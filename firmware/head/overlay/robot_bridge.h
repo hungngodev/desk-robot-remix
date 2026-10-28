@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <mutex>
 #include <string>
 #include "esp_http_server.h"
@@ -23,6 +24,8 @@ private:
     std::mutex uart_mutex_;
     bool uart_ready_ = false;
     bool enabled_ = false;
+    std::atomic<bool> camera_busy_{false};
+    static void CameraTask(void* context);
     Reply Transact(const std::string& command, bool operator_control);
     bool Authorize(httpd_req_t* req);
     esp_err_t Handle(httpd_req_t* req);

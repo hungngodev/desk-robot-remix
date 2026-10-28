@@ -270,7 +270,7 @@ void framing() {
   CHECK(!body.state().armed);
   CHECK(frame(body, receiver, "\n", 0)[0] == "OK arm");
   CHECK(frame(body, receiver, "disarm\n", 0)[0] == "OK disarm");
-  for (const std::string bytes : {std::string("ar\rm\n"), std::string("arm\r\r\n"),
+  for (const std::string& bytes : {std::string("ar\rm\n"), std::string("arm\r\r\n"),
                                   std::string("arm\0\n", 5), std::string("arm\x80\n", 5),
                                   std::string("arm\t\n")}) {
     auto replies = frame(body, receiver, bytes, 0);

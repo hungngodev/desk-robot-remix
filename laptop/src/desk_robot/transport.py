@@ -20,7 +20,11 @@ class Head(Protocol):
 
 
 def validate_command(command: str) -> str:
-    if not isinstance(command, str) or len(command) > 95 or not re.fullmatch(r"[a-z0-9 -]+", command):
+    if (
+        not isinstance(command, str)
+        or len(command) > 95
+        or not re.fullmatch(r"[a-z0-9 -]+", command)
+    ):
         raise ValueError("Invalid command")
     tokens = command.split(" ")
     op = tokens[0]
@@ -39,6 +43,17 @@ def validate_command(command: str) -> str:
     raise ValueError("Command exceeds conservative bounds")
 
 
+def expected_ack(command: str) -> str:
+    op = validate_command(command)
+    args = command.split()[1:]
+    if op == "drive":
+        left, right, ms = map(int, args)
+        return f"OK drive left={left} right={right} ms={ms}"
+    if op in {"lift", "grip"}:
+        return f"OK {op} angle={int(args[0])}"
+    return f"OK {op}"
+
+
 class HttpHead:
     def __init__(self, config: RobotConfig, client: httpx.AsyncClient):
         self.config = config
@@ -48,9 +63,11 @@ class HttpHead:
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
             response = await self.client.request(
-                method, self.config.head_url.rstrip("/") + path,
+                method,
+                self.config.head_url.rstrip("/") + path,
                 headers={"Authorization": f"Bearer {secret(self.config.token_env)}"},
-                timeout=httpx.Timeout(3, connect=1), **kwargs,
+                timeout=httpx.Timeout(3, connect=1),
+                **kwargs,
             )
             response.raise_for_status()
             return response
@@ -58,13 +75,12 @@ class HttpHead:
             raise HeadError(f"{self.config.id}: head request failed; no retry: {exc}") from exc
 
     async def command(self, command: str) -> dict:
-        op = validate_command(command)
+        expected = expected_ack(command)
         async with self.lock:
             response = await self._request("POST", "/api/command", json={"command": command})
             data = response.json()
             reply = data.get("reply", "")
-            if (not data.get("ok") or data.get("robot_id") != self.config.id
-                    or not (reply == f"OK {op}" or reply.startswith(f"OK {op} "))):
+            if not data.get("ok") or data.get("robot_id") != self.config.id or reply != expected:
                 raise HeadError("Unmatched or failed command ACK; movement not retried")
             return data
 

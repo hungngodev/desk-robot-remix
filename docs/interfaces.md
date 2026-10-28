@@ -29,6 +29,8 @@ and startup logs when waiting for an ACK; do not accept an unrelated ACK.
 Invalid/overlong control input must not actuate; reject non-finite/non-integer and
 trailing tokens. A missing valid control/keepalive for **500 ms** stops wheels and
 servo ramp and disarms. Status/ping/invalid input cannot keep motion alive.
+Watchdog disarm retains the last servo PWM to avoid releasing a payload;
+explicit operator `disarm` detaches. Boot starts detached.
 Drive duration expires independently, even with keepalive. Disarm requires a new
 operator `arm` and resets targets to current commanded angles (not old targets).
 At boot, set H-bridge inputs low before UART; servos stay detached until armed.
@@ -53,7 +55,10 @@ and avoiding changes to the stock CoreS3 board's identity. Token/robot ID go in
 private build configuration. Existing Xiaozhi camera capture and HTTP capture
 must not race. Common-camera changes, if necessary, must be narrow and guarded.
 
-MCP tools map bounded drive/stop/lift/grip/status to the same serial transport.
+Opt-in debugging MCP tools map bounded drive/stop/lift/grip/status to the same
+serial transport. In normal operation the head exposes status only, and the
+server plugin routes pickup and job-cancelling stop through the laptop. This
+prevents an independent head tool from changing movement during a laptop job.
 Keepalive only during a bounded, supervised operation; no background task that
 silently maintains an abandoned movement. Manual operator arming via HTTP/USB.
 
@@ -75,10 +80,15 @@ per robot. Capture -> YOLO-World detections -> calibrated pixel/ground alignment
 or servo ACK alone is not proof of pickup; uncertain verification is a failure.
 
 Expose a local FastAPI coordinator API/CLI for status, stop, supervised manual
-control, image capture, calibration, pickup, acceptance-trial recording, and a
+control, image capture, pickup and a
 two-robot conversation. Default localhost. Use the existing Xiaozhi server through
 an overlay/plugin to route spoken pickup requests to the right robot/coordinator.
 Keep model/vision/speech imports optional so base tests run without model weights.
+Measured calibration is a private JSON file; human physical trials are recorded
+in the CSV and summarized by `scripts/check_trials.py`, separately from the API.
+Operator `/enable` grants a 30-second one-use permit for one bounded job. The
+body is actually armed only when the job starts. Model tools have a separate
+token and cannot grant permits. Keepalive runs only while the job is active.
 
 Conversation: shared speaker lock, independent robot histories, distinct IDs,
 maximum six **utterances total**, cancellation/stop. Deliver peers' transcripts

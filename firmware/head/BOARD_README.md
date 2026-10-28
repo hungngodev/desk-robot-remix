@@ -24,8 +24,10 @@ All endpoints require `Authorization: Bearer <token>`. No CORS or remote Interne
 exposure is configured. HTTP is for the trusted local network only.
 
 Only an authenticated operator may send `arm`, `disarm`, or individual
-`keepalive` commands through HTTP. MCP exposes drive, lift, grip, stop, status;
-it cannot arm or send keepalives. There is no background keepalive. The WROOM
+`keepalive` commands through HTTP. MCP normally exposes status only; the laptop
+server provides pickup and job-cancelling stop. Raw drive/lift/grip/stop MCP tools
+are opt-in bench debugging (CONFIG_DESK_ROBOT_DIRECT_MOTION_TOOLS). They cannot
+arm or send keepalives. There is no background keepalive. The WROOM
 starts disarmed, expires control after 500 ms, and caps drive pulses at 250 ms.
 UART timeouts are failures and are never retried automatically. A timeout can
 mean an action executed without the acknowledgement reaching the head.

@@ -27,6 +27,7 @@ class Vision(Protocol):
 
 class YoloWorldVision:
     """Existing Ultralytics detector. An explicitly supplied local weights file is required."""
+
     def __init__(self, weights: Path | None):
         self.weights = weights
         self.model = None
@@ -38,16 +39,21 @@ class YoloWorldVision:
 
     def _detect(self, jpeg: bytes, label: str) -> list[Detection]:
         if self.weights is None or not self.weights.is_file():
-            raise RuntimeError("Install vision extra and explicitly download/set local YOLO-World weights")
+            raise RuntimeError(
+                "Install vision extra and explicitly download/set local YOLO-World weights"
+            )
         if self.model is None:
             from ultralytics import YOLOWorld
+
             self.model = YOLOWorld(str(self.weights))
         self.model.set_classes([label])
         # Letterbox/coordinate restoration is handled by the upstream model, not guessed here.
         image = Image.open(BytesIO(jpeg)).convert("RGB")
         result = self.model.predict(image, verbose=False, device="cpu")[0]
-        return [Detection(label, float(box.conf.item()), tuple(map(float, box.xyxy[0].tolist())))
-                for box in result.boxes]
+        return [
+            Detection(label, float(box.conf.item()), tuple(map(float, box.xyxy[0].tolist())))
+            for box in result.boxes
+        ]
 
 
 def image_size(jpeg: bytes) -> tuple[int, int]:

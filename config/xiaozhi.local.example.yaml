@@ -1,0 +1,57 @@
+# Copy into laptop/server/build/xiaozhi/main/xiaozhi-server/data/.config.yaml.
+# Replace MAC_LAN_IP and LOCAL_RANDOM_SECRET there, and keep that file private.
+server:
+  ip: 0.0.0.0
+  port: 8000
+  http_port: 8003
+  websocket: ws://MAC_LAN_IP:8000/xiaozhi/v1/
+  auth_key: LOCAL_RANDOM_SECRET
+  auth:
+    enabled: true
+    allowed_devices: []
+read_config_from_api: false
+selected_module:
+  VAD: SileroVAD
+  ASR: FunASR
+  LLM: OllamaLLM
+  TTS: CustomTTS
+  Memory: nomem
+  Intent: function_call
+LLM:
+  OllamaLLM:
+    type: ollama
+    model_name: qwen3:8b
+    base_url: http://127.0.0.1:11434
+ASR:
+  FunASR:
+    type: fun_local
+    model_dir: models/SenseVoiceSmall
+    output_dir: tmp/
+    language: en
+TTS:
+  CustomTTS:
+    type: custom
+    method: POST
+    url: http://127.0.0.1:8880/v1/audio/speech
+    format: wav
+    output_dir: tmp/
+    params:
+      model: kokoro
+      input: "{prompt_text}"
+      response_format: wav
+      voice: af_heart
+      speed: 1
+      stream: false
+Intent:
+  function_call:
+    type: function_call
+    functions: [desk_robot_tools]
+prompt: >-
+  You are a friendly desk robot. Keep replies short. Use desk_robot_pickup only
+  when the user asks to pick up a key or candy. An operator must enable one job.
+  Accepted means queued, not picked up. Read desk_robot_job before reporting its
+  result. Never claim measured grip force or a physical success from an ACK.
+end_prompt:
+  enable: false
+enable_stop_tts_notify: false
+close_connection_no_voice_time: 600

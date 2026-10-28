@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, dataclass, field
 import time
 import uuid
+from dataclasses import asdict, dataclass, field
 from typing import Awaitable, Callable
 
 from .calibration import Calibration
@@ -49,23 +49,39 @@ class Coordinator:
 
     async def operator_arm(self, robot_id: str):
         robot = self.robot(robot_id)
+        if self.closed:
+            raise OperationError("Coordinator closing")
         if not robot.motion_enabled:
             raise OperationError("motion_enabled=false; no arm sent")
-        if self.locks[robot_id].locked():
+        if self.locks[robot_id].locked() or any(
+            j.robot_id == robot_id and j.state in {"queued", "running"} for j in self.jobs.values()
+        ):
             raise OperationError("Robot busy")
         self.permits[robot_id] = time.monotonic() + 30
-        return {"robot_id": robot_id, "operator_permit": True, "expires_in_seconds": 30,
-                "physical_armed": False, "note": "One bounded job may consume this permit; no idle keepalive"}
+        return {
+            "robot_id": robot_id,
+            "operator_permit": True,
+            "expires_in_seconds": 30,
+            "physical_armed": False,
+            "note": "One bounded job may consume this permit; no idle keepalive",
+        }
 
     async def stop(self, robot_id: str):
         self.robot(robot_id)
         self.permits.pop(robot_id, None)
-        running = [task for jid, task in self.tasks.items()
-                   if self.jobs[jid].robot_id == robot_id and not task.done()]
+        running = [
+            task
+            for jid, task in self.tasks.items()
+            if self.jobs[jid].robot_id == robot_id and not task.done()
+        ]
         for task in running:
             task.cancel()
         if running:
             await asyncio.gather(*running, return_exceptions=True)
+        for jid, task in self.tasks.items():
+            if self.jobs[jid].robot_id == robot_id and task.cancelled():
+                self.jobs[jid].state = "cancelled"
+                self.jobs[jid].error = "Operator cancelled before job started"
         return await self.heads[robot_id].command("stop")
 
     async def close(self):
@@ -80,8 +96,14 @@ class Coordinator:
         if self.permits.get(robot_id, 0) < time.monotonic():
             self.permits.pop(robot_id, None)
             raise OperationError("Operator permit missing or expired; enable one operation first")
-        if self.closed or self.locks[robot_id].locked() or any(
-                j.robot_id == robot_id and j.state in {"queued", "running"} for j in self.jobs.values()):
+        if (
+            self.closed
+            or self.locks[robot_id].locked()
+            or any(
+                j.robot_id == robot_id and j.state in {"queued", "running"}
+                for j in self.jobs.values()
+            )
+        ):
             raise OperationError("Robot busy or coordinator closing")
         # Retain only bounded history; never accumulate infinite tasks/results in a long-running server.
         if len(self.jobs) >= 100:
@@ -99,7 +121,7 @@ class Coordinator:
     async def _keepalive(self, robot_id: str):
         while True:
             await self.heads[robot_id].command("keepalive")
-            await asyncio.sleep(.1)
+            await asyncio.sleep(0.1)
 
     async def _run(self, job: Job, work):
         async with self.locks[job.robot_id]:
@@ -107,12 +129,16 @@ class Coordinator:
             keeper = None
             operation = None
             try:
-                await self.heads[job.robot_id].command("arm")  # only after consuming operator permit
+                await self.heads[job.robot_id].command(
+                    "arm"
+                )  # only after consuming operator permit
                 keeper = asyncio.create_task(self._keepalive(job.robot_id))
                 operation = asyncio.create_task(work(job))
                 # A failed keepalive cancels the operation immediately; do not continue blindly.
                 async with asyncio.timeout(self.settings.max_job_seconds):
-                    done, _ = await asyncio.wait({keeper, operation}, return_when=asyncio.FIRST_COMPLETED)
+                    done, _ = await asyncio.wait(
+                        {keeper, operation}, return_when=asyncio.FIRST_COMPLETED
+                    )
                     if keeper in done:
                         await keeper
                         raise OperationError("Keepalive ended unexpectedly")
@@ -131,7 +157,9 @@ class Coordinator:
                 await asyncio.gather(*(t for t in (operation, keeper) if t), return_exceptions=True)
                 try:
                     await self.heads[job.robot_id].command("stop")
-                    job.events.append("stop acknowledged; servo positions are commanded, not measured")
+                    job.events.append(
+                        "stop acknowledged; servo positions are commanded, not measured"
+                    )
                 except Exception as exc:
                     job.error = f"{job.error or ''}; STOP failed: {exc}; rely on body watchdog"
                     job.state = "failed"
@@ -140,7 +168,9 @@ class Coordinator:
         robot = self.robot(robot_id)
         op = validate_command(command)
         if not robot.motion_enabled or op not in {"drive", "lift", "grip"}:
-            raise OperationError("Manual movement requires motion_enabled and drive/lift/grip command")
+            raise OperationError(
+                "Manual movement requires motion_enabled and drive/lift/grip command"
+            )
 
         async def work(job):
             result = await self.heads[robot_id].command(command)
@@ -149,6 +179,7 @@ class Coordinator:
             else:
                 await asyncio.sleep(2)  # bounded ramp/settling; does not claim measured position
             return result
+
         return self._submit(robot_id, "manual", work)
 
     def pickup(self, robot_id: str, target: str) -> Job:
@@ -159,16 +190,22 @@ class Coordinator:
             raise OperationError("Pickup requires motion_enabled=true and measured calibration")
         calibration = Calibration.load(robot.calibration)
         calibration.verify_ready()
+        if calibration.simulation_only and self.settings.mode != "simulation":
+            raise OperationError("Simulation calibration cannot be used on hardware")
         return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
 
     async def _observe(self, robot_id: str, target: str, c: Calibration) -> Detection:
         jpeg = await self.heads[robot_id].snapshot()
         if image_size(jpeg) != (c.image_width, c.image_height):
             raise OperationError("Camera resolution differs from measured calibration")
-        objects = [d for d in await self.vision.detect(jpeg, target)
-                   if d.label == target and d.confidence >= c.min_confidence
-                   and 0 <= d.box[0] < d.box[2] <= c.image_width
-                   and 0 <= d.box[1] < d.box[3] <= c.image_height]
+        objects = [
+            d
+            for d in await self.vision.detect(jpeg, target)
+            if d.label == target
+            and d.confidence >= c.min_confidence
+            and 0 <= d.box[0] < d.box[2] <= c.image_width
+            and 0 <= d.box[1] < d.box[3] <= c.image_height
+        ]
         if len(objects) != 1:
             raise OperationError("Lost or ambiguous target; stop and request operator intervention")
         return objects[0]
@@ -191,12 +228,12 @@ class Coordinator:
                 break
             if abs(dx) > c.alignment_tolerance_mm:
                 direction = (1 if dx > 0 else -1) * c.turn_sign
-                command = f"drive {direction*20} {-direction*20} 100"
+                command = f"drive {direction * 20} {-direction * 20} 100"
             else:
                 direction = (1 if dy > 0 else -1) * c.forward_sign
-                command = f"drive {direction*20} {direction*20} 100"
+                command = f"drive {direction * 20} {direction * 20} 100"
             await head.command(command)  # exactly once: an uncertain ACK is a failure
-            await asyncio.sleep(.12)
+            await asyncio.sleep(0.12)
             await head.command("stop")
         if initial is None:
             raise OperationError("Alignment attempt limit reached")
@@ -215,14 +252,24 @@ class Coordinator:
             detection = await self._observe(job.robot_id, target, c)
             px, py = detection.center
             if not (a <= px <= x and b <= py <= y):
-                raise OperationError("Pickup unverified: target not in calibrated raised-jaw region")
+                raise OperationError(
+                    "Pickup unverified: target not in calibrated raised-jaw region"
+                )
             if initial.center[1] - py < c.min_lift_displacement_px:
                 raise OperationError("Pickup unverified: insufficient upward image displacement")
             if c.within(c.ground(detection.center)):
-                raise OperationError("Pickup unverified: target still projects into ground work area")
+                raise OperationError(
+                    "Pickup unverified: target still projects into ground work area"
+                )
             observed.append(detection.center)
         if abs(observed[0][0] - observed[1][0]) > 10 or abs(observed[0][1] - observed[1][1]) > 10:
-            raise OperationError("Pickup unverified: target did not remain stable in raised-jaw region")
-        return {"visually_verified": True, "criterion": "two fresh raised-jaw frames, upward displacement, outside floor region",
-                "physical_acceptance_pass": False, "target": target,
-                "note": "Visual evidence is experimental, not force sensing or a physical acceptance trial"}
+            raise OperationError(
+                "Pickup unverified: target did not remain stable in raised-jaw region"
+            )
+        return {
+            "visually_verified": True,
+            "criterion": "two fresh raised-jaw frames, upward displacement, outside floor region",
+            "physical_acceptance_pass": False,
+            "target": target,
+            "note": "Visual evidence is experimental, not force sensing or a physical acceptance trial",
+        }

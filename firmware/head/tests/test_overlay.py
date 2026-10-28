@@ -52,6 +52,7 @@ class OverlayTests(unittest.TestCase):
         source = (self.root / overlay.BOARD / "desk_robot_core_s3.cc").read_text()
         self.assertEqual(source.count("DECLARE_BOARD("), 1)
         self.assertIn("DECLARE_BOARD(DeskRobotCoreS3Board)", source)
+        self.assertLess(source.index("WifiBoard::StartNetwork();"), source.index("robot_bridge.Start();"))
         self.assertEqual((self.root / overlay.BOARD / "config.h").read_bytes(), self.original["main/boards/m5stack/core-s3/config.h"])
         mcp = (self.root / "main/mcp_server.cc").read_text()
         lock = mcp.index("camera_lock(camera->AccessMutex())")

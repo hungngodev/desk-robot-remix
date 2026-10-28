@@ -67,10 +67,11 @@ CAD has noncommercial restrictions; preserve each source's actual license.
 ## Progress
 
 - [x] Project folder created and accepted plan saved.
-- [ ] Upstream revisions and licenses recorded.
-- [ ] Parts list and first-build guide prepared.
-- [ ] Body firmware and stop behavior verified in software.
-- [ ] CoreS3 UART/MCP integration built.
-- [ ] Laptop control/vision/conversation software verified.
+- [x] Upstream revisions and licenses recorded.
+- [x] Parts allowance list and first-build guide prepared ($123.25 target; final motor/battery quotes and fit remain unresolved).
+- [x] Body firmware and stop behavior verified in software; hardware stop measurement pending.
+- [x] CoreS3 UART/MCP integration built; physical peripherals untested.
+- [x] Laptop control/vision/conversation logic verified in simulation; physical/model-provider tests pending.
+- [ ] Full local AI stack installed and tested with real devices.
 - [ ] Physical gripper, power, camera and autonomous pickup acceptance performed.
 - [ ] Second physical robot acceptance performed.

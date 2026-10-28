@@ -1,0 +1,16 @@
+{
+  "currency": "USD", "checked_at": "2026-10-28", "cap_usd": 150, "fit_confirmed": false,
+  "items": [
+    {"item":"CoreS3 Lite K128-LITE", "quantity":1, "unit_usd":44.90, "price_status":"verified", "url":"https://shop.m5stack.com/products/m5stack-cores3-lite-esp32s3-iot-dev-kit", "fit":"LCD revision and mounting still need physical checks"},
+    {"item":"Existing ESP32-WROOM-32 dev board", "quantity":1, "unit_usd":0, "price_status":"owned", "url":"", "fit":"Read pin labels before wiring"},
+    {"item":"Adafruit SG92R micro servo PID169", "quantity":2, "unit_usd":5.95, "price_status":"verified", "url":"https://www.adafruit.com/product/169", "fit":"Provisional substitute for pictured SG90; measure case and spline before printing"},
+    {"item":"Adafruit DRV8833 PID3297", "quantity":1, "unit_usd":5.95, "price_status":"verified", "url":"https://www.adafruit.com/product/3297", "fit":"Mount on insulated spacer; match stall current to driver"},
+    {"item":"6V N20 150-200rpm gearmotor with 3mm D shaft", "quantity":2, "unit_usd":8, "price_status":"allowance", "url":"", "fit":"Exact affordable SKU/shaft/body dimensions not selected. Pololu2368 is $23.95 each and exceeds this allowance"},
+    {"item":"DFRobot DFR0205 buck converter", "quantity":1, "unit_usd":8.50, "price_status":"verified", "url":"https://www.dfrobot.com/product-752.html", "fit":"46x50x20mm; test chassis clearance; 5V regulated output"},
+    {"item":"DFRobot DFR0564 2S charger (conditional)", "quantity":1, "unit_usd":5, "price_status":"verified", "url":"https://www.dfrobot.com/product-1713.html", "fit":"Only if final pack manufacturer permits this charger; it does not balance cells"},
+    {"item":"Assembled protected/balanced 2S pack and matching connector", "quantity":1, "unit_usd":16, "price_status":"allowance", "url":"", "fit":"Exact pack, charger compatibility and current capability unresolved"},
+    {"item":"Power switch, wiring, connectors and fasteners", "quantity":1, "unit_usd":8, "price_status":"allowance", "url":"", "fit":"Includes Grove-UART cable; confirm polarity"},
+    {"item":"Filament for first chassis, tracks and gripper", "quantity":1, "unit_usd":5, "price_status":"allowance", "url":"", "fit":"Assumes printer access; service printing costs extra"},
+    {"item":"Motor suppression and power decoupling components", "quantity":1, "unit_usd":2, "price_status":"allowance", "url":"", "fit":"Size after motor/servo selection and measured current"}
+  ]
+}

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Calibration(BaseModel):
+    simulation_only: bool = False
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     measured: bool = False
     image_width: int = Field(gt=0)
@@ -23,11 +24,11 @@ class Calibration(BaseModel):
     lift_down: int = Field(default=60, ge=60, le=120)
     lift_up: int = Field(default=110, ge=60, le=120)
     alignment_tolerance_mm: float = Field(default=8, gt=0, le=30)
-    min_confidence: float = Field(default=.45, ge=.1, le=1)
+    min_confidence: float = Field(default=0.45, ge=0.1, le=1)
     min_lift_displacement_px: float = Field(default=20, ge=5)
     max_reprojection_error_mm: float = Field(default=3, gt=0, le=10)
-    servo_settle_seconds: float = Field(default=2, ge=.5, le=5)
-    hold_seconds: float = Field(default=.7, ge=.5, le=3)
+    servo_settle_seconds: float = Field(default=2, ge=0.5, le=5)
+    hold_seconds: float = Field(default=0.7, ge=0.5, le=3)
     # Confirm motor polarity on stands before setting measured=true.
     turn_sign: int = Field(default=1)
     forward_sign: int = Field(default=1)
@@ -41,7 +42,11 @@ class Calibration(BaseModel):
                 raise ValueError("Calibration points outside image")
         x0, y0, x1, y1 = self.work_area_mm
         a, b, c, d = self.lifted_roi_px
-        if not x0 < x1 or not y0 < y1 or not (0 <= a < c <= self.image_width and 0 <= b < d <= self.image_height):
+        if (
+            not x0 < x1
+            or not y0 < y1
+            or not (0 <= a < c <= self.image_width and 0 <= b < d <= self.image_height)
+        ):
             raise ValueError("Work area and lifted ROI must be valid rectangles")
         if self.turn_sign not in {-1, 1} or self.forward_sign not in {-1, 1}:
             raise ValueError("Motor polarity signs must be -1 or 1")
@@ -56,8 +61,8 @@ class Calibration(BaseModel):
         if np.linalg.matrix_rank(np.column_stack((source, np.ones(len(source))))) < 3:
             raise ValueError("Calibration points are collinear")
         rows = []
-        for (x, y), (u, v) in zip(source, target):
-            rows.extend(([x, y, 1, 0, 0, 0, -u*x, -u*y], [0, 0, 0, x, y, 1, -v*x, -v*y]))
+        for (x, y), (u, v) in zip(source, target, strict=True):
+            rows.extend(([x, y, 1, 0, 0, 0, -u * x, -u * y], [0, 0, 0, x, y, 1, -v * x, -v * y]))
         design = np.array(rows)
         if np.linalg.matrix_rank(design) < 8:
             raise ValueError("Degenerate homography point pairs")
@@ -87,7 +92,9 @@ class Calibration(BaseModel):
 
     def verify_ready(self):
         if not self.measured:
-            raise ValueError("Calibration is an unmeasured example; measure this robot before pickup")
+            raise ValueError(
+                "Calibration is an unmeasured example; measure this robot before pickup"
+            )
 
     @classmethod
     def load(cls, path: Path) -> "Calibration":

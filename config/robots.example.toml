@@ -1,0 +1,28 @@
+# Copy to local.toml and enter the two heads' LAN addresses/device IDs after assembly.
+# Head tokens must match the private CoreS3 build settings. Never put tokens here.
+mode = "hardware"
+ollama_model = "qwen3:8b"
+trials_file = "../data/physical-trials.jsonl"
+vision_weights = "../models/yolov8s-worldv2.pt"
+
+[[robots]]
+id = "robot-01"
+name = "Pip"
+head_url = "http://192.168.1.101:8081"
+token_env = "DESK_ROBOT_HEAD_01_TOKEN"
+device_id = ""
+motion_enabled = false
+calibration = "calibration.example.json"
+voice = "af_heart"
+persona = "You are Pip, a curious desk robot. Speak one short sentence. Take turns with your peer."
+
+[[robots]]
+id = "robot-02"
+name = "Dot"
+head_url = "http://192.168.1.102:8081"
+token_env = "DESK_ROBOT_HEAD_02_TOKEN"
+device_id = ""
+motion_enabled = false
+calibration = "calibration.example.json"
+voice = "am_adam"
+persona = "You are Dot, a calm desk robot. Speak one short sentence. Take turns with your peer."

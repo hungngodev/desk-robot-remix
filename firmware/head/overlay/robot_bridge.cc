@@ -177,15 +177,41 @@ esp_err_t Bridge::Json(httpd_req_t* req, int status, const std::string& body) {
 
 esp_err_t Bridge::Dispatch(httpd_req_t* req) { return static_cast<Bridge*>(req->user_ctx)->Handle(req); }
 
+void Bridge::CameraTask(void* context) {
+    auto* req = static_cast<httpd_req_t*>(context);
+    auto* bridge = static_cast<Bridge*>(req->user_ctx);
+    {
+        auto jpeg = bridge->camera_->SnapshotJpeg();
+        if (!jpeg) {
+            bridge->Json(req, 503, Envelope(false, jpeg.error()));
+        } else {
+            httpd_resp_set_type(req, "image/jpeg");
+            httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
+        }
+    }  // Destroy JPEG storage before vTaskDelete (which does not unwind C++ locals).
+    bridge->camera_busy_.store(false);
+    httpd_req_async_handler_complete(req);
+    vTaskDelete(nullptr);
+}
+
 esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
     if (strcmp(req->uri, "/api/camera.jpg") == 0) {
         if (!camera_) return Json(req, 503, Envelope(false, "camera unavailable"));
-        auto jpeg = camera_->SnapshotJpeg();
-        if (!jpeg) return Json(req, 503, Envelope(false, jpeg.error()));
-        httpd_resp_set_type(req, "image/jpeg");
-        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-        return httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
+        if (camera_busy_.exchange(true)) return Json(req, 503, Envelope(false, "camera busy"));
+        // Camera locking/encoding must never block HTTP keepalive or emergency stop.
+        httpd_req_t* async_req = nullptr;
+        if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+            camera_busy_.store(false);
+            return Json(req, 503, Envelope(false, "camera worker unavailable"));
+        }
+        if (xTaskCreate(CameraTask, "robot_camera", 8192, async_req, 3, nullptr) != pdPASS) {
+            Json(async_req, 503, Envelope(false, "camera task unavailable"));
+            httpd_req_async_handler_complete(async_req);
+            camera_busy_.store(false);
+        }
+        return ESP_OK;
     }
     if (strcmp(req->uri, "/api/status") == 0) {
         auto reply = Transact("status", false);
@@ -228,6 +254,7 @@ void Bridge::AddTools() {
         if (!reply.ok) return std::unexpected(reply.text);
         return reply.text;
     };
+#ifdef CONFIG_DESK_ROBOT_DIRECT_MOTION_TOOLS
     mcp.AddTool("self.robot.drive", "One wheel pulse, maximum 250 ms; requires operator arm, never auto-arms.",
         PropertyList({Property("left", kPropertyTypeInteger, -100, 100), Property("right", kPropertyTypeInteger, -100, 100),
                       Property("duration_ms", kPropertyTypeInteger, 150, 1, 250)}),
@@ -238,7 +265,13 @@ void Bridge::AddTools() {
             PropertyList({Property("angle", kPropertyTypeInteger, 60, 120)}),
             [call, verb](const PropertyList& p) -> ToolResult { return call(verb + " " + std::to_string(p["angle"].value<int>())); });
     }
+#endif
     for (const std::string verb : {"stop", "status"}) {
+#ifndef CONFIG_DESK_ROBOT_DIRECT_MOTION_TOOLS
+        // Normal voice stop must cancel the laptop job, so it cannot resume on
+        // the next step. The server's desk_robot_stop tool owns that operation.
+        if (verb == "stop") continue;
+#endif
         mcp.AddTool("self.robot." + verb, verb == "stop" ? "Stop wheels and servo ramp immediately." : "Read body status; does not renew the arm lease.",
             PropertyList(), [call, verb](const PropertyList&) -> ToolResult { return call(verb); });
     }

@@ -1,14 +1,15 @@
 """Image-generating mock head for development; never a physical acceptance result."""
+
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 from io import BytesIO
-import time
 
 import numpy as np
 from PIL import Image, ImageDraw
 
-from .transport import HeadError, validate_command
+from .transport import HeadError, expected_ack, validate_command
 from .vision import Detection
 
 
@@ -26,13 +27,18 @@ class SimulatedHead:
         self.show_target = True
 
     def _watchdog(self):
-        if time.monotonic() - self.last_control > .5:
+        if time.monotonic() - self.last_control > 0.5:
             self.armed = False
 
     async def status(self):
         self._watchdog()
-        return {"robot_id": self.id, "armed": self.armed, "motor": {"m0": 0, "m1": 0},
-                "servo": {"position_source": "commanded"}, "watchdog_ms": 500 if self.armed else 0}
+        return {
+            "robot_id": self.id,
+            "armed": self.armed,
+            "motor": {"m0": 0, "m1": 0},
+            "servo": {"position_source": "commanded"},
+            "watchdog_ms": 500 if self.armed else 0,
+        }
 
     async def command(self, command):
         op = validate_command(command)
@@ -58,7 +64,7 @@ class SimulatedHead:
             self.gripped = int(command.split()[1]) > 90
         elif op == "lift":
             self.lifted = self.gripped and int(command.split()[1]) > 90
-        return {"ok": True, "reply": f"OK {op}", "robot_id": self.id}
+        return {"ok": True, "reply": expected_ack(command), "robot_id": self.id}
 
     async def snapshot(self):
         if self.fail_snapshot:
@@ -66,7 +72,7 @@ class SimulatedHead:
         image = Image.new("RGB", (200, 200), "white")
         if self.show_target:
             x, y = (100, 65) if self.lifted else self.position
-            ImageDraw.Draw(image).rectangle((x-7, y-5, x+7, y+5), fill=(240, 0, 0))
+            ImageDraw.Draw(image).rectangle((x - 7, y - 5, x + 7, y + 5), fill=(240, 0, 0))
         out = BytesIO()
         image.save(out, "JPEG")
         return out.getvalue()
@@ -78,7 +84,13 @@ class SimulationVision:
         yy, xx = np.where((pixels[:, :, 0] > 150) & (pixels[:, :, 1] < 80) & (pixels[:, :, 2] < 80))
         if len(xx) == 0:
             return []
-        return [Detection(label, .99, (float(xx.min()), float(yy.min()), float(xx.max()+1), float(yy.max()+1)))]
+        return [
+            Detection(
+                label,
+                0.99,
+                (float(xx.min()), float(yy.min()), float(xx.max() + 1), float(yy.max() + 1)),
+            )
+        ]
 
 
 class SimulatedSpeaker:

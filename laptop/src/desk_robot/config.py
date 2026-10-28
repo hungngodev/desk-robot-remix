@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tomllib
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -23,6 +23,7 @@ class RobotConfig(BaseModel):
     @model_validator(mode="after")
     def local_http(self):
         from urllib.parse import urlparse
+
         u = urlparse(self.head_url)
         if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
             raise ValueError("head_url must be an http(s) URL without embedded credentials")
@@ -34,6 +35,7 @@ class Settings(BaseModel):
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
     coordinator_token_env: str = "DESK_ROBOT_API_TOKEN"
+    tools_token_env: str = "DESK_ROBOT_TOOL_TOKEN"
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:8b"
     kokoro_url: str = "http://127.0.0.1:8880"
@@ -76,4 +78,6 @@ def load_settings(path: str | Path) -> Settings:
             robot.calibration = (path.parent / robot.calibration).resolve()
     if settings.vision_weights and not settings.vision_weights.is_absolute():
         settings.vision_weights = (path.parent / settings.vision_weights).resolve()
+    if not settings.trials_file.is_absolute():
+        settings.trials_file = (path.parent / settings.trials_file).resolve()
     return settings

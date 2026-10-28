@@ -1,0 +1,23 @@
+{
+  "built_at": "2026-10-28",
+  "flashed": false,
+  "head_bridge_token": "empty; disabled in verification build",
+  "head_wake_word": "disabled",
+  "artifacts": [
+    {
+      "path": "firmware/body/.pio/build/esp32dev/firmware.bin",
+      "bytes": 273552,
+      "sha256": "a2a93ff03d92ddf896db1fa2fe5b3134727a9797eb5e4e87280c84ac2416ff76"
+    },
+    {
+      "path": "firmware/head/build/xiaozhi/build/xiaozhi.bin",
+      "bytes": 2664464,
+      "sha256": "e7597d0cef6d5895fc15f45f7adb2476c09afb2e2d82ca33983dbc95864fb175"
+    },
+    {
+      "path": "firmware/head/build/xiaozhi/build/merged-binary.bin",
+      "bytes": 9761657,
+      "sha256": "9391cd8a888dcc3a5a9dbaebcacbaf8d2830d15853bf5618e162f32d8b1a1438"
+    }
+  ]
+}
