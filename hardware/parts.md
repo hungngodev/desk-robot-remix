@@ -1,12 +1,17 @@
 # Parts and cost — 2026-10-28
 
-Target **$100–140 per robot before shipping/tax**, with a **$150 first-robot cap**.
-The draft totals **$123.25**. Shipping/tax and any purchased bench supply must fit
-inside the cap. This is a planning list, not a complete quoted cart.
+The active build uses separate head modules and an existing EVA printed case.
+The draft totals **$117.33 before shipping/tax**, with a **$150 first-robot cap**
+including charges and any purchased bench supply. This is a planning list, not
+a complete quoted cart. No CoreS3 purchase is required.
 
 | Item | Qty | Line total USD | Status |
 | --- | ---: | ---: | --- |
-| [CoreS3 Lite K128-LITE](https://shop.m5stack.com/products/m5stack-cores3-lite-esp32s3-iot-dev-kit) | 1 | 44.90 | Verified price; recheck stock |
+| [Freenove FNK0085B S3 camera board](https://store.freenove.com/products/fnk0085?variant=44552293155014) | 1 | 21.99 | Exact 16 MB flash / 8 MB PSRAM variant price; camera sensor/lens fit unresolved |
+| [1.3-inch SH1106 I²C OLED, DSP-9](https://protosupplies.com/product/oled-1-3-128x64-i2c-blue-display/) | 1 | 5.95 | Observed seller quote; 35.4×33.5 mm PCB; mounting fit provisional |
+| [INMP441 microphone breakout](https://www.sinoning.com/product/omnidirectional-microphone-module-i2s-interface-inmp441-mems-high-precision-low-power-ultra-small-volume-for-esp32/) | 1 | 2.09 | Observed seller quote; exact PCB fit and delivery unverified |
+| [MAX98357A amplifier, PID3006](https://www.adafruit.com/product/3006) | 1 | 5.95 | Observed price; board mounting provisional |
+| Compact 4–8 Ω speaker | 1 | 3.00 | $2–4 allowance; exact size/power unresolved |
 | Existing ESP32-WROOM-32 | 1 | 0.00 | Owned |
 | [Adafruit SG92R PID169](https://www.adafruit.com/product/169) | 2 | 11.90 | $5.95 each; fit provisional |
 | [Adafruit DRV8833 PID3297](https://www.adafruit.com/product/3297) | 1 | 5.95 | Verified price |
@@ -15,21 +20,31 @@ inside the cap. This is a planning list, not a complete quoted cart.
 | [DFRobot DFR0564 2S charger](https://www.dfrobot.com/product-1713.html) | 1 | 5.00 | Conditional on pack compatibility |
 | Assembled protected/balanced 2S pack | 1 | 16.00 | Allowance; pack not selected |
 | Switch, wires, connectors, fasteners | — | 8.00 | Allowance |
-| Filament | — | 5.00 | Allowance; assumes printer access |
+| Filament, including EVA head case | — | 5.00 | Allowance; assumes printer access; slicer mass not checked |
 | Suppression/decoupling components | — | 2.00 | Allowance |
-| **Parts estimate** | | **123.25** | **$26.75 left for charges/changes** |
+| **Parts estimate** | | **117.33** | **$32.67 left for charges/changes** |
+
+Head electronics are **$37.98–39.98**, using the $3 speaker midpoint above.
+The separate-module route saves about $5–7 versus the earlier $44.90 head at
+these retail references; larger savings are not verified. Consolidate suppliers
+where the exact module matches, because multiple shipping charges can erase
+that difference. [Case, dimensions, wiring and firmware status](../docs/modular-head.md).
 
 The dimensioned [Pololu 2368](https://www.pololu.com/product/2368/specs) motor is
-$23.95 each. Using two raises this estimate to **$155.15 before tax/shipping**,
-over the cap. Do not silently substitute it or use TT motors that do not fit.
+$23.95 each at the earlier check. Using two raises this estimate to **$149.23
+before tax/shipping**, leaving just $0.77 under the cap for charges. Do not
+silently substitute it or use TT motors that do not fit.
 
 The gripper photos show SG90-style servos. SG92R is a priced candidate, not a
 verified drop-in replacement: measure case, ears, shaft height and matching horn
 spline before printing. Flat-key clearance and lift performance are unverified.
 
-CoreS3 **Lite** includes camera, LCD, microphones and speaker; **SE** is different.
-The [manufacturer revision notes](https://docs.m5stack.com/en/core/CoreS3-Lite)
-report an August 2026 LCD change, which needs checking on the actual head.
+The OLED is monochrome. Stock software shows emotion symbols and text; smooth
+eye animation needs another adapter. It does not provide a color LCD.
+The camera is included with the candidate Freenove board, but the seller does
+not identify the current sensor/lens assembly. Confirm it against EVA's camera
+opening before ordering. Display PCB holes, speaker dimensions and head-to-rover
+clearance are unverified. The original case is saved; no new case design is planned.
 
 DFR0205 is 46 × 50 × 20 mm. Its advertised 5 A rating does not establish sustained
 performance inside this rover. DFR0564 is an unbalanced charger: use only if the

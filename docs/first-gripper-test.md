@@ -3,14 +3,17 @@
 Test your actual **flat key and candy** before buying the complete rover/head.
 The existing mechanism's floor clearance and gripping ability are unproven.
 
-1. From [Bluino's files page](https://www.thingiverse.com/thing:4253681/files),
-   download `servo_case_arm.stl`, `arm_rack.stl`, `pinion_gear.stl`.
-2. The author also links [fork_lift_e.stl](https://cdn.thingiverse.com/assets/9c/73/bb/a8/bd/fork_lift_e.stl)
-   and [fork_lift_f.stl](https://cdn.thingiverse.com/assets/08/79/47/dc/a3/fork_lift_f.stl).
-   Confirm their original license before redistribution.
-3. Save them in `cad/originals/gripper/`. Use the source's assembly photos and
-   print guidance. The download buttons did not expose direct STL links for the
-   three bundled parts to the research tool; no STLs are downloaded here yet.
+1. The original `servo_case_arm.stl`, `arm_rack.stl` and `pinion_gear.stl` are
+   [saved locally](../cad/originals/gripper/README.md) from
+   [Bluino's files page](https://www.thingiverse.com/thing:4253681/files), CC BY 4.0.
+2. The two linked lift files and assembly PDF are also
+   [saved locally](../cad/originals/forklift/README.md). Their original source is
+   [Forklift module for SMARS #3027255](https://www.thingiverse.com/thing:3027255),
+   by tristomietitoredeituit, **CC BY-NC-SA 4.0**, separate from Bluino's terms.
+3. Use the source's assembly photos and print guidance. The three bundled parts'
+   hashes and bounds are recorded locally, as are the two original lift pieces.
+   STL has no unit metadata: compare dimensions against your
+   measured servo before slicing, and do not treat a valid file as verified fit.
 4. Measure the actual servo case and horn. Print one pocket/fit part first. Do not
    scale the whole rack and pinion to change a servo pocket.
 5. Follow [wiring](../hardware/wiring.md) and [body build](build.md). Remove horns

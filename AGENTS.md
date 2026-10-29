@@ -1,6 +1,8 @@
 # Desk robot remix project instructions
 
 - Read `PLAN.md`, `test-results/verification.md` and the relevant guide first.
+- The active head uses separate S3-camera/OLED/audio modules and EVA's original
+  case; see `docs/modular-head.md`. CoreS3 is an earlier reference, not a purchase.
 - Keep upstream clones untouched and pinned. Modify overlays/local integration
   code, never unrelated repositories or global agent configuration.
 - Physical tests are not represented by simulation. Never invent successful

@@ -18,7 +18,7 @@ def test_allowances_and_over_budget_are_not_ready():
     budget = module("check_budget").budget
     data = json.loads((ROOT / "hardware/bom.json").read_text())
     result = budget(data)
-    assert result["parts_estimate_usd"] == 123.25
+    assert result["parts_estimate_usd"] == 117.33
     assert not result["purchase_ready"] and result["quoted_total_usd"] is None
     for row in data["items"]:
         row["price_status"] = "verified"

@@ -1,16 +1,130 @@
 {
-  "currency": "USD", "checked_at": "2026-10-28", "cap_usd": 150, "fit_confirmed": false,
+  "currency": "USD",
+  "checked_at": "2026-10-28",
+  "cap_usd": 150,
+  "fit_confirmed": false,
   "items": [
-    {"item":"CoreS3 Lite K128-LITE", "quantity":1, "unit_usd":44.90, "price_status":"verified", "url":"https://shop.m5stack.com/products/m5stack-cores3-lite-esp32s3-iot-dev-kit", "fit":"LCD revision and mounting still need physical checks"},
-    {"item":"Existing ESP32-WROOM-32 dev board", "quantity":1, "unit_usd":0, "price_status":"owned", "url":"", "fit":"Read pin labels before wiring"},
-    {"item":"Adafruit SG92R micro servo PID169", "quantity":2, "unit_usd":5.95, "price_status":"verified", "url":"https://www.adafruit.com/product/169", "fit":"Provisional substitute for pictured SG90; measure case and spline before printing"},
-    {"item":"Adafruit DRV8833 PID3297", "quantity":1, "unit_usd":5.95, "price_status":"verified", "url":"https://www.adafruit.com/product/3297", "fit":"Mount on insulated spacer; match stall current to driver"},
-    {"item":"6V N20 150-200rpm gearmotor with 3mm D shaft", "quantity":2, "unit_usd":8, "price_status":"allowance", "url":"", "fit":"Exact affordable SKU/shaft/body dimensions not selected. Pololu2368 is $23.95 each and exceeds this allowance"},
-    {"item":"DFRobot DFR0205 buck converter", "quantity":1, "unit_usd":8.50, "price_status":"verified", "url":"https://www.dfrobot.com/product-752.html", "fit":"46x50x20mm; test chassis clearance; 5V regulated output"},
-    {"item":"DFRobot DFR0564 2S charger (conditional)", "quantity":1, "unit_usd":5, "price_status":"verified", "url":"https://www.dfrobot.com/product-1713.html", "fit":"Only if final pack manufacturer permits this charger; it does not balance cells"},
-    {"item":"Assembled protected/balanced 2S pack and matching connector", "quantity":1, "unit_usd":16, "price_status":"allowance", "url":"", "fit":"Exact pack, charger compatibility and current capability unresolved"},
-    {"item":"Power switch, wiring, connectors and fasteners", "quantity":1, "unit_usd":8, "price_status":"allowance", "url":"", "fit":"Includes Grove-UART cable; confirm polarity"},
-    {"item":"Filament for first chassis, tracks and gripper", "quantity":1, "unit_usd":5, "price_status":"allowance", "url":"", "fit":"Assumes printer access; service printing costs extra"},
-    {"item":"Motor suppression and power decoupling components", "quantity":1, "unit_usd":2, "price_status":"allowance", "url":"", "fit":"Size after motor/servo selection and measured current"}
-  ]
+    {
+      "item": "Freenove FNK0085B ESP32-S3 camera board, N16R8 / 16MB flash + 8MB PSRAM",
+      "quantity": 1,
+      "unit_usd": 21.99,
+      "price_status": "verified",
+      "url": "https://store.freenove.com/products/fnk0085?variant=44552293155014",
+      "fit": "Reference EVA board family. Confirm actual N16R8 marking, included camera sensor/lens and case alignment; no extension board required."
+    },
+    {
+      "item": "ProtoSupplies DSP-9 1.3 inch SH1106 128x64 I2C OLED, 4 pin",
+      "quantity": 1,
+      "unit_usd": 5.95,
+      "price_status": "verified",
+      "url": "https://protosupplies.com/product/oled-1-3-128x64-i2c-blue-display/",
+      "fit": "Candidate PCB 35.4x33.5mm, visible area 29.42x14.7mm. EVA display PCB SKU unspecified; verify mounting holes and clearances. Monochrome, not color LCD."
+    },
+    {
+      "item": "INMP441 I2S microphone breakout",
+      "quantity": 1,
+      "unit_usd": 2.09,
+      "price_status": "verified",
+      "url": "https://www.sinoning.com/product/omnidirectional-microphone-module-i2s-interface-inmp441-mems-high-precision-low-power-ultra-small-volume-for-esp32/",
+      "fit": "Exact breakout footprint and microphone port alignment require checking; use 3.3V power."
+    },
+    {
+      "item": "Adafruit MAX98357A I2S amplifier PID3006",
+      "quantity": 1,
+      "unit_usd": 5.95,
+      "price_status": "verified",
+      "url": "https://www.adafruit.com/product/3006",
+      "fit": "19.4x17.8x3mm; may need small internal spacers versus EVA generic module. Speaker goes across SPK+ and SPK-, neither output to ground."
+    },
+    {
+      "item": "Compact moving-coil speaker, 4-8 ohm",
+      "quantity": 1,
+      "unit_usd": 3,
+      "price_status": "allowance",
+      "url": "",
+      "fit": "Target $2-4. Exact speaker size/power and EVA mounting cavity not selected. Limit volume to rated power."
+    },
+    {
+      "item": "Existing ESP32-WROOM-32 dev board",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Read pin labels before wiring"
+    },
+    {
+      "item": "Adafruit SG92R micro servo PID169",
+      "quantity": 2,
+      "unit_usd": 5.95,
+      "price_status": "verified",
+      "url": "https://www.adafruit.com/product/169",
+      "fit": "Provisional substitute for pictured SG90; measure case and spline before printing"
+    },
+    {
+      "item": "Adafruit DRV8833 PID3297",
+      "quantity": 1,
+      "unit_usd": 5.95,
+      "price_status": "verified",
+      "url": "https://www.adafruit.com/product/3297",
+      "fit": "Mount on insulated spacer; match stall current to driver"
+    },
+    {
+      "item": "6V N20 150-200rpm gearmotor with 3mm D shaft",
+      "quantity": 2,
+      "unit_usd": 8,
+      "price_status": "allowance",
+      "url": "",
+      "fit": "Exact affordable SKU/shaft/body dimensions not selected. Pololu2368 is $23.95 each and exceeds this allowance"
+    },
+    {
+      "item": "DFRobot DFR0205 buck converter",
+      "quantity": 1,
+      "unit_usd": 8.5,
+      "price_status": "verified",
+      "url": "https://www.dfrobot.com/product-752.html",
+      "fit": "46x50x20mm; test chassis clearance; 5V regulated output"
+    },
+    {
+      "item": "DFRobot DFR0564 2S charger (conditional)",
+      "quantity": 1,
+      "unit_usd": 5,
+      "price_status": "verified",
+      "url": "https://www.dfrobot.com/product-1713.html",
+      "fit": "Only if final pack manufacturer permits this charger; it does not balance cells"
+    },
+    {
+      "item": "Assembled protected/balanced 2S pack and matching connector",
+      "quantity": 1,
+      "unit_usd": 16,
+      "price_status": "allowance",
+      "url": "",
+      "fit": "Exact pack, charger compatibility and current capability unresolved"
+    },
+    {
+      "item": "Power switch, wiring, connectors and fasteners",
+      "quantity": 1,
+      "unit_usd": 8,
+      "price_status": "allowance",
+      "url": "",
+      "fit": "Includes short UART/inside-head wiring, insulated connections and mounting screws; exact sizes/quantities unresolved. No Grove cable required."
+    },
+    {
+      "item": "Filament for chassis, tracks, gripper and EVA head",
+      "quantity": 1,
+      "unit_usd": 5,
+      "price_status": "allowance",
+      "url": "",
+      "fit": "Allowance assumes printer access; slicer mass and local filament cost not measured. Service printing costs extra."
+    },
+    {
+      "item": "Motor suppression and power decoupling components",
+      "quantity": 1,
+      "unit_usd": 2,
+      "price_status": "allowance",
+      "url": "",
+      "fit": "Size after motor/servo selection and measured current"
+    }
+  ],
+  "head_configuration": "modular EVA-style S3 head; replaces CoreS3 Lite",
+  "note": "Verified means the listed item price was observed, not a complete delivered cart or verified mechanical fit. Modular-head firmware compiles; physical head and rover untested; no purchases."
 }

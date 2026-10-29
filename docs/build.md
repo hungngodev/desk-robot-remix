@@ -1,8 +1,11 @@
 # Firmware builds
 
 These commands build files. **Nothing in setup automatically flashes hardware.**
-The body target is classic ESP32-WROOM-32; the head target requires CoreS3 Lite's
-ESP32-S3. Do not flash a head image onto WROOM.
+The body target is classic ESP32-WROOM-32. The active head is **Freenove N16R8
+with separate OLED/audio modules**; select it explicitly with `--board modular`.
+CoreS3 is an earlier reference with its own build copy. See the
+[modular-head guide](modular-head.md) for parts/case and hardware checks. Do not
+flash CoreS3 images onto Freenove, or S3 images onto WROOM.
 
 ## Body
 
@@ -56,7 +59,7 @@ On this Mac, the installed compiler needed its existing SDK C++ include path:
 `export CPLUS_INCLUDE_PATH="$(xcrun --show-sdk-path)/usr/include/c++/v1"`.
 This is a per-terminal workaround, not a global configuration change.
 
-## CoreS3 head
+## Shared head build environment
 
 The pinned Xiaozhi source requires ESP-IDF release/v6.1. This session installed
 it under `.tools/esp-idf` and tools under `.tools/idf-tools`. On another machine,
@@ -64,10 +67,61 @@ restore the exact SDK commit recorded in `toolchain-lock.json`, initialize its
 submodules, and run its `install.sh esp32s3` with `IDF_TOOLS_PATH` set as below.
 Do not substitute IDF5.
 
+The build helper seeds and verifies `firmware/head/dependencies.lock` in each
+build copy. It rejects a changed dependency lock. Keep the two board copies
+separate so that overlay changes and binaries retain their actual board identity.
+
+## Modular S3 head — active hardware direction
+
+Prepare its own build copy, leaving `upstream/` and the CoreS3 reference untouched:
+
 ```sh
 python3 scripts/restore_upstreams.py
-python3 firmware/head/install_overlay.py --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi
-bash scripts/build_head.sh
+python3 firmware/head/install_overlay.py --board modular --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi-modular
+bash scripts/build_head.sh --board modular
+```
+
+On an existing modular copy, check it with
+`python3 firmware/head/install_overlay.py --board modular --target firmware/head/build/xiaozhi-modular`.
+The installer refuses changed overlay files. Remove only unchanged overlay files
+with `--remove`; preserve local edits first.
+
+This target uses **16 MB flash and 8 MB octal PSRAM**. Camera SCCB explicitly uses
+I²C0 and the new I²C driver; the OLED uses I²C1. The board has a compile guard
+against changing the camera to I²C1 or mixing in the legacy I²C driver. Setting
+only `camera_config_t.sccb_i2c_port` is insufficient when SCCB pins are assigned:
+the pinned camera driver chooses that bus through Kconfig.
+
+The verification configuration uses an empty bridge token and disabled wake word.
+For private local-server settings, after generating `config/local.env`:
+
+```sh
+uv run desk-robot secrets
+python3 firmware/head/private_config.py --board modular --robot robot-01 --server-ip MAC_LAN_IP
+bash scripts/build_head.sh --board modular --private
+```
+
+Replace `MAC_LAN_IP` with the Mac's reachable IPv4 address. Use robot-02 only for
+the second physical head. Keep private settings/binaries in the ignored build
+directory. Real wake-word, audio, camera, OLED address/orientation and UART must
+still be tested. The default SH1106 UI shows emotion symbols/text; smooth moving
+eyes are a later animation adapter.
+
+After selecting the actual Freenove device and confirming its module/camera,
+flash only from `firmware/head/build/xiaozhi-modular` using the same exported IDF
+environment and upstream `idf.py -p PORT flash monitor`. No device has been
+selected or flashed. Bring up the head alone on USB before connecting the WROOM
+UART or actuator supply.
+
+## Previous CoreS3 head reference
+
+These commands are retained for the earlier board and do not build modular-head
+firmware:
+
+```sh
+python3 scripts/restore_upstreams.py
+python3 firmware/head/install_overlay.py --board cores3 --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi
+bash scripts/build_head.sh --board cores3
 ```
 
 If the build copy already exists, check the overlay with
@@ -81,8 +135,8 @@ For a real head, prepare private settings after generating `config/local.env`:
 
 ```sh
 uv run desk-robot secrets
-python3 firmware/head/private_config.py --robot robot-01 --server-ip MAC_LAN_IP
-bash scripts/build_head.sh --private
+python3 firmware/head/private_config.py --board cores3 --robot robot-01 --server-ip MAC_LAN_IP
+bash scripts/build_head.sh --board cores3 --private
 ```
 
 The helper selects the existing local Python 3.12 bootstrap before exporting

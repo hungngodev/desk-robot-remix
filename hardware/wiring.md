@@ -2,11 +2,14 @@
 
 Confirm printed GPIO labels on your **ESP32-WROOM-32 development board**; physical
 pin positions vary. The Feather and USB-C breakout #4090 are not needed here.
+The active modular head's proposed pins and electrical corrections are in
+[the head guide](../docs/modular-head.md). Use the dedicated `--board modular`
+firmware configuration; the earlier CoreS3 binary must not be flashed to Freenove.
 
 | WROOM GPIO | Connection |
 | --- | --- |
-| 16 / UART RX | CoreS3 PORT.A GPIO2 / TX, standard cable yellow |
-| 17 / UART TX | CoreS3 PORT.A GPIO1 / RX, standard cable white |
+| 16 / UART RX | S3 head GPIO2 / TX, configured module-head allocation |
+| 17 / UART TX | S3 head GPIO1 / RX, configured module-head allocation |
 | GND | Head GND and actuator supply GND |
 | 25, 26 | DRV8833 AIN1, AIN2 for left motor |
 | 27, 32 | DRV8833 BIN1, BIN2 for right motor |
@@ -18,9 +21,10 @@ breakout's VM, GND, sleep and current-limit instructions; SLP must be high for
 the Adafruit board to operate. Match the limit to the actual selected motors.
 [Driver guide](https://learn.adafruit.com/adafruit-drv8833-dc-stepper-motor-driver-breakout-board).
 
-UART is 115200 8N1, **3.3 V logic**, common ground. PORT.A becomes UART and cannot
-also serve I2C. In the initial two-USB bench test, leave the Grove red 5 V wire
-disconnected to avoid joining two supplies. Verify the actual cable pinout.
+UART is 115200 8N1, **3.3 V logic**, common ground. In the initial two-USB bench
+test, join TX/RX/GND only; leave board 5 V rails separate. The previous CoreS3
+reference used the same GPIO numbers on PORT.A; that connector and its cable
+colors do not describe the new modular head.
 
 ## Power
 

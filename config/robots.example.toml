@@ -1,5 +1,5 @@
 # Copy to local.toml and enter the two heads' LAN addresses/device IDs after assembly.
-# Head tokens must match the private CoreS3 build settings. Never put tokens here.
+# Head tokens must match the selected head's private build settings. Never put tokens here.
 mode = "hardware"
 ollama_model = "qwen3:8b"
 trials_file = "../data/physical-trials.jsonl"

@@ -7,7 +7,9 @@ that unchanged Verdure firmware is safe or compatible with this build.
 ## Body UART, 115200 baud, 8N1, 3.3 V logic
 
 Head TX GPIO2 -> body RX GPIO16; body TX GPIO17 -> head RX GPIO1. Common ground.
-These are CoreS3-Lite PORT.A pins (not the camera's pins) and WROOM-32 UART2 pins.
+These are the configured modular-head GPIOs and existing WROOM-32 UART2 pins.
+The previous CoreS3 reference used the same numbers on PORT.A. They are not
+the new head's display/camera pins; see [module pin allocation](modular-head.md).
 Use a separate regulated supply for motors/servos, never GPIO power.
 
 Each command is one ASCII line, at most 95 characters, terminated by CRLF.
@@ -50,10 +52,13 @@ access; reject oversized bodies and commands. Never auto-arm from an MCP tool.
 - `GET /api/camera.jpg`: fresh JPEG using the existing camera implementation and
   image-to-JPEG helpers. No new sensor driver. Return failure if capture fails.
 
-Use a unique `desk-robot-core-s3` board/variant, retaining CoreS3 audio/camera pins
-and avoiding changes to the stock CoreS3 board's identity. Token/robot ID go in
-private build configuration. Existing Xiaozhi camera capture and HTTP capture
-must not race. Common-camera changes, if necessary, must be narrow and guarded.
+The active modular implementation uses `desk-robot-modular-s3` and an
+`Esp32Camera` snapshot adapter; the previous `desk-robot-core-s3` reference remains
+separate. The modular board uses its own audio/display pins and camera I²C0 versus
+OLED I²C1, with a camera-driver Kconfig guard. Token/robot ID go in private build
+configuration. Both variants retain the same API and shared camera lock. Existing
+Xiaozhi camera capture and HTTP capture must not race. Common-camera changes,
+if necessary, must be narrow and guarded.
 
 Opt-in debugging MCP tools map bounded drive/stop/lift/grip/status to the same
 serial transport. In normal operation the head exposes status only, and the

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--robot", choices=["robot-01", "robot-02"], required=True)
+    p.add_argument("--board", choices=["cores3", "modular"], default="cores3")
     p.add_argument(
         "--server-ip", required=True, help="Mac LAN IPv4 address, reachable from the head"
     )
@@ -30,7 +31,12 @@ def main():
     token = os.environ.get(name, values.get(name, ""))
     if not re.fullmatch(r"[a-zA-Z0-9_-]{32,128}", token):
         p.error("Generate local credentials first; the head token is missing/invalid")
-    board = ROOT / "firmware/head/build/xiaozhi/main/boards/desk-robot/desk-robot-core-s3"
+    build, variant = (
+        ("xiaozhi-modular", "desk-robot-modular-s3")
+        if args.board == "modular"
+        else ("xiaozhi", "desk-robot-core-s3")
+    )
+    board = ROOT / "firmware/head/build" / build / "main/boards/desk-robot" / variant
     config = json.loads((board / "config.json").read_text())
     config["builds"][0]["sdkconfig_append"] = [
         x

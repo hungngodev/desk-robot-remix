@@ -1,22 +1,29 @@
 # CAD source register
 
-Originals go in `originals/`, small changes in `remixes/`. No CAD files have been
-downloaded or edited yet. Source filenames/licenses were checked 2026-10-28.
+Originals go in `originals/`, small changes in `remixes/`. EVA's original head
+3MF, three Bluino gripper STLs, two original forklift STLs and the four requested
+SMARS chassis/wheel/track STLs are saved and inspected, with original assembly
+documents. No geometry has been edited or sliced. Checked 2026-10-28.
 
 | Source | Author | Needed files | License |
 | --- | --- | --- | --- |
-| [SMARS 2662828](https://www.thingiverse.com/thing:2662828/files) | tristomietitoredeituit / Kevin Thomas | `chassis_-SL.stl`, `master_wheel.stl`, matching `slave_wheel_SL.stl`, `mechanical_track.stl`; `doc_lite.zip`, `Instructions.pdf` for counts/assembly | CC BY-NC-SA 4.0 |
-| [Gripper 4253681](https://www.thingiverse.com/thing:4253681/files) | bluino | `servo_case_arm.stl`, `arm_rack.stl`, `pinion_gear.stl` | CC BY 4.0 |
-| Author-linked lift pieces | Original attribution to confirm | `fork_lift_e.stl`, `fork_lift_f.stl` | Verify originating license separately |
+| [EVA Robot head 7319190](https://www.thingiverse.com/thing:7319190/files) | Ksirailway-Base | [Saved EVA-Robot.3mf](originals/eva-head/EVA-Robot.3mf), [inspection/provenance](originals/eva-head/README.md); four objects in assembly positions | CC BY-SA 4.0 |
+| [SMARS 2662828](https://www.thingiverse.com/thing:2662828/files) | tristomietitoredeituit | [Saved screwless selection and documents](originals/smars/README.md): `chassis_-SL.stl`, `master_wheel.stl`, `slave_wheel_SL.stl`, `mechanical_track.stl`; `doc_lite.zip`, `Instructions.pdf` | CC BY-NC-SA 4.0 |
+| [Gripper 4253681](https://www.thingiverse.com/thing:4253681/files) | bluino | [Saved originals and hashes](originals/gripper/README.md): `servo_case_arm.stl`, `arm_rack.stl`, `pinion_gear.stl` | CC BY 4.0 |
+| [Original forklift 3027255](https://www.thingiverse.com/thing:3027255/files) | tristomietitoredeituit | [Saved E/F pieces, PDF and hashes](originals/forklift/README.md) | CC BY-NC-SA 4.0 |
 
 Do not mix screwless/screwed axle and wheel variants. Follow original assembly
-counts. CoreS3/WROOM/regulator mounting still needs measured fit checks.
+counts. EVA head/WROOM/regulator mounting still needs measured fit checks.
 
-Future permitted jobs: removable CoreS3 bracket clearing camera/microphones/
-speaker/button; WROOM/regulator spacers; thin replaceable jaw tips. Keep the
+Future permitted jobs: removable EVA head bracket clearing camera/microphone/
+speaker/button; small internal module spacers or camera-aperture corrections;
+WROOM/regulator spacers; thin replaceable jaw tips. Keep the
 camera pose fixed relative to the jaws. The buck is 46 × 50 × 20 mm, so check
 clearance before committing to it. Preserve the existing chassis and linkage.
 
 Each export must record source/license, dimensions, changes and hash. Derived
 SMARS geometry retains its noncommercial/share-alike terms. Software MIT terms
 do not relicense printed designs. Fusion MCP is currently unavailable.
+The EVA case has its own CC BY-SA 4.0 terms; preserve its attribution and mark
+changes to it. A combined mechanical remix must respect every applicable source
+license; do not assume the software MIT license covers the assembled robot CAD.

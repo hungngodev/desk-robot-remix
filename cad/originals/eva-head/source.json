@@ -1,0 +1,140 @@
+{
+  "verified_at": "2026-10-28",
+  "title": "Eva-Robot, Local AI Companion ESP32-S3",
+  "author": "Ksirailway-Base",
+  "author_url": "https://www.thingiverse.com/Ksirailway-Base/designs",
+  "source_url": "https://www.thingiverse.com/thing:7319190/files",
+  "download_url": "https://cdn.thingiverse.com/assets/ed/17/af/bb/69/EVA-Robot.3mf",
+  "mirror_url": "https://makerworld.com/uk/models/2550437-eva-robot-local-ai-companion-robot-esp32-s3",
+  "license": "CC-BY-SA-4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "license_evidence": "Author download-page License section explicitly linked to CC BY-SA 4.0; browser accessibility capture inspected 2026-10-28.",
+  "file": "EVA-Robot.3mf",
+  "bytes": 300027,
+  "sha256": "80af1ce2c64e283563d104c378ccc31987f48df6387f24066e4bbc2c5137594c",
+  "changes": "None. Original 3MF copied byte-for-byte. source-preview.png extracted unchanged from embedded Metadata/thumbnail.png.",
+  "units": "millimeter",
+  "objects": [
+    {
+      "object_id": "1",
+      "original_name": "днище",
+      "description": "bottom",
+      "vertices": 232,
+      "triangles": 476,
+      "bounds_mm": [
+        [
+          -7.0,
+          63.0
+        ],
+        [
+          -22.0,
+          22.0
+        ],
+        [
+          11.0,
+          15.0
+        ]
+      ],
+      "size_mm": [
+        70.0,
+        44.0,
+        4.0
+      ]
+    },
+    {
+      "object_id": "3",
+      "original_name": "крышка",
+      "description": "lid",
+      "vertices": 200,
+      "triangles": 412,
+      "bounds_mm": [
+        [
+          -9.0,
+          65.0
+        ],
+        [
+          -24.0,
+          24.0
+        ],
+        [
+          57.8,
+          59.8
+        ]
+      ],
+      "size_mm": [
+        74.0,
+        48.0,
+        2.0
+      ]
+    },
+    {
+      "object_id": "5",
+      "original_name": "стенка1",
+      "description": "main wall",
+      "vertices": 1403,
+      "triangles": 2830,
+      "bounds_mm": [
+        [
+          -9.0,
+          65.0
+        ],
+        [
+          -24.0,
+          24.0
+        ],
+        [
+          11.0,
+          57.8
+        ]
+      ],
+      "size_mm": [
+        74.0,
+        48.0,
+        46.8
+      ]
+    },
+    {
+      "object_id": "7",
+      "original_name": "тач",
+      "description": "touch piece",
+      "vertices": 16,
+      "triangles": 28,
+      "bounds_mm": [
+        [
+          7.499999,
+          23.5
+        ],
+        [
+          -14.0,
+          14.0
+        ],
+        [
+          54.0,
+          57.8
+        ]
+      ],
+      "size_mm": [
+        16.0,
+        28.0,
+        3.8
+      ]
+    }
+  ],
+  "assembled_size_mm": [
+    74,
+    48,
+    48.8
+  ],
+  "front_display_opening_mm": [
+    35,
+    19.6
+  ],
+  "front_camera_opening_diameter_mm_approx": 4.4,
+  "print_arrangement": "Original four build items are in assembled coordinates, without transforms. Separate, orient and place each object on the print bed before slicing.",
+  "physical_fit_verified": false,
+  "reference_repo": {
+    "url": "https://github.com/Ksirailway-base/EVA-Robot",
+    "commit": "c7ff17718a40d071b352e9894506c264578120c0",
+    "use": "Case and module architecture reference; code not copied. README says MIT but a complete license notice was not found in tree at this revision."
+  }
+}

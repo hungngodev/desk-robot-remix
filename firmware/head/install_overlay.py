@@ -12,6 +12,7 @@ from pathlib import Path
 
 PIN = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
 BOARD = "main/boards/desk-robot/desk-robot-core-s3"
+BOARDS = {"cores3": BOARD, "modular": "main/boards/desk-robot/desk-robot-modular-s3"}
 MARKER = ".desk-robot-head-overlay.json"
 HERE = Path(__file__).resolve().parent
 
@@ -22,7 +23,7 @@ def replace_once(text: str, old: str, new: str) -> str:
     return text.replace(old, new, 1)
 
 
-def planned_files(target: Path) -> dict[str, bytes]:
+def cores3_files(target: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     stock = target / "main/boards/m5stack/core-s3"
     for name in ("config.h", "cores3_audio_codec.h", "cores3_audio_codec.cc"):
@@ -179,6 +180,68 @@ std::expected<std::vector<uint8_t>, std::string> EspVideo::SnapshotJpeg() {
     return files
 
 
+def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
+    """Reuse the bridge/locking overlay, replacing only the selected board adapter."""
+    if board not in BOARDS:
+        raise ValueError(f"Unknown board: {board}")
+    files = cores3_files(target)
+    if board == "cores3":
+        return files
+
+    # Keep the original CoreS3 source and build copy independent. The selected
+    # integration guard is used by camera.h, EspVideo and the MCP capture lock.
+    files = {
+        name: data.replace(b"CONFIG_BOARD_TYPE_DESK_ROBOT_CORE_S3", b"CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3")
+        .replace(b"BOARD_TYPE_DESK_ROBOT_CORE_S3", b"BOARD_TYPE_DESK_ROBOT_MODULAR_S3")
+        .replace(b'Desk robot CoreS3 Lite', b'Desk robot modular S3 (Freenove N16R8)')
+        .replace(b"desk-robot/desk-robot-core-s3", b"desk-robot/desk-robot-modular-s3")
+        for name, data in files.items()
+        if not name.startswith(BOARD + "/")
+    }
+    cmake = files["main/CMakeLists.txt"].decode()
+    cmake = replace_once(
+        cmake,
+        '    set(BOARD_DIR "desk-robot/desk-robot-modular-s3")\n'
+        '    set(BUILTIN_TEXT_FONT font_noto_sans_basic_20_4)\n'
+        '    set(BUILTIN_ICON_FONT font_material_symbols_20_4)\n'
+        '    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)\n',
+        '    set(BOARD_DIR "desk-robot/desk-robot-modular-s3")\n'
+        '    set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)\n'
+        '    set(BUILTIN_ICON_FONT font_material_symbols_14_1)\n',
+    )
+    files["main/CMakeLists.txt"] = cmake.encode()
+    for path in (HERE / "modular").iterdir():
+        if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+            files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+    for path in (HERE / "overlay").iterdir():
+        if path.suffix in (".h", ".cc"):
+            files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+
+    guard = "#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3"
+    path = "main/boards/common/esp32_camera.h"
+    header = (target / path).read_text()
+    header = replace_once(
+        header, "    virtual bool Capture() override;",
+        "    virtual bool Capture() override;\n" + guard +
+        "\n    std::expected<std::vector<uint8_t>, std::string> SnapshotJpeg() override;\n#endif",
+    )
+    files[path] = header.encode()
+    path = "main/boards/common/esp32_camera.cc"
+    source = (target / path).read_text()
+    for anchor in (
+        "bool Esp32Camera::Capture() {",
+        "std::expected<std::string, std::string> Esp32Camera::Explain(const std::string& question) {",
+        "bool Esp32Camera::SetHMirror(bool enabled) {",
+        "bool Esp32Camera::SetVFlip(bool enabled) {",
+        "bool Esp32Camera::SetSwapBytes(bool enabled) {",
+    ):
+        source = replace_once(source, anchor, anchor + "\n" + guard +
+                              "\n    std::lock_guard<std::recursive_mutex> camera_lock(AccessMutex());\n#endif")
+    source += "\n" + guard + "\n" + (HERE / "modular_snapshot.inc").read_text() + "\n#endif\n"
+    files[path] = source.encode()
+    return files
+
+
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -199,18 +262,23 @@ def remove(target: Path) -> None:
         else:
             path.write_bytes(base64.b64decode(info["original"]))
     marker.unlink()
-    board = target / BOARD
-    if board.is_dir() and not any(board.iterdir()):
-        board.rmdir()
+    for name in BOARDS.values():
+        board = target / name
+        if board.is_dir() and not any(board.iterdir()):
+            board.rmdir()
 
 
-def apply(target: Path) -> None:
+def apply(target: Path, board: str = "cores3") -> None:
+    if board not in BOARDS:
+        raise ValueError(f"Unknown board: {board}")
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=target, text=True).strip()
     if head != PIN:
         raise ValueError(f"Requires Xiaozhi commit {PIN}, found {head}")
     marker = target / MARKER
     if marker.exists():
         state = json.loads(marker.read_text())
+        if not any(name.startswith(BOARDS[board] + "/") for name in state):
+            raise ValueError("A different board overlay is installed; use a separate build copy")
         for name, info in state.items():
             path = target / name
             if not path.is_file() or digest(path.read_bytes()) != info["sha256"]:
@@ -224,9 +292,9 @@ def apply(target: Path) -> None:
     )
     if changed:
         raise ValueError("Target has tracked changes; use a clean build copy")
-    if (target / BOARD).exists():
+    if any((target / name).exists() for name in BOARDS.values()):
         raise ValueError("Target board directory already exists")
-    files = planned_files(target)  # Validate every patch anchor before changing any source.
+    files = planned_files(target, board)  # Validate every patch anchor before changing any source.
     state = {}
     for name, data in files.items():
         path = target / name
@@ -250,6 +318,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, help="New disposable build clone to create")
     parser.add_argument("--target", type=Path, help="Existing clean pinned build clone")
     parser.add_argument("--remove", action="store_true")
+    parser.add_argument("--board", choices=BOARDS, default="cores3", help="Board adapter to install; use separate build copies")
     args = parser.parse_args()
     if args.output:
         if args.target or not args.upstream or args.remove:
@@ -276,7 +345,7 @@ def main() -> None:
     if args.remove:
         remove(target.resolve())
     else:
-        apply(target.resolve())
+        apply(target.resolve(), args.board)
 
 
 if __name__ == "__main__":

@@ -1,26 +1,31 @@
 # Desk robot remix
 
-A personal, experimental SMARS rover with a lift-and-grip arm, a CoreS3 Lite
-camera/screen/voice head, and an existing ESP32-WROOM-32 body controller. Two
-robots share the Mac and take turns speaking. Build one first.
+A personal, experimental SMARS rover with a lift-and-grip arm, a head assembled
+from separate camera/screen/audio modules inside an existing EVA Robot case,
+and an owned ESP32-WROOM-32 body controller. Two robots share the Mac and take
+turns speaking. Build one first.
 
-**Current stage: software prepared; physical assembly and pickup tests have not
-been run.** Both firmware targets compile. A simulated pickup and six-turn
-conversation run locally. Simulation does not establish that a flat key can be
-picked up by the printed mechanism.
+**Current stage: modular-head firmware builds and original print files are
+saved; physical assembly and pickup tests remain.** The WROOM firmware and new
+Freenove/OLED head compile; 65 focused software checks pass. A simulated pickup
+and six-turn conversation run locally. Hardware remains unflashed and untested;
+simulation does not establish that a flat key can be picked up by the mechanism.
 
-**Budget:** target $100–140 per robot before shipping/tax; first robot has a
-$150 spending cap. The allowance-based parts total is **$123.25**. Motor and
-battery choices are still unquoted; there is no complete verified shopping
-basket yet. [Parts and budget](hardware/parts.md).
+**Budget:** current allowance-based parts total **$117.33** before shipping/tax,
+including about **$39 for head electronics**. First robot has a $150 spending cap.
+Speaker, motors, battery and mechanical fit are not finalized; there is no
+complete verified shopping basket yet. [Parts and budget](hardware/parts.md).
 
 ## Start here
 
-1. [Print and bench-test the gripper](docs/first-gripper-test.md) with your actual
+1. [Review the module head and saved case](docs/modular-head.md). The 1.3-inch OLED
+   gives monochrome emotion symbols/text initially; camera, microphone and speech
+   remain included. Smooth eye animation needs a later adapter.
+2. [Print and bench-test the gripper](docs/first-gripper-test.md) with your actual
    flat key and candy before buying the full rover and head.
-2. Follow [wiring and power](hardware/wiring.md) and [firmware builds](docs/build.md).
-3. Set up [local speech and vision](docs/local-ai.md).
-4. [Measure and test pickup, then add the second robot](docs/pickup-and-two-robots.md).
+3. Follow [wiring and power](hardware/wiring.md) and [firmware builds](docs/build.md).
+4. Set up [local speech and vision](docs/local-ai.md).
+5. [Measure and test pickup, then add the second robot](docs/pickup-and-two-robots.md).
 
 Only small jaw tips, spacers and mounting brackets are in scope. Fusion MCP is
 not available in this session, so no CAD edits have been made. If a flat key
@@ -54,13 +59,14 @@ have separate credentials and cannot grant that permission.
 | --- | --- |
 | Chassis/tracks | [SMARS](https://www.thingiverse.com/thing:2662828) |
 | Lift/gripper | [Bluino SMARS arm](https://www.thingiverse.com/thing:4253681) |
-| Camera/screen/audio | [Xiaozhi CoreS3 drivers](https://github.com/78/xiaozhi-esp32) |
+| Head case/component layout | [EVA Robot](https://github.com/Ksirailway-base/EVA-Robot), [saved 3MF](cad/originals/eva-head/EVA-Robot.3mf) |
+| Camera/screen/audio drivers | [Xiaozhi S3 camera + breadboard targets](https://github.com/78/xiaozhi-esp32) |
 | UART approach | [VerdureBuddyRover](https://github.com/maker-community/VerdureBuddyRover) |
 | Voice server | [Xiaozhi server](https://github.com/xinnan-tech/xiaozhi-esp32-server) |
 
 - `PLAN.md`: accepted scope and progress.
 - `upstream-lock.json`, `upstream/`: exact revisions and untouched sources.
-- `firmware/`: WROOM body and separate CoreS3 head variant.
+- `firmware/`: WROOM body, active modular S3 head and previous CoreS3 reference.
 - `laptop/`: local coordinator and small Xiaozhi server adapter.
 - `cad/`, `hardware/`, `config/`: source register, parts, wiring and examples.
 - `docs/`, `test-results/`: build guides, contracts and verification evidence.

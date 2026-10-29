@@ -1,0 +1,80 @@
+{
+  "verified_at": "2026-10-28",
+  "title": "Forklift module for SMARS",
+  "author": "tristomietitoredeituit",
+  "source_url": "https://www.thingiverse.com/thing:3027255/files",
+  "license": "CC-BY-NC-SA-4.0",
+  "license_url": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+  "license_evidence": "Original-author files-page License section explicitly links CC BY-NC-SA4.0. The two STL downloads resolve to the same CDN links referenced by Bluino.",
+  "files": [
+    {
+      "file": "fork_lift_e.stl",
+      "source_url": "https://www.thingiverse.com/download:5188207",
+      "bytes": 377484,
+      "sha256": "13d9cf0798ff65a1e9350d20fc3894a215ec88fc6dac654060b1b9207d91e252",
+      "changes": "None; downloaded STL filename normalized to original underscore spelling.",
+      "format": "binary STL",
+      "triangles": 7548,
+      "source_coordinate_bounds": [
+        [
+          -24.126636505126953,
+          22.02991485595703
+        ],
+        [
+          30.194503784179688,
+          60.19450378417969
+        ],
+        [
+          13.699999809265137,
+          25.5
+        ]
+      ],
+      "source_coordinate_size": [
+        46.1566,
+        30.0,
+        11.8
+      ],
+      "unit_note": "STL has no unit metadata. Confirm millimeter interpretation with original assembly and measured parts."
+    },
+    {
+      "file": "fork_lift_f.stl",
+      "source_url": "https://www.thingiverse.com/download:5188208",
+      "bytes": 1451284,
+      "sha256": "a8bf72278054722a8017000b87e67697f735b0830ac45d7e9841f2f1d0ceda3b",
+      "changes": "None; downloaded STL filename normalized to original underscore spelling.",
+      "format": "binary STL",
+      "triangles": 29024,
+      "source_coordinate_bounds": [
+        [
+          -17.0,
+          17.0
+        ],
+        [
+          -19.0,
+          19.0
+        ],
+        [
+          0.0,
+          14.300000190734863
+        ]
+      ],
+      "source_coordinate_size": [
+        34.0,
+        38.0,
+        14.3
+      ],
+      "unit_note": "STL has no unit metadata. Confirm millimeter interpretation with original assembly and measured parts."
+    },
+    {
+      "file": "forklifft.pdf",
+      "source_url": "https://www.thingiverse.com/download:5188210",
+      "bytes": 135051,
+      "sha256": "ad7e2a33ee149dbb9f2c9973698ee32ac072f7b24317d9b6dd6396183b0ccbfe",
+      "changes": "None; downloaded STL filename normalized to original underscore spelling.",
+      "content_reviewed": false
+    }
+  ],
+  "modified": false,
+  "physical_fit_verified": false,
+  "mesh_manufacturing_qa": "File structure and bounds inspected only. Slicer, wall thickness, topology and physical fit are not validated."
+}

@@ -1,14 +1,15 @@
 {
-  "parts_estimate_usd": 123.25,
+  "parts_estimate_usd": 117.33,
   "quoted_total_usd": null,
-  "planning_total_usd": 123.25,
+  "planning_total_usd": 117.33,
   "cap_usd": 150,
-  "remaining_under_cap_usd": 26.75,
+  "remaining_under_cap_usd": 32.67,
   "unquoted_items": [
+    "Compact moving-coil speaker, 4-8 ohm",
     "6V N20 150-200rpm gearmotor with 3mm D shaft",
     "Assembled protected/balanced 2S pack and matching connector",
     "Power switch, wiring, connectors and fasteners",
-    "Filament for first chassis, tracks and gripper",
+    "Filament for chassis, tracks, gripper and EVA head",
     "Motor suppression and power decoupling components"
   ],
   "fit_confirmed": false,
