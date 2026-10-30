@@ -16,10 +16,19 @@ firmware configuration; the earlier CoreS3 binary must not be flashed to Freenov
 | 18 | Lift servo signal |
 | 19 | Gripper servo signal |
 
-DRV8833 AOUT1/2 go to the left motor; BOUT1/2 to the right. Follow the selected
-breakout's VM, GND, sleep and current-limit instructions; SLP must be high for
-the Adafruit board to operate. Match the limit to the actual selected motors.
-[Driver guide](https://learn.adafruit.com/adafruit-drv8833-dc-stepper-motor-driver-breakout-board).
+DRV8833 AOUT1/2 (often OUT1/2) go to the left motor; BOUT1/2
+(often OUT3/4) go to the right. IN1/2 correspond to AIN1/2; IN3/4 to BIN1/2.
+Confirm actual silkscreen and the chip/board documentation before connecting.
+On the inspected cheap listing, **EEP is nSLEEP (input)** and **ULT is nFAULT
+(open-drain output)**; the seller prose reverses these roles. Once the actual
+board is identified, nSLEEP must be high (3.3 V logic) to operate. Do not drive
+nFAULT or assume an Adafruit-specific current-limit setting exists.
+
+The [TI DRV8833 specifications](https://www.ti.com/product/DRV8833) distinguish
+500 mA RMS PW and 1.5 A RMS PWP/RTY packages; a “2 A peak” listing is not a
+continuous board rating. The generic board's package/cooling and N20 loaded or
+stall current are unresolved. The seller's N20 50 mA is **no-load** current.
+Bench-check current, voltage droop and temperature before a loaded rover test.
 
 UART is 115200 8N1, **3.3 V logic**, common ground. In the initial two-USB bench
 test, join TX/RX/GND only; leave board 5 V rails separate. The previous CoreS3
@@ -33,20 +42,32 @@ sized regulated supply, and join grounds. Never supply actuator current through
 the ESP32's 3.3 V output or through the board from a laptop USB port. Confirm
 servo voltage from its datasheet.
 
-Proposed portable arrangement:
+Budget portable arrangement, conditional on the owned bank's rating/load/fit:
 
 ```text
-assembled protected 2S pack -> switch/fuse -> buck adjusted to 5.0 V
-                                         -> separate branches to servos,
-                                            DRV8833 VM, approved 5 V board inputs
+regulated 5 V USB power bank -> suitably rated lead / switch / distribution
+                              -> head and WROOM approved USB/5 V inputs
+                              -> separate servo and DRV8833 power branches
 all grounds joined; UART remains 3.3 V
 ```
 
-A charged 2S pack reaches 8.4 V. Measure the buck output before connecting loads.
-MT3608 is boost-only; it cannot perform this step-down. Do not send 2S voltage
-directly to a 5 V input or micro servo. Pack, wire, fuse and connector selection
-remain dependent on actual currents. Avoid simultaneous external/USB 5 V unless
-that board's documented power path permits it.
+The user confirmed having a bank, not its current rating, weight or dimensions.
+Check the label, shared-port limits and loaded operation; a 5 V / 3 A label is a
+useful candidate, not a guarantee against startup brownouts. Check auto-shutoff
+at idle, mounting and stability too. Use short rated power conductors; ordinary
+thin breadboard jumpers are not the actuator-current path. Do not power actuators
+through the WROOM/S3 regulator or through a laptop USB port.
+
+[Adafruit #4090](https://www.adafruit.com/product/4090) is listed up to 1.5 A;
+do not treat it as a verified 3 A distributor for the complete robot. A suitable
+USB power lead/distribution is included in the wiring allowance. Do not join
+a bank/external 5 V source to a laptop USB 5 V source without a documented power
+path. Disconnect portable power for the initial laptop-USB board tests.
+
+The separate 2S pack/charger/buck has been removed from the active shopping plan.
+If power-bank reuse fails, revise the delivered budget rather than silently
+adding that $29.50 system. A future 2S supply still needs regulated step-down
+from up to 8.4 V; MT3608 is boost-only and cannot do that conversion.
 
 Measure voltage droop and temperature during motor startup, servo load, Wi-Fi and
 speech together. No power/current/stall test has been performed yet.

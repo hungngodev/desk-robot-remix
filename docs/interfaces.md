@@ -86,7 +86,7 @@ or servo ACK alone is not proof of pickup; uncertain verification is a failure.
 
 Expose a local FastAPI coordinator API/CLI for status, stop, supervised manual
 control, image capture, pickup and a
-two-robot conversation. Default localhost. Use the existing Xiaozhi server through
+two-to-five-robot conversation. Default localhost. Use the existing Xiaozhi server through
 an overlay/plugin to route spoken pickup requests to the right robot/coordinator.
 Keep model/vision/speech imports optional so base tests run without model weights.
 Measured calibration is a private JSON file; human physical trials are recorded
@@ -96,7 +96,8 @@ body is actually armed only when the job starts. Model tools have a separate
 token and cannot grant permits. Keepalive runs only while the job is active.
 
 Conversation: shared speaker lock, independent robot histories, distinct IDs,
-maximum six **utterances total**, cancellation/stop. Deliver peers' transcripts
+maximum six **utterances total** for two/three participants, eight for four,
+ten for five; cancellation/stop. Deliver peers' transcripts
 digitally, not by listening to each other's speakers. Ollama qwen3:8b, local
 SenseVoice ASR, native Kokoro HTTP TTS via Xiaozhi configuration. No automatic
 paid API use. A backend/provider failure must surface, not become a fake reply.

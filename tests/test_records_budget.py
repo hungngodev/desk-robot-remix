@@ -16,16 +16,34 @@ def module(name):
 
 def test_allowances_and_over_budget_are_not_ready():
     budget = module("check_budget").budget
-    data = json.loads((ROOT / "hardware/bom.json").read_text())
+    data = {
+        "cap_usd": 50, "fit_confirmed": False,
+        "readiness_checks": {"power": False},
+        "items": [{"item": "example parts", "quantity": 2,
+                   "unit_usd": 20, "price_status": "allowance"}],
+    }
     result = budget(data)
-    assert result["parts_estimate_usd"] == 117.33
+    assert result["parts_estimate_usd"] == 40
     assert not result["purchase_ready"] and result["quoted_total_usd"] is None
     for row in data["items"]:
         row["price_status"] = "verified"
     assert not budget(data, 0, 0)["purchase_ready"]  # mechanical fit still unknown
     data["fit_confirmed"] = True
+    assert not budget(data, 0, 0)["purchase_ready"]  # unverified power stays a gate
+    data["readiness_checks"]["power"] = True
     assert budget(data, 0, 0)["purchase_ready"]
-    assert not budget(data, 30, 10)["purchase_ready"]
+    assert budget(data, 7, 3)["purchase_ready"]  # delivered cap includes charges
+    assert not budget(data, 8, 3)["purchase_ready"]
+    with pytest.raises(ValueError, match="non-negative"):
+        budget(data, -1, 0)
+
+
+def test_active_budget_is_a_first_robot_target_with_open_checks():
+    data = json.loads((ROOT / "hardware/bom.json").read_text())
+    result = module("check_budget").budget(data)
+    assert data["cap_usd"] == 50
+    assert result["pending_checks"]
+    assert not result["purchase_ready"]
 
 
 def trial(category, n):

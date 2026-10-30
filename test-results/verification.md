@@ -1,24 +1,30 @@
-# Verification — updated 2026-10-29
+# Verification — updated 2026-10-30
 
-The active hardware direction is an EVA case with separate S3 camera, OLED and
-audio modules. **The modular-head firmware compiles and 65 focused software
-checks pass.** The robot has not been printed, assembled, flashed or physically
-tested. This is an experimental integration, not a validated autonomous pickup
-product. Hardware prices were observed 2026-10-28; allowances are not final quotes.
+The current plan is five identical cores with removable cosmetics, generic
+SG90/N20 actuators, separate camera/OLED/audio modules and existing print files.
+**90 checks pass: 60 Python, 20 body C++, 10 head overlay/protocol/snapshot.**
+Five-robot mock conversation gives all five IDs two turns. No robot has been
+printed, assembled, flashed or physically tested.
+
+The **$37.59 first-prototype parts target** assumes one owned usable power bank
+and WROOM. It excludes delivery/tax and includes four allowances; the $50 delivered
+cap is not yet established. The $7.11 S3/OV2640 bundle is not qualified against
+the compiled Freenove pinout/programming/case. Purchase readiness remains false.
+See [ten checks](../docs/budget-audit.md) and [fleet guide](../docs/five-robots.md).
 
 ## Evidence
 
 | Check | Result |
 | --- | --- |
-| WROOM firmware, PlatformIO 6.1.18/espressif32 6.9.0 | Build succeeds; 273185 flash bytes, 21840 static RAM bytes |
+| WROOM firmware, PlatformIO 6.1.18/espressif32 6.9.0 | Previously built; exact artifact size/hash in build-artifacts.json; no firmware changes this revision |
 | Body portable C++ control tests with address/undefined-behavior sanitizers | 20/20 pass |
 | Both head overlays, reversible install/remove/drift, pin/config checks, native protocol/ACK and fresh-JPEG boundary tests | 10/10 pass |
 | Active modular S3 head, pinned ESP-IDF release/v6.1 | Build helper exits 0; app 2500528 bytes, merged 8658489 bytes; no flashing |
 | Separate CoreS3 head, pinned ESP-IDF release/v6.1 | Build succeeds, app about 2.54 MiB; no flashing |
-| Laptop API/control/calibration/transport/conversation/server adapter/budget/trial checks | 35/35 pass |
+| Laptop API/control/calibration/transport/conversation/server adapter/budget/trial and head-identity checks | 60/60 pass |
 | Earlier upstream Xiaozhi host suite against the CoreS3 build | 143 tests run, 142 pass, one skipped; historical evidence, not rerun for the modular variant |
 | Ruff and whitespace checks | Pass |
-| Simulation demo | Pickup logic succeeds; six total alternating utterances; physical acceptance remains false |
+| Simulation demo | Generated-image pickup logic succeeds; ten total round-robin utterances across five IDs; physical acceptance remains false |
 | Budget/trial gates | Reject incomplete quotes and empty physical trial records as intended |
 | Source restore | Four pinned upstream revisions verified; source clones unchanged |
 | EVA case | Original 300027-byte 3MF saved; four actual meshes, millimeter units, bounds and SHA-256 verified; no geometry edits |
@@ -59,7 +65,7 @@ cmake --build .tools/body-host
 ctest --test-dir .tools/body-host --output-on-failure
 python3 -m unittest discover -s firmware/head/tests -v
 bash scripts/build_head.sh --board modular
-uv run desk-robot --config config/simulation.toml demo
+uv run desk-robot --config config/fleet.simulation.toml demo
 python3 scripts/check_budget.py
 python3 scripts/check_trials.py
 ```
@@ -67,6 +73,31 @@ python3 scripts/check_trials.py
 Use the C++ include workaround in the build guide if the local compiler cannot
 find standard headers. The upstream suite is run from its build copy with the
 coordinator Python and the same include-path workaround.
+
+## Five-unit additions verified 2026-10-30
+
+- Two-to-five participants; distinct IDs, bounded dynamic limits (six/six/eight/ten),
+  independent histories, every utterance delivered digitally to all peers.
+- No overlapping transmissions; all-five mute/session cleanup on completion,
+  cancellation, repeated stop, a canceled stop caller, stopped queued speech,
+  encoding interruption and disconnected/replaced heads tested.
+- API/CLI reject duplicates, oversized groups and invalid turn counts; legacy
+  pair limits retained. Hardware fleet examples have motion off and blank real
+  device IDs; each duplicate still needs its own measured calibration.
+- Missing credentials append without rotation, reject symlinks/duplicate entries,
+  retain existing file bytes and use mode 0600. Three new fleet credentials were
+  added to ignored local.env; all previous content preserved and no values shown.
+- Private head settings resolve the selected fleet's exact credential name.
+  Temporary fifth-head fixture verifies ID/token selection, stale-setting removal,
+  unchanged public config, restrictive permissions and no token output.
+- Named head/power/current readiness gates prevent an allowance-based cheap list
+  from being reported as order ready. Original CAD remains unchanged.
+
+Current commands: `.venv/bin/pytest -q` (60 pass), Ruff plus whitespace checks
+(pass), `ctest --test-dir .tools/body-host --output-on-failure` (20 pass), head
+unittest suite (10 pass, with the documented local SDK C++ include path). No
+runtime firmware source changed, so prior head/body builds are preserved rather
+than presented as builds for the unqualified cheap camera board.
 
 ## Scope and quality review
 
@@ -98,13 +129,13 @@ or mechanical certification.
 
 - Review original assembly documents for print quantities/orientation; perform
   slicer/topology/fit checks. Source files are collected, not edited or sliced;
-  Fusion/Blender MCP tools are unavailable for live geometry changes.
+  Fusion MCP was unavailable; no geometry changes have been made.
 - Measure actual servo fit and flat-key floor clearance, print and bench-test the
   gripper. Perform ten trials per key/candy category before the full build.
-- Finalize motor and battery/charger quotes, mounting clearance and current
-  capability. The revised $117.33 figure includes allowances; purchase readiness
-  is false. Module quotes from separate suppliers are not a delivered cart.
-- Confirm exact Freenove camera sensor/lens, display PCB mount, speaker size and
+- Qualify the cheap head board, actual generic driver package, motor/servo loaded
+  currents and existing power bank rating/weight/mount. Finalize speaker and
+  delivered charges under $50; $37.59 is a target with allowances, not a cart.
+- Confirm exact selected camera sensor/lens, display PCB mount, speaker size and
   head-to-rover bracket/clearance. No component is a measured case drop-in yet.
 - Bench-test the compiled modular S3 head and fresh-JPEG adapter on actual
   modules. Confirm OLED address/orientation and camera sensor/byte order. The
@@ -118,8 +149,9 @@ or mechanical certification.
   been exercised. The base demo uses mock speech and generated images.
 - Measure camera geometry and raised-jaw visibility. A planar projection and two
   image detections can misidentify a pickup; human physical trials remain separate.
-- Assemble/validate robot two only after robot one achieves >=8/10 per category.
-  Test distinct addressing, actual audio turn-taking, disconnects and cancellation.
+- Duplicate the validated core four times only after robot one achieves >=8/10
+  per category. Test all-five addressing, physical audio timing, disconnects,
+  cancellation and cosmetic clearance. Exact owned fleet inventory is unknown.
 
 `physical-trials.csv` is an empty recording template. `physical-summary.json`
 correctly records zero actual attempts and no physical acceptance pass.

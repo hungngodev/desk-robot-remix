@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def budget(data, shipping=None, tax=None):
+    if any(value is not None and value < 0 for value in (shipping, tax)):
+        raise ValueError("Shipping and tax must be non-negative")
     total = sum(
         (Decimal(str(row["unit_usd"])) * row["quantity"] for row in data["items"]), Decimal(0)
     )
@@ -18,6 +20,7 @@ def budget(data, shipping=None, tax=None):
     if shipping is not None and tax is not None:
         total += Decimal(str(shipping)) + Decimal(str(tax))
     complete = not unresolved and shipping is not None and tax is not None
+    pending_checks = [name for name, passed in data.get("readiness_checks", {}).items() if not passed]
     return {
         "parts_estimate_usd": float(
             total
@@ -30,8 +33,10 @@ def budget(data, shipping=None, tax=None):
         "remaining_under_cap_usd": float(Decimal(str(data["cap_usd"])) - total),
         "unquoted_items": unresolved,
         "fit_confirmed": data.get("fit_confirmed", False),
+        "pending_checks": pending_checks,
         "purchase_ready": complete
         and data.get("fit_confirmed", False)
+        and not pending_checks
         and total <= Decimal(str(data["cap_usd"])),
         "note": "Allowances are targets, not verified shopping prices. Confirm mechanical fit separately.",
     }

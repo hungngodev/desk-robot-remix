@@ -21,6 +21,8 @@ from aiohttp import web
 connections = {}
 lease_ids: frozenset[str] = frozenset()
 lease_until = 0.0
+lease_stopping = False
+lease_cleanup_task: asyncio.Task | None = None
 speaker_lock = asyncio.Lock()
 
 
@@ -114,8 +116,10 @@ async def transmit(conn, text, frames):
             await asyncio.sleep(0.06)
         await asyncio.sleep(0.24)  # estimated buffer tail; no physical playback acknowledgement
     finally:
-        await send_tts_message(conn, "stop")
-        conn.clearSpeakStatus()
+        try:
+            await send_tts_message(conn, "stop")
+        finally:
+            conn.clearSpeakStatus()
 
 
 def create_app():
@@ -138,21 +142,21 @@ def create_app():
     app = web.Application(middlewares=[auth], client_max_size=5_700_000)
 
     async def session(request):
-        global lease_ids, lease_until
+        global lease_ids, lease_until, lease_stopping, lease_cleanup_task
         body = await request.json()
         ids = body.get("device_ids")
         if (
             not isinstance(ids, list)
             or not ids
-            or len(ids) > 2
+            or len(ids) > 5
             or not all(isinstance(i, str) for i in ids)
         ):
-            raise ValueError("Choose one or two device IDs")
+            raise ValueError("Choose one to five device IDs")
         selected = frozenset(ids)
         if len(selected) != len(ids) or not selected.issubset(set(device_map().values())):
             raise ValueError("Unknown or duplicate device identity")
         if body.get("enabled") is True:
-            if time.monotonic() < lease_until:
+            if lease_stopping or time.monotonic() < lease_until:
                 raise RuntimeError("A coordinated session is already active")
             for device in selected:
                 conn = connections.get(device)
@@ -169,13 +173,23 @@ def create_app():
         elif body.get("enabled") is False:
             if lease_ids and lease_ids != selected:
                 raise RuntimeError("Session identities differ")
-            for device in lease_ids:
-                if device in connections:
-                    connections[device].client_abort = True
-            # Wait for any transmission to exit before unmuting microphones.
-            async with speaker_lock:
-                lease_until = 0
-                lease_ids = frozenset()
+            if not lease_stopping:
+                lease_stopping = True
+                for device in lease_ids:
+                    if device in connections:
+                        connections[device].client_abort = True
+
+                async def finish_stop():
+                    global lease_ids, lease_until, lease_stopping
+                    # Keep microphones muted until transmission has exited, even if
+                    # the caller disconnects while this stop waits for the lock.
+                    async with speaker_lock:
+                        lease_until = 0
+                        lease_ids = frozenset()
+                        lease_stopping = False
+
+                lease_cleanup_task = asyncio.create_task(finish_stop())
+            await asyncio.shield(lease_cleanup_task)
         else:
             raise ValueError("enabled must be a boolean")
         return web.json_response(
@@ -185,15 +199,21 @@ def create_app():
     async def speak(request):
         body = await request.json()
         device, text = body.get("device_id"), body.get("text")
-        if not isinstance(device, str) or not muted(device) or device not in connections:
+        connection = connections.get(device) if isinstance(device, str) else None
+        if connection is None or lease_stopping or not muted(device):
             raise RuntimeError("No active coordinated session for this robot")
         if not isinstance(text, str) or not 1 <= len(text) <= 2000:
             raise ValueError("Speech text must be 1..2000 characters")
         audio = wav_audio(body.get("wav_base64"))
         async with speaker_lock:
+            # A queued request may outlive a stop or a device disconnect.
+            if lease_stopping or not muted(device) or connections.get(device) is not connection:
+                raise RuntimeError("Coordinated session stopped or robot disconnected")
             async with asyncio.timeout(40):
                 frames = await asyncio.to_thread(encode_opus, audio)
-                await transmit(connections[device], text, frames)
+                if lease_stopping or not muted(device) or connections.get(device) is not connection:
+                    raise RuntimeError("Coordinated session stopped or robot disconnected")
+                await transmit(connection, text, frames)
         return web.json_response({"transmitted": True, "physical_playback_verified": False})
 
     app.router.add_post("/session", session)

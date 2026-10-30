@@ -1,94 +1,78 @@
-# Desk-robot remix — modular EVA head and Verdure integration
+# Desk robot remix — five identical budget cores
 
-Accepted implementation plan, updated 2026-10-29 after choosing separate head
-components and an existing printed case. This is an experimental physical robot;
-software verification and physical acceptance must be reported separately.
+Updated 2026-10-30 from the user's cheaper, five-unit direction. Each unit retains
+camera, screen, microphone, speaker, movement, lift and grip. Only removable hats
+or costumes differ. Shared Mac provides speech, vision and conversation.
 
-## Cost and project folder
+## Cost and selection
 
-Current parts estimate: **$117.33 per robot before shipping and tax**, including
-unquoted allowances. Keep the **$150 first-robot cap**, including order charges.
-Do not place orders automatically. The head is now assembled from modules;
-CoreS3 Lite is no longer on the active shopping list.
+First prototype delivered cap **$50**, using one owned WROOM and a usable owned
+USB power bank. [Parts target](hardware/parts.md): **$37.59 before shipping/tax**,
+with four allowances. The $7.11 S3/camera listing is a procurement candidate,
+**not qualified for the compiled Freenove firmware**. Check its schematic/GPIO,
+programming and case fit before purchase. No delivered cart is complete.
 
-| Item | Estimated cost |
-| --- | ---: |
-| Freenove S3 camera board + OLED + microphone + amplifier + speaker | $38.98 midpoint; head range $37.98–39.98 |
-| Existing ESP32-WROOM-32 | $0 |
-| Motors, servos, driver, power system, wiring, fasteners, filament | $78.35 mix of observed prices and allowances |
-| Total | $117.33 planning midpoint before shipping and tax |
+Five times that target is $187.95 before order charges and any missing WROOMs or
+power banks. Exact owned counts and five-unit quotes are unknown; do not assume
+five free controllers/batteries. Build and validate one before buying multiples.
+The old $117.33 retail BOM is archived, not the active plan.
 
-Two identical robots: approximately $234.66 at these allowances before
-shipping/tax, sharing the Mac. Buy the second only after the first passes. The
-parts list is not a delivered shopping quote; fit and some SKUs are unresolved.
+## Existing sources and minimal changes
 
-Project location: `/Users/hung/Documents/coding/desk-robot-remix`.
+- [SMARS chassis/tracks](https://www.thingiverse.com/thing:2662828): keep two N20
+  geared motors and original drivetrain; no TT/servo drivetrain redesign.
+- [Bluino gripper](https://www.thingiverse.com/thing:4253681), linked SMARS lift:
+  two ordinary positional SG90 servos, one lift and one grip. Actual loaded
+  performance on flat keys and wrapped candy remains unproven.
+- [EVA Robot case](https://www.thingiverse.com/thing:7319190/files): original 3MF
+  saved; SH1106 1.3-inch monochrome OLED, S3 camera board, INMP441, MAX98357 and
+  speaker. Existing mounts need measured checks; emotion symbols/text initially.
+- [Xiaozhi firmware](https://github.com/78/xiaozhi-esp32) and
+  [server](https://github.com/xinnan-tech/xiaozhi-esp32-server): reuse camera,
+  display, audio and protocol drivers. [Verdure UART/MCP approach](https://github.com/maker-community/VerdureBuddyRover/blob/main/docs/xiaozhi-mcp-serial-integration.md)
+  links head to WROOM; bounded drive/lift/grip/stop/status commands already added.
+- Mac: Ollama/Qwen3, SenseVoice, Kokoro and YOLO-World/OpenCV. Full model-provider
+  and real-hardware bring-up still pending; mock demonstrations are labeled.
 
-## Existing projects to combine
-
-- Body: SMARS, https://www.thingiverse.com/thing:2662828.
-- Lift and grip: Bluino, https://www.thingiverse.com/thing:4253681.
-- Head: Freenove ESP32-S3 camera board, 1.3-inch SH1106 OLED, INMP441,
-  MAX98357A and small speaker inside [EVA Robot's case](https://www.thingiverse.com/thing:7319190/files).
-  [Saved case and component guide](docs/modular-head.md). The screen gives
-  monochrome emotion symbols/text initially; smooth eye animation is a later
-  adapter. Exact display/camera/speaker fit needs checking.
-- Conversation: https://github.com/78/xiaozhi-esp32 and
-  https://github.com/xinnan-tech/xiaozhi-esp32-server.
-- Motor integration: adapt Verdure's UART/MCP bridge,
-  https://github.com/maker-community/VerdureBuddyRover/blob/main/docs/xiaozhi-mcp-serial-integration.md,
-  for the S3 head/WROOM-32 and extend it with lift and gripper controls.
-
-Organize upstream sources, firmware, laptop software, CAD, assembly notes and test
-results inside this folder. Pin upstream revisions and preserve attribution.
-
-## Integration and small CAD changes
-
-- Reuse existing camera, display and audio drivers; use existing mechanisms and
-  cases. Create parts/code from scratch only where the remix needs a small adapter.
-- Connect head and body through 3.3 V UART, with bounded drive/lift/grip commands,
-  stop/status and a 500 ms loss-of-control stop.
-- Run Ollama/Qwen3, SenseVoice, Kokoro and YOLO-World/OpenCV on the Mac.
-- Permit brackets, spacers, clearances and replaceable fingertips. Preserve the
-  original chassis, drivetrain, lift, rack-and-pinion mechanism and EVA shell.
-  Check internal board fit and add a removable head mount; no new case or PCB.
-- Use a battery-appropriate regulated supply; 2S-to-5 V requires a buck converter.
+Small brackets, spacers, jaw tips, camera-aperture corrections and removable
+cosmetics are permitted. Preserve chassis/mechanism/shell and source licenses.
+Fusion MCP must be connected and the live design inspected before CAD editing.
+No geometry edits, new PCB, whole chassis or new arm are part of this phase.
 
 ## Build order and acceptance
 
-1. Save the plan, parts list and existing case. Resolve exact camera/speaker,
-   display mount, delivered cost and clearances before a complete order.
-2. Print/test the gripper with actual keys (including a flat key) and candy;
-   make small measured CAD corrections if needed.
-3. Use the compiled modular-head configuration with existing Xiaozhi drivers;
-   assemble one rover and verify movement, stable power, stop behavior and head.
-4. Add detection, camera-guided approach/alignment, gripping, lifting and visual
-   verification of pickup in a clear, bounded, flat area.
-5. Physical target: at least 8 successful pickups in 10 trials **per category**.
-6. Build a second unit only after the first passes. Verify separate identities,
-   correctly routed commands and one speaker at a time, capped at six exchanges.
-
-## Assumptions and boundaries
-
-Keys and candy are required targets, not replaced by blocks. Autonomous pickup
-is not proven by existing sources. No fabricated physical test results, automatic
-hardware purchases, flashing unverified hardware, major mechanical redesign or
-new PCB design. Fusion MCP must be connected before model editing. Original SMARS
-CAD has noncommercial restrictions; preserve each source's actual license.
+1. Complete exact head-board qualification, actual power-bank rating/load/fit,
+   speaker quote, component clearances and delivered prototype cost under $50.
+2. Print one SG90 fit part and the original gripper/lift; test real flat keys and
+   candy. Adjust only small clearances/tips if necessary.
+3. Bring up one head's OLED, camera, microphone and speaker; assemble the rover,
+   test power/current/temperature and loss-of-control stop on stands.
+4. Calibrate the fixed camera, enable bounded supervised approach/alignment and
+   visible lift verification in a flat contained area, away from desk edges.
+5. Require at least 8/10 physical pickups per category (flat key, candy), with
+   measured lift, hold and controlled placement; log failures and assistance.
+6. Duplicate the validated core four times. Give every head a unique identity,
+   token, address and device ID; measure calibration per robot. Fit costumes
+   without covering camera/audio/screen/USB or restricting gripper travel.
+7. Verify routing and stops per robot, then conversations/games across five:
+   one speaker at a time, digital peer transcripts, **ten utterances total** by
+   default for five (two rounds). Pairs retain a six-utterance default/cap.
+   Conversation time limit is five minutes; test stop/disconnect cleanup.
 
 ## Progress
 
-- [x] Project folder created and accepted plan saved.
-- [x] Upstream revisions and licenses recorded.
-- [x] Separate-component head chosen and parts list revised ($117.33 midpoint; exact camera/speaker, motor/battery quotes and fit remain unresolved).
-- [x] Original EVA head 3MF saved, four meshes/dimensions/hash/license inspected.
-- [x] Original gripper/lift and matching screwless SMARS print files saved with source hashes, licenses and assembly documents; no geometry edits or slicing.
-- [x] Body firmware and stop behavior verified in software; hardware stop measurement pending.
-- [x] Previous CoreS3 UART/MCP integration built as a reference; this does not validate the modular head.
-- [x] Laptop control/vision/conversation logic verified in simulation; physical/model-provider tests pending.
-- [x] Modular S3 head configuration and fresh-JPEG adapter compiled; camera I²C0/OLED I²C1 selected and guarded; 65 focused software checks pass.
-- [ ] Modular S3 head camera, OLED, microphone, speaker and UART bench-tested on actual modules.
-- [ ] Actual head module fit and removable head-to-SMARS bracket checked.
-- [ ] Full local AI stack installed and tested with real devices.
-- [ ] Physical gripper, power, camera and autonomous pickup acceptance performed.
-- [ ] Second physical robot acceptance performed.
+- [x] Project organized at `/Users/hung/Documents/coding/desk-robot-remix`.
+- [x] Pinned upstream sources and original body/lift/gripper/head print files saved.
+- [x] Body firmware and Freenove-based modular-head overlay compiled previously.
+- [x] Cheaper SG90/N20/driver quotes recorded; [ten-check audit](docs/budget-audit.md)
+  distinguishes software/source evidence from unresolved hardware checks.
+- [x] Five-robot configuration, bounded conversation, per-head private settings
+  and append-only missing credential setup implemented; existing tokens preserved.
+- [ ] Cheap head board qualified for the compiled target or a small verified pin adapter.
+- [ ] Delivered basket and owned bank/controller quantities confirmed.
+- [ ] One physical robot assembled, calibrated and accepted.
+- [ ] Four duplicates built and all-five physical interaction tested.
+
+Simulation is not a successful physical pickup or playback test. Preserve the
+500 ms watchdog, 250 ms drive bound, operator permits and disarmed hardware
+configuration. No automatic purchases, flashing or publishing.

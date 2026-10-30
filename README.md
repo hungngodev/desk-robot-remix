@@ -2,19 +2,19 @@
 
 A personal, experimental SMARS rover with a lift-and-grip arm, a head assembled
 from separate camera/screen/audio modules inside an existing EVA Robot case,
-and an owned ESP32-WROOM-32 body controller. Two robots share the Mac and take
-turns speaking. Build one first.
+and an owned ESP32-WROOM-32 body controller. Five identical cores share the Mac
+and take turns speaking; only removable hats/costumes differ. Validate one first.
 
-**Current stage: modular-head firmware builds and original print files are
-saved; physical assembly and pickup tests remain.** The WROOM firmware and new
-Freenove/OLED head compile; 65 focused software checks pass. A simulated pickup
-and six-turn conversation run locally. Hardware remains unflashed and untested;
-simulation does not establish that a flat key can be picked up by the mechanism.
+**Current stage:** five-robot turn-taking works in simulation; original print
+files and the Freenove-based head/body firmware are prepared. Physical assembly,
+pickup, speech and power tests remain. The cheaper camera-board candidate has
+not been qualified for that compiled firmware.
 
-**Budget:** current allowance-based parts total **$117.33** before shipping/tax,
-including about **$39 for head electronics**. First robot has a $150 spending cap.
-Speaker, motors, battery and mechanical fit are not finalized; there is no
-complete verified shopping basket yet. [Parts and budget](hardware/parts.md).
+**Budget:** **$37.59 first-prototype parts target**, reusing one owned WROOM and
+power bank; **$50 delivered cap**. Several allowances, delivery/tax, power rating
+and fit remain open. This is not an order-ready quote. Five-unit quantities are
+listed without assuming five free boards or banks. [Components](hardware/parts.md),
+[ten cost/compatibility checks](docs/budget-audit.md).
 
 ## Start here
 
@@ -25,7 +25,7 @@ complete verified shopping basket yet. [Parts and budget](hardware/parts.md).
    flat key and candy before buying the full rover and head.
 3. Follow [wiring and power](hardware/wiring.md) and [firmware builds](docs/build.md).
 4. Set up [local speech and vision](docs/local-ai.md).
-5. [Measure and test pickup, then add the second robot](docs/pickup-and-two-robots.md).
+5. [Measure pickup](docs/pickup-and-two-robots.md), then [duplicate the core for five](docs/five-robots.md).
 
 Only small jaw tips, spacers and mounting brackets are in scope. Fusion MCP is
 not available in this session, so no CAD edits have been made. If a flat key
@@ -37,15 +37,16 @@ From this folder:
 
 ```sh
 uv sync --extra dev
-uv run desk-robot --config config/simulation.toml demo
-uv run desk-robot secrets
-uv run desk-robot doctor
+uv run desk-robot --config config/fleet.simulation.toml demo
+uv run desk-robot --config config/fleet.example.toml secrets --add-missing
+uv run desk-robot --config config/fleet.example.toml doctor
 ```
 
 The demo uses generated test images and mock speech, with no physical hardware
 or model downloads. It explicitly reports `physical_acceptance_pass=false`.
-Credentials are created once, hidden from output and excluded from version
-control in `config/local.env`. Hardware examples have movement disabled.
+The fleet demo gives each of the five IDs two turns (ten total). Credentials
+are hidden from output and excluded from version control in `config/local.env`;
+`--add-missing` preserves existing tokens. Hardware examples keep movement off.
 
 The body boots disarmed, caps drive at 40% PWM and 250 ms, and stops after 500 ms
 without valid control. Watchdog stop holds the last servo PWM; explicit disarm

@@ -1,6 +1,9 @@
+import asyncio
 import base64
 import importlib.util
 import json
+import sys
+import threading
 import time
 import wave
 from io import BytesIO
@@ -103,3 +106,161 @@ def test_overlay_targets_pinned_server_and_compiles():
     assert "desk_robot_bridge.unregister(handler)" in changes["core/websocket_server.py"]
     for path, source in changes.items():
         compile(source, path, "exec")
+
+
+def fleet_handlers(bridge, monkeypatch):
+    ids = [f"mac-{index:02}" for index in range(1, 6)]
+    monkeypatch.setenv(
+        "DESK_ROBOT_DEVICE_MAP",
+        json.dumps({f"robot-{index:02}": device for index, device in enumerate(ids, 1)}),
+    )
+    for device in ids:
+        bridge.register(conn(device))
+    app = bridge.create_app()
+    handlers = {route.resource.canonical: route.handler for route in app.router.routes()}
+    return ids, handlers
+
+
+def body_request(body):
+    async def json_body():
+        return body
+
+    return SimpleNamespace(json=json_body)
+
+
+async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypatch):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    session = handlers["/session"]
+    await session(body_request({"device_ids": ids, "enabled": True}))
+    active, maximum, spoken = 0, 0, []
+
+    async def transmit(connection, text, frames):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        assert all(bridge.muted(device) for device in ids)
+        await asyncio.sleep(0.01)
+        spoken.append(connection.device_id)
+        active -= 1
+
+    monkeypatch.setattr(bridge, "wav_audio", lambda encoded: b"RIFF")
+    monkeypatch.setattr(bridge, "encode_opus", lambda audio: [b"opus"])
+    monkeypatch.setattr(bridge, "transmit", transmit)
+    await asyncio.gather(
+        *(
+            handlers["/speak"](
+                body_request({"device_id": device, "text": "hello", "wav_base64": ""})
+            )
+            for device in ids
+        )
+    )
+    assert maximum == 1 and spoken == ids
+    await session(body_request({"device_ids": ids, "enabled": False}))
+    assert not bridge.lease_ids and not bridge.lease_stopping
+    assert all(not bridge.muted(device) for device in ids)
+    assert all(connection.client_abort for connection in bridge.connections.values())
+
+
+async def test_bridge_stop_rejects_queued_speech_and_unmutes_all_five(bridge, monkeypatch):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
+    monkeypatch.setattr(bridge, "wav_audio", lambda encoded: b"RIFF")
+    await bridge.speaker_lock.acquire()
+    queued = asyncio.create_task(
+        handlers["/speak"](body_request({"device_id": ids[0], "text": "hello", "wav_base64": ""}))
+    )
+    await asyncio.sleep(0)
+    stopping = asyncio.create_task(
+        handlers["/session"](body_request({"device_ids": ids, "enabled": False}))
+    )
+    await asyncio.sleep(0)
+    assert bridge.lease_stopping and all(bridge.muted(device) for device in ids)
+    bridge.speaker_lock.release()
+    with pytest.raises(RuntimeError, match="stopped"):
+        await queued
+    await stopping
+    assert not bridge.lease_ids and not bridge.lease_stopping
+
+
+async def test_cancelled_bridge_stop_still_completes_cleanup(bridge, monkeypatch):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
+    await bridge.speaker_lock.acquire()
+    stopping = asyncio.create_task(
+        handlers["/session"](body_request({"device_ids": ids, "enabled": False}))
+    )
+    await asyncio.sleep(0)
+    stopping.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopping
+    assert bridge.lease_stopping and all(bridge.muted(device) for device in ids)
+    bridge.speaker_lock.release()
+    await bridge.lease_cleanup_task
+    assert not bridge.lease_stopping and not bridge.lease_ids
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": False}))
+
+
+@pytest.mark.parametrize("replacement", [False, True])
+async def test_queued_speech_rejects_disconnected_or_replaced_head(
+    bridge, monkeypatch, replacement
+):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
+    monkeypatch.setattr(bridge, "wav_audio", lambda encoded: b"RIFF")
+    await bridge.speaker_lock.acquire()
+    queued = asyncio.create_task(
+        handlers["/speak"](body_request({"device_id": ids[0], "text": "hello", "wav_base64": ""}))
+    )
+    await asyncio.sleep(0)
+    bridge.unregister(bridge.connections[ids[0]])
+    if replacement:
+        bridge.register(conn(ids[0]))
+    bridge.speaker_lock.release()
+    with pytest.raises(RuntimeError, match="disconnected"):
+        await queued
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": False}))
+
+
+async def test_stop_during_encoding_does_not_start_transmission(bridge, monkeypatch):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
+    entered, release = threading.Event(), threading.Event()
+
+    def encode(audio):
+        entered.set()
+        assert release.wait(5)
+        return [b"opus"]
+
+    monkeypatch.setattr(bridge, "wav_audio", lambda encoded: b"RIFF")
+    monkeypatch.setattr(bridge, "encode_opus", encode)
+    speaking = asyncio.create_task(
+        handlers["/speak"](body_request({"device_id": ids[0], "text": "hello", "wav_base64": ""}))
+    )
+    assert await asyncio.to_thread(entered.wait, 5)
+    stopping = asyncio.create_task(
+        handlers["/session"](body_request({"device_ids": ids, "enabled": False}))
+    )
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(RuntimeError, match="stopped"):
+        await speaking
+    await stopping
+    assert not bridge.lease_ids
+
+
+async def test_transmit_clears_speaking_status_when_final_stop_fails(bridge, monkeypatch):
+    async def send(connection, state, text=None):
+        if state == "stop":
+            raise RuntimeError("socket disconnected")
+
+    monkeypatch.setitem(
+        sys.modules, "core.handle.sendAudioHandle", SimpleNamespace(send_tts_message=send)
+    )
+    connection = conn("mac-01")
+    connection.conn_from_mqtt_gateway = False
+    cleared = []
+    connection.clearSpeakStatus = lambda: cleared.append(True)
+    with pytest.raises(RuntimeError, match="disconnected"):
+        await bridge.transmit(connection, "hello", [])
+    assert cleared == [True]

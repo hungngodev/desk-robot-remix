@@ -64,3 +64,11 @@ The normal robots do not drive during this chat. Stop a session through the
 authenticated `/v1/conversation/stop` endpoint. Test normal completion, cancellation,
 one head disconnecting and coordinator interruption; verify input suppression
 ends and no speech overlaps. All physical two-robot tests are still unrun.
+
+## Continue to five identical cores
+
+After the first passes and routing/audio work on the second, follow
+[the five-robot guide](five-robots.md) to add robot-03 through robot-05. Each gets
+its own camera, screen, voice, lift/gripper, power source, credentials and measured
+calibration. Five participants default to ten total utterances; pair sessions
+retain the six-utterance limit. All physical fleet tests remain unrun.

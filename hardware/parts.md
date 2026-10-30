@@ -1,64 +1,76 @@
-# Parts and cost — 2026-10-28
+# Budget components — five identical cores
 
-The active build uses separate head modules and an existing EVA printed case.
-The draft totals **$117.33 before shipping/tax**, with a **$150 first-robot cap**
-including charges and any purchased bench supply. This is a planning list, not
-a complete quoted cart. No CoreS3 purchase is required.
+Updated 2026-10-30. **First prototype parts target: $37.59; delivered cap: $50.**
+This assumes one owned WROOM and a usable owned USB power bank. Delivery/tax,
+four allowances and the cheap camera board's compatibility remain unresolved.
+**This is not an order-ready $50 robot.** No purchase has been made.
 
-| Item | Qty | Line total USD | Status |
-| --- | ---: | ---: | --- |
-| [Freenove FNK0085B S3 camera board](https://store.freenove.com/products/fnk0085?variant=44552293155014) | 1 | 21.99 | Exact 16 MB flash / 8 MB PSRAM variant price; camera sensor/lens fit unresolved |
-| [1.3-inch SH1106 I²C OLED, DSP-9](https://protosupplies.com/product/oled-1-3-128x64-i2c-blue-display/) | 1 | 5.95 | Observed seller quote; 35.4×33.5 mm PCB; mounting fit provisional |
-| [INMP441 microphone breakout](https://www.sinoning.com/product/omnidirectional-microphone-module-i2s-interface-inmp441-mems-high-precision-low-power-ultra-small-volume-for-esp32/) | 1 | 2.09 | Observed seller quote; exact PCB fit and delivery unverified |
-| [MAX98357A amplifier, PID3006](https://www.adafruit.com/product/3006) | 1 | 5.95 | Observed price; board mounting provisional |
-| Compact 4–8 Ω speaker | 1 | 3.00 | $2–4 allowance; exact size/power unresolved |
-| Existing ESP32-WROOM-32 | 1 | 0.00 | Owned |
-| [Adafruit SG92R PID169](https://www.adafruit.com/product/169) | 2 | 11.90 | $5.95 each; fit provisional |
-| [Adafruit DRV8833 PID3297](https://www.adafruit.com/product/3297) | 1 | 5.95 | Verified price |
-| 6 V N20, 150–200 rpm, 3 mm D shaft | 2 | 16.00 | Allowance; exact affordable SKU needed |
-| [DFRobot DFR0205 buck](https://www.dfrobot.com/product-752.html) | 1 | 8.50 | Verified price; clearance needed |
-| [DFRobot DFR0564 2S charger](https://www.dfrobot.com/product-1713.html) | 1 | 5.00 | Conditional on pack compatibility |
-| Assembled protected/balanced 2S pack | 1 | 16.00 | Allowance; pack not selected |
-| Switch, wires, connectors, fasteners | — | 8.00 | Allowance |
-| Filament, including EVA head case | — | 5.00 | Allowance; assumes printer access; slicer mass not checked |
-| Suppression/decoupling components | — | 2.00 | Allowance |
-| **Parts estimate** | | **117.33** | **$32.67 left for charges/changes** |
+| Component | Per robot | For five | First-robot USD | Quote / requirement |
+| --- | ---: | ---: | ---: | --- |
+| [S3 N16R8 + OV2640 camera candidate](https://www.aliexpress.com/item/1005007884506760.html) | 1 | 5 | 7.11 | PCBFUN: select **Module and OV2640**; $5.60 shipping shown for one; pinout/programming/case fit unqualified |
+| [1.3-inch SH1106 four-pin I²C OLED](https://electropeak.com/1-3-i2c-128x64-white-oled-display-module) | 1 | 5 | 2.98 | LCD-01-103, 35.4×33.5 mm PCB; monochrome; measure mounts |
+| [INMP441 microphone](https://www.sinoning.com/product/omnidirectional-microphone-module-i2s-interface-inmp441-mems-high-precision-low-power-ultra-small-volume-for-esp32/) | 1 | 5 | 2.09 | 3.3 V; footprint/port check |
+| [Generic MAX98357 I²S amplifier](https://electropeak.com/max98357-i2s-audio-amplifier-module) | 1 | 5 | 1.95 | SEN-17-139; confirm I²S variant and dimensions |
+| Small moving-coil 4–8 Ω speaker | 1 | 5 | 1.00 | **Allowance**; exact size/power/quote still needed |
+| Existing ESP32-WROOM-32 | 1 | 5 | 0.00 | One confirmed owned; exact fleet count unknown |
+| [SG90 positional servo](https://www.sinoning.com/product/1pcs-sg90-9g-mini-micro-servo-for-rc-250-450-helicopter-airplane-car-robot/) | 2 | 10 | 2.98 | $1.49 each; lift + grip; includes horns/screws per seller |
+| [N20 3–6 V geared motor](https://www.sinoning.com/product/1pcs-n20-micro-reducer-motor-5v-6v-3v-dc-long-shaft-reducer-motor-metal-gear/) | 2 | 10 | 3.98 | $1.99 each; 3 mm D shaft; 100 rpm at 6 V/no load; slower at 5 V |
+| [Generic DRV8833 dual driver](https://www.sinoning.com/product/drv8833-2channel-dc-motor-driver-module-board-1-5a-3v-10v/) | 1 | 5 | 0.50 | Actual continuous current and sleep/fault wiring need checking |
+| Existing regulated USB power bank | 1 | 5 | 0.00 | One owned; rating, weight, fit and exact fleet count unknown |
+| Rated USB power lead, switch, wiring, connectors, screws | 1 set | 5 sets | 8.00 | **Allowance**, includes actuator power branch |
+| Filament for existing body, arm, head and small mounts | 1 set | 5 sets | 5.00 | **Allowance**; printer access assumed, sliced mass unmeasured |
+| Suppression capacitors / decoupling | 1 set | 5 sets | 2.00 | **Allowance**, selected after current/noise tests |
+| **Parts target** | | | **37.59** | **$12.41 remains for all shipping/tax/changes** |
 
-Head electronics are **$37.98–39.98**, using the $3 speaker midpoint above.
-The separate-module route saves about $5–7 versus the earlier $44.90 head at
-these retail references; larger savings are not verified. Consolidate suppliers
-where the exact module matches, because multiple shipping charges can erase
-that difference. [Case, dimensions, wiring and firmware status](../docs/modular-head.md).
+The head target is $15.13. The two servos, two motors and driver total **$7.46**.
+The old $117.33 branded-retail BOM is archived in
+[archive/bom-retail-2026-10-28.json](archive/bom-retail-2026-10-28.json).
+Removing the separate 2S pack, charger and buck saves $29.50 **only if the owned
+5 V bank can support the robot and mount without destabilizing it**.
 
-The dimensioned [Pololu 2368](https://www.pololu.com/product/2368/specs) motor is
-$23.95 each at the earlier check. Using two raises this estimate to **$149.23
-before tax/shipping**, leaving just $0.77 under the cap for charges. Do not
-silently substitute it or use TT motors that do not fit.
+## What is actually compatible
 
-The gripper photos show SG90-style servos. SG92R is a priced candidate, not a
-verified drop-in replacement: measure case, ears, shaft height and matching horn
-spline before printing. Flat-key clearance and lift performance are unverified.
+The original [Bluino arm](https://www.thingiverse.com/thing:4253681) uses SG90-style
+positional servos. Use ordinary **180° SG90s**, one for lift and one for grip;
+360° continuous-rotation servos cannot hold commanded arm angles. Check the actual
+case, spline, travel and load before duplicating the build. Claimed stall torque
+is not a demonstrated key-lifting capacity.
 
-The OLED is monochrome. Stock software shows emotion symbols and text; smooth
-eye animation needs another adapter. It does not provide a color LCD.
-The camera is included with the candidate Freenove board, but the seller does
-not identify the current sensor/lens assembly. Confirm it against EVA's camera
-opening before ordering. Display PCB holes, speaker dimensions and head-to-rover
-clearance are unverified. The original case is saved; no new case design is planned.
+Keep N20 motors for [SMARS](https://www.thingiverse.com/thing:2662828). Yellow TT
+motors and continuous servos require new drivetrain mounts; they are not a
+minimal change to this chassis. The cheap N20's 50 mA figure is **no-load current**,
+not stall current. Verify startup/load current and driver temperature.
 
-DFR0205 is 46 × 50 × 20 mm. Its advertised 5 A rating does not establish sustained
-performance inside this rover. DFR0564 is an unbalanced charger: use only if the
-final pack manufacturer confirms compatible charging, protection and balancing.
-[Charger instructions](https://wiki.dfrobot.com/dfr0564/docs/19979). This selection
-is unresolved; no battery or charger has been bought.
+The $7.11 camera bundle is a **price lead**, not a qualified substitute for the
+compiled Freenove N16R8 target. Confirm the camera wiring and that every GPIO in
+[modular-head.md](../docs/modular-head.md) is available, plus programming and the
+EVA case mount. The seller PDF could not be retrieved. An accessory-only $1.53
+option and a separate $6.45 board-only listing were rejected as complete-camera
+prices. Do not buy five or flash the reference firmware based on the title.
+The official [Freenove N16R8 reference](https://store.freenove.com/products/fnk0085?variant=44552293155014)
+was $21.99 at the earlier check; using it raises this target to **$52.47 before
+shipping/tax**, above the current cap. It remains a technical reference.
 
-Borrow a suitable regulated supply for the gripper test if available; otherwise
-add its real price. Replace allowances in `bom.json` with actual quotes, verify
-mechanical fit and include every order charge before treating the cap as met:
+## Five-unit cost and inventory
+
+Five times the present first-robot parts target is **$187.95**, before delivery/tax
+and any additional WROOM boards or power banks. This is arithmetic, **not a verified
+five-robot quote**: no five-unit price/shipping has been checked and only one owned
+bank/controller is confirmed. Record exact owned counts in
+[fleet-inventory.json](fleet-inventory.json), then price the missing quantities.
+The procurement quantities are in [fleet-components.csv](fleet-components.csv).
+Every robot gets its own camera, speaker, screen, lift and gripper.
+
+Do not treat bulk discounts, one-per-customer offers or the same power bank as
+five independent power supplies. ElectroPeak's advertised free shipping starts
+above $100; this prototype order does not automatically qualify. Consolidate
+suppliers where parts match and reject a delivered cart over $50.
 
 ```sh
 python3 scripts/check_budget.py
-python3 scripts/check_budget.py --shipping 12 --tax 9 --require-ready
+python3 scripts/check_budget.py --shipping 5.60 --tax 0 --require-ready
 ```
 
-The second command fails while quotes/fit are incomplete. No parts were purchased.
+The second command still fails: $5.60 covers only the observed camera-board
+shipping, not the other vendors, and compatibility/fit/quotes are open.
+See [the ten-check audit](../docs/budget-audit.md) and [power wiring](wiring.md).

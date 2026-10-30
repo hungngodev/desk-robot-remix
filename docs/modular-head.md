@@ -12,22 +12,25 @@ the earlier color LCD head; it does not remove vision or conversation.
 
 ## Components for one head
 
-Prices observed 2026-10-28, before delivery/tax. These are reference module quotes,
-not a consolidated shopping cart or a claim that all boards fit without checks.
+The [active budget list](../hardware/parts.md) now targets **$15.13 for head
+electronics**, using generic modules. This includes a $7.11 S3/OV2640 bundle,
+$2.98 four-pin SH1106 OLED, $2.09 INMP441, $1.95 MAX98357 and a $1 speaker allowance.
+Shipping, exact speaker and mechanical fit are unresolved.
 
-| Component | Quantity | USD | Selection |
-| --- | ---: | ---: | --- |
-| [Freenove FNK0085B S3 camera board](https://store.freenove.com/products/fnk0085?variant=44552293155014) | 1 | 21.99 | 16 MB flash, 8 MB PSRAM; camera included, exact sensor/lens unspecified by listing |
-| [ProtoSupplies DSP-9 OLED](https://protosupplies.com/product/oled-1-3-128x64-i2c-blue-display/) | 1 | 5.95 | SH1106, 128×64, 1.3-inch, four-pin I²C; PCB 35.4×33.5 mm |
-| [INMP441 microphone breakout](https://www.sinoning.com/product/omnidirectional-microphone-module-i2s-interface-inmp441-mems-high-precision-low-power-ultra-small-volume-for-esp32/) | 1 | 2.09 | I²S, 3.3 V power; check breakout outline and acoustic port |
-| [MAX98357A amplifier, Adafruit 3006](https://www.adafruit.com/product/3006) | 1 | 5.95 | I²S; PCB 19.4×17.8×3 mm; internal mounting may differ from EVA's generic board |
-| Compact 4–8 Ω moving-coil speaker | 1 | 2–4 allowance | Choose dimensions and power rating after measuring case cavity |
-| **Head electronics** | | **37.98–39.98** | **$38.98 midpoint used in BOM** |
+**The compiled target below remains the Freenove N16R8 reference.** The cheap
+PCBFUN board has not been matched to its pin allocation or programming method.
+Confirm every camera signal, free GPIO, PSRAM/flash marking, board outline,
+USB/programming connection and camera lens position before ordering/flashing.
+If mapping differs, first determine whether a small pin-only adapter fits the
+available GPIO. No hardware driver rewrite is planned. The earlier $21.99
+Freenove reference is above the current whole-robot cap when combined with the
+remaining components; it is not the active budget purchase recommendation.
 
-Wiring, screws and printed shell share the whole-robot allowances. No separate
-camera purchase is assumed. The manufacturer's default $19.99 board is the
-8 MB version; use the 16 MB variant link above. A bare ESP32 chip, extension board,
-SD card, touch sensor and Adafruit Feather are not needed for the initial head.
+The budget OLED is ElectroPeak LCD-01-103, SH1106, 128×64, 1.3-inch, four-pin I²C,
+35.4×33.5 mm PCB. Match actual mounting holes and pin order. The amplifier's
+actual footprint and speaker cavity also need measurement. No SD card, touch
+sensor, expansion/programming dock, CoreS3 or Adafruit Feather is budgeted; if
+the chosen camera board requires a dock, include its real cost before selection.
 
 The reference [EVA Robot hardware](https://github.com/Ksirailway-base/EVA-Robot/tree/c7ff17718a40d071b352e9894506c264578120c0)
 uses a Freenove S3, OV3660 camera, SH1106, INMP441 and MAX98357A. Its source is a
@@ -46,12 +49,12 @@ screen opening is about **35×19.6 mm**, with an approximately **4.4 mm camera
 opening** below it. Original geometry is unchanged. The file places parts in
 assembly positions: separate/arrange them on the bed before slicing.
 
-EVA does not specify exact display-PCB or speaker SKUs. The DSP-9 is a candidate,
-not a measured fit. Verify its holes/PCB against the shell. Do not substitute a
-0.96-inch display or a larger eight-pin OLED assuming equal fit. The current
-Freenove listing does not name its included camera sensor/lens, so confirm camera
-module dimensions and alignment before ordering. Even the same sensor name
-does not guarantee the same lens housing.
+EVA does not specify exact display-PCB or speaker SKUs. The generic LCD-01-103
+is a candidate, not a measured fit. Verify its holes/PCB against the shell. Do not substitute a
+0.96-inch display or a larger eight-pin OLED assuming equal fit. Confirm selected
+camera dimensions and alignment before ordering; the budget OV2640 is not the
+OV3660 named in EVA's reference. Even the same sensor name does not guarantee the
+same lens housing.
 
 Expected small remixes are internal spacers, a camera-opening correction if
 needed, and a removable EVA-to-SMARS mounting bracket. Check rover stability and

@@ -1,0 +1,11 @@
+{
+  "robot_count": 5,
+  "identical_core": true,
+  "controller_owned_count": null,
+  "power_bank_owned_count": null,
+  "confirmed_minimum_owned": {
+    "controller": 1,
+    "power_bank": 1
+  },
+  "note": "User confirmed five identical cores with different removable cosmetics. Exact owned controller/bank counts remain unanswered; do not price all five at zero. Every robot needs all core modules and its own usable power source."
+}

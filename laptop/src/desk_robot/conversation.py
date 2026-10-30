@@ -19,6 +19,22 @@ class Speaker(Protocol):
     async def say(self, robot: RobotConfig, text: str): ...
 
 
+def conversation_turns(robot_ids: list[str], utterances: int | None = None) -> int:
+    """Keep every group bounded, including the original six-turn pair."""
+    if not 2 <= len(robot_ids) <= 5 or len(set(robot_ids)) != len(robot_ids):
+        raise ValueError("Choose two to five distinct robots")
+    limit = max(6, 2 * len(robot_ids))
+    if utterances is None:
+        return limit
+    if (
+        isinstance(utterances, bool)
+        or not isinstance(utterances, int)
+        or not 1 <= utterances <= limit
+    ):
+        raise ValueError(f"Choose 1..{limit} total utterances for this group")
+    return utterances
+
+
 class OllamaChat:
     def __init__(self, settings: Settings, client: httpx.AsyncClient):
         self.settings, self.client = settings, client
@@ -106,9 +122,10 @@ class Conversation:
         self.active: asyncio.Task | None = None
         self.histories: dict[str, list[dict]] = {}
 
-    async def run(self, robot_ids: list[str], topic: str, utterances: int = 6) -> list[dict]:
-        if len(robot_ids) != 2 or len(set(robot_ids)) != 2 or not 1 <= utterances <= 6:
-            raise ValueError("Choose two distinct robots and 1..6 total utterances")
+    async def run(
+        self, robot_ids: list[str], topic: str, utterances: int | None = None
+    ) -> list[dict]:
+        turns = conversation_turns(robot_ids, utterances)
         if self.active is not None and not self.active.done():
             raise RuntimeError("A conversation is already active")
         robots = [self.settings.robot(i) for i in robot_ids]
@@ -116,7 +133,7 @@ class Conversation:
         self.histories = {
             r.id: [
                 {"role": "system", "content": r.persona},
-                {"role": "user", "content": f"Discuss this with your robot peer: {topic}"},
+                {"role": "user", "content": f"Discuss this with your robot peers: {topic}"},
             ]
             for r in robots
         }
@@ -124,23 +141,28 @@ class Conversation:
         try:
             async with asyncio.timeout(300):
                 async with self.speaker.session(robots):
-                    for index in range(utterances):
-                        robot, peer = robots[index % 2], robots[(index + 1) % 2]
+                    for index in range(turns):
+                        robot = robots[index % len(robots)]
                         text = await self.chat.reply(list(self.histories[robot.id]))
                         async with self.speaker_lock:
                             await self.speaker.say(
                                 robot, text
                             )  # await actual transmission + playback tail
                         self.histories[robot.id].append({"role": "assistant", "content": text})
-                        self.histories[peer.id].append(
-                            {"role": "user", "content": f"{robot.name} said: {text}"}
-                        )
+                        for peer in robots:
+                            if peer.id != robot.id:
+                                self.histories[peer.id].append(
+                                    {"role": "user", "content": f"{robot.name} said: {text}"}
+                                )
                         transcript.append({"robot_id": robot.id, "text": text})
             return transcript
         finally:
             self.active = None
 
     async def stop(self):
-        if self.active and self.active is not asyncio.current_task():
-            self.active.cancel()
-            await asyncio.gather(self.active, return_exceptions=True)
+        task = self.active
+        if task and task is not asyncio.current_task():
+            # Repeated stop requests must not cancel a session's cleanup a second time.
+            if not task.cancelling():
+                task.cancel()
+            await asyncio.shield(asyncio.gather(task, return_exceptions=True))

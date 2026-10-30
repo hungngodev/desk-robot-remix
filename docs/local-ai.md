@@ -83,7 +83,7 @@ experimental pickup geometry.
 
 The server adapter uses existing WAV-to-Opus conversion and head playback. It
 reports successful **transmission**, not proof that sound physically played.
-During a bounded two-robot conversation it suppresses microphone/listen input,
+During a bounded two-to-five-robot conversation it suppresses microphone/listen input,
 routes transcripts digitally and allows one speaker at a time. The mute lease
 expires after 305 seconds if the coordinator disappears. Normal speech resumes
 when the session exits. Device-specific physical audio and echo tests remain.

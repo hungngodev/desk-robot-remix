@@ -1,8 +1,9 @@
 # Firmware builds
 
 These commands build files. **Nothing in setup automatically flashes hardware.**
-The body target is classic ESP32-WROOM-32. The active head is **Freenove N16R8
-with separate OLED/audio modules**; select it explicitly with `--board modular`.
+The body target is classic ESP32-WROOM-32. The compiled head reference is **Freenove N16R8 with separate OLED/audio
+modules**; select it explicitly with `--board modular`. The cheaper board in the
+budget list is not yet pinout/programming-qualified for this build.
 CoreS3 is an earlier reference with its own build copy. See the
 [modular-head guide](modular-head.md) for parts/case and hardware checks. Do not
 flash CoreS3 images onto Freenove, or S3 images onto WROOM.
@@ -96,13 +97,14 @@ The verification configuration uses an empty bridge token and disabled wake word
 For private local-server settings, after generating `config/local.env`:
 
 ```sh
-uv run desk-robot secrets
+uv run desk-robot --config config/fleet.example.toml secrets --add-missing
 python3 firmware/head/private_config.py --board modular --robot robot-01 --server-ip MAC_LAN_IP
 bash scripts/build_head.sh --board modular --private
 ```
 
-Replace `MAC_LAN_IP` with the Mac's reachable IPv4 address. Use robot-02 only for
-the second physical head. Keep private settings/binaries in the ignored build
+Replace `MAC_LAN_IP` with the Mac's reachable IPv4 address. Select robot-01
+through robot-05 from the same fleet configuration used by the Mac; pass
+`--config config/local.toml` once real identities are configured. Keep private settings/binaries in the ignored build
 directory. Real wake-word, audio, camera, OLED address/orientation and UART must
 still be tested. The default SH1106 UI shows emotion symbols/text; smooth moving
 eyes are a later animation adapter.
@@ -134,7 +136,7 @@ disabled. It is a compile check, not ready-to-use personalized firmware.
 For a real head, prepare private settings after generating `config/local.env`:
 
 ```sh
-uv run desk-robot secrets
+uv run desk-robot --config config/fleet.example.toml secrets --add-missing
 python3 firmware/head/private_config.py --board cores3 --robot robot-01 --server-ip MAC_LAN_IP
 bash scripts/build_head.sh --board cores3 --private
 ```
@@ -143,8 +145,8 @@ The helper selects the existing local Python 3.12 bootstrap before exporting
 IDF. On another Mac, create `.tools/sdk-bootstrap` with
 `uv venv .tools/sdk-bootstrap --python 3.12` before the SDK install.
 
-Replace `MAC_LAN_IP` with the Mac's reachable IPv4 address. Use robot-02 only
-for the second head. The private variant embeds a head credential and local OTA
+Replace `MAC_LAN_IP` with the Mac's reachable IPv4 address. Select the actual
+robot ID from the same fleet configuration used by the Mac. The private variant embeds a head credential and local OTA
 address; keep the entire build directory and binary private. Empty credentials
 disable the bridge. Wake-word support is prepared, but the verified build used
 `disabled`; hardware wake-word behavior has not been tested.

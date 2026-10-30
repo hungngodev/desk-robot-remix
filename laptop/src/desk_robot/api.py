@@ -7,10 +7,11 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .config import Settings, secret
 from .controller import OperationError
+from .conversation import conversation_turns
 from .runtime import Runtime
 from .transport import HeadError
 
@@ -27,9 +28,14 @@ class PickupRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    robot_ids: list[str] = Field(min_length=2, max_length=2)
+    robot_ids: list[str] = Field(min_length=2, max_length=5)
     topic: str = Field(min_length=1, max_length=500)
-    utterances: int = Field(default=6, ge=1, le=6)
+    utterances: int | None = Field(default=None, ge=1, le=10, strict=True)
+
+    @model_validator(mode="after")
+    def bounded_group(self):
+        self.utterances = conversation_turns(self.robot_ids, self.utterances)
+        return self
 
 
 def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:

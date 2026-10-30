@@ -1,0 +1,288 @@
+import asyncio
+import json
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+
+import httpx
+import pytest
+from desk_robot import cli
+from desk_robot.api import create_app
+from desk_robot.config import load_settings
+from desk_robot.conversation import Conversation, conversation_turns
+from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+from fastapi.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parents[1]
+IDS = [f"robot-{i:02}" for i in range(1, 6)]
+
+
+@pytest.fixture
+def fleet():
+    return load_settings(ROOT / "config/fleet.simulation.toml")
+
+
+def test_fleet_examples_keep_identical_core_and_hardware_disarmed(fleet):
+    hardware = load_settings(ROOT / "config/fleet.example.toml")
+    assert [r.id for r in hardware.robots] == [r.id for r in fleet.robots] == IDS
+    assert all(not r.motion_enabled and not r.device_id for r in hardware.robots)
+    assert len({r.token_env for r in hardware.robots}) == 5
+    assert len({r.head_url for r in hardware.robots}) == 5
+    assert len({r.calibration for r in hardware.robots}) == 1
+    assert all(r.calibration.name == "calibration.simulation.json" for r in fleet.robots)
+
+
+async def test_five_round_robin_broadcasts_every_line_to_all_peers(fleet):
+    class UniqueChat:
+        def __init__(self):
+            self.calls = []
+
+        async def reply(self, history):
+            self.calls.append(history)
+            return f"line-{len(self.calls)}"
+
+    class TrackingSpeaker(SimulatedSpeaker):
+        active = 0
+        maximum = 0
+        participants = []
+        exited = False
+
+        @asynccontextmanager
+        async def session(self, robots):
+            self.participants = [r.id for r in robots]
+            try:
+                yield
+            finally:
+                self.exited = True
+
+        async def say(self, robot, text):
+            self.active += 1
+            self.maximum = max(self.maximum, self.active)
+            await asyncio.sleep(0)
+            await super().say(robot, text)
+            self.active -= 1
+
+    chat, speaker = UniqueChat(), TrackingSpeaker()
+    conversation = Conversation(fleet, chat, speaker)
+    transcript = await conversation.run(IDS, "Play a word game")
+    assert [line["robot_id"] for line in transcript] == IDS * 2
+    assert speaker.participants == IDS and speaker.maximum == 1 and speaker.exited
+    assert conversation.active is None
+    assert len({id(h) for h in conversation.histories.values()}) == 5
+    for robot in fleet.robots:
+        history = conversation.histories[robot.id]
+        assert history[0]["content"] == robot.persona
+        assert len(history) == 12
+        for line in transcript:
+            expected = (
+                {"role": "assistant", "content": line["text"]}
+                if line["robot_id"] == robot.id
+                else {
+                    "role": "user",
+                    "content": f"{fleet.robot(line['robot_id']).name} said: {line['text']}",
+                }
+            )
+            assert expected in history
+    assert all(f"line-{i}" in str(chat.calls[4]) for i in range(1, 5))
+
+
+@pytest.mark.parametrize("count,limit", [(2, 6), (3, 6), (4, 8), (5, 10)])
+def test_group_turn_limits(count, limit):
+    assert conversation_turns(IDS[:count]) == limit
+    assert conversation_turns(IDS[:count], 1) == 1
+    with pytest.raises(ValueError):
+        conversation_turns(IDS[:count], limit + 1)
+
+
+async def test_five_cancellation_and_repeated_stop_finish_session_cleanup(fleet):
+    entered, cleanup_started, release_cleanup = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class WaitingSpeaker(SimulatedSpeaker):
+        cleaned = 0
+
+        @asynccontextmanager
+        async def session(self, robots):
+            assert [r.id for r in robots] == IDS
+            try:
+                yield
+            finally:
+                cleanup_started.set()
+                await release_cleanup.wait()
+                self.cleaned += 1
+
+        async def say(self, robot, text):
+            entered.set()
+            await asyncio.Event().wait()
+
+    speaker = WaitingSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker)
+    task = asyncio.create_task(conversation.run(IDS, "hello"))
+    await entered.wait()
+    with pytest.raises(RuntimeError, match="active"):
+        await conversation.run(IDS, "another")
+    stop1 = asyncio.create_task(conversation.stop())
+    await cleanup_started.wait()
+    stop2 = asyncio.create_task(conversation.stop())
+    await asyncio.sleep(0)
+    release_cleanup.set()
+    await asyncio.gather(stop1, stop2)
+    assert task.cancelled() and speaker.cleaned == 1 and conversation.active is None
+    conversation.speaker = SimulatedSpeaker()
+    assert len(await conversation.run(IDS, "again", 1)) == 1
+
+
+async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(fleet):
+    class LostSpeaker(SimulatedSpeaker):
+        exited = False
+
+        @asynccontextmanager
+        async def session(self, robots):
+            try:
+                yield
+            finally:
+                self.exited = True
+
+        async def say(self, robot, text):
+            if robot.id == "robot-03":
+                raise RuntimeError("head disconnected")
+            await super().say(robot, text)
+
+    speaker = LostSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker)
+    with pytest.raises(RuntimeError, match="disconnected"):
+        await conversation.run(IDS, "hello")
+    assert speaker.exited and conversation.active is None
+    assert [r for r, _ in speaker.spoken] == IDS[:2]
+    conversation.speaker = SimulatedSpeaker()
+    assert len(await conversation.run(IDS, "again", 1)) == 1
+
+
+async def test_cancelled_stop_caller_cannot_interrupt_session_cleanup(fleet):
+    entered, cleanup_started, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class WaitingSpeaker(SimulatedSpeaker):
+        cleaned = False
+
+        @asynccontextmanager
+        async def session(self, robots):
+            try:
+                yield
+            finally:
+                cleanup_started.set()
+                await release.wait()
+                self.cleaned = True
+
+        async def say(self, robot, text):
+            entered.set()
+            await asyncio.Event().wait()
+
+    speaker = WaitingSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker)
+    task = asyncio.create_task(conversation.run(IDS, "hello"))
+    await entered.wait()
+    stopping = asyncio.create_task(conversation.stop())
+    await cleanup_started.wait()
+    stopping.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopping
+    assert not task.done()
+    release.set()
+    await asyncio.gather(task, return_exceptions=True)
+    assert speaker.cleaned and conversation.active is None
+
+
+def test_fleet_api_bounded_inputs_and_default_ten(fleet, tokens):
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    with TestClient(create_app(fleet)) as client:
+        for ids, turns in [
+            (IDS[:1], None),
+            (IDS + ["robot-06"], None),
+            (["robot-01", "robot-01"], None),
+            (IDS, 11),
+            (IDS[:2], 7),
+            (IDS[:3], 7),
+            (IDS[:4], 9),
+            (IDS, True),
+        ]:
+            body = {"robot_ids": ids, "topic": "Hello"}
+            if turns is not None:
+                body["utterances"] = turns
+            assert client.post("/v1/conversation", headers=headers, json=body).status_code == 422
+        missing = {"robot_ids": ["robot-01", "missing"], "topic": "Hello"}
+        assert client.post("/v1/conversation", headers=headers, json=missing).status_code == 404
+        response = client.post(
+            "/v1/conversation", headers=headers, json={"robot_ids": IDS, "topic": "Hello"}
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert [line["robot_id"] for line in result["transcript"]] == IDS * 2
+        assert result["physical_playback_verified"] is False
+
+
+def test_secret_extension_preserves_values_and_is_idempotent(fleet, tmp_path):
+    path = tmp_path / "private.env"
+    original = (
+        "# existing private credentials\n"
+        "DESK_ROBOT_API_TOKEN=old-operator\n"
+        "DESK_ROBOT_TOOL_TOKEN=old-model\n"
+        "DESK_ROBOT_SPEECH_TOKEN=old-speech\n"
+        "DESK_ROBOT_HEAD_01_TOKEN=old-one\n"
+        "DESK_ROBOT_HEAD_02_TOKEN=old-two"
+    )
+    path.write_text(original)
+    path.chmod(0o644)
+    assert cli.write_secrets(path, fleet, add_missing=True) == 3
+    extended = path.read_text()
+    assert extended.startswith(original + "\n")
+    values = dict(line.split("=", 1) for line in extended.splitlines() if not line.startswith("#"))
+    for index in range(3, 6):
+        assert len(values[f"DESK_ROBOT_HEAD_{index:02}_TOKEN"]) >= 32
+    assert len(set(values.values())) == 8
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert cli.write_secrets(path, fleet, add_missing=True) == 0
+    assert path.read_text() == extended
+    with pytest.raises(FileExistsError):
+        cli.write_secrets(path, fleet)
+
+
+def test_secret_extension_rejects_symlinks_and_duplicate_tokens(fleet, tmp_path):
+    path = tmp_path / "private.env"
+    original = "DESK_ROBOT_API_TOKEN=first\nDESK_ROBOT_API_TOKEN=second\n"
+    path.write_text(original)
+    with pytest.raises(ValueError, match="duplicate"):
+        cli.write_secrets(path, fleet, add_missing=True)
+    assert path.read_text() == original
+    link = tmp_path / "linked.env"
+    link.symlink_to(path)
+    with pytest.raises(OSError):
+        cli.write_secrets(link, fleet, add_missing=True)
+
+
+async def test_cli_group_request_uses_dynamic_default(fleet, tokens, monkeypatch):
+    original_client = httpx.AsyncClient
+    seen = []
+
+    def transport(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(
+        cli.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(transport), **kwargs),
+    )
+    args = SimpleNamespace(
+        action="chat", url="http://localhost", robots=IDS, topic="Play", turns=None
+    )
+    assert await cli.request(args, fleet) == {"ok": True}
+    assert seen == [{"robot_ids": IDS, "topic": "Play", "utterances": 10}]
+    args.robots, args.turns = IDS[:2], 7
+    with pytest.raises(ValueError):
+        await cli.request(args, fleet)
+    assert len(seen) == 1
+
+
+async def test_fleet_demo_uses_all_five_and_reports_simulation(fleet):
+    result = await cli.demo(fleet)
+    assert result["mode"] == "simulation" and result["physical_acceptance_pass"] is False
+    assert [line["robot_id"] for line in result["conversation"]] == IDS * 2
