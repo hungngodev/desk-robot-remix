@@ -6,8 +6,8 @@ SG90/N20 actuators, separate camera/OLED/audio modules and existing print files.
 Five-robot mock conversation gives all five IDs two turns. No robot has been
 printed, assembled, flashed or physically tested.
 
-The **$37.59 first-prototype parts target** assumes one owned usable power bank
-and WROOM. It excludes delivery/tax and includes four allowances; the $50 delivered
+The **$36.88 first-prototype parts target** assumes one owned usable power bank
+and WROOM. It excludes delivery/tax and includes three allowances; the $50 delivered
 cap is not yet established. The $7.11 S3/OV2640 bundle is not qualified against
 the compiled Freenove pinout/programming/case. Purchase readiness remains false.
 See [ten checks](../docs/budget-audit.md) and [fleet guide](../docs/five-robots.md).
@@ -133,8 +133,8 @@ or mechanical certification.
 - Measure actual servo fit and flat-key floor clearance, print and bench-test the
   gripper. Perform ten trials per key/candy category before the full build.
 - Qualify the cheap head board, actual generic driver package, motor/servo loaded
-  currents and existing power bank rating/weight/mount. Finalize speaker and
-  delivered charges under $50; $37.59 is a target with allowances, not a cart.
+  currents and existing power bank rating/weight/mount. Finalize speaker mounting and
+  delivered charges under $50; $36.88 is a target with allowances, not a cart.
 - Confirm exact selected camera sensor/lens, display PCB mount, speaker size and
   head-to-rover bracket/clearance. No component is a measured case drop-in yet.
 - Bench-test the compiled modular S3 head and fresh-JPEG adapter on actual

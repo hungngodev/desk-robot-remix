@@ -12,10 +12,10 @@ the earlier color LCD head; it does not remove vision or conversation.
 
 ## Components for one head
 
-The [active budget list](../hardware/parts.md) now targets **$15.13 for head
+The [active budget list](../hardware/parts.md) now targets **$14.42 for head
 electronics**, using generic modules. This includes a $7.11 S3/OV2640 bundle,
-$2.98 four-pin SH1106 OLED, $2.09 INMP441, $1.95 MAX98357 and a $1 speaker allowance.
-Shipping, exact speaker and mechanical fit are unresolved.
+$2.98 four-pin SH1106 OLED, $2.09 INMP441, $1.95 MAX98357 and a $0.29 speaker quote.
+Shipping and mechanical fit are unresolved.
 
 **The compiled target below remains the Freenove N16R8 reference.** The cheap
 PCBFUN board has not been matched to its pin allocation or programming method.

@@ -7,12 +7,12 @@ or costumes differ. Shared Mac provides speech, vision and conversation.
 ## Cost and selection
 
 First prototype delivered cap **$50**, using one owned WROOM and a usable owned
-USB power bank. [Parts target](hardware/parts.md): **$37.59 before shipping/tax**,
-with four allowances. The $7.11 S3/camera listing is a procurement candidate,
+USB power bank. [Parts target](hardware/parts.md): **$36.88 before shipping/tax**,
+with three allowances. The $7.11 S3/camera listing is a procurement candidate,
 **not qualified for the compiled Freenove firmware**. Check its schematic/GPIO,
 programming and case fit before purchase. No delivered cart is complete.
 
-Five times that target is $187.95 before order charges and any missing WROOMs or
+Five times that target is $184.40 before order charges and any missing WROOMs or
 power banks. Exact owned counts and five-unit quotes are unknown; do not assume
 five free controllers/batteries. Build and validate one before buying multiples.
 The old $117.33 retail BOM is archived, not the active plan.
@@ -42,7 +42,7 @@ No geometry edits, new PCB, whole chassis or new arm are part of this phase.
 ## Build order and acceptance
 
 1. Complete exact head-board qualification, actual power-bank rating/load/fit,
-   speaker quote, component clearances and delivered prototype cost under $50.
+   speaker mount, component clearances and delivered prototype cost under $50.
 2. Print one SG90 fit part and the original gripper/lift; test real flat keys and
    candy. Adjust only small clearances/tips if necessary.
 3. Bring up one head's OLED, camera, microphone and speaker; assemble the rover,

@@ -10,7 +10,7 @@ files and the Freenove-based head/body firmware are prepared. Physical assembly,
 pickup, speech and power tests remain. The cheaper camera-board candidate has
 not been qualified for that compiled firmware.
 
-**Budget:** **$37.59 first-prototype parts target**, reusing one owned WROOM and
+**Budget:** **$36.88 first-prototype parts target**, reusing one owned WROOM and
 power bank; **$50 delivered cap**. Several allowances, delivery/tax, power rating
 and fit remain open. This is not an order-ready quote. Five-unit quantities are
 listed without assuming five free boards or banks. [Components](hardware/parts.md),

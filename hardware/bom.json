@@ -42,12 +42,12 @@
       "fit": "Confirm actual MAX98357A/I2S variant and dimensions; speaker across SPK+ and SPK-, neither to ground."
     },
     {
-      "item": "Compact moving-coil 4-8 ohm speaker",
+      "item": "ElectroPeak SEN-17-105 speaker, 8 ohm 1W, 20mm x 3.75mm",
       "quantity": 1,
-      "unit_usd": 1.0,
-      "price_status": "allowance",
-      "url": "",
-      "fit": "Exact speaker dimensions/power and delivered quote unresolved; not a passive buzzer."
+      "unit_usd": 0.29,
+      "price_status": "verified",
+      "url": "https://electropeak.com/8-ohm-1w-20mm-diameter-speaker",
+      "fit": "Moving-coil with solder pads. Price/size observed; actual EVA mounting cavity and acoustic fit still unverified. Limit amplifier volume to speaker rating."
     },
     {
       "item": "Existing ESP32-WROOM-32 dev board",
@@ -115,5 +115,5 @@
     }
   ],
   "head_configuration": "Separate S3-camera / SH1106 / I2S audio; budget camera-board candidate NOT qualified for compiled Freenove firmware",
-  "note": "First prototype only, using one owned WROOM and power bank. Item quotes exclude delivery/tax; allowances are targets. AliExpress showed $5.60 shipping for one camera bundle; other shipping/tax unknown. Five-unit prices and owned inventory are not established. No purchases."
+  "note": "First prototype only, using one owned WROOM and power bank. Item quotes exclude delivery/tax; three allowances are targets. AliExpress showed $5.60 shipping for one camera bundle; other shipping/tax unknown. Five-unit prices and owned inventory are not established. No purchases."
 }

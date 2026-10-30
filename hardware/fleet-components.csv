@@ -3,7 +3,7 @@ PCBFUN S3 N16R8 + OV2640 bundle — compatibility candidate only,1,5,7.11,verifi
 "1.3 inch SH1106 128x64 four-pin I2C OLED, ElectroPeak LCD-01-103",1,5,2.98,verified,https://electropeak.com/1-3-i2c-128x64-white-oled-display-module
 INMP441 I2S microphone breakout,1,5,2.09,verified,https://www.sinoning.com/product/omnidirectional-microphone-module-i2s-interface-inmp441-mems-high-precision-low-power-ultra-small-volume-for-esp32/
 "Generic MAX98357 I2S amplifier, ElectroPeak SEN-17-139",1,5,1.95,verified,https://electropeak.com/max98357-i2s-audio-amplifier-module
-Compact moving-coil 4-8 ohm speaker,1,5,1.0,allowance,
+"ElectroPeak SEN-17-105 speaker, 8 ohm 1W, 20mm x 3.75mm",1,5,0.29,verified,https://electropeak.com/8-ohm-1w-20mm-diameter-speaker
 Existing ESP32-WROOM-32 dev board,1,5,0,owned,
 "Generic SG90 positional 180-degree micro servo, SINONING SN482",2,10,1.49,verified,https://www.sinoning.com/product/1pcs-sg90-9g-mini-micro-servo-for-rc-250-450-helicopter-airplane-car-robot/
 "Generic DRV8833 dual motor driver, SINONING 33012432478",1,5,0.5,verified,https://www.sinoning.com/product/drv8833-2channel-dc-motor-driver-module-board-1-5a-3v-10v/

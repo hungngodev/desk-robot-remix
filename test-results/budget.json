@@ -1,11 +1,10 @@
 {
-  "parts_estimate_usd": 37.59,
+  "parts_estimate_usd": 36.88,
   "quoted_total_usd": null,
-  "planning_total_usd": 37.59,
+  "planning_total_usd": 36.88,
   "cap_usd": 50,
-  "remaining_under_cap_usd": 12.41,
+  "remaining_under_cap_usd": 13.12,
   "unquoted_items": [
-    "Compact moving-coil 4-8 ohm speaker",
     "Rated USB power lead, switch, wiring, connectors and fasteners",
     "Filament for SMARS, lift/gripper and EVA head",
     "Motor suppression and power decoupling components"

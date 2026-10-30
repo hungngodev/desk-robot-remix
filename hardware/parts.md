@@ -1,8 +1,8 @@
 # Budget components — five identical cores
 
-Updated 2026-10-30. **First prototype parts target: $37.59; delivered cap: $50.**
+Updated 2026-10-30. **First prototype parts target: $36.88; delivered cap: $50.**
 This assumes one owned WROOM and a usable owned USB power bank. Delivery/tax,
-four allowances and the cheap camera board's compatibility remain unresolved.
+three allowances and the cheap camera board's compatibility remain unresolved.
 **This is not an order-ready $50 robot.** No purchase has been made.
 
 | Component | Per robot | For five | First-robot USD | Quote / requirement |
@@ -11,7 +11,7 @@ four allowances and the cheap camera board's compatibility remain unresolved.
 | [1.3-inch SH1106 four-pin I²C OLED](https://electropeak.com/1-3-i2c-128x64-white-oled-display-module) | 1 | 5 | 2.98 | LCD-01-103, 35.4×33.5 mm PCB; monochrome; measure mounts |
 | [INMP441 microphone](https://www.sinoning.com/product/omnidirectional-microphone-module-i2s-interface-inmp441-mems-high-precision-low-power-ultra-small-volume-for-esp32/) | 1 | 5 | 2.09 | 3.3 V; footprint/port check |
 | [Generic MAX98357 I²S amplifier](https://electropeak.com/max98357-i2s-audio-amplifier-module) | 1 | 5 | 1.95 | SEN-17-139; confirm I²S variant and dimensions |
-| Small moving-coil 4–8 Ω speaker | 1 | 5 | 1.00 | **Allowance**; exact size/power/quote still needed |
+| [20 mm 8 Ω / 1 W speaker](https://electropeak.com/8-ohm-1w-20mm-diameter-speaker) | 1 | 5 | 0.29 | SEN-17-105; 3.75 mm thick, solder pads; mount/acoustic fit unverified |
 | Existing ESP32-WROOM-32 | 1 | 5 | 0.00 | One confirmed owned; exact fleet count unknown |
 | [SG90 positional servo](https://www.sinoning.com/product/1pcs-sg90-9g-mini-micro-servo-for-rc-250-450-helicopter-airplane-car-robot/) | 2 | 10 | 2.98 | $1.49 each; lift + grip; includes horns/screws per seller |
 | [N20 3–6 V geared motor](https://www.sinoning.com/product/1pcs-n20-micro-reducer-motor-5v-6v-3v-dc-long-shaft-reducer-motor-metal-gear/) | 2 | 10 | 3.98 | $1.99 each; 3 mm D shaft; 100 rpm at 6 V/no load; slower at 5 V |
@@ -20,9 +20,9 @@ four allowances and the cheap camera board's compatibility remain unresolved.
 | Rated USB power lead, switch, wiring, connectors, screws | 1 set | 5 sets | 8.00 | **Allowance**, includes actuator power branch |
 | Filament for existing body, arm, head and small mounts | 1 set | 5 sets | 5.00 | **Allowance**; printer access assumed, sliced mass unmeasured |
 | Suppression capacitors / decoupling | 1 set | 5 sets | 2.00 | **Allowance**, selected after current/noise tests |
-| **Parts target** | | | **37.59** | **$12.41 remains for all shipping/tax/changes** |
+| **Parts target** | | | **36.88** | **$13.12 remains for all shipping/tax/changes** |
 
-The head target is $15.13. The two servos, two motors and driver total **$7.46**.
+The head target is $14.42. The two servos, two motors and driver total **$7.46**.
 The old $117.33 branded-retail BOM is archived in
 [archive/bom-retail-2026-10-28.json](archive/bom-retail-2026-10-28.json).
 Removing the separate 2S pack, charger and buck saves $29.50 **only if the owned
@@ -48,12 +48,12 @@ EVA case mount. The seller PDF could not be retrieved. An accessory-only $1.53
 option and a separate $6.45 board-only listing were rejected as complete-camera
 prices. Do not buy five or flash the reference firmware based on the title.
 The official [Freenove N16R8 reference](https://store.freenove.com/products/fnk0085?variant=44552293155014)
-was $21.99 at the earlier check; using it raises this target to **$52.47 before
+was $21.99 at the earlier check; using it raises this target to **$51.76 before
 shipping/tax**, above the current cap. It remains a technical reference.
 
 ## Five-unit cost and inventory
 
-Five times the present first-robot parts target is **$187.95**, before delivery/tax
+Five times the present first-robot parts target is **$184.40**, before delivery/tax
 and any additional WROOM boards or power banks. This is arithmetic, **not a verified
 five-robot quote**: no five-unit price/shipping has been checked and only one owned
 bank/controller is confirmed. Record exact owned counts in
