@@ -6,6 +6,12 @@ or costumes differ. Shared Mac provides speech, vision and conversation.
 
 ## Cost and selection
 
+Inventory correction, 2026-10-31: the user owns ESP32-WROOM-32 boards and **no
+ESP32-S3**. The earlier pasted N8R8 statement was incorrect. Keep an S3/camera
+head as a provisional purchase, not an owned part. The WROOM remains usable as
+the body controller; do not flash S3 head firmware onto it. Uno/Pico boards do
+not supply the missing S3 camera-head hardware or expand the WROOM's RAM.
+
 First prototype delivered cap **$50**, using one owned WROOM and a usable owned
 USB power bank. [Parts target](hardware/parts.md): **$36.88 before shipping/tax**,
 with three allowances. The $7.11 S3/camera listing is a procurement candidate,

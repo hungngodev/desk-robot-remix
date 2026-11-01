@@ -2,10 +2,13 @@
   "robot_count": 5,
   "identical_core": true,
   "controller_owned_count": null,
+  "controller_model": "ESP32-WROOM-32",
+  "s3_owned_count": 0,
+  "inventory_corrected_at": "2026-10-31",
   "power_bank_owned_count": null,
   "confirmed_minimum_owned": {
     "controller": 1,
     "power_bank": 1
   },
-  "note": "User confirmed five identical cores with different removable cosmetics. Exact owned controller/bank counts remain unanswered; do not price all five at zero. Every robot needs all core modules and its own usable power source."
+  "note": "User confirmed five identical cores with different removable cosmetics. On 2026-10-31 the user explicitly corrected the earlier pasted inventory: no ESP32-S3 is owned; ESP32-WROOM-32 boards are owned. Do not count an N8R8/S3 as available. Exact owned WROOM/bank counts remain unanswered; do not price all five at zero. Every robot needs all core modules and its own usable power source."
 }
