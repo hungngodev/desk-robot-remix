@@ -32,7 +32,13 @@
       "owned_count": null,
       "minimum_reported": 1,
       "needed_per_robot": 1,
-      "needed_for_five": 5
+      "needed_for_five": 5,
+      "brand_model": null,
+      "output_rating_verified": false,
+      "rated_output_current_a": null,
+      "label_status": "User reports no readable rating label",
+      "load_test_passed": false,
+      "note": "Described as a popular bank, not enough to identify model or infer current. Nominal 5 V reuse remains conditional; photo/model identification or actual load verification needed."
     },
     {
       "component": "0.96 inch SSD1306 OLED GME12864-11",
@@ -60,7 +66,12 @@
       "owned_count": null,
       "minimum_reported": 1,
       "needed_per_robot": 2,
-      "needed_for_five": 10
+      "needed_for_five": 10,
+      "estimated_owned_count": 10,
+      "count_status": "user_estimate",
+      "missing_for_five_estimate": 0,
+      "missing_for_five": null,
+      "note": "User: I think I got 10. Potentially enough for all five cores; exact count, positional type, condition and fit remain to confirm. No extra servo order planned yet."
     },
     {
       "component": "DuPont jumper ribbons",
@@ -93,5 +104,5 @@
       "usage": "not qualified for whole-robot actuator power"
     }
   ],
-  "note": "The repeated pasted S3 N8R8 claim does not override the explicit no-S3 correction. Exact WROOM, bank, OLED and MG90S counts remain unknown. All five receive the same full core; optional outer cosmetics only. No extra Uno/Pico/Pi required."
+  "note": "No ESP32-S3 is owned. WROOM, bank and OLED counts remain unknown; MG90S count is now estimated by the user at about 10, not confirmed. Power bank is unidentified and user reports no readable rating label; do not infer 2 A/3 A or usable whole-robot power. All five use the same full core with removable cosmetics."
 }

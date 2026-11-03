@@ -2,7 +2,8 @@
 
 Checked 2026-11-03. **Conditional first-robot target: $35.45 before delivery/tax;
 $50 delivered cap.** Assumes two usable owned MG90S servos and a suitable owned
-bank; neither servo quantity nor bank rating is confirmed. No order is ready.
+bank. User estimates about ten MG90S; exact count/condition is unconfirmed.
+The bank has no readable rating label and is unidentified. No order is ready.
 
 ## Buy candidates for one robot
 
@@ -32,8 +33,8 @@ if the selected Sense hardware cannot meet actual audio requirements.
 | 0.96-inch SSD1306 I²C OLED, GME12864-11 | 1 / 5 | At least one | Verify pins/controller/voltage and bezel fit; fleet count unknown. |
 | 5 V 28BYJ-48 stepper | 2 / 10 | **5** | **5 more for fleet**; no purchase quote yet. Slow speed/loaded torque need tests. |
 | ULN2003 stepper board | 2 / 10 | **5** | **5 more for fleet**; verify actual boards and wiring. |
-| MG90S positional servo | 2 / 10 | Count unknown | Need two usable servos for prototype; quantity/fit/load check pending. |
-| 5 V USB power bank | 1 / 5 | At least one | Rating, weight, mount, auto-off and load test; exact fleet count unknown. |
+| MG90S positional servo | 2 / 10 | **About 10, user estimate** | Potentially covers all five. Confirm count/type/condition and fit/load; no extras planned yet. |
+| 5 V USB power bank | 1 / 5 | At least one; no readable rating label | Model/current unknown; identify if possible and verify loaded voltage, mount and auto-off. Fleet count unknown. |
 | Filament | Sliced mass per core | Reported owned | Confirm sufficient quantity and printer access. Service printing is extra. |
 | DuPont jumper ribbons | Cut lengths per core | **10 ribbons** | Signals; do not use as an assumed high-current power harness. |
 | SER0043 continuous servo | 0 / 0 | **1** | Spare; cannot hold commanded claw/lift angles. |

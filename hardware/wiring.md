@@ -80,8 +80,11 @@ qualified regulated 5 V bank -> rated lead / switch / distribution
 all grounds common; data signals remain 3.3 V
 ```
 
-No bank output-current rating was supplied. Check its label, shared-port limits,
-auto-shutoff, cable drop, startup behavior, size, weight and mount. Measure voltage
+The user reports no readable output-rating label and has not identified the
+bank model. Do not infer current from a popular appearance or capacity marking.
+Try model/body/port identification, then verify cable drop, auto-shutoff, startup
+behavior, size, weight and mount. If its specification cannot be identified,
+reuse remains conditional on staged loaded-voltage and current measurements. Measure voltage
 at logic and actuators while both tracks, loaded servos, Wi-Fi and audio operate.
 No current/thermal test has passed. Large capacitors may reduce brief droop but
 cannot make an undersized bank adequate. Current-limited bench supplies should

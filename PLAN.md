@@ -17,10 +17,12 @@ Newly reported inventory replaces the old N20/SG90 shopping direction:
 
 - Five 5 V 28BYJ-48 steppers and five ULN2003 boards: two drive bases plus one
   spare motor/driver, not five robots.
-- Positional MG90S servos, count unknown: need two per robot, ten for five.
+- About **10 positional MG90S servos**, user estimate: potentially enough for
+  five robots at two each. Confirm count/type/condition; do not buy extras yet.
 - A 0.96-inch four-pin SSD1306 OLED, filament and ten DuPont-wire ribbons.
 - WROOM boards and at least one USB power bank; exact counts, bank current
-  rating, weight and dimensions remain unknown.
+  rating, weight and dimensions remain unknown. User reports no readable bank
+  rating label; popularity is not a model identification or current specification.
 - One SER0043 continuous servo: spare, unsuitable for angle-controlled lift/grip.
 
 **First-prototype target: $35.45 before shipping/tax**, conditional on two usable
@@ -29,8 +31,8 @@ $14.55 is for charges or missing items; this is not a completed delivered quote.
 See [components](hardware/parts.md), [BOM](hardware/bom.json) and
 [inventory](hardware/fleet-inventory.json). No purchase is ready or made.
 Do not multiply this reuse-based price by five as a fleet quote: five more
-steppers/drivers and unknown quantities of servos, screens, banks and WROOMs are
-still needed. The former $36.88 DC-motor BOM is archived.
+stepper/driver pairs are missing; screen, bank and WROOM counts remain unknown.
+The estimated ten MG90S may cover the fleet, subject to confirmation. The former $36.88 DC-motor BOM is archived.
 
 ## Existing projects to combine
 

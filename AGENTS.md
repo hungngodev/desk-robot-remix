@@ -4,6 +4,8 @@
 - Current design reuses owned WROOM, SSD1306, 28BYJ-48/ULN2003 and MG90S parts.
   No S3 is owned. Proposed new head is XIAO ESP32S3 Sense with camera/PDM mic;
   no separate INMP441, Uno, Pico or Pi is required. Inventory counts are partial.
+  MG90S count is about10 by user estimate; bank model/current are unknown and
+  user reports no readable rating label. Do not assume rated2A/3A or exact stock.
 - Compiled body profiles: default esp32_stepper and explicit legacy esp32dev DC.
   Sense8MB/PDM/SSD1306 now compiles alongside Freenove/CoreS3 references. Portable
   stepper/cliff policy exists, but sensor I/O and calibration are absent: guarded

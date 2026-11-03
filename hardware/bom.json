@@ -84,12 +84,12 @@
       "fit": "Five reported owned. Verify supplied motor/driver wiring, 3.3 V signal compatibility and current. No DRV8833 for this drivetrain."
     },
     {
-      "item": "Reported MG90S positional micro servo, quantity to confirm",
+      "item": "Reported MG90S positional micro servo, about 10 owned (user estimate)",
       "quantity": 2,
       "unit_usd": 0,
       "price_status": "inventory_check",
       "url": "",
-      "fit": "Conditional zero-cost reuse only; exact owned count unknown. Two required for prototype; ten for fleet. Check pocket, spline, horn, travel and actual loaded lifting."
+      "fit": "User estimates about ten owned, potentially enough for five robots. Count/type/condition still to confirm; no additional servos planned yet. Two needed for prototype. Check pocket, spline, horn, travel and actual loaded lifting."
     },
     {
       "item": "Owned regulated 5 V USB power bank",
@@ -97,7 +97,7 @@
       "unit_usd": 0,
       "price_status": "owned",
       "url": "",
-      "fit": "At least one owned. Label current, shared-port rating, cable, auto-off, loaded stability, weight and mount unverified. No 3 A claim."
+      "fit": "At least one owned, model unidentified. User reports no readable rating label. No current rating inferred from popularity or capacity; cable, auto-off, loaded voltage stability, weight and mount unverified. Reuse remains conditional."
     },
     {
       "item": "Owned filament",
