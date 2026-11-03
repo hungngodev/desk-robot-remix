@@ -4,14 +4,18 @@
 - Current design reuses owned WROOM, SSD1306, 28BYJ-48/ULN2003 and MG90S parts.
   No S3 is owned. Proposed new head is XIAO ESP32S3 Sense with camera/PDM mic;
   no separate INMP441, Uno, Pico or Pi is required. Inventory counts are partial.
-- Current compiled body is DC PWM, current modular head Freenove16MB/SH1106/I²S.
-  Stepper/Sense/cliff/pet-mode work is planned, not implemented. Never confuse
-  historical software tests with qualification of new hardware or behavior.
+- Compiled body profiles: default esp32_stepper and explicit legacy esp32dev DC.
+  Sense8MB/PDM/SSD1306 now compiles alongside Freenove/CoreS3 references. Portable
+  stepper/cliff policy exists, but sensor I/O and calibration are absent: guarded
+  profile cannot arm. Pet mode/animation/memory remain planned. Never equate
+  compilation/host tests with physical qualification. Read docs/firmware-foundation.md.
 - Keep pinned upstream clones and original CAD untouched. Small mounts, bezel,
   spacers, clearance corrections, jaw tips and removable costumes only. Keys
   and wrapped candy remain targets; new chassis/arm/PCB is outside scope.
 - Four downward ToFs + separate front ToF + mux are candidates. WROOM must own
-  local fault-latched stop; no blind retreat, automatic rearm or dependence on
+  local fault-latched stop; ordinary arm cannot clear faults, local USB-only
+  rearm clears only fresh healthy data and leaves motion disarmed. No blind
+  retreat, automatic rearm or dependence on
   network/LLM latency. Final geometry/surface/stopping qualification is required.
 - Keep hardware motion off by default. Preserve 500ms watchdog, 250ms drive,
   one-use operator permits and separate model/operator credentials. Proposed

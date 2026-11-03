@@ -1,5 +1,5 @@
 > Updated 2026-11-03: this is the historical Freenove 16 MB/SH1106/I²S target.
-> The proposed Sense/PDM/SSD1306/8 MB head is a separate, unimplemented target.
+> The Sense/PDM/SSD1306/8 MB head is a separate compiled target, not physically tested.
 > Do not flash this build onto Sense. See `docs/modular-head.md`.
 
 # Modular S3 head — hardware unverified

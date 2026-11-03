@@ -1,25 +1,27 @@
 # Verification — current design updated 2026-11-03
 
-## Current design qualification
+## Current firmware foundation
 
-The revised plan reuses WROOM/SSD1306/28BYJ-48/ULN2003/MG90S and proposes
-Sense camera/PDM head, four floor ToFs plus front ToF/mux, and active-pet behavior.
-**Those firmware/behavior changes are not implemented or verified.** Historical
-90 checks below concern earlier DC/Freenove software only. No robot is assembled,
-flashed or physically accepted, and no CAD geometry was changed.
+Sense8MB/PDM/SSD1306 head target and stepper/DC body profiles now compile.
+Portable stepper timing and sensor-fault policy are integrated with local-only
+recovery: normal job arm cannot clear a fault. The stepper hardware adapter
+provides no sensor I/O or calibration, so it refuses arming. Pet animation,
+scheduler, memory and pet-mode motion lease remain unimplemented.
 
-Two original stepper CAD files are saved with source records and hashes. Integrity
-checks do not establish manufacturing quality, units, compatible lift/head mounting
-or stopping coverage. Twelve video descriptions/resources and selected published
-code were audited; full-frame/timestamp viewing is not claimed.
+No hardware is flashed, assembled or physically accepted; no geometry changed.
+Host tests and compilation do not prove camera/audio, mechanical fit, real sensor
+behavior, stopping distance or pickups. See
+[firmware progress](../docs/firmware-foundation.md) and
+[current evidence](firmware-foundation-2026-11-03.json).
 
-The new conditional target is $35.45 before shipping/tax and missing reused stock.
-There is no complete delivered order or five-unit quote. Budget readiness remains
-false. See [current plan](../PLAN.md), [parts](../hardware/parts.md) and
-[research](../docs/research/2026-11-03-video-audit.md).
+Two stepper originals are saved with hashes; source integrity is not mechanical
+qualification. The twelve-video audit covers descriptions/resources and selected
+code, not full-frame viewing. The conditional target remains $35.45 before charges
+and missing reused parts; procurement readiness is false.
 
-Documentation-update verification is recorded in
-[plan-update-2026-11-03.json](plan-update-2026-11-03.json).
+[Earlier plan-update verification](plan-update-2026-11-03.json) records the prior
+documentation-only checkpoint. The historical90 checks below are a separate older
+baseline and do not include these new components.
 
 ## Historical software baseline — 2026-10-30
 

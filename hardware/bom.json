@@ -5,7 +5,7 @@
   "fit_confirmed": false,
   "readiness_checks": {
     "two_usable_owned_mg90s_confirmed": false,
-    "sense_variant_pin_budget_and_8mb_feasibility_reviewed": false,
+    "sense_variant_pin_budget_and_8mb_feasibility_reviewed": true,
     "case_mechanism_sensor_envelope_preflight_confirmed": false,
     "bank_label_cable_and_mount_preflight_confirmed": false,
     "sufficient_filament_and_printer_access_confirmed": false
@@ -17,7 +17,7 @@
       "unit_usd": 13.99,
       "price_status": "verified",
       "url": "https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html",
-      "fit": "8 MB flash / 8 MB PSRAM. New purchase; no S3 owned. Verify actual OV3660 or OV5640 AF revision, Sense bundle, pin map and mount. Requires new firmware target; old Freenove binary incompatible."
+      "fit": "8 MB flash / 8 MB PSRAM. New purchase; no S3 owned. Verify actual OV3660 or OV5640 AF revision, Sense bundle, pin map and mount. Separate Sense target compiled; old Freenove binary incompatible; physical tests pending."
     },
     {
       "item": "MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139",
@@ -57,7 +57,7 @@
       "unit_usd": 0,
       "price_status": "owned",
       "url": "",
-      "fit": "At least one owned; exact fleet count unknown. Body firmware currently DC-only; stepper/cliff changes pending."
+      "fit": "At least one owned; exact fleet count unknown. Stepper profile and portable cliff policy compile; no sensor I/O/calibration, so cannot arm. Legacy DC profile preserved."
     },
     {
       "item": "Owned 0.96 inch four-pin SSD1306 OLED, GME12864-11",
@@ -132,11 +132,11 @@
       "fit": "Choose values/voltage rating after power measurements. Capacitors do not fix an undersized bank."
     }
   ],
-  "head_configuration": "Candidate XIAO ESP32S3 Sense + owned SSD1306 + MAX98357/speaker; no new INMP441; Sense firmware target pending",
+  "head_configuration": "Separate XIAO ESP32S3 Sense target compiled: PDM/camera/owned SSD1306/MAX98357; physical tests pending",
   "note": "Conditional FIRST prototype target 35.45 USD before shipping, tax and any missing reused inventory. Item prices verified, allowances not quoted. Five-unit bill requires five additional steppers/drivers and unknown other quantities. Old DC/Freenove BOM archived. No purchases or physical validation.",
   "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
   "qualification_checks": {
-    "sense_board_configuration_and_8mb_build_confirmed": false,
+    "sense_board_configuration_and_8mb_build_confirmed": true,
     "ssd1306_and_sense_camera_physical_case_fit_confirmed": false,
     "stepper_chassis_lift_and_head_physical_fit_confirmed": false,
     "stepper_backend_and_cliff_interlock_verified": false,

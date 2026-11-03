@@ -12,7 +12,6 @@
   "fit_confirmed": false,
   "pending_checks": [
     "two_usable_owned_mg90s_confirmed",
-    "sense_variant_pin_budget_and_8mb_feasibility_reviewed",
     "case_mechanism_sensor_envelope_preflight_confirmed",
     "bank_label_cable_and_mount_preflight_confirmed",
     "sufficient_filament_and_printer_access_confirmed"

@@ -8,7 +8,7 @@ passthrough=()
 while (($#)); do
   case "$1" in
     --board)
-      if (($# < 2)); then echo "--board needs cores3 or modular" >&2; exit 2; fi
+      if (($# < 2)); then echo "--board needs cores3, modular or sense" >&2; exit 2; fi
       board="$2"; shift 2 ;;
     --private) private=true; shift ;;
     *) passthrough+=("$1"); shift ;;
@@ -17,7 +17,8 @@ done
 case "$board" in
   cores3) variant=desk-robot-core-s3; build_copy=xiaozhi ;;
   modular) variant=desk-robot-modular-s3; build_copy=xiaozhi-modular ;;
-  *) echo "Unknown board: $board (choose cores3 or modular)" >&2; exit 2 ;;
+  sense) variant=desk-robot-sense-s3; build_copy=xiaozhi-sense ;;
+  *) echo "Unknown board: $board (choose cores3, modular or sense)" >&2; exit 2 ;;
 esac
 build_root="firmware/head/build/$build_copy"
 if [[ ! -f "$build_root/scripts/build.py" ]]; then

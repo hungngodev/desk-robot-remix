@@ -1,9 +1,9 @@
 # Wiring and power — proposed stepper/sensor revision
 
-Updated 2026-11-03. **Do not wire or flash this proposed map using the current
-body binary.** That binary drives four DC H-bridge inputs with PWM. Two ULN2003
-steppers require eight phase outputs and a new nonblocking backend; cliff logic
-also remains unimplemented. This map is for pin-budget/bench review only.
+Updated 2026-11-03. **Use only the matching profile.** Default `esp32_stepper` now compiles with
+eight phase outputs and portable cliff policy, but no sensor I/O/calibration:
+it refuses to arm. Explicit `esp32dev` preserves four DC H-bridge inputs and
+must never be connected to this stepper map. This is not physically qualified.
 
 ## Proposed WROOM allocation
 
@@ -12,7 +12,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/5/12/15 and programming UART0 GPIO1/3.
 
 | WROOM GPIO | Proposed use |
 | --- | --- |
-| 16 RX / 17 TX | Sense head UART TX / RX, 115200 8N1, 3.3 V; Sense pins not yet allocated |
+| 16 RX / 17 TX | Sense head UART TX / RX, 115200 8N1, 3.3 V; Sense TX2 / RX1, compiled allocation |
 | 18 / 19 | Lift / grip MG90S signal |
 | 13, 14, 25, 26 | Left ULN2003 IN1–IN4, phase order to verify |
 | 27, 32, 33, 23 | Right ULN2003 IN1–IN4, phase order to verify |
@@ -60,11 +60,11 @@ or gripper-distance feedback. Use [sensor requirements](../docs/research/2026-11
 
 ## Head boundary
 
-The proposed [Sense head](../docs/modular-head.md) needs a **new** board map for
-camera, PDM mic, SSD1306, I²S output and UART. Old Freenove GPIO1/2 assignments or
+The [Sense head](../docs/modular-head.md) now has a separate compiled board map:
+OLED5/6, amplifier4/7/8, UARTTX2/RX1, PDM42/41 and stock camera. Old Freenove GPIO1/2 assignments or
 video GPIO1/2 I²C instructions are not a Sense allocation. Preserve native USB,
-internal camera/mic pins and flash/PSRAM; disable SD use where necessary. No
-final head pin instructions or compatible Sense binary have been produced.
+internal camera/mic pins and flash/PSRAM; disable SD use where necessary. See [exact compiled Sense allocation](../firmware/head/sense/README.md); physical
+qualification is still pending, and its SD slot must stay empty/disabled.
 
 Initial two-USB head/body test joins **TX, RX and GND only**; keep 5 V rails
 separate. Do not flash CoreS3/Freenove firmware onto Sense, or S3 firmware onto
@@ -110,7 +110,8 @@ by the bank-based plan; a future 2S design needs a buck, not a boost-only MT3608
 4. Connect/calibrate sensors on a supported flat surface. Missing/invalid/stale
    readings, bus faults and cliffs must latch a local motor stop in every mode.
 5. Measure stopping/latency and full sensor coverage with a tether/catch tray;
-   rearm explicitly after faults. Never blindly reverse away from an edge.
+   recover explicitly after faults. Ordinary arm does not clear a latch; only
+   local USB rearm with healthy fresh readings does, and it leaves motion disarmed. Never blindly reverse away from an edge.
 6. Test Sense screen/camera/PDM/audio separately, then UART, then the integrated
    load. Only then try contained low-speed movement and pickups.
 

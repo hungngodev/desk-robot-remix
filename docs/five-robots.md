@@ -59,20 +59,19 @@ uv run desk-robot --config config/local.toml secrets --add-missing
 ```
 
 Values stay in ignored `config/local.env`, permissions 0600, hidden from output.
-**The following commands are historical Freenove references, not Sense commands.**
-The new Sense target is not implemented. After it is added and qualified, prepare
-each head using its own configured identity,
+**Sense now compiles, but physical peripheral/fit tests remain.** After it is
+qualified, prepare each head using its own configured identity,
 rebuilding one private binary at a time; see [firmware builds](build.md):
 
 ```sh
-python3 firmware/head/private_config.py --config config/local.toml --board modular --robot robot-05 --server-ip MAC_LAN_IP
-bash scripts/build_head.sh --board modular --private
+python3 firmware/head/private_config.py --config config/local.toml --board sense --robot robot-05 --server-ip MAC_LAN_IP
+bash scripts/build_head.sh --board sense --private
 ```
 
 The private-config helper looks up that robot's exact token environment name.
 Never flash the last robot's private binary onto another unit. No devices have
-been selected or flashed. The Sense board needs its own camera/PDM/SSD1306/8 MB configuration and successful
-build; these historical Freenove commands do not produce that firmware.
+been selected or flashed. The separate Sense camera/PDM/SSD1306/8 MB build is available. It must still pass
+actual camera, OLED, microphone, speaker, UART, power and case tests per unit.
 
 After local speech/model setup and individual head audio tests:
 

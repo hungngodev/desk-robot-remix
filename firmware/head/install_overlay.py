@@ -12,7 +12,11 @@ from pathlib import Path
 
 PIN = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
 BOARD = "main/boards/desk-robot/desk-robot-core-s3"
-BOARDS = {"cores3": BOARD, "modular": "main/boards/desk-robot/desk-robot-modular-s3"}
+BOARDS = {
+    "cores3": BOARD,
+    "modular": "main/boards/desk-robot/desk-robot-modular-s3",
+    "sense": "main/boards/desk-robot/desk-robot-sense-s3",
+}
 MARKER = ".desk-robot-head-overlay.json"
 HERE = Path(__file__).resolve().parent
 
@@ -184,6 +188,21 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     """Reuse the bridge/locking overlay, replacing only the selected board adapter."""
     if board not in BOARDS:
         raise ValueError(f"Unknown board: {board}")
+    if board == "sense":
+        # Reuse the tested common camera/bridge changes without changing either
+        # existing board adapter or its separate build copy.
+        files = {
+            name: data.replace(b"DESK_ROBOT_MODULAR_S3", b"DESK_ROBOT_SENSE_S3")
+            .replace(b"Desk robot modular S3 (Freenove N16R8)", b"Desk robot XIAO ESP32S3 Sense")
+            .replace(b"desk-robot/desk-robot-modular-s3", b"desk-robot/desk-robot-sense-s3")
+            for name, data in planned_files(target, "modular").items()
+            if not name.startswith(BOARDS["modular"] + "/")
+        }
+        for folder in (HERE / "sense", HERE / "overlay"):
+            for path in folder.iterdir():
+                if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+                    files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+        return files
     files = cores3_files(target)
     if board == "cores3":
         return files

@@ -1,7 +1,8 @@
 > Design update 2026-11-03: this documents the existing DC-body/Freenove protocol.
-> Stepper identity, sensor fault/status capabilities, face events and an operator
-> pet lease are proposed in `docs/plans/2026-11-03-active-desk-pet.md`, not current
-> commands. Do not infer cliff protection or reusable roam permission from this API.
+> Body status now adds protocol2, backend and safety state. Stepper/guard policy
+> compiles but real sensor I/O/calibration is absent, so the stepper build cannot arm.
+> `rearm` is local body USB only, rejected by the bridge/laptop; ordinary arm
+> cannot clear a fault. Face events/pet lease remain planned. See firmware-foundation.md.
 
 # Integration contract (implementation baseline)
 

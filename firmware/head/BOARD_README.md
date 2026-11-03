@@ -1,5 +1,5 @@
 > Design update 2026-11-03: these are preserved CoreS3/Freenove build references.
-> The candidate Sense/PDM/SSD1306/8 MB board is not yet implemented.
+> The separate Sense/PDM/SSD1306/8 MB board now compiles; see sense/README.md.
 > See `docs/modular-head.md`; no S3 is owned and no hardware is flashed.
 
 # Desk robot CoreS3 Lite

@@ -32,13 +32,16 @@ The revised design uses **four downward floor sensors, one separate front
 obstacle sensor and an I²C mux**, controlled locally by the WROOM. Proposed pet
 behavior adds curiosity, rest, attention and peer activities with human-enabled
 bounded motion. Begin with stationary expression; then one moving robot at a
-time in a qualified clear area. Neither cliff firmware nor active roaming is
-implemented yet. A sensor arrangement alone does not guarantee against falling.
+time in a qualified clear area. Portable cliff-fault policy is implemented, but actual sensor acquisition and
+calibration are not; the new stepper build refuses arming. Active roaming remains
+unimplemented. A sensor arrangement alone does not guarantee against falling.
 
 ## What already works in software
 
-The earlier DC-motor body/Freenove head builds and five-robot mock conversation
-exist. They do not validate the new stepper/Sense/sensor design. No robot has
+The new Sense-head target and stepper/DC body profiles compile. Stepper timing,
+sensor fault policy and local-only recovery have host tests; actual sensor I/O
+and measured calibration are unfinished. Five-robot mock conversation still works.
+See [implementation progress](docs/firmware-foundation.md). No robot has
 been flashed, assembled or physically accepted; no CAD geometry has changed.
 
 ```sh
@@ -54,9 +57,9 @@ real speech, gripping, cliffs or pet autonomy. Hardware examples keep motion off
 Keep credentials private; `secrets --add-missing` preserves existing tokens.
 
 Existing controls boot disarmed, use 250 ms bounded drive, a 500 ms watchdog,
-one-use operator permits and separate model/operator credentials. New local
-sensor stopping and a separate operator-granted pet-mode lease are planned, not
-available commands. Watchdog stop holds servo PWM; explicit disarm releases it.
+one-use operator permits and separate model/operator credentials. Local sensor-fault policy is implemented, but not yet wired to real ToF reads.
+Ordinary arm cannot clear its latch; recovery is local USB only. A separate
+operator-granted pet-mode lease remains planned, not an available command. Watchdog stop holds servo PWM; explicit disarm releases it.
 
 ## Source organization
 

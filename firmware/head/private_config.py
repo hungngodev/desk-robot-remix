@@ -30,7 +30,7 @@ def main():
     p.add_argument("--robot", required=True)
     p.add_argument("--config", type=Path, default=ROOT / "config/fleet.example.toml")
     p.add_argument("--secrets", type=Path, default=ROOT / "config/local.env")
-    p.add_argument("--board", choices=["cores3", "modular"], default="cores3")
+    p.add_argument("--board", choices=["cores3", "modular", "sense"], default="cores3")
     p.add_argument(
         "--server-ip", required=True, help="Mac LAN IPv4 address, reachable from the head"
     )
@@ -50,11 +50,11 @@ def main():
     token = os.environ.get(name, values.get(name, ""))
     if not re.fullmatch(r"[a-zA-Z0-9_-]{32,128}", token):
         p.error("Generate local credentials first; the head token is missing/invalid")
-    build, variant = (
-        ("xiaozhi-modular", "desk-robot-modular-s3")
-        if args.board == "modular"
-        else ("xiaozhi", "desk-robot-core-s3")
-    )
+    build, variant = {
+        "cores3": ("xiaozhi", "desk-robot-core-s3"),
+        "modular": ("xiaozhi-modular", "desk-robot-modular-s3"),
+        "sense": ("xiaozhi-sense", "desk-robot-sense-s3"),
+    }[args.board]
     board = ROOT / "firmware/head/build" / build / "main/boards/desk-robot" / variant
     config = json.loads((board / "config.json").read_text())
     config["builds"][0]["sdkconfig_append"] = [

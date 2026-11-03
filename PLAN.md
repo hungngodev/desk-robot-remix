@@ -1,6 +1,6 @@
 # Five active desk pets — budget remix
 
-Updated 2026-11-03. Build one working core, then duplicate it four times. Each
+Updated 2026-11-03. [Firmware implementation progress](docs/firmware-foundation.md). Build one working core, then duplicate it four times. Each
 robot has a camera, animated OLED face, microphone, speaker, slow tracked drive,
 lift/gripper, local edge sensing and its own identity. Only removable hats and
 costumes differ. Pick up actual flat keys and wrapped candy. Reuse existing
@@ -40,12 +40,12 @@ still needed. The former $36.88 DC-motor BOM is archived.
 | Lift/grip | Saved [Bluino gripper](https://www.thingiverse.com/thing:4253681) and linked [SMARS forklift](https://www.thingiverse.com/thing:3027255). Check MG90S pocket, horn and sweep; combined fit on the stepper variant is unproven. |
 | Head electronics | Candidate [XIAO ESP32S3 Sense bundle](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html), $13.99; includes camera and digital microphone. Add owned SSD1306, MAX98357A and speaker. No separate INMP441 purchase. |
 | Head case | Saved [EVA Robot shell](cad/originals/eva-head/README.md). Small OLED bezel, Sense/camera spacers, head bracket and sensor brackets only; fit remains a gate. |
-| Voice/camera | Pinned [Xiaozhi firmware](https://github.com/78/xiaozhi-esp32) and [server](https://github.com/xinnan-tech/xiaozhi-esp32-server); add a Sense-specific PDM mic/camera/SSD1306/8 MB configuration, rather than rewrite drivers. |
-| Motor boundary | Existing local [Verdure-inspired UART bridge](https://github.com/maker-community/VerdureBuddyRover/blob/main/docs/xiaozhi-mcp-serial-integration.md). Add a stepper backend and WROOM sensor interlock. |
+| Voice/camera | Pinned [Xiaozhi firmware](https://github.com/78/xiaozhi-esp32) and [server](https://github.com/xinnan-tech/xiaozhi-esp32-server); Sense-specific PDM mic/camera/SSD1306/8 MB target now compiles using existing drivers. |
+| Motor boundary | Existing local [Verdure-inspired UART bridge](https://github.com/maker-community/VerdureBuddyRover/blob/main/docs/xiaozhi-mcp-serial-integration.md). Prototype stepper backend and portable sensor interlock implemented; hardware ToF acquisition/calibration still pending. |
 | Expression/initiative | RoboEyes, Tech Talkies, WALL-E and Open Duck are references, with [license and behavior findings](docs/research/2026-11-03-active-pet-sources.md). Preserve license boundaries before copying. |
 
-The Sense is a new purchase and firmware target. The existing Freenove 16 MB,
-I²S microphone, SH1106 build is historical evidence, not a Sense binary. Camera
+The Sense remains a new purchase. Its separate 8 MB firmware now compiles. The
+existing Freenove 16 MB/I²S microphone/SH1106 binary is not a Sense binary. Camera
 revisions vary; verify the delivered module and actual pin allocation.
 
 ## Responsibilities
@@ -74,8 +74,8 @@ and cannot also measure an object in the claw.
 | One front downward ToF | Cheap, like the video, but uncovered rear/corner travel. | Reject for general table roaming. |
 
 The WROOM must stop locally on a cliff, stale/invalid reading, sensor/bus failure
-or missing calibration. Boot disarmed; latch the fault until a person rearms on
-a verified surface. No blind automatic reverse or automatic resumption. Retain
+or missing calibration. Boot disarmed; latch the fault until a person clears it locally on
+a verified surface. Ordinary job `arm` cannot clear a fault; `rearm` is body-USB-only. No blind automatic reverse or automatic resumption. Retain
 the 500 ms communication watchdog and 250 ms bounded drive; local edge checks
 must stop sooner as required by measured clearance. Stop holds the gripper target
 rather than dropping a payload. Final hold/coast behavior needs current, thermal
@@ -150,10 +150,13 @@ Detailed files, tests and milestones are in the
 - [x] Inventory, budget, video/source audit and revised design documented.
 - [x] Existing stepper chassis/wheel originals saved with source, hashes and license caveat.
 - [ ] Stepper/lift/head fit and source-chain redistribution terms qualified.
-- [ ] Sense head, stepper drive, cliff interlock and active-pet software implemented.
+- [x] Sense target and stepper/DC body profiles compile; portable stepper and sensor-guard tests pass.
+- [ ] Actual ToF/mux acquisition and measured calibration integrated; stepper profile currently refuses arming.
+- [ ] Animated face, pet scheduler, memory and supervised pet-mode lease implemented.
 - [ ] Delivered order, power, sensors, assembly and physical acceptance verified.
 - [ ] Four duplicates and physical five-robot interaction verified.
 
-Historical 90 checks do not validate these proposed additions. No robot has been
+Historical 90 checks do not validate these additions. Current software evidence
+is recorded separately in [firmware foundation](docs/firmware-foundation.md). No robot has been
 flashed, no CAD geometry changed and no physical success is claimed. Preserve
 licenses and inspect the active Fusion design before precision CAD edits.

@@ -22,6 +22,10 @@ int main() {
         assert(ParseCommand(verb, true, c));
         assert(ExpectedAck(c) == std::string("OK ") + verb);
     }
+    // Guard fault recovery is a body-local USB action, never a bridge command,
+    // even when the caller has ordinary head/operator movement authority.
+    assert(!ParseCommand("rearm", true, c));
+    assert(!ParseCommand("rearm", false, c));
     assert(!ParseCommand(std::string(96, 'x'), true, c));
     for (int value = 0; value < 256; ++value) {
         if (value >= 32 && value <= 126) continue;

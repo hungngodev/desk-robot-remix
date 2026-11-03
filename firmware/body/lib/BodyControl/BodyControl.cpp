@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "CliffGuard.h"
 
 #include <cstdio>
 #include <cstring>
@@ -73,6 +74,13 @@ std::uint32_t BodyControl::drive_remaining(std::uint32_t now_ms) const {
 }
 
 void BodyControl::tick(std::uint32_t now_ms) {
+  if (profile_ == BodyProfile::StepperGuarded &&
+      (guard_ == nullptr || !guard_->evaluate(now_ms))) {
+    stop_motion();
+    state_.armed = false;
+    // A floor/bus fault must not deliberately release a held payload.
+    return;
+  }
   if (!state_.armed) return;
   // Unsigned elapsed arithmetic remains correct when millis() wraps.
   if (now_ms - last_control_ms_ >= kWatchdogMs) {
@@ -97,7 +105,7 @@ void BodyControl::tick(std::uint32_t now_ms) {
 
 void BodyControl::execute(const char* line, std::size_t length,
                           std::uint32_t now_ms, char* reply,
-                          std::size_t capacity) {
+                          std::size_t capacity, bool local_safety_rearm) {
   tick(now_ms);
   if (length > kMaxLineLength) {
     std::snprintf(reply, capacity, "ERR input line_too_long");
@@ -136,12 +144,13 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool lift = std::strcmp(command, "lift") == 0;
   const bool grip = std::strcmp(command, "grip") == 0;
   const bool arm = std::strcmp(command, "arm") == 0;
+  const bool rearm = std::strcmp(command, "rearm") == 0;
   const bool disarm = std::strcmp(command, "disarm") == 0;
   const bool stop = std::strcmp(command, "stop") == 0;
   const bool keepalive = std::strcmp(command, "keepalive") == 0;
   const bool ping = std::strcmp(command, "ping") == 0;
   const bool status = std::strcmp(command, "status") == 0;
-  if (!(drive || lift || grip || arm || disarm || stop || keepalive || ping || status)) {
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
@@ -186,13 +195,42 @@ void BodyControl::execute(const char* line, std::size_t length,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
-        "\"watchdog_ms\":%lu,\"drive_ms\":%lu}",
+        "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
+        "\"backend\":\"%s\",\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"fault\":\"%s\",\"sensor\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
         state_.lift, state_.grip, state_.lift_target, state_.grip_target,
         state_.servos_attached ? "true" : "false",
         static_cast<unsigned long>(watchdog_remaining(now_ms)),
-        static_cast<unsigned long>(drive_remaining(now_ms)));
+        static_cast<unsigned long>(drive_remaining(now_ms)),
+        profile_ == BodyProfile::StepperGuarded ? "stepper_28byj48" : "dc_pwm",
+        profile_ == BodyProfile::StepperGuarded ? "true" : "false",
+        profile_ == BodyProfile::StepperGuarded && guard_ != nullptr &&
+            guard_->evaluate(now_ms) ? "true" : "false",
+        profile_ != BodyProfile::StepperGuarded ? "not_required" :
+            guard_ == nullptr ? "missing_guard" : CliffGuard::fault_name(guard_->fault()),
+        static_cast<unsigned>(guard_ == nullptr ? kNoFaultSensor : guard_->fault_sensor()));
+  } else if (rearm) {
+    // Head/HTTP/MCP jobs may arm only an already-clear body. A new local USB
+    // action is required after a fault; an older job permit cannot clear it.
+    if (!local_safety_rearm) {
+      std::snprintf(reply, capacity, "ERR rearm local_only");
+      return;
+    }
+    stop_motion();
+    state_.armed = false;
+    if (profile_ != BodyProfile::StepperGuarded || guard_ == nullptr ||
+        !guard_->try_rearm(now_ms)) {
+      std::snprintf(reply, capacity, "ERR rearm safety_interlock");
+      return;
+    }
+    std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (profile_ == BodyProfile::StepperGuarded &&
+        (guard_ == nullptr || !guard_->evaluate(now_ms))) {
+      std::snprintf(reply, capacity, "ERR arm safety_interlock");
+      return;
+    }
     // Explicit re-arm also clears earlier targets; it never resumes old motion.
     stop_motion();
     state_.armed = true;
@@ -236,7 +274,7 @@ bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
     } else if (invalid_) {
       std::snprintf(reply, capacity, "ERR input invalid_ascii");
     } else {
-      control.execute(line_, length_, now_ms, reply, capacity);
+      control.execute(line_, length_, now_ms, reply, capacity, local_safety_rearm_);
     }
     length_ = 0;
     saw_cr_ = false;

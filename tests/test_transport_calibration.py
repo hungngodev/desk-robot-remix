@@ -17,6 +17,7 @@ from desk_robot.transport import HeadError, HttpHead, validate_command
         "lift 59",
         "stop extra",
         "arm ",
+        "rearm",  # local body USB recovery is never a network movement command
         "drive 0  0 100",
     ],
 )

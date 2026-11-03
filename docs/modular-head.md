@@ -15,22 +15,23 @@ OV3660 or OV5640 AF; verify actual delivered sensor, cable and lens housing. The
 camera/microphone stack is about 21 × 17.8 × 15 mm. No new INMP441 is required.
 
 The proposed head reuses pinned Xiaozhi camera, SSD1306, PDM input and I²S output
-components. It needs a **new Sense board target**, pin map and 8 MB partition/
-asset configuration. The existing modular build is Freenove 16 MB + SH1106 +
+components. A **separate Sense board target**, pin map and 8 MB partition/asset configuration
+are now implemented and compiled. See [actual pins/build](../firmware/head/sense/README.md)
+and [verification](firmware-foundation.md). The existing modular build is Freenove 16 MB + SH1106 +
 INMP441 I²S; it cannot be flashed to Sense. CoreS3 and WROOM binaries are also
-incompatible. No Sense configuration/build/physical test has happened yet.
+incompatible. The Sense build passes; no physical Sense test has happened.
 
-Preliminary header budget: OLED2 + amplifier3 + UART2 = seven signals, with
-camera/PDM internally connected. This is not a validated allocation. Inspect the
-actual schematic, reserve camera/mic, USB, flash/PSRAM and boot functions, then
-select safe pins. Disable SD where pins are reused. Do not copy video GPIO1/2
+Implemented, physically unqualified header budget: OLED2 + amplifier3 + UART2 = seven signals, with
+camera/PDM internally connected. The allocation was checked against official documentation and compiled; it is
+not physically qualified. OLED5/6, amplifier4/7/8 and UART2/1 preserve nativeUSB,
+camera/PDM and PSRAM pins. SD is disabled and CS21 held high; leave its slot empty. Do not copy video GPIO1/2
 sensor wiring or the old Freenove UART pin numbers blindly. The body owns all
 cliff sensors; the head owns OLED, so no shared two-master bus is required.
 
-The earlier 2,500,528-byte app suggests an 8 MB OTA-slot build may be feasible,
-but its full merged image is not an 8 MB Sense image. Select correct partitions,
-reduce/measure assets as required and build/check actual sizes; never truncate a
-binary. Firmware installation/build scripts do **not** yet accept `--board sense`.
+The new Sense app is 2,503,664 bytes and passes the 0x2f0000-byte OTA-slot check;
+assets fit at 0x600000 in the 8 MB layout. The earlier Freenove merged image is
+not a Sense image; never truncate or substitute it. Firmware installation/private/build scripts now accept `--board sense`, using
+a separate ignored `xiaozhi-sense` copy.
 [Implementation milestone](plans/2026-11-03-active-desk-pet.md#milestone-4--sense-head-and-original-face).
 
 ## Face and interaction

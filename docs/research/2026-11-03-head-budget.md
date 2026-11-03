@@ -1,6 +1,7 @@
 # Head and budget verification — 2026-11-03
 
-The user owns classic ESP32-WROOM-32 boards and **no ESP32-S3**. The Sense board below is a proposed purchase. It does not make the existing Freenove firmware compatible without a board configuration change and a successful build/bench test.
+The user owns classic ESP32-WROOM-32 boards and **no ESP32-S3**. The Sense board below remains a proposed purchase; its separate firmware target
+now compiles, as recorded in [firmware progress](../firmware-foundation.md). It does not make the existing Freenove firmware compatible without a board configuration change and a successful build/bench test.
 
 ## Exact head candidate
 

@@ -1,6 +1,6 @@
 # Active Desk Pet Implementation Plan
 
-> **For implementation:** Use the installed executing-plans workflow, preserve the current checkout and validate each milestone before enabling hardware motion. This file is a plan; the runtime additions below do not exist yet.
+> **For implementation:** Use the installed executing-plans workflow, preserve the current checkout and validate each milestone before enabling hardware motion. This file records the implementation sequence. See the progress note below before treating a task as unfinished.
 
 **Goal:** Build one affordable, expressive, camera-equipped desk rover that can
 initiate supervised activities, avoid qualified table edges locally, and lift
@@ -17,7 +17,15 @@ VL53L0X/TCA9548A, SSD1306, ULN2003/28BYJ-48, MG90S; shared Ollama/Qwen3,
 SenseVoice, Kokoro and OpenCV/YOLO-World. RoboEyes is a GPL-3.0 integration
 candidate, not an already-installed dependency.
 
-## Current baseline and constraints
+## Implementation progress — 2026-11-03
+
+Stepper timing, portable guard policy, local-USB-only recovery and separate
+Sense8MB/PDM/SSD1306 target are implemented and compile. Actual sensor I/O and
+measured calibration remain missing; the stepper target refuses arming. Pet
+scheduler/animation/memory remain unimplemented.
+[Evidence and remaining gates](../firmware-foundation.md).
+
+## Baseline before this implementation and constraints
 
 Read [master plan](../../PLAN.md), [inventory](../../hardware/fleet-inventory.json),
 [parts](../../hardware/parts.md), [sensor requirements](../research/2026-11-03-cliff-sensors.md),
@@ -138,7 +146,8 @@ legacy DC configuration if useful; do not make one pin map drive both backends.
    must latch wheel stop and reject every later drive until human rearm.
 3. The central output gate checks sensor health for manual, serial, MCP, pickup
    and pet paths. Stop must not drop gripper PWM. Healthy samples do not clear a
-   latch. Never implement automatic reverse as cliff recovery.
+   latch. Ordinary job arm must not clear a fault: the implemented recovery is
+   local body-USB-only rearm, which leaves motion disarmed. Never automatically reverse.
 4. Configure each same-address sensor on one mux channel, verify 3.3 V pullups,
    time-bounded reads, reset behavior and continuous ranging. Do not wait for five
    full sequential measurement cycles inside the motor loop. Bus recovery remains stopped.
@@ -195,7 +204,7 @@ all-table operation. One front ToF has no side/rear collision coverage.
 
 **Validation:** existing overlay test command plus new Sense tests,
 `uv run pytest firmware/head/tests -q`; only after adding `sense`, run
-`bash scripts/build_head.sh --board sense`. Today that selector does not exist.
+`bash scripts/build_head.sh --board sense`. The Sense selector and a successful build now exist; physical tests remain.
 Hardware flashing remains an explicit device-specific action after successful build.
 
 ## Milestone 5 — stationary pet behavior and per-robot memory
@@ -295,7 +304,7 @@ and trial guides; add focused keyframe tests if sequences are introduced.
 
 ## Work completed by this planning update
 
-Inventory/BOM/guides and dated source audits updated; no Sense target, stepper
-backend, cliff firmware, pet scheduler, CAD geometry or physical test is claimed
-implemented. Next engineering milestone is source/fit/power verification followed
-by portable stepper and interlock code, keeping hardware motion disabled.
+The planning update saved inventory/BOM/source audits. Subsequent implementation
+added stepper timing, guard policy/local recovery and a compiled Sense target.
+Actual sensor I/O/calibration, face/pet/memory work and all physical qualification
+remain. Keep hardware motion disabled while those gates are unresolved.

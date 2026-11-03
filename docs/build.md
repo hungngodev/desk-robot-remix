@@ -2,21 +2,22 @@
 
 These commands build files. **Nothing in setup automatically flashes hardware.**
 
-Updated 2026-11-03: this guide preserves earlier tested targets. No Sense build
-selector, stepper backend, cliff interlock or pet-mode command exists yet. Follow
+Updated 2026-11-03: this guide preserves earlier tested targets. Sense and stepper build selectors now exist; portable fault policy is tested,
+but ToF I/O/calibration and pet mode remain unfinished. See
+[firmware progress](firmware-foundation.md). Follow
 the [new implementation plan](plans/2026-11-03-active-desk-pet.md) for that work.
 The body target is classic ESP32-WROOM-32. The compiled head reference is **Freenove N16R8 with separate OLED/audio
 modules**; select it explicitly with `--board modular`. The proposed XIAO ESP32S3 Sense is not compatible with this pin map or binary;
-its PDM microphone, SSD1306 and 8 MB target are not implemented.
+its PDM microphone, SSD1306 and 8 MB target are separately implemented.
 CoreS3 is an earlier reference with its own build copy. See the
 [modular-head guide](modular-head.md) for parts/case and hardware checks. Do not
 flash CoreS3 images onto Freenove, or S3 images onto WROOM.
 
-## Body — current DC firmware only
+## Body — guarded stepper default and explicit legacy DC
 
-The proposed ULN2003/28BYJ-48 body needs a new phase-generation backend and
-local cliff interlock. Current commands below build DC PWM firmware; do not
-connect it to the proposed eight-wire stepper map.
+The default build is now `esp32_stepper`, with eight phase outputs and guarded
+control. It has no ToF I/O/calibration supplied, so it refuses arming. Use explicit
+`-e esp32dev` only for the legacy DC allocation; never connect it to stepper wiring.
 
 From the project root:
 
@@ -32,7 +33,8 @@ The platform is pinned to espressif32 6.9.0 (Arduino 2.0.17). Its generic
 `esp32dev` profile compiled for the WROOM development board, but the actual
 board's flash/reset/USB interface still needs confirmation.
 
-When your board is connected, identify its exact port using:
+No upload is appropriate for the unfinished guarded build. After hardware and
+sensor qualification, identify the exact board/port explicitly; port listing is read-only:
 
 ```sh
 .tools/body-pio-venv/bin/pio device list
@@ -44,7 +46,8 @@ After confirming the port belongs to the WROOM, upload explicitly with
 servo horns removed, separate actuator supply and common ground for the first
 test. No port has been selected and nothing has been uploaded in this session.
 
-One bounded USB bench test, after wiring/centering:
+For legacy servo-only bench work with motors disconnected, after wiring/centering:
+The helper cannot clear the guarded profile’s sensor latch or grant recovery.
 
 ```sh
 uv run python scripts/serial_bench.py --port PORT --command "grip 95"

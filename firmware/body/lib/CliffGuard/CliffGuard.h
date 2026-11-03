@@ -1,0 +1,75 @@
+#pragma once
+
+#include <cstdint>
+
+namespace desk_robot {
+
+constexpr std::uint8_t kFloorSensorCount = 4;
+constexpr std::uint8_t kCliffSensorCount = 5;
+constexpr std::uint8_t kNoFaultSensor = 255;
+
+struct FloorInterval {
+  std::uint16_t min_mm = 0;
+  std::uint16_t max_mm = 0;
+};
+
+// Values are per-robot measured qualification inputs, not universal thresholds.
+// No calibrated configuration or sample is supplied by default.
+struct CliffConfig {
+  bool calibrated = false;
+  FloorInterval floor[kFloorSensorCount]{};
+  std::uint16_t front_obstacle_mm = 0;
+  std::uint16_t front_max_mm = 0;
+  std::uint32_t freshness_ms = 0;
+};
+
+enum class CliffFault : std::uint8_t {
+  None,
+  Unconfigured,
+  MissingSample,
+  InvalidSample,
+  StaleSample,
+  FloorOutOfRange,
+  FrontObstacle,
+  FrontOutOfRange,
+  BusFailure,
+  InvalidChannel
+};
+
+// Pure policy only: it neither reads I2C nor arms/moves hardware. The caller must
+// evaluate before every output/control path and stop on false. A healthy update
+// never clears a fault. Only an explicit, authorized try_rearm may clear it.
+class CliffGuard {
+ public:
+  bool configure(const CliffConfig& config);
+  void sample(std::uint8_t channel, std::uint16_t distance_mm, bool valid,
+              std::uint32_t now_ms);
+  void bus_fault();
+  bool evaluate(std::uint32_t now_ms);
+  bool try_rearm(std::uint32_t now_ms);
+  bool configured() const { return configured_; }
+  CliffFault fault() const { return fault_; }
+  std::uint8_t fault_sensor() const { return fault_sensor_; }
+  static const char* fault_name(CliffFault fault);
+
+ private:
+  struct Sample {
+    bool present = false;
+    bool valid = false;
+    std::uint16_t mm = 0;
+    std::uint32_t at_ms = 0;
+  };
+  CliffConfig config_{};
+  Sample samples_[kCliffSensorCount]{};
+  bool configured_ = false;
+  CliffFault fault_ = CliffFault::Unconfigured;
+  std::uint8_t fault_sensor_ = kNoFaultSensor;
+
+  static bool valid_config(const CliffConfig& config);
+  CliffFault sample_fault(std::uint8_t channel) const;
+  bool current_health(std::uint32_t now_ms, CliffFault& reason,
+                      std::uint8_t& sensor) const;
+  void latch(CliffFault reason, std::uint8_t sensor = kNoFaultSensor);
+};
+
+}  // namespace desk_robot

@@ -2,8 +2,9 @@
 
 Updated 2026-11-03: use the reported **positional MG90S**, two required, count
 unknown. Verify its pocket/horn fit against the source SG90 mechanism. SER0043
-is continuous rotation and cannot hold a commanded claw/lift angle. The current
-body build can test its servo outputs alone, but cannot run the proposed steppers.
+is continuous rotation and cannot hold a commanded claw/lift angle. Use the explicit legacy DC profile only for servo-only tests with motors
+disconnected. The new stepper profile has tested control but no sensor I/O or
+calibration supplied, so it refuses arming.
 
 Test your actual **flat key and candy** before buying the complete rover/head.
 The existing mechanism's floor clearance and gripping ability are unproven.
