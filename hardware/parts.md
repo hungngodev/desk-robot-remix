@@ -5,6 +5,13 @@ $50 delivered cap.** Assumes two usable owned MG90S servos and a suitable owned
 bank. User estimates about ten MG90S; exact count/condition is unconfirmed.
 The bank has no readable rating label and is unidentified. No order is ready.
 
+## Amazon preference
+
+[Amazon US alternatives](amazon-parts.md) are recorded separately: **$59.83 in
+package purchases**, before power parts, shipping or tax. They exceed the $50
+prototype cap. The $35.45 target below uses other suppliers and owned parts;
+it must not be described as an Amazon basket. No substitutions or purchases made.
+
 ## Buy candidates for one robot
 
 | Component | One / five robots | Unit USD | First robot | Link and qualification |

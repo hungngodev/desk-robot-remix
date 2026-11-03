@@ -34,6 +34,15 @@ Do not multiply this reuse-based price by five as a fleet quote: five more
 stepper/driver pairs are missing; screen, bank and WROOM counts remain unknown.
 The estimated ten MG90S may cover the fleet, subject to confirmation. The former $36.88 DC-motor BOM is archived.
 
+## Amazon preference
+
+User prefers Amazon where possible. [Checked Amazon US candidates](hardware/amazon-parts.md)
+currently total **$59.83 in electronics packages**, or **$69.83 with existing
+power/decoupling allowances, before shipping/tax**. The first-prototype cap stays
+$50; this is over cap and not order-ready. The original $35.45 supplier target
+is not an Amazon price. Keep Sense as the candidate head; the earlier $9.58
+bare-board/microphone subtotal excluded its compatible camera/interface.
+
 ## Existing projects to combine
 
 | Function | Choice and remaining adaptation |

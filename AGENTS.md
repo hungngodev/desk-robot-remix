@@ -22,6 +22,9 @@
 - Keep hardware motion off by default. Preserve 500ms watchdog, 250ms drive,
   one-use operator permits and separate model/operator credentials. Proposed
   pet lease is operator-only, expiring and preemptible; not a current command.
+- Amazon is preferred where possible; checked alternatives are in hardware/amazon-parts.md.
+  Do not apply supplier prices to Amazon or silently raise the $50 cap; current
+  Amazon-only package spend exceeds it before power parts/charges.
 - First prototype delivered cap $50, conditional target $35.45 before charges
   and missing reused parts. No unqualified five-times reuse fleet quote.
 - No purchases, flashing or external publishing without device/order-specific
