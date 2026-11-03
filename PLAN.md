@@ -1,84 +1,159 @@
-# Desk robot remix — five identical budget cores
+# Five active desk pets — budget remix
 
-Updated 2026-10-30 from the user's cheaper, five-unit direction. Each unit retains
-camera, screen, microphone, speaker, movement, lift and grip. Only removable hats
-or costumes differ. Shared Mac provides speech, vision and conversation.
+Updated 2026-11-03. Build one working core, then duplicate it four times. Each
+robot has a camera, animated OLED face, microphone, speaker, slow tracked drive,
+lift/gripper, local edge sensing and its own identity. Only removable hats and
+costumes differ. Pick up actual flat keys and wrapped candy. Reuse existing
+designs; limit CAD to mounts, spacers, bezel inserts, clearance fixes and jaw tips.
 
-## Cost and selection
+## Inventory and cost
 
-Inventory correction, 2026-10-31: the user owns ESP32-WROOM-32 boards and **no
-ESP32-S3**. The earlier pasted N8R8 statement was incorrect. Keep an S3/camera
-head as a provisional purchase, not an owned part. The WROOM remains usable as
-the body controller; do not flash S3 head firmware onto it. Uno/Pico boards do
-not supply the missing S3 camera-head hardware or expand the WROOM's RAM.
+**No ESP32-S3 is owned.** The user's explicit correction overrides the repeated
+older pasted N8R8 inventory. Keep the owned ESP32-WROOM-32 as the body controller.
+An Uno, Pico or Raspberry Pi is unnecessary: the shared Mac supplies STT, TTS,
+LLM, vision and persistent memory.
 
-First prototype delivered cap **$50**, using one owned WROOM and a usable owned
-USB power bank. [Parts target](hardware/parts.md): **$36.88 before shipping/tax**,
-with three allowances. The $7.11 S3/camera listing is a procurement candidate,
-**not qualified for the compiled Freenove firmware**. Check its schematic/GPIO,
-programming and case fit before purchase. No delivered cart is complete.
+Newly reported inventory replaces the old N20/SG90 shopping direction:
 
-Five times that target is $184.40 before order charges and any missing WROOMs or
-power banks. Exact owned counts and five-unit quotes are unknown; do not assume
-five free controllers/batteries. Build and validate one before buying multiples.
-The old $117.33 retail BOM is archived, not the active plan.
+- Five 5 V 28BYJ-48 steppers and five ULN2003 boards: two drive bases plus one
+  spare motor/driver, not five robots.
+- Positional MG90S servos, count unknown: need two per robot, ten for five.
+- A 0.96-inch four-pin SSD1306 OLED, filament and ten DuPont-wire ribbons.
+- WROOM boards and at least one USB power bank; exact counts, bank current
+  rating, weight and dimensions remain unknown.
+- One SER0043 continuous servo: spare, unsuitable for angle-controlled lift/grip.
 
-## Existing sources and minimal changes
+**First-prototype target: $35.45 before shipping/tax**, conditional on two usable
+owned MG90S servos and other reused parts. **Delivered cap: $50.** The remaining
+$14.55 is for charges or missing items; this is not a completed delivered quote.
+See [components](hardware/parts.md), [BOM](hardware/bom.json) and
+[inventory](hardware/fleet-inventory.json). No purchase is ready or made.
+Do not multiply this reuse-based price by five as a fleet quote: five more
+steppers/drivers and unknown quantities of servos, screens, banks and WROOMs are
+still needed. The former $36.88 DC-motor BOM is archived.
 
-- [SMARS chassis/tracks](https://www.thingiverse.com/thing:2662828): keep two N20
-  geared motors and original drivetrain; no TT/servo drivetrain redesign.
-- [Bluino gripper](https://www.thingiverse.com/thing:4253681), linked SMARS lift:
-  two ordinary positional SG90 servos, one lift and one grip. Actual loaded
-  performance on flat keys and wrapped candy remains unproven.
-- [EVA Robot case](https://www.thingiverse.com/thing:7319190/files): original 3MF
-  saved; SH1106 1.3-inch monochrome OLED, S3 camera board, INMP441, MAX98357 and
-  speaker. Existing mounts need measured checks; emotion symbols/text initially.
-- [Xiaozhi firmware](https://github.com/78/xiaozhi-esp32) and
-  [server](https://github.com/xinnan-tech/xiaozhi-esp32-server): reuse camera,
-  display, audio and protocol drivers. [Verdure UART/MCP approach](https://github.com/maker-community/VerdureBuddyRover/blob/main/docs/xiaozhi-mcp-serial-integration.md)
-  links head to WROOM; bounded drive/lift/grip/stop/status commands already added.
-- Mac: Ollama/Qwen3, SenseVoice, Kokoro and YOLO-World/OpenCV. Full model-provider
-  and real-hardware bring-up still pending; mock demonstrations are labeled.
+## Existing projects to combine
 
-Small brackets, spacers, jaw tips, camera-aperture corrections and removable
-cosmetics are permitted. Preserve chassis/mechanism/shell and source licenses.
-Fusion MCP must be connected and the live design inspected before CAD editing.
-No geometry edits, new PCB, whole chassis or new arm are part of this phase.
+| Function | Choice and remaining adaptation |
+| --- | --- |
+| Drive body | Existing [SMARS 28BYJ-48 remix](https://www.thingiverse.com/thing:2778904/files), with [build/code reference](https://github.com/wtlx/smars-28byj-48). Correct stepper chassis/wheel originals are now saved; measure them before printing. The saved N20 chassis is not a stepper mount. |
+| Lift/grip | Saved [Bluino gripper](https://www.thingiverse.com/thing:4253681) and linked [SMARS forklift](https://www.thingiverse.com/thing:3027255). Check MG90S pocket, horn and sweep; combined fit on the stepper variant is unproven. |
+| Head electronics | Candidate [XIAO ESP32S3 Sense bundle](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html), $13.99; includes camera and digital microphone. Add owned SSD1306, MAX98357A and speaker. No separate INMP441 purchase. |
+| Head case | Saved [EVA Robot shell](cad/originals/eva-head/README.md). Small OLED bezel, Sense/camera spacers, head bracket and sensor brackets only; fit remains a gate. |
+| Voice/camera | Pinned [Xiaozhi firmware](https://github.com/78/xiaozhi-esp32) and [server](https://github.com/xinnan-tech/xiaozhi-esp32-server); add a Sense-specific PDM mic/camera/SSD1306/8 MB configuration, rather than rewrite drivers. |
+| Motor boundary | Existing local [Verdure-inspired UART bridge](https://github.com/maker-community/VerdureBuddyRover/blob/main/docs/xiaozhi-mcp-serial-integration.md). Add a stepper backend and WROOM sensor interlock. |
+| Expression/initiative | RoboEyes, Tech Talkies, WALL-E and Open Duck are references, with [license and behavior findings](docs/research/2026-11-03-active-pet-sources.md). Preserve license boundaries before copying. |
+
+The Sense is a new purchase and firmware target. The existing Freenove 16 MB,
+I²S microphone, SH1106 build is historical evidence, not a Sense binary. Camera
+revisions vary; verify the delivered module and actual pin allocation.
+
+## Responsibilities
+
+```mermaid
+flowchart LR
+  Mac[Shared Mac: speech, vision, memory, pet activities] <-->|Wi-Fi| Head[Sense head: camera, mic, OLED, speaker]
+  Head <-->|3.3 V UART| Body[Owned WROOM: bounded drive, servos, local stop]
+  Floor[Four floor sensors + front sensor via mux] --> Body
+  Body --> Drive[Two ULN2003 steppers + two MG90S servos]
+```
+
+## Edge sensing and bounded roaming
+
+Default candidate: **four downward VL53L0X modules**, one near each corner,
+**one separate forward obstacle module**, plus **one TCA9548A I²C multiplexer**.
+Five sensors and mux target $9.22 per robot. The mux avoids exhausting WROOM
+GPIOs with individual sensor-address reset wires. Body owns this bus; head owns
+its display bus. A single downward front sensor cannot cover reversing or pivots
+and cannot also measure an object in the claw.
+
+| Approach | Cost / tradeoff | Decision |
+| --- | --- | --- |
+| Four downward ToFs + front ToF + mux | $9.22 target; standoff, field of view, dark/glass surfaces and timing need tests. | Preferred candidate if body height and stops qualify. |
+| Four short-range IR floor sensors + separate obstacle sensor | Potentially cheaper; very low mounting height and surface-specific calibration required. | Budget fallback only after mount/surface tests; not an equivalent drop-in. |
+| One front downward ToF | Cheap, like the video, but uncovered rear/corner travel. | Reject for general table roaming. |
+
+The WROOM must stop locally on a cliff, stale/invalid reading, sensor/bus failure
+or missing calibration. Boot disarmed; latch the fault until a person rearms on
+a verified surface. No blind automatic reverse or automatic resumption. Retain
+the 500 ms communication watchdog and 250 ms bounded drive; local edge checks
+must stop sooner as required by measured clearance. Stop holds the gripper target
+rather than dropping a payload. Final hold/coast behavior needs current, thermal
+and stopping tests. [Sensor note](docs/research/2026-11-03-cliff-sensors.md).
+
+One front obstacle beam does not protect the sides/rear from collisions. Start
+with one moving robot in a clear contained area; allow reverse/pivots only where
+the complete swept footprint has qualified clearance. Four floor sensors are a
+proposed layout, not a guarantee against falling.
+
+## Make them feel alive
+
+Separate movement, navigation and initiative. Cheap tracks can support an active
+pet without reproducing a learned biped controller or adding a Pi.
+
+- **WROOM:** step timing, servos, sensors, watchdog and motor stop.
+- **Sense head:** camera/audio/display, local blinking, gaze and interaction input.
+- **Mac:** event-driven curiosity/social state, activity selection, object/person
+  observations, per-robot memory, occasional LLM decisions and group turn-taking.
+
+Begin with stationary blinking, listening gaze, sleepy pauses and touch/button
+reactions. Add supervised stop/look/short-move exploration, approaching a visible
+target in a cleared area, asking for attention, calibrated pickup sequences and
+bounded peer games. Use cooldowns and quiet mode; no LLM call every tick.
+Personality energy is not a claimed USB-bank battery measurement.
+
+Planned pet mode has a separate human-granted expiring motion lease: initially
+120 seconds, at most 300 seconds. Models cannot grant or renew it. Existing
+one-use manual/pickup permits remain unchanged. Fault, stop, expiry or disconnect
+cancels activity; queued wandering cannot restart on its own. Manual work and
+pickup preempt roaming. Default motion remains off.
+
+All five can animate and talk, but initially **only one moves at a time** in a
+reserved clear area. Existing digital peer messages and serialized speech avoid
+five robots talking over each other. Simultaneous free roaming, chasing and
+physical handoff require later collision/pose qualification.
+
+Aesthetic direction: compact WALL-E-like tracks, an original expressive face,
+Mochi-style removable accessories, EMO-like initiative and Duck-like gaze/pauses.
+Do not copy commercial assets or replace the chassis with a new brass-frame build.
+The [twelve-video audit](docs/research/2026-11-03-video-audit.md) distinguishes
+creator descriptions, published code and unverified timestamp claims. We did not
+watch every frame or validate these builds physically.
 
 ## Build order and acceptance
 
-1. Complete exact head-board qualification, actual power-bank rating/load/fit,
-   speaker mount, component clearances and delivered prototype cost under $50.
-2. Print one SG90 fit part and the original gripper/lift; test real flat keys and
-   candy. Adjust only small clearances/tips if necessary.
-3. Bring up one head's OLED, camera, microphone and speaker; assemble the rover,
-   test power/current/temperature and loss-of-control stop on stands.
-4. Calibrate the fixed camera, enable bounded supervised approach/alignment and
-   visible lift verification in a flat contained area, away from desk edges.
-5. Require at least 8/10 physical pickups per category (flat key, candy), with
-   measured lift, hold and controlled placement; log failures and assistance.
-6. Duplicate the validated core four times. Give every head a unique identity,
-   token, address and device ID; measure calibration per robot. Fit costumes
-   without covering camera/audio/screen/USB or restricting gripper travel.
-7. Verify routing and stops per robot, then conversations/games across five:
-   one speaker at a time, digital peer transcripts, **ten utterances total** by
-   default for five (two rounds). Pairs retain a six-utterance default/cap.
-   Conversation time limit is five minutes; test stop/disconnect cleanup.
+1. Confirm inventory, exact Sense bundle and bank label/mount preflight; finish a
+   delivered basket under $50. Resolve the stepper source-chain terms and check the saved originals.
+2. Fit-test the MG90S gripper/lift and stepper chassis. Test slow drive and
+   watchdog on a stand; measure loaded current, temperature and stability.
+3. Add the floor sensors, front sensor and mux. Calibrate on the actual table,
+   then test disconnects, bad/stale readings, bus faults and stopping distances
+   with a tether/catch setup. No unprotected edge trial.
+4. Bring up Sense OLED, camera, PDM mic and speaker on USB; verify private identity,
+   actual pins and the 8 MB layout. Confirm head/body UART independently.
+5. Implement stationary pet behavior, then motion arbitration and the operator
+   lease. Test preemption, expiry, network loss and blocked paths before contained
+   exploration.
+6. Require **8/10 physical pickups for flat keys and 8/10 for candy**: visibly
+   lift 10 mm, hold three seconds and place under control. Log slips and assistance.
+7. Duplicate after robot one passes. Calibrate every unit, verify identities and
+   stops, then test five stationary peers and one-at-a-time motion. Five-robot
+   chat defaults to ten total utterances; pairs to six.
 
-## Progress
+Detailed files, tests and milestones are in the
+[implementation plan](docs/plans/2026-11-03-active-desk-pet.md).
 
-- [x] Project organized at `/Users/hung/Documents/coding/desk-robot-remix`.
-- [x] Pinned upstream sources and original body/lift/gripper/head print files saved.
-- [x] Body firmware and Freenove-based modular-head overlay compiled previously.
-- [x] Cheaper SG90/N20/driver quotes recorded; [ten-check audit](docs/budget-audit.md)
-  distinguishes software/source evidence from unresolved hardware checks.
-- [x] Five-robot configuration, bounded conversation, per-head private settings
-  and append-only missing credential setup implemented; existing tokens preserved.
-- [ ] Cheap head board qualified for the compiled target or a small verified pin adapter.
-- [ ] Delivered basket and owned bank/controller quantities confirmed.
-- [ ] One physical robot assembled, calibrated and accepted.
-- [ ] Four duplicates built and all-five physical interaction tested.
+## Actual progress
 
-Simulation is not a successful physical pickup or playback test. Preserve the
-500 ms watchdog, 250 ms drive bound, operator permits and disarmed hardware
-configuration. No automatic purchases, flashing or publishing.
+- [x] Folder, pinned sources and original EVA/Bluino/N20-SMARS files saved.
+- [x] Earlier DC-body/Freenove-head builds and five-robot mock conversation exist.
+- [x] Inventory, budget, video/source audit and revised design documented.
+- [x] Existing stepper chassis/wheel originals saved with source, hashes and license caveat.
+- [ ] Stepper/lift/head fit and source-chain redistribution terms qualified.
+- [ ] Sense head, stepper drive, cliff interlock and active-pet software implemented.
+- [ ] Delivered order, power, sensors, assembly and physical acceptance verified.
+- [ ] Four duplicates and physical five-robot interaction verified.
+
+Historical 90 checks do not validate these proposed additions. No robot has been
+flashed, no CAD geometry changed and no physical success is claimed. Preserve
+licenses and inspect the active Fusion design before precision CAD edits.

@@ -1,24 +1,31 @@
 # Desk robot remix project instructions
 
-- Read `PLAN.md`, `test-results/verification.md` and the relevant guide first.
-- The active head uses separate S3-camera/OLED/audio modules and EVA's original
-  case; see `docs/modular-head.md`. CoreS3 is an earlier reference, not a purchase.
-- Keep upstream clones untouched and pinned. Modify overlays/local integration
-  code, never unrelated repositories or global agent configuration.
-- Physical tests are not represented by simulation. Never invent successful
-  pickups, force feedback, playback acknowledgements or CAD exports.
-- Keep hardware motion off by default. Preserve the 500 ms watchdog, 250 ms
-  drive bound, one-use operator permits and separate model/operator credentials.
-- No purchases, hardware flashing or external publishing without concrete user
-  authorization for the selected device/order. User instructions take precedence.
-- The first-robot delivered cap is $50, conditional on reusing an owned usable
-  power bank and WROOM. Five identical cores are planned; only removable cosmetics
-  differ. Owned counts for the fleet remain unknown. Allowances are not quotes.
-- The budget camera-board listing is not qualified for the compiled Freenove
-  configuration. Verify pinout, exposed GPIO, programming and case fit first.
-- Keys and candy remain required. Major mechanical redesign is out of scope.
-- Use Fusion MCP for live CAD only after confirming the active design. It is
-  unavailable in the initial session; preserve source licenses and attribution.
-- Keep credentials, models, build outputs and captures in ignored private paths.
-- Run Python tests/lint, portable body tests, head overlay/protocol tests and the
-  affected firmware build after relevant changes. Record exact evidence and gaps.
+- Read `PLAN.md`, `test-results/verification.md` and relevant guides first.
+- Current design reuses owned WROOM, SSD1306, 28BYJ-48/ULN2003 and MG90S parts.
+  No S3 is owned. Proposed new head is XIAO ESP32S3 Sense with camera/PDM mic;
+  no separate INMP441, Uno, Pico or Pi is required. Inventory counts are partial.
+- Current compiled body is DC PWM, current modular head Freenove16MB/SH1106/I²S.
+  Stepper/Sense/cliff/pet-mode work is planned, not implemented. Never confuse
+  historical software tests with qualification of new hardware or behavior.
+- Keep pinned upstream clones and original CAD untouched. Small mounts, bezel,
+  spacers, clearance corrections, jaw tips and removable costumes only. Keys
+  and wrapped candy remain targets; new chassis/arm/PCB is outside scope.
+- Four downward ToFs + separate front ToF + mux are candidates. WROOM must own
+  local fault-latched stop; no blind retreat, automatic rearm or dependence on
+  network/LLM latency. Final geometry/surface/stopping qualification is required.
+- Keep hardware motion off by default. Preserve 500ms watchdog, 250ms drive,
+  one-use operator permits and separate model/operator credentials. Proposed
+  pet lease is operator-only, expiring and preemptible; not a current command.
+- First prototype delivered cap $50, conditional target $35.45 before charges
+  and missing reused parts. No unqualified five-times reuse fleet quote.
+- No purchases, flashing or external publishing without device/order-specific
+  authorization. User instructions take precedence; local reversible work can continue.
+- Use live Fusion only after inspecting active design; preserve unrelated work.
+  No geometry edits/physical successes are currently recorded.
+- Source/license audits are in `docs/research/`. RoboEyes/TechTalkies face and
+  chillibasket are GPL3 candidates, not MIT copied code. Resolve source-chain
+  terms for the stepper remix and retain all CAD/software notices.
+- Keep private credentials, models, captures and character memory in ignored paths.
+- After relevant runtime changes, run affected Python/body/head tests and builds.
+  Record exact commands, versions, hashes and gaps. Documentation-only updates
+  need source/BOM/link/whitespace verification, not a claim of hardware validation.

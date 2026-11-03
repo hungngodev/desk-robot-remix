@@ -1,19 +1,21 @@
 {
-  "parts_estimate_usd": 36.88,
+  "parts_estimate_usd": 35.45,
   "quoted_total_usd": null,
-  "planning_total_usd": 36.88,
+  "planning_total_usd": 35.45,
   "cap_usd": 50,
-  "remaining_under_cap_usd": 13.12,
+  "remaining_under_cap_usd": 14.55,
   "unquoted_items": [
-    "Rated USB power lead, switch, wiring, connectors and fasteners",
-    "Filament for SMARS, lift/gripper and EVA head",
-    "Motor suppression and power decoupling components"
+    "Reported MG90S positional micro servo, quantity to confirm",
+    "Rated actuator power lead, switch, connectors, fasteners and wiring",
+    "Bulk and local decoupling components"
   ],
   "fit_confirmed": false,
   "pending_checks": [
-    "head_board_pinout_and_programming_confirmed",
-    "power_bank_rating_load_and_mount_confirmed",
-    "generic_driver_and_motor_loaded_current_confirmed"
+    "two_usable_owned_mg90s_confirmed",
+    "sense_variant_pin_budget_and_8mb_feasibility_reviewed",
+    "case_mechanism_sensor_envelope_preflight_confirmed",
+    "bank_label_cable_and_mount_preflight_confirmed",
+    "sufficient_filament_and_printer_access_confirmed"
   ],
   "purchase_ready": false,
   "note": "Allowances are targets, not verified shopping prices. Confirm mechanical fit separately."

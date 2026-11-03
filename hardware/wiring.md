@@ -1,86 +1,121 @@
-# Wiring and power
+# Wiring and power — proposed stepper/sensor revision
 
-Confirm printed GPIO labels on your **ESP32-WROOM-32 development board**; physical
-pin positions vary. The Feather and USB-C breakout #4090 are not needed here.
-The active modular head's proposed pins and electrical corrections are in
-[the head guide](../docs/modular-head.md). Use the dedicated `--board modular`
-firmware configuration; the earlier CoreS3 binary must not be flashed to Freenove.
+Updated 2026-11-03. **Do not wire or flash this proposed map using the current
+body binary.** That binary drives four DC H-bridge inputs with PWM. Two ULN2003
+steppers require eight phase outputs and a new nonblocking backend; cliff logic
+also remains unimplemented. This map is for pin-budget/bench review only.
 
-| WROOM GPIO | Connection |
+## Proposed WROOM allocation
+
+Check actual ESP32-WROOM-32 development-board labels and exposed pins first.
+Avoid flash GPIO6–11, strapping GPIO0/2/5/12/15 and programming UART0 GPIO1/3.
+
+| WROOM GPIO | Proposed use |
 | --- | --- |
-| 16 / UART RX | S3 head GPIO2 / TX, configured module-head allocation |
-| 17 / UART TX | S3 head GPIO1 / RX, configured module-head allocation |
-| GND | Head GND and actuator supply GND |
-| 25, 26 | DRV8833 AIN1, AIN2 for left motor |
-| 27, 32 | DRV8833 BIN1, BIN2 for right motor |
-| 18 | Lift servo signal |
-| 19 | Gripper servo signal |
+| 16 RX / 17 TX | Sense head UART TX / RX, 115200 8N1, 3.3 V; Sense pins not yet allocated |
+| 18 / 19 | Lift / grip MG90S signal |
+| 13, 14, 25, 26 | Left ULN2003 IN1–IN4, phase order to verify |
+| 27, 32, 33, 23 | Right ULN2003 IN1–IN4, phase order to verify |
+| 21 / 22 | Body I²C SDA / SCL to mux upstream |
+| 4 | Mux active-low RESET, only if board exposes and electrically supports it |
+| GND | Head, body, sensors and actuator-supply common logic reference |
+| Optional 34/35/36/39 | Input-only bumper signals with **external** pullups; not budgeted/implemented |
 
-DRV8833 AOUT1/2 (often OUT1/2) go to the left motor; BOUT1/2
-(often OUT3/4) go to the right. IN1/2 correspond to AIN1/2; IN3/4 to BIN1/2.
-Confirm actual silkscreen and the chip/board documentation before connecting.
-On the inspected cheap listing, **EEP is nSLEEP (input)** and **ULT is nFAULT
-(open-drain output)**; the seller prose reverses these roles. Once the actual
-board is identified, nSLEEP must be high (3.3 V logic) to operate. Do not drive
-nFAULT or assume an Adafruit-specific current-limit setting exists.
+The conservative output set has 15 pins. Steppers8 + servos2 + UART2 + I²C2
+consume 14, so there are not five spare outputs for sensor XSHUT lines. The mux
+isolates equal-address sensors rather than trying to assign them all new addresses.
+Head display remains on the head bus: never simply join two independent MCU
+masters. GPIO34–39 cannot drive outputs and lack internal pullups.
 
-The [TI DRV8833 specifications](https://www.ti.com/product/DRV8833) distinguish
-500 mA RMS PW and 1.5 A RMS PWP/RTY packages; a “2 A peak” listing is not a
-continuous board rating. The generic board's package/cooling and N20 loaded or
-stall current are unresolved. The seller's N20 50 mA is **no-load** current.
-Bench-check current, voltage droop and temperature before a loaded rover test.
+Connect each motor's existing five-pin plug to its correctly matched ULN2003
+board; verify coil/common wiring, phase order and 3.3 V input behavior with the
+actual parts. ULN2003 is not a DRV8833 replacement with the same firmware signals.
+Do not modify the steppers to bipolar operation for this build. Pulse timing,
+acceleration, loaded speed, stop/hold current and thermal limits need measurements.
 
-UART is 115200 8N1, **3.3 V logic**, common ground. In the initial two-USB bench
-test, join TX/RX/GND only; leave board 5 V rails separate. The previous CoreS3
-reference used the same GPIO numbers on PORT.A; that connector and its cable
-colors do not describe the new modular head.
+## Sensor topology
+
+```text
+WROOM GPIO21/22 -> TCA9548A upstream I²C
+                  channel 0 -> front-left downward VL53L0X
+                  channel 1 -> front-right downward VL53L0X
+                  channel 2 -> rear-left downward VL53L0X
+                  channel 3 -> rear-right downward VL53L0X
+                  channel 4 -> separate forward-facing obstacle VL53L0X
+Sense -> separate head-owned OLED bus
+```
+
+Each ToF keeps its default **7-bit 0x29** address; select only one corresponding
+channel for reads/configuration. Confirm channel numbering in firmware, module
+supply, reset behavior, default mux address and **3.3 V signal pullups**. Generic
+boards vary; an IC voltage range does not establish breakout level shifting.
+No 5 V signal may enter a WROOM pin. Check total I²C pullup loading and use short
+wires. A mux reset may recover a stuck downstream bus, but must leave motion
+latched stopped. No automatic resume follows recovery.
+
+Qualify four downward optical footprints beyond the relevant track contact
+patch, including pivot sweep, at the final mounting height. One forward beam
+covers only a limited obstacle region; it is not side/rear collision protection
+or gripper-distance feedback. Use [sensor requirements](../docs/research/2026-11-03-cliff-sensors.md).
+
+## Head boundary
+
+The proposed [Sense head](../docs/modular-head.md) needs a **new** board map for
+camera, PDM mic, SSD1306, I²S output and UART. Old Freenove GPIO1/2 assignments or
+video GPIO1/2 I²C instructions are not a Sense allocation. Preserve native USB,
+internal camera/mic pins and flash/PSRAM; disable SD use where necessary. No
+final head pin instructions or compatible Sense binary have been produced.
+
+Initial two-USB head/body test joins **TX, RX and GND only**; keep 5 V rails
+separate. Do not flash CoreS3/Freenove firmware onto Sense, or S3 firmware onto
+the classic WROOM.
 
 ## Power
 
-On the bench, power the dev boards by USB, servos/motor driver from a separately
-sized regulated supply, and join grounds. Never supply actuator current through
-the ESP32's 3.3 V output or through the board from a laptop USB port. Confirm
-servo voltage from its datasheet.
-
-Budget portable arrangement, conditional on the owned bank's rating/load/fit:
-
 ```text
-regulated 5 V USB power bank -> suitably rated lead / switch / distribution
-                              -> head and WROOM approved USB/5 V inputs
-                              -> separate servo and DRV8833 power branches
-all grounds joined; UART remains 3.3 V
+qualified regulated 5 V bank -> rated lead / switch / distribution
+                               -> approved head + WROOM power inputs
+                               -> separate ULN2003 / stepper power branches
+                               -> separate MG90S power branch
+all grounds common; data signals remain 3.3 V
 ```
 
-The user confirmed having a bank, not its current rating, weight or dimensions.
-Check the label, shared-port limits and loaded operation; a 5 V / 3 A label is a
-useful candidate, not a guarantee against startup brownouts. Check auto-shutoff
-at idle, mounting and stability too. Use short rated power conductors; ordinary
-thin breadboard jumpers are not the actuator-current path. Do not power actuators
-through the WROOM/S3 regulator or through a laptop USB port.
+No bank output-current rating was supplied. Check its label, shared-port limits,
+auto-shutoff, cable drop, startup behavior, size, weight and mount. Measure voltage
+at logic and actuators while both tracks, loaded servos, Wi-Fi and audio operate.
+No current/thermal test has passed. Large capacitors may reduce brief droop but
+cannot make an undersized bank adequate. Current-limited bench supplies should
+be sized from measurements; no guessed universal 3 A guarantee.
 
-[Adafruit #4090](https://www.adafruit.com/product/4090) is listed up to 1.5 A;
-do not treat it as a verified 3 A distributor for the complete robot. A suitable
-USB power lead/distribution is included in the wiring allowance. Do not join
-a bank/external 5 V source to a laptop USB 5 V source without a documented power
-path. Disconnect portable power for the initial laptop-USB board tests.
+Use rated conductors for actuator power. Owned DuPont ribbons are signal leads,
+not the main motor/servo supply. Never run motor/servo current through a board's
+3.3 V regulator or from a laptop USB port through the board. Check the actual
+MG90S voltage rating. MAX98357 speaker connects across SPK+ and SPK−, **neither
+to ground**; set volume for the 8 Ω / 1 W speaker. Insulate brass/cosmetic metal.
 
-The separate 2S pack/charger/buck has been removed from the active shopping plan.
-If power-bank reuse fails, revise the delivered budget rather than silently
-adding that $29.50 system. A future 2S supply still needs regulated step-down
-from up to 8.4 V; MT3608 is boost-only and cannot do that conversion.
+The [Adafruit #4090](https://www.adafruit.com/product/4090) breakout is not a
+qualified whole-robot high-current distributor. Avoid joining external/bank 5 V
+to laptop USB 5 V without a documented power path. Portable power should be
+disconnected during initial USB programming. No raw Li-ion/2S charger is required
+by the bank-based plan; a future 2S design needs a buck, not a boost-only MT3608.
 
-Measure voltage droop and temperature during motor startup, servo load, Wi-Fi and
-speech together. No power/current/stall test has been performed yet.
+## Bring-up and stopping
 
-## Bring-up order
+1. Keep tracks off the surface; remove servo horns/loads. Verify supplies,
+   grounds and driver mapping before enabling any output.
+2. Only after the new stepper build passes host/firmware checks, test one coil
+   sequence slowly, both directions, ramping and bounded stop on the stand.
+3. Center unloaded positional servos, then fit horns and test small movements
+   near center. Preserve the communication watchdog; do not disable it to test.
+4. Connect/calibrate sensors on a supported flat surface. Missing/invalid/stale
+   readings, bus faults and cliffs must latch a local motor stop in every mode.
+5. Measure stopping/latency and full sensor coverage with a tether/catch tray;
+   rearm explicitly after faults. Never blindly reverse away from an edge.
+6. Test Sense screen/camera/PDM/audio separately, then UART, then the integrated
+   load. Only then try contained low-speed movement and pickups.
 
-1. Disconnect motors and remove servo horns. Flash only the WROOM first.
-2. Confirm `READY ... disarmed`, `ping`, `status` at 115200. Boot servo PWM is off.
-3. `arm` applies center PWM. Center unloaded servos before attaching horns, then
-   `disarm`. Start powered linkage tests near 90°, with small angle changes.
-4. Lift the rover so tracks cannot propel it. Test 15% PWM for 100 ms, direction
-   and stop. Interrupt control and measure the 500 ms timeout on the stand.
-5. Bring up head screen, audio and fresh camera capture before connecting UART.
-
-Watchdog stop holds the last servo PWM. Support/remove the payload before
-explicit `disarm` or power-off. Use the power switch if the mechanism stalls.
+Existing 500 ms watchdog and 250 ms pulse bounds remain independent protections;
+cliff checks must meet measured clearance deadlines locally. Stop should hold
+servo targets without dropping payload; explicit disarm/power-off can release
+servos, so support the object first. Stepper coil hold/coast policy must be
+qualified for stopping distance, current and heat. No unprotected tabletop trial.

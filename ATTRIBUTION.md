@@ -31,3 +31,27 @@ Ultralytics/YOLO-World, Qwen3, SenseVoice and Kokoro weights are not redistribut
 here. Their code/model licenses and attribution must be preserved when installed
 or shared. Generated head build clones retain upstream license files. Do not
 publish private configuration or credential-bearing binaries.
+
+## Additional sources collected/reviewed 2026-11-03
+
+- [SMARS 28BYJ-48 remix #2778904](https://www.thingiverse.com/thing:2778904/files),
+  unclejeff: two unmodified original STLs now saved in
+  `cad/originals/smars-stepper/`, with source hashes. Page displays CC BY4.0;
+  recorded original SMARS ancestor is NC-SA4.0. Preserve both attributions and
+  resolve that difference before redistribution; no commercial grant inferred.
+- [wtlx's sketches](https://github.com/wtlx/smars-28byj-48): no LICENSE found,
+  code not copied. Links identify the existing mechanical variant.
+- [FluxGarage/RoboEyes](https://github.com/FluxGarage/RoboEyes),
+  [Tech Talkies face fork](https://github.com/TechTalkies/Xiaozhi-for-XiaoESP32S3)
+  and [chillibasket WALL-E](https://github.com/chillibasket/walle-replica): GPL3;
+  research/integration candidates only. No code/assets copied in this update.
+  Any future incorporation must preserve source/notices and applicable terms;
+  the project MIT file does not relicense these components.
+- Qubit README's MIT claim has no matching top-level LICENSE at the checked
+  revision; copying permission remains unresolved. Creator binaries, Patreon
+  releases and public videos are not assumed open source.
+- Dasai Mochi, Living.AI EMO and Disney droids are appearance/interaction
+  references only; no proprietary face, sound, shell or character assets copied.
+
+The research files contain original summaries and source links, not complete
+video transcripts. See `docs/research/` for evidence and qualification limits.

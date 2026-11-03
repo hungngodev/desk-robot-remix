@@ -1,6 +1,29 @@
-# Verification — updated 2026-10-30
+# Verification — current design updated 2026-11-03
 
-The current plan is five identical cores with removable cosmetics, generic
+## Current design qualification
+
+The revised plan reuses WROOM/SSD1306/28BYJ-48/ULN2003/MG90S and proposes
+Sense camera/PDM head, four floor ToFs plus front ToF/mux, and active-pet behavior.
+**Those firmware/behavior changes are not implemented or verified.** Historical
+90 checks below concern earlier DC/Freenove software only. No robot is assembled,
+flashed or physically accepted, and no CAD geometry was changed.
+
+Two original stepper CAD files are saved with source records and hashes. Integrity
+checks do not establish manufacturing quality, units, compatible lift/head mounting
+or stopping coverage. Twelve video descriptions/resources and selected published
+code were audited; full-frame/timestamp viewing is not claimed.
+
+The new conditional target is $35.45 before shipping/tax and missing reused stock.
+There is no complete delivered order or five-unit quote. Budget readiness remains
+false. See [current plan](../PLAN.md), [parts](../hardware/parts.md) and
+[research](../docs/research/2026-11-03-video-audit.md).
+
+Documentation-update verification is recorded in
+[plan-update-2026-11-03.json](plan-update-2026-11-03.json).
+
+## Historical software baseline — 2026-10-30
+
+The plan at that date was five identical cores with removable cosmetics, generic
 SG90/N20 actuators, separate camera/OLED/audio modules and existing print files.
 **90 checks pass: 60 Python, 20 body C++, 10 head overlay/protocol/snapshot.**
 Five-robot mock conversation gives all five IDs two turns. No robot has been

@@ -1,4 +1,10 @@
-# Ten distinct checks of the cheaper build
+# Historical DC-build budget audit — 2026-10-30
+
+Superseded on 2026-11-03 by [current parts](../hardware/parts.md) and the
+[Sense/sensor budget research](research/2026-11-03-head-budget.md). The amounts
+and N20/SG90/SH1106 selection below are historical, not the active shopping list.
+
+## Ten distinct checks of the earlier cheaper build
 
 Checked 2026-10-30. Ten checks mean different cost/compatibility questions, not
 ten copies of a search or ten successful physical tests. **There are open gates.**

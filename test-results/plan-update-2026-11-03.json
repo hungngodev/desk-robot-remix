@@ -1,0 +1,38 @@
+{
+  "checked_at": "2026-11-03",
+  "scope": "Documentation, inventory/BOM data and unmodified source collection only; no runtime/geometry changes",
+  "checks": {
+    "budget_target_usd": 35.45,
+    "remaining_to_cap_before_charges_usd": 14.55,
+    "procurement_ready": false,
+    "zero_charges_do_not_bypass_gate": true,
+    "budget_trial_tests": "uv run pytest tests/test_records_budget.py -q: 3 passed",
+    "inventory_no_s3": true,
+    "additional_fleet_stepper_driver_pairs": 5,
+    "csv_matches_bom": true,
+    "stepper_original_integrity": [
+      {
+        "file": "cad/originals/smars-stepper/SMARS_28BYJ-48-RearWheel.stl",
+        "sha256": "fb0f566ec96e907ca89ceed85ad4b09c78807595b68b019488899627e55ba704",
+        "bytes": 1367184,
+        "binary_stl_length_valid": true
+      },
+      {
+        "file": "cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl",
+        "sha256": "5f79f4a3f67ba21f0d23e96487369799421d7879d9b8569315a5eb4fded2ed78",
+        "bytes": 333284,
+        "binary_stl_length_valid": true
+      }
+    ],
+    "changed_markdown_local_links_checked": 23,
+    "missing_local_links": [],
+    "changed_json_syntax_valid": true
+  },
+  "limits": [
+    "No Sense build, stepper backend, cliff interlock or pet scheduler implemented by this update",
+    "No hardware flashed, power/sensor/stopping/fit/pickup tests performed",
+    "Video descriptions/resources and selected code inspected, not full videos watched",
+    "Old 90-check baseline does not verify revised design"
+  ],
+  "new_plan": "docs/plans/2026-11-03-active-desk-pet.md"
+}

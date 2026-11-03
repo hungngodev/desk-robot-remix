@@ -1,78 +1,72 @@
-# Desk robot remix
+# Five active desk pets
 
-A personal, experimental SMARS rover with a lift-and-grip arm, a head assembled
-from separate camera/screen/audio modules inside an existing EVA Robot case,
-and an owned ESP32-WROOM-32 body controller. Five identical cores share the Mac
-and take turns speaking; only removable hats/costumes differ. Validate one first.
+Five identical inexpensive tracked robots, each with a camera, OLED face,
+conversation, lift/gripper and local edge sensing. Different hats/costumes share
+the same core. One Mac supplies speech, vision and language models. Build one
+working robot before repeating it four times.
 
-**Current stage:** five-robot turn-taking works in simulation; original print
-files and the Freenove-based head/body firmware are prepared. Physical assembly,
-pickup, speech and power tests remain. The cheaper camera-board candidate has
-not been qualified for that compiled firmware.
+**Updated 2026-11-03:** reuse your WROOM-32, SSD1306 OLED, 28BYJ-48/ULN2003
+motors and positional MG90S servos. You own **no ESP32-S3**. Candidate new head:
+XIAO ESP32S3 **Sense**, including camera and PDM microphone, plus amplifier and
+speaker. No extra Uno, Pico or Pi is needed.
 
-**Budget:** **$36.88 first-prototype parts target**, reusing one owned WROOM and
-power bank; **$50 delivered cap**. Several allowances, delivery/tax, power rating
-and fit remain open. This is not an order-ready quote. Five-unit quantities are
-listed without assuming five free boards or banks. [Components](hardware/parts.md),
-[ten cost/compatibility checks](docs/budget-audit.md).
+**Cost target: $35.45 before delivery/tax**, conditional on two usable owned
+MG90S servos and a suitable owned bank. **First-robot delivered cap: $50**;
+charges, missing inventory and fit remain unresolved. This is not a full fleet
+quote or an order-ready robot. [Components](hardware/parts.md),
+[inventory](hardware/fleet-inventory.json), [budget evidence](docs/research/2026-11-03-head-budget.md).
 
 ## Start here
 
-1. [Review the module head and saved case](docs/modular-head.md). The 1.3-inch OLED
-   gives monochrome emotion symbols/text initially; camera, microphone and speech
-   remain included. Smooth eye animation needs a later adapter.
-2. [Print and bench-test the gripper](docs/first-gripper-test.md) with your actual
-   flat key and candy before buying the full rover and head.
-3. Follow [wiring and power](hardware/wiring.md) and [firmware builds](docs/build.md).
-4. Set up [local speech and vision](docs/local-ai.md).
-5. [Measure pickup](docs/pickup-and-two-robots.md), then [duplicate the core for five](docs/five-robots.md).
+1. [Master plan](PLAN.md) and [implementation tasks](docs/plans/2026-11-03-active-desk-pet.md).
+2. [Stepper chassis and wheel originals](cad/originals/smars-stepper/README.md),
+   [saved gripper/lift](docs/first-gripper-test.md) and [saved EVA case](cad/originals/eva-head/README.md).
+3. [Sense head adaptation](docs/modular-head.md), [proposed wiring/power](hardware/wiring.md)
+   and [edge-sensor layout](docs/research/2026-11-03-cliff-sensors.md).
+4. [Twelve-video audit](docs/research/2026-11-03-video-audit.md) and
+   [active behavior / aesthetic sources](docs/research/2026-11-03-active-pet-sources.md).
+5. [Existing local AI setup](docs/local-ai.md), [five-robot identity/turn-taking](docs/five-robots.md)
+   and [verification limits](test-results/verification.md).
 
-Only small jaw tips, spacers and mounting brackets are in scope. Fusion MCP is
-not available in this session, so no CAD edits have been made. If a flat key
-requires a new arm/chassis, revisit the remix choice before spending more.
+The revised design uses **four downward floor sensors, one separate front
+obstacle sensor and an I²C mux**, controlled locally by the WROOM. Proposed pet
+behavior adds curiosity, rest, attention and peer activities with human-enabled
+bounded motion. Begin with stationary expression; then one moving robot at a
+time in a qualified clear area. Neither cliff firmware nor active roaming is
+implemented yet. A sensor arrangement alone does not guarantee against falling.
 
-## Try the software now
+## What already works in software
 
-From this folder:
+The earlier DC-motor body/Freenove head builds and five-robot mock conversation
+exist. They do not validate the new stepper/Sense/sensor design. No robot has
+been flashed, assembled or physically accepted; no CAD geometry has changed.
 
 ```sh
 uv sync --extra dev
 uv run desk-robot --config config/fleet.simulation.toml demo
-uv run desk-robot --config config/fleet.example.toml secrets --add-missing
 uv run desk-robot --config config/fleet.example.toml doctor
+python3 scripts/check_budget.py
 ```
 
-The demo uses generated test images and mock speech, with no physical hardware
-or model downloads. It explicitly reports `physical_acceptance_pass=false`.
-The fleet demo gives each of the five IDs two turns (ten total). Credentials
-are hidden from output and excluded from version control in `config/local.env`;
-`--add-missing` preserves existing tokens. Hardware examples keep movement off.
+The demo uses generated images and mock speech, gives five IDs ten utterances,
+and reports `physical_acceptance_pass=false`. It does not demonstrate live models,
+real speech, gripping, cliffs or pet autonomy. Hardware examples keep motion off.
+Keep credentials private; `secrets --add-missing` preserves existing tokens.
 
-The body boots disarmed, caps drive at 40% PWM and 250 ms, and stops after 500 ms
-without valid control. Watchdog stop holds the last servo PWM; explicit disarm
-detaches it. Positions are commanded estimates, not sensor readings. A human
-grants one bounded laptop job a 30-second single-use permission; model tools
-have separate credentials and cannot grant that permission.
+Existing controls boot disarmed, use 250 ms bounded drive, a 500 ms watchdog,
+one-use operator permits and separate model/operator credentials. New local
+sensor stopping and a separate operator-granted pet-mode lease are planned, not
+available commands. Watchdog stop holds servo PWM; explicit disarm releases it.
 
-## Sources and folders
+## Source organization
 
-| Function | Existing project |
-| --- | --- |
-| Chassis/tracks | [SMARS](https://www.thingiverse.com/thing:2662828) |
-| Lift/gripper | [Bluino SMARS arm](https://www.thingiverse.com/thing:4253681) |
-| Head case/component layout | [EVA Robot](https://github.com/Ksirailway-base/EVA-Robot), [saved 3MF](cad/originals/eva-head/EVA-Robot.3mf) |
-| Camera/screen/audio drivers | [Xiaozhi S3 camera + breadboard targets](https://github.com/78/xiaozhi-esp32) |
-| UART approach | [VerdureBuddyRover](https://github.com/maker-community/VerdureBuddyRover) |
-| Voice server | [Xiaozhi server](https://github.com/xinnan-tech/xiaozhi-esp32-server) |
+- `upstream-lock.json`, `upstream/`: pinned, untouched source copies.
+- `firmware/`, `laptop/`: existing integrations; new tasks clearly marked in plan.
+- `cad/`, `hardware/`: original file provenance, inventory, proposed wiring and BOM.
+- `docs/research/`: dated source/price audits, not full video transcripts.
+- `test-results/`: historical software evidence and empty physical trial records.
 
-- `PLAN.md`: accepted scope and progress.
-- `upstream-lock.json`, `upstream/`: exact revisions and untouched sources.
-- `firmware/`: WROOM body, active modular S3 head and previous CoreS3 reference.
-- `laptop/`: local coordinator and small Xiaozhi server adapter.
-- `cad/`, `hardware/`, `config/`: source register, parts, wiring and examples.
-- `docs/`, `test-results/`: build guides, contracts and verification evidence.
-
-Restore sources with `python3 scripts/restore_upstreams.py`; review costs with
-`python3 scripts/check_budget.py`. See [verification](test-results/verification.md)
-and [attribution](ATTRIBUTION.md) for limitations, checks and licenses.
-
+Restore sources with `python3 scripts/restore_upstreams.py`. Preserve
+[attribution and license boundaries](ATTRIBUTION.md); GPL face libraries are
+candidates, not MIT code already incorporated. Use the live Fusion MCP only after
+checking the active design when small precision CAD edits become necessary.

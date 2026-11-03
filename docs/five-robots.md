@@ -1,7 +1,8 @@
 # Five copies of one core
 
-All five have the same camera, OLED, microphone, speaker, N20 drive, two SG90s,
-lift/gripper, WROOM and regulated power. Copy the first **physically validated**
+Updated 2026-11-03: the proposed core has Sense camera/PDM mic, owned SSD1306,
+amplifier/speaker, two 28BYJ-48/ULN2003 drives, two positional MG90S servos,
+four floor sensors, a separate front ToF, mux and lift/gripper, WROOM and regulated power. Copy the first **physically validated**
 build four times. Hats and costumes are removable covers; keep lens, acoustic
 ports, OLED, USB, antenna area, power switch and full arm/track travel clear.
 Avoid heavy or tall decorations that tip the rover. No costume CAD has been made.
@@ -58,7 +59,9 @@ uv run desk-robot --config config/local.toml secrets --add-missing
 ```
 
 Values stay in ignored `config/local.env`, permissions 0600, hidden from output.
-Prepare each **qualified** modular head using its own configured identity,
+**The following commands are historical Freenove references, not Sense commands.**
+The new Sense target is not implemented. After it is added and qualified, prepare
+each head using its own configured identity,
 rebuilding one private binary at a time; see [firmware builds](build.md):
 
 ```sh
@@ -68,8 +71,8 @@ bash scripts/build_head.sh --board modular --private
 
 The private-config helper looks up that robot's exact token environment name.
 Never flash the last robot's private binary onto another unit. No devices have
-been selected or flashed. The budget camera board still needs qualification
-against the reference firmware before these hardware steps apply.
+been selected or flashed. The Sense board needs its own camera/PDM/SSD1306/8 MB configuration and successful
+build; these historical Freenove commands do not produce that firmware.
 
 After local speech/model setup and individual head audio tests:
 
@@ -80,8 +83,9 @@ uv run desk-robot --config config/local.toml chat robot-01 robot-02 robot-03 rob
 
 Run the chat in a second terminal while the coordinator is running. Stop through
 the authenticated `/v1/conversation/stop` endpoint. The group does not drive
-automatically during conversation. Every movement/pickup still requires its own
-operator permit and uses the existing watchdog/bounded-command path.
+automatically during conversation. Current movement/pickup still requires its own operator permit and existing
+watchdog/bounded-command path. Planned pet mode uses a separate expiring
+operator lease, never model-authorized arming.
 
 ## Physical acceptance before the group plays
 
@@ -91,9 +95,22 @@ operator permit and uses the existing watchdog/bounded-command path.
 3. With all five stationary, verify ten-turn ordering, one audible speaker at a
    time and microphone suppression. Check normal completion, stop during speech,
    one head disconnecting and coordinator loss. Verify normal listening resumes.
-4. Run supervised activities in a contained flat area. There is no cliff or
-   multi-robot collision sensing; the software does not promise free-roaming play.
+4. Qualify the proposed local cliff interlock and sensor geometry before table
+   activity. Only one robot moves at a time in a reserved contained patch; peers
+   may animate/talk. Front ToF is not all-direction collision avoidance.
+5. Later, qualify simultaneous motion before allowing all-five free roaming,
+   chasing or physical object handoff. These are not implemented capabilities.
 
 Exact owned board/bank counts and five-unit delivered costs are unresolved. Use
 [the quantity sheet](../hardware/fleet-components.csv) and
 [inventory](../hardware/fleet-inventory.json); buy multiples after one passes.
+
+## Planned initiative, not only replies
+
+The [active-pet plan](plans/2026-11-03-active-desk-pet.md) adds local idle eyes
+and a Mac event scheduler: curiosity, rest, attention requests, bounded exploration
+and peer invitations. Distinct per-ID persistent memories and cooldowns avoid
+identity mixups and endless peer chatter. Start stationary, then human-enabled
+short motion; stops/faults/lease expiry cancel queued activity with no auto-resume.
+RoboEyes is GPL3 and needs an ESP-IDF adapter. No new face/pet/cliff code is
+implemented by the documentation update.

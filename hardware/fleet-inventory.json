@@ -1,14 +1,97 @@
 {
   "robot_count": 5,
   "identical_core": true,
-  "controller_owned_count": null,
+  "inventory_corrected_at": "2026-11-03",
   "controller_model": "ESP32-WROOM-32",
+  "controller_owned_count": null,
   "s3_owned_count": 0,
-  "inventory_corrected_at": "2026-10-31",
   "power_bank_owned_count": null,
   "confirmed_minimum_owned": {
     "controller": 1,
-    "power_bank": 1
+    "power_bank": 1,
+    "ssd1306_oled": 1,
+    "mg90s_positional_servo": 1
   },
-  "note": "User confirmed five identical cores with different removable cosmetics. On 2026-10-31 the user explicitly corrected the earlier pasted inventory: no ESP32-S3 is owned; ESP32-WROOM-32 boards are owned. Do not count an N8R8/S3 as available. Exact owned WROOM/bank counts remain unanswered; do not price all five at zero. Every robot needs all core modules and its own usable power source."
+  "components": [
+    {
+      "component": "ESP32-WROOM-32 dev board",
+      "owned_count": null,
+      "minimum_reported": 1,
+      "needed_per_robot": 1,
+      "needed_for_five": 5
+    },
+    {
+      "component": "ESP32-S3",
+      "owned_count": 0,
+      "needed_per_robot": 1,
+      "needed_for_five": 5,
+      "candidate": "XIAO ESP32S3 Sense camera/mic bundle"
+    },
+    {
+      "component": "5 V USB power bank",
+      "owned_count": null,
+      "minimum_reported": 1,
+      "needed_per_robot": 1,
+      "needed_for_five": 5
+    },
+    {
+      "component": "0.96 inch SSD1306 OLED GME12864-11",
+      "owned_count": null,
+      "minimum_reported": 1,
+      "needed_per_robot": 1,
+      "needed_for_five": 5
+    },
+    {
+      "component": "28BYJ-48 5 V stepper",
+      "owned_count": 5,
+      "needed_per_robot": 2,
+      "needed_for_five": 10,
+      "missing_for_five": 5
+    },
+    {
+      "component": "ULN2003 board",
+      "owned_count": 5,
+      "needed_per_robot": 2,
+      "needed_for_five": 10,
+      "missing_for_five": 5
+    },
+    {
+      "component": "MG90S positional servo",
+      "owned_count": null,
+      "minimum_reported": 1,
+      "needed_per_robot": 2,
+      "needed_for_five": 10
+    },
+    {
+      "component": "DuPont jumper ribbons",
+      "owned_count": 10,
+      "needed_per_robot": null,
+      "usage": "signals; power wiring sized separately"
+    },
+    {
+      "component": "filament",
+      "owned_count": null,
+      "reported_owned": true,
+      "usage": "quantity/mass and printer access unconfirmed"
+    },
+    {
+      "component": "DFRobot SER0043 continuous servo",
+      "owned_count": 1,
+      "needed_per_robot": 0,
+      "usage": "spare; not positional claw/lift"
+    },
+    {
+      "component": "Adafruit Feather nRF52840",
+      "owned_count": 1,
+      "needed_per_robot": 0,
+      "usage": "not required"
+    },
+    {
+      "component": "Adafruit USB-C breakout 4090",
+      "owned_count": 1,
+      "needed_per_robot": 0,
+      "usage": "not qualified for whole-robot actuator power"
+    }
+  ],
+  "note": "The repeated pasted S3 N8R8 claim does not override the explicit no-S3 correction. Exact WROOM, bank, OLED and MG90S counts remain unknown. All five receive the same full core; optional outer cosmetics only. No extra Uno/Pico/Pi required."
 }

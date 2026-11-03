@@ -1,128 +1,89 @@
-# Separate-component head with an existing case
+# Small-component head — Sense candidate
 
-This is the active head direction. Assemble small modules in EVA Robot's existing
-printed shell, then mount that head on the SMARS/Bluino rover. Keep the owned
-ESP32-WROOM-32 as the motor/lift/gripper controller. No custom PCB is planned.
+Updated 2026-11-03. Reuse the owned **0.96-inch SSD1306 OLED** and saved EVA shell.
+Candidate new board: [Seeed XIAO ESP32S3 Sense, SKU 113991115](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html),
+**$13.99**, including camera and digital microphone. Add the $1.95 MAX98357
+amplifier and $0.29 speaker: **$16.23 of new head electronics**, excluding
+shipping/tax/mount parts. [Quote and specification evidence](research/2026-11-03-head-budget.md).
+No S3 is owned. This is not the bare XIAO or an expansion-board-only offer.
 
-The display is a **1.3-inch monochrome OLED for face graphics and text**. Stock
-Xiaozhi OLED software shows emotion symbols and chat text. Smooth EVA-style
-moving eyes need an additional animation adapter; that UI is not implemented.
-Camera, listening, speech and laptop AI remain in scope. This choice changes
-the earlier color LCD head; it does not remove vision or conversation.
+## Reuse drivers, change the board configuration
 
-## Components for one head
+The [official Sense guide](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/)
+specifies 8 MB flash / 8 MB PSRAM and a PDM microphone. Current stock may contain
+OV3660 or OV5640 AF; verify actual delivered sensor, cable and lens housing. The
+camera/microphone stack is about 21 × 17.8 × 15 mm. No new INMP441 is required.
 
-The [active budget list](../hardware/parts.md) now targets **$14.42 for head
-electronics**, using generic modules. This includes a $7.11 S3/OV2640 bundle,
-$2.98 four-pin SH1106 OLED, $2.09 INMP441, $1.95 MAX98357 and a $0.29 speaker quote.
-Shipping and mechanical fit are unresolved.
+The proposed head reuses pinned Xiaozhi camera, SSD1306, PDM input and I²S output
+components. It needs a **new Sense board target**, pin map and 8 MB partition/
+asset configuration. The existing modular build is Freenove 16 MB + SH1106 +
+INMP441 I²S; it cannot be flashed to Sense. CoreS3 and WROOM binaries are also
+incompatible. No Sense configuration/build/physical test has happened yet.
 
-**The compiled target below remains the Freenove N16R8 reference.** The cheap
-PCBFUN board has not been matched to its pin allocation or programming method.
-Confirm every camera signal, free GPIO, PSRAM/flash marking, board outline,
-USB/programming connection and camera lens position before ordering/flashing.
-If mapping differs, first determine whether a small pin-only adapter fits the
-available GPIO. No hardware driver rewrite is planned. The earlier $21.99
-Freenove reference is above the current whole-robot cap when combined with the
-remaining components; it is not the active budget purchase recommendation.
+Preliminary header budget: OLED2 + amplifier3 + UART2 = seven signals, with
+camera/PDM internally connected. This is not a validated allocation. Inspect the
+actual schematic, reserve camera/mic, USB, flash/PSRAM and boot functions, then
+select safe pins. Disable SD where pins are reused. Do not copy video GPIO1/2
+sensor wiring or the old Freenove UART pin numbers blindly. The body owns all
+cliff sensors; the head owns OLED, so no shared two-master bus is required.
 
-The budget OLED is ElectroPeak LCD-01-103, SH1106, 128×64, 1.3-inch, four-pin I²C,
-35.4×33.5 mm PCB. Match actual mounting holes and pin order. The amplifier's
-actual footprint and speaker cavity also need measurement. No SD card, touch
-sensor, expansion/programming dock, CoreS3 or Adafruit Feather is budgeted; if
-the chosen camera board requires a dock, include its real cost before selection.
+The earlier 2,500,528-byte app suggests an 8 MB OTA-slot build may be feasible,
+but its full merged image is not an 8 MB Sense image. Select correct partitions,
+reduce/measure assets as required and build/check actual sizes; never truncate a
+binary. Firmware installation/build scripts do **not** yet accept `--board sense`.
+[Implementation milestone](plans/2026-11-03-active-desk-pet.md#milestone-4--sense-head-and-original-face).
 
-The reference [EVA Robot hardware](https://github.com/Ksirailway-base/EVA-Robot/tree/c7ff17718a40d071b352e9894506c264578120c0)
-uses a Freenove S3, OV3660 camera, SH1106, INMP441 and MAX98357A. Its source is a
-case/module reference. Our existing Xiaozhi/Mac stack stays the conversation and
-robot-control base; EVA's Windows server is not required.
+## Face and interaction
 
-## Case already saved
+The OLED is monochrome, not a color LCD. Begin with original blink/gaze/listening/
+speaking/rest/blocked expressions. [RoboEyes](https://github.com/FluxGarage/RoboEyes)
+is a strong **GPL-3.0** candidate, with an Arduino/GFX graphics layer; a small
+ESP-IDF drawing/timing adapter is needed. Tech Talkies' custom-face fork is also
+GPL-3.0. Neither is integrated; resolve dependency/notices/source obligations
+before copying. Do not mark a combined GPL firmware MIT-only.
 
-- [Original EVA-Robot.3mf](../cad/originals/eva-head/EVA-Robot.3mf).
-- [Preview and print preparation](../cad/originals/eva-head/README.md).
-- [Author's files](https://www.thingiverse.com/thing:7319190/files),
-  Ksirailway-Base, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+One task should own OLED updates; animation must yield and never delay audio,
+UART stop or camera handling. Blink/idle behavior can continue locally while the
+Mac provides higher-level character state. Use an existing button first; an
+optional touch pad/TTP223 is unquoted until pins, mounting and wiring are known.
+Head patting does not locate the user or navigate back to them.
 
-The actual four meshes were inspected: assembled shell **74×48×48.8 mm**. The
-screen opening is about **35×19.6 mm**, with an approximately **4.4 mm camera
-opening** below it. Original geometry is unchanged. The file places parts in
-assembly positions: separate/arrange them on the bed before slicing.
+## Existing case and small changes
 
-EVA does not specify exact display-PCB or speaker SKUs. The generic LCD-01-103
-is a candidate, not a measured fit. Verify its holes/PCB against the shell. Do not substitute a
-0.96-inch display or a larger eight-pin OLED assuming equal fit. Confirm selected
-camera dimensions and alignment before ordering; the budget OV2640 is not the
-OV3660 named in EVA's reference. Even the same sensor name does not guarantee the
-same lens housing.
+The [EVA original](../cad/originals/eva-head/README.md) is saved unchanged under
+CC BY-SA 4.0. Four meshes are in assembly coordinates, overall approximately
+74 × 48 × 48.8 mm; screen opening about 35 × 19.6 mm and camera opening about
+4.4 mm. Arrange parts separately before slicing.
 
-Expected small remixes are internal spacers, a camera-opening correction if
-needed, and a removable EVA-to-SMARS mounting bracket. Check rover stability and
-full gripper travel with the head in place. No compatible existing mounting
-bracket was found. A major head/chassis redesign is outside this plan. Fusion MCP
-must be connected and the active design checked before geometry editing.
+The opening was not designed for the owned SSD1306/Sense combination. Measure
+actual OLED PCB/glass and lens position. Expected small remixes: a replaceable
+bezel insert, camera/board spacer, speaker retention and removable rover bracket.
+Keep lens, mic, speaker, USB and antenna clear; check full arm sweep and bank
+weight/stability. If the combination needs a new shell/chassis, revisit the
+choice rather than silently enlarging scope. Do not cut display glass or PCB.
 
-## Configured pin allocation — hardware unverified
+Keep camera pose fixed relative to jaws for calibration. Check actual MG90S
+pockets/horns and the stepper chassis lift interface before final head mounting.
+No geometry edit or physical fit has passed. Fusion tools are exposed for future precision work; verify the live connection
+and active design before touching geometry.
 
-This allocation preserves the Freenove camera wiring, avoids octal-PSRAM pins,
-and retains the same UART pair as the earlier head. A dedicated
-`desk-robot-modular-s3` board configuration now implements it; real peripheral
-tests are required before the wiring can be considered physically validated.
+## Power/audio and staged bring-up
 
-| Connection | S3 GPIO / setup |
-| --- | --- |
-| Camera | Freenove stock mapping: SIOD 4, SIOC 5, VSYNC 6, HREF 7, XCLK 15, PCLK 13; Y2–Y9 = 11, 9, 8, 10, 12, 18, 17, 16 |
-| Camera SCCB | I²C controller 0, explicitly selected in Kconfig with the new I²C driver |
-| OLED SDA / SCL | 38 / 39, **I²C controller 1**; 3.3 V power |
-| INMP441 SCK / WS / SD | 42 / 41 / 40; L/R to GND, 3.3 V power |
-| MAX98357A BCLK / LRC / DIN | 14 / 21 / 47; regulated 5 V power, common logic ground |
-| Head UART TX / RX | 2 / 1 → WROOM RX16 / TX17; 115200 8N1, 3.3 V logic |
-| Interaction button | Existing BOOT button, GPIO0 |
-| Unused | SD-card slot; GPIO38–40 are assigned above, so leave the slot empty |
+- Logic stays 3.3 V. Verify amplifier variant/pins and supply per its documentation.
+  Speaker connects **SPK+ to SPK−**, neither output to GND. Limit output for the
+  8 Ω / 1 W speaker; check acoustic port and cavity fit.
+- Use a qualified power bank and separate rated actuator branches. Do not route
+  motor current through head/body regulators or laptop USB.
+- On USB with motors absent, verify screen, fresh camera capture, PDM recording,
+  speaker/listening transition and head identity before joining UART TX/RX/GND.
+- Only after hardware and local body interlock tests should the head command
+  bounded motion. Mac handles speech/LLM/vision; no Uno/Pico/Pi needed.
 
-Reserve GPIO35–37 for octal PSRAM, GPIO19/20 for native USB and GPIO43/44 for
-debug UART. Check the actual module marking and board pin labels. Freenove's
-[GPIO notes](https://docs.freenove.com/projects/fnk0085/en/latest/fnk0085/codes/C/Preface.html)
-and [camera example](https://github.com/Freenove/Freenove_ESP32_S3_WROOM_Board/blob/main/C/Sketches/Sketch_07.1_CameraWebServer/camera_pins.h)
-are the hardware references.
+## Preserved historical reference
 
-Do not copy EVA's wiring table verbatim: it assigns OLED pins 36/37, which
-conflict with the selected R8 board's PSRAM. Its speaker-ground instruction is
-also incorrect for MAX98357A. Connect the speaker **between SPK+ and SPK−**;
-neither speaker output goes to GND. See the
-[amplifier guide](https://learn.adafruit.com/adafruit-max98357-i2s-class-d-mono-amp/pinouts).
-Use short audio wires, insulated joints and volume suitable for the speaker.
-
-## Firmware reuse and remaining work
-
-Reuse the pinned Xiaozhi `Esp32Camera`, SH1106/SSD1306 display support and
-`NoAudioCodecSimplex` I²S audio. The existing `bread-compact-wifi-s3cam` and
-`bread-compact-wifi` targets supply those pieces. No camera/audio driver or
-speech engine needs to be written from scratch.
-
-The overlay now has a unique `desk-robot-modular-s3` configuration, alongside the
-earlier CoreS3 reference. Select it explicitly with `--board modular`; its ignored
-build copy is `firmware/head/build/xiaozhi-modular`. The authenticated fresh-JPEG
-adapter uses `Esp32Camera` and shares the capture/explain lock. The body protocol,
-watchdog, authentication and laptop API remain unchanged. See
-[build commands](build.md) and [verification evidence](../test-results/verification.md).
-
-Camera SCCB is forced to I²C0 through Kconfig, with a compile guard; the camera
-port field alone does not select its bus when SCCB pins are assigned. OLED uses
-I²C1. The selected 16 MB flash supports the configured partition/assets layout.
-Compilation does not establish actual sensor, display, audio or case fit. Do not
-flash a CoreS3 binary onto Freenove, or either S3 binary onto the WROOM.
-
-## Build sequence
-
-1. Open the saved case; compare the display, camera, speaker and amplifier
-   drawings against its mounts. Resolve exact camera/speaker choices and quote
-   delivery from as few suppliers as practical.
-2. Print/test the gripper with real keys/candy and print a head fit sample before
-   the full rover. No physical fit or pickup trial has happened yet.
-3. Build the dedicated modular-head configuration, then bring up screen, camera,
-   microphone and speaker on USB with no actuators attached.
-4. Connect the verified 3.3 V UART to the WROOM. Power motors/servos separately
-   during bench tests; follow [body wiring and power](../hardware/wiring.md).
-5. Fit a small removable head bracket, measure stability/camera pose, and run the
-   existing pickup and multi-robot acceptance steps.
+`firmware/head/modular/` and [build.md](build.md) retain the previously compiled
+Freenove N16R8 map: OLED38/39, INMP44142/41/40, amplifier14/21/47, UART2/1;
+camera uses Freenove's stock signals, SCCB I²C0 and OLED I²C1. These are **not
+Sense wiring instructions**. Native USB, octal PSRAM reservations and exact
+module wiring remain board-specific. Preserve the historical build rather than
+renaming it Sense or treating its successful compilation as new hardware proof.

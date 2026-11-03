@@ -1,3 +1,7 @@
+> Updated 2026-11-03: this is the historical Freenove 16 MB/SH1106/I²S target.
+> The proposed Sense/PDM/SSD1306/8 MB head is a separate, unimplemented target.
+> Do not flash this build onto Sense. See `docs/modular-head.md`.
+
 # Modular S3 head — hardware unverified
 
 Unique `desk-robot-modular-s3` board for Freenove FNK0085B / N16R8 (16 MB flash,

@@ -1,119 +1,146 @@
 {
   "currency": "USD",
-  "checked_at": "2026-10-30",
+  "checked_at": "2026-11-03",
   "cap_usd": 50,
   "fit_confirmed": false,
   "readiness_checks": {
-    "head_board_pinout_and_programming_confirmed": false,
-    "power_bank_rating_load_and_mount_confirmed": false,
-    "generic_driver_and_motor_loaded_current_confirmed": false
+    "two_usable_owned_mg90s_confirmed": false,
+    "sense_variant_pin_budget_and_8mb_feasibility_reviewed": false,
+    "case_mechanism_sensor_envelope_preflight_confirmed": false,
+    "bank_label_cable_and_mount_preflight_confirmed": false,
+    "sufficient_filament_and_printer_access_confirmed": false
   },
   "items": [
     {
-      "item": "PCBFUN S3 N16R8 + OV2640 bundle \u2014 compatibility candidate only",
+      "item": "Seeed XIAO ESP32S3 Sense camera and PDM microphone bundle, SKU 113991115",
       "quantity": 1,
-      "unit_usd": 7.11,
+      "unit_usd": 13.99,
       "price_status": "verified",
-      "url": "https://www.aliexpress.com/item/1005007884506760.html",
-      "fit": "Select Module and OV2640, not expansion board. Price observed; camera pinout, exposed GPIO, native USB/programming requirements and EVA mount are NOT verified. Do not flash the Freenove build until matched."
+      "url": "https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html",
+      "fit": "8 MB flash / 8 MB PSRAM. New purchase; no S3 owned. Verify actual OV3660 or OV5640 AF revision, Sense bundle, pin map and mount. Requires new firmware target; old Freenove binary incompatible."
     },
     {
-      "item": "1.3 inch SH1106 128x64 four-pin I2C OLED, ElectroPeak LCD-01-103",
-      "quantity": 1,
-      "unit_usd": 2.98,
-      "price_status": "verified",
-      "url": "https://electropeak.com/1-3-i2c-128x64-white-oled-display-module",
-      "fit": "35.4x33.5mm PCB; mounting holes and connector clearance still need checking. Monochrome."
-    },
-    {
-      "item": "INMP441 I2S microphone breakout",
-      "quantity": 1,
-      "unit_usd": 2.09,
-      "price_status": "verified",
-      "url": "https://www.sinoning.com/product/omnidirectional-microphone-module-i2s-interface-inmp441-mems-high-precision-low-power-ultra-small-volume-for-esp32/",
-      "fit": "3.3V; confirm footprint and acoustic port."
-    },
-    {
-      "item": "Generic MAX98357 I2S amplifier, ElectroPeak SEN-17-139",
+      "item": "MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139",
       "quantity": 1,
       "unit_usd": 1.95,
       "price_status": "verified",
       "url": "https://electropeak.com/max98357-i2s-audio-amplifier-module",
-      "fit": "Confirm actual MAX98357A/I2S variant and dimensions; speaker across SPK+ and SPK-, neither to ground."
+      "fit": "Verify actual MAX98357A/I2S variant, pins and cavity. Differential speaker outputs; neither goes to ground."
     },
     {
-      "item": "ElectroPeak SEN-17-105 speaker, 8 ohm 1W, 20mm x 3.75mm",
+      "item": "8 ohm 1 W speaker, 20 mm x 3.75 mm, ElectroPeak SEN-17-105",
       "quantity": 1,
       "unit_usd": 0.29,
       "price_status": "verified",
       "url": "https://electropeak.com/8-ohm-1w-20mm-diameter-speaker",
-      "fit": "Moving-coil with solder pads. Price/size observed; actual EVA mounting cavity and acoustic fit still unverified. Limit amplifier volume to speaker rating."
+      "fit": "Solder pads; cavity/acoustics unverified; limit output for speaker rating."
     },
     {
-      "item": "Existing ESP32-WROOM-32 dev board",
+      "item": "GY-530 VL53L0X double-hole ToF module, SEN-19-018",
+      "quantity": 5,
+      "unit_usd": 1.75,
+      "price_status": "verified",
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
+      "fit": "Four downward corners plus one separate front obstacle sensor. Standoff/FOV/surface/voltage and stopping qualification required; not a falling-prevention guarantee."
+    },
+    {
+      "item": "TCA9548A eight-channel I2C multiplexer breakout",
+      "quantity": 1,
+      "unit_usd": 0.47,
+      "price_status": "verified",
+      "url": "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
+      "fit": "Five sensors on isolated channels, default 7-bit address 0x29; one selected at a time. Check reset access and 3.3 V pullups. Body bus only."
+    },
+    {
+      "item": "Owned ESP32-WROOM-32 dev board",
       "quantity": 1,
       "unit_usd": 0,
       "price_status": "owned",
       "url": "",
-      "fit": "At least one owned; five-unit inventory count unknown."
+      "fit": "At least one owned; exact fleet count unknown. Body firmware currently DC-only; stepper/cliff changes pending."
     },
     {
-      "item": "Generic SG90 positional 180-degree micro servo, SINONING SN482",
-      "quantity": 2,
-      "unit_usd": 1.49,
-      "price_status": "verified",
-      "url": "https://www.sinoning.com/product/1pcs-sg90-9g-mini-micro-servo-for-rc-250-450-helicopter-airplane-car-robot/",
-      "fit": "Lift and grip, one each; 23x12.2x29mm seller dimensions. Check actual horn, pocket, travel and loaded torque. No continuous-rotation substitution."
-    },
-    {
-      "item": "Generic DRV8833 dual motor driver, SINONING 33012432478",
-      "quantity": 1,
-      "unit_usd": 0.5,
-      "price_status": "verified",
-      "url": "https://www.sinoning.com/product/drv8833-2channel-dc-motor-driver-module-board-1-5a-3v-10v/",
-      "fit": "Confirm package/board continuous current and sleep/fault pin labels. Seller text swaps EEP/ULT roles; do not copy it."
-    },
-    {
-      "item": "N20 3-6V gearmotor, 6V 100rpm, SINONING M1",
-      "quantity": 2,
-      "unit_usd": 1.99,
-      "price_status": "verified",
-      "url": "https://www.sinoning.com/product/1pcs-n20-micro-reducer-motor-5v-6v-3v-dc-long-shaft-reducer-motor-metal-gear/",
-      "fit": "12x10mm gearbox, 3mm D shaft, 10mm shaft. 100rpm is at 6V/no load; slower at 5V. Stall current/torque unknown."
-    },
-    {
-      "item": "Existing regulated 5V USB power bank",
+      "item": "Owned 0.96 inch four-pin SSD1306 OLED, GME12864-11",
       "quantity": 1,
       "unit_usd": 0,
       "price_status": "owned",
       "url": "",
-      "fit": "Existence confirmed, output rating/weight/dimensions not supplied. Reuse is conditional on load, cable and stability tests; exact count for five unknown."
+      "fit": "At least one reported; verify controller, pin order, voltage and dimensions. Existing EVA opening needs measured bezel/mount. Fleet count unknown."
     },
     {
-      "item": "Rated USB power lead, switch, wiring, connectors and fasteners",
+      "item": "Owned 5 V 28BYJ-48 stepper motor",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Five reported owned; ten needed for fleet. Use existing stepper-specific SMARS remix, not saved N20 mounts. Loaded speed/torque/temperature unknown."
+    },
+    {
+      "item": "Owned ULN2003 stepper driver board",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Five reported owned. Verify supplied motor/driver wiring, 3.3 V signal compatibility and current. No DRV8833 for this drivetrain."
+    },
+    {
+      "item": "Reported MG90S positional micro servo, quantity to confirm",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "inventory_check",
+      "url": "",
+      "fit": "Conditional zero-cost reuse only; exact owned count unknown. Two required for prototype; ten for fleet. Check pocket, spline, horn, travel and actual loaded lifting."
+    },
+    {
+      "item": "Owned regulated 5 V USB power bank",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "At least one owned. Label current, shared-port rating, cable, auto-off, loaded stability, weight and mount unverified. No 3 A claim."
+    },
+    {
+      "item": "Owned filament",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Reuse stock; printer access, sliced mass and sufficient quantity must be confirmed. Service printing/replenishment excluded."
+    },
+    {
+      "item": "Owned DuPont signal wire ribbons",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Ten ribbons reported. Signal wiring only; do not assume actuator-current rating."
+    },
+    {
+      "item": "Rated actuator power lead, switch, connectors, fasteners and wiring",
       "quantity": 1,
       "unit_usd": 8,
       "price_status": "allowance",
       "url": "",
-      "fit": "Includes a suitable actuator power branch; do not use ESP32 regulator or assume Adafruit #4090 is a 3A distributor. Final sizes/quote needed."
+      "fit": "Includes separate motor/servo power branches and suitable conductors. Exact parts/current sizing and shipping pending; no custom PCB."
     },
     {
-      "item": "Filament for SMARS, lift/gripper and EVA head",
-      "quantity": 1,
-      "unit_usd": 5,
-      "price_status": "allowance",
-      "url": "",
-      "fit": "Assumes printer access; actual sliced mass, failed prints, tiny bracket and cosmetics not measured. Service printing extra."
-    },
-    {
-      "item": "Motor suppression and power decoupling components",
+      "item": "Bulk and local decoupling components",
       "quantity": 1,
       "unit_usd": 2,
       "price_status": "allowance",
       "url": "",
-      "fit": "Choose after current/noise measurement; no unverified current guarantee."
+      "fit": "Choose values/voltage rating after power measurements. Capacitors do not fix an undersized bank."
     }
   ],
-  "head_configuration": "Separate S3-camera / SH1106 / I2S audio; budget camera-board candidate NOT qualified for compiled Freenove firmware",
-  "note": "First prototype only, using one owned WROOM and power bank. Item quotes exclude delivery/tax; three allowances are targets. AliExpress showed $5.60 shipping for one camera bundle; other shipping/tax unknown. Five-unit prices and owned inventory are not established. No purchases."
+  "head_configuration": "Candidate XIAO ESP32S3 Sense + owned SSD1306 + MAX98357/speaker; no new INMP441; Sense firmware target pending",
+  "note": "Conditional FIRST prototype target 35.45 USD before shipping, tax and any missing reused inventory. Item prices verified, allowances not quoted. Five-unit bill requires five additional steppers/drivers and unknown other quantities. Old DC/Freenove BOM archived. No purchases or physical validation.",
+  "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
+  "qualification_checks": {
+    "sense_board_configuration_and_8mb_build_confirmed": false,
+    "ssd1306_and_sense_camera_physical_case_fit_confirmed": false,
+    "stepper_chassis_lift_and_head_physical_fit_confirmed": false,
+    "stepper_backend_and_cliff_interlock_verified": false,
+    "sensor_mount_surface_latency_and_stops_qualified": false,
+    "integrated_power_load_temperature_and_stability_qualified": false
+  }
 }

@@ -1,3 +1,8 @@
+> Updated 2026-11-03: this describes existing supervised pickup software.
+> The new stepper/Sense/cliff/pet design is planned in `PLAN.md`; local cliff
+> firmware is not implemented. Use a contained setup and qualify the new hardware
+> before physical pickup. No actual trials have passed.
+
 # Measured pickup and the second robot
 
 ## Calibrate one robot

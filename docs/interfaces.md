@@ -1,3 +1,8 @@
+> Design update 2026-11-03: this documents the existing DC-body/Freenove protocol.
+> Stepper identity, sensor fault/status capabilities, face events and an operator
+> pet lease are proposed in `docs/plans/2026-11-03-active-desk-pet.md`, not current
+> commands. Do not infer cliff protection or reusable roam permission from this API.
+
 # Integration contract (implementation baseline)
 
 The protocol is derived from VerdureBuddyRover's newline-delimited UART protocol,

@@ -1,14 +1,22 @@
 # Firmware builds
 
 These commands build files. **Nothing in setup automatically flashes hardware.**
+
+Updated 2026-11-03: this guide preserves earlier tested targets. No Sense build
+selector, stepper backend, cliff interlock or pet-mode command exists yet. Follow
+the [new implementation plan](plans/2026-11-03-active-desk-pet.md) for that work.
 The body target is classic ESP32-WROOM-32. The compiled head reference is **Freenove N16R8 with separate OLED/audio
-modules**; select it explicitly with `--board modular`. The cheaper board in the
-budget list is not yet pinout/programming-qualified for this build.
+modules**; select it explicitly with `--board modular`. The proposed XIAO ESP32S3 Sense is not compatible with this pin map or binary;
+its PDM microphone, SSD1306 and 8 MB target are not implemented.
 CoreS3 is an earlier reference with its own build copy. See the
 [modular-head guide](modular-head.md) for parts/case and hardware checks. Do not
 flash CoreS3 images onto Freenove, or S3 images onto WROOM.
 
-## Body
+## Body — current DC firmware only
+
+The proposed ULN2003/28BYJ-48 body needs a new phase-generation backend and
+local cliff interlock. Current commands below build DC PWM firmware; do not
+connect it to the proposed eight-wire stepper map.
 
 From the project root:
 
@@ -72,7 +80,7 @@ The build helper seeds and verifies `firmware/head/dependencies.lock` in each
 build copy. It rejects a changed dependency lock. Keep the two board copies
 separate so that overlay changes and binaries retain their actual board identity.
 
-## Modular S3 head — active hardware direction
+## Modular S3 head — historical Freenove reference
 
 Prepare its own build copy, leaving `upstream/` and the CoreS3 reference untouched:
 
