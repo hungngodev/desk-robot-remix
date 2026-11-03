@@ -18,9 +18,10 @@ quote or an order-ready robot. [Components](hardware/parts.md),
 
 ## Start here
 
-1. [Master plan](PLAN.md) and [implementation tasks](docs/plans/2026-11-03-active-desk-pet.md).
+1. [Product shape, behavior and acceptance](docs/product-definition.md),
+   [master plan](PLAN.md) and [implementation tasks](docs/plans/2026-11-03-active-desk-pet.md).
 2. [Stepper chassis and wheel originals](cad/originals/smars-stepper/README.md),
-   [saved gripper/lift](docs/first-gripper-test.md) and [saved EVA case](cad/originals/eva-head/README.md).
+   [saved gripper/lift](docs/first-gripper-test.md) and [rounded head candidate](cad/originals/sparky-head/README.md).
 3. [Sense head adaptation](docs/modular-head.md), [proposed wiring/power](hardware/wiring.md)
    and [edge-sensor layout](docs/research/2026-11-03-cliff-sensors.md).
 4. [Twelve-video audit](docs/research/2026-11-03-video-audit.md) and
@@ -42,7 +43,9 @@ The new Sense-head target and stepper/DC body profiles compile. Stepper timing,
 sensor fault policy and local-only recovery have host tests; actual sensor I/O
 and measured calibration are unfinished. Five-robot mock conversation still works.
 See [implementation progress](docs/firmware-foundation.md). No robot has
-been flashed, assembled or physically accepted; no CAD geometry has changed.
+been flashed, assembled or physically accepted; original manufacturing CAD is unchanged.
+[Source-based concept views](cad/concepts/2026-11-03-rounded/README.md) exist,
+with illustrative mechanisms and no fitted power bank.
 
 ```sh
 uv sync --extra dev

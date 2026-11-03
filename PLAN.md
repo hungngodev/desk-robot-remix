@@ -6,6 +6,12 @@ lift/gripper, local edge sensing and its own identity. Only removable hats and
 costumes differ. Pick up actual flat keys and wrapped candy. Reuse existing
 designs; limit CAD to mounts, spacers, bezel inserts, clearance fixes and jaw tips.
 
+**Product shape/behavior:** [requirements and acceptance](docs/product-definition.md).
+The user chose a **rounder existing head case**. [Sparky v0.1.0](cad/originals/sparky-head/README.md)
+is the leading fit-check candidate; the earlier EVA layout is superseded for
+appearance. [Actual-source layout views](cad/concepts/2026-11-03-rounded/README.md)
+are concepts, not a fitted assembly or print package.
+
 ## Inventory and cost
 
 **No ESP32-S3 is owned.** The user's explicit correction overrides the repeated
@@ -50,7 +56,7 @@ bare-board/microphone subtotal excluded its compatible camera/interface.
 | Drive body | Existing [SMARS 28BYJ-48 remix](https://www.thingiverse.com/thing:2778904/files), with [build/code reference](https://github.com/wtlx/smars-28byj-48). Correct stepper chassis/wheel originals are now saved; measure them before printing. The saved N20 chassis is not a stepper mount. |
 | Lift/grip | Saved [Bluino gripper](https://www.thingiverse.com/thing:4253681) and linked [SMARS forklift](https://www.thingiverse.com/thing:3027255). Check MG90S pocket, horn and sweep; combined fit on the stepper variant is unproven. |
 | Head electronics | Candidate [XIAO ESP32S3 Sense bundle](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html), $13.90; includes camera and digital microphone. Add owned SSD1306, MAX98357A and speaker. No separate INMP441 purchase. |
-| Head case | Saved [EVA Robot shell](cad/originals/eva-head/README.md). Small OLED bezel, Sense/camera spacers, head bracket and sensor brackets only; fit remains a gate. |
+| Head case | Rounded [Sparky v0.1.0 shell](cad/originals/sparky-head/README.md), saved with license/hashes, is the current candidate. Author labels it unprinted/estimated. Small OLED insert, Sense/camera/audio mounts and rover retention need fit checks. EVA is historical. |
 | Voice/camera | Pinned [Xiaozhi firmware](https://github.com/78/xiaozhi-esp32) and [server](https://github.com/xinnan-tech/xiaozhi-esp32-server); Sense-specific PDM mic/camera/SSD1306/8 MB target now compiles using existing drivers. |
 | Motor boundary | Existing local [Verdure-inspired UART bridge](https://github.com/maker-community/VerdureBuddyRover/blob/main/docs/xiaozhi-mcp-serial-integration.md). Prototype stepper backend and portable sensor interlock implemented; hardware ToF acquisition/calibration still pending. |
 | Expression/initiative | RoboEyes, Tech Talkies, WALL-E and Open Duck are references, with [license and behavior findings](docs/research/2026-11-03-active-pet-sources.md). Preserve license boundaries before copying. |

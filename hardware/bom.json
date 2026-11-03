@@ -67,7 +67,7 @@
       "unit_usd": 0,
       "price_status": "owned",
       "url": "",
-      "fit": "At least one reported; verify controller, pin order, voltage and dimensions. Existing EVA opening needs measured bezel/mount. Fleet count unknown."
+      "fit": "At least one reported; verify controller, pin order, voltage and dimensions. Rounded Sparky v0.1.0 candidate has a larger OLED opening and needs a measured insert/mount. Case is unprinted/unqualified. Fleet count unknown."
     },
     {
       "item": "Owned 5 V 28BYJ-48 stepper motor",

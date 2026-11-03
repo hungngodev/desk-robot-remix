@@ -90,6 +90,13 @@ No current/thermal test has passed. Large capacitors may reduce brief droop but
 cannot make an undersized bank adequate. Current-limited bench supplies should
 be sized from measurements; no guessed universal 3 A guarantee.
 
+For a compact mechanical reference only, a 5,000mAh bank around 80×40×25mm/100g
+with a specified 5 V / 3 A output is a candidate class. [Product definition](../docs/product-definition.md)
+records one official-spec example and its over-cap cost. No replacement bank is
+selected or purchased; the owned unidentified unit remains conditional. Keep
+retention replaceable, support the bank independently of its USB connector and
+qualify the actual bank/cable under load before mobile operation.
+
 Use rated conductors for actuator power. Owned DuPont ribbons are signal leads,
 not the main motor/servo supply. Never run motor/servo current through a board's
 3.3 V regulator or from a laptop USB port through the board. Check the actual

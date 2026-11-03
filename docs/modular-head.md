@@ -1,6 +1,8 @@
 # Small-component head — Sense candidate
 
-Updated 2026-11-03. Reuse the owned **0.96-inch SSD1306 OLED** and saved EVA shell.
+Updated 2026-11-03. Reuse the owned **0.96-inch SSD1306 OLED**. User chose a rounder
+existing head: [Sparky v0.1.0](../cad/originals/sparky-head/README.md) is the current
+fit-check candidate; EVA remains a historical source.
 Candidate new board: [Seeed XIAO ESP32S3 Sense, SKU 113991115](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html),
 **$13.90**, including camera and digital microphone. Add the $1.95 MAX98357
 amplifier and $0.29 speaker: **$16.14 of new head electronics**, excluding
@@ -51,21 +53,27 @@ Head patting does not locate the user or navigate back to them.
 
 ## Existing case and small changes
 
-The [EVA original](../cad/originals/eva-head/README.md) is saved unchanged under
-CC BY-SA 4.0. Four meshes are in assembly coordinates, overall approximately
-74 × 48 × 48.8 mm; screen opening about 35 × 19.6 mm and camera opening about
-4.4 mm. Arrange parts separately before slicing.
+The [Sparky v0.1.0 original shell](../cad/originals/sparky-head/README.md) is saved
+unchanged under CC BY-SA 4.0, about 56 ×52 ×54mm with rounded corners. The author
+explicitly says this release is not test-printed and component sizes are estimates.
+Do not mix its STL with v0.2 dimensions. Only the shell is shown in the
+[layout study](../cad/concepts/2026-11-03-rounded/README.md); tracks/mechanism/mounts
+are illustrative and the bank is not fitted.
 
-The opening was not designed for the owned SSD1306/Sense combination. Measure
-actual OLED PCB/glass and lens position. Expected small remixes: a replaceable
-bezel insert, camera/board spacer, speaker retention and removable rover bracket.
+The source 1.3-inch window needs an insert for the owned 0.96-inch OLED. Measure
+actual PCB/glass and lens position. Expected small remixes: a replaceable
+bezel, Sense/camera spacer or wedge, microphone opening, speaker retention and
+removable rover bracket. The original LED hole is not proof of camera fit.
+Shell retention must be priced; do not adopt the source's raw-LiPo power system
+or silently require its full magnet set. EVA's 74mm axis is depth when its 48mm
+face points forward; its boxy appearance was declined.
 Keep lens, mic, speaker, USB and antenna clear; check full arm sweep and bank
 weight/stability. If the combination needs a new shell/chassis, revisit the
 choice rather than silently enlarging scope. Do not cut display glass or PCB.
 
 Keep camera pose fixed relative to jaws for calibration. Check actual MG90S
 pockets/horns and the stepper chassis lift interface before final head mounting.
-No geometry edit or physical fit has passed. Fusion tools are exposed for future precision work; verify the live connection
+No manufacturing geometry edit or physical fit has passed. Fusion tools are exposed for future precision work; verify the live connection
 and active design before touching geometry.
 
 ## Power/audio and staged bring-up

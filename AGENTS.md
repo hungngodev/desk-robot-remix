@@ -30,7 +30,10 @@
 - No purchases, flashing or external publishing without device/order-specific
   authorization. User instructions take precedence; local reversible work can continue.
 - Use live Fusion only after inspecting active design; preserve unrelated work.
-  No geometry edits/physical successes are currently recorded.
+  No manufacturing geometry edits/physical successes are currently recorded.
+  User chose a rounder existing head: Sparky v0.1.0 is the unprinted fit-check
+  candidate, EVA is historical. Read docs/product-definition.md and the new
+  source-based layout views; tracks/mechanism/mounts are placeholders, bank not fitted.
 - Source/license audits are in `docs/research/`. RoboEyes/TechTalkies face and
   chillibasket are GPL3 candidates, not MIT copied code. Resolve source-chain
   terms for the stepper remix and retain all CAD/software notices.

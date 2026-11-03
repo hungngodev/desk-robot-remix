@@ -6,18 +6,25 @@ SMARS chassis/wheel/track STLs are saved and inspected, with original assembly
 documents. No geometry has been edited or sliced. Updated 2026-11-03: the stepper chassis
 and rear wheel originals are also saved; combined mechanical fit is unverified.
 
+**Appearance revision:** user chose a rounder existing head. Saved
+[Sparky v0.1.0](originals/sparky-head/README.md) is the current fit-check candidate;
+EVA is historical. [Four concept views](concepts/2026-11-03-rounded/README.md)
+use real shell/chassis meshes but illustrative tracks/mechanism/mounts and no bank.
+
 | Source | Author | Needed files | License |
 | --- | --- | --- | --- |
-| [EVA Robot head 7319190](https://www.thingiverse.com/thing:7319190/files) | Ksirailway-Base | [Saved EVA-Robot.3mf](originals/eva-head/EVA-Robot.3mf), [inspection/provenance](originals/eva-head/README.md); four objects in assembly positions | CC BY-SA 4.0 |
+| [Sparky v0.1.0](https://github.com/slahiri/sparky/releases/tag/v0.1.0) | Siddhartha Lahiri | [Saved shell, collar, rack, base/lid, archive and license](originals/sparky-head/README.md); current fit-check candidate, explicitly unprinted | CC BY-SA 4.0 |
+| [Tiny Engineer head](https://github.com/jamro/tiny-engineer/tree/aefc852a894174604a1e350bf9bc04c04f28ec80/3d_models) | Krzysztof Jamroz | [Saved Head/Hat/license/notice](originals/tiny-engineer-head/README.md); alternative reference only | CERN-OHL-S-2.0 |
+| [EVA Robot head 7319190](https://www.thingiverse.com/thing:7319190/files) | Ksirailway-Base | [Saved EVA-Robot.3mf](originals/eva-head/EVA-Robot.3mf), [inspection/provenance](originals/eva-head/README.md); historical, four objects in assembly positions | CC BY-SA 4.0 |
 | [SMARS 2662828](https://www.thingiverse.com/thing:2662828/files) | tristomietitoredeituit | [Saved screwless selection and documents](originals/smars/README.md): `chassis_-SL.stl`, `master_wheel.stl`, `slave_wheel_SL.stl`, `mechanical_track.stl`; `doc_lite.zip`, `Instructions.pdf` | CC BY-NC-SA 4.0 |
 | [Stepper SMARS 2778904](https://www.thingiverse.com/thing:2778904/files) | unclejeff | [Two saved original STLs, source and hashes](originals/smars-stepper/README.md); WIP, slow drivetrain, original SMARS tracks, M4 motor/M3 slave mounts | Displayed CC BY 4.0; ancestor NC-SA difference recorded, retain both attributions and resolve before redistribution |
 | [Gripper 4253681](https://www.thingiverse.com/thing:4253681/files) | bluino | [Saved originals and hashes](originals/gripper/README.md): `servo_case_arm.stl`, `arm_rack.stl`, `pinion_gear.stl` | CC BY 4.0 |
 | [Original forklift 3027255](https://www.thingiverse.com/thing:3027255/files) | tristomietitoredeituit | [Saved E/F pieces, PDF and hashes](originals/forklift/README.md) | CC BY-NC-SA 4.0 |
 
 Do not mix screwless/screwed axle and wheel variants. Follow original assembly
-counts. Stepper chassis/lift/EVA head/WROOM/bank/sensor mounting still needs measured fit checks.
+counts. Stepper chassis/lift/rounded head/WROOM/bank/sensor mounting still needs measured fit checks.
 
-Future permitted jobs: removable EVA head bracket clearing camera/microphone/
+Future permitted jobs: removable rounded-head bracket clearing camera/microphone/
 speaker/button; small internal module spacers or camera-aperture corrections;
 WROOM/bank spacers, small sensor brackets, an SSD1306 bezel and thin replaceable
 jaw tips. Keep the camera pose fixed relative to the jaws. The old separate

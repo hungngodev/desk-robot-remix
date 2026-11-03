@@ -16,12 +16,30 @@ behavior, stopping distance or pickups. See
 
 Two stepper originals are saved with hashes; source integrity is not mechanical
 qualification. The twelve-video audit covers descriptions/resources and selected
-code, not full-frame viewing. The conditional target remains $35.45 before charges
+code, not full-frame viewing. The conditional target remains $35.36 before charges
 and missing reused parts; procurement readiness is false.
 
 [Earlier plan-update verification](plan-update-2026-11-03.json) records the prior
 documentation-only checkpoint. The historical90 checks below are a separate older
 baseline and do not include these new components.
+
+## Product-definition and visual checkpoint — 2026-11-03
+
+User chose a rounder existing head case. [Requirements/acceptance](../docs/product-definition.md)
+and [case audit](../docs/research/2026-11-03-rounded-cases.md) now distinguish
+requested behavior, current software, measured source geometry and physical gaps.
+Sparky v0.1.0 originals and license are saved unchanged; its actual shell measures
+about 56×52×54mm, not main/v0.2 dimensions. Source explicitly says not test-printed.
+
+Four [source-based concept views](../cad/concepts/2026-11-03-rounded/README.md)
+and an editable native layout were rendered in a separate background Blender 5.2.3
+process and visually opened. Head/chassis are actual saved meshes; track/claw/
+mount/sensor geometry is illustrative and the bank is not fitted. Originals were
+not modified. No print files, fit, manufacturing audit or physical acceptance
+result was produced by this visual. No runtime firmware changes in this checkpoint;
+earlier software test/build evidence remains dated as above.
+[Concept/document checks](product-definition-2026-11-03.json) record source and
+preview integrity, local links and the explicit physical-acceptance gap.
 
 ## Historical software baseline — 2026-10-30
 

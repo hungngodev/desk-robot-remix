@@ -34,6 +34,17 @@ publish private configuration or credential-bearing binaries.
 
 ## Additional sources collected/reviewed 2026-11-03
 
+- [Sparky v0.1.0](https://github.com/slahiri/sparky/releases/tag/v0.1.0),
+  **Sparky by Siddhartha Lahiri**, [CC BY-SA4.0](cad/originals/sparky-head/LICENSE.md):
+  unchanged release ZIP, five STLs and source config/license saved under
+  `cad/originals/sparky-head/`. The shell is a rounded-head candidate; author
+  explicitly labels the design unprinted/estimated. Concept views use it and
+  the saved SMARS stepper chassis, with illustrative mechanisms, not print exports.
+- [Tiny Engineer](https://github.com/jamro/tiny-engineer/tree/aefc852a894174604a1e350bf9bc04c04f28ec80/3d_models),
+  **Krzysztof Jamroz**, hardware **CERN-OHL-S-2.0**: unchanged SG90 Head/Hat STL,
+  license, scope and NOTICE saved under `cad/originals/tiny-engineer-head/`.
+  Alternative reference only. Software MIT does not relicense this CAD; name/logo
+  rights are not adopted. No Tiny Engineer firmware or character assets copied.
 - [SMARS 28BYJ-48 remix #2778904](https://www.thingiverse.com/thing:2778904/files),
   unclejeff: two unmodified original STLs now saved in
   `cad/originals/smars-stepper/`, with source hashes. Page displays CC BY4.0;

@@ -199,7 +199,7 @@ all-table operation. One front ToF has no side/rear collision coverage.
    branches test loaded track startup/turning, servo lift/grip, Wi-Fi and audio
    together. Record droop/current/temperature, bank auto-off and payload stability.
    Repeat sensor timing/stopping qualification under that combined load.
-   Recheck EVA bezel/camera aperture,
+   Recheck the current rounded-shell OLED insert/camera aperture and retention,
    thermal clearance and full gripper sweep. No eyes-in-render equals fit proof.
 
 **Validation:** existing overlay test command plus new Sense tests,

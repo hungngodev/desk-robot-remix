@@ -60,8 +60,9 @@ unquoted. Sensor/mux electronics alone are $9.22 per core / $46.10 for five.
 - **Lift/grip:** [saved Bluino parts](../cad/originals/gripper/README.md) and
   [linked forklift](../cad/originals/forklift/README.md). MG90S fit and combined
   mounting to the stepper base are unproven; allow small pockets/spacers only.
-- **Case:** [saved EVA 3MF](../cad/originals/eva-head/README.md), with a small
-  measured OLED bezel, camera spacer and removable rover bracket if feasible.
+- **Case:** user chose a rounder existing shell. [Saved Sparky v0.1.0](../cad/originals/sparky-head/README.md)
+  is the fit-check candidate, with an OLED insert, Sense/camera/audio mounts and
+  small rover retention. Source is explicitly unprinted/estimated. EVA is historical.
 - Add small downward-sensor mounts and removable hats without covering optics,
   audio, antenna, USB, switch or gripper/track motion. No new structural frame.
 
