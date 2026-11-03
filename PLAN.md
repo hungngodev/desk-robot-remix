@@ -25,9 +25,9 @@ Newly reported inventory replaces the old N20/SG90 shopping direction:
   rating label; popularity is not a model identification or current specification.
 - One SER0043 continuous servo: spare, unsuitable for angle-controlled lift/grip.
 
-**First-prototype target: $35.45 before shipping/tax**, conditional on two usable
+**First-prototype target: $35.36 before shipping/tax**, conditional on two usable
 owned MG90S servos and other reused parts. **Delivered cap: $50.** The remaining
-$14.55 is for charges or missing items; this is not a completed delivered quote.
+$14.64 is for charges or missing items; this is not a completed delivered quote.
 See [components](hardware/parts.md), [BOM](hardware/bom.json) and
 [inventory](hardware/fleet-inventory.json). No purchase is ready or made.
 Do not multiply this reuse-based price by five as a fleet quote: five more
@@ -39,7 +39,7 @@ The estimated ten MG90S may cover the fleet, subject to confirmation. The former
 User prefers Amazon where possible. [Checked Amazon US candidates](hardware/amazon-parts.md)
 currently total **$59.83 in electronics packages**, or **$69.83 with existing
 power/decoupling allowances, before shipping/tax**. The first-prototype cap stays
-$50; this is over cap and not order-ready. The original $35.45 supplier target
+$50; this is over cap and not order-ready. The original $35.36 supplier target
 is not an Amazon price. Keep Sense as the candidate head; the earlier $9.58
 bare-board/microphone subtotal excluded its compatible camera/interface.
 
@@ -49,7 +49,7 @@ bare-board/microphone subtotal excluded its compatible camera/interface.
 | --- | --- |
 | Drive body | Existing [SMARS 28BYJ-48 remix](https://www.thingiverse.com/thing:2778904/files), with [build/code reference](https://github.com/wtlx/smars-28byj-48). Correct stepper chassis/wheel originals are now saved; measure them before printing. The saved N20 chassis is not a stepper mount. |
 | Lift/grip | Saved [Bluino gripper](https://www.thingiverse.com/thing:4253681) and linked [SMARS forklift](https://www.thingiverse.com/thing:3027255). Check MG90S pocket, horn and sweep; combined fit on the stepper variant is unproven. |
-| Head electronics | Candidate [XIAO ESP32S3 Sense bundle](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html), $13.99; includes camera and digital microphone. Add owned SSD1306, MAX98357A and speaker. No separate INMP441 purchase. |
+| Head electronics | Candidate [XIAO ESP32S3 Sense bundle](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html), $13.90; includes camera and digital microphone. Add owned SSD1306, MAX98357A and speaker. No separate INMP441 purchase. |
 | Head case | Saved [EVA Robot shell](cad/originals/eva-head/README.md). Small OLED bezel, Sense/camera spacers, head bracket and sensor brackets only; fit remains a gate. |
 | Voice/camera | Pinned [Xiaozhi firmware](https://github.com/78/xiaozhi-esp32) and [server](https://github.com/xinnan-tech/xiaozhi-esp32-server); Sense-specific PDM mic/camera/SSD1306/8 MB target now compiles using existing drivers. |
 | Motor boundary | Existing local [Verdure-inspired UART bridge](https://github.com/maker-community/VerdureBuddyRover/blob/main/docs/xiaozhi-mcp-serial-integration.md). Prototype stepper backend and portable sensor interlock implemented; hardware ToF acquisition/calibration still pending. |
@@ -171,3 +171,5 @@ Historical 90 checks do not validate these additions. Current software evidence
 is recorded separately in [firmware foundation](docs/firmware-foundation.md). No robot has been
 flashed, no CAD geometry changed and no physical success is claimed. Preserve
 licenses and inspect the active Fusion design before precision CAD edits.
+
+[All-component Amazon/direct-supplier comparison](hardware/supplier-comparison.md).

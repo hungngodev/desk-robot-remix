@@ -10,7 +10,7 @@ motors and positional MG90S servos. You own **no ESP32-S3**. Candidate new head:
 XIAO ESP32S3 **Sense**, including camera and PDM microphone, plus amplifier and
 speaker. No extra Uno, Pico or Pi is needed.
 
-**Cost target: $35.45 before delivery/tax**, conditional on two usable owned
+**Cost target: $35.36 before delivery/tax**, conditional on two usable owned
 MG90S servos and a suitable owned bank. **First-robot delivered cap: $50**;
 charges, missing inventory and fit remain unresolved. This is not a full fleet
 quote or an order-ready robot. [Components](hardware/parts.md),

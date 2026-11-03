@@ -3,7 +3,7 @@
 User prefers Amazon where possible. Keep the **$50 first-prototype delivered cap**.
 These are checked product-page candidates, not a completed cart or qualified
 mechanical/electrical substitutions. Nothing was added to a cart or purchased.
-The [existing $35.45 supplier target](parts.md) is a different basket and remains
+The [existing $35.36 supplier target](parts.md) is a different basket and remains
 conditional; it is not an Amazon quote.
 
 | Candidate | Package purchase | Needed now | Observed USD |

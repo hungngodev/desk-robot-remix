@@ -74,6 +74,7 @@
   "first_robot_cap_usd": 50,
   "over_cap_before_charges": true,
   "purchase_ready": false,
-  "existing_supplier_target_usd": 35.45,
-  "note": "Compare whole pack outlay, not only used-unit cost. Current active supplier BOM remains unchanged. Bare S3 plus microphone9.58USD was an incomplete supplier subtotal without a compatible camera/interface, not a qualified lower-cost head. Amazon-only first prototype exceeds cap even before allowances/charges. No purchase, cap increase, or component substitution authorized by this record."
+  "existing_supplier_target_usd": 35.36,
+  "note": "Compare whole pack outlay, not only used-unit cost. Direct-supplier target refreshed to35.36USD; see supplier-comparison.json. Bare S3 plus microphone9.58USD was an incomplete supplier subtotal without a compatible camera/interface, not a qualified lower-cost head. Amazon-only first prototype exceeds cap even before allowances/charges. No purchase, cap increase, or component substitution authorized by this record.",
+  "comparison": "hardware/supplier-comparison.json"
 }

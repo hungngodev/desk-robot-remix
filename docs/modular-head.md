@@ -2,8 +2,8 @@
 
 Updated 2026-11-03. Reuse the owned **0.96-inch SSD1306 OLED** and saved EVA shell.
 Candidate new board: [Seeed XIAO ESP32S3 Sense, SKU 113991115](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html),
-**$13.99**, including camera and digital microphone. Add the $1.95 MAX98357
-amplifier and $0.29 speaker: **$16.23 of new head electronics**, excluding
+**$13.90**, including camera and digital microphone. Add the $1.95 MAX98357
+amplifier and $0.29 speaker: **$16.14 of new head electronics**, excluding
 shipping/tax/mount parts. [Quote and specification evidence](research/2026-11-03-head-budget.md).
 No S3 is owned. This is not the bare XIAO or an expansion-board-only offer.
 

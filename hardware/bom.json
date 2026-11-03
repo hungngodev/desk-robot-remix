@@ -14,10 +14,12 @@
     {
       "item": "Seeed XIAO ESP32S3 Sense camera and PDM microphone bundle, SKU 113991115",
       "quantity": 1,
-      "unit_usd": 13.99,
+      "unit_usd": 13.9,
       "price_status": "verified",
       "url": "https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html",
-      "fit": "8 MB flash / 8 MB PSRAM. New purchase; no S3 owned. Verify actual OV3660 or OV5640 AF revision, Sense bundle, pin map and mount. Separate Sense target compiled; old Freenove binary incompatible; physical tests pending."
+      "fit": "8 MB flash / 8 MB PSRAM. New purchase; no S3 owned. Verify actual OV3660 or OV5640 AF revision, Sense bundle, pin map and mount. Separate Sense target compiled; old Freenove binary incompatible; physical tests pending.",
+      "previous_unit_usd": 13.99,
+      "price_rechecked_at": "2026-11-03"
     },
     {
       "item": "MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139",
@@ -133,7 +135,7 @@
     }
   ],
   "head_configuration": "Separate XIAO ESP32S3 Sense target compiled: PDM/camera/owned SSD1306/MAX98357; physical tests pending",
-  "note": "Conditional FIRST prototype target 35.45 USD before shipping, tax and any missing reused inventory. Item prices verified, allowances not quoted. Five-unit bill requires five additional steppers/drivers and unknown other quantities. Old DC/Freenove BOM archived. No purchases or physical validation.",
+  "note": "Conditional FIRST prototype target 35.36 USD before shipping, tax and any missing reused inventory. Item prices verified, allowances not quoted. Five-unit bill requires five additional steppers/drivers and unknown other quantities. Old DC/Freenove BOM archived. No purchases or physical validation.",
   "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
   "qualification_checks": {
     "sense_board_configuration_and_8mb_build_confirmed": true,
