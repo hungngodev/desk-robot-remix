@@ -67,6 +67,12 @@ publish private configuration or credential-bearing binaries.
 The research files contain original summaries and source links, not complete
 video transcripts. See `docs/research/` for evidence and qualification limits.
 
+FETCH by **SECTOR 07 / Austin Dutenhoeffer** is an added appearance and assembly
+reference. [Creator's build article](https://projecthub.arduino.cc/sector_07/build-fetch-an-open-source-ai-robot-powered-by-arduino-uno-q-8092d1)
+and [video](https://www.youtube.com/watch?v=51q_WmbnJtQ) were reviewed. Page metadata
+assigns CC BY-NC 4.0 or later; no Fetch CAD, firmware, face graphics or voice
+assets are copied here. [Research and archive audit](docs/research/2026-11-03-fetch-appearance.md).
+
 ## Realtime conversation references — 2026-11-03
 
 - [RIO XIAO ESP32-S3 Gemini Live assistant](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant/tree/b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a),

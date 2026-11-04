@@ -20,6 +20,14 @@ All five robots use the same functional core; color, removable hats and costumes
 give them different characters. Costumes must leave optics, microphone, speaker,
 antenna, cooling, USB, switch and moving parts clear.
 
+**Added appearance reference: FETCH by SECTOR 07.** Its inset face, substantial
+bezel, soft corners, contrasting side panels and antenna-like ears inform the
+next visual study. Combine those cues with our rounder existing head and tracked
+base. Optional ears are static/removable; both positional servos stay assigned
+to lift + grip. Our existing white monochrome OLED stays. This is inspiration,
+not selection of Fetch's much larger shell or additional actuators.
+[Video/build review and reuse boundaries](research/2026-11-03-fetch-appearance.md).
+
 The longer-term experience remains **five active peers playing together**. The
 first acceptance stage serializes movement while all five can animate and
 converse; this is a staged fleet bring-up, not a replacement of that group goal.

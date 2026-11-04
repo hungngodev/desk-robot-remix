@@ -20,6 +20,11 @@ is the leading fit-check candidate; the earlier EVA layout is superseded for
 appearance. [Actual-source layout views](cad/concepts/2026-11-03-rounded/README.md)
 are concepts, not a fitted assembly or print package.
 
+**Additional appearance inspiration:** [FETCH by SECTOR 07](docs/research/2026-11-03-fetch-appearance.md).
+Use the inset face/bezel, soft corners, contrasting panels and optional static
+antenna/ears with our rounded existing shell. Keep the tracked core and two
+lift/grip servos; the complete UNO Q Fetch case is a different mechanical layout.
+
 ## Inventory and cost
 
 **At least one XIAO ESP32S3 Sense is now reported purchased.** Exact order quantity,
