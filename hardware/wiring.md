@@ -66,6 +66,12 @@ video GPIO1/2 I²C instructions are not a Sense allocation. Preserve native USB,
 internal camera/mic pins and flash/PSRAM; disable SD use where necessary. See [exact compiled Sense allocation](../firmware/head/sense/README.md); physical
 qualification is still pending, and its SD slot must stay empty/disabled.
 
+[RIO's reference](../docs/research/2026-11-03-sense-realtime-reuse.md) uses speaker
+BCLK7/LRC8/DIN9 and amplifier SD44. Those are **not** the compiled allocation
+above. Port software/reference handling to one checked map before wiring; do not
+mix the two tables or add an SD44 wire to the current build. Software echo
+cancellation and ordinary-speech interruption remain unimplemented in this target.
+
 Initial two-USB head/body test joins **TX, RX and GND only**; keep 5 V rails
 separate. Do not flash CoreS3/Freenove firmware onto Sense, or S3 firmware onto
 the classic WROOM.

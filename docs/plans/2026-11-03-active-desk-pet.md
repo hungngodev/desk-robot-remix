@@ -7,7 +7,7 @@ initiate supervised activities, avoid qualified table edges locally, and lift
 keys/candy, then repeat its validated core for five distinct characters.
 
 **Architecture:** Owned WROOM handles deterministic steppers, servos and sensor
-interlocks; a candidate XIAO ESP32S3 Sense handles camera/PDM audio/OLED; one Mac
+interlocks; the purchased XIAO ESP32S3 Sense handles camera/PDM audio/OLED; one Mac
 handles vision, speech, memory and activity selection. The existing UART/job and
 credential boundaries stay in place. A separate human-granted pet lease allows
 multiple bounded activities without giving a model arming authority.
@@ -25,6 +25,15 @@ measured calibration remain missing; the stepper target refuses arming. Pet
 scheduler/animation/memory remain unimplemented.
 [Evidence and remaining gates](../firmware-foundation.md).
 
+User now reports purchasing at least one Sense kit (displayed $18.87, receipt,
+quantity and arrival unconfirmed). Keep it as the active head. The conditional
+prototype target is now **$40.33 including that purchase**, with **$21.46** of
+further parts/allowances before charges; the **$50 delivered cap includes money
+already spent**. Ordinary-speech interruption is mandatory in robot one.
+RIO software AEC and Google/Pipecat live examples are the reuse direction;
+replacement hardware is not yet necessary. The offline Mac turn/frame core is
+implemented; live transport, device AEC and physical acceptance are pending.
+
 ## Baseline before this implementation and constraints
 
 Read [master plan](../../PLAN.md), [inventory](../../hardware/fleet-inventory.json),
@@ -34,14 +43,15 @@ Read [master plan](../../PLAN.md), [inventory](../../hardware/fleet-inventory.js
 
 - Existing body implements DC PWM, two positional servos, disarmed boot, 500 ms
   watchdog and 250 ms bounded drive. It cannot yet run ULN2003 steppers or stop at cliffs.
-- Existing head builds are Freenove 16 MB/SH1106/I²S mic and CoreS3 references,
-  not Sense/SSD1306/PDM/8 MB. No S3 is owned.
+- Before this milestone the head builds were Freenove 16 MB/SH1106/I²S mic and
+  CoreS3 references. A separate Sense/SSD1306/PDM/8 MB build now exists. The
+  subsequent user-reported Sense order supersedes the earlier no-S3 inventory.
 - Existing Mac has one-use 30-second operator permits, bounded pickup jobs,
   stop/cancellation and two-to-five robot digital turn-taking. Pet mode and
   persistent character memory are new work.
 - Historical 90 checks, simulations and compilation are not physical acceptance
   or verification of any new design. No hardware is flashed or assembled.
-- First prototype $35.45 conditional parts target, $50 delivered cap. Missing
+- First prototype now $40.33 conditional target, $50 delivered cap. Missing
   owned quantities and all delivered charges remain gates. No automatic purchases.
 - Keep saved originals/upstream clones untouched. Small CAD fixes only. If
   combined stepper/lift/head cannot fit without a major redesign, stop that
@@ -206,6 +216,42 @@ all-table operation. One front ToF has no side/rear collision coverage.
 `uv run pytest firmware/head/tests -q`; only after adding `sense`, run
 `bash scripts/build_head.sh --board sense`. The Sense selector and a successful build now exist; physical tests remain.
 Hardware flashing remains an explicit device-specific action after successful build.
+
+## Milestone 4.5 — voice interruption and paced camera understanding
+
+**Sources:** [pinned RIO/Google/Pipecat review](../research/2026-11-03-sense-realtime-reuse.md),
+[Mac integration contract](../live-conversation.md), [audio acceptance](../audio-barge-in.md).
+
+1. Keep the purchased Sense and the compiled pin map until a reviewed port
+   replaces it. Reuse RIO's software playback-reference/calibration approach
+   through the [existing ESP-IDF AFE seam](../sense-aec-port.md), adapting task
+   synchronization, reference timing and resampling. Avoid a second full AEC chain.
+   Measure delay with the final speaker/microphone/enclosure. An echo gate that
+   suppresses the user's voice during playback fails this requirement.
+2. Connect the offline Mac turn core to a native live-audio provider/transport.
+   Cancel obsolete generation and flush both Mac queues and actual device/DMA
+   playback on interruption. Retain the new utterance. Do not stamp delayed old
+   audio with a new turn ID. Selecting the pinned Xiaozhi text Gemini provider
+   alone does not supply native Live audio/video.
+3. Schedule camera capture independently from audio, initially about one JPEG
+   frame per second in an active observation session. Reuse the latest fresh
+   frame; do not queue seconds of old images or block speech for still capture.
+   Camera frames never replace body-local edge sensing.
+4. Enable proactive observations explicitly. A brief fresh-frame prompt may run
+   only between user/model/tool turns, with cooldowns, quiet mode and five-robot
+   speech arbitration. A frame alone and Google's proactive-audio setting do
+   not implement the full pet scheduler. No model receives new motion authority.
+5. Keep cloud sessions opt-in with private keys; no account or paid API is used
+   by offline tests. Record model availability and usage costs separately from
+   hardware costs before live testing.
+6. Pass the ordinary-speech, playback-cancellation, speaker-only, camera-load
+   and motor-load trials in the audio acceptance sheet before claiming robot one
+   supports barge-in. Then repeat per assembled robot; microphone presence and
+   compilation are not physical proof.
+
+**Progress:** Mac cancellation/frame/idle-observation state and offline tests
+exist. Device AEC, a connected live provider, video transport and physical trials
+remain pending. The optional Waveshare adapter does not change this active path.
 
 ## Milestone 5 — stationary pet behavior and per-robot memory
 

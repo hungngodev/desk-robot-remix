@@ -1,7 +1,7 @@
 component,per_robot,for_five,owned_confirmed_count,owned_estimated_count,missing_for_five,unit_usd_first_quote,status,source
-"Seeed XIAO ESP32S3 Sense camera and PDM microphone bundle, SKU 113991115",1,5,0,,5,13.90,verified,https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html
-"MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139",1,5,0,,5,1.95,verified,https://electropeak.com/max98357-i2s-audio-amplifier-module
-"8 ohm 1 W speaker, 20 mm x 3.75 mm, ElectroPeak SEN-17-105",1,5,0,,5,0.29,verified,https://electropeak.com/8-ohm-1w-20mm-diameter-speaker
+Purchased XIAO ESP32S3 Sense camera/PDM microphone bundle (quantity/arrival to confirm),1,5,,,confirm order quantity,18.87,reported_purchase,https://www.aliexpress.us/item/3256810060131517.html
+"MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139",1,5,,,5 unless already acquired,1.95,verified,https://electropeak.com/max98357-i2s-audio-amplifier-module
+"8 ohm 1 W speaker, 20 mm x 3.75 mm, ElectroPeak SEN-17-105",1,5,,,5 unless already acquired,0.29,verified,https://electropeak.com/8-ohm-1w-20mm-diameter-speaker
 "GY-530 VL53L0X double-hole ToF module, SEN-19-018",5,25,0,,25,1.75,verified,https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole
 TCA9548A eight-channel I2C multiplexer breakout,1,5,0,,5,0.47,verified,https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board
 Owned ESP32-WROOM-32 dev board,1,5,,,unknown,0,owned,

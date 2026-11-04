@@ -1,4 +1,20 @@
-# All missing electronics — Amazon versus direct suppliers
+# Historical missing-electronics comparison — Amazon versus direct suppliers
+
+**Superseded by the user's Sense purchase:** the listing displays **$18.87**;
+quantity, delivered receipt and arrival remain unconfirmed. Keep that purchased
+head. The dated tables below are preserved as historical observations, not fresh
+quotes or instructions to order another Sense. The active [parts target](parts.md)
+is **$40.33**, comprising one assumed **$18.87 head purchase** and **$21.46 further
+parts/allowances**, before charges. The $50 cap includes already-spent money.
+
+Using the old Amazon observations for the *remaining* packages and allowances
+would require **$43.84 more**, or **$62.71 including the reported head**, before
+charges. No new Amazon prices were checked for this update. Do not multiply the
+one-time Sense offer into a fleet quote. Sensor purchase is limited to two L0X
+samples or at most one five-pack until [mount/surface tests](sensor-choice.md)
+pass; the historical 25-sensor arithmetic is not a fleet purchase instruction.
+
+## Earlier observed first-prototype comparison
 
 Rechecked 2026-11-03, USD. Reuse the owned WROOM, SSD1306 OLED, two existing
 28BYJ/ULN2003 pairs, two positional MG90S, filament and signal wires for the
@@ -63,5 +79,7 @@ advertised free-shipping thresholds. Do not substitute another similarly named
 store's shipping policy.
 
 [Machine-readable comparison](supplier-comparison.json) preserves the arithmetic.
-The candidate low-item-price route is one Sense order from Seeed plus the other
-four component types together from ElectroPeak, subject to fit and delivered cost.
+At the time of that comparison, the candidate low-item-price route was one Sense
+order from Seeed plus the other four component types from ElectroPeak. That is
+**not the current procurement instruction**: the user has since reported a Sense
+purchase, and the active target is recorded above and in [parts](parts.md).

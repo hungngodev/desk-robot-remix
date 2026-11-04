@@ -16,6 +16,7 @@ BOARDS = {
     "cores3": BOARD,
     "modular": "main/boards/desk-robot/desk-robot-modular-s3",
     "sense": "main/boards/desk-robot/desk-robot-sense-s3",
+    "waveshare": "main/boards/desk-robot/desk-robot-waveshare-s3-cam",
 }
 MARKER = ".desk-robot-head-overlay.json"
 HERE = Path(__file__).resolve().parent
@@ -188,6 +189,34 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     """Reuse the bridge/locking overlay, replacing only the selected board adapter."""
     if board not in BOARDS:
         raise ValueError(f"Unknown board: {board}")
+    if board == "waveshare":
+        # Keep all existing variants unchanged. This physical-reference candidate
+        # reuses their common camera/HTTP locking, but no Sense PDM adapter.
+        files = {
+            name: data.replace(b"DESK_ROBOT_MODULAR_S3", b"DESK_ROBOT_WAVESHARE_S3_CAM")
+            .replace(
+                b"Desk robot modular S3 (Freenove N16R8)",
+                b"Desk robot Waveshare S3 CAM (hardware reference)",
+            )
+            .replace(b"desk-robot/desk-robot-modular-s3", b"desk-robot/desk-robot-waveshare-s3-cam")
+            for name, data in planned_files(target, "modular").items()
+            if not name.startswith(BOARDS["modular"] + "/")
+        }
+        for folder in (HERE / "waveshare", HERE / "overlay"):
+            for path in folder.iterdir():
+                if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+                    files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+        path = "main/Kconfig.projbuild"
+        files[path] = replace_once(
+            files[path].decode(),
+            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP32_S3_BOX_3",
+            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_WAVESHARE_S3_CAM || BOARD_TYPE_ESP32_S3_BOX_3",
+        ).encode()
+        path = f"{BOARDS[board]}/robot_bridge.cc"
+        files[path] = replace_once(
+            files[path].decode(), "uart_set_pin(kUart, 2, 1,", "uart_set_pin(kUart, 43, 44,"
+        ).encode()
+        return files
     if board == "sense":
         # Reuse the tested common camera/bridge changes without changing either
         # existing board adapter or its separate build copy.

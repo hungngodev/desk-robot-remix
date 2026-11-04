@@ -30,7 +30,7 @@ def main():
     p.add_argument("--robot", required=True)
     p.add_argument("--config", type=Path, default=ROOT / "config/fleet.example.toml")
     p.add_argument("--secrets", type=Path, default=ROOT / "config/local.env")
-    p.add_argument("--board", choices=["cores3", "modular", "sense"], default="cores3")
+    p.add_argument("--board", choices=["cores3", "modular", "sense", "waveshare"], default="cores3")
     p.add_argument(
         "--server-ip", required=True, help="Mac LAN IPv4 address, reachable from the head"
     )
@@ -54,6 +54,7 @@ def main():
         "cores3": ("xiaozhi", "desk-robot-core-s3"),
         "modular": ("xiaozhi-modular", "desk-robot-modular-s3"),
         "sense": ("xiaozhi-sense", "desk-robot-sense-s3"),
+        "waveshare": ("xiaozhi-waveshare", "desk-robot-waveshare-s3-cam"),
     }[args.board]
     board = ROOT / "firmware/head/build" / build / "main/boards/desk-robot" / variant
     config = json.loads((board / "config.json").read_text())

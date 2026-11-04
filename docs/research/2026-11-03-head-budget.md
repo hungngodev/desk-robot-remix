@@ -1,6 +1,12 @@
 # Head and budget verification — 2026-11-03
 
-The user owns classic ESP32-WROOM-32 boards and **no ESP32-S3**. The Sense board below remains a proposed purchase; its separate firmware target
+**Historical comparison, superseded by the user's subsequent Sense purchase.**
+The active [BOM](../../hardware/bom.json) includes an assumed one Sense at the
+reported $18.87 display price; quantity, receipt and arrival remain unconfirmed.
+Keep that purchased board. The earlier supplier prices below are not its receipt.
+
+At the time of this comparison the user owned classic ESP32-WROOM-32 boards and
+reported no ESP32-S3. The Sense board below was a proposed purchase; its separate firmware target
 now compiles, as recorded in [firmware progress](../firmware-foundation.md). It does not make the existing Freenove firmware compatible without a board configuration change and a successful build/bench test.
 
 ## Exact head candidate

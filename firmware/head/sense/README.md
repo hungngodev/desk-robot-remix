@@ -1,8 +1,16 @@
 # XIAO ESP32S3 Sense head target
 
-Candidate board: **Seeed XIAO ESP32S3 Sense, SKU113991115**, with its camera/mic
-expansion attached. The user does not currently own an S3. This target is
+Active board: **Seeed XIAO ESP32S3 Sense, SKU 113991115**, with its camera/mic
+expansion attached. The user reports ordering at least one full Sense bundle;
+receipt quantity, arrival and delivered revision remain unconfirmed. This target is
 separate from the preserved CoreS3 and Freenove targets. No board is flashed.
+
+Keep this purchased board. [RIO reuse research](../../../docs/research/2026-11-03-sense-realtime-reuse.md)
+identifies software playback-reference/AEC code for Sense; it is not integrated
+in this compiled baseline. Ordinary-speech interruption must still pass the
+[audio gate](../../../docs/audio-barge-in.md). Do not set `input_reference` true
+without supplying actual synchronized mic/reference data. RIO's speaker pins
+differ from the table below; do not mix the two wiring maps.
 
 ## Pin source and allocation
 
@@ -30,7 +38,7 @@ assigned to external peripherals. Amplifier7/8 reuse SD signals, so never insert
 an SD card or initialize SD. No touch pad is allocated. Floor/obstacle sensors
 belong to the WROOM bus, not this head's display bus.
 
-SSD1306 pin order/voltage, address, orientation and EVA bezel fit still need
+SSD1306 pin order/voltage, address, orientation and the rounded Sparky bezel fit still need
 checking. MAX98357 speaker connects across SPK+ and SPK−, neither to ground;
 limit volume for the selected8Ω1W speaker. Use qualified supplies/grounds and
 rated actuator wiring. Do not join independent USB5V sources blindly.

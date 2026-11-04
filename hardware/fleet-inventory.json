@@ -4,7 +4,7 @@
   "inventory_corrected_at": "2026-11-03",
   "controller_model": "ESP32-WROOM-32",
   "controller_owned_count": null,
-  "s3_owned_count": 0,
+  "s3_owned_count": null,
   "power_bank_owned_count": null,
   "confirmed_minimum_owned": {
     "controller": 1,
@@ -22,10 +22,12 @@
     },
     {
       "component": "ESP32-S3",
-      "owned_count": 0,
+      "owned_count": null,
       "needed_per_robot": 1,
       "needed_for_five": 5,
-      "candidate": "XIAO ESP32S3 Sense camera/mic bundle"
+      "candidate": "Purchased XIAO ESP32S3 Sense; active head, retain and qualify software AEC",
+      "minimum_ordered": 1,
+      "received_count": null
     },
     {
       "component": "5 V USB power bank",
@@ -104,5 +106,16 @@
       "usage": "not qualified for whole-robot actuator power"
     }
   ],
-  "note": "No ESP32-S3 is owned. WROOM, bank and OLED counts remain unknown; MG90S count is now estimated by the user at about 10, not confirmed. Power bank is unidentified and user reports no readable rating label; do not infer 2 A/3 A or usable whole-robot power. All five use the same full core with removable cosmetics."
+  "note": "At least one XIAO ESP32S3 Sense is reported purchased; exact quantity, arrival and hardware revision are not confirmed. WROOM, bank and OLED counts remain unknown; MG90S count is now estimated by the user at about 10, not confirmed. Power bank is unidentified and user reports no readable rating label; do not infer 2 A/3 A or usable whole-robot power. All five use the same full core with removable cosmetics.",
+  "voice_interruption_required_first_build": true,
+  "s3_purchase": {
+    "model": "XIAO ESP32S3 Sense complete camera/microphone kit as listed",
+    "status": "user_reported_purchased",
+    "quantity": null,
+    "minimum_ordered": 1,
+    "received_and_markings_verified": false,
+    "pasted_display_price_usd": 18.87,
+    "delivered_receipt_total_verified": false,
+    "source_url": "https://www.aliexpress.us/item/3256810060131517.html"
+  }
 }

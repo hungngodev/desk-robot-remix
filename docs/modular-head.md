@@ -1,13 +1,16 @@
-# Small-component head — Sense candidate
+# Small-component head — purchased Sense
 
 Updated 2026-11-03. Reuse the owned **0.96-inch SSD1306 OLED**. User chose a rounder
 existing head: [Sparky v0.1.0](../cad/originals/sparky-head/README.md) is the current
 fit-check candidate; EVA remains a historical source.
-Candidate new board: [Seeed XIAO ESP32S3 Sense, SKU 113991115](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html),
-**$13.90**, including camera and digital microphone. Add the $1.95 MAX98357
-amplifier and $0.29 speaker: **$16.14 of new head electronics**, excluding
-shipping/tax/mount parts. [Quote and specification evidence](research/2026-11-03-head-budget.md).
-No S3 is owned. This is not the bare XIAO or an expansion-board-only offer.
+User reports buying a **XIAO ESP32S3 Sense camera/microphone bundle**, with a
+displayed price of **$18.87**. Quantity, receipt charges, arrival and revision
+remain unconfirmed. Keep this board; do not buy a replacement for voice
+interruption at this stage. Add the $1.95 MAX98357 amplifier and $0.29 speaker:
+**$21.11 including the reported board purchase**, before charges/mount parts.
+The older [supplier comparison](research/2026-11-03-head-budget.md) is historical.
+Confirm the delivery contains the full Sense kit, rather than a bare XIAO or
+expansion board alone. No separate camera or microphone is on the current list.
 
 ## Reuse drivers, change the board configuration
 
@@ -22,6 +25,16 @@ are now implemented and compiled. See [actual pins/build](../firmware/head/sense
 and [verification](firmware-foundation.md). The existing modular build is Freenove 16 MB + SH1106 +
 INMP441 I²S; it cannot be flashed to Sense. CoreS3 and WROOM binaries are also
 incompatible. The Sense build passes; no physical Sense test has happened.
+
+**Ordinary-speech interruption is required in the first build.** The compiled
+Sense baseline has no playback reference/AEC and does not yet meet it. Reuse
+[RIO's exact-Sense software AEC and cancellation](research/2026-11-03-sense-realtime-reuse.md),
+then qualify the final acoustics. RIO's speaker pins differ from ours, and its
+Arduino source is not a drop-in ESP-IDF binary. Its camera captures requested
+stills; Google's/Pipecat's live-session examples supply the next integration
+pattern for paced camera frames and idle observations. See
+[audio acceptance](audio-barge-in.md). An echo gate that mutes the microphone
+during playback cannot pass the interruption requirement.
 
 Implemented, physically unqualified header budget: OLED2 + amplifier3 + UART2 = seven signals, with
 camera/PDM internally connected. The allocation was checked against official documentation and compiled; it is

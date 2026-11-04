@@ -1,10 +1,26 @@
-# Amazon US candidates — 2026-11-03
+# Historical Amazon US candidates — 2026-11-03
+
+**Superseded head procurement:** the user now reports buying the Sense shown at
+**$18.87** on [AliExpress](https://www.aliexpress.us/item/3256810060131517.html).
+Quantity, receipt charges and arrival are unconfirmed; do not buy another head.
+The observations below remain a dated historical comparison, not a new quote.
+The old remaining packages plus allowances total **$43.84**; with the reported
+head purchase, cumulative spend would be **$62.71 before charges**, over the
+unchanged $50 cap. The active supplier-based [parts target](parts.md) is **$40.33**
+including that head, with $21.46 further parts/allowances before charges.
+
+Sensor buying is staged: [start with two L0X samples](sensor-choice.md), at most
+one five-pack for robot one, and no 25-sensor fleet purchase before mount/surface
+qualification. VL53L1X is not a required upgrade. The old table's five-module
+quantity represents a conditional eventual first core, not an immediate order.
+
+## Earlier observed basket
 
 User prefers Amazon where possible. Keep the **$50 first-prototype delivered cap**.
 These are checked product-page candidates, not a completed cart or qualified
 mechanical/electrical substitutions. Nothing was added to a cart or purchased.
-The [existing $35.36 supplier target](parts.md) is a different basket and remains
-conditional; it is not an Amazon quote.
+The earlier $35.36 supplier target used a $13.90 Sense quote; it is historical
+and is not the current purchased-head total or an Amazon quote.
 
 | Candidate | Package purchase | Needed now | Observed USD |
 | --- | --- | ---: | ---: |
@@ -25,10 +41,12 @@ counted. Pack purchases are cash outlay; unused parts are not treated as refunds
 The parts physically consumed by one robot are not the same as the amount paid
 for the packages.
 
-## Head recommendation
+## Head recommendation — updated after the reported purchase
 
-Keep Sense as the first prototype's candidate head: its camera/mic are included
-and the project already has a separate compiled Sense target. The earlier
+Keep the **purchased Sense** as robot one's head. Its listing describes camera/mic;
+verify the delivered package and actual markings. The project has a separate
+compiled Sense baseline; voice interruption still requires integration/testing.
+The earlier
 $9.58 bare-XIAO-plus-INMP441 comparison excluded a compatible camera/add-on and
 was not a complete or firmware-qualified cheaper option. Generic camera boards
 might cost less, but their complete Amazon package, pins, memory, programming
@@ -53,6 +71,6 @@ verify footprints, labels, power/pullups, reset access and real sensor range.
 No physical fit, power or anti-fall test has passed. The new guarded body remains
 unable to arm until real sensor I/O and measured calibration are implemented.
 
-[Machine-readable observations](amazon-candidates.json) preserve package counts,
+[Machine-readable historical observations](amazon-candidates.json) preserve package counts,
 links, price scope and unresolved checks. A complete delivered cart within cap
 or a user-directed budget change is needed before an order-ready recommendation.

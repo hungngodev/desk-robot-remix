@@ -66,3 +66,20 @@ publish private configuration or credential-bearing binaries.
 
 The research files contain original summaries and source links, not complete
 video transcripts. See `docs/research/` for evidence and qualification limits.
+
+## Realtime conversation references — 2026-11-03
+
+- [RIO XIAO ESP32-S3 Gemini Live assistant](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant/tree/b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a),
+  MIT: unchanged pinned reference in ignored `upstream/rio-sense-reference`,
+  including its full LICENSE. AEC, reference timing and interruption handling
+  are inspected integration candidates; no RIO firmware is incorporated or
+  redistributed by this change. [Inspected-file hashes](hardware/reuse-sources.json).
+- [Google Gemini cookbook](https://github.com/google-gemini/cookbook) and
+  [robotics streaming guidance](https://ai.google.dev/gemini-api/docs/robotics-streaming):
+  source references for interruption handling and idle-frame observations. The
+  Mac turn-state module is original code, not a copied Google SDK client.
+- [Pipecat](https://github.com/pipecat-ai/pipecat), BSD-2-Clause, and its
+  [ESP32 client](https://github.com/pipecat-ai/pipecat-esp32), MIT: inspected native
+  audio/video integration alternatives, not installed or redistributed here.
+- [LiveKit ESP32 client](https://github.com/livekit/client-sdk-esp32), Apache-2.0:
+  inspected alternative only. Preserve actual dependency notices if adopted.

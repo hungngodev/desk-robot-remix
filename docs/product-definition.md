@@ -5,6 +5,13 @@ mounting CAD and assembly instructions. It distinguishes requested behavior from
 working software and physically verified hardware. **No complete robot has been
 assembled, flashed or tested.**
 
+**Voice requirement revision:** the user explicitly requires ordinary-speech
+interruption in the first build and has now purchased **XIAO ESP32S3 Sense**.
+Keep it and reuse RIO software AEC/live cancellation plus Google/Pipecat streaming
+patterns. A replacement board is not established as necessary. [Required audio gate](audio-barge-in.md)
+and [reuse sources](research/2026-11-03-sense-realtime-reuse.md). Order quantity,
+arrival and revision remain unconfirmed; no physical test has passed.
+
 ## Appearance and shape
 
 The user chose **a rounder existing head case**, replacing the boxy EVA appearance.
@@ -48,7 +55,7 @@ mechanical reference, roughly 80×40×25mm and about 100g, with a clearly specif
 5 V / 3 A output as a candidate for load testing. The
 [Anker Nano A1653 official specifications](https://www.anker.com/products/a1653-usb-c-portable-charger-5000mah)
 list about 77×37×25mm,100g and 5 V / 3 A. The checked $26.99 price would increase the
-$35.36 reuse-based target to $62.35 before charges, exceeding the unchanged $50 cap.
+$40.33 reuse-based target to $67.32 before charges, exceeding the unchanged $50 cap.
 **Do not add it as a required purchase.** Reuse/test the owned bank first, leave
 its carrier replaceable and measure the actual unit before final CAD. A 3 A label
 does not qualify transient load, auto-off, stability or runtime; this reference
@@ -83,7 +90,7 @@ These are requirements, **not a list of finished features**.
 | --- | --- |
 | Power on | Start disarmed. Show waking/ready eyes. No automatic track or claw movement. Report missing connection/calibration clearly. |
 | Idle | Blink, glance and change between neutral, curious, happy and sleepy faces without waiting for a voice question. Keep animation local so the face remains responsive during Mac/network delay. |
-| User speaks | First version uses a button to start listening; show listening/thinking/speaking states. Mac performs STT, LLM and TTS. Wake-word and useful interruption depend on audio testing; no assumption of echo cancellation. |
+| User speaks | Start a conversational session, show listening/thinking/speaking states and support multiple turns. **Ordinary speech during TTS interrupts playback and captures the new request without a button or special phrase.** Mac performs STT, LLM and TTS; playback-reference AEC and the abort chain must pass the audio gate. |
 | A visible person or object appears | Mac can select an observation, change gaze/mood and make a short comment. Observing does not itself authorize motor movement. No face-identity recognition is required. |
 | Pet mode enabled | Choose short curiosity, attention, rest or social activities without needing a new user question each time. Use a state machine, timers and observations; occasional LLM choices supply meaning, not motor timing. |
 | Exploration permitted | Stop/look, take a bounded short movement, stop and observe again. Blocked path means stop/wait/report. Reverse or turn only within a qualified clear swept area. No blind backing away from a cliff. |
@@ -102,7 +109,7 @@ bounded session. Quiet mode and a stop always override timers.
 
 | Part | Responsibility |
 | --- | --- |
-| New XIAO ESP32S3 **Sense complete bundle** | Camera, onboard PDM microphone, OLED, audio output and connection to Mac/body. It remains a purchase candidate; no S3 is currently owned. |
+| Purchased XIAO ESP32S3 Sense | Camera, onboard PDM mic, owned OLED, external MAX98357/speaker and connection to Mac/body. Reuse software echo-cancellation/reference; board order/revision and physical audio remain to qualify. |
 | Owned ESP32-WROOM-32 | Two ULN2003/28BYJ tracks, two MG90S positional servos, sensor/mux acquisition, watchdog and local fault-latched stopping. |
 | Shared Mac | Speech recognition/synthesis, LLM, vision, activity selection, peer coordination and per-robot memory. No Uno, Pico or Raspberry Pi is needed. |
 
@@ -125,14 +132,14 @@ hardware combination is not yet proven.**
 
 | Subsystem | Evidence now | Still required |
 | --- | --- | --- |
-| Sense camera/mic/OLED/amp/UART | Matching8MB/PDM firmware target compiles; pins do not overlap in the selected profile | Delivered Sense/camera revision, actual module labels, display order/address, USB, image, mic/audio and UART bench checks. SD stays disabled because audio reuses its signals. |
+| Sense camera/mic/OLED/UART | Baseline8MB/PDM/SSD1306 target compiles; exact-Sense RIO source has real software AEC/cancellation code | Order/revision, actual modules, software-reference timing/concurrency, pin adapter, live provider/frames, capture/playback cancellation and physical barge-in tests. A readme or muted mic is not a pass. |
 | WROOM stepper/servo body | Stepper target and portable control tests pass | Actual phase order/direction,3.3V input behavior, loaded motion, current and heat. Open-loop step counts/servo targets are not measured position or force. |
 | Five ToFs and mux | Fault-latch/interlock policy tested | Real checked I²C/mux/ToF acquisition and calibration are unfinished. **Current stepper build intentionally refuses arming.** Check3.3V pullups and exact breakout supply/RESET behavior. |
 | Supply | Separate power branches/common ground documented | Bank identification/load/auto-off, connectors, actuator transients and whole-system operation. Capacitors cannot establish sufficient power. |
 | Mechanics | Original files, dimensions, licenses and hashes saved; source-based visual now exists | Registered assembly, interference/sweep checks, measured parts, balance, slicer review and physical fit samples. |
 
 Use [the current wiring map](../hardware/wiring.md),
-[Sense pin map](../firmware/head/sense/README.md) and
+[head selection/audio guide](modular-head.md) and
 [firmware evidence](firmware-foundation.md). The split architecture needs no
 additional Uno/Pico. Existing build success does not validate substituted boards,
 unmatched binaries, sensor wiring or the new case.
@@ -142,7 +149,7 @@ unmatched binaries, sensor wiring or the new case.
 | ID | Pass condition |
 | --- | --- |
 | A1 Face/offline | Five-minute stationary test: face animation remains responsive while the Mac is delayed/disconnected; no unintended motion. |
-| A2 Voice/quiet | Button-started conversation shows listening/thinking/speaking states. Ten-minute quiet-mode test has no unsolicited speech or movement. Record echo/self-trigger failures and latency. |
+| A2 Voice/quiet | Multi-turn conversation shows listening/thinking/speaking states and passes the required [ordinary-speech interruption gate](audio-barge-in.md), including audible-stop latency, capture of the new request and no false echo-only interruption. No button fallback. Ten-minute quiet-mode test has no unsolicited speech or movement. |
 | A3 Control ownership | Stop, manual/pickup preemption, lease expiry and link loss cancel active/queued pet motion. Neither a model command nor reconnect can reauthorize it. Concurrent requests from two robot IDs grant at most one fleet motion owner; others wait. Stop/expiry releases ownership without automatic resumption of queued motion. |
 | A4 Local edge stop | Test every sensor disconnect, invalid/stale reading, bus fault and relevant edge approach with a tether/catch setup. Log actual detection latency and coast distance; require measured margin before the support footprint crosses an edge. No universal stop distance is assumed. |
 | A5 Manipulation | At least 8/10 actual flat-key trials and 8/10 wrapped-candy trials: lift visibly10mm, hold3seconds, then place under control. Record object dimensions/mass, slips and human assistance. Assisted trials fail. Blocks are supplementary, not a substitute for keys. |
@@ -164,7 +171,8 @@ gaze, pauses, initiative and supervised movement without claiming those features
    supports, material/profile, measured tolerances, license and hash. Fit samples
    first; do not present the concept `.blend` as printable CAD.
 3. A delivered BOM under the unchanged $50 prototype cap, including every required
-   connector/retainer. Current$35.36 supplier target excludes charges; current
+   connector/retainer. Current $40.33 target includes assumed $18.87 Sense purchase
+   and $21.46 further parts/allowances before charges; earlier
    Amazon-only option is over cap. Fleet reuse quantities remain incomplete.
 4. Finished body sensor driver/calibration, face/initiative/memory/lease code,
    affected tests and firmware builds. Existing foundation is not that final code.

@@ -6,11 +6,14 @@ the same core. One Mac supplies speech, vision and language models. Build one
 working robot before repeating it four times.
 
 **Updated 2026-11-03:** reuse your WROOM-32, SSD1306 OLED, 28BYJ-48/ULN2003
-motors and positional MG90S servos. You own **no ESP32-S3**. Candidate new head:
-XIAO ESP32S3 **Sense**, including camera and PDM microphone, plus amplifier and
-speaker. No extra Uno, Pico or Pi is needed.
+motors and positional MG90S servos. You now report purchasing **XIAO ESP32S3 Sense**,
+including camera/PDM microphone. Keep it; add MAX98357/speaker. User requires
+[voice interruption in robot one](docs/audio-barge-in.md); reuse
+[exact-Sense RIO and live audio/video examples](docs/research/2026-11-03-sense-realtime-reuse.md).
+No replacement board, extra camera/mic, Uno, Pico or Pi is presently required.
 
-**Cost target: $35.36 before delivery/tax**, conditional on two usable owned
+**Cost target: $40.33 before delivery/tax**, including assumed reported $18.87
+Sense purchase and $21.46 remaining parts/allowances, conditional on two usable owned
 MG90S servos and a suitable owned bank. **First-robot delivered cap: $50**;
 charges, missing inventory and fit remain unresolved. This is not a full fleet
 quote or an order-ready robot. [Components](hardware/parts.md),
@@ -22,10 +25,16 @@ quote or an order-ready robot. [Components](hardware/parts.md),
    [master plan](PLAN.md) and [implementation tasks](docs/plans/2026-11-03-active-desk-pet.md).
 2. [Stepper chassis and wheel originals](cad/originals/smars-stepper/README.md),
    [saved gripper/lift](docs/first-gripper-test.md) and [rounded head candidate](cad/originals/sparky-head/README.md).
-3. [Sense head adaptation](docs/modular-head.md), [proposed wiring/power](hardware/wiring.md)
+3. [Head selection/audio adaptation](docs/modular-head.md), [proposed wiring/power](hardware/wiring.md)
    and [edge-sensor layout](docs/research/2026-11-03-cliff-sensors.md).
 4. [Twelve-video audit](docs/research/2026-11-03-video-audit.md) and
    [active behavior / aesthetic sources](docs/research/2026-11-03-active-pet-sources.md).
+
+Realtime foundation: [integration contract](docs/live-conversation.md),
+[sensor choice](hardware/sensor-choice.md) and
+[offline verification](test-results/realtime-foundation-2026-11-03.json).
+The Mac cancellation/frame/idle-observation core is tested; live device AEC,
+provider connections and physical acceptance remain pending.
 5. [Existing local AI setup](docs/local-ai.md), [five-robot identity/turn-taking](docs/five-robots.md)
    and [verification limits](test-results/verification.md).
 

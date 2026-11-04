@@ -5,6 +5,15 @@ The project now has a compiled XIAO ESP32S3 Sense head target, a compiled
 are software milestones. No board has been flashed, sensor I/O is not connected
 in firmware, and no physical edge, power, audio, camera or pickup test has passed.
 
+The user has since reported purchasing Sense; it remains the active head.
+[Realtime reuse research](research/2026-11-03-sense-realtime-reuse.md) identifies
+RIO's software AEC for this hardware. It has not been integrated into the compiled
+head baseline. The new Mac `live_turns.py` module handles offline turn cancellation,
+bounded playback, paced frames and opt-in idle observations only; it opens no
+session and supplies no echo cancellation. See [integration contract](live-conversation.md).
+The optional Waveshare adapter is a separate fallback with host checks, not a
+required purchase or a completed firmware-build claim.
+
 ## Body builds
 
 ```sh

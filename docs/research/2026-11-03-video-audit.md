@@ -8,7 +8,11 @@ user's timestamp-level hardware and demonstration claims therefore remain
 unverified unless corroborated by a linked creator guide or published code.
 No complete transcripts or video copies are stored here.
 
-The explicit inventory correction still applies: **no ESP32-S3 is owned**.
+The earlier explicit inventory correction was that no ESP32-S3 was owned.
+**Subsequent update:** the user now reports purchasing a XIAO ESP32S3 Sense
+bundle. Keep that as the active head; quantity, arrival and revision remain
+unconfirmed. See [current reuse research](2026-11-03-sense-realtime-reuse.md)
+and [active inventory](../../hardware/fleet-inventory.json).
 Repeated N8R8 text in the pasted summary does not override that correction.
 
 ## All twelve videos
