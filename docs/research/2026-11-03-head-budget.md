@@ -1,13 +1,13 @@
 # Head and budget verification — 2026-11-03
 
 **Historical comparison, superseded by the user's subsequent Sense purchase.**
-The active [BOM](../../hardware/bom.json) includes an assumed one Sense at the
+The active [BOM](../hardware/bom.json) includes an assumed one Sense at the
 reported $18.87 display price; quantity, receipt and arrival remain unconfirmed.
 Keep that purchased board. The earlier supplier prices below are not its receipt.
 
 At the time of this comparison the user owned classic ESP32-WROOM-32 boards and
 reported no ESP32-S3. The Sense board below was a proposed purchase; its separate firmware target
-now compiles, as recorded in [firmware progress](../firmware-foundation.md). It does not make the existing Freenove firmware compatible without a board configuration change and a successful build/bench test.
+now compiles, as recorded in [firmware progress](../guides/firmware-foundation.md). It does not make the existing Freenove firmware compatible without a board configuration change and a successful build/bench test.
 
 ## Exact head candidate
 
@@ -41,6 +41,6 @@ The sensor quotes and mounting qualifications belong in [cliff-sensors](2026-11-
 
 ## Existing budget checker contract
 
-[scripts/check_budget.py](../../scripts/check_budget.py) reads an object containing `items`, `cap_usd`, optional `fit_confirmed` and optional boolean `readiness_checks`. Each item requires numeric `unit_usd`, numeric `quantity`, `item` and `price_status`. A null price will fail decimal conversion. Statuses other than `verified` or `owned` are reported unresolved, so `inventory_check` is suitable for a conditional zero-dollar reuse assumption with an unknown owned count. Mark allowances as `allowance`, not `verified`.
+[scripts/check_budget.py](../../code/scripts/check_budget.py) reads an object containing `items`, `cap_usd`, optional `fit_confirmed` and optional boolean `readiness_checks`. Each item requires numeric `unit_usd`, numeric `quantity`, `item` and `price_status`. A null price will fail decimal conversion. Statuses other than `verified` or `owned` are reported unresolved, so `inventory_check` is suitable for a conditional zero-dollar reuse assumption with an unknown owned count. Mark allowances as `allowance`, not `verified`.
 
 `purchase_ready` additionally requires shipping and tax arguments, confirmed fit, all readiness checks true, and a total within the cap. Item price verification alone cannot make the design order-ready. Use procurement readiness for exact-variant feasibility, servo inventory and preliminary fit/power checks. Keep completed builds, physical fit, sensor stopping and integrated power tests in separate qualification fields that gate roaming/fleet duplication, so the first sample purchase does not depend on tests requiring those samples. No runtime or checker code was changed for this research.

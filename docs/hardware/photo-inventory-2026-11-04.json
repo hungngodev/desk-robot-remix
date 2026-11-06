@@ -1,0 +1,203 @@
+{
+  "recorded_at": "2026-11-04",
+  "source": "User supplied 18 photos and stated ownership",
+  "module_type_count": 10,
+  "photo_count": 18,
+  "counting_rule": "Grouped front/back/angle photos prove at least one per type, not an exact total stock count.",
+  "modules": [
+    {
+      "id": "berryimu",
+      "identification": "OzzMaker BerryIMU, likely V1; exact revision unverified",
+      "confidence": "high_family_provisional_revision",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "prototype_imu_candidate",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3893.JPG",
+          "sha256": "89a93c0d45c5adac17eab1e2b5d6875fc79155ad1e1ad5b1d61f4fe50db72945"
+        },
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3892.JPG",
+          "sha256": "507daad19f3a9cf8b2e5b48871a90186c2cb244319778ee3a38670982c9847d3"
+        }
+      ]
+    },
+    {
+      "id": "bmp280",
+      "identification": "Adafruit BMP280 pressure/temperature breakout",
+      "confidence": "high",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "optional_spare",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3891.JPG",
+          "sha256": "6d8a84b1cf770f65bc4bac43ad662a1b24f4997650c217adcd80525521685060"
+        },
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3890.JPG",
+          "sha256": "7de59a41367d1c706cf680cf37e929dfeeb4e1ae63e5c8ec0d2a9fbec217b330"
+        }
+      ]
+    },
+    {
+      "id": "ir_obstacle",
+      "identification": "Reflective infrared obstacle module, exact model unverified",
+      "confidence": "high_function_unverified_model",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "optional_bench",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3889.JPG",
+          "sha256": "ae9a2400f47f0c3a170a93d090f5734804076dd0004dfb790f669bc080e79de0"
+        }
+      ]
+    },
+    {
+      "id": "pir",
+      "identification": "PIR motion detector, SB00622A-2-V1.3",
+      "confidence": "high_function_unverified_ratings",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "stationary_spare",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3888.JPG",
+          "sha256": "a342871e0a8add771b3e340c60c70e26519e5d88e78dc6f9531ebc58bf19e5db"
+        },
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3887.JPG",
+          "sha256": "569ce3e4484f1378f7b0d9578de354863afb865853664f6f4314cfe72a59c027"
+        },
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3886.JPG",
+          "sha256": "97ca9223172bf862b81e6d6a27c098b05c61a6a754a83f8494f2c56a44d56a6a"
+        }
+      ]
+    },
+    {
+      "id": "ir_receiver",
+      "identification": "Infrared remote receiver, KY-022-style",
+      "confidence": "high_function_unverified_model",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "optional_spare",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3885.JPG",
+          "sha256": "2aadb59abe63e773cef7bc90429a70b46ad3b505e003716b764cd1548fd9ec09"
+        },
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3884.JPG",
+          "sha256": "b0126a572ef9d92e700d5865be2e9dfaa54f7c5b77ca1e92bf750521b8f1b5b8"
+        }
+      ]
+    },
+    {
+      "id": "tilt_switch",
+      "identification": "Likely mechanical tilt/vibration switch module",
+      "confidence": "medium",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "optional_spare",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3883.JPG",
+          "sha256": "8a010e1a7f1fbbf51fc71f415b3c4164d60d95e297243453acfd42e8e00c0119"
+        }
+      ]
+    },
+    {
+      "id": "camera_module",
+      "identification": "Separate camera, text appears CMY-1118 V1.0; interface unknown",
+      "confidence": "high_category_unknown_interface",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "spare_keep_sense_camera",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3882.JPG",
+          "sha256": "f3eef6bce6bf78b646c2f175e29a8dd3160a3004bdec1e554ba83c1e08af4679"
+        },
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3881.JPG",
+          "sha256": "ce010d45464a8935868bfbb6ec0f580baf3547e1331d42a7bf4fb4146ba6c6ed"
+        }
+      ]
+    },
+    {
+      "id": "reed_switch",
+      "identification": "Magnetic reed-switch comparator, KY-025-style",
+      "confidence": "high_function_unverified_model",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "optional_accessory_game",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3880.JPG",
+          "sha256": "134474b2a90cf03e2fbecc1a16161bbe939a53c68e508a15e5505fde4fdb9917"
+        }
+      ]
+    },
+    {
+      "id": "gy61",
+      "identification": "GY-61 analog accelerometer, consistent with ADXL335",
+      "confidence": "high_category_unread_chip_marking",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "spare_no_gyro",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3879.JPG",
+          "sha256": "aaee36b63b9f25355d76a8861bdcd2bffcfd761863591ba77ee56563d0319dd9"
+        },
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3878.JPG",
+          "sha256": "1b1955783cb464b169707c78743a3bf8a7b4a7568614d96e1107a0087dcc5384"
+        }
+      ]
+    },
+    {
+      "id": "max9814",
+      "identification": "Adafruit MAX9814 analog AGC microphone amplifier",
+      "confidence": "high",
+      "minimum_observed": 1,
+      "exact_owned_count": null,
+      "functionality_tested": false,
+      "integration_role": "spare_keep_sense_mic",
+      "photos": [
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3877.JPG",
+          "sha256": "3a7060095904547a5b22db16b5f35a538460a84fb428cba57d2990fea7ca42c5"
+        },
+        {
+          "path": "/Users/hung/Downloads/electric components/IMG_3876.JPG",
+          "sha256": "ebd587a3075211a1c733dd3fb33fc421417b6d82db8959fc9a8e7dc33a2f129d"
+        }
+      ]
+    }
+  ],
+  "not_identified_in_these_photos": [
+    "TTP223 touch module",
+    "MAX98357A I2S speaker amplifier",
+    "speaker",
+    "VL6180X/VL53L0X ToF",
+    "TCA9548A mux",
+    "matched rechargeable1S power kit"
+  ],
+  "hardware_test_passed": false,
+  "notes_document": "photo-inventory-2026-11-04.md",
+  "source_rechecked_at": "2026-11-06",
+  "source_recheck": "All 18 files in the electric components folder match the original audit SHA-256 hashes."
+}

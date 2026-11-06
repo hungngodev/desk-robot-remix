@@ -1,0 +1,215 @@
+{
+  "currency": "USD",
+  "checked_at": "2026-11-04",
+  "cap_usd": 50,
+  "fit_confirmed": false,
+  "readiness_checks": {
+    "two_usable_owned_mg90s_confirmed": false,
+    "sense_variant_pin_budget_and_8mb_feasibility_reviewed": true,
+    "case_mechanism_sensor_envelope_preflight_confirmed": false,
+    "sufficient_filament_and_printer_access_confirmed": false,
+    "sense_realtime_aec_route_and_integration_reviewed": false,
+    "matched_1s_power_kit_output_and_mount_preflight_confirmed": false,
+    "touch_imu_exact_modules_and_quotes_confirmed": false,
+    "all_required_current_quotes_and_delivery_confirmed": false
+  },
+  "items": [
+    {
+      "item": "Purchased XIAO ESP32S3 Sense camera/PDM microphone bundle (quantity/arrival to confirm)",
+      "quantity": 1,
+      "unit_usd": 18.87,
+      "price_status": "reported_purchase",
+      "url": "https://www.aliexpress.us/item/3256810060131517.html",
+      "fit": "User reports purchase; pasted listing display price18.87, quantity/receipt charges/arrival unconfirmed. Budget assumes one full Sense bundle, actual hardware markings still to verify. Keep this head. Camera/PDM mic included as described; software AEC/Gemini Live integration and physical tests remain pending."
+    },
+    {
+      "item": "MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "https://electropeak.com/max98357-i2s-audio-amplifier-module",
+      "fit": "Direct I2S baseline. Check variant, pins, cavity and speaker rating. Differential speaker outputs stay isolated from ground. The photographed HiLetgo HW-104 PAM8403 is an analog alternative if a suitable DAC is available. Select one path before ordering.",
+      "historical_reference_unit_usd": 1.95,
+      "reference_price_date": "2026-11-03"
+    },
+    {
+      "item": "8 ohm 1 W speaker, 20 mm x 3.75 mm, ElectroPeak SEN-17-105",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "https://electropeak.com/8-ohm-1w-20mm-diameter-speaker",
+      "fit": "Solder pads; cavity/acoustics unverified; limit output for speaker rating.",
+      "historical_reference_unit_usd": 0.29,
+      "reference_price_date": "2026-11-03"
+    },
+    {
+      "item": "TCA9548A eight-channel I2C multiplexer breakout",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
+      "fit": "Five sensors on isolated channels, default 7-bit address 0x29; one selected at a time. Check reset access and 3.3 V pullups. Body bus only.",
+      "historical_reference_unit_usd": 0.47,
+      "reference_price_date": "2026-11-03"
+    },
+    {
+      "item": "Owned ESP32-WROOM-32 dev board",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "At least one owned; exact fleet count unknown. Stepper profile and portable cliff policy compile; no sensor I/O/calibration, so cannot arm. Legacy DC profile preserved."
+    },
+    {
+      "item": "Owned 0.96 inch four-pin SSD1306 OLED, GME12864-11",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "At least one reported; verify controller, pin order, voltage and dimensions. Rounded Sparky v0.1.0 candidate has a larger OLED opening and needs a measured insert/mount. Case is unprinted/unqualified. Fleet count unknown."
+    },
+    {
+      "item": "Owned 5 V 28BYJ-48 stepper motor",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Five reported owned; ten needed for fleet. Use existing stepper-specific SMARS remix, not saved N20 mounts. Loaded speed/torque/temperature unknown."
+    },
+    {
+      "item": "Owned ULN2003 stepper driver board",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Five reported owned. Verify supplied motor/driver wiring, 3.3 V signal compatibility and current. No DRV8833 for this drivetrain."
+    },
+    {
+      "item": "Reported MG90S positional micro servo, about 10 owned (user estimate)",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "inventory_check",
+      "url": "",
+      "fit": "User estimates about ten owned, potentially enough for five robots. Count/type/condition still to confirm; no additional servos planned yet. Two needed for prototype. Check pocket, spline, horn, travel and actual loaded lifting."
+    },
+    {
+      "item": "Owned filament",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Reuse stock; printer access, sliced mass and sufficient quantity must be confirmed. Service printing/replenishment excluded."
+    },
+    {
+      "item": "Owned DuPont signal wire ribbons",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Ten ribbons reported. Signal wiring only; do not assume actuator-current rating."
+    },
+    {
+      "item": "Rated actuator power lead, switch, connectors, fasteners and wiring",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "",
+      "fit": "Exact rated conductors, switch/fuse/connectors/fasteners and delivery quote pending. No custom PCB or main DuPont harness.",
+      "historical_reference_unit_usd": 8,
+      "reference_price_date": "2026-11-03"
+    },
+    {
+      "item": "Bulk and local decoupling components",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "",
+      "fit": "Values/ratings and quote follow selected1S power system and current/noise measurements; capacitors do not fix an undersized supply.",
+      "historical_reference_unit_usd": 2,
+      "reference_price_date": "2026-11-03"
+    },
+    {
+      "item": "VL6180X downward ToF breakout",
+      "quantity": 4,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module",
+      "fit": "Four concealed downward views with open optical windows; breakout levels, mounting, timing/surfaces/stops unqualified."
+    },
+    {
+      "item": "VL53L0X forward obstacle breakout",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
+      "fit": "Separate forward role, default0x29 behind mux; no all-direction collision or successful-grip proof."
+    },
+    {
+      "item": "Owned Adafruit AT42QT1010 momentary touch breakout #1374",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "inventory_check",
+      "url": "https://www.adafruit.com/product/1374",
+      "fit": "IMG_3907 package label. Zero additional purchase outlay; receipt price unrecorded. Proposed 3.3 V supply and active-high OUT to WROOM GPIO34. Check pad response through the printed shell."
+    },
+    {
+      "item": "Owned BerryIMU for prototype motion sensing (revision/working condition to verify)",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "inventory_check",
+      "url": "https://ozzmaker.com/product/berryimu-accelerometer-gyroscope-magnetometer-barometricaltitude-sensor/",
+      "fit": "At least one shown in IMG_3893/3892; likely V1, exact chips/pins/voltage/working condition and mount unverified. Reuse candidate, not current LSM6 driver. Hold new IMU purchase until tested. One observed board does not cover all five cores."
+    },
+    {
+      "item": "Matched rechargeable1S cell/holder charging-protection-5V kit",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "",
+      "fit": "Exact cell/pack, holder, charge/protection and regulated5V output module unselected; current/temperature/power-path/fit unqualified. Integrated module may combine functions."
+    }
+  ],
+  "head_configuration": "Active head is user-purchased XIAO ESP32S3 Sense. Retain existing compiled Sense baseline; reuse pinned RIO software AEC/cancellation and official Google/Pipecat streaming patterns before considering replacement. Voice interruption remains first-build gate, not yet passed. Waveshare is optional fallback only.",
+  "note": "No full total established for revised1S/compactToF/touch/IMU core. Null prices are unknown, not free. Historical basket archived. Cap50includesreportedSensemoney; exactreceiptstillunknown. OptionalRGB/bumper excluded from required core until selected. Photo audit holds the prototype new-IMU purchase in favor of owned BerryIMU; MAX9814 is analog mic input and does not replace MAX98357A speaker output. No working-condition/fit gate changed.",
+  "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
+  "qualification_checks": {
+    "sense_board_configuration_and_8mb_build_confirmed": true,
+    "ssd1306_and_sense_camera_physical_case_fit_confirmed": false,
+    "stepper_chassis_lift_and_head_physical_fit_confirmed": false,
+    "stepper_backend_and_cliff_interlock_verified": false,
+    "sensor_mount_surface_latency_and_stops_qualified": false,
+    "integrated_power_load_temperature_and_stability_qualified": false,
+    "ordinary_speech_barge_in_passed": false,
+    "downward_sensor_near_field_mount_qualified": false,
+    "touch_and_handling_interactions_physically_passed": false,
+    "proactive_camera_pipeline_physically_passed": false
+  },
+  "reported_already_purchased_usd": 18.87,
+  "quote_status": "incomplete_revision_touch_imu_compact_tof_and_1s_power",
+  "optional_items": [
+    {
+      "item": "One diffused RGB pixel plus level buffer and passives",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "https://www.ti.com/product/SN74AHCT1G125",
+      "fit": "Optional; candidateSenseGPIO9/SDdisabled. Not purchased, wired or compiled."
+    },
+    {
+      "item": "Mechanical bumper switch plus external pullup",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "",
+      "fit": "Optional; bodyGPIO35, small mount and stop policy must be qualified."
+    },
+    {
+      "item": "Conditional replacement six-axis IMU breakout, only if owned BerryIMU is unsuitable",
+      "quantity": 1,
+      "unit_usd": null,
+      "price_status": "quote_pending",
+      "url": "https://www.adafruit.com/product/4503",
+      "fit": "LSM6DS3TR-C documented reference; not an additional required purchase. Quote only after owned BerryIMU identity/working/fit check. Four further fleet equivalents remain unconfirmed if only one BerryIMU is owned."
+    }
+  ]
+}

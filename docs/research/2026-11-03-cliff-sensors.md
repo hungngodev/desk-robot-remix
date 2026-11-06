@@ -3,7 +3,7 @@
 **Recommendation:** qualify four downward-facing sensors near the chassis
 corners, plus a separate front-facing obstacle sensor. The WROOM body controller
 owns their readings and motor interlock. This is a proposed design: the body firmware at the research checkpoint used DC PWM only. A later
-[firmware milestone](../firmware-foundation.md) adds stepper and guard policy,
+[firmware milestone](../guides/firmware-foundation.md) adds stepper and guard policy,
 but actual sensor I/O/calibration and physical protection remain unfinished. No physical sensor, power or stopping test has passed yet.
 
 ## Candidate parts and alternatives

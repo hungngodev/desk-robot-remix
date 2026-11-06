@@ -1,0 +1,52 @@
+{
+  "recorded_at": "2026-11-04",
+  "scope": "Owned-parts photo identification and canonical inventory/BOM/docs update only",
+  "photo_files_hashed": 18,
+  "module_groups": 10,
+  "exact_stock_counts_verified": false,
+  "checks": [
+    {
+      "check": "JSON parse and inventory/BOM assertions",
+      "result": "pass",
+      "files": 3
+    },
+    {
+      "check": "Five-core CSV arithmetic",
+      "result": "pass",
+      "rows": 21
+    },
+    {
+      "check": "Local Markdown target existence",
+      "result": "pass",
+      "documents": 10,
+      "links": 103
+    },
+    {
+      "check": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "command": ".venv/bin/pytest -q tests/test_records_budget.py",
+      "exit_code": 0,
+      "passed": 4
+    },
+    {
+      "command": "python3 scripts/check_budget.py --shipping 0 --tax 0 --require-ready",
+      "exit_code": 1,
+      "result": "Expected refusal; purchase_ready=false; total remains null. Zero delivery/tax inputs are a gate exercise, not a shipping quote."
+    }
+  ],
+  "memory": {
+    "dataset": "desk-robot-remix",
+    "data_item_id": "6ffa24cd-e394-4b7c-ad44-58919947341c",
+    "write_status": "completed",
+    "narrow_recall_contains_photo_update": true,
+    "dataset_items_after_write": 2
+  },
+  "limits": [
+    "Photo evidence does not prove electrical identity of all chips, working condition, dimensions or final fit.",
+    "No hardware connected, flashed or physically tested in this audit.",
+    "No runtime driver, CAD geometry or new physical feature implemented.",
+    "Existing full suite 96-pass evidence belongs to the prior source/sensor/budget revision; only relevant budget tests rerun here."
+  ]
+}

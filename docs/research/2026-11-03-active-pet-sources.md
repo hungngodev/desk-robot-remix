@@ -1,5 +1,43 @@
 # Active desk-pet sources and remix decisions — 2026-11-03
 
+## Follow-up source inspection — 2026-11-04
+
+This is research evidence, not implemented functionality. Current product choices
+and acceptance live in [the product brief](../product-definition.md); later head,
+power, sensor and motion-session decisions supersede older recommendations below.
+
+- Reachy Mini conversation app inspected at
+  `e90192559149d6281d782c1c4aed39bb7d84bdef`, Apache-2.0. Its
+  [idle policy](https://github.com/pollen-robotics/reachy_mini_conversation_app/blob/e90192559149d6281d782c1c4aed39bb7d84bdef/src/reachy_mini_conversation_app/idle_policy.py)
+  selects local stillness/dance/emotion/head moves; the
+  [conversation handler](https://github.com/pollen-robotics/reachy_mini_conversation_app/blob/e90192559149d6281d782c1c4aed39bb7d84bdef/src/reachy_mini_conversation_app/conversation_handler.py)
+  dispatches idle actions without sending a model turn. Its camera tool returns
+  a fresh JPEG separately. The movement manager sequences primary moves, blends
+  speech motion and suppresses idle movement while listening. Reuse scheduling
+  and interruption concepts through our own hardware adapter, not Reachy poses
+  or an assumption that its camera tool already supplies our proactive vision.
+- [Open Duck's inspected walking path](https://github.com/apirrone/Open_Duck_Mini_Runtime/blob/376de65435c93486347cd601a31aa96951799896/scripts/v2_rl_walk_mujoco.py)
+  takes gamepad motion commands into a walking policy. Independent blinking and
+  controller-triggered sounds/antenna moves do not establish autonomous social
+  or camera-driven activity selection.
+- The newer Pollen Microduck's
+  [behavior notes](https://github.com/pollen-robotics/microduck/blob/54e0789635ae28120be9ea0dd51750a494ab50ac/docs/ideas/autonomous_behavior.md)
+  describe a prior mood/energy/novelty state machine, while explicitly identifying
+  the autonomous-brain migration gap in the current daemon. Its old named runtime
+  was not retrieved; do not claim independent inspection of that implementation.
+- [Cozmo SDK source](https://github.com/anki/cozmo-python-sdk/blob/master/src/cozmo/robot.py)
+  activates Freeplay in an existing robot engine. The SDK is not that engine.
+  [Vector's subsystem documentation](https://support.anki.bot/article/567-vector-subsystems)
+  separates high-level behaviors/mood, animation and cloud voice. These support
+  a perception/event/activity/animation split, not a claim we can copy a complete
+  commercial personality engine into ESP32 firmware.
+
+Implementation consequence: build fresh camera events, bounded observation
+memory, activity selection and speech arbitration around the existing Mac core;
+keep eye animation and WROOM reflexes independent. Test camera-triggered reactions
+without speech, repeated/stale-event rejection and five-feed speech ownership.
+Do not mark source review as completion of those tests or runtime features.
+
 The intended result is five identical, inexpensive tracked robots that initiate
 small activities, notice interactions, and pick up keys or wrapped candy. The
 sources below inform that behavior and appearance; none establishes that our

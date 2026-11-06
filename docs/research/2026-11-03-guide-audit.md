@@ -12,7 +12,7 @@ or its hardware tested.
 The user explicitly answered: **voice interruption must work in the first build**.
 Ordinary speech over the robot's own playing TTS must stop obsolete playback and
 capture the new request. Button interruption cannot satisfy that requirement.
-[The audio gate](../audio-barge-in.md) is now required before robot one passes.
+[The audio gate](../guides/audio-barge-in.md) is now required before robot one passes.
 
 **Purchase update supersedes the initial hardware recommendation:** the user has
 bought at least one **XIAO ESP32S3 Sense**, with **$18.87 displayed** in the

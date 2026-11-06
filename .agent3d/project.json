@@ -13,10 +13,10 @@
   "functional_objects": ["SOURCE_Stepper_SMARS_Chassis", "SOURCE_Sparky_v010_shell"],
   "print_objects": [],
   "stage": "primary_form_concept",
-  "source_protection": "cad/originals is unchanged; no manufacturing modifications or print exports",
+  "source_protection": "docs/cad/originals is unchanged; no manufacturing modifications or print exports",
   "brief": "docs/product-definition.md",
-  "checkpoint": "cad/concepts/2026-11-03-rounded/layout-study.blend",
-  "evidence": "cad/concepts/2026-11-03-rounded/evidence.json",
+  "checkpoint": "docs/cad/concepts/2026-11-03-rounded/layout-study.blend",
+  "evidence": "docs/cad/concepts/2026-11-03-rounded/evidence.json",
   "known_dimensions_mm": {"sparky_v010_shell": [55.9658, 51.9658, 53.9829]},
   "unknowns": ["Bank dimensions, mass and output", "MG90S/linkage interface", "Final sensor/camera view and stopping envelope", "Printer and measured fit tolerances"],
   "physical_fit_status": "not_verified"

@@ -12,7 +12,7 @@ The earlier explicit inventory correction was that no ESP32-S3 was owned.
 **Subsequent update:** the user now reports purchasing a XIAO ESP32S3 Sense
 bundle. Keep that as the active head; quantity, arrival and revision remain
 unconfirmed. See [current reuse research](2026-11-03-sense-realtime-reuse.md)
-and [active inventory](../../hardware/fleet-inventory.json).
+and [active inventory](../hardware/fleet-inventory.json).
 Repeated N8R8 text in the pasted summary does not override that correction.
 
 ## All twelve videos

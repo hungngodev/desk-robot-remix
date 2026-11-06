@@ -1,0 +1,22 @@
+component,per_robot,for_five,owned_confirmed_count,owned_estimated_count,missing_for_five,unit_usd_first_quote,status,source,optional
+Purchased XIAO ESP32S3 Sense camera/PDM microphone bundle (quantity/arrival to confirm),1,5,,,confirm inventory,18.87,reported_purchase,https://www.aliexpress.us/item/3256810060131517.html,false
+"MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139",1,5,,,confirm stock before ordering,,quote_pending,https://electropeak.com/max98357-i2s-audio-amplifier-module,false
+"8 ohm 1 W speaker, 20 mm x 3.75 mm, ElectroPeak SEN-17-105",1,5,,,confirm stock before ordering,,quote_pending,https://electropeak.com/8-ohm-1w-20mm-diameter-speaker,false
+TCA9548A eight-channel I2C multiplexer breakout,1,5,,,confirm stock before ordering,,quote_pending,https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board,false
+Owned ESP32-WROOM-32 dev board,1,5,,,confirm inventory,0,owned,,false
+"Owned 0.96 inch four-pin SSD1306 OLED, GME12864-11",1,5,,,confirm inventory,0,owned,,false
+Owned 5 V 28BYJ-48 stepper motor,2,10,5,,5,0,owned,,false
+Owned ULN2003 stepper driver board,2,10,5,,5,0,owned,,false
+"Reported MG90S positional micro servo, about 10 owned (user estimate)",2,10,,10,0 if count/type/condition confirmed,0,inventory_check,,false
+Owned filament,1,5,,,confirm inventory,0,owned,,false
+Owned DuPont signal wire ribbons,1,5,10,,check signal lengths,0,owned,,false
+"Rated actuator power lead, switch, connectors, fasteners and wiring",1,5,,,confirm stock before ordering,,quote_pending,,false
+Bulk and local decoupling components,1,5,,,confirm stock before ordering,,quote_pending,,false
+VL6180X downward ToF breakout,4,20,,,confirm stock before ordering,,quote_pending,https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module,false
+VL53L0X forward obstacle breakout,1,5,,,confirm stock before ordering,,quote_pending,https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole,false
+Owned Adafruit AT42QT1010 momentary head-touch breakout #1374,1,5,1,,4 if only one is owned and works,0,inventory_check,https://www.adafruit.com/product/1374,false
+Owned BerryIMU for prototype motion sensing (revision/working condition to verify),1,5,,,four equivalents unconfirmed if only one owned; verify stock,0,inventory_check,https://ozzmaker.com/product/berryimu-accelerometer-gyroscope-magnetometer-barometricaltitude-sensor/,false
+Matched rechargeable1S cell/holder charging-protection-5V kit,1,5,,,confirm stock before ordering,,quote_pending,,false
+One diffused RGB pixel plus level buffer and passives,1,5,,,confirm stock before ordering,,quote_pending,https://www.ti.com/product/SN74AHCT1G125,true
+Mechanical bumper switch plus external pullup,1,5,,,confirm stock before ordering,,quote_pending,,true
+"Conditional replacement six-axis IMU breakout, only if owned BerryIMU is unsuitable",1,5,,,conditional alternative; do not double count,,quote_pending,https://www.adafruit.com/product/4503,true

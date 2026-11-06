@@ -1,0 +1,80 @@
+{
+  "checked_at": "2026-11-03",
+  "store": "Amazon US (.com); shipping location/eligibility may change offers",
+  "procurement_preference": "Amazon if possible",
+  "scope": "Candidate first-prototype purchases; no cart/order created",
+  "items": [
+    {
+      "component": "XIAO ESP32S3 Sense camera/mic bundle",
+      "asin": "B0C69FFVHH",
+      "pack_quantity": 1,
+      "needed_for_first_robot": 1,
+      "pack_price_usd": 25.99,
+      "note": "Selected ESP32S3 Sense / 1PCS. Sold by Seeed Studio Official in observed Amazon US offer. Includes camera/mic; no separate INMP441. Actual camera revision and head fit still require checks.",
+      "url": "https://www.amazon.com/dp/B0C69FFVHH",
+      "packs_to_buy": 1,
+      "price_status": "observed_amazon_us_product_page",
+      "mechanically_qualified": false
+    },
+    {
+      "component": "ACEIRMC VL53L0X modules, 5pcs Black",
+      "asin": "B0F28MFW6X",
+      "pack_quantity": 5,
+      "needed_for_first_robot": 5,
+      "pack_price_usd": 13.99,
+      "note": "Four floor sensors and one front obstacle sensor. Generic breakout revision, voltage/pullups, dimensions and actual standoff/FOV not qualified.",
+      "url": "https://www.amazon.com/dp/B0F28MFW6X",
+      "packs_to_buy": 1,
+      "price_status": "observed_amazon_us_product_page",
+      "mechanically_qualified": false
+    },
+    {
+      "component": "MAX98357A I2S amplifier modules, 2PCS",
+      "asin": "B0DPJRLMDJ",
+      "pack_quantity": 2,
+      "needed_for_first_robot": 1,
+      "pack_price_usd": 6.88,
+      "note": "One spare from pack. Confirm supplied I2S variant, pin labels and head clearance.",
+      "url": "https://www.amazon.com/dp/B0DPJRLMDJ",
+      "packs_to_buy": 1,
+      "price_status": "observed_amazon_us_product_page",
+      "mechanically_qualified": false
+    },
+    {
+      "component": "TCA9548A multiplexer modules, 3PCS",
+      "asin": "B0F8ZB8DNM",
+      "pack_quantity": 3,
+      "needed_for_first_robot": 1,
+      "pack_price_usd": 6.98,
+      "note": "Two spares from pack. Verify actual 3.3V pullups and reset access.",
+      "url": "https://www.amazon.com/dp/B0F8ZB8DNM",
+      "packs_to_buy": 1,
+      "price_status": "observed_amazon_us_product_page",
+      "mechanically_qualified": false
+    },
+    {
+      "component": "MECCANIXITY 8 ohm 1W 20mm speakers, 2PCS",
+      "asin": "B0GR48Q949",
+      "pack_quantity": 2,
+      "needed_for_first_robot": 1,
+      "pack_price_usd": 5.99,
+      "note": "One spare. Listing dimensions20x3.6mm, prewired1.25mm plug. Fit/acoustics/volume remain untested.",
+      "url": "https://www.amazon.com/dp/B0GR48Q949",
+      "packs_to_buy": 1,
+      "price_status": "observed_amazon_us_product_page",
+      "mechanically_qualified": false
+    }
+  ],
+  "pack_spend_usd": 59.83,
+  "power_wiring_fastener_allowance_usd": 8,
+  "decoupling_allowance_usd": 2,
+  "planning_total_before_charges_usd": 69.83,
+  "shipping_usd": null,
+  "tax_usd": null,
+  "first_robot_cap_usd": 50,
+  "over_cap_before_charges": true,
+  "purchase_ready": false,
+  "existing_supplier_target_usd": 35.36,
+  "note": "Compare whole pack outlay, not only used-unit cost. Direct-supplier target refreshed to35.36USD; see supplier-comparison.json. Bare S3 plus microphone9.58USD was an incomplete supplier subtotal without a compatible camera/interface, not a qualified lower-cost head. Amazon-only first prototype exceeds cap even before allowances/charges. No purchase, cap increase, or component substitution authorized by this record.",
+  "comparison": "hardware/archive/supplier-comparison.json"
+}

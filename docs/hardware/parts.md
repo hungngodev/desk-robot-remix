@@ -1,0 +1,109 @@
+# Combined electronics inventory and build gaps
+
+Reconciled 2026-11-06 against the earlier ownership reports, the reported
+Sense order and [all 18 photos](photo-inventory-2026-11-04.md). All 18 match the
+original audit hashes and group into ten module types. Exact quantities and
+working condition for the photographed modules are unverified. The
+[six-photo follow-up](photo-inventory-2026-11-04.md#2026-11-06-follow-up) confirms
+an owned touch breakout and identifies the HiLetgo amplifier. The
+[machine-readable inventory](fleet-inventory.json) tracks quantities separately
+from reported estimates and purchases.
+
+**The delivered prototype cap remains $50 including already-spent money.** The
+old $40.33 owned-bank/five-L0X basket is historical. The revised distance sensors, 1S power kit
+and remaining parts are unquoted; no whole-robot total or remaining headroom
+is established. Unknown prices are not zero. [BOM](bom.json) and its checker now
+keep known subtotal separate from an incomplete total.
+
+## Reuse first
+
+| Part | Per robot / five | Reported stock | Still to establish |
+| --- | ---: | --- | --- |
+| XIAO ESP32S3 Sense camera/PDM mic bundle |1 /5 | At least1 ordered; quantity/arrival unknown | Actual sensor/revision and delivered receipt. No separate camera/mic purchase |
+| ESP32-WROOM-32 |1 /5 | At least1; multiple reported, count unknown | Count and exact exposed board pins |
+|0.96in SSD1306 OLED |1 /5 | At least1 | Count/controller/pin order and fitted bezel |
+|5V28BYJ-48 |2 /10 |5 | **5 additional motors for the fleet**, subject to prototype validation |
+|ULN2003 driver |2 /10 |5 | **5 additional drivers for the fleet** |
+|MG90S positional servo |2 /10 | About10, user estimate | Count/type/condition, pocket/horn and loaded lift/grip fit |
+| Adafruit AT42QT1010 momentary touch #1374 | 1 / 5 | At least 1 by package label | Bench-test the pad through the shell. Four more touch inputs if only one is owned |
+|BerryIMU motion board |1 /5 | At least1 photographed, likely older V1 | Exact revision/chips/pins, working condition and mount. Four further equivalents unconfirmed if only one is owned |
+|Filament / DuPont ribbons | As needed | Filament and10 ribbons | Print mass/stock; DuPont is signal wiring, not main actuator power |
+
+## Other reported and photographed stock
+
+| Part | Evidence | Use |
+| --- | --- | --- |
+| HiLetgo HW-104 PAM8403 | One visible, bag marked 5 pieces | Conditional speaker amplifier reuse with an analog source |
+| Adafruit DRV8833 #3297 and DFRobot FIT0774 | One each visible | Spare motor driver and optional vibration feedback |
+| 5 V USB power bank | At least one reported. Output current unknown | Possible bench supply after checking the output under load |
+| Adafruit Feather nRF52840, Adafruit USB-C breakout #4090 and DFRobot SER0043 continuous servo | One of each reported | Spares. The lift and gripper use positional MG90S servos |
+| Adafruit MAX9814, Adafruit BMP280, PIR motion detector, reflective IR obstacle module, IR remote receiver, likely tilt/vibration switch, separate camera board, magnetic reed-switch module and GY-61 accelerometer | Nine photographed types in addition to the BerryIMU | Spares and optional experiments. See the photo audit for confidence and possible uses |
+
+The earlier ESP32-S3 N8R8 mention was corrected by the user. The reported
+XIAO ESP32S3 Sense order is the source of the planned head board. Its delivered
+quantity and hardware revision remain open.
+
+## Missing for one complete core
+
+Unless newly reported as owned, plan to acquire these. Counts are per one / five
+finished robots; quote and validate robot one before ordering the remaining sets.
+
+| Part | One / five | Purpose / selection status |
+| --- | ---: | --- |
+|[MAX98357A I2S amplifier](https://electropeak.com/max98357-i2s-audio-amplifier-module)|1 /5 | Default speaker output; check the HiLetgo reuse option below before ordering |
+|[Mini speaker](https://electropeak.com/8-ohm-1w-20mm-diameter-speaker)|1 /5 |20mm8ohm1W is the existing candidate; cavity/acoustics unqualified |
+|[VL6180X breakout](https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module)|4 /20 | Concealed downward floor views; exact breakout voltage, geometry and stops pending |
+|[VL53L0X breakout](https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole)|1 /5 | Separate forward obstacle view, not gripper feedback or all-direction collision protection |
+|[TCA9548A mux](https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board)|1 /5 | Isolates the equal-address ToFs |
+|Matched rechargeable1S kit|1 set /5 sets | Cell+holder/pack, charging, protection, regulated5V output; integrated module may combine functions. Current capability/thermal/fit/quote not selected |
+|Rated power wire, switch, connectors/fuse, fasteners, decoupling|1 set /5 sets | Exact sizes/ratings depend on selected power system and loaded tests |
+
+No L1X upgrade, Uno, Pico, Pi, PCA9685, second camera, INMP441 or DC-motor driver
+is required by this core. Optional lighting is one diffused RGB pixel plus a
+suitable logic buffer/passives; no exposed laser is selected. A bumper, extra
+touch zone, Hall game sensor or light sensor is an optional later addition, not
+an unexplained required purchase. See [interaction plan](interaction-sensors.md).
+
+The owned **MAX9814 is an analog microphone amplifier**, not a MAX98357A speaker
+amplifier. Keep it spare because Sense already has a mic. The separate camera,
+GY-61 accelerometer (no gyro), tilt switch, PIR, IR obstacle/remote modules,
+BMP280 and reed switch are now recorded; they do not all need installing. The
+reed switch could support a later magnet-accessory game. None is automatically
+a qualified replacement for the floor array. LSM6DS3TR-C is a conditional IMU
+fallback only if the BerryIMU is unsuitable. Fleet IMU quantities remain open.
+
+The new photo identifies the **HiLetgo HW-104 PAM8403 speaker amplifier**.
+One board is visible and its bag says five pieces. Count the contents before
+allocating five. A suitable DAC is needed to convert the Sense's digital I²S
+output for the analog input. MAX98357A combines conversion and amplification
+for the direct I²S path. Choose one route. For PAM8403, connect a speaker across
+one channel's paired outputs and keep both leads isolated from ground.
+[PAM8403 datasheet](https://www.diodes.com/datasheet/download/PAM8403.pdf).
+
+## Camera and printable sources
+
+Use the camera delivered with Sense; confirm its reported sensor ID rather than
+buying OV2640/OV3660/OV5640 by name. Preserve the actual Sense pin map. Streaming
+capture, selected frames, visual attention and model reasoning are separate work;
+[the source map](../source-map.md) names reusable components.
+
+Use the saved stepper-SMARS source for owned motor mounting and Bluino/SMARS for
+closing grip. Compare Cozmars' actual head/packaging first for the desired style;
+Sparky is an explicitly unprinted fallback candidate, not a final fitted shell.
+Keep the head fixed under the two-servo lift/grip allocation. Small mounts,
+bezel/clearance corrections, jaw tips and costumes are allowed; do not silently
+redesign a drivetrain/arm to force compatibility.
+
+## Procurement and validation
+
+Amazon remains preferred where practical; historical supplier prices are not
+Amazon prices or current delivered quotes. Record exact variants, package outlay,
+shipping/tax and inventory before declaring the basket ready. Additional sensor
+features do not silently raise the cap. All fit, audio interruption, power,
+local edge/attitude stopping and physical pickup trials remain open.
+
+`python3 scripts/check_budget.py` reports unknown totals explicitly.
+`python3 scripts/check_budget.py --shipping 0 --tax 0 --require-ready` must still
+reject the current incomplete basket; those zeros demonstrate the gate, not
+free delivery. [Historical Amazon and supplier observations](archive/supplier-comparison.md)
+record the earlier baskets.

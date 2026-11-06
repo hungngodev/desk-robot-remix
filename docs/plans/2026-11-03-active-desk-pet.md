@@ -1,5 +1,12 @@
 # Active Desk Pet Implementation Plan
 
+Run development commands from the repository’s `code/` folder.
+
+Updated 2026-11-04: reconcile accepted decisions, not rediscover features.
+The [canonical product brief](../product-definition.md) takes precedence over
+historical BOMs, runtime defaults and earlier research suggestions. The remaining
+work is implementation, integration and physical qualification.
+
 > **For implementation:** Use the installed executing-plans workflow, preserve the current checkout and validate each milestone before enabling hardware motion. This file records the implementation sequence. See the progress note below before treating a task as unfinished.
 
 **Goal:** Build one affordable, expressive, camera-equipped desk rover that can
@@ -9,11 +16,11 @@ keys/candy, then repeat its validated core for five distinct characters.
 **Architecture:** Owned WROOM handles deterministic steppers, servos and sensor
 interlocks; the purchased XIAO ESP32S3 Sense handles camera/PDM audio/OLED; one Mac
 handles vision, speech, memory and activity selection. The existing UART/job and
-credential boundaries stay in place. A separate human-granted pet lease allows
+credential boundaries stay in place. A separate operator-enabled pet session allows
 multiple bounded activities without giving a model arming authority.
 
 **Tech stack:** ESP32 Arduino body, ESP-IDF/Xiaozhi head, Python coordinator,
-VL53L0X/TCA9548A, SSD1306, ULN2003/28BYJ-48, MG90S; shared Ollama/Qwen3,
+VL6180X-down/VL53L0X-front/TCA9548A candidates, SSD1306, ULN2003/28BYJ-48, MG90S; shared Ollama/Qwen3,
 SenseVoice, Kokoro and OpenCV/YOLO-World. RoboEyes is a GPL-3.0 integration
 candidate, not an already-installed dependency.
 
@@ -23,21 +30,20 @@ Stepper timing, portable guard policy, local-USB-only recovery and separate
 Sense8MB/PDM/SSD1306 target are implemented and compile. Actual sensor I/O and
 measured calibration remain missing; the stepper target refuses arming. Pet
 scheduler/animation/memory remain unimplemented.
-[Evidence and remaining gates](../firmware-foundation.md).
+[Evidence and remaining gates](../guides/firmware-foundation.md).
 
 User now reports purchasing at least one Sense kit (displayed $18.87, receipt,
-quantity and arrival unconfirmed). Keep it as the active head. The conditional
-prototype target is now **$40.33 including that purchase**, with **$21.46** of
-further parts/allowances before charges; the **$50 delivered cap includes money
-already spent**. Ordinary-speech interruption is mandatory in robot one.
+quantity and arrival unconfirmed). Keep it as the active head. The old $40.33
+owned-bank/L0X target is historical; the sensor/power revision needs a new quote.
+The **$50 delivered cap includes already-spent money**. Ordinary-speech interruption is mandatory in robot one.
 RIO software AEC and Google/Pipecat live examples are the reuse direction;
 replacement hardware is not yet necessary. The offline Mac turn/frame core is
 implemented; live transport, device AEC and physical acceptance are pending.
 
 ## Baseline before this implementation and constraints
 
-Read [master plan](../../PLAN.md), [inventory](../../hardware/fleet-inventory.json),
-[parts](../../hardware/parts.md), [sensor requirements](../research/2026-11-03-cliff-sensors.md),
+Read [master plan](../PLAN.md), [inventory](../hardware/fleet-inventory.json),
+[parts](../hardware/parts.md), [sensor requirements](../research/2026-11-03-cliff-sensors.md),
 [video audit](../research/2026-11-03-video-audit.md) and
 [behavior sources](../research/2026-11-03-active-pet-sources.md).
 
@@ -59,14 +65,14 @@ Read [master plan](../../PLAN.md), [inventory](../../hardware/fleet-inventory.js
 
 ## Milestone 1 — inventory, print source and power feasibility
 
-**Files:** `hardware/fleet-inventory.json`, `hardware/bom.json`,
-`hardware/fleet-components.csv`, `hardware/parts.md`,
-`cad/originals/smars-stepper/{README.md,source.json}`, future
-`test-results/local/power-and-fit.md`.
+**Files:** `docs/hardware/fleet-inventory.json`, `docs/hardware/bom.json`,
+`docs/hardware/fleet-components.csv`, `docs/hardware/parts.md`,
+`docs/cad/originals/smars-stepper/{README.md,source.json}`, future
+`docs/records/local/power-and-fit.md`.
 
 1. Count WROOMs, OLEDs, MG90S servos and banks. Do not turn an unknown count into
    five free parts. Confirm five stepper/driver pairs, leaving five pairs to buy
-   for the fleet. Read bank label and measure dimensions/weight.
+   for the fleet. Select a matched 1S kit and measure its dimensions/weight.
 2. Review the saved #2778904 stepper chassis/wheel originals, source URLs,
    author, filenames and hashes; resolve the displayed CC BY remix versus
    recorded NC-SA ancestor terms before redistribution. Do not substitute N20 files. The linked
@@ -74,7 +80,7 @@ Read [master plan](../../PLAN.md), [inventory](../../hardware/fleet-inventory.js
 3. Compare module/servo drawings and actual measurements to the originals.
    Verify the forklift attachment interface on the stepper base and head/arm
    sweep. Print a servo pocket or bracket fit coupon before full sets.
-4. Check owned bank label, cables, idle auto-off and actual part dimensions.
+4. Check the selected 1S cell/holder/protection/charger/5 V module and power wiring.
    Measure accessible owned-part loads only with an existing valid test setup;
    estimate remaining head/current needs conservatively. Integrated track/servo/
    Wi-Fi/audio load testing waits until milestones 2 and 4 provide working firmware.
@@ -121,13 +127,13 @@ Actual mechanical fit, loaded current and stopping remain later qualification ga
 **Validation:**
 
 ```sh
-cmake -S firmware/body -B .tools/body-host -DBODY_SANITIZERS=ON
-cmake --build .tools/body-host
-ctest --test-dir .tools/body-host --output-on-failure
-.tools/body-pio-venv/bin/pio run -d firmware/body
+cmake -S firmware/body -B ../.tools/body-host -DBODY_SANITIZERS=ON
+cmake --build ../.tools/body-host
+ctest --test-dir ../.tools/body-host --output-on-failure
+../.tools/body-pio-venv/bin/pio run -d firmware/body
 ```
 
-Use the existing per-terminal macOS compiler workaround in [build.md](../build.md)
+Use the existing per-terminal macOS compiler workaround in [build.md](../guides/build.md)
 if necessary. Do not flash as part of this automated milestone. Keep a separate
 legacy DC configuration if useful; do not make one pin map drive both backends.
 
@@ -135,9 +141,9 @@ legacy DC configuration if useful; do not make one pin map drive both backends.
 
 **Create:** `firmware/body/lib/CliffGuard/CliffGuard.{h,cpp}`,
 `firmware/body/tests/cliff_tests.cpp`,
-`test-results/cliff-trials.csv` (empty measurement template).
+`docs/records/cliff-trials.csv` (empty measurement template).
 **Modify:** body control/adapter/pins/CMake files above,
-`firmware/head/overlay/robot_protocol.h`, `docs/interfaces.md`,
+`firmware/head/overlay/robot_protocol.h`, `docs/guides/interfaces.md`,
 `laptop/src/desk_robot/{transport.py,simulator.py}`,
 `tests/test_transport_calibration.py` as the status contract requires.
 
@@ -181,7 +187,7 @@ all-table operation. One front ToF has no side/rear collision coverage.
 **Create:** `firmware/head/sense/{config.json,config.h,desk_robot_sense.cc}`,
 `firmware/head/sense/README.md`, future `firmware/head/sense/face_adapter.*`.
 **Modify:** `firmware/head/{install_overlay.py,private_config.py,BOARD_README.md}`,
-`scripts/build_head.sh`, `firmware/head/tests/test_overlay.py`, `docs/modular-head.md`,
+`scripts/build_head.sh`, `firmware/head/tests/test_overlay.py`, `docs/guides/modular-head.md`,
 `ATTRIBUTION.md` and dependency notices if library code is incorporated.
 
 1. Verify exact Sense revision, official schematic, camera and microphone pins.
@@ -220,15 +226,16 @@ Hardware flashing remains an explicit device-specific action after successful bu
 ## Milestone 4.5 — voice interruption and paced camera understanding
 
 **Sources:** [pinned RIO/Google/Pipecat review](../research/2026-11-03-sense-realtime-reuse.md),
-[Mac integration contract](../live-conversation.md), [audio acceptance](../audio-barge-in.md).
+[Mac integration contract](../guides/live-conversation.md), [audio acceptance](../guides/audio-barge-in.md).
 
 1. Keep the purchased Sense and the compiled pin map until a reviewed port
    replaces it. Reuse RIO's software playback-reference/calibration approach
-   through the [existing ESP-IDF AFE seam](../sense-aec-port.md), adapting task
+   through the [existing ESP-IDF AFE seam](../guides/sense-aec-port.md), adapting task
    synchronization, reference timing and resampling. Avoid a second full AEC chain.
    Measure delay with the final speaker/microphone/enclosure. An echo gate that
    suppresses the user's voice during playback fails this requirement.
-2. Connect the offline Mac turn core to a native live-audio provider/transport.
+2. Connect the offline Mac turn core to local Mac speech/vision transport first;
+   cloud providers remain optional.
    Cancel obsolete generation and flush both Mac queues and actual device/DMA
    playback on interruption. Retain the new utterance. Do not stamp delayed old
    audio with a new turn ID. Selecting the pinned Xiaozhi text Gemini provider
@@ -237,7 +244,9 @@ Hardware flashing remains an explicit device-specific action after successful bu
    frame per second in an active observation session. Reuse the latest fresh
    frame; do not queue seconds of old images or block speech for still capture.
    Camera frames never replace body-local edge sensing.
-4. Enable proactive observations explicitly. A brief fresh-frame prompt may run
+4. With observation enabled, derive fresh scene/person/target events without a
+   spoken prompt; coalesce repeats, remember recent observations and reject stale
+   camera events. A brief fresh-frame prompt may run
    only between user/model/tool turns, with cooldowns, quiet mode and five-robot
    speech arbitration. A frame alone and Google's proactive-audio setting do
    not implement the full pet scheduler. No model receives new motion authority.
@@ -253,12 +262,28 @@ Hardware flashing remains an explicit device-specific action after successful bu
 exist. Device AEC, a connected live provider, video transport and physical trials
 remain pending. The optional Waveshare adapter does not change this active path.
 
+## Milestone 4.6 — touch, motion and sensor-event reactions
+
+Follow [interaction-sensors.md](../hardware/interaction-sensors.md). Add the
+owned AT42QT1010 digital input and a version-matched BerryIMU I²C adapter
+(LSM6DS3TR-C conditional fallback only), with bounded bus work and
+floor/stop priority. Reuse Stackchan-agent's MIT hardware-independent behavior
+controller through a face/audio action adapter; use Focus/Yumo as idea references
+within their copying boundaries. Fuse handling evidence rather than infer held
+state from IMU alone. Touch during motion pauses locally; putdown cannot rearm.
+Test A10/A11 and applicable A12 before duplication; RGB remains optional.
+
+The [source map](../source-map.md) records the stronger Google observation/event
+and HF local engine candidates. Prove provider/embodiment adapters and actual
+VLM/cancellation before replacing existing server paths. No second competing
+voice loop or copied hardware-specific head-motion routine is introduced.
+
 ## Milestone 5 — stationary pet behavior and per-robot memory
 
 **Create:** `laptop/src/desk_robot/pet.py`, `laptop/src/desk_robot/memory.py`,
 `tests/test_pet.py`, `tests/test_pet_memory.py`.
 **Modify:** `laptop/src/desk_robot/{config.py,runtime.py,api.py,cli.py}`, head event
-boundary, `config/{fleet.example.toml,fleet.simulation.toml}`, `docs/five-robots.md`.
+boundary, `config/{fleet.example.toml,fleet.simulation.toml}`, `docs/guides/five-robots.md`.
 
 1. Add disabled-by-default pet configuration. Use injected clock/random source;
    state per robot includes curiosity, social cooldown, rest and recent activity.
@@ -270,35 +295,37 @@ boundary, `config/{fleet.example.toml,fleet.simulation.toml}`, `docs/five-robots
    `inspect_visible_target`, later `explore_patch` and `pickup_target`. The scheduler
    chooses when, vision supplies observations, and optional LLM chooses a bounded
    intent. Unknown/unseen targets do not become invented coordinates.
-4. Default spontaneous speech no more than once per robot per two minutes and
-   once fleet-wide per 20 seconds; human interactions can reply promptly. These
+4. Default spontaneous speech no more than once fleet-wide per 120 seconds;
+   human interactions can reply promptly. These
    are initial tunable product defaults, not hardware timing. Group sessions keep
    existing total-turn/time limits and one audible speaker.
 5. Keep small persistent records keyed by robot ID under ignored `data/private/`:
    recent activities, explicitly supplied preferences and peer encounters. Test
    restart/isolation, corrupt-record fallback and bounded retention. No raw audio
-   or pictures are retained automatically. Stop/fault/leases are runtime state,
+   or pictures are retained automatically. Stop/fault/motion sessions are runtime state,
    never persisted as permission to move after restart.
 
 **Exit:** repeatable simulation shows independent, proactive stationary behavior
 and memory without LLM-every-tick calls or any hardware movement. Robot/person
 recognition reliability remains unqualified; touch does not give user location.
 
-## Milestone 6 — motion arbitration and supervised pet lease
+## Milestone 6 — motion arbitration and enable-until-paused pet session
 
 **Create:** `laptop/src/desk_robot/motion.py`, `tests/test_pet_motion.py`.
 **Modify:** `laptop/src/desk_robot/{controller.py,runtime.py,config.py,api.py,cli.py}`,
-`tests/{test_control.py,test_api_conversation.py,test_fleet.py}`, `docs/interfaces.md`.
+`tests/{test_control.py,test_api_conversation.py,test_fleet.py}`, `docs/guides/interfaces.md`.
 
 1. Single owner per robot. Fault/operator stop overrides everything; manual and
    pickup preempt roaming, which cannot queue an automatic restart. Keep existing
    bounded-job permits unchanged; they are not reusable wander permission.
-2. Add operator-only pet enable: monotonic lease default 120 s, hard cap 300 s,
-   hardware motion false unless explicitly configured. Model credentials must
-   receive denial for enable/renew/rearm. Expiry, disconnect, stop, fault and
-   runtime shutdown revoke the lease and cancel all in-flight pet activity.
+2. Add operator-only pet enable until paused/stopped, without recurring renewal.
+   Hardware motion stays off unless explicitly configured. Model credentials
+   cannot enable/rearm. Keep individual drive deadlines and watchdogs. Disconnect,
+   pause/stop, fault and shutdown revoke the session and cancel pending activity;
+   reconnect/restart cannot resume movement.
 3. Add fault tests before implementation: model cannot enable, stale sensor status
-   blocks enable, restart stays off, expired queued jobs never run, active manual
+   blocks enable, restart stays off, enable survives beyond 300 seconds without
+   renewal, canceled/expired individual jobs never run, active manual
    preempts roam, fault prevents later drive, and stop during LLM/vision wait
    cancels pending intents. No transport retry of uncertain movement ACK.
 4. Implement stop/look/short bounded movement only inside a human-cleared region
@@ -335,7 +362,7 @@ and trial guides; add focused keyframe tests if sequences are introduced.
 ## Milestone 8 — repeat the validated core and document limits
 
 **Files:** inventory/BOM, per-robot ignored calibration/settings,
-`docs/five-robots.md`, `test-results/verification.md`, physical trial records.
+`docs/guides/five-robots.md`, `docs/records/verification.md`, physical trial records.
 
 1. Quote missing fleet stock only after prototype success; identical core modules,
    unique tokens/device IDs/addresses/personas and individually measured calibration.

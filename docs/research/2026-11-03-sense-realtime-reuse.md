@@ -16,7 +16,7 @@ fallback, not an additional shopping requirement.
 | [LiveKit ESP32](https://github.com/livekit/client-sdk-esp32/tree/669ef1382501224fdac93d8d02378fbc5b2cb197) | Apache2 SDK with audio/video/data/RPC, developer-preview alternative. | A larger integration path. Sense capture/render support and reference-based AEC are not supplied merely by selecting this SDK. |
 
 RIO is saved unchanged at the exact revision under ignored
-`upstream/rio-sense-reference`. [Reuse source hashes](../../hardware/reuse-sources.json)
+`upstream/rio-sense-reference`. [Reuse source hashes](../hardware/reuse-sources.json)
 record the inspected files. No firmware from this source has been flashed or
 integrated, and no cloud session has been opened.
 
@@ -44,7 +44,7 @@ reference and has a bring-up sweep. However:
 
 1. **Voice interruption:** echo-clean live input, interrupt detection, cancel the
    obsolete answer, flush queued audio on Mac/device and keep the new utterance.
-   [Physical acceptance](../audio-barge-in.md) remains mandatory for robot one.
+   [Physical acceptance](../guides/audio-barge-in.md) remains mandatory for robot one.
 2. **Proactive pet behavior:** local blink/gaze plus an event/timer scheduler that
    sometimes initiates an observation or speech. Google's proactive-audio option
    controls response selectivity; it is not a complete autonomous pet scheduler.
@@ -63,7 +63,7 @@ replacing the whole robot architecture.
 
 ## Integration direction
 
-The [concrete Sense port seam](../sense-aec-port.md) reuses Xiaozhi's existing
+The [concrete Sense port seam](../guides/sense-aec-port.md) reuses Xiaozhi's existing
 audio front end with a Sense-only synchronized mic/playback-reference adapter.
 RIO supplies reference-timing/calibration and cancellation patterns; importing
 its entire second AEC/VAD/gate chain is unnecessary. This adapter is not yet
