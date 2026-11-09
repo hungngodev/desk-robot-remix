@@ -20,6 +20,7 @@ DOCUMENTS = (
     "original-html-link-index.md",
     "acceptance.md",
     "decisions-before-hardware.md",
+    "html-quantitative-proposals.md",
 )
 
 
