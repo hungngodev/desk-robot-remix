@@ -134,6 +134,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.post("/v1/robots/{robot_id}/stop", dependencies=[Depends(authorize)])
     async def stop(robot_id: str):
+        coordinator().robot(robot_id)
         await app.state.runtime.pet.pause(robot_id)
         return await coordinator().stop(robot_id)
 
@@ -176,10 +177,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.post("/v1/conversation", dependencies=[Depends(authorize)])
     async def conversation(request: ChatRequest):
         try:
-            # An explicit conversation preempts unsolicited pet speech.
+            # Validate first. Human conversation preempts any robot's spontaneous
+            # speech, including a robot not in the requested peer subset.
             for robot_id in request.robot_ids:
                 coordinator().robot(robot_id)
-                await app.state.runtime.pet.interrupt(robot_id)
+            for robot in settings.robots:
+                await app.state.runtime.pet.interrupt(robot.id)
             transcript = await app.state.runtime.conversation.run(
                 request.robot_ids, request.topic, request.utterances
             )
