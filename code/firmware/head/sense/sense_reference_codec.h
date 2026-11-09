@@ -25,6 +25,7 @@ public:
     // Urgent output reset is driven by the application playback flush event.
     // i2s_channel_disable()/enable() remains owned by the inherited codec.
     void ClearReference();
+    void EnableOutput(bool enable) override;
 
 protected:
     int Read(int16_t* dest, int samples) override;
