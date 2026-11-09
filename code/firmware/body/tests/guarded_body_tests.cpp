@@ -104,6 +104,39 @@ static void fault_holds_payload_and_requires_rearm() {
   CHECK(!body.state().servos_attached);
 }
 
+static void local_only_real_ranges_and_persistable_calibration() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  const std::string values = "calibrate 40 60 40 60 40 60 40 60 30 1000 100";
+  CHECK(send(body, values, 0) == "ERR calibrate local_only");
+  CHECK(!guard.configured());
+  CHECK(send(body, "calclear", 0) == "ERR calclear local_only");
+  CHECK(send(body, "calibrate 40 60 40", 0, true) ==
+        "ERR calibrate bad_arguments");
+  CHECK(send(body, "calibrate 20 10 40 60 40 60 40 60 30 1000 100",
+             0, true) == "ERR calibrate invalid_intervals");
+  CHECK(!guard.configured());
+  CHECK(send(body, values, 0, true) == "OK calibrate");
+  CHECK(guard.configured());
+  CHECK(guard.configuration().floor[0].min_mm == 40);
+  CHECK(guard.configuration().front_max_mm == 1000);
+  CHECK(send(body, "arm", 0) == "ERR arm safety_interlock");
+  for (std::uint8_t sensor = 0; sensor < desk_robot::kCliffSensorCount; ++sensor) {
+    guard.sample(sensor, sensor < 4 ? 50 : 200, true, 3);
+  }
+  const auto diag = send(body, "ranges", 3);
+  CHECK(diag.find("\"ranges_mm\":[50,50,50,50,200]") != std::string::npos);
+  CHECK(diag.find("\"valid_mask\":31") != std::string::npos);
+  CHECK(send(body, "rearm", 3, true) == "OK rearm");
+  CHECK(send(body, "arm", 3) == "OK arm");
+  CHECK(send(body, values, 4, true) == "ERR calibrate disarm_first");
+  CHECK(send(body, "calclear", 4, true) == "ERR calclear disarm_first");
+  CHECK(send(body, "disarm", 4) == "OK disarm");
+  CHECK(send(body, "calclear", 4, true) == "OK calclear");
+  CHECK(!guard.configured());
+  CHECK(send(body, "rearm", 4, true) == "ERR rearm safety_interlock");
+}
+
 static void stale_read_stops_before_watchdog() {
   desk_robot::CliffGuard guard;
   guard.configure(config());
@@ -189,6 +222,8 @@ int main() {
     std::cout << "PASS head receiver cannot borrow USB recovery authority\n";
     fault_holds_payload_and_requires_rearm();
     std::cout << "PASS fault holds payload and requires explicit rearm\n";
+    local_only_real_ranges_and_persistable_calibration();
+    std::cout << "PASS only local measured calibration enables guarded sensor recovery\\n";
     stale_read_stops_before_watchdog();
     std::cout << "PASS stale sensor stops before communication watchdog\n";
     both_receivers_and_coils_respect_stop();
