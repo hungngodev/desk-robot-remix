@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from pathlib import Path
 
 from .config import Settings
 
@@ -93,7 +92,7 @@ class PetMemory:
             (limit,),
         )
         names = ("event_id", "observed_by", "told_by", "kind", "summary", "captured_at", "source")
-        return [dict(zip(names, row)) for row in cursor]
+        return [dict(zip(names, row, strict=True)) for row in cursor]
 
     def context(self, robot_id: str) -> str:
         """Explicitly label what is personally seen versus secondhand."""
