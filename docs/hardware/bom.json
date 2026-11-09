@@ -129,12 +129,13 @@
       "reference_price_date": "2026-11-03"
     },
     {
-      "item": "VL6180X downward ToF breakout",
+      "item": "Four qualified short-range downward ToF breakouts (exact supported part not yet selected)",
       "quantity": 4,
       "unit_usd": null,
       "price_status": "quote_pending",
-      "url": "https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module",
-      "fit": "Four concealed downward views with open optical windows; breakout levels, mounting, timing/surfaces/stops unqualified. ST now lists VL6180X obsolete/out of production (checked 2026-11-09). Hold fleet purchase. One VL53L4CD alternate may be bench-evaluated for price, field coverage and different firmware; no automatic substitution or safety approval."
+      "url": "",
+      "fit": "Four downward optical roles are mandatory, but the actual short-range sensor breakout, driver, mounting and delivered price are unresolved. ST marks historical VL6180X obsolete and out of production. VL53L4CD is an active comparison candidate, not an approved substitute: test one exact real module at intended height and surfaces, measure scan-age/stop margin, verify breakout voltage and four-unit cost before purchase. Historical VL6180X supplier URL is retained separately as provenance, NOT as a shopping link.",
+      "historical_reference_url": "https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module"
     },
     {
       "item": "VL53L0X forward obstacle breakout",
