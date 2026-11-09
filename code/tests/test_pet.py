@@ -197,3 +197,37 @@ def test_pet_api_requires_operator_enable_but_allows_authenticated_stop(fleet, t
         assert client.post("/v1/pet/robot-01/pause", headers=tool).status_code == 200
         assert not client.get("/v1/pet/robot-01", headers=tool).json()["enabled"]
         assert client.post("/v1/pet/missing/start", headers=operator).status_code == 409
+
+
+async def test_touch_edge_from_real_body_status_creates_memory_and_proactive_reply(fleet, tmp_path):
+    class TouchHead:
+        def __init__(self):
+            self.count = 0
+            self.calls = 0
+
+        async def status(self):
+            self.calls += 1
+            if self.calls >= 2:
+                self.count = 1
+            return {"touch": {"active": False, "count": self.count}}
+
+        async def snapshot(self):
+            return WHITE
+
+    head, chat, speaker, scene = TouchHead(), GroundedChat(), SimulatedSpeaker(), KeyScene()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, chat, speaker, memory=memory)
+    pet = PetController(fleet, {"robot-01": head}, conversation, memory, scene,
+                        interval=.01, speech_cooldown=120)
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: len(speaker.spoken) == 1)
+        assert scene.calls == 0  # A capacitive touch is not a fabricated camera detection.
+        assert head.calls >= 2
+        events = [m for m in memory.recent("robot-01") if m.kind == "touch"]
+        assert len(events) == 1 and events[0].witnessed
+        assert events[0].source_robot == "robot-01"
+        assert len(speaker.spoken) == 1
+        assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
+    finally:
+        await pet.close()
