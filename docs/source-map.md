@@ -8,7 +8,7 @@ that all components have been integrated. The product requirements remain in
 [guide audit](research/2026-11-03-guide-audit.md), and
 [case audit](research/2026-11-03-rounded-cases.md).
 
-**Complete research preservation:** The [day-zero reuse shortlist](research/2026-11-03-active-pet-sources.md) gives inspected implementation files and compatible integration boundaries. The [200-entry feature register](#original-html-feature-and-sensor-idea-register) records original and historic sensor, game, personality and robotics ideas; [all 131 unique external links from the original 23-section HTML](#complete-original-html-research-link-index) are preserved without claiming every destination was verified. The [linear integration plan](PLAN.md) keeps these visible before buying or printing. Existing source reviews below are retained, not superseded by a small shortlist.
+**Complete research preservation:** The [day-zero reuse shortlist](research/2026-11-03-active-pet-sources.md) gives inspected implementation files and compatible integration boundaries. The [200-entry feature register](#original-html-feature-and-sensor-idea-register) records original and historic sensor, game, personality and robotics ideas; [all 131 unique external links from the original 41-section HTML](#complete-original-html-research-link-index) are preserved without claiming every destination was verified. The [linear integration plan](PLAN.md) keeps these visible before buying or printing. Existing source reviews below are retained, not superseded by a small shortlist.
 
 ## Requirements that govern reuse
 
@@ -135,7 +135,7 @@ is a separate historical objective, not a robot dependency.
 
 **Status interpretation:** `REQUIRED` is a user-visible hard goal that may not be deferred out of the final product. `RESERVE NOW` means leave physical/software extension accommodation before assembling, not that the module must be purchased. `EXPANSION` means fully recorded, with a planned adapter/test but separate cost/fit approval. `REFERENCE` means concept only. `REJECTED FOR SAFETY` cannot be implemented as described. `EVALUATE` is an upstream or tuning candidate awaiting independent proof. Hybrid statuses reflect a required *behavior* with an optional *sensor implementation*. The $50 hard cap and small body make all listed experimental physical modules simultaneously installed an unproven, almost certainly incompatible configuration; see [decision gate](decision-log.md).
 
-## A. Live HTML sections 1–16 and repo requirements
+## A. Current HTML project and topic sections with repo requirements
 
 | ID | Idea or requirement | Design status | Day-zero reservation, constraint, or proof required |
 | --- | --- | --- | --- |
@@ -349,13 +349,13 @@ is a separate historical objective, not a robot dependency.
 
 | ID | Idea or requirement | Design status | Day-zero reservation, constraint, or proof required |
 | --- | --- | --- | --- |
-| `H001` | Historical section 17: Xiaozhi First, Emotion Lab, old 3 forks | REFERENCE | Earlier Xiaozhi packs retained; not substitute for current Sense/WROOM platform |
-| `H002` | Historical section 18: Xiaozhi mod packs and six week schedule | REFERENCE | Touch/motion/cliff/dance ideas mapped here; old two-TCRT5000 scheme not accepted edge coverage |
-| `H003` | Historical section 19: sensor leaderboard and waves | PRESERVE | Every named sensor family appears in group C, with source/fit/safety flags |
-| `H004` | Historical section 20: sensors/emotions/24 idea shortlist | PRESERVE | Mapped to groups B/C/D; no automatic reverse or single-mic voice direction |
-| `H005` | Historical section 21: finds from Reddit/YouTube | PRESERVE | Source register includes original patterns; a video demo does not equal source license or code |
-| `H006` | Historical section 22: newly found projects Nov 7 and Nov 9 | RESEARCH | Claude Desktop Buddy, Tiny Engineer, JARVIS, coding agent pet, Dogo, HachimoDock, Tokpet, Sesame Robot, MoodiMOS, Meta Muse, Tiny Touch DeskBuddy, Duckbert, AI Ball, AI DeskBuddy and others retained as leads |
-| `H007` | Historical section 23: reference BOM and fork list | PRESERVE | StackChan, MyDeskRobo, AI Pet Robot V2, Sentio, Xiaozhi-Pet, Claude Desktop Buddy remain candidates, not verified source integrations |
+| `H001` | Historical Xiaozhi First, Emotion Lab and older forks | REFERENCE | Earlier Xiaozhi packs retained; not substitute for current Sense/WROOM platform |
+| `H002` | Historical Xiaozhi mod packs and six week schedule | REFERENCE | Touch/motion/cliff/dance ideas mapped here; old two-TCRT5000 scheme not accepted edge coverage |
+| `H003` | Historical sensor leaderboard and brainstorm waves | PRESERVE | Every named sensor family appears in group C, with source/fit/safety flags |
+| `H004` | Historical sensors, emotions and 24 idea shortlist | PRESERVE | Mapped to groups B/C/D; no automatic reverse or single-mic voice direction |
+| `H005` | Historical finds from Reddit and YouTube | PRESERVE | Source register includes original patterns; a video demo does not equal source license or code |
+| `H006` | Historical newly found projects from Nov 7 and Nov 9 | RESEARCH | Claude Desktop Buddy, Tiny Engineer, JARVIS, coding agent pet, Dogo, HachimoDock, Tokpet, Sesame Robot, MoodiMOS, Meta Muse, Tiny Touch DeskBuddy, Duckbert, AI Ball, AI DeskBuddy and others retained as leads |
+| `H007` | Historical reference BOM and fork list | PRESERVE | StackChan, MyDeskRobo, AI Pet Robot V2, Sentio, Xiaozhi-Pet, Claude Desktop Buddy remain candidates, not verified source integrations |
 | `H008` | Eilik/EMO/Cozmo/Vector/Mochi/Fetch comparisons | INSPIRATION | Character and appearance pattern, not copying closed commercial personality engines |
 | `H009` | Projects with no confirmed source/license | REVIEW | Do not copy copyrighted binary, STL or code from partial videos simply because public URL exists |
 | `H010` | New external sources and model/library claims | SOURCE CHECK | Verify per pinned release/license/readme/actual code; never turn user's unverified market/pricing/model benchmark into repo truth |
