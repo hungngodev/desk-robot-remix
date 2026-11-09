@@ -1,7 +1,7 @@
 // Board integration using Xiaozhi's bread-compact-wifi and S3CAM initializers.
 // Camera, SSD1306 display, PDM input and I2S output remain upstream drivers.
 #include "wifi_board.h"
-#include "codecs/no_audio_codec.h"
+#include "sense_reference_codec.h"
 #include "display/oled_display.h"
 #include "application.h"
 #include "button.h"
@@ -112,7 +112,7 @@ public:
     }
 
     AudioCodec* GetAudioCodec() override {
-        static NoAudioCodecSimplexPdm audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+        static SenseReferenceCodec audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
             AUDIO_PDM_MIC_GPIO_SCK, AUDIO_PDM_MIC_GPIO_DIN);
         return &audio_codec;
