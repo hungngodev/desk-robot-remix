@@ -16,7 +16,8 @@ Read in this order:
 3. [Feature, sensor and research traceability](feature-register.md): includes the HTML's live sections 1–16, historical sections 17–23, experimental waves, unusual sensors, games, peripherals and software-only pet ideas. No idea disappears because it is not in the first purchase basket.
 4. [Open source reuse decision register](reuse-register.md): exact repositories, representative files and licenses, plus a copy/port/compare/reject rule. The existing [source map](../source-map.md), [twelve video audit](../research/2026-11-03-video-audit.md), [guide audit](../research/2026-11-03-guide-audit.md), [active behavior research](../research/2026-11-03-active-pet-sources.md) and [Sense/RIO source inspection](../research/2026-11-03-sense-realtime-reuse.md) remain authoritative evidence.
 5. [Acceptance and evidence ledger](acceptance.md): includes canonical A1–A12, full user experience cases, future feature verification and reasons a green CI job cannot certify a desk-safe robot.
-6. [Prebuild decisions and conflicts](decisions-before-hardware.md): decisions that must be settled once, early, instead of forcing a rebuild later.
+6. [HTML quantitative proposals](html-quantitative-proposals.md): preserve exact numerical/tuning suggestions from live sections 8–15, clearly distinguish candidate values from real measured or mandatory A1–A12 thresholds.
+7. [Prebuild decisions and conflicts](decisions-before-hardware.md): decisions that must be settled once, early, instead of forcing a rebuild later.
 
 ## Preserve the sources, including contradictory historical ideas
 
