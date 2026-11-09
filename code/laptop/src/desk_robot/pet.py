@@ -44,7 +44,7 @@ def _thumbnail(jpeg: bytes) -> bytes:
 def _distance(a: bytes, b: bytes) -> float:
     if len(a) != len(b):
         raise ValueError("Mismatched image grids")
-    return sum(abs(x - y) for x, y in zip(a, b)) / (len(a) * 255)
+    return sum(abs(x - y) for x, y in zip(a, b, strict=True)) / (len(a) * 255)
 
 
 @dataclass
