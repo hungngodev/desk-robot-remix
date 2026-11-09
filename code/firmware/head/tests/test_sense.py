@@ -33,7 +33,8 @@ class SenseOverlayTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        names = ['main/Kconfig.projbuild', 'main/CMakeLists.txt', 'main/mcp_server.cc']
+        names = ['main/Kconfig.projbuild', 'main/CMakeLists.txt', 'main/mcp_server.cc',
+                 'main/application.cc']
         names += [f'main/boards/common/{name}' for name in (
             'camera.h', 'esp_video.h', 'esp_video.cc', 'esp32_camera.h', 'esp32_camera.cc')]
         names += [p.relative_to(UPSTREAM).as_posix()
@@ -82,7 +83,8 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertFalse(set(pins.values()) & {3, 19, 20, 26, 27, 28, 29, 30, 31,
                                               32, 33, 34, 35, 36, 37, 43, 44})
         source = (board / 'desk_robot_sense.cc').read_text()
-        self.assertIn('NoAudioCodecSimplexPdm', source)
+        self.assertIn('SenseReferenceCodec audio_codec', source)
+        self.assertIn('NoAudioCodecSimplexPdm::Read', (board / 'sense_reference_codec.cc').read_text())
         self.assertNotIn('NoAudioCodecSimplex audio_codec', source)
         self.assertIn('esp_lcd_new_panel_ssd1306', source)
         self.assertIn('#include <esp_lcd_panel_vendor.h>', source)
