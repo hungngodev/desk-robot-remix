@@ -46,11 +46,15 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   // requests also require Wire's own 15ms timeout, independent of the sensor.
   wire_.begin(sda, scl, 400000);
   wire_.setTimeOut(15);
-  pinMode(mux_reset_pin, OUTPUT);
-  digitalWrite(mux_reset_pin, LOW);
-  delayMicroseconds(10);
-  digitalWrite(mux_reset_pin, HIGH);
-  delay(2);
+  // The final WROOM allocation does not have a spare boot-safe output.
+  // With mux_reset_pin = -1, physically tie TCA9548A RESET high to 3.3V.
+  if (mux_reset_pin >= 0) {
+    pinMode(mux_reset_pin, OUTPUT);
+    digitalWrite(mux_reset_pin, LOW);
+    delayMicroseconds(10);
+    digitalWrite(mux_reset_pin, HIGH);
+    delay(2);
+  }
   device_.setBus(&wire_);
   device_.setTimeout(80);
   for (std::uint8_t channel = 0; channel < kFloorAndFrontCount; ++channel) {
