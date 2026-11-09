@@ -250,8 +250,8 @@ void BodyControl::execute(const char* line, std::size_t length,
       if (guard_->sample_valid(i)) valid_mask |= 1U << i;
     }
     std::snprintf(reply, capacity,
-        "{\\"ranges_mm\\":[%u,%u,%u,%u,%u],"
-        "\\"valid_mask\\":%u,\\"ages_ms\\":[%lu,%lu,%lu,%lu,%lu]}",
+        "{\"ranges_mm\":[%u,%u,%u,%u,%u],"
+        "\"valid_mask\":%u,\"ages_ms\":[%lu,%lu,%lu,%lu,%lu]}",
         static_cast<unsigned>(guard_->distance_mm(0)),
         static_cast<unsigned>(guard_->distance_mm(1)),
         static_cast<unsigned>(guard_->distance_mm(2)),
