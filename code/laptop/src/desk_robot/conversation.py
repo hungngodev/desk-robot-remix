@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 from contextlib import asynccontextmanager
 from typing import Protocol
 
@@ -56,6 +57,60 @@ class OllamaChat:
         if not text or len(text) > 2000:
             raise RuntimeError("Ollama returned empty or oversized speech")
         return text
+
+
+    async def observe_change(self, before: bytes, after: bytes) -> dict | None:
+        """Reuse Ollama's local multimodal chat API with two actual camera images.
+
+        A proposed scene change is never treated as fact without a configured
+        vision model and explicit confidence/grounding. No raw frames are stored.
+        """
+        if not self.settings.ollama_vision_model:
+            return None
+        if not before.startswith(b"\\xff\\xd8") or not after.startswith(b"\\xff\\xd8"):
+            raise ValueError("Only actual bounded JPEG camera frames may be observed")
+        if max(len(before), len(after)) > 512_000:
+            raise ValueError("Camera frame exceeds the observation limit")
+        prompt = (
+            "Compare the FIRST earlier desk image and SECOND current desk image. "
+            "Only report clearly visible changes: a person, hand, key, wrapped candy "
+            "or newly appeared/moved object. Do not guess identity, distance, "
+            "intent, emotions or unseen facts. Respond JSON only: "
+            '{\"kind\":\"new_object|object_moved|person_entered|hand_visible|scene_change|none\",'
+            '\"summary\":\"brief directly visible change\",\"confidence\":0.0}. '
+            "If uncertain or no meaningful change, kind must be none."
+        )
+        response = await self.client.post(
+            self.settings.ollama_url.rstrip("/") + "/api/chat",
+            json={
+                "model": self.settings.ollama_vision_model,
+                "messages": [{
+                    "role": "user", "content": prompt,
+                    "images": [base64.b64encode(x).decode() for x in (before, after)],
+                }],
+                "format": "json",
+                "stream": False,
+                "think": False,
+                "options": {"num_predict": 130},
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = json.loads(response.json()["message"]["content"])
+        if not isinstance(data, dict):
+            return None
+        kind, summary, confidence = (
+            data.get("kind"), data.get("summary"), data.get("confidence")
+        )
+        allowed = {"new_object", "object_moved", "person_entered", "hand_visible", "scene_change"}
+        if (
+            kind not in allowed or not isinstance(summary, str)
+            or not 1 <= len(summary.strip()) <= 160
+            or isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+            or not 0.8 <= confidence <= 1.0
+        ):
+            return None
+        return {"kind": kind, "summary": summary.strip(), "confidence": float(confidence)}
 
 
 class KokoroHeadSpeaker:
@@ -158,6 +213,31 @@ class Conversation:
             return transcript
         finally:
             self.active = None
+
+    async def say_one(self, robot_id: str, prompt: str, memory_context: str) -> str:
+        """Single fleet-serialized unsolicited turn, never grants motion authority.
+
+        The lease and bridge still need actual duplex AEC for physical barge-in.
+        Reject an active peer conversation rather than talking over it.
+        """
+        robot = self.settings.robot(robot_id)
+        if self.active is not None and not self.active.done():
+            raise RuntimeError("Another conversation owns the floor")
+        async with self.speaker_lock:
+            if self.active is not None and not self.active.done():
+                raise RuntimeError("Another conversation owns the floor")
+            history = [
+                {"role": "system", "content": robot.persona + (
+                    " Talk about only the directly observed change. Be brief, "
+                    "natural and curious. Do not command motors or invent memories."
+                )},
+                {"role": "system", "content": "Real memory with attribution: " + memory_context},
+                {"role": "user", "content": prompt},
+            ]
+            async with self.speaker.session([robot]):
+                text = await self.chat.reply(history)
+                await self.speaker.say(robot, text)
+            return text
 
     async def stop(self):
         task = self.active
