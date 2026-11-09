@@ -8,8 +8,8 @@ from pathlib import Path
 import httpx
 import pytest
 from desk_robot.api import create_app
-from desk_robot.conversation import Conversation
 from desk_robot.config import load_settings
+from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore
 from desk_robot.pet import PetController
 from desk_robot.simulator import SimulatedSpeaker
