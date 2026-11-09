@@ -29,6 +29,12 @@ Sources and reuse boundaries: [source-map.md](source-map.md).
 | 2026-11-06 project layout | Keep the living handbook in `docs/` and implementation in `code/`. Keep automated tests with the implementation and physical trial sheets and past reports in `docs/records/`. The two [entry points](../README.md) replace the earlier scattered top-level folders. |
 | Evidence boundary | No complete robot assembled/flashed/physically accepted. Current runtime foundations compile historically; actual ToF I/O/calibration and many behaviors remain unfinished. New notes do not change those evidence states |
 
+## 2026-11-09 complete scope / linear integration request
+
+The user explicitly requested a single **day-zero full-feature** plan and a forward-only build rather than first making a reduced talking robot and later rewriting hardware, AI, memory, autonomy or enclosure. This does not mean physically running every sensor simultaneously before testing, nor does it authorize changing the unchanged $50 delivered cap. [Blueprint](blueprint/README.md) maps the 23-section HTML, 200 individually named requirements/ideas and 131 unique external URLs, and records each unresolved conflict before permanent work. Hard requirements are full pushed context-grounded proactive conversations, natural first-build interruption, persistent independent identity/memory, peer social experience, body local safety, real key/candy pickup and operator-enabled continuing activity. Experimental odd sensors, optional games and advanced docking remain traceable and interface-reserved, not claimed installed; their cost, voltage, geometry and source license must be approved separately. Build one fully representative core and duplicate four after acceptance; no throwaway head/body migration.
+
+This is a **planning commitment**, not approval of an exact untested IP5306 board, VL53L4CD module, Mac provider or GPL face engine. No physical test status changes.
+
 ## Continuing recording rule
 
 Record meaningful decisions, rationale, source/terms and superseded choices in
