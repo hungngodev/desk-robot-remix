@@ -37,6 +37,7 @@ class PetState:
     suppressed: int = 0
     last_event: str | None = None
     last_error: str | None = None
+    last_touch_count: int | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
 
@@ -104,6 +105,7 @@ class PetController:
             raise RuntimeError("Previous pet task still shutting down")
         state.generation += 1
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
+        state.last_touch_count = None
         state.enabled = True
         state.last_error = None
         state.task = asyncio.create_task(self._observe(robot_id, state.generation))
@@ -141,6 +143,47 @@ class PetController:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
+    async def _touch_from_body(self, robot_id: str, generation: int) -> None:
+        """Read actual WROOM touch edge count through the existing Sense status UART bridge.
+
+        One-shot GPIO pulses survive a slower camera polling cycle, while
+        reconnect/reset counter changes cannot invent old touches. This
+        source has no motor or safety-rearm privileges.
+        """
+        head = self.heads[robot_id]
+        getter = getattr(head, "status", None)
+        if getter is None:
+            return  # Minimal test cameras have no body telemetry.
+        body = await getter()
+        touch = body.get("touch") if isinstance(body, dict) else None
+        if not isinstance(touch, dict):
+            return
+        count = touch.get("count")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            return
+        state = self.states[robot_id]
+        previous = state.last_touch_count
+        state.last_touch_count = count
+        if previous is None or count <= previous or not state.enabled or state.generation != generation:
+            return
+        # Bounded recall across status polling; ignore implausible jumps after
+        # a new board identity/reset instead of narrating phantom touches.
+        if count - previous > 20:
+            return
+        change = SceneChange(
+            "touch", "Someone has just touched my body", 1.0
+        )
+        state.events += 1
+        state.last_event = change.description
+        await asyncio.to_thread(
+            self.memory.remember,
+            robot_id, uuid.uuid4().hex, change.description,
+            kind="touch", source_robot=robot_id,
+            witnessed=True, observed_at=time.time(), confidence=1.0,
+        )
+        if state.enabled and state.generation == generation:
+            self._consider_speech(robot_id, change, generation)
+
     async def _observe(self, robot_id: str, generation: int) -> None:
         state = self.states[robot_id]
         while state.enabled and state.generation == generation and not self._closed:
@@ -152,6 +195,7 @@ class PetController:
                 ):
                     await asyncio.sleep(self.interval)
                     continue
+                await self._touch_from_body(robot_id, generation)
                 started = time.monotonic()
                 jpeg = await self.heads[robot_id].snapshot()
                 received = time.monotonic()
