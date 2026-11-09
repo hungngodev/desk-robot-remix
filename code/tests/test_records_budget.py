@@ -207,3 +207,24 @@ def test_source_crosswalk_matches_41_original_html_section_ids():
     assert len(ids) == len(set(ids)) == 41
     digest = hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()
     assert digest == "1128952b6b42f42eb0a5650714c541b7916b3f07b91856cf9ae82e3a9a3d43be"
+
+
+def test_obsolete_floor_sensor_is_not_an_active_purchase_item():
+    data = json.loads((DOCS / "hardware/bom.json").read_text(encoding="utf-8"))
+    down = [
+        item for item in data["items"]
+        if "short-range downward ToF" in item["item"]
+    ]
+    assert len(down) == 1
+    assert down[0]["quantity"] == 4
+    assert down[0]["unit_usd"] is None
+    assert down[0]["url"] == "", "An unqualified obsolete-part purchase link cannot be active"
+    assert "vl6180x" in down[0]["historical_reference_url"].lower()
+    assert "vl53l4cd" in down[0]["fit"].lower()
+    parts = (DOCS / "hardware/parts.md").read_text(encoding="utf-8")
+    assert "Sensor purchase hold" in parts
+    assert "|[VL6180X breakout]" not in parts
+    wiring = (DOCS / "hardware/wiring.md").read_text(encoding="utf-8")
+    assert "downward ToF (final supported part TBD)" in wiring
+    assert "downward VL6180X" not in wiring
+    assert not module("check_budget").budget(data)["purchase_ready"]
