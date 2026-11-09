@@ -44,6 +44,11 @@ class Settings(BaseModel):
     vision_weights: Path | None = None
     max_job_seconds: float = Field(default=45, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
+    memory_dir: Path = Path("data/pet-memory")
+    # Vision models must be installed locally, never silently using a cloud provider.
+    ollama_vision_model: str | None = None
+    pet_poll_seconds: float = Field(default=1.0, ge=0.5, le=30)
+    pet_spontaneous_gap_seconds: float = Field(default=120.0, ge=30, le=3600)
 
     @model_validator(mode="after")
     def unique_ids(self):
@@ -80,4 +85,6 @@ def load_settings(path: str | Path) -> Settings:
         settings.vision_weights = (path.parent / settings.vision_weights).resolve()
     if not settings.trials_file.is_absolute():
         settings.trials_file = (path.parent / settings.trials_file).resolve()
+    if not settings.memory_dir.is_absolute():
+        settings.memory_dir = (path.parent / settings.memory_dir).resolve()
     return settings
