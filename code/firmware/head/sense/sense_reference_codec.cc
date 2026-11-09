@@ -136,3 +136,11 @@ void SenseReferenceCodec::ClearReference() {
     last_filtered_ = 0;
     phase_ = 0.0f;
 }
+
+void SenseReferenceCodec::EnableOutput(bool enable) {
+    if (!enable) {
+        // Urgent output disable invalidates reference for canceled audio.
+        ClearReference();
+    }
+    NoAudioCodec::EnableOutput(enable);
+}
