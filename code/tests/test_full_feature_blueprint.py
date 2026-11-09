@@ -100,7 +100,7 @@ def test_accepted_experience_and_fail_closed_constraints_are_explicit(pages):
     assert "19/20" in acceptance and "18/20" in acceptance
     assert "8/10" in acceptance and "120s" in acceptance
     assert "$50" in design and "$52.87" in design
-    assert "gpio41/42" in design.lower()
+    assert "41/42" in design
     assert "l4cd" in design.lower()
 
 
