@@ -55,7 +55,7 @@ with the [implementation](../code/).
 
 
 **Status: proposed design contract, not a verified assembled robot.**
-Reviewed 2026-11-09 against the user supplied 23-section `ESP32 Deskpet Ideas.html`, its 2026-11-09 engineering report, the 56 Markdown files in the original repository, the existing audit branch, published reuse sources and current software. This is the **entry point for the complete project**, including the research-era feature library, without silently dropping ideas.
+Reviewed 2026-11-09 against the user supplied 41-section `ESP32 Deskpet Ideas.html`, its 2026-11-09 engineering report, the 56 Markdown files in the original repository, the existing audit branch, published reuse sources and current software. This is the **entry point for the complete project**, including the research-era feature library, without silently dropping ideas.
 
 ## How this blueprint changes the approach
 
@@ -67,7 +67,7 @@ Read in this order:
 
 1. [Complete target and non-negotiable behaviors](product-definition.md): who owns speech, observations, autonomous action, safety and power, with actual hardware pin maps.
 2. [Forward-only build sequence](PLAN.md): every task and gate from inventory to five peers; full-feature interfaces exist at the start, not retrofitted.
-3. [Feature, sensor and research traceability](source-map.md): includes the HTML's live sections 1–16, historical sections 17–23, experimental waves, unusual sensors, games, peripherals and software-only pet ideas. No idea disappears because it is not in the first purchase basket.
+3. [Feature, sensor and research traceability](source-map.md): includes the HTML's current project and eight detailed engineering topics, the later historical Xiaozhi-era research library, experimental waves, unusual sensors, games, peripherals and software-only pet ideas. No idea disappears because it is not in the first purchase basket.
 4. [Open source reuse decision register](research/2026-11-03-active-pet-sources.md): exact repositories, representative files and licenses, plus a copy/port/compare/reject rule. The existing [source map](source-map.md), [twelve video audit](research/2026-11-03-video-audit.md), [guide audit](research/2026-11-03-guide-audit.md), [active behavior research](research/2026-11-03-active-pet-sources.md) and [Sense/RIO source inspection](research/2026-11-03-sense-realtime-reuse.md) remain authoritative evidence.
 5. [Acceptance and evidence ledger](records/verification.md): includes canonical A1–A12, full user experience cases, future feature verification and reasons a green CI job cannot certify a desk-safe robot.
 6. [HTML quantitative proposals](research/2026-11-03-active-pet-sources.md): preserve exact numerical/tuning suggestions from live sections 8–15, clearly distinguish candidate values from real measured or mandatory A1–A12 thresholds.
@@ -76,7 +76,7 @@ Read in this order:
 
 ## Preserve the sources, including contradictory historical ideas
 
-The HTML has a **live plan in sections 1–16** and a **research archive in sections 17–23**. Old Xiaozhi mod packs, older pin maps, early two-sensor cliff concepts, former battery and motor choices, previous budget estimates and the interactive sensor-to-emotion simulator are **research**, not safe construction instructions. The new plan maps the ideas forward but does not reauthorize outdated wiring or unsafe reversal. The original 1.1 MB HTML remains the source artifact: the repo did not contain its bytes when this documentation was authored. Do not claim an exhaustively verified web link corpus, assembled CAD or physical tests from this text.
+The actual uploaded HTML has **41 `section` elements, 44 `h2` headings, 316 `h3` headings and 231 expandable `details` blocks**. Its active project overview and detailed Power, Drive, Cliff, Touch, Audio, Head, Mac and Proactive topics precede the historical Xiaozhi-era research library. Old Xiaozhi mod packs, older pin maps, early two-sensor cliff concepts, former battery and motor choices, previous budget estimates and the interactive sensor-to-emotion simulator are **research**, not safe construction instructions. The new plan maps the ideas forward but does not reauthorize outdated wiring or unsafe reversal. The original 1.1 MB HTML remains the source artifact: the repo did not contain its bytes when this documentation was authored. Do not claim an exhaustively verified web link corpus, assembled CAD or physical tests from this text.
 
 Source priority when instructions disagree:
 
