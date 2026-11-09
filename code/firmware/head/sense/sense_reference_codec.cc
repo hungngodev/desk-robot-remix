@@ -64,7 +64,7 @@ void SenseReferenceCodec::PublishAcceptedLocked(
         while (phase_ < 1.0f) {
             const int32_t result = static_cast<int32_t>(
                 last_filtered_ + (filtered - last_filtered_) * phase_);
-            PushLocked(static_cast<int16_t>(std::clamp(result, -32768, 32767)));
+            PushLocked(static_cast<int16_t>(std::clamp(result, static_cast<int32_t>(-32768), static_cast<int32_t>(32767))));
             phase_ += 1.5f;
         }
         phase_ -= 1.0f;
