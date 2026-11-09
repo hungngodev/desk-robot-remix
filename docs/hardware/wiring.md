@@ -151,3 +151,25 @@ cliff checks must meet measured clearance deadlines locally. Stop should hold
 servo targets without dropping payload; explicit disarm/power-off can release
 servos, so support the object first. Stepper coil hold/coast policy must be
 qualified for stopping distance, current and heat. No unprotected tabletop trial.
+
+## 2026-11-09 HTML research reconciliation
+
+The separate `ESP32 Deskpet Ideas.html` is not an as-built wiring diagram. It
+incorrectly directs the optional GY-MAX30102 heartbeat pad to Sense GPIO41/42:
+these are **the onboard PDM microphone data and clock**, not spare I2C pins.
+The optional MAX30102 must instead be reviewed on the WROOM body I2C
+GPIO21 SDA / GPIO22 SCL, potentially through mux channel 5. Do **not** wire
+it until the actual purple breakout has been identified and its regulator,
+level shifting, pullups and voltage limits are verified. The reported quantity
+of about five remains an unconfirmed inventory claim, not an approved BOM line.
+See [Seeed's Sense pin allocation](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/)
+and [the MAX30102 datasheet](https://www.analog.com/en/products/max30102.html).
+
+ST now labels the proposed VL6180X **obsolete and out of production**. The
+existing sensor channel plan is still a proposed baseline, not a fleet
+procurement authorization. Bench evaluate one supported short range
+[VL53L4CD](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html)
+against the intended surfaces and height before substituting: it requires a
+different driver and may exceed the existing budget at current breakout prices.
+No optical scan time, stopping margin or surface support is physically
+qualified. [Full evidence and blockers](../research/2026-11-09-html-verification.md).
