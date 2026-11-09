@@ -5,6 +5,8 @@ import httpx
 from .config import Settings
 from .controller import Coordinator
 from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
+from .memory import PetMemory
+from .pet import PetRuntime
 from .simulator import SimulatedChat, SimulatedHead, SimulatedSpeaker, SimulationVision
 from .transport import HttpHead
 from .vision import YoloWorldVision
@@ -24,8 +26,10 @@ class Runtime:
             speaker = KokoroHeadSpeaker(settings, self.client)
         self.coordinator = Coordinator(settings, heads, vision)
         self.conversation = Conversation(settings, chat, speaker)
+        self.pet = PetRuntime(settings, heads, chat, self.conversation, PetMemory(settings))
 
     async def close(self):
+        await self.pet.close()
         await self.conversation.stop()
         await self.coordinator.close()
         await self.client.aclose()
