@@ -266,9 +266,31 @@ class Coordinator:
             raise OperationError(
                 "Pickup unverified: target did not remain stable in raised-jaw region"
             )
+        # The accepted user task includes CONTROLLED PLACEMENT, not simply
+        # gripping and lifting. Stop wheels, lower the load in the measured
+        # work area, release the jaw, and obtain a fresh camera view of the
+        # actual object at rest on the desk. An ACK alone is never placement.
+        await head.command("stop")
+        await head.command(f"lift {c.lift_down}")
+        await asyncio.sleep(c.servo_settle_seconds)
+        await head.command(f"grip {c.grip_open}")
+        await asyncio.sleep(c.servo_settle_seconds)
+        placed = await self._observe(job.robot_id, target, c)
+        on_surface = c.within(c.ground(placed.center))
+        left_raised_region = not (a <= placed.center[0] <= x and
+                                  b <= placed.center[1] <= y)
+        if not on_surface or not left_raised_region:
+            raise OperationError(
+                "Placement unverified: object has not returned to the measured work surface"
+            )
+        job.events.append("visual placement verified in floor work area")
         return {
             "visually_verified": True,
-            "criterion": "two fresh raised-jaw frames, upward displacement, outside floor region",
+            "placement_visually_verified": True,
+            "criterion": (
+                "raised-jaw displacement and hold verified, then lowered, "
+                "opened and freshly observed back within calibrated floor area"
+            ),
             "physical_acceptance_pass": False,
             "target": target,
             "note": "Visual evidence is experimental, not force sensing or a physical acceptance trial",
