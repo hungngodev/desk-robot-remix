@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "CliffGuard.h"
+
 namespace desk_robot {
 
 // Protocol and direction/PWM conventions adapted from VerdureBuddyRover (MIT).
@@ -28,7 +30,6 @@ struct State {
   int grip_target = 90;
 };
 
-class CliffGuard;
 enum class BodyProfile { DcPwm, StepperGuarded };
 
 class BodyControl {
@@ -55,6 +56,10 @@ class BodyControl {
   std::uint32_t drive_duration_ms_ = 0;
   std::uint32_t last_servo_step_ms_ = 0;
   void stop_motion();
+  // Local USB only: stage all five measured safety limits atomically.
+  // No network or AI path can set or persist them.
+  CliffConfig calibration_stage_{};
+  std::uint8_t calibration_stage_mask_ = 0;
 };
 
 // Each transport has its own bounded receiver. It discards an entire malformed
