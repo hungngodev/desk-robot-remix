@@ -523,6 +523,8 @@ This index is not a shopping list or authorization to install all parts. See [fe
 
 ## Original HTML DOM section crosswalk, verified 2026-11-09
 
+**Exact source fingerprints:** Uploaded `ESP32 Deskpet Ideas.html`: 1,074,994 bytes, SHA256 `12a0068f3bcec7daa6065cc180478294ccc1d0cc5e439250774684f3b2008b5d`. Uploaded additional engineering audit text: 51,993 bytes, SHA256 `5f934f13ded7cd6764c974456ee15fa79a4733c4059376ee72686e93c60f0414`. These hashes identify the review inputs; the original files are **not committed to this repository**, so the 131 URLs and 41 section IDs are preserved in canonical Markdown instead. A later user upload with a different hash must be diffed before revising this map.
+
 This table is extracted from the **actual uploaded HTML structure**, rather than the previous inaccurate description of the file as 23 numbered sections. The original contains **41 section elements (24 with `class=group`), 44 `h2` headings, 316 `h3` headings and 231 `<details>` research blocks**. The page has 567 link occurrences: 256 external occurrences representing 131 unique URLs and 311 in-page anchors. The original section ID sequence is preserved below; the 200 idea register groups related ideas and should not be mistaken for a one-to-one HTML section count.
 
 | Order | Actual `section` ID in HTML | What the section owns | Interpretation | Canonical existing file |
