@@ -1,5 +1,7 @@
 #include "TofBus.h"
 
+#if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
+
 namespace desk_robot {
 
 bool TofBus::select(std::uint8_t channel) {
@@ -12,12 +14,12 @@ bool TofBus::select(std::uint8_t channel) {
 bool TofBus::read_register(std::uint16_t reg, std::uint8_t* out, std::uint8_t length) {
   if (!out || length == 0 || length > kMaxSampleBytes) return false;
   wire_.beginTransmission(kSensorAddress);
-  if (wire_.write(static_cast<std::uint8_t>(reg >> 8)) != 1 ||
-      wire_.write(static_cast<std::uint8_t>(reg)) != 1 ||
-      wire_.endTransmission(false) != 0) {
-    return false;
-  }
-  if (wire_.requestFrom(kSensorAddress, length, true) != length) return false;
+  const bool written =
+      wire_.write(static_cast<std::uint8_t>(reg >> 8)) == 1 &&
+      wire_.write(static_cast<std::uint8_t>(reg)) == 1;
+  const int result = wire_.endTransmission(false);
+  if (!written || result != 0) return false;
+  if (wire_.requestFrom(kSensorAddress, static_cast<size_t>(length), true) != length) return false;
   for (std::uint8_t n = 0; n < length; ++n) {
     if (wire_.available() < 1) return false;
     const int sample = wire_.read();
@@ -29,10 +31,12 @@ bool TofBus::read_register(std::uint16_t reg, std::uint8_t* out, std::uint8_t le
 
 bool TofBus::write_byte(std::uint16_t reg, std::uint8_t value) {
   wire_.beginTransmission(kSensorAddress);
-  return wire_.write(static_cast<std::uint8_t>(reg >> 8)) == 1 &&
-         wire_.write(static_cast<std::uint8_t>(reg)) == 1 &&
-         wire_.write(value) == 1 &&
-         wire_.endTransmission(true) == 0;
+  const bool written =
+      wire_.write(static_cast<std::uint8_t>(reg >> 8)) == 1 &&
+      wire_.write(static_cast<std::uint8_t>(reg)) == 1 &&
+      wire_.write(value) == 1;
+  const int result = wire_.endTransmission(true);
+  return written && result == 0;
 }
 
 void TofBus::failed(CliffGuard& guard) {
@@ -112,3 +116,5 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
 }
 
 }  // namespace desk_robot
+
+#endif  // DESK_ROBOT_STEPPER
