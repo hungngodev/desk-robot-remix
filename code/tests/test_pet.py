@@ -26,7 +26,9 @@ def jpeg(color: str) -> bytes:
 
 @pytest.fixture
 def fleet():
-    return load_settings(Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml")
+    config = load_settings(Path(__file__).resolve().parents[1] / "config/fleet.example.toml")
+    config.mode = "simulation"
+    return config
 
 
 WHITE = jpeg("white")
@@ -35,8 +37,13 @@ RED = jpeg("red")
 
 class ChangingCamera:
     def __init__(self):
+        self.emotions = []
         self.frames = [WHITE, WHITE, RED, RED, RED, RED]
         self.calls = 0
+
+    async def emote(self, emotion):
+        self.emotions.append(emotion)
+        return {"ok": True}
 
     async def snapshot(self):
         index = min(self.calls, len(self.frames) - 1)
