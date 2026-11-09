@@ -172,6 +172,40 @@ static void drive_expiry_stops_coils_even_with_keepalive() {
   CHECK(motor.update(50000, body.state().left, body.state().armed) == 0);
 }
 
+static void measured_local_calibration_is_atomic_and_never_arms() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "calfloor 0 40 60", 0) == "ERR calibration local_usb_only");
+  CHECK(send(body, "calcommit", 0, true) == "ERR calcommit incomplete_stage");
+  CHECK(send(body, "calfloor 4 40 60", 0, true).find("ERR calfloor") == 0);
+  CHECK(send(body, "calfloor 0 60 40", 0, true).find("ERR calfloor") == 0);
+  for (int i = 0; i < 4; ++i)
+    CHECK(send(body, "calfloor " + std::to_string(i) + " 40 60", 0, true) ==
+          "OK calfloor channel=" + std::to_string(i));
+  CHECK(send(body, "calfront 30 1000", 0, true) == "OK calfront");
+  CHECK(send(body, "calfresh 1000", 0, true).find("ERR calfresh") == 0);
+  CHECK(send(body, "calfresh 100", 0, true) == "OK calfresh");
+  CHECK(send(body, "calcommit", 0) == "ERR calibration local_usb_only");
+  CHECK(!guard.configured());
+  CHECK(send(body, "calcommit", 0, true) == "OK calcommit");
+  CHECK(guard.configured());
+  CHECK(guard.configuration().floor[0].min_mm == 40);
+  CHECK(guard.configuration().front_obstacle_mm == 30);
+  CHECK(guard.configuration().freshness_ms == 100);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 1) == "ERR arm safety_interlock");
+  fresh(guard, 2);
+  CHECK(send(body, "rearm", 2) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 2, true) == "OK rearm");
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 2) == "OK arm");
+  CHECK(send(body, "calfloor 0 40 60", 3, true) ==
+        "ERR calibration disarm_first");
+  CHECK(send(body, "disarm", 3) == "OK disarm");
+  CHECK(send(body, "calabort", 4, true) == "OK calabort");
+  CHECK(send(body, "calcommit", 4, true) == "ERR calcommit incomplete_stage");
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -183,6 +217,8 @@ int main() {
     CHECK(status.find("missing_guard") != std::string::npos);
     CHECK(status.front() == '{' && status.back() == '}');
     std::cout << "PASS guarded profile cannot arm without a guard\n";
+    measured_local_calibration_is_atomic_and_never_arms();
+    std::cout << "PASS USB calibration staged atomically with no arming\\n";
     recovery_is_local_and_not_an_arm();
     std::cout << "PASS only local recovery can clear a healthy fault latch\n";
     receiver_recovery_authority_is_not_shared();
