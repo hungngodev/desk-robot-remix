@@ -206,6 +206,25 @@ static void measured_local_calibration_is_atomic_and_never_arms() {
   CHECK(send(body, "calcommit", 4, true) == "ERR calcommit incomplete_stage");
 }
 
+static void touch_telemetry_never_grants_motion() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(!body.state().armed && body.state().touch_count == 0);
+  body.set_touch(true);
+  body.set_touch(true);
+  CHECK(body.state().touch_count == 1 && body.state().touch_active);
+  CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":1}") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 0) == "ERR arm safety_interlock");
+  body.set_touch(false);
+  CHECK(!body.state().touch_active && body.state().touch_count == 1);
+  body.set_touch(true);
+  CHECK(body.state().touch_count == 2);
+  CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":2}") !=
+        std::string::npos);
+  CHECK(!body.state().armed);
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -217,6 +236,7 @@ int main() {
     CHECK(status.find("missing_guard") != std::string::npos);
     CHECK(status.front() == '{' && status.back() == '}');
     std::cout << "PASS guarded profile cannot arm without a guard\n";
+    touch_telemetry_never_grants_motion();
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
     recovery_is_local_and_not_an_arm();
