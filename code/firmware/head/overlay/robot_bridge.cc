@@ -11,6 +11,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "mcp_server.h"
+#include "application.h"
+#include "board.h"
 #include "sdkconfig.h"
 
 namespace desk_robot {
@@ -90,7 +92,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 3;
+    config.max_uri_handlers = 4;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -98,7 +100,8 @@ void Bridge::Start() {
         return;
     }
     for (const auto& entry : std::vector<std::pair<const char*, httpd_method_t>>{
-             {"/api/status", HTTP_GET}, {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET}}) {
+             {"/api/status", HTTP_GET}, {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET},
+             {"/api/emotion", HTTP_POST}}) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
         uri.method = entry.second;
@@ -240,6 +243,29 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     auto json = Parse(body);
     if (!json || !cJSON_IsObject(json.get()) || cJSON_GetArraySize(json.get()) != 1)
         return Json(req, 400, Envelope(false, "expected one command field"));
+    if (strcmp(req->uri, "/api/emotion") == 0) {
+        auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "emotion");
+        if (!cJSON_IsString(item) || !item->valuestring)
+            return Json(req, 400, Envelope(false, "one valid emotion required"));
+        // Fixed glyph names only. A model cannot send a script or motor command.
+        static constexpr const char* kAllowed[] = {
+            "neutral", "happy", "thinking", "surprised", "sad", "sleepy"
+        };
+        bool allowed = false;
+        for (const char* value : kAllowed) {
+            if (strcmp(item->valuestring, value) == 0) {
+                allowed = true;
+                break;
+            }
+        }
+        if (!allowed) return Json(req, 400, Envelope(false, "unsupported emotion"));
+        std::string emotion(item->valuestring);
+        Application::GetInstance().Schedule([emotion = std::move(emotion)]() {
+            auto* display = Board::GetInstance().GetDisplay();
+            if (display) display->SetEmotion(emotion.c_str());
+        });
+        return Json(req, 200, Envelope(true, "emotion queued on main task"));
+    }
     auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "command");
     if (!cJSON_IsString(item) || !item->valuestring)
         return Json(req, 400, Envelope(false, "command must be a string"));
