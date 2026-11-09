@@ -22,6 +22,8 @@ constexpr std::uint32_t kServoStepMs = 20;  // at most 50 commanded degrees/sec
 struct State {
   bool armed = false;
   bool servos_attached = false;
+  bool touch_active = false;
+  std::uint32_t touch_count = 0;
   int left = 0;
   int right = 0;
   int lift = 90;       // commanded angle, NOT a position measurement
@@ -44,6 +46,8 @@ class BodyControl {
                char* reply, std::size_t capacity, bool local_safety_rearm = false);
   // Hardware adapter may force disarm on a fault without renewing the lease.
   void force_disarm();
+  // Hardware GPIO input only; never grants or clears a motion permit.
+  void set_touch(bool active);
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
   std::uint32_t drive_remaining(std::uint32_t now_ms) const;
 
