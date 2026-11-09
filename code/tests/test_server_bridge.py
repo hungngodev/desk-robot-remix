@@ -264,3 +264,88 @@ async def test_transmit_clears_speaking_status_when_final_stop_fails(bridge, mon
     with pytest.raises(RuntimeError, match="disconnected"):
         await bridge.transmit(connection, "hello", [])
     assert cleared == [True]
+
+
+
+async def test_authenticated_interrupt_requests_head_abort_without_waiting_on_speech_lock(bridge):
+    connection = conn("mac-01")
+    sent = []
+
+    class Socket:
+        async def send(self, data):
+            sent.append(json.loads(data))
+
+    connection.websocket = Socket()
+    connection.session_id = "socket-session-1"
+    bridge.register(connection)
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        auth = {"Authorization": "Bearer " + "s" * 40}
+        assert (await client.post("/interrupt", json={"device_id": "mac-01"})).status == 401
+        assert (await client.post(
+            "/interrupt", headers=auth, json={"device_id": "foreign"}
+        )).status == 400
+        await bridge.speaker_lock.acquire()
+        try:
+            result = await asyncio.wait_for(
+                client.post("/interrupt", headers=auth, json={"device_id": "mac-01"}),
+                1,
+            )
+            assert result.status == 200
+            data = await result.json()
+            assert data["head_flush_requested"] is True
+            assert data["head_flush_acknowledged"] is False
+            assert data["audible_stop_verified"] is False
+            assert connection.client_abort is True
+            assert bridge.interrupt_generation["mac-01"] == 1
+            assert sent == [{
+                "type": "tts", "state": "abort", "session_id": "socket-session-1"
+            }]
+        finally:
+            bridge.speaker_lock.release()
+
+
+async def test_interrupt_fences_inflight_and_queued_speech(bridge, monkeypatch):
+    device = "mac-01"
+    connection = conn(device)
+    connection.session_id = "listen"
+    sent = []
+
+    class Socket:
+        async def send(self, payload):
+            sent.append(payload)
+
+    connection.websocket = Socket()
+    bridge.register(connection)
+    bridge.lease_ids = frozenset([device])
+    bridge.lease_until = time.monotonic() + 10
+    handlers = {route.resource.canonical: route.handler for route in bridge.create_app().router.routes()}
+    monkeypatch.setattr(bridge, "wav_audio", lambda _: b"RIFF")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    def encode(_):
+        return [b"opus"]
+
+    async def blocked_encode(_):
+        entered.set()
+        await release.wait()
+        return [b"opus"]
+
+    # Replace asyncio.to_thread only locally to hold the encode boundary.
+    # Abort must invalidate the generation before any packet is transmitted.
+    async def to_thread_(_func, _arg):
+        return await blocked_encode(_arg)
+
+    monkeypatch.setattr(bridge.asyncio, "to_thread", to_thread_)
+    pending = asyncio.create_task(
+        handlers["/speak"](
+            body_request({"device_id": device, "text": "Old speech", "wav_base64": ""})
+        )
+    )
+    await entered.wait()
+    await handlers["/interrupt"](body_request({"device_id": device}))
+    release.set()
+    with pytest.raises(RuntimeError, match="stopped"):
+        await pending
+    assert len(sent) == 1
+    assert json.loads(sent[0])["state"] == "abort"
