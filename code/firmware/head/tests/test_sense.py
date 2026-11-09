@@ -33,7 +33,8 @@ class SenseOverlayTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        names = ['main/Kconfig.projbuild', 'main/CMakeLists.txt', 'main/mcp_server.cc']
+        names = ['main/Kconfig.projbuild', 'main/CMakeLists.txt', 'main/mcp_server.cc',
+                 'main/application.cc']
         names += [f'main/boards/common/{name}' for name in (
             'camera.h', 'esp_video.h', 'esp_video.cc', 'esp32_camera.h', 'esp32_camera.cc')]
         names += [p.relative_to(UPSTREAM).as_posix()
@@ -97,6 +98,10 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('uart_set_pin(kUart, 2, 1,', (board / 'robot_bridge.cc').read_text())
         self.assertEqual((self.root / 'main/boards/common/esp32_camera.cc').read_text()
                          .count('camera_lock(AccessMutex())'), 6)
+        application = (self.root / 'main/application.cc').read_text()
+        self.assertIn('strcmp(state->valuestring, "abort") == 0', application)
+        self.assertIn('audio_service_.ResetDecoder();', application)
+        self.assertEqual(application.count('strcmp(state->valuestring, "abort") == 0'), 1)
 
     def test_sense_reinstall_drift_and_exact_restore(self):
         overlay.apply(self.root, 'sense')
