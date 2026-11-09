@@ -73,3 +73,14 @@ Until those proofs exist, report **RESEARCHED: yes** for grounded datasheet choi
 * [ST VL53L4CD ULD driver](https://www.st.com/en/embedded-software/stsw-img026.html)
 
 **Caution:** Manufacturer product pages establish component specifications, not the quality, pinout, protection or delivered price of an unidentified marketplace breakout. Actual qualification remains necessary.
+
+## Independent manufacturer status recheck, 2026-11-09
+
+A second current-source check confirmed the key physical conflicts rather than relying only on the earlier HTML audit:
+
+* [ST official VL6180X product status](https://www.st.com/en/imaging-and-photonics-solutions/vl6180x.html): **Obsolete, Out of Production**. Do not silently use the research-era part as a current supply-ready purchase.
+* [ST official VL53L4CD product status](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html): the referenced VL53L4CD part variants are listed **Active, in volume production**. This establishes manufacturer status, **not** breakout availability, complete $50 affordability, compatible physical sensor field geometry or successful firmware migration.
+* [Seeed official XIAO ESP32S3 Sense microphone usage](https://wiki.seeedstudio.com/xiao_esp32s3_sense_mic/): **GPIO41 microphone DATA and GPIO42 microphone clock**. The optional MAX30102 cannot occupy those lines while the onboard PDM mic is retained.
+* [Seeed XIAO ESP32S3 pin multiplexing](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/): GPIO43/44 are standard UART-labelled header pins, but the **actual compiled project's TX2/RX1** allocation is a different deliberate map. Do not rewire the head to a tutorial's 43/44 without corresponding reviewed firmware and collision testing.
+
+This is a manufacturer-document **specification check**. No sample breakout was energized, no near-field ranging trace was captured, no product purchased and no Sense UART/heart pad wiring was bench-tested in this audit.
