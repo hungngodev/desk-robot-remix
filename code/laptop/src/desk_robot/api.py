@@ -26,6 +26,11 @@ class PickupRequest(BaseModel):
     target: Literal["key", "candy"]
 
 
+class PetQuietRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    quiet: bool
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     robot_ids: list[str] = Field(min_length=2, max_length=5)
@@ -136,6 +141,26 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if job_id not in coordinator().jobs:
             raise HTTPException(404, "Job not found")
         return coordinator().jobs[job_id].data()
+
+    @app.get("/v1/pet/{robot_id}", dependencies=[Depends(authorize)])
+    async def pet_status(robot_id: str):
+        coordinator().robot(robot_id)
+        return app.state.runtime.pet.status(robot_id)
+
+    @app.post("/v1/pet/{robot_id}/start", dependencies=[Depends(operator)])
+    async def pet_start(robot_id: str):
+        coordinator().robot(robot_id)
+        return await app.state.runtime.pet.start(robot_id)
+
+    @app.post("/v1/pet/{robot_id}/pause", dependencies=[Depends(operator)])
+    async def pet_pause(robot_id: str):
+        coordinator().robot(robot_id)
+        return await app.state.runtime.pet.pause(robot_id)
+
+    @app.post("/v1/pet/{robot_id}/quiet", dependencies=[Depends(operator)])
+    async def pet_quiet(robot_id: str, request: PetQuietRequest):
+        coordinator().robot(robot_id)
+        return await app.state.runtime.pet.quiet(robot_id, request.quiet)
 
     @app.post("/v1/conversation", dependencies=[Depends(authorize)])
     async def conversation(request: ChatRequest):
