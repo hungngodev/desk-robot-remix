@@ -240,6 +240,27 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP32_S3_BOX_3",
             "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_SENSE_S3 || BOARD_TYPE_ESP32_S3_BOX_3",
         ).encode()
+        # Urgent stop is an extension to the existing Xiaozhi TTS state event,
+        # not a second decoder or audio transport. Normal TTS stops retain the
+        # upstream behavior; flush=true explicitly discards queued decoder PCM
+        # and disables I2S TX so its DMA no longer plays obsolete audio.
+        path = "main/application.cc"
+        text = (target / path).read_text()
+        text = replace_once(
+            text,
+            """} else if (strcmp(state->valuestring, "stop") == 0) {
+                Schedule([this]() {
+                    if (GetDeviceState() == kDeviceStateSpeaking) {""",
+            """} else if (strcmp(state->valuestring, "stop") == 0) {
+                const bool urgent_flush = cJSON_IsTrue(cJSON_GetObjectItem(root, "flush"));
+                Schedule([this, urgent_flush]() {
+                    if (urgent_flush) {
+                        audio_service_.ResetDecoder();
+                        Board::GetInstance().GetAudioCodec()->EnableOutput(false);
+                    }
+                    if (GetDeviceState() == kDeviceStateSpeaking) {""",
+        )
+        files[path] = text.encode()
         return files
     files = cores3_files(target)
     if board == "cores3":
