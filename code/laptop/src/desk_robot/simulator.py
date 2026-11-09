@@ -25,6 +25,7 @@ class SimulatedHead:
         self.fail_command: str | None = None
         self.fail_snapshot = False
         self.show_target = True
+        self.emotions: list[str] = []
 
     def _watchdog(self):
         if time.monotonic() - self.last_control > 0.5:
@@ -65,6 +66,12 @@ class SimulatedHead:
         elif op == "lift":
             self.lifted = self.gripped and int(command.split()[1]) > 90
         return {"ok": True, "reply": expected_ack(command), "robot_id": self.id}
+
+    async def emote(self, emotion: str):
+        if emotion not in {"neutral", "happy", "thinking", "surprised", "sad", "sleepy"}:
+            raise ValueError("Unsupported robot expression")
+        self.emotions.append(emotion)
+        return {"ok": True, "reply": "emotion queued on main task", "robot_id": self.id}
 
     async def snapshot(self):
         if self.fail_snapshot:
