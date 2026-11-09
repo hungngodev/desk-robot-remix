@@ -3,6 +3,9 @@
 # Hats/costumes are removable cosmetics; every unit keeps its camera and gripper.
 mode = "hardware"
 ollama_model = "qwen3:8b"
+# Choose and separately install a locally compatible multimodal Ollama model.
+# This name is a candidate; no model download, five-feed benchmark or accuracy claim is implied.
+vision_model = "qwen3-vl:4b"
 trials_file = "../data/physical-trials.jsonl"
 vision_weights = "../models/yolov8s-worldv2.pt"
 
