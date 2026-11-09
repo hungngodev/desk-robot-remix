@@ -39,6 +39,17 @@ jobs:
         working-directory: code
         run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
 
+  body-platformio:
+    name: ESP32 WROOM firmware compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Compile guarded stepper firmware
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
+      - name: Compile preserved DC reference
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32dev
+
   body-host:
     name: Body C++ host tests with sanitizers
     runs-on: ubuntu-latest
