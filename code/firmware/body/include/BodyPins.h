@@ -14,7 +14,10 @@ constexpr int kRightStepperPins[] = {27, 32, 33, 23};
 constexpr int kMotorPins[] = {13, 14, 25, 26, 27, 32, 33, 23};
 constexpr int kSensorSda = 21;
 constexpr int kSensorScl = 22;
-constexpr int kMuxReset = 4;
+// No spare boot-safe output on this pin map. GPIO4 is a boot strapping
+// pin; do not connect the multiplexer RESET there. Pull the active-low
+// TCA9548A RESET to 3.3V (through the module's required pull-up).
+constexpr int kMuxReset = -1;
 #else
 // DRV8833: xIN1 positive PWM / xIN2 low, reversed for negative; both low = coast.
 constexpr int kLeftIn1 = 25;
