@@ -1,9 +1,13 @@
 # Wiring and power — proposed stepper/sensor revision
 
-Updated 2026-11-06. **Use only the matching profile.** Default `esp32_stepper` now compiles with
-eight phase outputs and portable cliff policy, but no sensor I/O/calibration:
-it refuses to arm. Explicit `esp32dev` preserves four DC H-bridge inputs and
-must never be connected to this stepper map. This is not physically qualified.
+Updated 2026-11-09. **Use only the matching profile.** Default `esp32_stepper` now
+reads five real VL53L0X sensors using the Pololu Arduino driver, TCA9548A mux and
+WROOM I2C, plus the existing local fail-closed `CliffGuard`. Sensor thresholds are
+loaded from WROOM NVS only after someone enters measured values over the local USB
+serial line. Without a valid calibration, healthy five-channel readings and an
+explicit local `rearm`, physical arming is rejected. This is not yet physically
+qualified. Explicit `esp32dev` preserves the original DC H-bridge profile and
+must never be connected to stepper wiring.
 
 ## Proposed WROOM allocation
 
@@ -46,15 +50,28 @@ acceleration, loaded speed, stop/hold current and thermal limits need measuremen
 ```text
 WROOM GPIO21/22 -> owned BerryIMU upstream (revision/addresses to verify), candidate
                -> TCA9548A upstream I²C
-                  channel 0 -> front-left downward ToF (final supported part TBD)
-                  channel 1 -> front-right downward ToF (final supported part TBD)
-                  channel 2 -> rear-left downward ToF (final supported part TBD)
-                  channel 3 -> rear-right downward ToF (final supported part TBD)
-                  channel 4 -> separate forward-facing obstacle VL53L0X
+                  channel 0 -> front-left downward VL53L0X candidate
+                  channel 1 -> front-right downward VL53L0X candidate
+                  channel 2 -> rear-left downward VL53L0X candidate
+                  channel 3 -> rear-right downward VL53L0X candidate
+                  channel 4 -> forward-facing VL53L0X
 Sense -> separate head-owned OLED bus
 ```
 
-The proposed ST VL6180X downrange part is obsolete. A compatible short-range part must be selected after a one-sample physical desk-height test and the corresponding driver/mount must be reviewed; the four corner roles do not change. The 7-bit **0x29** address applies to the currently named ST ToF family and must be checked for the finally selected sensor. Select only one corresponding
+The present firmware explicitly supports **five VL53L0X modules** via the
+Pololu 1.3.1 driver, each at 7-bit address **0x29** and isolated behind a
+different TCA9548A channel. The mux itself uses upstream address **0x70**.
+Continuous ranging starts separately in each mux channel and the body polls
+for ready results without a long blocking wait. A failed mux transaction,
+missing device at startup, invalid range, or stale reading latches a local stop.
+This is a code-backed alternative, not a claim that the particular floor
+placement is safe. VL53L0X is unlikely to be reliable at a 10–30 mm floor
+standoff: first qualify a real sample near 40–60 mm, with the track perimeter,
+spot footprint, black/glossy surfaces and stopping distance. If the enclosure
+requires a low mounting point, change the actual floor driver and sensor
+choice rather than substituting different chips at address 0x29 without
+updating firmware. VL6180X is obsolete; VL53L4CD is a newer but currently more
+expensive candidate and needs its own driver. Select only one corresponding
 channel for reads/configuration. Confirm channel numbering in firmware, module
 supply, reset behavior, default mux address and **3.3 V signal pullups**. Generic
 boards vary; an IC voltage range does not establish breakout level shifting.
@@ -76,6 +93,46 @@ unless the collision is resolved. [Photo identification and checks](photo-invent
 Keep body I2C reads bounded and serialized so floor sensing retains priority.
 [Interaction wiring and acceptance](interaction-sensors.md) also covers optional
 SenseGPIO9 RGB data with a level buffer; bodyGPIO4 is not spare.
+
+## Actual local calibration and sensor verification
+
+The existing body UART on WROOM 16/17 carries normal head requests. It cannot
+configure sensor thresholds or clear the fault latch. **Only local WROOM USB
+serial** at 115200 can perform the following commands, in this order:
+
+```text
+ranges
+calibrate 40 60 40 60 40 60 40 60 30 1000 100
+ranges
+rearm
+status
+```
+
+**These numbers are examples only, not usable measured limits.** The 11
+`calibrate` arguments are four individual inclusive floor
+`min_mm max_mm` pairs in channel order 0 to 3, then front obstacle
+`minimum_mm`, front accepted `maximum_mm`, and maximum reading age in
+milliseconds. Hardware will reject a freshness interval above 250 ms. First
+read `ranges` for every channel on your actual level desk, at the finished
+sensor positions, and measure the acceptance intervals from multiple trials.
+Use a catch tray, motors disconnected and known obstruction/cliff test
+positions. Motor speed and safety margins must be based on *measured* scan
+age and stopping distance. Do not just type the illustration.
+
+The NVS profile is versioned and checksummed. Entering a new profile clears
+all samples, cancels any previous authorization, and requires five new real
+samples followed by explicit `rearm`. Power cycles always start disarmed
+and require a new local `rearm`. `calclear` removes the profile; it also
+requires local USB and disarmed servos. `ranges` returns mm, valid bit mask
+and sample ages so it can be used with real sensors before any motor motion.
+It does not grant motion. If initialization or any I2C transaction fails,
+the five-sensor adapter latches failure; do not bypass the guard.
+
+TCA9548A RST is assigned WROOM GPIO4 in this profile. Confirm your actual
+mux breakout exposes an active-low reset pin and supports WROOM 3.3V I2C
+pullups. The Pololu driver is for a VL53L0X sensor, not a VL6180X or
+VL53L4CD. Firmware on GPIO21/22 does not make an unidentified breakout
+electrically safe; inspect its voltage ratings before connection.
 
 ## Head boundary
 
