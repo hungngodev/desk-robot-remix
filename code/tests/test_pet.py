@@ -142,7 +142,7 @@ async def test_five_cameras_one_group_speech_and_distinct_eyewitness_memories(fl
     await wait_for(lambda: sum(pet.status(x)["camera_change_events"] for x in cameras) == 5)
     await wait_for(lambda: len(speaker.spoken) == 1)
     assert len(speaker.spoken) == 1
-    assert sum(pet.status(x)["suppressed_speech_candidates"] for x in cameras) == 4
+    await wait_for(lambda: sum(pet.status(x)["suppressed_speech_candidates"] for x in cameras) == 4)
     for robot in cameras:
         seen = [m for m in memory.recent(robot) if m.kind == "key"]
         assert len(seen) == 1 and seen[0].source_robot == robot and seen[0].witnessed
