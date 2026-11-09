@@ -121,13 +121,13 @@ void BodyControl::execute(const char* line, std::size_t length,
     buffer[i] = line[i];
   }
 
-  char* tokens[5]{};
+  char* tokens[16]{};
   std::size_t count = 0;
   char* position = buffer;
   while (*position != '\0') {
     while (*position == ' ') ++position;
     if (*position == '\0') break;
-    if (count == 5) {
+    if (count == 16) {
       std::snprintf(reply, capacity, "ERR input trailing_tokens");
       return;
     }
@@ -150,14 +150,18 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool keepalive = std::strcmp(command, "keepalive") == 0;
   const bool ping = std::strcmp(command, "ping") == 0;
   const bool status = std::strcmp(command, "status") == 0;
-  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status)) {
+  const bool ranges = std::strcmp(command, "ranges") == 0;
+  const bool calibrate = std::strcmp(command, "calibrate") == 0;
+  const bool calclear = std::strcmp(command, "calclear") == 0;
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || ranges || calibrate || calclear)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
   }
   if ((drive && count != 3 && count != 4) ||
       ((lift || grip) && count != 2) ||
-      (!(drive || lift || grip) && count != 1)) {
+      (calibrate && count != 12) ||
+      (!(drive || lift || grip || calibrate) && count != 1)) {
     std::snprintf(reply, capacity, "ERR %s bad_arguments", command);
     return;
   }
@@ -187,7 +191,78 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
   }
 
-  if (ping) {
+  if (calibrate) {
+    if (!local_safety_rearm) {
+      std::snprintf(reply, capacity, "ERR calibrate local_only");
+      return;
+    }
+    if (state_.armed || state_.servos_attached) {
+      std::snprintf(reply, capacity, "ERR calibrate disarm_first");
+      return;
+    }
+    if (profile_ != BodyProfile::StepperGuarded || guard_ == nullptr) {
+      std::snprintf(reply, capacity, "ERR calibrate unavailable");
+      return;
+    }
+    // Eleven values are measured on this real robot by a human operator,
+    // not inferred from photos, test fixtures, or Mac suggestions.
+    int values[11]{};
+    for (int i = 0; i < 11; ++i) {
+      if (!parse_integer(tokens[i + 1], values[i]) ||
+          values[i] <= 0 || values[i] > 65000) {
+        std::snprintf(reply, capacity, "ERR calibrate integer_range");
+        return;
+      }
+    }
+    CliffConfig next{};
+    next.calibrated = true;
+    for (int i = 0; i < 4; ++i) {
+      next.floor[i].min_mm = static_cast<std::uint16_t>(values[i * 2]);
+      next.floor[i].max_mm = static_cast<std::uint16_t>(values[i * 2 + 1]);
+    }
+    next.front_obstacle_mm = static_cast<std::uint16_t>(values[8]);
+    next.front_max_mm = static_cast<std::uint16_t>(values[9]);
+    next.freshness_ms = static_cast<std::uint32_t>(values[10]);
+    if (next.freshness_ms > 250 || !guard_->configure(next)) {
+      std::snprintf(reply, capacity, "ERR calibrate invalid_intervals");
+      return;
+    }
+    // Config is now incomplete until fresh 5-channel samples and local rearm.
+    std::snprintf(reply, capacity, "OK calibrate");
+  } else if (calclear) {
+    if (!local_safety_rearm) {
+      std::snprintf(reply, capacity, "ERR calclear local_only");
+      return;
+    }
+    if (state_.armed || state_.servos_attached || guard_ == nullptr) {
+      std::snprintf(reply, capacity, "ERR calclear disarm_first");
+      return;
+    }
+    guard_->configure(CliffConfig{});
+    std::snprintf(reply, capacity, "OK calclear");
+  } else if (ranges) {
+    if (guard_ == nullptr) {
+      std::snprintf(reply, capacity, "ERR ranges no_sensors");
+      return;
+    }
+    unsigned valid_mask = 0;
+    for (std::uint8_t i = 0; i < kCliffSensorCount; ++i) {
+      if (guard_->sample_valid(i)) valid_mask |= 1U << i;
+    }
+    std::snprintf(reply, capacity,
+        "{\\"ranges_mm\\":[%u,%u,%u,%u,%u],"
+        "\\"valid_mask\\":%u,\\"ages_ms\\":[%lu,%lu,%lu,%lu,%lu]}",
+        static_cast<unsigned>(guard_->distance_mm(0)),
+        static_cast<unsigned>(guard_->distance_mm(1)),
+        static_cast<unsigned>(guard_->distance_mm(2)),
+        static_cast<unsigned>(guard_->distance_mm(3)),
+        static_cast<unsigned>(guard_->distance_mm(4)), valid_mask,
+        static_cast<unsigned long>(guard_->age_ms(0, now_ms)),
+        static_cast<unsigned long>(guard_->age_ms(1, now_ms)),
+        static_cast<unsigned long>(guard_->age_ms(2, now_ms)),
+        static_cast<unsigned long>(guard_->age_ms(3, now_ms)),
+        static_cast<unsigned long>(guard_->age_ms(4, now_ms)));
+  } else if (ping) {
     std::snprintf(reply, capacity, "OK ping");
   } else if (status) {
     std::snprintf(
