@@ -180,7 +180,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # Validate first. Human conversation preempts any robot's spontaneous
             # speech, including a robot not in the requested peer subset.
             for robot_id in request.robot_ids:
-                coordinator().robot(robot_id)
+                settings.robot(robot_id)  # preserve unknown-ID 404, not coordinator's 409
             for robot in settings.robots:
                 await app.state.runtime.pet.interrupt(robot.id)
             transcript = await app.state.runtime.conversation.run(
