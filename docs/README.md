@@ -6,14 +6,17 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 
 ## Start here
 
+**Before any permanent build:** Read the [complete day-zero blueprint](blueprint/README.md), the [forward-only build sequence](blueprint/linear-build.md), and the [prebuild contradictions](blueprint/decisions-before-hardware.md). Those include **all required proactive voice/vision/peer behaviors** and the original sensor/game research from day one; the seven stages below are the physical integration shorthand, not a reduction of the target.
+
 | I want to… | Open |
 | --- | --- |
-| See the build order and what is ready | [Project plan](PLAN.md) |
+| See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](blueprint/linear-build.md) |
+| Find every requested idea and link | [200 feature entries](blueprint/feature-register.md) and [131 original HTML URLs](blueprint/original-html-link-index.md) |
+| Check the hard behavior and proactive requirements | [System contract](blueprint/system-contract.md) and [acceptance A1–A12](blueprint/acceptance.md) |
 | Check what I own and what I still need | [Parts and shopping list](hardware/parts.md) |
 | Start the first physical check | [Gripper fit and bench guide](guides/first-gripper-test.md) |
 
-**Next step.** Check the fit of one MG90S servo in the saved gripper design
-before printing the whole robot. Keep robot motion disabled during the fit check.
+**Next step.** First settle the day-zero architecture, part variant, final fit and full delivered cost gates, then check one MG90S servo in the saved gripper before printing the whole robot. Keep robot motion disabled during fit work.
 
 **Current status.** The head and body firmware compile, and the fleet demo
 runs with simulated inputs. Robot one still needs assembly, working floor
