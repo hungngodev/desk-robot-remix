@@ -209,13 +209,16 @@ def create_app():
         if not isinstance(text, str) or not 1 <= len(text) <= 2000:
             raise ValueError("Speech text must be 1..2000 characters")
         audio = wav_audio(body.get("wav_base64"))
+        generation = interrupt_generation.get(device, 0)
         async with speaker_lock:
             # A queued request may outlive a stop or a device disconnect.
-            if lease_stopping or not muted(device) or connections.get(device) is not connection:
+            if (lease_stopping or not muted(device) or connections.get(device) is not connection
+                or generation != interrupt_generation.get(device, 0)):
                 raise RuntimeError("Coordinated session stopped or robot disconnected")
             async with asyncio.timeout(40):
                 frames = await asyncio.to_thread(encode_opus, audio)
-                if lease_stopping or not muted(device) or connections.get(device) is not connection:
+                if (lease_stopping or not muted(device) or connections.get(device) is not connection
+                or generation != interrupt_generation.get(device, 0)):
                     raise RuntimeError("Coordinated session stopped or robot disconnected")
                 await transmit(connection, text, frames)
         return web.json_response({"transmitted": True, "physical_playback_verified": False})
