@@ -8,6 +8,8 @@ that all components have been integrated. The product requirements remain in
 [guide audit](research/2026-11-03-guide-audit.md), and
 [case audit](research/2026-11-03-rounded-cases.md).
 
+**Complete research preservation:** The [day-zero reuse shortlist](blueprint/reuse-register.md) gives inspected implementation files and compatible integration boundaries. The [200-entry feature register](blueprint/feature-register.md) records original and historic sensor, game, personality and robotics ideas; [all 131 unique external links from the original 23-section HTML](blueprint/original-html-link-index.md) are preserved without claiming every destination was verified. The [linear integration plan](blueprint/linear-build.md) keeps these visible before buying or printing. Existing source reviews below are retained, not superseded by a small shortlist.
+
 ## Requirements that govern reuse
 
 Five identical, inexpensive robots with different removable cosmetics; Fetch
