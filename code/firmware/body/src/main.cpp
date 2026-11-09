@@ -18,6 +18,29 @@ desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
 desk_robot::TofBus tof;
+// AT42QT1010 owns the input threshold. Sample without internal pullups
+// (GPIO34 is input-only), debounce three equal 25ms samples, and retain
+// an edge counter so the Mac can detect short taps between status polls.
+bool touch_stable = false;
+bool touch_candidate = false;
+std::uint8_t touch_candidate_samples = 0;
+std::uint32_t touch_last_sample_ms = 0;
+
+void poll_touch(std::uint32_t now_ms) {
+  if (now_ms - touch_last_sample_ms < 25) return;
+  touch_last_sample_ms = now_ms;
+  const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
+  if (active != touch_candidate) {
+    touch_candidate = active;
+    touch_candidate_samples = 1;
+  } else if (touch_candidate_samples < 3) {
+    ++touch_candidate_samples;
+  }
+  if (touch_candidate_samples >= 3 && touch_candidate != touch_stable) {
+    touch_stable = touch_candidate;
+    control.set_touch(touch_stable);
+  }
+}
 
 // Nonvolatile calibration is written only by a completed local USB commit.
 // The hardware never resumes movement after reboot, even with valid stored
@@ -233,6 +256,11 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool loca
 void setup() {
   // The first hardware action disables every motor/phase input, before UART.
   all_motor_inputs_low();
+#if DESK_ROBOT_STEPPER
+  // The touch breakout OUT is actively driven and powered at 3.3V.
+  // GPIO34 has no internal pullup; do not leave it floating when fitted.
+  pinMode(body_pins::kTouchOutput, INPUT);
+#endif
   for (int pin : body_pins::kServoPins) {
     pinMode(pin, OUTPUT);
     digitalWrite(pin, LOW);
@@ -285,6 +313,7 @@ void loop() {
   // Real I2C sampling precedes every physical motor update. The pure
   // CliffGuard remains the only local motion/safety authority.
   if (tof.ready()) tof.poll(cliff_guard, millis());
+  poll_touch(millis());
 #endif
   control.tick(millis());
   apply_outputs();
