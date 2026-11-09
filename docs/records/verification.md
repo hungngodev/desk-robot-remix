@@ -8,6 +8,38 @@ Earlier firmware artifacts are in the repository’s ignored
 old `firmware/head/build/` prefix and `body-platformio/` replaces
 `firmware/body/.pio/`.
 
+
+## 2026-11-09 independent GitHub Actions host and WROOM evidence
+
+[Host verification run #6](https://github.com/hungngodev/desk-robot-remix/actions/runs/42675682437)
+completed successfully against audit commit
+`c3acbef6884cece264fdaf54ae6980fdd8ccb791`.
+These are **automatically run on GitHub Ubuntu runners**, rather than copied
+from a previous local checklist:
+
+* Python plus head host tests: **104 passed, 12 skipped, 4 subtests passed**.
+  The 12 skipped tests have not been demonstrated in this run. The warning
+  was Starlette's deprecated `httpx` testclient usage, not a failure.
+* Python Ruff lint: **passed** on the specified source directories.
+* Body native CTest with address/undefined-behavior sanitizers: **23 of 23 passed**.
+* PlatformIO build: **both** the guarded `esp32_stepper` profile and preserved
+  `esp32dev` reference profile compiled successfully.
+
+The CI work does **not** restore or compile the actual ESP-IDF Sense head target,
+flash a board, supply the missing I2C sensors, or validate microphone AEC,
+supply, stopping or gripper performance. The saved Sense firmware artifacts
+from 2026-11-03 remain historical evidence, not a new successful head build.
+
+The source document `ESP32 Deskpet Ideas.html` (not checked into Git) was
+separately parsed locally on 2026-11-09: JavaScript parsed under Node v22,
+567 links and 311 internal anchors were inspected, all internal anchors
+resolved and no duplicate HTML element IDs were found. External link
+validity, browser runtime behavior and electrical claims were **not** proven
+by that static check. See the [engineering research audit](../research/2026-11-09-html-verification.md).
+
+The physical trial CSV still contains zero tested attempts. The robot and
+five-unit fleet **remain unverified physically**.
+
 ## 2026-11-06 folder reorganization
 
 - From `code/`, `uv run --no-sync pytest -q tests firmware/head/tests` passed
