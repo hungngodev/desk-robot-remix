@@ -1,0 +1,48 @@
+name: Host verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - codex/initial-remix
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-and-head-host:
+    name: Python and head host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python and locked dependencies
+        working-directory: code
+        run: |
+          uv python install 3.11
+          uv sync --extra dev --python 3.11 --locked
+      - name: Host tests
+        working-directory: code
+        run: uv run --no-sync pytest -q tests firmware/head/tests
+      - name: Python lint
+        working-directory: code
+        run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
+
+  body-host:
+    name: Body C++ host tests with sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure portable C++ tests
+        run: cmake -S code/firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build /tmp/desk-robot-body-host --parallel 2
+      - name: Run tests
+        run: ctest --test-dir /tmp/desk-robot-body-host --output-on-failure
+
+# This runs only host checks. It does not flash a board, compile the full
+# ESP-IDF firmware, validate actual ToF readings, or certify physical safety.
+# Head overlay checks that need pinned upstream sources may be skipped here.
