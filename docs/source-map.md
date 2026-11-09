@@ -517,3 +517,56 @@ This index is not a shopping list or authorization to install all parts. See [fe
 | `L131` | <https://yana.vutam.link/wheelbot-en.html> |
 
 **Research tracking:** For each source opened in future work record `LID / feature_id / date / claimed behavior / inspected original source / actual code or diagram / license / specific compatible hardware / deviations / test`. No project or supplier claim becomes a purchase or safety instruction from this URL list alone.
+
+
+---
+
+## Original HTML DOM section crosswalk, verified 2026-11-09
+
+This table is extracted from the **actual uploaded HTML structure**, rather than the previous inaccurate description of the file as 23 numbered sections. The original contains **41 section elements (24 with `class=group`), 44 `h2` headings, 316 `h3` headings and 231 `<details>` research blocks**. The page has 567 link occurrences: 256 external occurrences representing 131 unique URLs and 311 in-page anchors. The original section ID sequence is preserved below; the 200 idea register groups related ideas and should not be mistaken for a one-to-one HTML section count.
+
+| Order | Actual `section` ID in HTML | What the section owns | Interpretation | Canonical existing file |
+| --- | --- | --- | --- | --- |
+| 1 | `project-overview` | What we are building | Current | [View](product-definition.md) |
+| 2 | `project-architecture` | Three compute owners | Current | [View](product-definition.md) |
+| 3 | `project-build-order` | Original seven stage summary | Current | [View](PLAN.md) |
+| 4 | `project-status` | Current evidence and gaps | Current | [View](records/verification.md) |
+| 5 | `project-parts` | Owned versus quoted parts | Current | [View](hardware/parts.md) |
+| 6 | `max30102-add` | Proposed heartbeat paw | Optional, not electrically qualified | [View](hardware/wiring.md) |
+| 7 | `project-rules` | Safety and build constraints | Current | [View](product-definition.md) |
+| 8 | `project-roadmap` | Topics and original navigation | Current | [View](PLAN.md) |
+| 9 | `topic6-power` | Power topology and sequencing | Proposed, qualification open | [View](hardware/wiring.md) |
+| 10 | `topic4-drive-gripper` | Steppers, lift, grip and trials | Required, physical tests open | [View](PLAN.md) |
+| 11 | `topic1-cliff` | Four floor and front ToF | Required roles, part unresolved | [View](hardware/wiring.md) |
+| 12 | `topic2-touch` | Owned touch and IMU plus experiments | Required reactions and optional parts | [View](hardware/interaction-sensors.md) |
+| 13 | `topic3-audio` | Full duplex speech and interruption | Required, physical AEC open | [View](guides/audio-barge-in.md) |
+| 14 | `topic5-head-face` | Head geometry and expression | Required, physical fit open | [View](product-definition.md) |
+| 15 | `topic7-mac-brain` | Local AI, voices, identity and fleet | Required, live integration open | [View](guides/live-conversation.md) |
+| 16 | `topic8-proactive` | Contextual self initiation and agency | Required, implementation open | [View](product-definition.md) |
+| 17 | `project-research-map` | Live topics to older sources | Source map | [View](source-map.md) |
+| 18 | `research-library` | Historical research intro | Archive | [View](source-map.md) |
+| 19 | `start-here` | Xiaozhi baseline and Emotion Lab | Historical | [View](source-map.md) |
+| 20 | `paths` | Older Xiaozhi first route | Superseded architecture | [View](decision-log.md) |
+| 21 | `build-plan` | Older Xiaozhi mod pack plan | Historical | [View](source-map.md) |
+| 22 | `modpack1` | Touch, movement and fall pack | Historical, unsafe parts rejected | [View](source-map.md) |
+| 23 | `modpack2` | Dance and tricks pack | Historical | [View](source-map.md) |
+| 24 | `schedule` | Older six week plan | Historical | [View](source-map.md) |
+| 25 | `top-picks` | Shortlists and leaderboards | Research only | [View](source-map.md) |
+| 26 | `brainstorm-sensors` | Unselected sensor candidates | Experimental | [View](source-map.md) |
+| 27 | `specs` | Older Xiaozhi specifications | Historical, pinmaps not active | [View](source-map.md) |
+| 28 | `spec-pack` | Five cheaper sensor examples | Experimental, old wiring not active | [View](source-map.md) |
+| 29 | `sensor-menu` | Broad sensor idea waves | Experimental | [View](source-map.md) |
+| 30 | `finds` | Reddit and video research | Research only | [View](source-map.md) |
+| 31 | `reddit-youtube` | Creator build reviews | Research only | [View](research/2026-11-03-video-audit.md) |
+| 32 | `steal` | Behavior ideas from other pets | Idea reuse only | [View](research/2026-11-03-active-pet-sources.md) |
+| 33 | `popular` | Common ESP32 build patterns | Research only | [View](source-map.md) |
+| 34 | `tweaks` | Nine physical accessory ideas | Experimental | [View](source-map.md) |
+| 35 | `sensors` | Sensor to emotion map and simulator | Historical, no blind retreat | [View](source-map.md) |
+| 36 | `ideas` | Twenty four original concepts | Experimental or required by actual product | [View](source-map.md) |
+| 37 | `new-finds-2026-11-07` | New desk agent finds | Research only | [View](source-map.md) |
+| 38 | `new-finds-2026-11-09` | Later robot and code finds | Research only | [View](source-map.md) |
+| 39 | `reference` | Historical parts and BOM | Historical estimates only | [View](hardware/archive/budget-audit.md) |
+| 40 | `diy-shopping-list` | Nested DIY shopping block | Historical, not purchase ready | [View](hardware/archive/budget-audit.md) |
+| 41 | `repos` | Older open source starter projects | Research only | [View](source-map.md) |
+
+**Important:** Section IDs and link set are source provenance. The table does **not** imply each external article has been visited, that an old wiring example is safe, or that every speculative sensor fits the current chassis and $50 cap. Use the full 131 URL list and feature IDs for deeper source inspection. Do not reinstate deprecated Xiaozhi era pinouts or the interactive simulator's cliff reversal.
