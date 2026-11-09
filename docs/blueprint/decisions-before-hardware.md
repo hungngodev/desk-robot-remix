@@ -2,7 +2,7 @@
 
 The user requests a **linear path to the complete feature rich robot**, not a quick cheap prototype followed by a controller or chassis rebuild. Therefore settle foundational uncertainty *before* final assembly, using small reusable tests, technical sources and explicit decisions. If a requirement and a cap conflict, disclose the conflict rather than pretending one can be met by a product listing.
 
-This file is a **decision queue**, not a record that these choices were already approved. Record chosen part, exact upstream commit or supplier variant, data sheet, physical evidence, unit price/shipping/tax, accepted risk and effect on all five robots. Failed gate means pause final assembly, not secretly drop the requirement.
+For the original HTML's precise power, motor, voice, Mac fleet, camera, AprilTag, docking and timing values, see the [quantitative proposal appendix](html-quantitative-proposals.md). This file is a **decision queue**, not a record that these choices were already approved. Record chosen part, exact upstream commit or supplier variant, data sheet, physical evidence, unit price/shipping/tax, accepted risk and effect on all five robots. Failed gate means pause final assembly, not secretly drop the requirement.
 
 ## Red blockers
 
