@@ -134,7 +134,7 @@
       "unit_usd": null,
       "price_status": "quote_pending",
       "url": "https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module",
-      "fit": "Four concealed downward views with open optical windows; breakout levels, mounting, timing/surfaces/stops unqualified."
+      "fit": "Four concealed downward views with open optical windows; breakout levels, mounting, timing/surfaces/stops unqualified. ST now lists VL6180X obsolete/out of production (checked 2026-11-09). Hold fleet purchase. One VL53L4CD alternate may be bench-evaluated for price, field coverage and different firmware; no automatic substitution or safety approval."
     },
     {
       "item": "VL53L0X forward obstacle breakout",
@@ -211,5 +211,19 @@
       "url": "https://www.adafruit.com/product/4503",
       "fit": "LSM6DS3TR-C documented reference; not an additional required purchase. Quote only after owned BerryIMU identity/working/fit check. Four further fleet equivalents remain unconfirmed if only one BerryIMU is owned."
     }
-  ]
+  ],
+  "html_research_reconciliation": {
+    "review_date": "2026-11-09",
+    "source": "ESP32 Deskpet Ideas.html",
+    "decision": "research_only_not_purchase_ready",
+    "unverified_inventory": [
+      "about five GY-MAX30102 purple breakout modules claimed as owned in HTML but not verified against physical stock"
+    ],
+    "supplier_warnings": [
+      "VL6180X manufacturer marks obsolete; do not fleet-buy before evaluating supported alternatives",
+      "IP5306 module/cell/protection and peak output remain unselected and untested"
+    ],
+    "budget_warning": "HTML proposed $34 delivered power plus reported $18.87 Sense listing already totals $52.87 before other unknown parts; potential overlap in shopping list must be reconciled.",
+    "engineering_audit": "docs/research/2026-11-09-html-verification.md"
+  }
 }
