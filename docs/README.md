@@ -6,12 +6,12 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 
 ## Start here
 
-**Before any permanent build:** Read the [complete day-zero blueprint](README.md), the [forward-only build sequence](PLAN.md), and the [prebuild contradictions](decision-log.md). Those include **all required proactive voice/vision/peer behaviors** and the original sensor/game research from day one; the seven stages below are the physical integration shorthand, not a reduction of the target.
+**Before any permanent build:** Read the [complete day-zero project scope](README.md#full-final-project-contract-and-scope), the [forward-only build sequence](PLAN.md), and the [prebuild contradictions](decision-log.md). Those include **all required proactive voice/vision/peer behaviors** and the original sensor/game research from day one; the seven stages below are the physical integration shorthand, not a reduction of the target.
 
 | I want to… | Open |
 | --- | --- |
-| See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](PLAN.md) |
-| Find every requested idea and link | [200 feature entries](source-map.md) and [131 original HTML URLs](source-map.md) |
+| See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](PLAN.md#complete-linear-build-and-permanent-verification-stages) |
+| Find every requested idea and link | [200 feature entries](source-map.md#original-html-feature-and-sensor-idea-register) and [131 original HTML URLs](source-map.md#complete-original-html-research-link-index) |
 | Check the hard behavior and proactive requirements | [System contract](product-definition.md) and [acceptance A1–A12](records/verification.md) |
 | See the exact proposed code and firmware changes | [Implementation file map](PLAN.md) and [source reuse decisions](research/2026-11-03-active-pet-sources.md) |
 | Check what I own and what I still need | [Parts and shopping list](hardware/parts.md) |
