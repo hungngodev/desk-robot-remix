@@ -220,9 +220,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         std::snprintf(reply, capacity, "ERR calfloor channel_0to3_min_max_1to1300");
         return;
       }
-      calibration_stage_.floor[channel] = {
-          static_cast<std::uint16_t>(minimum),
-          static_cast<std::uint16_t>(maximum)};
+      calibration_stage_.floor[channel].min_mm = static_cast<std::uint16_t>(minimum);
+      calibration_stage_.floor[channel].max_mm = static_cast<std::uint16_t>(maximum);
       calibration_stage_mask_ |= static_cast<std::uint8_t>(1U << channel);
       std::snprintf(reply, capacity, "OK calfloor channel=%d", channel);
       return;
