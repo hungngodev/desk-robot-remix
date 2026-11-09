@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,15 +63,23 @@ class MemoryStore:
                        )"""
                 )
 
-    def _connect(self, robot_id: str) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self, robot_id: str):
         if robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
         path = self.root / (robot_id + ".sqlite3")
         if path.is_symlink():
             raise ValueError("Refusing symlinked memory database")
         db = sqlite3.connect(path, timeout=3)
-        db.execute("PRAGMA busy_timeout=3000")
-        return db
+        try:
+            db.execute("PRAGMA busy_timeout=3000")
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def remember(
         self,
