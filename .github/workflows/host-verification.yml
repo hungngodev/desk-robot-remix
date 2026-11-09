@@ -24,6 +24,14 @@ jobs:
         run: |
           uv python install 3.11
           uv sync --extra dev --python 3.11 --locked
+      - name: Restore pinned Xiaozhi server fixture
+        working-directory: code
+        run: |
+          git init upstream/xiaozhi-esp32-server
+          git -C upstream/xiaozhi-esp32-server remote add origin https://github.com/xinnan-tech/xiaozhi-esp32-server.git
+          git -C upstream/xiaozhi-esp32-server fetch --depth=1 origin d9c2e8c5d92627b670dec57d72a07a4226a410a3
+          git -C upstream/xiaozhi-esp32-server checkout --detach FETCH_HEAD
+          test "$(git -C upstream/xiaozhi-esp32-server rev-parse HEAD)" = "d9c2e8c5d92627b670dec57d72a07a4226a410a3"
       - name: Host tests
         working-directory: code
         run: uv run --no-sync pytest -q tests firmware/head/tests
@@ -45,4 +53,4 @@ jobs:
 
 # This runs only host checks. It does not flash a board, compile the full
 # ESP-IDF firmware, validate actual ToF readings, or certify physical safety.
-# Head overlay checks that need pinned upstream sources may be skipped here.
+# Head tests that require the other missing pinned upstreams are skipped here.
