@@ -67,7 +67,7 @@ class OllamaChat:
         """
         if not self.settings.ollama_vision_model:
             return None
-        if not before.startswith(b"\\xff\\xd8") or not after.startswith(b"\\xff\\xd8"):
+        if not before.startswith(b"\xff\xd8") or not after.startswith(b"\xff\xd8"):
             raise ValueError("Only actual bounded JPEG camera frames may be observed")
         if max(len(before), len(after)) > 512_000:
             raise ValueError("Camera frame exceeds the observation limit")
