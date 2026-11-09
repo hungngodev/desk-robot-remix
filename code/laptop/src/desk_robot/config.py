@@ -44,7 +44,7 @@ class Settings(BaseModel):
     vision_weights: Path | None = None
     max_job_seconds: float = Field(default=45, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
-    memory_dir: Path = Path("data/pet-memory")
+    memory_dir: Path = Path("../data/private/pet-memory")
     # Vision models must be installed locally, never silently using a cloud provider.
     ollama_vision_model: str | None = None
     pet_poll_seconds: float = Field(default=1.0, ge=0.5, le=30)
