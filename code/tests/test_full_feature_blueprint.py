@@ -21,6 +21,7 @@ DOCUMENTS = (
     "acceptance.md",
     "decisions-before-hardware.md",
     "html-quantitative-proposals.md",
+    "implementation-file-plan.md",
 )
 
 
