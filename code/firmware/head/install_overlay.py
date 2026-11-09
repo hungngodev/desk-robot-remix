@@ -231,6 +231,26 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             for path in folder.iterdir():
                 if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
                     files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+        # The stock Xiaozhi 'tts stop' changes UI/listening state but does not
+        # invalidate the pending decoded audio. Reuse its ResetDecoder queue
+        # generation for a distinct authenticated abort message. This is
+        # *not* proof the I2S DMA has become audibly silent within A2.
+        app_path = "main/application.cc"
+        source = (target / app_path).read_text()
+        source = replace_once(
+            source,
+            '            } else if (strcmp(state->valuestring, "stop") == 0) {',
+            '''            } else if (strcmp(state->valuestring, "abort") == 0) {
+                Schedule([this]() {
+                    aborted_ = true;
+                    audio_service_.ResetDecoder();
+                    if (GetDeviceState() == kDeviceStateSpeaking) {
+                        SetDeviceState(kDeviceStateListening);
+                    }
+                });
+            } else if (strcmp(state->valuestring, "stop") == 0) {''',
+        )
+        files[app_path] = source.encode()
         return files
     files = cores3_files(target)
     if board == "cores3":
