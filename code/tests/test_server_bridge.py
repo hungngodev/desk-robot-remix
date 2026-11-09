@@ -323,9 +323,6 @@ async def test_interrupt_fences_inflight_and_queued_speech(bridge, monkeypatch):
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    def encode(_):
-        return [b"opus"]
-
     async def blocked_encode(_):
         entered.set()
         await release.wait()
