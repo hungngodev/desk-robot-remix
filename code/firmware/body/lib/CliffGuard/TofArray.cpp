@@ -51,7 +51,7 @@ bool TofArray::begin(TwoWire& bus, int reset_pin, CliffGuard& guard) {
     }
     auto& device = sensors_[ch];
     device.setBus(&bus);
-    device.setTimeout(12); // Bound driver wait; never wait indefinitely for a frame
+    device.setTimeout(250); // Sensor calibration at boot may take longer; motors are OFF
     bus.beginTransmission(kRangerAddress);
     if (bus.endTransmission() != 0 || !device.init()) {
       failure();
@@ -69,6 +69,7 @@ bool TofArray::begin(TwoWire& bus, int reset_pin, CliffGuard& guard) {
       failure();
       return false;
     }
+    device.setTimeout(12); // Runtime loop is bounded separately from startup
   }
   // Leave no downstream address connected when the CPU is not probing.
   bus.beginTransmission(kMuxAddress);
