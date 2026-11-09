@@ -1,5 +1,7 @@
 # Desk robot remix project instructions
 
+**Read [docs/blueprint/README.md](docs/blueprint/README.md) before planning or implementing anything new.** The user requires a final-capability plan from day zero, preserving all 200 registered behavior/sensor/game/experimental ideas and the 131 unique HTML research links, rather than a throwaway simple robot rebuilt for proactive conversation later. Source-first remix and a no-avoidable-rework integration path take priority. The hard end experience includes independent pushed-camera conversation, contextual memory, normal speech interruption in robot one, social five-peer sessions, safe physical behavior and measured key/candy pickup. Do not mark optional sensors as physically selected, delete historical research, weaken safety, or invent power/current/price/physical test evidence. [Linear stages](docs/blueprint/linear-build.md) and [stage-zero blockers](docs/blueprint/decisions-before-hardware.md) apply before final print or purchase.
+
 - Start at `docs/README.md`. Keep the build order in `docs/PLAN.md`, requirements in
   `docs/product-definition.md` and purchasing details in `docs/hardware/parts.md`.
   Link to the canonical page when a decision already has a home.
