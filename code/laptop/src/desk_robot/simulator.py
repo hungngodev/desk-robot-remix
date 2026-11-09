@@ -106,5 +106,15 @@ class SimulatedSpeaker:
 
 
 class SimulatedChat:
+    async def observe_change(self, before: bytes, after: bytes) -> dict | None:
+        # Simulation only. This does not demonstrate semantic vision on hardware.
+        if before == after:
+            return None
+        return {
+            "kind": "object_moved",
+            "summary": "The red simulated target changed position on the desk",
+            "confidence": 0.99,
+        }
+
     async def reply(self, history):
         return "I see a candy on the desk." if len(history) <= 2 else "Let us take turns exploring."
