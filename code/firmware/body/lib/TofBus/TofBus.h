@@ -1,5 +1,7 @@
 #pragma once
 
+#if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
+
 // Five independent ST VL53L4CD measurements via TCA9548A channels 0..4.
 // Reuse the pinned Pololu implementation for sensor initialization/ranging,
 // but use bounded checked Wire reads on the safety path. The upstream helper
@@ -44,3 +46,5 @@ class TofBus {
 };
 
 }  // namespace desk_robot
+
+#endif  // DESK_ROBOT_STEPPER
