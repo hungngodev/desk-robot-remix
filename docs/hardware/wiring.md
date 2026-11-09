@@ -46,15 +46,15 @@ acceleration, loaded speed, stop/hold current and thermal limits need measuremen
 ```text
 WROOM GPIO21/22 -> owned BerryIMU upstream (revision/addresses to verify), candidate
                -> TCA9548A upstream I²C
-                  channel 0 -> front-left downward VL6180X
-                  channel 1 -> front-right downward VL6180X
-                  channel 2 -> rear-left downward VL6180X
-                  channel 3 -> rear-right downward VL6180X
+                  channel 0 -> front-left downward ToF (final supported part TBD)
+                  channel 1 -> front-right downward ToF (final supported part TBD)
+                  channel 2 -> rear-left downward ToF (final supported part TBD)
+                  channel 3 -> rear-right downward ToF (final supported part TBD)
                   channel 4 -> separate forward-facing obstacle VL53L0X
 Sense -> separate head-owned OLED bus
 ```
 
-Each ToF keeps its default **7-bit 0x29** address; select only one corresponding
+The proposed ST VL6180X downrange part is obsolete. A compatible short-range part must be selected after a one-sample physical desk-height test and the corresponding driver/mount must be reviewed; the four corner roles do not change. The 7-bit **0x29** address applies to the currently named ST ToF family and must be checked for the finally selected sensor. Select only one corresponding
 channel for reads/configuration. Confirm channel numbering in firmware, module
 supply, reset behavior, default mux address and **3.3 V signal pullups**. Generic
 boards vary; an IC voltage range does not establish breakout level shifting.
