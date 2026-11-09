@@ -231,6 +231,15 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             for path in folder.iterdir():
                 if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
                     files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+        # Only Sense has a real playback reference. Permit Xiaozhi's existing
+        # ESP-SR AFE device AEC for this exact board, without enabling it for
+        # any other profile or modifying the pristine upstream clone.
+        path = "main/Kconfig.projbuild"
+        files[path] = replace_once(
+            files[path].decode(),
+            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP32_S3_BOX_3",
+            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_SENSE_S3 || BOARD_TYPE_ESP32_S3_BOX_3",
+        ).encode()
         return files
     files = cores3_files(target)
     if board == "cores3":
