@@ -13,6 +13,7 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](blueprint/linear-build.md) |
 | Find every requested idea and link | [200 feature entries](blueprint/feature-register.md) and [131 original HTML URLs](blueprint/original-html-link-index.md) |
 | Check the hard behavior and proactive requirements | [System contract](blueprint/system-contract.md) and [acceptance A1–A12](blueprint/acceptance.md) |
+| See the exact proposed code and firmware changes | [Implementation file map](blueprint/implementation-file-plan.md) and [source reuse decisions](blueprint/reuse-register.md) |
 | Check what I own and what I still need | [Parts and shopping list](hardware/parts.md) |
 | Start the first physical check | [Gripper fit and bench guide](guides/first-gripper-test.md) |
 
