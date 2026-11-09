@@ -89,6 +89,14 @@ class KokoroHeadSpeaker:
         finally:
             await self._bridge("/session", {"device_ids": ids, "enabled": False})
 
+    async def interrupt(self, robot: RobotConfig):
+        """Request immediate head abort rather than only cancelling a Python task.
+
+        The head's code resets its decoder generation but does not yet provide
+        an I2S DMA completion acknowledgement or an acoustic A2 guarantee.
+        """
+        return await self._bridge("/interrupt", {"device_id": robot.device_id})
+
     async def say(self, robot: RobotConfig, text: str):
         response = await self.client.post(
             self.settings.kokoro_url.rstrip("/") + "/v1/audio/speech",
