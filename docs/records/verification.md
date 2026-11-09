@@ -11,15 +11,17 @@ old `firmware/head/build/` prefix and `body-platformio/` replaces
 
 ## 2026-11-09 independent GitHub Actions host and WROOM evidence
 
-[Host verification run #6](https://github.com/hungngodev/desk-robot-remix/actions/runs/42675682437)
+[Host verification run #8](https://github.com/hungngodev/desk-robot-remix/actions/runs/42675991038)
 completed successfully against audit commit
-`c3acbef6884cece264fdaf54ae6980fdd8ccb791`.
+`5adb54dd3b54ffa9c511e125099dbf1f5f6f0681`.
+The earlier [run #6](https://github.com/hungngodev/desk-robot-remix/actions/runs/42675682437)
+had 12 skipped tests because the Xiaozhi device upstream fixture was absent.
+The CI workflow now restores the exact pinned upstream and runs those tests.
 These are **automatically run on GitHub Ubuntu runners**, rather than copied
 from a previous local checklist:
 
-* Python plus head host tests: **104 passed, 12 skipped, 4 subtests passed**.
-  The 12 skipped tests have not been demonstrated in this run. The warning
-  was Starlette's deprecated `httpx` testclient usage, not a failure.
+* Python plus head host tests: **116 passed, 0 skipped, 4 subtests passed**.
+  The non-failing warning was Starlette's deprecated `httpx` testclient usage.
 * Python Ruff lint: **passed** on the specified source directories.
 * Body native CTest with address/undefined-behavior sanitizers: **23 of 23 passed**.
 * PlatformIO build: **both** the guarded `esp32_stepper` profile and preserved
