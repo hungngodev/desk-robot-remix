@@ -3,9 +3,9 @@ from __future__ import annotations
 import httpx
 
 from .config import Settings
-from .memory import MemoryStore
 from .controller import Coordinator
 from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
+from .memory import MemoryStore
 from .simulator import SimulatedChat, SimulatedHead, SimulatedSpeaker, SimulationVision
 from .transport import HttpHead
 from .vision import YoloWorldVision
