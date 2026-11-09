@@ -4,13 +4,13 @@ from io import BytesIO
 
 import httpx
 import pytest
-from PIL import Image
 from desk_robot.api import create_app
 from desk_robot.conversation import Conversation, OllamaChat
 from desk_robot.memory import PetMemory
 from desk_robot.pet import PetRuntime
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 from fastapi.testclient import TestClient
+from PIL import Image
 
 
 def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
