@@ -48,7 +48,7 @@
       "unit_usd": null,
       "price_status": "quote_pending",
       "url": "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
-      "fit": "Five sensors on isolated channels, default 7-bit address 0x29; one selected at a time. Check reset access and 3.3 V pullups. Body bus only.",
+      "fit": "Five sensors on isolated channels, default 7-bit address 0x29; one selected at a time. Check reset access and 3.3 V pullups. Body bus only. Active-low RESET requires qualified 3.3V pullup, not GPIO4 strapping pin.",
       "historical_reference_unit_usd": 0.47,
       "reference_price_date": "2026-11-03"
     },
@@ -129,21 +129,22 @@
       "reference_price_date": "2026-11-03"
     },
     {
-      "item": "Four qualified short-range downward ToF breakouts (exact supported part not yet selected)",
+      "item": "VL53L4CD compatible downward short range ToF carriers, exact breakout unqualified",
       "quantity": 4,
       "unit_usd": null,
       "price_status": "quote_pending",
       "url": "",
-      "fit": "Four downward optical roles are mandatory, but the actual short-range sensor breakout, driver, mounting and delivered price are unresolved. ST marks historical VL6180X obsolete and out of production. VL53L4CD is an active comparison candidate, not an approved substitute: test one exact real module at intended height and surfaces, measure scan-age/stop margin, verify breakout voltage and four-unit cost before purchase. Historical VL6180X supplier URL is retained separately as provenance, NOT as a shopping link.",
+      "fit": "Four independent downward corners with VL53L4CD initialization and bounded checked read firmware, Pololu pinned code. Exact 3.3V carrier, near floor black/glossy/transparent performance, mounting geometry, sample freshness, cost and shipping not verified. Do not buy all four until one actual breakout is tested. Old VL6180X obsolete.",
       "historical_reference_url": "https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module"
     },
     {
-      "item": "VL53L0X forward obstacle breakout",
+      "item": "VL53L4CD compatible independent forward obstacle carrier, exact breakout unqualified",
       "quantity": 1,
       "unit_usd": null,
       "price_status": "quote_pending",
-      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
-      "fit": "Separate forward role, default0x29 behind mux; no all-direction collision or successful-grip proof."
+      "url": "",
+      "fit": "Fifth same-model VL53L4CD on mux channel4, using same pinned Pololu initialization and checked reads. Not gripper proof or all-direction collision. Prior VL53L0X URL historical only.",
+      "historical_reference_url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole"
     },
     {
       "item": "Owned Adafruit AT42QT1010 momentary touch breakout #1374",
@@ -186,7 +187,7 @@
     "proactive_camera_pipeline_physically_passed": false
   },
   "reported_already_purchased_usd": 18.87,
-  "quote_status": "incomplete_revision_touch_imu_compact_tof_and_1s_power",
+  "quote_status": "incomplete_five_vl53l4cd_breakouts_and_1s_power",
   "optional_items": [
     {
       "item": "One diffused RGB pixel plus level buffer and passives",
