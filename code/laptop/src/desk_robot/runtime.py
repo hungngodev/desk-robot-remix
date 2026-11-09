@@ -3,11 +3,17 @@ from __future__ import annotations
 import httpx
 
 from .config import Settings
-from .memory import MemoryStore
 from .controller import Coordinator
-from .pet import PetController
 from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
-from .simulator import SimulatedChat, SimulatedHead, SimulatedScene, SimulatedSpeaker, SimulationVision
+from .memory import MemoryStore
+from .pet import PetController
+from .simulator import (
+    SimulatedChat,
+    SimulatedHead,
+    SimulatedScene,
+    SimulatedSpeaker,
+    SimulationVision,
+)
 from .transport import HttpHead
 from .vision import OllamaScene, YoloWorldVision
 
