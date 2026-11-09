@@ -96,6 +96,15 @@ async def request(args, settings):
             result = await client.get(f"/v1/robots/{args.robot}/status")
         elif args.action == "job":
             result = await client.get(f"/v1/jobs/{args.job}")
+        elif args.action.startswith("pet-"):
+            action = args.action.removeprefix("pet-")
+            endpoint = f"/v1/pet/{args.robot}"
+            if action == "status":
+                result = await client.get(endpoint)
+            elif action == "quiet":
+                result = await client.post(endpoint + "/quiet", json={"quiet": not args.off})
+            else:
+                result = await client.post(endpoint + "/" + action)
         elif args.action == "chat":
             turns = conversation_turns(args.robots, args.turns)
             result = await client.post(
@@ -139,6 +148,11 @@ def main():
             part.add_argument("command", help='One bounded command, e.g. "drive 15 15 100"')
         if action == "pickup":
             part.add_argument("target", choices=["key", "candy"])
+    for action in ("pet-status", "pet-start", "pet-pause", "pet-quiet"):
+        part = sub.add_parser(action, help="Control and inspect proactive camera behavior")
+        part.add_argument("robot")
+        if action == "pet-quiet":
+            part.add_argument("--off", action="store_true", help="Allow unsolicited speech again")
     job = sub.add_parser("job")
     job.add_argument("job")
     chat = sub.add_parser("chat")
