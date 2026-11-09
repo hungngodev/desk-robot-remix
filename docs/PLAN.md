@@ -18,6 +18,24 @@ shopping. This page owns the original seven physical build stages; the [full day
 | **6. Object pickup** | Test real flat keys and wrapped candy with the fitted lifting claw. [Pickup guide](guides/pickup-and-two-robots.md) | At least **8 of 10** attempts per object type lift it 10 mm, hold it for three seconds and place it under control. |
 | **7. Duplicate** | Copy the qualified core four times, then assign distinct identities and calibrate each unit. Start group play with serialized speech and one moving robot at a time. [Fleet guide](guides/five-robots.md) | Five distinct robots complete ten coordinated utterances and each passes its own movement checks. |
 
+
+## Which build order is authoritative?
+
+There are **not two competing build plans**. The original seven stages above are a concise historical summary. For all new implementation work, follow [the complete Stage 0 through Stage 12 protocol](#complete-linear-build-and-permanent-verification-stages) below, in order. The more detailed stages establish final interfaces and all difficult behavioral requirements **before** permanent assembly. The original stage names remain here so instructions and source links written earlier still make sense.
+
+| Original stage | Complete linear stages | What the new sequence changes |
+| --- | --- | --- |
+| 1. Fit and parts | 0, 1, 2 | First resolve all features, owner boundaries, power/expansion, source licenses, budgets and dimensions, then print only reversible fit coupons |
+| 2. Drive and power | 2, 3 | Test the selected physical power path and both actuators on a stand; body motion remains guarded |
+| 3. Cliff sensing | 2, 3 | Decide a supported floor sensor before buying; qualify four corner roles and actual stop margin |
+| 4. Head and conversation | 4 | First assembled head must already support natural ordinary speech interruption, not require a later replacement |
+| 5. Initiative and exploration | 5, 6, 7, 8 | Build true camera-triggered context, per-unit memory and proactive speech **before** roaming; then enable only locally protected motion |
+| 6. Pickup | 1, 3, 8 | Reserve and fit the actual lift/claw **from Stage 1**, verify real key/candy pickup when safety and perception are integrated |
+| 7. Duplicate | 9, 10, 11 | Qualify the **complete** first unit, then four identical cores with independent memory and a coordinated five-peer experience |
+| All original research and future ideas | 0, 12 | Preserve all research from day zero, but swappable experiments receive explicit electrical, cost and safety gates rather than silently changing the qualified core |
+
+**Progression rule:** A stage is not complete until the evidence gate passes; the next stage consumes its fixed interfaces. A failed prebuild measurement can require a design decision before the irreversible build, but no hidden "simple V1 first and replace it" migration is allowed. The $50 delivered cap, the four downward floor roles, real A2 voice interruption, contextual A8/A9 initiative, and key/candy A5 acceptance cannot simply be dropped to advance the schedule.
+
 ## Design decisions that affect the build
 
 - **Body.** The WROOM owns motion, sensors and the local stop. The XIAO Sense
