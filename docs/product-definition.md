@@ -22,6 +22,8 @@ patterns. A replacement board is not established as necessary. [Required audio g
 and [reuse sources](research/2026-11-03-sense-realtime-reuse.md). Order quantity,
 arrival and revision remain unconfirmed; no physical test has passed.
 
+**Complete day-zero scope:** The [full-feature system contract](blueprint/system-contract.md), [200 item feature and sensor register](blueprint/feature-register.md), [linear build](blueprint/linear-build.md), [source index](blueprint/original-html-link-index.md) and [acceptance plan](blueprint/acceptance.md) preserve the richer original HTML research without changing A1–A12. Proactive conversation means **fresh unsolicited visual context, meaningful self initiation, per-robot memory, interruption and five-robot speaker arbitration**; generic scheduled greetings are not equivalent. All mandatory interfaces must be planned before final assembly to avoid avoidable rebuilds. Physical experiments and optional add-ons remain separately costed/qualified, not secretly installed or discarded.
+
 ## Appearance and shape
 
 The user chose **a rounder existing head case**, replacing the boxy EVA appearance.
