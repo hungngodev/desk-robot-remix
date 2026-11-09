@@ -197,3 +197,13 @@ def test_new_canonical_document_links_are_local_and_resolvable():
             if rel and not rel.startswith("/"):
                 target = (file.parent / rel).resolve()
                 assert target.exists(), f"Broken link in {file}: {link}"
+
+
+def test_source_crosswalk_matches_41_original_html_section_ids():
+    """Exact ordered identifiers from the original, independently parsed HTML."""
+    text = (DOCS / "source-map.md").read_text(encoding="utf-8")
+    table = text.split("## Original HTML DOM section crosswalk, verified 2026-11-09", 1)[1]
+    ids = re.findall(r"^\| \d+ \| \`([a-z0-9_-]+)\` \|", table, re.MULTILINE)
+    assert len(ids) == len(set(ids)) == 41
+    digest = hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()
+    assert digest == "1128952b6b42f42eb0a5650714c541b7916b3f07b91856cf9ae82e3a9a3d43be"
