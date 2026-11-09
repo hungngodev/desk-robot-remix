@@ -26,6 +26,11 @@ class PickupRequest(BaseModel):
     target: Literal["key", "candy"]
 
 
+class QuietRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    quiet: bool
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     robot_ids: list[str] = Field(min_length=2, max_length=5)
@@ -129,7 +134,38 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.post("/v1/robots/{robot_id}/stop", dependencies=[Depends(authorize)])
     async def stop(robot_id: str):
+        await app.state.runtime.pet.pause(robot_id)
         return await coordinator().stop(robot_id)
+
+    @app.get("/v1/pet/{robot_id}", dependencies=[Depends(authorize)])
+    async def pet_status(robot_id: str):
+        coordinator().robot(robot_id)
+        return app.state.runtime.pet.status(robot_id)
+
+    @app.post("/v1/pet/{robot_id}/start", dependencies=[Depends(operator)])
+    async def pet_start(robot_id: str):
+        coordinator().robot(robot_id)
+        return app.state.runtime.pet.start(robot_id)
+
+    @app.post("/v1/pet/{robot_id}/pause", dependencies=[Depends(authorize)])
+    async def pet_pause(robot_id: str):
+        coordinator().robot(robot_id)
+        result = await app.state.runtime.pet.pause(robot_id)
+        await coordinator().stop(robot_id)
+        return result
+
+    @app.post("/v1/pet/{robot_id}/quiet", dependencies=[Depends(operator)])
+    async def pet_quiet(robot_id: str, request: QuietRequest):
+        coordinator().robot(robot_id)
+        result = await app.state.runtime.pet.set_quiet(robot_id, request.quiet)
+        if request.quiet:
+            await coordinator().stop(robot_id)
+        return result
+
+    @app.post("/v1/pet/{robot_id}/interrupt", dependencies=[Depends(authorize)])
+    async def pet_interrupt(robot_id: str):
+        coordinator().robot(robot_id)
+        return await app.state.runtime.pet.interrupt(robot_id)
 
     @app.get("/v1/jobs/{job_id}", dependencies=[Depends(authorize)])
     async def job(job_id: str):
@@ -140,6 +176,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.post("/v1/conversation", dependencies=[Depends(authorize)])
     async def conversation(request: ChatRequest):
         try:
+            # An explicit conversation preempts unsolicited pet speech.
+            for robot_id in request.robot_ids:
+                coordinator().robot(robot_id)
+                await app.state.runtime.pet.interrupt(robot_id)
             transcript = await app.state.runtime.conversation.run(
                 request.robot_ids, request.topic, request.utterances
             )
