@@ -213,7 +213,7 @@ def test_obsolete_floor_sensor_is_not_an_active_purchase_item():
     data = json.loads((DOCS / "hardware/bom.json").read_text(encoding="utf-8"))
     down = [
         item for item in data["items"]
-        if "short-range downward ToF" in item["item"]
+        if "VL53L4CD compatible downward short range ToF carriers" in item["item"]
     ]
     assert len(down) == 1
     assert down[0]["quantity"] == 4
@@ -225,6 +225,6 @@ def test_obsolete_floor_sensor_is_not_an_active_purchase_item():
     assert "Sensor purchase hold" in parts
     assert "|[VL6180X breakout]" not in parts
     wiring = (DOCS / "hardware/wiring.md").read_text(encoding="utf-8")
-    assert "downward ToF (final supported part TBD)" in wiring
+    assert "front-left downward VL53L4CD candidate" in wiring
     assert "downward VL6180X" not in wiring
     assert not module("check_budget").budget(data)["purchase_ready"]
