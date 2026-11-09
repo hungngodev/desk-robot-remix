@@ -2,7 +2,7 @@
 
 Audit date: 2026-11-09
 
-Source: user supplied `ESP32 Deskpet Ideas.html`, 1,074,994 bytes, 23 numbered sections. Active product decisions are in sections 1 through 16. Sections 17 through 23 are historical Xiaozhi research and must not silently override the live implementation.
+Source: user supplied `ESP32 Deskpet Ideas.html`, 1,074,994 bytes, **41 HTML section elements, 44 h2 headings, 316 h3 headings and 231 expandable details blocks**. The active project and topic sections (Power, Drive, Cliff, Touch, Audio, Head, Mac and Proactive) precede the later Xiaozhi-era research library; older instructions must not override the live implementation.
 
 Audited base: `codex/initial-remix`, commit `aa7fb7deebbefda0d1642894165f4398849f360f`.
 
