@@ -32,9 +32,17 @@ jobs:
           git -C upstream/xiaozhi-esp32-server fetch --depth=1 origin d9c2e8c5d92627b670dec57d72a07a4226a410a3
           git -C upstream/xiaozhi-esp32-server checkout --detach FETCH_HEAD
           test "$(git -C upstream/xiaozhi-esp32-server rev-parse HEAD)" = "d9c2e8c5d92627b670dec57d72a07a4226a410a3"
+      - name: Restore pinned Xiaozhi device firmware fixture
+        working-directory: code
+        run: |
+          git init upstream/xiaozhi-esp32
+          git -C upstream/xiaozhi-esp32 remote add origin https://github.com/78/xiaozhi-esp32.git
+          git -C upstream/xiaozhi-esp32 fetch --depth=1 origin c435f99a88066029ec2dbd2d758c8cc9d051565b
+          git -C upstream/xiaozhi-esp32 checkout --detach FETCH_HEAD
+          test "$(git -C upstream/xiaozhi-esp32 rev-parse HEAD)" = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
       - name: Host tests
         working-directory: code
-        run: uv run --no-sync pytest -q tests firmware/head/tests
+        run: uv run --no-sync pytest -q -ra tests firmware/head/tests
       - name: Python lint
         working-directory: code
         run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
