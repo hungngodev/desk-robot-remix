@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .transport import HeadError, expected_ack, validate_command
-from .vision import Detection
+from .vision import Detection, SceneChange
 
 
 class SimulatedHead:
@@ -108,3 +108,13 @@ class SimulatedSpeaker:
 class SimulatedChat:
     async def reply(self, history):
         return "I see a candy on the desk." if len(history) <= 2 else "Let us take turns exploring."
+
+
+
+class SimulatedScene:
+    """Deterministic fake semantics for tests only; never evidence of real vision."""
+
+    async def compare(self, before: bytes, after: bytes) -> SceneChange | None:
+        if before == after:
+            return None
+        return SceneChange("object", "A red desk object changed position", 0.99)
