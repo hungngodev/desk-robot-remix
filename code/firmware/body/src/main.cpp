@@ -6,6 +6,7 @@
 #include "CliffGuard.h"
 #include "StepperDrive.h"
 #include "TofBus.h"
+#include <Preferences.h>
 #endif
 
 namespace {
@@ -17,6 +18,69 @@ desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
 desk_robot::TofBus tof;
+
+// Nonvolatile calibration is written only by a completed local USB commit.
+// The hardware never resumes movement after reboot, even with valid stored
+// thresholds: CliffGuard starts MissingSample and requires local USB rearm.
+struct StoredCalibration {
+  std::uint32_t magic;
+  std::uint32_t version;
+  desk_robot::CliffConfig config;
+  std::uint32_t checksum;
+};
+constexpr std::uint32_t kCalibrationMagic = 0x434C4635U; // "CLF5"
+constexpr std::uint32_t kCalibrationVersion = 1U;
+
+std::uint32_t calibration_checksum(const desk_robot::CliffConfig& c) {
+  std::uint32_t value = 2166136261U;
+  auto byte = [&value](std::uint8_t n) { value = (value ^ n) * 16777619U; };
+  auto halfword = [&byte](std::uint16_t n) {
+    byte(static_cast<std::uint8_t>(n));
+    byte(static_cast<std::uint8_t>(n >> 8));
+  };
+  byte(c.calibrated ? 1U : 0U);
+  for (const auto& interval : c.floor) {
+    halfword(interval.min_mm);
+    halfword(interval.max_mm);
+  }
+  halfword(c.front_obstacle_mm);
+  halfword(c.front_max_mm);
+  for (unsigned bits = 0; bits < 32; bits += 8) {
+    byte(static_cast<std::uint8_t>(c.freshness_ms >> bits));
+  }
+  return value;
+}
+
+bool load_calibration() {
+  Preferences preferences;
+  if (!preferences.begin("cliffsafety", true)) return false;
+  const bool right_length =
+      preferences.getBytesLength("calibration") == sizeof(StoredCalibration);
+  StoredCalibration saved{};
+  const size_t read = right_length
+      ? preferences.getBytes("calibration", &saved, sizeof(saved)) : 0;
+  preferences.end();
+  if (read != sizeof(saved) ||
+      saved.magic != kCalibrationMagic ||
+      saved.version != kCalibrationVersion ||
+      saved.checksum != calibration_checksum(saved.config)) return false;
+  return cliff_guard.configure(saved.config);
+}
+
+bool save_calibration() {
+  if (!cliff_guard.configured()) return false;
+  StoredCalibration saved{};
+  saved.magic = kCalibrationMagic;
+  saved.version = kCalibrationVersion;
+  saved.config = cliff_guard.configuration();
+  saved.checksum = calibration_checksum(saved.config);
+  Preferences preferences;
+  if (!preferences.begin("cliffsafety", false)) return false;
+  const size_t written =
+      preferences.putBytes("calibration", &saved, sizeof(saved));
+  preferences.end();
+  return written == sizeof(saved);
+}
 #else
 desk_robot::BodyControl control;
 #endif
@@ -135,7 +199,7 @@ void apply_outputs() {
   }
 }
 
-void process_input(Stream& stream, desk_robot::LineReceiver& receiver) {
+void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool local_usb) {
   char reply[desk_robot::kReplyCapacity]{};
   // Bounded read prevents sustained input from starving the other port/timers.
   for (int bytes = 0; bytes < 64 && stream.available() > 0; ++bytes) {
@@ -145,6 +209,18 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver) {
       control.force_disarm();
       snprintf(reply, sizeof(reply), "ERR arm pwm_unavailable");
     }
+#if DESK_ROBOT_STEPPER
+    if (completed && local_usb && strcmp(reply, "OK calcommit") == 0 &&
+        !save_calibration()) {
+      // A partially written or unavailable NVS record cannot silently allow
+      // operation on a calibration that would disappear next boot.
+      cliff_guard.configure(desk_robot::CliffConfig{});
+      control.force_disarm();
+      snprintf(reply, sizeof(reply), "ERR calcommit nvs_write_failed");
+    }
+#else
+    (void)local_usb;
+#endif
     apply_outputs();  // apply accepted command/expired timer before acknowledging
     if (completed) {
       stream.print(reply);
@@ -189,10 +265,15 @@ void setup() {
   } else {
     Serial.println("OK sensor_init five_vl53l4cd_channels");
   }
+  if (load_calibration()) {
+    Serial.println("OK calibration_loaded samples_and_local_rearm_required");
+  } else {
+    Serial.println("ERR calibration_missing_or_invalid use_local_usb_calfloor_calfront_calfresh_calcommit");
+  }
 #endif
   Serial.println(pwm_ready ?
 #if DESK_ROBOT_STEPPER
-      "READY desk-robot-body stepper disarmed safety_unconfigured" :
+      "READY desk-robot-body stepper disarmed local_rearm_required" :
 #else
       "READY desk-robot-body dc disarmed" :
 #endif
@@ -207,7 +288,7 @@ void loop() {
 #endif
   control.tick(millis());
   apply_outputs();
-  process_input(head_uart, head_receiver);
-  process_input(Serial, usb_receiver);
+  process_input(head_uart, head_receiver, false);
+  process_input(Serial, usb_receiver, true);
   delay(1);
 }
