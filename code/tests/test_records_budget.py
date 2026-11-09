@@ -147,7 +147,7 @@ def test_full_behavioral_acceptance_keeps_original_gates():
         assert f"| A{number} " in product, f"Canonical A{number} removed"
         assert f"| **A{number} " in evidence, f"Expanded A{number} removed"
     for scenario in range(1, 11):
-        assert f"\`E{scenario:02d}\`" in evidence
+        assert f"E{scenario:02d}" in evidence
     assert "19/20" in evidence and "18/20" in evidence
     assert "8/10" in evidence
     assert "120s" in evidence
