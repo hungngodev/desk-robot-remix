@@ -5,13 +5,18 @@
 #if DESK_ROBOT_STEPPER
 #include "CliffGuard.h"
 #include "StepperDrive.h"
+#include "TofArray.h"
+#include <Preferences.h>
+#include <Wire.h>
+#include <cstddef>
 #endif
 
 namespace {
 #if DESK_ROBOT_STEPPER
-// No fabricated calibration or sample source. Until sensor I/O and measured
-// calibration are supplied, every arm request is rejected by this guard.
+// Genuine five-channel I2C sensor acquisition, calibrated locally and persisted
+// in WROOM NVS. Missing/invalid data always fails closed.
 desk_robot::CliffGuard cliff_guard;
+desk_robot::TofArray tof_array;
 desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_guard);
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
@@ -30,6 +35,85 @@ int applied_right = 0;
 #endif
 int applied_lift = -1;
 int applied_grip = -1;
+
+#if DESK_ROBOT_STEPPER
+// Saved thresholds are physical measurements by the owner. No default profile
+// is ever supplied by firmware. CRC and schema reject torn writes/old layouts.
+struct StoredCalibration {
+  std::uint32_t magic = 0x44535054UL;
+  std::uint16_t min_mm[4]{};
+  std::uint16_t max_mm[4]{};
+  std::uint16_t front_obstacle_mm = 0;
+  std::uint16_t front_max_mm = 0;
+  std::uint16_t freshness_ms = 0;
+  std::uint16_t version = 1;
+  std::uint32_t checksum = 0;
+};
+
+std::uint32_t calibration_checksum(const StoredCalibration& saved) {
+  const auto* data = reinterpret_cast<const std::uint8_t*>(&saved);
+  std::uint32_t value = 2166136261UL;
+  for (std::size_t i = 0; i < offsetof(StoredCalibration, checksum); ++i) {
+    value = (value ^ data[i]) * 16777619UL;
+  }
+  return value;
+}
+
+StoredCalibration pack_calibration(const desk_robot::CliffConfig& source) {
+  StoredCalibration saved{};
+  for (std::size_t i = 0; i < 4; ++i) {
+    saved.min_mm[i] = source.floor[i].min_mm;
+    saved.max_mm[i] = source.floor[i].max_mm;
+  }
+  saved.front_obstacle_mm = source.front_obstacle_mm;
+  saved.front_max_mm = source.front_max_mm;
+  saved.freshness_ms = static_cast<std::uint16_t>(source.freshness_ms);
+  saved.checksum = calibration_checksum(saved);
+  return saved;
+}
+
+bool restore_calibration() {
+  Preferences prefs;
+  if (!prefs.begin("deskpetcliff", true)) return false;
+  StoredCalibration saved{};
+  const bool loaded =
+      prefs.getBytesLength("profile") == sizeof(saved) &&
+      prefs.getBytes("profile", &saved, sizeof(saved)) == sizeof(saved);
+  prefs.end();
+  if (!loaded || saved.magic != 0x44535054UL || saved.version != 1 ||
+      saved.checksum != calibration_checksum(saved)) return false;
+  desk_robot::CliffConfig config{};
+  config.calibrated = true;
+  for (std::size_t i = 0; i < 4; ++i) {
+    config.floor[i].min_mm = saved.min_mm[i];
+    config.floor[i].max_mm = saved.max_mm[i];
+  }
+  config.front_obstacle_mm = saved.front_obstacle_mm;
+  config.front_max_mm = saved.front_max_mm;
+  config.freshness_ms = saved.freshness_ms;
+  // Even a valid persisted profile starts UNARMED and requires fresh
+  // sensor observations and a new local USB "rearm" each boot.
+  return cliff_guard.configure(config);
+}
+
+bool store_calibration() {
+  if (!cliff_guard.configured()) return false;
+  const auto saved = pack_calibration(cliff_guard.configuration());
+  Preferences prefs;
+  if (!prefs.begin("deskpetcliff", false)) return false;
+  const bool written = prefs.putBytes("profile", &saved, sizeof(saved)) == sizeof(saved);
+  prefs.end();
+  return written;
+}
+
+bool erase_calibration() {
+  Preferences prefs;
+  if (!prefs.begin("deskpetcliff", false)) return false;
+  const bool erased = prefs.remove("profile");
+  prefs.end();
+  return erased;
+}
+#endif
 
 void all_motor_inputs_low() {
   for (int pin : body_pins::kMotorPins) {
@@ -144,6 +228,19 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver) {
       snprintf(reply, sizeof(reply), "ERR arm pwm_unavailable");
     }
     apply_outputs();  // apply accepted command/expired timer before acknowledging
+#if DESK_ROBOT_STEPPER
+    if (completed && &receiver == &usb_receiver) {
+      if (strcmp(reply, "OK calibrate") == 0 && !store_calibration()) {
+        cliff_guard.configure(desk_robot::CliffConfig{});
+        control.force_disarm();
+        snprintf(reply, sizeof(reply), "ERR calibrate nvs_write");
+      } else if (strcmp(reply, "OK calclear") == 0 && !erase_calibration()) {
+        // Clear in RAM already; absence of persisted removal is an error.
+        control.force_disarm();
+        snprintf(reply, sizeof(reply), "ERR calclear nvs_erase");
+      }
+    }
+#endif
     if (completed) {
       stream.print(reply);
       stream.print("\r\n");
@@ -175,10 +272,22 @@ void setup() {
   }
   zero_motor_pwm();
   Serial.begin(115200);
+#if DESK_ROBOT_STEPPER
+  // Motor inputs have been held LOW since the first line of setup().
+  // The mux and all five sensors share this body's I2C bus only.
+  Wire.begin(body_pins::kSensorSda, body_pins::kSensorScl);
+  Wire.setClock(100000);
+  Wire.setTimeOut(10);
+  const bool calibrated = restore_calibration();
+  const bool sensors_ready = tof_array.begin(Wire, body_pins::kMuxReset, cliff_guard);
+  Serial.printf("SENSORS %s calibration=%s (USB rearm required)\\r\\n",
+                sensors_ready ? "ready" : "fault",
+                calibrated ? "persisted" : "missing");
+#endif
   head_uart.begin(115200, SERIAL_8N1, body_pins::kUartRx, body_pins::kUartTx);
   Serial.println(pwm_ready ?
 #if DESK_ROBOT_STEPPER
-      "READY desk-robot-body stepper disarmed safety_unconfigured" :
+      "READY desk-robot-body stepper disarmed safety_requires_local_rearm" :
 #else
       "READY desk-robot-body dc disarmed" :
 #endif
@@ -186,6 +295,9 @@ void setup() {
 }
 
 void loop() {
+#if DESK_ROBOT_STEPPER
+  tof_array.poll(millis()); // real sensor acquisition; no remote overrides
+#endif
   control.tick(millis());
   apply_outputs();
   process_input(head_uart, head_receiver);
