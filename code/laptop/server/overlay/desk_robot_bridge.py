@@ -24,7 +24,11 @@ lease_until = 0.0
 lease_stopping = False
 lease_cleanup_task: asyncio.Task | None = None
 speaker_lock = asyncio.Lock()
-interrupt_generation: dict[str, int] = {}
+# Never allow one robot to cancel another's reply based on hearing its speaker.
+# Only the current device may contribute AEC-cleaned voice during group speech.
+active_device_id: str | None = None
+voice_frames: dict[str, int] = {}
+human_interrupted_devices: set[str] = set()
 
 
 def device_map():
@@ -58,16 +62,86 @@ def muted(device_id):
     return device_id in lease_ids and time.monotonic() < lease_until
 
 
+def duplex_available(conn) -> bool:
+    """Only a real device AEC/realtime session may stream double-talk audio.
+
+    If actual head AEC is disabled or misconfigured, retain the old safe
+    suppression rather than creating endless self-triggered conversations.
+    A successful physical A2 trial is still required.
+    """
+    return getattr(conn, "client_listen_mode", "") == "realtime"
+
+
+def was_interrupted_by_human(device_id):
+    return device_id in human_interrupted_devices
+
+
 def suppress_message(conn, message):
     if not muted(conn.device_id):
         return False
     if isinstance(message, bytes):
-        return True
+        return not (conn.device_id == active_device_id and duplex_available(conn))
     try:
         data = json.loads(message)
+        # The existing listener setup is established before the speaker lease.
+        # A fresh listen request during group playback cannot reset ASR state.
         return isinstance(data, dict) and data.get("type") == "listen"
     except (ValueError, TypeError):
         return False
+
+
+def _start_lease_cleanup() -> None:
+    """Complete cleanup even when the HTTP caller disappears mid-abort."""
+    global lease_stopping, lease_cleanup_task
+    if lease_cleanup_task is not None and not lease_cleanup_task.done():
+        return
+    lease_stopping = True
+
+    async def finish_stop():
+        global lease_ids, lease_until, lease_stopping, active_device_id
+        async with speaker_lock:
+            lease_until = 0
+            lease_ids = frozenset()
+            lease_stopping = False
+            active_device_id = None
+            voice_frames.clear()
+            human_interrupted_devices.clear()
+
+    lease_cleanup_task = asyncio.create_task(finish_stop())
+
+
+async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
+    """Adapt upstream Xiaozhi VAD with a minimal two-frame double-talk gate.
+
+    The mic PCM passes through to upstream ASR throughout; nothing is clipped
+    waiting for the decision. The first two real voice frames are retained.
+    """
+    global lease_stopping
+    device = conn.device_id
+    if (
+        not muted(device) or active_device_id != device
+        or not duplex_available(conn) or lease_stopping
+    ):
+        voice_frames.pop(device, None)
+        return False
+    if not have_voice:
+        voice_frames.pop(device, None)
+        return False
+    voice_frames[device] = min(voice_frames.get(device, 0) + 1, 2)
+    if voice_frames[device] < 2:
+        return False
+    # Never let an old unsolicited TTS resume after detecting human speech.
+    human_interrupted_devices.add(device)
+    conn.client_abort = True
+    conn.close_after_chat = False
+    _start_lease_cleanup()
+    # A normal Xiaozhi 'tts stop' waits for its queued stream and does not
+    # empty I2S DMA. This explicit stop extension is handled by Sense firmware.
+    await conn.websocket.send(json.dumps({
+        "type": "tts", "state": "stop", "session_id": conn.session_id,
+        "flush": True,
+    }))
+    return True
 
 
 def wav_audio(encoded):
@@ -101,18 +175,18 @@ def encode_opus(audio):
 async def transmit(conn, text, frames):
     from core.handle.sendAudioHandle import send_tts_message
 
+    global active_device_id
+    active_device_id = conn.device_id
+    voice_frames.pop(conn.device_id, None)
     if conn.conn_from_mqtt_gateway:
         raise ValueError("Speech bridge currently requires direct Xiaozhi WebSocket transport")
-    # A previous user's explicit interrupt must not be lost when an old
-    # provider finishes encoding and tries to begin output.
-    generation = interrupt_generation.get(conn.device_id, 0)
     conn.client_abort = False
     conn.client_is_speaking = True
     try:
         await send_tts_message(conn, "start")
         await send_tts_message(conn, "sentence_start", text)
         for packet in frames:
-            if conn.client_abort or generation != interrupt_generation.get(conn.device_id, 0) or not muted(conn.device_id):
+            if conn.client_abort or not muted(conn.device_id):
                 raise RuntimeError("Speech interrupted or session expired")
             # Reuse the firmware's existing 16 kHz mono, 60 ms Opus framing.
             await conn.websocket.send(packet)
@@ -121,9 +195,18 @@ async def transmit(conn, text, frames):
         await asyncio.sleep(0.24)  # estimated buffer tail; no physical playback acknowledgement
     finally:
         try:
-            await send_tts_message(conn, "stop")
+            if conn.client_abort:
+                # Bypass upstream normal stop's wait-for-all-audio behavior.
+                await conn.websocket.send(json.dumps({
+                    "type": "tts", "state": "stop",
+                    "session_id": conn.session_id, "flush": True,
+                }))
+            else:
+                await send_tts_message(conn, "stop")
         finally:
             conn.clearSpeakStatus()
+            if active_device_id == conn.device_id:
+                active_device_id = None
 
 
 def create_app():
@@ -178,22 +261,12 @@ def create_app():
             if lease_ids and lease_ids != selected:
                 raise RuntimeError("Session identities differ")
             if not lease_stopping:
-                lease_stopping = True
                 for device in lease_ids:
-                    if device in connections:
+                    if device in connections and device not in human_interrupted_devices:
                         connections[device].client_abort = True
-
-                async def finish_stop():
-                    global lease_ids, lease_until, lease_stopping
-                    # Keep microphones muted until transmission has exited, even if
-                    # the caller disconnects while this stop waits for the lock.
-                    async with speaker_lock:
-                        lease_until = 0
-                        lease_ids = frozenset()
-                        lease_stopping = False
-
-                lease_cleanup_task = asyncio.create_task(finish_stop())
-            await asyncio.shield(lease_cleanup_task)
+                _start_lease_cleanup()
+            if lease_cleanup_task is not None:
+                await asyncio.shield(lease_cleanup_task)
         else:
             raise ValueError("enabled must be a boolean")
         return web.json_response(
@@ -209,51 +282,18 @@ def create_app():
         if not isinstance(text, str) or not 1 <= len(text) <= 2000:
             raise ValueError("Speech text must be 1..2000 characters")
         audio = wav_audio(body.get("wav_base64"))
-        generation = interrupt_generation.get(device, 0)
         async with speaker_lock:
             # A queued request may outlive a stop or a device disconnect.
-            if (lease_stopping or not muted(device) or connections.get(device) is not connection
-                or generation != interrupt_generation.get(device, 0)):
+            if lease_stopping or not muted(device) or connections.get(device) is not connection:
                 raise RuntimeError("Coordinated session stopped or robot disconnected")
             async with asyncio.timeout(40):
                 frames = await asyncio.to_thread(encode_opus, audio)
-                if (lease_stopping or not muted(device) or connections.get(device) is not connection
-                or generation != interrupt_generation.get(device, 0)):
+                if lease_stopping or not muted(device) or connections.get(device) is not connection:
                     raise RuntimeError("Coordinated session stopped or robot disconnected")
                 await transmit(connection, text, frames)
         return web.json_response({"transmitted": True, "physical_playback_verified": False})
 
-    async def interrupt(request):
-        """Authenticated, immediate cancellation, including queued audio.
-
-        This endpoint does not detect human speech. VAD/AEC must call it on a
-        genuine user interruption; server cancellation is not yet audible A2.
-        The custom device 'tts abort' branch is installed by the Sense overlay.
-        """
-        body = await request.json()
-        device = body.get("device_id")
-        if not isinstance(device, str) or device not in device_map().values():
-            raise ValueError("Known device_id required")
-        connection = connections.get(device)
-        if connection is None:
-            raise RuntimeError("Robot is offline")
-        interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
-        connection.client_abort = True
-        # Never wait on speaker_lock here: an active stream may be sleeping
-        # under that lock and must be notified immediately.
-        await connection.websocket.send(
-            json.dumps({"type": "tts", "state": "abort", "session_id": connection.session_id})
-        )
-        return web.json_response({
-            "interrupted": True,
-            "device_id": device,
-            "head_flush_requested": True,
-            "head_flush_acknowledged": False,
-            "audible_stop_verified": False,
-        })
-
     app.router.add_post("/session", session)
-    app.router.add_post("/interrupt", interrupt)
     app.router.add_post("/speak", speak)
     return app
 

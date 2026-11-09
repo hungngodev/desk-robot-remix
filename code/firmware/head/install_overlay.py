@@ -231,26 +231,36 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             for path in folder.iterdir():
                 if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
                     files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
-        # The stock Xiaozhi 'tts stop' changes UI/listening state but does not
-        # invalidate the pending decoded audio. Reuse its ResetDecoder queue
-        # generation for a distinct authenticated abort message. This is
-        # *not* proof the I2S DMA has become audibly silent within A2.
-        app_path = "main/application.cc"
-        source = (target / app_path).read_text()
-        source = replace_once(
-            source,
-            '            } else if (strcmp(state->valuestring, "stop") == 0) {',
-            '''            } else if (strcmp(state->valuestring, "abort") == 0) {
+        # Only Sense has a real playback reference. Permit Xiaozhi's existing
+        # ESP-SR AFE device AEC for this exact board, without enabling it for
+        # any other profile or modifying the pristine upstream clone.
+        path = "main/Kconfig.projbuild"
+        files[path] = replace_once(
+            files[path].decode(),
+            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP32_S3_BOX_3",
+            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_SENSE_S3 || BOARD_TYPE_ESP32_S3_BOX_3",
+        ).encode()
+        # Urgent stop is an extension to the existing Xiaozhi TTS state event,
+        # not a second decoder or audio transport. Normal TTS stops retain the
+        # upstream behavior; flush=true explicitly discards queued decoder PCM
+        # and disables I2S TX so its DMA no longer plays obsolete audio.
+        path = "main/application.cc"
+        text = (target / path).read_text()
+        text = replace_once(
+            text,
+            """} else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
-                    aborted_ = true;
-                    audio_service_.ResetDecoder();
-                    if (GetDeviceState() == kDeviceStateSpeaking) {
-                        SetDeviceState(kDeviceStateListening);
+                    if (GetDeviceState() == kDeviceStateSpeaking) {""",
+            """} else if (strcmp(state->valuestring, "stop") == 0) {
+                const bool urgent_flush = cJSON_IsTrue(cJSON_GetObjectItem(root, "flush"));
+                Schedule([this, urgent_flush]() {
+                    if (urgent_flush) {
+                        audio_service_.ResetDecoder();
+                        Board::GetInstance().GetAudioCodec()->EnableOutput(false);
                     }
-                });
-            } else if (strcmp(state->valuestring, "stop") == 0) {''',
+                    if (GetDeviceState() == kDeviceStateSpeaking) {""",
         )
-        files[app_path] = source.encode()
+        files[path] = text.encode()
         return files
     files = cores3_files(target)
     if board == "cores3":

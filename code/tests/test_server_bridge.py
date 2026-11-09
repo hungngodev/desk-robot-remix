@@ -266,83 +266,115 @@ async def test_transmit_clears_speaking_status_when_final_stop_fails(bridge, mon
     assert cleared == [True]
 
 
+def test_only_current_duplex_speaker_passes_microphone_while_group_talks(bridge):
+    one, two = conn("mac-01"), conn("mac-02")
+    one.client_listen_mode = "realtime"
+    two.client_listen_mode = "realtime"
+    bridge.lease_ids = frozenset(["mac-01", "mac-02"])
+    bridge.lease_until = time.monotonic() + 20
+    bridge.active_device_id = "mac-01"
+    assert not bridge.suppress_message(one, b"live clean microphone PCM")
+    assert bridge.suppress_message(two, b"the other robot heard robot 1")
+    assert bridge.suppress_message(one, '{"type":"listen","state":"start"}')
+    one.client_listen_mode = "auto"  # no confirmed head AEC: fail closed
+    assert bridge.suppress_message(one, b"echo-only unclean PCM")
 
-async def test_authenticated_interrupt_requests_head_abort_without_waiting_on_speech_lock(bridge):
-    connection = conn("mac-01")
+
+async def test_real_time_user_double_talk_aborts_peer_speech_with_immediate_dma_flush(bridge):
     sent = []
 
-    class Socket:
-        async def send(self, data):
-            sent.append(json.loads(data))
+    class Websocket:
+        async def send(self, content):
+            sent.append(json.loads(content))
 
-    connection.websocket = Socket()
-    connection.session_id = "socket-session-1"
-    bridge.register(connection)
-    async with TestClient(TestServer(bridge.create_app())) as client:
-        auth = {"Authorization": "Bearer " + "s" * 40}
-        assert (await client.post("/interrupt", json={"device_id": "mac-01"})).status == 401
-        assert (await client.post(
-            "/interrupt", headers=auth, json={"device_id": "foreign"}
-        )).status == 400
-        await bridge.speaker_lock.acquire()
-        try:
-            result = await asyncio.wait_for(
-                client.post("/interrupt", headers=auth, json={"device_id": "mac-01"}),
-                1,
-            )
-            assert result.status == 200
-            data = await result.json()
-            assert data["head_flush_requested"] is True
-            assert data["head_flush_acknowledged"] is False
-            assert data["audible_stop_verified"] is False
-            assert connection.client_abort is True
-            assert bridge.interrupt_generation["mac-01"] == 1
-            assert sent == [{
-                "type": "tts", "state": "abort", "session_id": "socket-session-1"
-            }]
-        finally:
-            bridge.speaker_lock.release()
+    first, second = conn("mac-01"), conn("mac-02")
+    first.websocket = Websocket()
+    first.session_id = "private-session"
+    first.clearSpeakStatus = lambda: None
+    first.client_listen_mode = "realtime"
+    second.client_listen_mode = "realtime"
+    bridge.register(first)
+    bridge.register(second)
+    bridge.lease_ids = frozenset(["mac-01", "mac-02"])
+    bridge.lease_until = time.monotonic() + 20
+    bridge.active_device_id = "mac-01"
+    await bridge.speaker_lock.acquire()
+    try:
+        assert not await bridge.interrupt_for_user_voice(first, False)
+        assert not await bridge.interrupt_for_user_voice(first, True)
+        assert not await bridge.interrupt_for_user_voice(second, True)
+        assert not sent
+        assert await bridge.interrupt_for_user_voice(first, True)
+        assert first.client_abort is True
+        assert bridge.was_interrupted_by_human("mac-01")
+        assert bridge.lease_stopping
+        assert sent == [
+            {
+                "type": "tts", "state": "stop", "flush": True,
+                "session_id": "private-session",
+            }
+        ]
+        assert not await bridge.interrupt_for_user_voice(first, True)
+    finally:
+        bridge.speaker_lock.release()
+    await bridge.lease_cleanup_task
+    assert bridge.lease_ids == frozenset()
+    assert not bridge.lease_stopping
+    assert not bridge.was_interrupted_by_human("mac-01")
 
 
-async def test_interrupt_fences_inflight_and_queued_speech(bridge, monkeypatch):
-    device = "mac-01"
-    connection = conn(device)
-    connection.session_id = "listen"
-    sent = []
-
-    class Socket:
-        async def send(self, payload):
-            sent.append(payload)
-
-    connection.websocket = Socket()
-    bridge.register(connection)
-    bridge.lease_ids = frozenset([device])
-    bridge.lease_until = time.monotonic() + 10
-    handlers = {route.resource.canonical: route.handler for route in bridge.create_app().router.routes()}
-    monkeypatch.setattr(bridge, "wav_audio", lambda _: b"RIFF")
-    entered = asyncio.Event()
-    release = asyncio.Event()
-
-    async def blocked_encode(_):
-        entered.set()
-        await release.wait()
-        return [b"opus"]
-
-    # Replace asyncio.to_thread only locally to hold the encode boundary.
-    # Abort must invalidate the generation before any packet is transmitted.
-    async def to_thread_(_func, _arg):
-        return await blocked_encode(_arg)
-
-    monkeypatch.setattr(bridge.asyncio, "to_thread", to_thread_)
-    pending = asyncio.create_task(
-        handlers["/speak"](
-            body_request({"device_id": device, "text": "Old speech", "wav_base64": ""})
-        )
+async def test_server_overlay_routes_actual_double_talk_audio_to_guard(bridge):
+    spec = importlib.util.spec_from_file_location(
+        "real_upstream_overlay", ROOT / "laptop/server/install_overlay.py"
     )
-    await entered.wait()
-    await handlers["/interrupt"](body_request({"device_id": device}))
-    release.set()
-    with pytest.raises(RuntimeError, match="stopped"):
-        await pending
-    assert len(sent) == 1
-    assert json.loads(sent[0])["state"] == "abort"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    files = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
+    audio = files["core/handle/receiveAudioHandle.py"]
+    assert "await desk_robot_bridge.interrupt_for_user_voice(conn, have_voice)" in audio
+    assert audio.index("await desk_robot_bridge.interrupt_for_user_voice") < audio.index(
+        "await conn.asr.receive_audio"
+    )
+    assert "and not desk_robot_bridge.was_interrupted_by_human" in audio
+    assert '"flush": True' in (
+        ROOT / "laptop/server/overlay/desk_robot_bridge.py"
+    ).read_text()
+
+
+async def test_stop_during_group_playback_marks_urgent_flush(bridge, monkeypatch):
+    sent = []
+
+    class Socket:
+        async def send(self, frame):
+            sent.append(frame)
+
+    connection = conn("mac-01")
+    connection.conn_from_mqtt_gateway = False
+    connection.websocket = Socket()
+    connection.session_id = "session"
+    connection.last_activity_time = 0
+    connection.clearSpeakStatus = lambda: None
+    bridge.lease_ids = frozenset(["mac-01"])
+    bridge.lease_until = time.monotonic() + 30
+    bridge.active_device_id = "mac-01"
+
+    async def send_tts(connection, state, text=None):
+        sent.append(state)
+
+    monkeypatch.setitem(
+        sys.modules, "core.handle.sendAudioHandle",
+        SimpleNamespace(send_tts_message=send_tts)
+    )
+
+    async def abort_midplayback():
+        await asyncio.sleep(0)
+        connection.client_abort = True
+
+    kill = asyncio.create_task(abort_midplayback())
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await bridge.transmit(connection, "short greeting", [b"one", b"two"])
+    await kill
+    assert "start" in sent
+    assert any(
+        isinstance(value, str) and '"flush": true' in value for value in sent
+    )

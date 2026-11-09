@@ -73,3 +73,50 @@ def test_private_settings_write_only_selected_fifth_identity(tmp_path, monkeypat
     assert target.stat().st_mode & 0o777 == 0o600
     output = capsys.readouterr().out
     assert first not in output and fifth not in output and "robot-05" in output
+
+
+def test_pinned_sense_overlay_provides_real_reference_channels_and_explicit_dma_flush():
+    """Inspect actual generated upstream output, not merely static local strings."""
+    spec = importlib.util.spec_from_file_location(
+        "sense_overlay_aec", ROOT / "firmware/head/install_overlay.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    files = module.planned_files(ROOT / "upstream/xiaozhi-esp32", "sense")
+    base = "main/boards/desk-robot/desk-robot-sense-s3/"
+    assert (base + "sense_reference_codec.h") in files
+    assert (base + "sense_reference_codec.cc") in files
+    codec = files[base + "sense_reference_codec.cc"].decode()
+    header = files[base + "sense_reference_codec.h"].decode()
+    board = files[base + "desk_robot_sense.cc"].decode()
+    assert "input_reference_ = true" in codec
+    assert "input_channels_ = 2" in codec
+    assert "NoAudioCodecSimplexPdm::Read" in codec
+    assert "NoAudioCodec::Write" in codec
+    assert "SenseReferenceCodec audio_codec" in board
+    assert "sense_reference_codec.h" in board
+    assert "ReadReferenceLocked" in header
+    kconfig = files["main/Kconfig.projbuild"].decode()
+    assert (
+        "USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_SENSE_S3"
+    ) in kconfig
+    application = files["main/application.cc"].decode()
+    assert "cJSON_IsTrue(cJSON_GetObjectItem(root, \"flush\"))" in application
+    assert "audio_service_.ResetDecoder();" in application
+    assert "GetAudioCodec()->EnableOutput(false)" in application
+    config = json.loads(files[base + "config.json"])
+    extras = config["builds"][0]["sdkconfig_append"]
+    assert "CONFIG_USE_AUDIO_PROCESSOR=y" in extras
+    assert "CONFIG_USE_DEVICE_AEC=y" in extras
+    assert "CONFIG_USE_SERVER_AEC=n" in extras
+
+
+def test_aec_port_preserves_existing_sense_pin_map_and_offline_scope():
+    config = (ROOT / "firmware/head/sense/config.h").read_text()
+    assert "AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42" in config
+    assert "AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41" in config
+    assert "AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_4" in config
+    assert "AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_7" in config
+    assert "AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_8" in config
+    assert "ROBOT_UART_TX GPIO_NUM_2" in config
+    assert "ROBOT_UART_RX GPIO_NUM_1" in config

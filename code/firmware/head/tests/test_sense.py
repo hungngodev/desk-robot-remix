@@ -83,7 +83,8 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertFalse(set(pins.values()) & {3, 19, 20, 26, 27, 28, 29, 30, 31,
                                               32, 33, 34, 35, 36, 37, 43, 44})
         source = (board / 'desk_robot_sense.cc').read_text()
-        self.assertIn('NoAudioCodecSimplexPdm', source)
+        self.assertIn('SenseReferenceCodec audio_codec', source)
+        self.assertIn('NoAudioCodecSimplexPdm::Read', (board / 'sense_reference_codec.cc').read_text())
         self.assertNotIn('NoAudioCodecSimplex audio_codec', source)
         self.assertIn('esp_lcd_new_panel_ssd1306', source)
         self.assertIn('#include <esp_lcd_panel_vendor.h>', source)
@@ -98,10 +99,6 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('uart_set_pin(kUart, 2, 1,', (board / 'robot_bridge.cc').read_text())
         self.assertEqual((self.root / 'main/boards/common/esp32_camera.cc').read_text()
                          .count('camera_lock(AccessMutex())'), 6)
-        application = (self.root / 'main/application.cc').read_text()
-        self.assertIn('strcmp(state->valuestring, "abort") == 0', application)
-        self.assertIn('audio_service_.ResetDecoder();', application)
-        self.assertEqual(application.count('strcmp(state->valuestring, "abort") == 0'), 1)
 
     def test_sense_reinstall_drift_and_exact_restore(self):
         overlay.apply(self.root, 'sense')
