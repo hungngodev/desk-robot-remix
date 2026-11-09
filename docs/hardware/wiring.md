@@ -1,14 +1,13 @@
 # Wiring and power — proposed stepper/sensor revision
 
 Updated 2026-11-06. **Use only the matching profile.** Default `esp32_stepper` now compiles with
-eight phase outputs and portable cliff policy, but no sensor I/O/calibration:
-it refuses to arm. Explicit `esp32dev` preserves four DC H-bridge inputs and
+eight phase outputs and five sensor acquisition channels. It still refuses to arm without real mounted sensors, measured local calibration and manual USB rearm. Explicit `esp32dev` preserves four DC H-bridge inputs and
 must never be connected to this stepper map. This is not physically qualified.
 
 ## Proposed WROOM allocation
 
 Check actual ESP32-WROOM-32 development-board labels and exposed pins first.
-Avoid flash GPIO6–11, strapping GPIO0/2/5/12/15 and programming UART0 GPIO1/3.
+Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/3.
 
 | WROOM GPIO | Proposed use |
 | --- | --- |
@@ -17,7 +16,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/5/12/15 and programming UART0 GPIO1/3.
 | 13, 14, 25, 26 | Left ULN2003 IN1–IN4, phase order to verify |
 | 27, 32, 33, 23 | Right ULN2003 IN1–IN4, phase order to verify |
 | 21 / 22 | Body I²C SDA / SCL to mux upstream |
-| 4 | Mux active-low RESET, only if board exposes and electrically supports it |
+| No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not ESP32 strapping GPIO4 |
 | GND | Head, body, sensors and actuator-supply common logic reference |
 |34 | Proposed Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Bench test and firmware integration pending |
 | Optional35/36/39 | Input-only bumper/interrupt signals with **external** pullups as needed; not implemented |
@@ -46,11 +45,11 @@ acceleration, loaded speed, stop/hold current and thermal limits need measuremen
 ```text
 WROOM GPIO21/22 -> owned BerryIMU upstream (revision/addresses to verify), candidate
                -> TCA9548A upstream I²C
-                  channel 0 -> front-left downward ToF (final supported part TBD)
-                  channel 1 -> front-right downward ToF (final supported part TBD)
-                  channel 2 -> rear-left downward ToF (final supported part TBD)
-                  channel 3 -> rear-right downward ToF (final supported part TBD)
-                  channel 4 -> separate forward-facing obstacle VL53L0X
+                  channel 0 -> front-left downward VL53L4CD candidate, 0x29
+                  channel 1 -> front-right downward VL53L4CD candidate, 0x29
+                  channel 2 -> rear-left downward VL53L4CD candidate, 0x29
+                  channel 3 -> rear-right downward VL53L4CD candidate, 0x29
+                  channel 4 -> separate forward VL53L4CD candidate, 0x29
 Sense -> separate head-owned OLED bus
 ```
 
@@ -88,8 +87,7 @@ qualification is still pending, and its SD slot must stay empty/disabled.
 [RIO's reference](../research/2026-11-03-sense-realtime-reuse.md) uses speaker
 BCLK7/LRC8/DIN9 and amplifier SD44. Those are **not** the compiled allocation
 above. Port software/reference handling to one checked map before wiring; do not
-mix the two tables or add an SD44 wire to the current build. Software echo
-cancellation and ordinary-speech interruption remain unimplemented in this target.
+mix the two tables or add an SD44 wire to the current build. Sense AEC software reference and urgent PCM flush are in the stacked firmware implementation. No hardware acoustic interruption gate has passed.
 
 Initial two-USB head/body test joins **TX, RX and GND only**; keep 5 V rails
 separate. Do not flash CoreS3/Freenove firmware onto Sense, or S3 firmware onto
@@ -173,3 +171,24 @@ against the intended surfaces and height before substituting: it requires a
 different driver and may exceed the existing budget at current breakout prices.
 No optical scan time, stopping margin or surface support is physically
 qualified. [Full evidence and blockers](../research/2026-11-09-html-verification.md).
+
+## Five-channel sensor integration and measured local USB calibration
+
+The current esp32_stepper target selects the same **VL53L4CD driver for all five sensors**, reusing pinned Pololu ST-derived code for device setup and start, plus bounded checked Wire measurement reads. Neither actual breakout part, case optic fit, five-unit purchase or loaded stop margin is qualified. Historic VL6180X and VL53L0X suggestions are **not** the current firmware purchase list.
+
+WROOM GPIO21 SDA and GPIO22 SCL go to TCA9548A at 0x70, with channels 0,1,2,3 allocated to individual downward corners and channel 4 to forward obstacle. Each VL53L4CD uses isolated 0x29 I2C. Shared 3.3V logic and ground, verified pullups. Connect mux active-low RESET to 3.3V pullup, never strapping GPIO4.
+
+Local measured calibration commands are accepted only on the WROOM programming USB Serial. They are rejected over the head UART or Mac network service. **The values below must come from a real measured rig**, actual black/glossy/transparent surfaces and loaded stopping/scan latency with a catch tray:
+
+    calfloor 0 MIN_MM MAX_MM
+    calfloor 1 MIN_MM MAX_MM
+    calfloor 2 MIN_MM MAX_MM
+    calfloor 3 MIN_MM MAX_MM
+    calfront NEAR_MM MAX_MM
+    calfresh MAX_SAMPLE_AGE_MS
+    calcommit
+    rearm
+
+Limits range 1..1300 mm; freshness is 30..200ms. All four floor, front and freshness settings must be staged before the atomic commit; calabort clears the stage. The body saves a versioned checksummed calibration in NVS, leaves motors disarmed, and requires five fresh measurements plus a NEW direct USB rearm before motion. Reboot and recovering I2C never resume old motion. Any stale/invalid/out-of-range sensor or bus fault latches stop, with no blind reversal. Measure real lead and stopping margin before putting tracks on a desk.
+
+The pinned Pololu generic read helper can divide by zero for zero SPAD returns; the runtime uses only its initialization and start functions, and a checked raw I2C results path. All of this is software integration, **not** a verified physical stop test or a solution to the current $50 delivered budget contradiction.
