@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 
 from .config import Settings
+from .memory import MemoryStore
 from .controller import Coordinator
 from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
 from .simulator import SimulatedChat, SimulatedHead, SimulatedSpeaker, SimulationVision
@@ -22,8 +23,9 @@ class Runtime:
             vision = YoloWorldVision(settings.vision_weights)
             chat = OllamaChat(settings, self.client)
             speaker = KokoroHeadSpeaker(settings, self.client)
+        self.memory = MemoryStore(settings.memory_dir, [r.id for r in settings.robots])
         self.coordinator = Coordinator(settings, heads, vision)
-        self.conversation = Conversation(settings, chat, speaker)
+        self.conversation = Conversation(settings, chat, speaker, memory=self.memory)
 
     async def close(self):
         await self.conversation.stop()
