@@ -48,6 +48,17 @@ class CliffGuard {
   bool evaluate(std::uint32_t now_ms);
   bool try_rearm(std::uint32_t now_ms);
   bool configured() const { return configured_; }
+  const CliffConfig& configuration() const { return config_; }
+  std::uint16_t distance_mm(std::uint8_t channel) const {
+    return channel < kCliffSensorCount && samples_[channel].present ? samples_[channel].mm : 0;
+  }
+  std::uint32_t age_ms(std::uint8_t channel, std::uint32_t now_ms) const {
+    return channel < kCliffSensorCount && samples_[channel].present ?
+        now_ms - samples_[channel].at_ms : 0xFFFFFFFFUL;
+  }
+  bool sample_valid(std::uint8_t channel) const {
+    return channel < kCliffSensorCount && samples_[channel].present && samples_[channel].valid;
+  }
   CliffFault fault() const { return fault_; }
   std::uint8_t fault_sensor() const { return fault_sensor_; }
   static const char* fault_name(CliffFault fault);
