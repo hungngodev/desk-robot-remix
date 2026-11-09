@@ -17,6 +17,7 @@ class Head(Protocol):
     async def command(self, command: str) -> dict: ...
     async def status(self) -> dict: ...
     async def snapshot(self) -> bytes: ...
+    async def emote(self, emotion: str) -> dict: ...
 
 
 def validate_command(command: str) -> str:
@@ -90,6 +91,14 @@ class HttpHead:
             if data.get("robot_id") != self.config.id:
                 raise HeadError("Status robot identity mismatch")
             return data
+
+    async def emote(self, emotion: str) -> dict:
+        if emotion not in {"neutral", "happy", "thinking", "surprised", "sad", "sleepy"}:
+            raise ValueError("Unsupported robot expression")
+        data = (await self._request("POST", "/api/emotion", json={"emotion": emotion})).json()
+        if not data.get("ok") or data.get("robot_id") != self.config.id:
+            raise HeadError("Unmatched emotion acknowledgement")
+        return data
 
     async def snapshot(self) -> bytes:
         # Camera may take longer than a keepalive transaction; head itself serializes UART/camera.
