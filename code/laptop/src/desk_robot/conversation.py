@@ -124,6 +124,7 @@ class Conversation:
         self.settings, self.chat, self.speaker = settings, chat, speaker
         self.memory = memory
         self.speaker_lock = asyncio.Lock()
+        self.session_lock = asyncio.Lock()  # One owned device-audio session across group and pet.
         self.active: asyncio.Task | None = None
         self.histories: dict[str, list[dict]] = {}
 
@@ -180,7 +181,7 @@ class Conversation:
         transcript = []
         try:
             async with asyncio.timeout(300):
-                async with self.speaker.session(robots):
+                async with self.session_lock, self.speaker.session(robots):
                     for index in range(turns):
                         robot = robots[index % len(robots)]
                         text = await self.chat.reply(list(self.histories[robot.id]))
@@ -199,6 +200,23 @@ class Conversation:
             return transcript
         finally:
             self.active = None
+
+    async def say_proactive(self, robot: RobotConfig, text: str) -> bool:
+        """Reuse exactly one speaker/session owner for optional autonomous remarks.
+
+        The caller owns cancellation on quiet/user speech. This method deliberately
+        cannot make the model's audio bypass the same exclusive bridge lease used
+        for robot-to-robot group conversation.
+        """
+        if self.active is not None and not self.active.done():
+            return False
+        async with self.session_lock:
+            if self.active is not None and not self.active.done():
+                return False
+            async with self.speaker.session([robot]):
+                async with self.speaker_lock:
+                    await self.speaker.say(robot, text)
+            return True
 
     async def stop(self):
         task = self.active
