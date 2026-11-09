@@ -5,6 +5,7 @@
 #if DESK_ROBOT_STEPPER
 #include "CliffGuard.h"
 #include "StepperDrive.h"
+#include "TofBus.h"
 #endif
 
 namespace {
@@ -15,6 +16,7 @@ desk_robot::CliffGuard cliff_guard;
 desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_guard);
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
+desk_robot::TofBus tof;
 #else
 desk_robot::BodyControl control;
 #endif
@@ -176,6 +178,18 @@ void setup() {
   zero_motor_pwm();
   Serial.begin(115200);
   head_uart.begin(115200, SERIAL_8N1, body_pins::kUartRx, body_pins::kUartTx);
+#if DESK_ROBOT_STEPPER
+  // Keep motors and servos de-energized through all five device inits.
+  // No accepted calibration is embedded in this image. A local calibration
+  // commit and a fresh manual USB rearm are required before any arm can pass.
+  if (!tof.begin(body_pins::kSensorSda, body_pins::kSensorScl,
+                 body_pins::kMuxReset)) {
+    cliff_guard.bus_fault();
+    Serial.println("ERR sensor_init check_mux_0x70_and_five_vl53l4cd_channels");
+  } else {
+    Serial.println("OK sensor_init five_vl53l4cd_channels");
+  }
+#endif
   Serial.println(pwm_ready ?
 #if DESK_ROBOT_STEPPER
       "READY desk-robot-body stepper disarmed safety_unconfigured" :
@@ -186,6 +200,11 @@ void setup() {
 }
 
 void loop() {
+#if DESK_ROBOT_STEPPER
+  // Real I2C sampling precedes every physical motor update. The pure
+  // CliffGuard remains the only local motion/safety authority.
+  if (tof.ready()) tof.poll(cliff_guard, millis());
+#endif
   control.tick(millis());
   apply_outputs();
   process_input(head_uart, head_receiver);
