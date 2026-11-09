@@ -237,7 +237,7 @@ A single star count is not a quality score: Xiaozhi is a popular full-stack base
 *Checked source candidates and proposed HTML tuning remain distinct from implemented hardware and measured test results.*
 
 
-This is the **lossless decision reminder**, not an approved performance specification. The user's full `ESP32 Deskpet Ideas.html` contains detailed proposed values in live topic sections 8–16 and extensive research in sections 17–23. Values below are *transcribed as proposed* so they do not vanish behind a generic "research later" statement. Accept only after the actual code, manufacturer data, source license and physical test support them. The [system contract](../product-definition.md), [existing A1–A12](../product-definition.md#acceptance-before-duplication), [acceptance ledger](../records/verification.md) and WROOM safety policy overrule incompatible proposals.
+This is the **lossless decision reminder**, not an approved performance specification. The user's full `ESP32 Deskpet Ideas.html` contains detailed proposed values in the current Power, Drive, Cliff, Touch, Audio, Head, Mac and Proactive topics and the later historical research library. Values below are *transcribed as proposed* so they do not vanish behind a generic "research later" statement. Accept only after the actual code, manufacturer data, source license and physical test support them. The [system contract](../product-definition.md), [existing A1–A12](../product-definition.md#acceptance-before-duplication), [acceptance ledger](../records/verification.md) and WROOM safety policy overrule incompatible proposals.
 
 ## HTML topic 8: power, battery, startup and safety states
 
@@ -301,7 +301,7 @@ This is the **lossless decision reminder**, not an approved performance specific
 * OOMWOO docking concept: IR **NEC bursts** rather than continuous carrier into `TSOP38238` receiver, contacts unenergized until physically verified dock, proposed **10s** charge signal rise and **3** bounded retries. **Not approved on this robot**; charging power/contact electrical safety and collision/navigation need independent design/acceptance. Returning automatically to a person is **not** demonstrated by AprilTag alone.
 * Health states `NORMAL -> DEGRADED -> STOPPED -> RECOVERY`, age/quality rather than unchanged value; HTML proposes 50 fresh reads to regain health and some reverse/pivot allowance when one channel dies. The latter **conflicts with this project's canonical fail-closed guard and is rejected**. Logging can have graded health icons, but **movement remains stopped/latching on any essential channel loss** with local USB recovery and new operator enable only.
 
-## HTML topic 16 and sections 17–23: preserve the idea library, do not follow outdated wiring
+## Current proactive topic and historical research library: preserve all ideas, not outdated wiring
 
 The current research integration topic explicitly links camera, exploration, audio, sensor expansion and personalities to the original library. The legacy Xiaozhi First/mod packs, Emotion Lab, 6-week schedule, sensor leaderboard/waves, 24 idea chart, specific 9 one-part hacks, 7 code-only wild ideas, Nov 7/9 new finds, creator tutorials, Reddit ideas, Spec Pack, old BOM and forks still have full coverage in [200-entry feature register](../source-map.md) and [131 exact original URL index](../source-map.md). Those source paragraphs do **not** become product requirements or proof each project/tutorial source was downloaded.
 
