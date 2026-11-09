@@ -48,6 +48,7 @@ class CliffGuard {
   bool evaluate(std::uint32_t now_ms);
   bool try_rearm(std::uint32_t now_ms);
   bool configured() const { return configured_; }
+  const CliffConfig& configuration() const { return config_; }
   CliffFault fault() const { return fault_; }
   std::uint8_t fault_sensor() const { return fault_sensor_; }
   static const char* fault_name(CliffFault fault);
