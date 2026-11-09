@@ -3,7 +3,7 @@
 Build and qualify one robot before making four copies. The
 [product definition](product-definition.md) owns appearance, behavior and
 acceptance criteria. The [parts list](hardware/parts.md) owns inventory and
-shopping. This page owns the original seven physical build stages; the [full day-zero forward-only sequence](PLAN.md) owns the complete integrated experience, including proactive conversation, memory, all selected sensors and expansion interfaces. Both descriptions preserve the same final product rather than replacing it mid-build.
+shopping. This page owns the original seven physical build stages; the [full day-zero forward-only sequence](#complete-linear-build-and-permanent-verification-stages) owns the complete integrated experience, including proactive conversation, memory, all selected sensors and expansion interfaces. Both descriptions preserve the same final product rather than replacing it mid-build.
 
 ## Build order
 
