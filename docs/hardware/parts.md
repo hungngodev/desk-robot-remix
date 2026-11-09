@@ -45,7 +45,7 @@ quantity and hardware revision remain open.
 
 ## Missing for one complete core
 
-**Sensor purchase hold, 2026-11-09:** The old 4× VL6180X shopping recommendation is withdrawn from the active purchase basket because the manufacturer marks that part out of production. The role remains **four downward plus one front obstacle sensor**. Select and qualify the actual short-range part before editing the physical wiring/print geometry and calculating final delivered cost. Historical listings remain in the research audit, **not** an approved order.
+**Sensor purchase hold, 2026-11-09:** The old 4× VL6180X shopping recommendation is withdrawn from the active purchase basket because the manufacturer marks that part out of production. The role remains **four downward plus one front obstacle sensor**. The pinned Pololu library and five-sensor firmware now select VL53L4CD for every role; verify actual carrier, cost, optics and physical stop before editing final print geometry and calculating final delivered cost. Historical listings remain in the research audit, **not** an approved order.
 
 Unless newly reported as owned, plan to acquire these. Counts are per one / five
 finished robots; quote and validate robot one before ordering the remaining sets.
@@ -54,8 +54,8 @@ finished robots; quote and validate robot one before ordering the remaining sets
 | --- | ---: | --- |
 |[MAX98357A I2S amplifier](https://electropeak.com/max98357-i2s-audio-amplifier-module)|1 /5 | Default speaker output; check the HiLetgo reuse option below before ordering |
 |[Mini speaker](https://electropeak.com/8-ohm-1w-20mm-diameter-speaker)|1 /5 |20mm8ohm1W is the existing candidate; cavity/acoustics unqualified |
-| Four **qualified short-range downward ToF breakouts, exact part OPEN** | 4 / 20 | Required four corner floor roles, **not purchase ready**. ST lists [VL6180X obsolete](https://www.st.com/en/imaging-and-photonics-solutions/vl6180x.html). [VL53L4CD active alternative](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html) requires one real low-mount sample, driver, surface and price check before ordering. Do not substitute a single front IR board |
-|[VL53L0X breakout](https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole)|1 /5 | Separate forward obstacle view, not gripper feedback or all-direction collision protection |
+| Four VL53L4CD compatible downward carriers, final exact breakout UNQUALIFIED | 4 / 20 | Software driver chosen and integrated, hardware not approved for purchase. Inspect 3.3V carrier and actual optical height on every surface before buying all five. ST lists previous VL6180X obsolete. |
+| Fifth VL53L4CD compatible forward obstacle carrier, exact physical breakout UNQUALIFIED | 1 /5 | Software uses a fifth VL53L4CD through TCA9548A channel 4. Do not purchase the historic VL53L0X listing for this firmware. |
 |[TCA9548A mux](https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board)|1 /5 | Isolates the equal-address ToFs |
 |Matched rechargeable1S kit|1 set /5 sets | Cell+holder/pack, charging, protection, regulated5V output; integrated module may combine functions. Current capability/thermal/fit/quote not selected |
 |Rated power wire, switch, connectors/fuse, fasteners, decoupling|1 set /5 sets | Exact sizes/ratings depend on selected power system and loaded tests |
