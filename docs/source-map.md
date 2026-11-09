@@ -8,7 +8,7 @@ that all components have been integrated. The product requirements remain in
 [guide audit](research/2026-11-03-guide-audit.md), and
 [case audit](research/2026-11-03-rounded-cases.md).
 
-**Complete research preservation:** The [day-zero reuse shortlist](research/2026-11-03-active-pet-sources.md) gives inspected implementation files and compatible integration boundaries. The [200-entry feature register](source-map.md) records original and historic sensor, game, personality and robotics ideas; [all 131 unique external links from the original 23-section HTML](source-map.md) are preserved without claiming every destination was verified. The [linear integration plan](PLAN.md) keeps these visible before buying or printing. Existing source reviews below are retained, not superseded by a small shortlist.
+**Complete research preservation:** The [day-zero reuse shortlist](research/2026-11-03-active-pet-sources.md) gives inspected implementation files and compatible integration boundaries. The [200-entry feature register](#original-html-feature-and-sensor-idea-register) records original and historic sensor, game, personality and robotics ideas; [all 131 unique external links from the original 23-section HTML](#complete-original-html-research-link-index) are preserved without claiming every destination was verified. The [linear integration plan](PLAN.md) keeps these visible before buying or printing. Existing source reviews below are retained, not superseded by a small shortlist.
 
 ## Requirements that govern reuse
 
