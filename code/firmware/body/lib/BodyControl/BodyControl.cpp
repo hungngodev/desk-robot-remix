@@ -150,14 +150,22 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool keepalive = std::strcmp(command, "keepalive") == 0;
   const bool ping = std::strcmp(command, "ping") == 0;
   const bool status = std::strcmp(command, "status") == 0;
-  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status)) {
+  const bool calfloor = std::strcmp(command, "calfloor") == 0;
+  const bool calfront = std::strcmp(command, "calfront") == 0;
+  const bool calfresh = std::strcmp(command, "calfresh") == 0;
+  const bool calcommit = std::strcmp(command, "calcommit") == 0;
+  const bool calabort = std::strcmp(command, "calabort") == 0;
+  const bool calibration = calfloor || calfront || calfresh || calcommit || calabort;
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || calibration)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
   }
   if ((drive && count != 3 && count != 4) ||
-      ((lift || grip) && count != 2) ||
-      (!(drive || lift || grip) && count != 1)) {
+      ((lift || grip || calfresh) && count != 2) ||
+      (calfront && count != 3) ||
+      (calfloor && count != 4) ||
+      (!(drive || lift || grip || calfloor || calfront || calfresh) && count != 1)) {
     std::snprintf(reply, capacity, "ERR %s bad_arguments", command);
     return;
   }
@@ -185,6 +193,83 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR %s out_of_range", command);
       return;
     }
+  }
+
+  if (calibration) {
+    if (!local_safety_rearm || profile_ != BodyProfile::StepperGuarded || guard_ == nullptr) {
+      std::snprintf(reply, capacity, "ERR calibration local_usb_only");
+      return;
+    }
+    if (state_.armed) {
+      std::snprintf(reply, capacity, "ERR calibration disarm_first");
+      return;
+    }
+    if (calabort) {
+      calibration_stage_ = CliffConfig{};
+      calibration_stage_mask_ = 0;
+      std::snprintf(reply, capacity, "OK calabort");
+      return;
+    }
+    if (calfloor) {
+      int channel = 0, minimum = 0, maximum = 0;
+      if (!parse_integer(tokens[1], channel) ||
+          !parse_integer(tokens[2], minimum) ||
+          !parse_integer(tokens[3], maximum) ||
+          channel < 0 || channel >= kFloorSensorCount ||
+          minimum < 1 || maximum < minimum || maximum > 1300) {
+        std::snprintf(reply, capacity, "ERR calfloor channel_0to3_min_max_1to1300");
+        return;
+      }
+      calibration_stage_.floor[channel] = {
+          static_cast<std::uint16_t>(minimum),
+          static_cast<std::uint16_t>(maximum)};
+      calibration_stage_mask_ |= static_cast<std::uint8_t>(1U << channel);
+      std::snprintf(reply, capacity, "OK calfloor channel=%d", channel);
+      return;
+    }
+    if (calfront) {
+      int near_mm = 0, far_mm = 0;
+      if (!parse_integer(tokens[1], near_mm) ||
+          !parse_integer(tokens[2], far_mm) ||
+          near_mm < 1 || far_mm <= near_mm || far_mm > 1300) {
+        std::snprintf(reply, capacity, "ERR calfront near_far_1to1300");
+        return;
+      }
+      calibration_stage_.front_obstacle_mm = static_cast<std::uint16_t>(near_mm);
+      calibration_stage_.front_max_mm = static_cast<std::uint16_t>(far_mm);
+      calibration_stage_mask_ |= 0x10U;
+      std::snprintf(reply, capacity, "OK calfront");
+      return;
+    }
+    if (calfresh) {
+      int max_age_ms = 0;
+      if (!parse_integer(tokens[1], max_age_ms) ||
+          max_age_ms < 30 || max_age_ms > 200) {
+        std::snprintf(reply, capacity, "ERR calfresh measured_30to200ms");
+        return;
+      }
+      calibration_stage_.freshness_ms = static_cast<std::uint32_t>(max_age_ms);
+      calibration_stage_mask_ |= 0x20U;
+      std::snprintf(reply, capacity, "OK calfresh");
+      return;
+    }
+    // All four measured floor intervals, front clearance and sample-age
+    // policy must be staged before a SINGLE atomic configure. No default
+    // sensor geometry is silently adopted or committed by a network command.
+    if (calibration_stage_mask_ != 0x3fU) {
+      std::snprintf(reply, capacity, "ERR calcommit incomplete_stage");
+      return;
+    }
+    calibration_stage_.calibrated = true;
+    if (!guard_->configure(calibration_stage_)) {
+      std::snprintf(reply, capacity, "ERR calcommit invalid_intervals");
+      return;
+    }
+    force_disarm();
+    calibration_stage_ = CliffConfig{};
+    calibration_stage_mask_ = 0;
+    std::snprintf(reply, capacity, "OK calcommit");
+    return;
   }
 
   if (ping) {
