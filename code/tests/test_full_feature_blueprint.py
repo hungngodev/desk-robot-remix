@@ -92,7 +92,7 @@ def test_accepted_experience_and_fail_closed_constraints_are_explicit(pages):
         "camera",
         "max30102",
         "sense",
-        "no blind",
+        "blind reverse",
     ):
         assert claim in contract
     for test in range(1, 13):
