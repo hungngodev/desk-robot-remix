@@ -9,6 +9,7 @@ offload blocking I/O from their asyncio event loop.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import sqlite3
@@ -109,17 +110,12 @@ class MemoryStore:
         when = time.time() if observed_at is None else observed_at
         if not isinstance(when, (int, float)) or isinstance(when, bool) or not 0 <= when < 1e12:
             raise ValueError("Invalid observation clock")
-        if (
-            not isinstance(confidence, (int, float))
-            or isinstance(confidence, bool)
-            or not 0 <= confidence <= 1
-        ):
+        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
             raise ValueError("Confidence outside [0,1]")
-        # Refuse NaN/Inf because they poison ranking and cannot be meaningful evidence.
-        import math
-
         if not math.isfinite(float(when)) or not math.isfinite(float(confidence)):
             raise ValueError("Nonfinite timestamp or confidence")
+        if not 0 <= confidence <= 1:
+            raise ValueError("Confidence outside [0,1]")
         with self._connect(robot_id) as db:
             cursor = db.execute(
                 """INSERT OR IGNORE INTO memories
