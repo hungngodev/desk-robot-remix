@@ -1,4 +1,5 @@
 import asyncio
+import json
 from io import BytesIO
 
 import httpx
@@ -242,8 +243,9 @@ async def test_ollama_vision_receives_two_real_images_and_rejects_ungrounded_ans
         chat = OllamaChat(settings, client)
         result = await chat.observe_change(_jpeg("white"), _jpeg("black"))
         assert result["summary"] == "A new key is visible"
-        payload = requests[0].content.decode()
-        assert '"images"' in payload and '"model":"local-vision"' in payload
+        payload = json.loads(requests[0].content)
+        assert len(payload["messages"][0]["images"]) == 2
+        assert payload["model"] == "local-vision"
 
 
 def test_pet_operator_api_requires_real_credential(settings, tokens, tmp_path):
