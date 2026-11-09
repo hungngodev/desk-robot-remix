@@ -223,7 +223,19 @@ class Conversation:
                 return False
             async with self.speaker.session([robot]):
                 async with self.speaker_lock:
-                    await self.speaker.say(robot, text)
+                    try:
+                        await self.speaker.say(robot, text)
+                    except asyncio.CancelledError:
+                        # Cancelling an HTTP request does not silence an ESP32.
+                        # The Sense firmware must receive the explicit abort
+                        # frame before we release this audio session.
+                        interrupt = getattr(self.speaker, "interrupt", None)
+                        if interrupt is not None:
+                            try:
+                                await asyncio.wait_for(interrupt(robot), timeout=2)
+                            except Exception:
+                                pass  # Still cancel; transport failure remains unverified.
+                        raise
             return True
 
     async def stop(self):
