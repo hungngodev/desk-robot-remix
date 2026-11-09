@@ -95,7 +95,7 @@ and active design before touching geometry.
 - Logic stays 3.3 V. Verify amplifier variant/pins and supply per its documentation.
   Speaker connects **SPK+ to SPK−**, neither output to GND. Limit output for the
   8 Ω / 1 W speaker; check acoustic port and cavity fit.
-- Use a qualified power bank and separate rated actuator branches. Do not route
+- Use the final **qualified matched rechargeable 1S cell, charger/protection and regulated 5V distribution system**, with separately rated actuator branches. An unidentified owned power bank may only be used for isolated bench testing after verifying its output; it is not the selected permanent power architecture. Do not route
   motor current through head/body regulators or laptop USB.
 - On USB with motors absent, verify screen, fresh camera capture, PDM recording,
   speaker/listening transition and head identity before joining UART TX/RX/GND.
