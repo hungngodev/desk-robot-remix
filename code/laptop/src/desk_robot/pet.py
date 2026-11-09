@@ -126,14 +126,12 @@ class PetController:
         state = self.states[robot_id]
         state.quiet = quiet
         if quiet:
-            state.generation += 1
             await self._cancel_speech(robot_id)
         return self.status(robot_id)
 
     async def interrupt(self, robot_id: str) -> dict:
         """Call when actual user speech is detected. Does not claim mic VAD wiring."""
         state = self.states[robot_id]
-        state.generation += 1
         await self._cancel_speech(robot_id)
         return self.status(robot_id)
 
