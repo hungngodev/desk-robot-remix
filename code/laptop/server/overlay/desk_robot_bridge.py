@@ -24,6 +24,7 @@ lease_until = 0.0
 lease_stopping = False
 lease_cleanup_task: asyncio.Task | None = None
 speaker_lock = asyncio.Lock()
+interrupt_generation: dict[str, int] = {}
 
 
 def device_map():
@@ -102,13 +103,16 @@ async def transmit(conn, text, frames):
 
     if conn.conn_from_mqtt_gateway:
         raise ValueError("Speech bridge currently requires direct Xiaozhi WebSocket transport")
+    # A previous user's explicit interrupt must not be lost when an old
+    # provider finishes encoding and tries to begin output.
+    generation = interrupt_generation.get(conn.device_id, 0)
     conn.client_abort = False
     conn.client_is_speaking = True
     try:
         await send_tts_message(conn, "start")
         await send_tts_message(conn, "sentence_start", text)
         for packet in frames:
-            if conn.client_abort or not muted(conn.device_id):
+            if conn.client_abort or generation != interrupt_generation.get(conn.device_id, 0) or not muted(conn.device_id):
                 raise RuntimeError("Speech interrupted or session expired")
             # Reuse the firmware's existing 16 kHz mono, 60 ms Opus framing.
             await conn.websocket.send(packet)
@@ -216,7 +220,37 @@ def create_app():
                 await transmit(connection, text, frames)
         return web.json_response({"transmitted": True, "physical_playback_verified": False})
 
+    async def interrupt(request):
+        """Authenticated, immediate cancellation, including queued audio.
+
+        This endpoint does not detect human speech. VAD/AEC must call it on a
+        genuine user interruption; server cancellation is not yet audible A2.
+        The custom device 'tts abort' branch is installed by the Sense overlay.
+        """
+        body = await request.json()
+        device = body.get("device_id")
+        if not isinstance(device, str) or device not in device_map().values():
+            raise ValueError("Known device_id required")
+        connection = connections.get(device)
+        if connection is None:
+            raise RuntimeError("Robot is offline")
+        interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
+        connection.client_abort = True
+        # Never wait on speaker_lock here: an active stream may be sleeping
+        # under that lock and must be notified immediately.
+        await connection.websocket.send(
+            json.dumps({"type": "tts", "state": "abort", "session_id": connection.session_id})
+        )
+        return web.json_response({
+            "interrupted": True,
+            "device_id": device,
+            "head_flush_requested": True,
+            "head_flush_acknowledged": False,
+            "audible_stop_verified": False,
+        })
+
     app.router.add_post("/session", session)
+    app.router.add_post("/interrupt", interrupt)
     app.router.add_post("/speak", speak)
     return app
 
