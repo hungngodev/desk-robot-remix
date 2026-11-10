@@ -183,9 +183,6 @@ class PetController:
         state = self.states[robot_id]
         previous_count = state.last_touch_count
         state.last_touch_count = count
-        if previous_count is None or count < previous_count:
-            state.last_touch_events = None
-            return
 
         # This field set is emitted by the WROOM gesture classifier, not by a
         # Mac clock estimate from the much slower camera polling interval.
@@ -196,18 +193,25 @@ class PetController:
                 return
             old = state.last_touch_events
             state.last_touch_events = counters
-            if old is None or count - previous_count > 20:
-                return
+            if (
+                old is None or previous_count is None or
+                count < previous_count or count - previous_count > 20
+            ):
+                return  # initial baseline or reset, never replay stored touches
+            deltas = {key: counters[key] - old[key] for key in keys}
+            if any(delta < 0 or delta > 20 for delta in deltas.values()):
+                return  # reject the whole inconsistent frame, not partial events
             for key, kind, phrase in (
                 ("hold_count", "touch_hold", "Someone has held my touch pad"),
                 ("double_count", "touch_double", "Someone has tapped me twice"),
                 ("tap_count", "touch_tap", "Someone has tapped me"),
             ):
-                delta = counters[key] - old[key]
-                if delta < 0 or delta > 20:
-                    return  # a board restart or corrupt frame, not an event
-                if delta:
+                if deltas[key]:
                     await self._remember_touch(robot_id, generation, kind, phrase)
+            return
+
+        if previous_count is None or count < previous_count:
+            state.last_touch_events = None
             return
 
         # Compatibility for a head flashed before typed touch counters existed.
