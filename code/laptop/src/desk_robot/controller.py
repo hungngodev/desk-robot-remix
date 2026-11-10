@@ -192,6 +192,8 @@ class Coordinator:
         calibration.verify_ready()
         if calibration.simulation_only and self.settings.mode != "simulation":
             raise OperationError("Simulation calibration cannot be used on hardware")
+        if self.settings.mode == "hardware" and calibration.hold_seconds < 3:
+            raise OperationError("Real pickup requires at least three seconds of verified hold")
         return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
 
     async def _observe(self, robot_id: str, target: str, c: Calibration) -> Detection:
@@ -266,10 +268,53 @@ class Coordinator:
             raise OperationError(
                 "Pickup unverified: target did not remain stable in raised-jaw region"
             )
+        # The existing pickup ended after a hold, leaving a real key or candy
+        # suspended in the claw. Placement is a separate, observed phase: do
+        # not open the jaws unless the object is visibly back over the
+        # calibrated ground area. No blind wheel movement or drop command.
+        job.events.append("lift and hold visually verified; begin supervised placement")
+        await head.command(f"lift {c.lift_down}")
+        await asyncio.sleep(c.servo_settle_seconds)
+        lowered = await self._observe(job.robot_id, target, c)
+        lowered_ground = c.ground(lowered.center)
+        if (
+            not c.within(lowered_ground)
+            or max(abs(lowered_ground[i] - c.grip_ground_mm[i]) for i in (0, 1))
+            > c.alignment_tolerance_mm * 2
+        ):
+            raise OperationError("Placement unverified: object not over calibrated release area")
+
+        # Release only after observing the object near the table, then raise
+        # the empty jaws to distinguish a placed object from one stuck in them.
+        await head.command(f"grip {c.grip_open}")
+        await asyncio.sleep(c.servo_settle_seconds)
+        await head.command(f"lift {c.lift_up}")
+        await asyncio.sleep(c.servo_settle_seconds)
+        placed_positions = []
+        for sample in range(2):
+            if sample:
+                await asyncio.sleep(0.15)
+            placed = await self._observe(job.robot_id, target, c)
+            ground = c.ground(placed.center)
+            if (
+                not c.within(ground)
+                or max(abs(ground[i] - lowered_ground[i]) for i in (0, 1))
+                > c.alignment_tolerance_mm * 2
+            ):
+                raise OperationError(
+                    "Placement unverified: object not stable on calibrated ground"
+                )
+            placed_positions.append(ground)
+        if max(
+            abs(placed_positions[0][i] - placed_positions[1][i]) for i in (0, 1)
+        ) > c.alignment_tolerance_mm:
+            raise OperationError("Placement unverified: object moved after jaw withdrawal")
+        job.events.append("two frames support placement after jaw withdrawal")
         return {
             "visually_verified": True,
-            "criterion": "two fresh raised-jaw frames, upward displacement, outside floor region",
+            "placed_visually_verified": True,
+            "criterion": "raised-jaw lift and hold followed by observed lower, release and stable placement",
             "physical_acceptance_pass": False,
             "target": target,
-            "note": "Visual evidence is experimental, not force sensing or a physical acceptance trial",
+            "note": "Image evidence is experimental; no physical 10 mm lift or loaded object acceptance is claimed",
         }
