@@ -97,8 +97,12 @@ async def test_simulated_closed_loop_pickup_is_not_acceptance(settings):
         await c.tasks[job.id]
         assert job.state == "succeeded", job.error
         assert job.result["visually_verified"]
+        assert job.result["placed_visually_verified"]
         assert job.result["physical_acceptance_pass"] is False
         assert any(s.startswith("drive ") for s in head.commands)
+        assert head.commands.count("grip 60") == 2  # initial opening and final release
+        assert head.commands.count("lift 110") == 2  # held object, then jaw withdrawal
+        assert head.commands.index("grip 110") < head.commands.index("lift 110")
         assert head.commands[-1] == "stop"
     finally:
         await c.close()
@@ -126,6 +130,57 @@ async def test_pickup_failures_stop(settings, fault):
         await c.tasks[job.id]
         assert job.state == "failed" and head.commands[-1] == "stop"
         assert job.result is None
+    finally:
+        await c.close()
+
+
+@pytest.mark.parametrize("fault", ["vanished_on_release", "stuck_in_jaws"])
+async def test_pickup_does_not_report_success_without_verified_placement(settings, fault):
+    c, head = make(settings)
+    original = head.command
+    openings = 0
+
+    async def faulty_placement(command):
+        nonlocal openings
+        result = await original(command)
+        if command == "grip 60":
+            openings += 1
+            if openings == 2 and fault == "vanished_on_release":
+                head.show_target = False
+        if command == "lift 110" and openings == 2 and fault == "stuck_in_jaws":
+            head.lifted = True
+        return result
+
+    head.command = faulty_placement
+    try:
+        await c.operator_arm("robot-01")
+        job = c.pickup("robot-01", "key")
+        await c.tasks[job.id]
+        assert openings == 2
+        assert job.state == "failed"
+        assert job.result is None
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()
+
+
+async def test_real_pickup_rejects_sub_three_second_hold(settings, tmp_path):
+    import json
+
+    original = settings.robots[0].calibration.read_text()
+    config = json.loads(original)
+    config["simulation_only"] = False
+    config["hold_seconds"] = 0.5
+    measured = tmp_path / "measured.json"
+    measured.write_text(json.dumps(config))
+    settings.mode = "hardware"
+    settings.robots[0].calibration = measured
+    c, head = make(settings)
+    try:
+        await c.operator_arm("robot-01")
+        with pytest.raises(OperationError, match="three seconds"):
+            c.pickup("robot-01", "key")
+        assert head.commands == []
     finally:
         await c.close()
 
