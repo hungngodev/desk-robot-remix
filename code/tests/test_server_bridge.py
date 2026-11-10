@@ -378,3 +378,146 @@ async def test_stop_during_group_playback_marks_urgent_flush(bridge, monkeypatch
     assert any(
         isinstance(value, str) and '"flush": true' in value for value in sent
     )
+
+
+async def test_authenticated_device_interrupt_restored_from_pr7(bridge):
+    sent = []
+
+    class Websocket:
+        async def send(self, frame):
+            sent.append(json.loads(frame))
+
+    first = conn("mac-01")
+    first.websocket = Websocket()
+    first.session_id = "private-01"
+    bridge.register(first)
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        payload = {"device_id": "mac-01"}
+        assert (await client.post("/interrupt", json=payload)).status == 401
+        headers = {"Authorization": "Bearer " + "s" * 40}
+        assert (await client.post(
+            "/interrupt", headers=headers, json={"device_id": "unknown"}
+        )).status == 400
+        assert (await client.post(
+            "/interrupt", headers=headers, json={"device_id": "mac-02"}
+        )).status == 409
+        response = await client.post("/interrupt", headers=headers, json=payload)
+        assert response.status == 200
+        data = await response.json()
+        assert data["interrupted"] is True
+        assert data["head_flush_requested"] is True
+        assert data["head_flush_acknowledged"] is False
+        assert data["audible_stop_verified"] is False
+    assert bridge.interrupt_generation["mac-01"] == 1
+    assert first.client_abort is True
+    assert sent == [{
+        "type": "tts", "state": "stop", "session_id": "private-01",
+        "flush": True,
+    }]
+
+
+async def test_interrupt_fences_previously_queued_speech_without_waiting_for_lock(
+    bridge, monkeypatch
+):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    first = bridge.connections[ids[0]]
+    sent, delivered = [], []
+
+    class Websocket:
+        async def send(self, frame):
+            sent.append(json.loads(frame))
+
+    first.websocket = Websocket()
+    first.session_id = "session"
+    monkeypatch.setattr(bridge, "wav_audio", lambda value: b"RIFF")
+    monkeypatch.setattr(bridge, "encode_opus", lambda audio: [b"opus"])
+
+    async def record_transmission(connection, text, frames):
+        delivered.append(connection.device_id)
+
+    monkeypatch.setattr(bridge, "transmit", record_transmission)
+    await handlers["/session"](
+        body_request({"device_ids": ids, "enabled": True})
+    )
+    await bridge.speaker_lock.acquire()
+    queued = asyncio.create_task(handlers["/speak"](body_request({
+        "device_id": ids[0], "text": "old sentence", "wav_base64": ""
+    })))
+    await asyncio.sleep(0)
+    try:
+        interrupt = await asyncio.wait_for(
+            handlers["/interrupt"](body_request({"device_id": ids[0]})),
+            timeout=0.5,
+        )
+        assert interrupt.status == 200
+        assert first.client_abort is True
+        assert bridge.interrupt_generation[ids[0]] == 1
+        assert not bridge.connections[ids[1]].client_abort
+        assert sent == [{
+            "type": "tts", "state": "stop",
+            "session_id": "session", "flush": True,
+        }]
+    finally:
+        bridge.speaker_lock.release()
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await queued
+    assert delivered == []
+    # A different robot keeps its own generation and can still transmit.
+    await handlers["/speak"](body_request({
+        "device_id": ids[1], "text": "new sentence", "wav_base64": ""
+    }))
+    assert delivered == [ids[1]]
+    await handlers["/session"](
+        body_request({"device_ids": ids, "enabled": False})
+    )
+
+
+async def test_interrupt_while_opus_encoding_cannot_resurrect_obsolete_tts(
+    bridge, monkeypatch
+):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    first = bridge.connections[ids[0]]
+    sent, delivered = [], []
+    entered, release = threading.Event(), threading.Event()
+
+    class Websocket:
+        async def send(self, frame):
+            sent.append(json.loads(frame))
+
+    first.websocket = Websocket()
+    first.session_id = "session"
+    monkeypatch.setattr(bridge, "wav_audio", lambda value: b"RIFF")
+
+    def slow_encode(audio):
+        entered.set()
+        assert release.wait(5)
+        return [b"opus"]
+
+    async def record_transmission(connection, text, frames):
+        delivered.append(connection.device_id)
+
+    monkeypatch.setattr(bridge, "encode_opus", slow_encode)
+    monkeypatch.setattr(bridge, "transmit", record_transmission)
+    await handlers["/session"](
+        body_request({"device_ids": ids, "enabled": True})
+    )
+    old = asyncio.create_task(handlers["/speak"](body_request({
+        "device_id": ids[0], "text": "still encoding", "wav_base64": ""
+    })))
+    assert await asyncio.to_thread(entered.wait, 5)
+    try:
+        result = await asyncio.wait_for(
+            handlers["/interrupt"](body_request({"device_id": ids[0]})),
+            timeout=0.5,
+        )
+        assert result.status == 200
+        assert first.client_abort
+        assert sent[0]["flush"] is True
+    finally:
+        release.set()
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await old
+    assert delivered == []
+    await handlers["/session"](
+        body_request({"device_ids": ids, "enabled": False})
+    )
