@@ -323,14 +323,14 @@ static void imu_identity_is_diagnostic_only() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   body.set_imu_identity(1, 0xd4, 0x49);
   auto status = send(body, "status", 0);
-  CHECK(status.find("\"imu\":{\"family\":1,\"gyro_id\":212,\"aux_id\":73}") !=
+  CHECK(status.find("\"imu\":{\"family\":1,\"gyro_id\":212,\"aux_id\":73,\"valid\":false") !=
         std::string::npos);
   CHECK(status.size() < desk_robot::kReplyCapacity - 1);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 1) == "ERR arm safety_interlock");
   body.set_imu_identity(255, 0, 0);
   status = send(body, "status", 2);
-  CHECK(status.find("\"imu\":{\"family\":0,\"gyro_id\":0,\"aux_id\":0}") !=
+  CHECK(status.find("\"imu\":{\"family\":0,\"gyro_id\":0,\"aux_id\":0,\"valid\":false") !=
         std::string::npos);
   CHECK(!body.state().armed);
 }
