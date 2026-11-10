@@ -271,3 +271,12 @@ age with an explicit validity bit, not interpreted tilt or an optical cliff
 clearance. Keep actuators unloaded during board identification and measure the
 real axis orientation before considering tilt or held interlock thresholds.
 A valid raw IMU sample never substitutes for any missing VL53L4CD corner.
+
+
+The physical WROOM profile also refuses a motion `arm` without fresh
+BerryIMU six-axis samples. It stops/disarms if those samples become stale
+or invalid during a drive, without releasing a held payload intentionally.
+The Mac's authenticated permit preflight checks the same data. Neither this
+heartbeat nor the existing five optical channels replaces the pending,
+measured tilt/held acceptance trials. The read-only USB inspection may show
+valid raw counts while the robot is still unqualified for operation.
