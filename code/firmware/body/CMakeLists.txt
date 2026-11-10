@@ -22,6 +22,16 @@ target_link_libraries(body_control PUBLIC cliff_guard berry_imu)
 target_compile_features(body_control PUBLIC cxx_std_11)
 target_compile_options(body_control PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
+add_executable(optional_i2c_io_tests
+  tests/optional_i2c_io_tests.cpp
+  lib/AccessorySensors/AccessorySensors.cpp
+  lib/PulsePad/PulsePad.cpp
+  lib/ExpansionTouch/ExpansionTouch.cpp)
+target_include_directories(optional_i2c_io_tests PRIVATE
+  tests/fakes lib/AccessorySensors lib/PulsePad lib/ExpansionTouch)
+target_compile_definitions(optional_i2c_io_tests PRIVATE DESK_ROBOT_STEPPER=1)
+target_compile_features(optional_i2c_io_tests PRIVATE cxx_std_11)
+target_compile_options(optional_i2c_io_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_executable(accessory_math_tests tests/accessory_math_tests.cpp)
 target_include_directories(accessory_math_tests PRIVATE lib/AccessorySensors)
 target_compile_features(accessory_math_tests PRIVATE cxx_std_11)
@@ -50,13 +60,14 @@ add_executable(guarded_body_tests tests/guarded_body_tests.cpp)
 target_link_libraries(guarded_body_tests PRIVATE body_control stepper_drive)
 target_compile_options(guarded_body_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 if(BODY_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-  foreach(target accessory_math_tests pulse_raw_tests range_scan_tests berry_imu berry_imu_tests body_control body_tests stepper_drive stepper_tests cliff_guard cliff_tests guarded_body_tests)
+  foreach(target optional_i2c_io_tests accessory_math_tests pulse_raw_tests range_scan_tests berry_imu berry_imu_tests body_control body_tests stepper_drive stepper_tests cliff_guard cliff_tests guarded_body_tests)
     target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=address,undefined)
   endforeach()
 endif()
 
 enable_testing()
+add_test(NAME optional_sensor_bus_protocol COMMAND optional_i2c_io_tests)
 add_test(NAME optional_sensor_register_math COMMAND accessory_math_tests)
 add_test(NAME paw_pulse_fifo_parser COMMAND pulse_raw_tests)
 add_test(NAME safety_priority_ranging_schedule COMMAND range_scan_tests)
