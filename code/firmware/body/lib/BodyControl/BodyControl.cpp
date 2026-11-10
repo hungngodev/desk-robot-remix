@@ -68,6 +68,24 @@ void BodyControl::sample_touch_input(bool active) {
   if (active) touch_trip();  // before debounce and before motor output
 }
 
+void BodyControl::set_cap(bool valid, std::uint8_t zones) {
+  if (!valid) {
+    state_.cap_valid = false;
+    state_.cap_mask = 0;
+    cap_initialized_ = false;
+    return;
+  }
+  if (cap_initialized_) {
+    const std::uint8_t rising = zones & static_cast<std::uint8_t>(~state_.cap_mask);
+    for (int index = 0; index < 8; ++index) {
+      if ((rising & (1U << index)) != 0U) ++state_.cap_events;
+    }
+  }
+  state_.cap_valid = true;
+  state_.cap_mask = zones;
+  cap_initialized_ = true;
+}
+
 void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
                                          bool reed, bool pir) {
   enabled_mask &= 0x07U;
@@ -403,7 +421,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
-        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"extras\":{\"mask\":%u,\"bumper\":%s,\"bumps\":%lu,\"reed\":%s,\"reed_count\":%lu,\"pir\":%s,\"pir_count\":%lu},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"age_ms\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"extras\":{\"mask\":%u,\"bumper\":%s,\"bumps\":%lu,\"reed\":%s,\"reed_count\":%lu,\"pir\":%s,\"pir_count\":%lu,\"cap\":%u,\"cap_ok\":%s,\"cap_events\":%lu},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"age_ms\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
         "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
         "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
@@ -424,6 +442,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(state_.reed_events),
         state_.pir_active ? "true" : "false",
         static_cast<unsigned long>(state_.pir_events),
+        static_cast<unsigned>(state_.cap_mask),
+        state_.cap_valid ? "true" : "false",
+        static_cast<unsigned long>(state_.cap_events),
         static_cast<unsigned>(state_.imu_family),
         static_cast<unsigned>(state_.imu_gyro_id),
         static_cast<unsigned>(state_.imu_aux_id),

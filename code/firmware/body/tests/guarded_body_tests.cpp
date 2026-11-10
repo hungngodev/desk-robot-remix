@@ -206,6 +206,30 @@ static void measured_local_calibration_is_atomic_and_never_arms() {
   CHECK(send(body, "calcommit", 4, true) == "ERR calcommit incomplete_stage");
 }
 
+static void cap_petting_zones_are_optional_and_never_arm() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.set_cap(true, 1);
+  CHECK(body.state().cap_valid);
+  CHECK(body.state().cap_events == 0); // first sample is a baseline
+  body.set_cap(true, 3);
+  CHECK(body.state().cap_events == 1);
+  body.set_cap(true, 3);
+  CHECK(body.state().cap_events == 1);
+  body.set_cap(true, 2);
+  body.set_cap(true, 66);
+  CHECK(body.state().cap_events == 2);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 1) == "ERR arm safety_interlock");
+  const auto status = send(body, "status", 1);
+  CHECK(status.find("\"cap\":66") != std::string::npos);
+  CHECK(status.find("\"cap_ok\":true") != std::string::npos);
+  CHECK(status.find("\"cap_events\":2") != std::string::npos);
+  body.set_cap(false, 0);
+  CHECK(!body.state().cap_valid && body.state().cap_mask == 0);
+  CHECK(send(body, "status", 2).find("\"cap_ok\":false") != std::string::npos);
+}
+
 static void touch_telemetry_never_grants_motion() {
   desk_robot::CliffGuard guard;
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
@@ -459,6 +483,7 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     optional_sensor_inputs_never_arm_or_forge_boot_events();
+    cap_petting_zones_are_optional_and_never_arm();
     touch_telemetry_never_grants_motion();
     raw_touch_trip_preempts_debounce_without_forging_a_tap();
     touch_is_local_human_stop_and_requires_fresh_arm();

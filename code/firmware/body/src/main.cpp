@@ -7,6 +7,7 @@
 #include "BerryImu.h"
 #include "StepperDrive.h"
 #include "TofBus.h"
+#include "ExpansionTouch.h"
 #include <Preferences.h>
 #endif
 
@@ -19,6 +20,7 @@ desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
 desk_robot::TofBus tof;
+desk_robot::ExpansionTouch cap1188;
 desk_robot::BerryImu berry_imu;  // One six-axis adapter, MPU6050 or BerryIMU; shares Wire
 // AT42QT1010 owns the input threshold. Sample without internal pullups
 // (GPIO34 is input-only), debounce three equal 25ms samples, and retain
@@ -355,6 +357,11 @@ void setup() {
                 static_cast<unsigned>(imu.gyro_id),
                 static_cast<unsigned>(imu.aux_id));
   Serial.println();
+  // Optional 8-zone CAP1188 via mux 0x71, channel 0 at 0x28.
+  // The dedicated AT42QT1010 GPIO34 remains the actual touch stop.
+  const bool petting_present = cap1188.begin(Wire);
+  Serial.println(petting_present ? "INFO cap1188_read_only_available" :
+                   "INFO cap1188_missing_or_wrong_id");
   if (load_calibration()) {
     Serial.println("OK calibration_loaded samples_and_local_rearm_required");
   } else {
@@ -379,6 +386,12 @@ void loop() {
   control.set_imu(berry_imu.reading());
   poll_touch(millis());
   poll_optional(millis());
+  // Safety sampling first, optional petting second. No motion authority.
+  std::uint8_t cap_zones = 0;
+  if (cap1188.present() && cap1188.verified()) {
+    if (cap1188.poll(millis(), cap_zones)) control.set_cap(true, cap_zones);
+    else if (!cap1188.verified()) control.set_cap(false, 0);
+  }
 #endif
   control.tick(millis());
   apply_outputs();

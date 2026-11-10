@@ -29,6 +29,9 @@ struct State {
   std::uint32_t touch_taps = 0;
   std::uint32_t touch_double_taps = 0;
   std::uint32_t touch_holds = 0;
+  bool cap_valid = false; // read-only CAP1188 zones, never a motor permit
+  std::uint8_t cap_mask = 0;
+  std::uint32_t cap_events = 0;
   std::uint8_t extra_mask = 0; // bumper bit0, reed bit1, PIR bit2
   bool bumper_raw = false;
   bool bumper_active = false;
@@ -68,6 +71,8 @@ class BodyControl {
   // without fabricating a recognized gesture or releasing servo holding PWM.
   void touch_trip();
   void sample_touch_input(bool active);  // raw GPIO level, no gesture count
+  // Optional multi-zone petting. No movement authority and no fabricated reads.
+  void set_cap(bool valid, std::uint8_t zones);
   // Optional active 3.3V digital inputs; no software can authorize motion.
   void sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
                               bool reed, bool pir);
@@ -101,6 +106,7 @@ class BodyControl {
   std::uint32_t touch_released_ms_ = 0;
   bool touch_pending_tap_ = false;
   bool touch_hold_emitted_ = false;
+  bool cap_initialized_ = false;
   bool extras_initialized_ = false;
   bool extra_candidates_[3]{};
   std::uint8_t extra_streaks_[3]{};
