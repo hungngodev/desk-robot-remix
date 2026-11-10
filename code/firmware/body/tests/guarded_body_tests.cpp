@@ -255,6 +255,31 @@ static void touch_is_local_human_stop_and_requires_fresh_arm() {
   CHECK(body.state().left == 0 && body.state().right == 0);
 }
 
+static void five_range_status_reports_real_samples_not_a_permission() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 1);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  auto value = send(body, "status", 10);
+  CHECK(value.size() < desk_robot::kReplyCapacity - 1);
+  CHECK(value.find("\"mm\":[50,50,50,50,200]") != std::string::npos);
+  CHECK(value.find("\"age_ms\":[9,9,9,9,9]") != std::string::npos);
+  CHECK(value.find("\"present_mask\":31,\"valid_mask\":31") != std::string::npos);
+  CHECK(!body.state().armed);
+  CHECK(guard.fault() == desk_robot::CliffFault::MissingSample);
+  guard.sample(3, 1000, false, 11);
+  value = send(body, "status", 12);
+  CHECK(value.find("\"mm\":[50,50,50,1000,200]") != std::string::npos);
+  CHECK(value.find("\"present_mask\":31,\"valid_mask\":23") != std::string::npos);
+  CHECK(value.find("\"invalid_sample\"") != std::string::npos);
+  CHECK(!body.state().armed);
+  guard.bus_fault();
+  value = send(body, "status", 13);
+  CHECK(value.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
+  CHECK(value.find("\"mm\":[0,0,0,0,0]") != std::string::npos);
+  CHECK(!body.state().armed);
+}
+
 static void touch_gesture_counters_survive_slow_status_polling() {
   desk_robot::BodyControl body;
   body.set_touch(true, 0);
@@ -299,10 +324,13 @@ int main() {
     CHECK(status.find("stepper_28byj48") != std::string::npos);
     CHECK(status.find("missing_guard") != std::string::npos);
     CHECK(status.front() == '{' && status.back() == '}');
+    CHECK(status.size() < desk_robot::kReplyCapacity - 1);
+    CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     touch_telemetry_never_grants_motion();
     touch_is_local_human_stop_and_requires_fresh_arm();
     touch_gesture_counters_survive_slow_status_polling();
+    five_range_status_reports_real_samples_not_a_permission();
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
