@@ -107,6 +107,42 @@ def test_usb_bench_reads_five_real_range_slots_without_arming():
     assert not result["eligible_for_manual_local_rearm"]
 
 
+def test_usb_bench_reports_raw_six_axis_without_claiming_tilt_safety():
+    status = {
+        "backend": "stepper_28byj48", "armed": False,
+        "imu": {"family": 1, "gyro_id": 212, "aux_id": 73,
+                "valid": True, "acc": [-32768, 0, 16384],
+                "gyro": [-25, 33, 125], "age_ms": 20},
+        "touch": {"active": False},
+        "safety": {"ready": False, "fault": "missing_sample"},
+        "ranges": {"mm": [50, 50, 50, 50, 200],
+                   "age_ms": [5, 6, 7, 8, 9],
+                   "present_mask": 31, "valid_mask": 31},
+    }
+    result = inspect_status(status)
+    assert result["imu"]["motion_driver_active"] is True
+    assert result["imu"]["accelerometer_raw"] == [-32768, 0, 16384]
+    assert result["imu"]["gyroscope_raw"] == [-25, 33, 125]
+    assert result["imu"]["sample_age_ms"] == 20
+    assert result["physical_qualification_pass"] is False
+    assert result["imu"]["physical_qualification_pass"] is False
+
+    for bad in (
+        {"valid": True, "acc": [1, 2, 3], "gyro": [4, 5, 6], "age_ms": 201},
+        {"valid": True, "acc": [1, 2, 3], "gyro": [4, 5, 6], "age_ms": -1},
+        {"valid": True, "acc": [1, 2, 32768], "gyro": [4, 5, 6], "age_ms": 1},
+        {"valid": True, "acc": [1, 2, 3], "gyro": [4, 5], "age_ms": 1},
+        {"valid": 1, "acc": [1, 2, 3], "gyro": [4, 5, 6], "age_ms": 1},
+        {"valid": True, "acc": [1, 2, 3], "gyro": [4, 5, 6], "age_ms": "1"},
+        {"valid": True, "acc": [1, 2, 3], "gyro": [4, 5, 6], "age_ms": 1,
+         "family": 0},
+    ):
+        mutated = dict(status)
+        mutated["imu"] = {**status["imu"], **bad}
+        with pytest.raises(ValueError):
+            inspect_status(mutated)
+
+
 @pytest.mark.parametrize("change", [
     {"backend": "dc_pwm"},
     {"imu": {"family": 4, "gyro_id": 0, "aux_id": 0}},
