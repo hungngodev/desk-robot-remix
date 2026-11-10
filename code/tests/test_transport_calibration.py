@@ -1,9 +1,17 @@
 import json
+from pathlib import Path
+from runpy import run_path
 
 import httpx
 import pytest
 from desk_robot.calibration import Calibration
 from desk_robot.transport import HeadError, HttpHead, validate_command
+
+# The USB bench tool is intentionally a standalone script, not a second
+# installable robot controller or a package in the firmware/runtime hierarchy.
+inspect_status = run_path(
+    str(Path(__file__).resolve().parents[1] / "scripts/serial_bench.py")
+)["inspect_status"]
 
 
 @pytest.mark.parametrize(
@@ -69,8 +77,6 @@ def test_nonfinite_calibration_rejected(settings):
 
 
 def test_usb_bench_reads_five_real_range_slots_without_arming():
-    from scripts.serial_bench import inspect_status
-
     status = {
         "backend": "stepper_28byj48", "armed": False,
         "imu": {"family": 1, "gyro_id": 212, "aux_id": 73},
@@ -116,8 +122,6 @@ def test_usb_bench_reads_five_real_range_slots_without_arming():
                 "present_mask": 31, "valid_mask": 31}},
 ])
 def test_usb_bench_rejects_malformed_or_wrong_profile_status(change):
-    from scripts.serial_bench import inspect_status
-
     status = {
         "backend": "stepper_28byj48", "armed": False,
         "touch": {"active": False},
