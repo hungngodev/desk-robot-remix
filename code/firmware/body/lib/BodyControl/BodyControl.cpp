@@ -55,19 +55,39 @@ void BodyControl::stop_motion() {
   state_.grip_target = state_.grip;
 }
 
-void BodyControl::set_touch(bool active) {
-  if (active && !state_.touch_active) {
+void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
+  if (active == state_.touch_active) return;
+  state_.touch_active = active;
+  if (active) {
     ++state_.touch_count;
-    // Touch is a local human stop, not merely delayed Mac telemetry.
-    // Stop the tracks and any in-flight servo target before reporting the
-    // event. Preserve held servo PWM to avoid deliberately dropping a key.
-    // Neither an old drive pulse nor a keepalive may restart motion.
+    touch_started_ms_ = now_ms;
+    touch_hold_emitted_ = false;
+    // A touched moving robot stops locally; no Mac event or model is needed.
     if (state_.armed) {
       stop_motion();
       state_.armed = false;
     }
+    return;
   }
-  state_.touch_active = active;
+
+  const std::uint32_t held_ms = now_ms - touch_started_ms_;
+  if (held_ms >= 900 && !touch_hold_emitted_) {
+    ++state_.touch_holds;
+    touch_hold_emitted_ = true;
+  }
+  if (touch_hold_emitted_ || held_ms > 600) {
+    if (touch_pending_tap_) ++state_.touch_taps;
+    touch_pending_tap_ = false;
+    return;
+  }
+  if (touch_pending_tap_ && now_ms - touch_released_ms_ <= 350) {
+    ++state_.touch_double_taps;
+    touch_pending_tap_ = false;
+  } else {
+    if (touch_pending_tap_) ++state_.touch_taps;
+    touch_pending_tap_ = true;
+    touch_released_ms_ = now_ms;
+  }
 }
 
 void BodyControl::force_disarm() {
@@ -89,6 +109,20 @@ std::uint32_t BodyControl::drive_remaining(std::uint32_t now_ms) const {
 }
 
 void BodyControl::tick(std::uint32_t now_ms) {
+  // Local gesture classification survives slow Mac camera polling.
+  // Unsigned subtraction also handles millis rollover.
+  if (state_.touch_active && !touch_hold_emitted_ &&
+      now_ms - touch_started_ms_ >= 900) {
+    ++state_.touch_holds;
+    touch_hold_emitted_ = true;
+    if (touch_pending_tap_) ++state_.touch_taps;
+    touch_pending_tap_ = false;
+  }
+  if (touch_pending_tap_ && !state_.touch_active &&
+      now_ms - touch_released_ms_ > 350) {
+    ++state_.touch_taps;
+    touch_pending_tap_ = false;
+  }
   if (profile_ == BodyProfile::StepperGuarded &&
       (guard_ == nullptr || !guard_->evaluate(now_ms))) {
     stop_motion();
@@ -295,7 +329,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
-        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
         "\"fault\":\"%s\",\"sensor\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
         state_.lift, state_.grip, state_.lift_target, state_.grip_target,
@@ -305,6 +339,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         profile_ == BodyProfile::StepperGuarded ? "stepper_28byj48" : "dc_pwm",
         state_.touch_active ? "true" : "false",
         static_cast<unsigned long>(state_.touch_count),
+        static_cast<unsigned long>(state_.touch_taps),
+        static_cast<unsigned long>(state_.touch_double_taps),
+        static_cast<unsigned long>(state_.touch_holds),
         profile_ == BodyProfile::StepperGuarded ? "true" : "false",
         profile_ == BodyProfile::StepperGuarded && guard_ != nullptr &&
             guard_->evaluate(now_ms) ? "true" : "false",
