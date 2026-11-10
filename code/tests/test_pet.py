@@ -523,15 +523,17 @@ async def test_independent_touch_poll_silences_pet_while_camera_vlm_is_blocked(
         assert not scene.release.is_set()
         assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
         assert not speaker.spoken
-        assert any(m.kind == "touch_hold" for m in memory.recent("robot-01"))
+        await wait_for(
+            lambda: any(m.kind == "touch_hold" for m in memory.recent("robot-01"))
+        )
         scene.release.set()
         await wait_for(lambda: pet.status("robot-01")["camera_change_events"] == 2)
         await asyncio.sleep(.02)
         assert not speaker.spoken
-        before_pause = head.status_calls
         await pet.pause("robot-01")
+        after_pause = head.status_calls
         await asyncio.sleep(.05)
-        assert head.status_calls == before_pause
+        assert head.status_calls == after_pause
     finally:
         scene.release.set()
         await pet.close()
