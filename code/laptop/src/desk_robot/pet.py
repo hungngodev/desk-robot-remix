@@ -44,6 +44,7 @@ class PetState:
     safety_fault_events: int = 0
     last_extra_mask: int | None = None
     last_extra_events: dict[str, int] | None = None
+    last_cap_events: int | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
@@ -135,6 +136,9 @@ class PetController:
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
         state.last_touch_count = None
         state.last_touch_events = None
+        state.last_cap_events = None
+        state.last_extra_events = None
+        state.last_extra_mask = None
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
         state.enabled = True
         state.last_error = None
@@ -371,6 +375,39 @@ class PetController:
             "safety_fault", description, 1.0
         ))
 
+    async def _observe_cap(self, robot_id: str, generation: int, extra: dict) -> None:
+        """Record actual CAP1188 rising-zone counters, never assume optional contact.
+
+        A missing module, reboot, counter wrap or reconnect establishes a new
+        baseline. CAP touch may prompt a playful reaction but grants no motion.
+        """
+        if not {"cap", "cap_ok", "cap_events"}.issubset(extra):
+            return  # Backward compatible with heads lacking optional touch
+        mask, good, count = extra["cap"], extra["cap_ok"], extra["cap_events"]
+        if (type(mask) is not int or not 0 <= mask <= 255
+                or type(good) is not bool
+                or type(count) is not int or not 0 <= count <= 0xffffffff):
+            return
+        state = self.states[robot_id]
+        old = state.last_cap_events
+        state.last_cap_events = count if good else None
+        if (not good or old is None or count < old or count - old > 8
+                or not state.enabled or state.generation != generation):
+            return
+        delta = count - old
+        if delta == 0:
+            return
+        description = (
+            f"My physical CAP1188 petting pads registered {delta} new touch "
+            f"{'contact' if delta == 1 else 'contacts'}"
+            + (f"; currently active zones bitmask {mask}" if mask else "")
+        )
+        state.events += 1
+        state.last_event = description
+        change = SceneChange("petting_zone", description, 1.0)
+        await self._store_observation(robot_id, change)
+        self._consider_speech(robot_id, change, generation)
+
     async def _observe_optional(self, robot_id: str, generation: int, body: dict) -> None:
         """Use real WROOM mask and counters, without inventing sensor evidence."""
         extra = body.get("extras")
@@ -385,6 +422,7 @@ class PetController:
             return
         if any(type(extra.get(key)) is not bool for key in ("bumper", "reed", "pir")):
             return
+        await self._observe_cap(robot_id, generation, extra)
         state = self.states[robot_id]
         values = {key: extra[key] for key in keys}
         previous = state.last_extra_events

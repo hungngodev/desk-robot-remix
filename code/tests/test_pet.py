@@ -802,6 +802,42 @@ async def test_selective_only_mode_copies_single_existing_eyewitness_event(fleet
         await pet.close()
 
 
+async def test_cap1188_touch_memory_carries_real_edge_provenance(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(), speech_cooldown=120)
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 4
+    def extra(cap, good, events):
+        return {"mask": 0, "bumper": False, "bumps": 0, "reed": False,
+                "reed_count": 0, "pir": False, "pir_count": 0,
+                "cap": cap, "cap_ok": good, "cap_events": events}
+    try:
+        await pet._observe_optional("robot-01", 4, {"extras": extra(0, True, 8)})
+        assert not any(m.kind == "petting_zone" for m in memory.recent("robot-01"))
+        await pet._observe_optional("robot-01", 4, {"extras": extra(1, True, 9)})
+        await pet._observe_optional("robot-01", 4, {"extras": extra(1, True, 9)})
+        rows = [m for m in memory.recent("robot-01") if m.kind == "petting_zone"]
+        assert len(rows) == 1
+        assert rows[0].source_robot == "robot-01" and rows[0].witnessed
+        assert memory.count("robot-02") == 0
+        await pet._observe_optional("robot-01", 4, {"extras": extra(0, False, 12)})
+        await pet._observe_optional("robot-01", 4, {"extras": extra(0, True, 15)})
+        await pet._observe_optional("robot-01", 4, {"extras": extra(2, True, 16)})
+        assert sum(m.kind == "petting_zone" for m in memory.recent("robot-01")) == 2
+        # Bad fields and a giant counter jump never fabricate remembered touch.
+        await pet._observe_optional("robot-01", 4, {"extras": extra(2, True, 600)})
+        await pet._observe_optional("robot-01", 4, {"extras": extra(2, "true", 601)})
+        assert sum(m.kind == "petting_zone" for m in memory.recent("robot-01")) == 2
+        state.enabled = False
+        await pet._observe_optional("robot-01", 4, {"extras": extra(2, True, 602)})
+        assert sum(m.kind == "petting_zone" for m in memory.recent("robot-01")) == 2
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_optional_bumper_magnet_pir_are_real_masked_fleet_events(fleet, tmp_path):
     cancellations = []
     async def stop(robot_id):

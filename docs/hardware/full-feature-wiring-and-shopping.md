@@ -197,3 +197,8 @@ Do **not** buy another BerryIMU, extra camera, separate microphone, Pi, duplicat
 - https://www.analog.com/media/en/technical-documentation/data-sheets/AS5600_DS000365_5-00.pdf
 
 The accompanying [machine-readable plan](full-feature-plan.json) is the source for parts quantities and lane allocations. It deliberately records unqualified hardware instead of pretending a zero physical-trial count is a pass.
+
+
+## Active CAP1188 telemetry pipeline, November 10
+
+A new bounded WROOM adapter reads Microchip CAP1188 ID 0xFD = 0x50 and manufacturer 0xFE = 0x5D on expansion mux 0x71 lane 0, address 0x28 after its address strap is verified. It reads actual 8-bit touch status at register 0x03 every 80ms, temporarily disconnecting the range mux and closing the optional mux before leaving. Missing and wrong-ID devices cannot forge touch reports. `BodyControl` tracks zone mask, source validity and observed rising-zone counters, without granting motor authority or replacing the independent AT42QT1010 stop pad. The existing authenticated Mac head-status poll now stores qualifying rising contacts as private firsthand petting memories, ignoring first samples, reconnect resets and malformed deltas. Both C++ and Python tests were added; these are software tests only. The physical electrode geometry and through-case capacitance still require trials.
