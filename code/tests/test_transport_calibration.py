@@ -5,7 +5,7 @@ from runpy import run_path
 import httpx
 import pytest
 from desk_robot.calibration import Calibration
-from desk_robot.transport import HeadError, HttpHead, validate_command
+from desk_robot.transport import HeadError, HttpHead, expected_ack, validate_command
 
 # The USB bench tool is intentionally a standalone script, not a second
 # installable robot controller or a package in the firmware/runtime hierarchy.
@@ -32,6 +32,19 @@ inspect_status = run_path(
 def test_invalid_commands_rejected(command):
     with pytest.raises(ValueError):
         validate_command(command)
+
+
+def test_default_drive_duration_matches_body_and_head_ack():
+    assert validate_command("drive 20 -20") == "drive"
+    assert expected_ack("drive 20 -20") == (
+        "OK drive left=20 right=-20 ms=250"
+    )
+    assert expected_ack("drive 20 -20 50") == (
+        "OK drive left=20 right=-20 ms=50"
+    )
+    for invalid in ("drive 40 40 251", "drive 41 0", "drive 0 0 0"):
+        with pytest.raises(ValueError):
+            validate_command(invalid)
 
 
 @pytest.mark.parametrize(
