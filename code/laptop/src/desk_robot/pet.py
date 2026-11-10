@@ -38,6 +38,7 @@ class PetState:
     last_event: str | None = None
     last_error: str | None = None
     last_touch_count: int | None = None
+    last_touch_events: dict[str, int] | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
 
@@ -106,6 +107,7 @@ class PetController:
         state.generation += 1
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
         state.last_touch_count = None
+        state.last_touch_events = None
         state.enabled = True
         state.last_error = None
         state.task = asyncio.create_task(self._observe(robot_id, state.generation))
@@ -143,46 +145,76 @@ class PetController:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    async def _touch_from_body(self, robot_id: str, generation: int) -> None:
-        """Read actual WROOM touch edge count through the existing Sense status UART bridge.
+    async def _remember_touch(
+        self, robot_id: str, generation: int, kind: str, description: str
+    ) -> None:
+        state = self.states[robot_id]
+        if not state.enabled or state.generation != generation:
+            return
+        change = SceneChange(kind, description, 1.0)
+        state.events += 1
+        state.last_event = description
+        await asyncio.to_thread(
+            self.memory.remember,
+            robot_id, uuid.uuid4().hex, description,
+            kind=kind, source_robot=robot_id, witnessed=True,
+            observed_at=time.time(), confidence=1.0,
+        )
+        if state.enabled and state.generation == generation:
+            self._consider_speech(robot_id, change, generation)
 
-        One-shot GPIO pulses survive a slower camera polling cycle, while
-        reconnect/reset counter changes cannot invent old touches. This
-        source has no motor or safety-rearm privileges.
+    async def _touch_from_body(self, robot_id: str, generation: int) -> None:
+        """Consume firmware edge and gesture counters, never manufacture touch frames.
+
+        A reset, first sample, reconnect or impossible counter jump establishes
+        a new baseline. Typed counters are authoritative when present; legacy
+        heads still report a generic touch rising edge instead.
         """
-        head = self.heads[robot_id]
-        getter = getattr(head, "status", None)
+        getter = getattr(self.heads[robot_id], "status", None)
         if getter is None:
-            return  # Minimal test cameras have no body telemetry.
+            return
         body = await getter()
         touch = body.get("touch") if isinstance(body, dict) else None
         if not isinstance(touch, dict):
             return
         count = touch.get("count")
-        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        if type(count) is not int or count < 0:
             return
         state = self.states[robot_id]
-        previous = state.last_touch_count
+        previous_count = state.last_touch_count
         state.last_touch_count = count
-        if previous is None or count <= previous or not state.enabled or state.generation != generation:
+        if previous_count is None or count < previous_count:
+            state.last_touch_events = None
             return
-        # Bounded recall across status polling; ignore implausible jumps after
-        # a new board identity/reset instead of narrating phantom touches.
-        if count - previous > 20:
+
+        # This field set is emitted by the WROOM gesture classifier, not by a
+        # Mac clock estimate from the much slower camera polling interval.
+        keys = ("tap_count", "double_count", "hold_count")
+        if all(key in touch for key in keys):
+            counters = {key: touch[key] for key in keys}
+            if any(type(v) is not int or v < 0 for v in counters.values()):
+                return
+            old = state.last_touch_events
+            state.last_touch_events = counters
+            if old is None or count - previous_count > 20:
+                return
+            for key, kind, phrase in (
+                ("hold_count", "touch_hold", "Someone has held my touch pad"),
+                ("double_count", "touch_double", "Someone has tapped me twice"),
+                ("tap_count", "touch_tap", "Someone has tapped me"),
+            ):
+                delta = counters[key] - old[key]
+                if delta < 0 or delta > 20:
+                    return  # a board restart or corrupt frame, not an event
+                if delta:
+                    await self._remember_touch(robot_id, generation, kind, phrase)
             return
-        change = SceneChange(
-            "touch", "Someone has just touched my body", 1.0
-        )
-        state.events += 1
-        state.last_event = change.description
-        await asyncio.to_thread(
-            self.memory.remember,
-            robot_id, uuid.uuid4().hex, change.description,
-            kind="touch", source_robot=robot_id,
-            witnessed=True, observed_at=time.time(), confidence=1.0,
-        )
-        if state.enabled and state.generation == generation:
-            self._consider_speech(robot_id, change, generation)
+
+        # Compatibility for a head flashed before typed touch counters existed.
+        if 0 < count - previous_count <= 20:
+            await self._remember_touch(
+                robot_id, generation, "touch", "Someone has just touched my body"
+            )
 
     async def _observe(self, robot_id: str, generation: int) -> None:
         state = self.states[robot_id]
