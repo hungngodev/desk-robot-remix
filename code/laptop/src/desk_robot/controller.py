@@ -79,7 +79,7 @@ class Coordinator:
         if (
             not isinstance(imu, dict)
             or type(imu.get("family")) is not int
-            or imu["family"] not in (1, 2, 3)
+            or imu["family"] not in (1, 2, 3, 4)
             or imu.get("valid") is not True
             or type(imu.get("age_ms")) is not int
             or not 0 <= imu["age_ms"] <= 200

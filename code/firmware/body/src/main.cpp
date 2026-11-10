@@ -19,7 +19,7 @@ desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
 desk_robot::TofBus tof;
-desk_robot::BerryImu berry_imu;  // Shares upstream Wire and existing identity probe
+desk_robot::BerryImu berry_imu;  // One six-axis adapter, MPU6050 or BerryIMU; shares Wire
 // AT42QT1010 owns the input threshold. Sample without internal pullups
 // (GPIO34 is input-only), debounce three equal 25ms samples, and retain
 // an edge counter so the Mac can detect short taps between status polls.
@@ -307,6 +307,8 @@ void setup() {
   // The same upstream Wire bus can read WHO_AM_I from the owned BerryIMU
   // before motion is ever enabled. No IMU driver, sensor fusion, second
   // controller or unqualified safety thresholds are silently installed.
+  // MPU6050 uses WHO_AM_I at 0x75 on 0x68/0x69; BerryIMU has paired
+  // WHO_AM_I at 0x0f. No second bus, no speculative pin swap.
   // Sensor bringup is independently diagnosable on USB. Even if one ToF
   // channel fails to initialize, Wire was opened with a bounded timeout by
   // TofBus.begin. We can identify the owned upstream IMU without granting
@@ -316,7 +318,7 @@ void setup() {
   if (imu.family != 0 &&
       !berry_imu.begin(Wire, desk_robot::BerryImu::identify(imu.gyro_id, imu.aux_id),
                       imu.gyro_address, imu.aux_address)) {
-    Serial.println("WARN berryimu_raw_sample_init_failed");
+    Serial.println("WARN six_axis_sample_init_failed");
   }
   Serial.printf("INFO imu_probe family=%u gyro_id=0x%02x aux_id=0x%02x unqualified",
                 static_cast<unsigned>(imu.family),

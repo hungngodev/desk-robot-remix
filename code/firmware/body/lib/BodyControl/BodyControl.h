@@ -29,7 +29,7 @@ struct State {
   std::uint32_t touch_taps = 0;
   std::uint32_t touch_double_taps = 0;
   std::uint32_t touch_holds = 0;
-  std::uint8_t imu_family = 0;   // 0 unverified, 1 V1, 2 V2, 3 V3
+  std::uint8_t imu_family = 0;   // 0 unverified, 1..3 BerryIMU, 4 MPU6050
   std::uint8_t imu_gyro_id = 0;
   std::uint8_t imu_aux_id = 0;
   int left = 0;

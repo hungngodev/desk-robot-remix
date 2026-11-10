@@ -43,8 +43,10 @@ def inspect_status(status: dict) -> dict:
     aux = imu.get("aux_id", 0)
     if any(type(n) is not int or not 0 <= n <= 255 for n in (family, gyro, aux)):
         raise ValueError("Malformed optional IMU chip identity")
-    if family > 3:
+    if family > 4:
         raise ValueError("Unsupported IMU family code")
+    if family == 4 and (gyro != 0x68 or aux != 0):
+        raise ValueError("MPU6050 identity must match the official 0x75 response")
     raw_present = any(key in imu for key in ("valid", "acc", "gyro", "age_ms"))
     raw_valid = False
     accelerometer = gyroscope = None
@@ -68,7 +70,7 @@ def inspect_status(status: dict) -> dict:
             raise ValueError("Malformed or stale IMU six-axis diagnostics")
     return {
         "imu": {
-            "family": ("unverified", "berryimu_v1", "berryimu_v2", "berryimu_v3")[family],
+            "family": ("unverified", "berryimu_v1", "berryimu_v2", "berryimu_v3", "mpu6050")[family],
             "gyro_who_am_i": gyro,
             "aux_who_am_i": aux,
             # A valid sample is diagnostic information, NOT an attitude
