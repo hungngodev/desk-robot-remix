@@ -98,8 +98,12 @@ RangeDiagnostic CliffGuard::diagnostic(std::uint8_t channel,
                                        std::uint32_t now_ms) const {
   if (channel >= kCliffSensorCount) return {};
   const auto& sample = samples_[channel];
-  return {sample.present, sample.valid, sample.mm,
-          sample.present ? now_ms - sample.at_ms : 0U};
+  RangeDiagnostic result;
+  result.present = sample.present;
+  result.valid = sample.valid;
+  result.distance_mm = sample.mm;
+  result.age_ms = sample.present ? now_ms - sample.at_ms : 0U;
+  return result;
 }
 
 bool CliffGuard::evaluate(std::uint32_t now_ms) {
