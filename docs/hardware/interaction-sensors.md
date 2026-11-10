@@ -57,7 +57,7 @@ independently; the first build uses eyes/audio and optional diffused light.
 | Head pat, stationary | Happy eyes/short sound, brief interaction state | Debounce/coalesce; no movement implicitly authorized |
 | Touch during exploration | Body disarms drive locally on the debounced rising edge, holds last servo output and then reports the touch | Touch is not an automatic rearm/resume command; no arm while pressed |
 | Double tap, stationary | Invite conversation or show attention | Respect active speech, quiet settings and cooldown |
-| Deliberate long touch | Quiet/pause state | Never authorize motors through this gesture |
+| Deliberate long touch | WROOM hold event enters Mac pet quiet mode, cancelling its active spontaneous reply | Never authorize motors or clear faults through this gesture; physical response still unqualified |
 | Gentle tilt/rotation | Eyes lean/look curious; short sound if appropriate | Excessive tilt suppresses drive; thresholds are calibrated on actual hardware |
 | Shake | Surprised/dizzy reaction | Reject normal track/servo vibration and own animated motion; cooldown repeated events |
 | Suspected pickup | Stop tracks before expression/voice; held-like response | Fuse IMU transient/attitude, multiple floor-range changes and touch/context. IMU alone cannot prove a level robot is held still |
