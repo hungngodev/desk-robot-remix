@@ -35,7 +35,24 @@ def inspect_status(status: dict) -> dict:
         or type(safety.get("ready")) is not bool
     ):
         raise ValueError("Malformed or out-of-range WROOM status")
+    imu = status.get("imu", {})
+    if not isinstance(imu, dict):
+        raise ValueError("Malformed optional IMU identity")
+    family = imu.get("family", 0)
+    gyro = imu.get("gyro_id", 0)
+    aux = imu.get("aux_id", 0)
+    if any(type(n) is not int or not 0 <= n <= 255 for n in (family, gyro, aux)):
+        raise ValueError("Malformed optional IMU chip identity")
+    if family > 3:
+        raise ValueError("Unsupported IMU family code")
     return {
+        "imu": {
+            "family": ("unverified", "berryimu_v1", "berryimu_v2", "berryimu_v3")[family],
+            "gyro_who_am_i": gyro,
+            "aux_who_am_i": aux,
+            "motion_driver_active": False,
+            "physical_qualification_pass": False,
+        },
         "armed": status.get("armed") is True,
         "touch_active": touch["active"],
         "local_guard_ready": safety["ready"],
