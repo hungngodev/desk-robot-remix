@@ -216,3 +216,6 @@ The new `esp32_full` firmware profile initializes and samples all eight TCA9548A
 ## Real eight channel USB bench report
 
 The preexisting USB `serial_bench.py --inspect` output now parses the **actual** `side_ranges` WROOM telemetry into three named left/right/rear range observations, with raw distances, ages, presence/validity and `motion_certified=false`. It is read-only; forged masks, nonexistent channels, stale source formats or any attempt to claim `motion_certified=true` are rejected. An unconnected five sensor WROOM still reports side sensing absent, not three fabricated values. This can be reused for a future measured swept-turn calibration, but is not its acceptance evidence.
+
+
+**Eight lane scheduling correction:** The full firmware no longer cycles 0 through 7 equally. It samples mandatory floor and front lanes 0,1,2,3,4, then **one** of optional left/right/rear lanes 5,6,7 before returning to critical sensors. Each optional direction rotates once per six polling calls. This preserves a five sensor safety sample window while keeping all eight channels alive and honestly diagnostic. The scheduler has a new portable C++ unit test (100 cycles); no actual I2C timing or loaded floor-stop measurement has been claimed.

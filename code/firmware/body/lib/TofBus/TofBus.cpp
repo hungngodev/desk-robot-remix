@@ -57,6 +57,7 @@ void TofBus::failed(CliffGuard& guard) {
 
 bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   initialized_ = false;
+  scan_.reset();
   new_extra_channel_ = 255;
   for (auto& sample : extra_) sample = ExtraSample{};
   // Pololu sensor setup is bounded by its 80ms init timeout. Actual I2C
@@ -199,8 +200,10 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     failed(guard);
     return;
   }
-  const std::uint8_t channel = next_channel_;
-  next_channel_ = (next_channel_ + 1) % kRangeCount;
+  // Five mandatory floor/front reads always precede one extra side/rear
+  // read, preserving the local guard cadence even on the full eight profile.
+  const std::uint8_t channel = scan_.next();
+  next_channel_ = channel;
   if (!select(channel)) {
     failed(guard);
     return;

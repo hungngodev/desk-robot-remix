@@ -14,6 +14,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <VL53L4CD.h>
+#include "RangeScanOrder.h"
 
 #ifndef DESK_ROBOT_EXTRA_RANGERS
 #define DESK_ROBOT_EXTRA_RANGERS 0
@@ -59,6 +60,7 @@ class TofBus {
   static constexpr std::uint8_t kMaxSampleBytes = 15;
   TwoWire& wire_ = Wire;
   VL53L4CD device_{};
+  RangeScanOrder scan_{DESK_ROBOT_EXTRA_RANGERS != 0};
   std::uint8_t next_channel_ = 0;
   std::uint8_t new_extra_channel_ = 255;
   struct ExtraSample {
