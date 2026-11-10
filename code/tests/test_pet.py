@@ -578,6 +578,40 @@ async def test_touch_bridge_disconnect_disables_pet_without_automatic_reconnect(
         await pet.close()
 
 
+async def test_local_wroom_fault_transition_cancels_mac_motion_authority(fleet, tmp_path):
+    # This is the missing bridge between independent WROOM reflexes and
+    # any outstanding Mac jobs or one-use operator permits.
+    observed = []
+    async def cancel_job(robot_id):
+        observed.append(robot_id)
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), on_local_fault=cancel_job
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 4
+    def body(fault, ready=False):
+        return {"safety": {"required": True, "ready": ready,
+                           "fault": fault, "sensor": 2}}
+    try:
+        await pet._observe_body_safety("robot-01", 4, body("none", True))
+        await pet._observe_body_safety("robot-01", 4, body("floor_out_of_range"))
+        await pet._observe_body_safety("robot-01", 4, body("floor_out_of_range"))
+        assert observed == ["robot-01"]
+        await pet._observe_body_safety("robot-01", 4, body("none", True))
+        await pet._observe_body_safety("robot-01", 4, body("front_obstacle"))
+        assert observed == ["robot-01", "robot-01"]
+        assert state.safety_fault_events == 2
+        assert len([m for m in memory.recent("robot-01")
+                    if m.kind == "safety_fault"]) == 2
+        assert memory.count("robot-02") == 0
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_local_wroom_safety_transitions_are_firsthand_not_replayed(fleet, tmp_path):
     class GuardedHead:
         def __init__(self):

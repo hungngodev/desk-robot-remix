@@ -14,7 +14,7 @@ import math
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Awaitable, Callable, Protocol
 
 from .config import Settings
 from .conversation import Conversation
@@ -68,6 +68,7 @@ class PetController:
         group_window: float = 3.0,
         max_observation_age: float = 10.0,
         touch_interval: float = 0.15,
+        on_local_fault: Callable[[str], Awaitable[object]] | None = None,
     ):
         if (
             not 0 < interval <= 60
@@ -84,6 +85,7 @@ class PetController:
         )
         self.max_observation_age = max_observation_age
         self.touch_interval = touch_interval
+        self.on_local_fault = on_local_fault  # existing Coordinator.stop, not a new motion authority
         self.states = {robot.id: PetState() for robot in settings.robots}
         self._vision_lock = asyncio.Lock()
         self._speech_task: asyncio.Task | None = None
@@ -352,6 +354,15 @@ class PetController:
         state.safety_fault_events += 1
         state.events += 1
         state.last_event = description
+        # The WROOM already stopped locally. Also cancel the Mac operation and
+        # invalidate any pending operator permit, so an in-flight pickup or
+        # exploratory action cannot continue once this transition was observed.
+        # Do not erase the observation even if the head is now disconnected.
+        if self.on_local_fault is not None:
+            try:
+                await self.on_local_fault(robot_id)
+            except Exception as exc:
+                state.last_error = f"Local stop: {type(exc).__name__}: {str(exc)[:80]}"
         # Report the firmware's own status, not an inferred physical drop,
         # desk height, or an unverified cliff-stop distance.
         await self._store_observation(robot_id, SceneChange(

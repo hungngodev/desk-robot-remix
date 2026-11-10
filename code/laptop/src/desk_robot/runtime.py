@@ -35,7 +35,10 @@ class Runtime:
         self.memory = MemoryStore(settings.memory_dir, [r.id for r in settings.robots])
         self.coordinator = Coordinator(settings, heads, vision)
         self.conversation = Conversation(settings, chat, speaker, memory=self.memory)
-        self.pet = PetController(settings, heads, self.conversation, self.memory, scene)
+        self.pet = PetController(
+            settings, heads, self.conversation, self.memory, scene,
+            on_local_fault=self.coordinator.stop,
+        )
 
     async def close(self):
         await self.pet.close()
