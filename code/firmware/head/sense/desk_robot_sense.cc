@@ -9,10 +9,12 @@
 #include "esp32_camera.h"
 #include "robot_bridge.h"
 #include "stackchan_behavior.hpp"
+#include "sdkconfig.h"
 
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <string_view>
 #include <driver/i2c_master.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
@@ -155,6 +157,12 @@ public:
         static desk_robot::Bridge robot_bridge(camera_);
         static std::once_flag bridge_once;
         std::call_once(bridge_once, [] { robot_bridge.Start(); });
+        // Each configured robot ID seeds Stackchan's EXISTING weighted idle
+        // picker independently. Five copies need not blink/smile in sync.
+        uint32_t pet_seed = 2166136261U;
+        for (const unsigned char c : std::string_view(CONFIG_DESK_ROBOT_ID))
+            pet_seed = (pet_seed ^ c) * 16777619U;
+        face_behavior_.seed(pet_seed);
         // One local OLED mood task; no new speech stack, camera task or motor
         // service. Keep idle expressions out of Xiaozhi active voice UI.
         if (!face_task_) {
