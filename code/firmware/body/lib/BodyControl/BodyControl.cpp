@@ -335,13 +335,16 @@ void BodyControl::execute(const char* line, std::size_t length,
         if (ranges[i].present && ranges[i].valid) valid_mask |= 1U << i;
       }
     }
+    const std::uint32_t imu_age = now_ms - imu_.at_ms;
+    const bool imu_valid = imu_.valid && imu_.model != BerryModel::Unknown &&
+                           imu_age <= 200U;
     std::snprintf(
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
-        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"imu\":{\"model\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"age_ms\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
         "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
         "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
@@ -355,6 +358,10 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(state_.touch_taps),
         static_cast<unsigned long>(state_.touch_double_taps),
         static_cast<unsigned long>(state_.touch_holds),
+        static_cast<unsigned>(imu_.model), imu_valid ? "true" : "false",
+        imu_.accel[0], imu_.accel[1], imu_.accel[2],
+        imu_.gyro[0], imu_.gyro[1], imu_.gyro[2],
+        static_cast<unsigned long>(imu_.valid ? imu_age : 0U),
         profile_ == BodyProfile::StepperGuarded ? "true" : "false",
         profile_ == BodyProfile::StepperGuarded && guard_ != nullptr &&
             guard_->evaluate(now_ms) ? "true" : "false",
