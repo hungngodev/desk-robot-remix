@@ -398,3 +398,77 @@ async def test_failing_peer_storage_does_not_erase_eyewitness_or_block_speech(
         assert len(speaker.spoken) == 1
     finally:
         await pet.close()
+
+
+async def test_old_camera_inference_is_dropped_before_memory_or_spontaneous_speech(
+    fleet, tmp_path
+):
+    class SlowVisualModel:
+        def __init__(self):
+            self.calls = 0
+
+        async def compare(self, before, after):
+            self.calls += 1
+            assert before == WHITE and after == RED
+            await asyncio.sleep(.06)
+            return SceneChange("key", "A key appeared some time ago", 0.96)
+
+    scene = SlowVisualModel()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    chat = GroundedChat()
+    pet = PetController(
+        fleet, {"robot-01": ChangingCamera()},
+        Conversation(fleet, chat, speaker, memory=memory),
+        memory, scene, interval=.01, max_observation_age=.02,
+    )
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: scene.calls >= 1)
+        await wait_for(lambda: pet.status("robot-01")["stale_camera_events_dropped"] == 1)
+        assert pet.status("robot-01")["camera_change_events"] == 0
+        assert memory.count("robot-01") == 0
+        assert not speaker.spoken and not chat.prompts
+        assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
+        assert pet.status("robot-01")["source_capture_timestamp_verified"] is False
+    finally:
+        await pet.close()
+
+
+async def test_different_observations_of_same_kind_are_not_falsely_coalesced(
+    fleet, tmp_path
+):
+    class StillCamera:
+        async def snapshot(self):
+            return WHITE
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": StillCamera()},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), interval=.05, speech_cooldown=0,
+        group_window=10,
+    )
+    try:
+        pet.start("robot-01")
+        generation = pet.states["robot-01"].generation
+        first = SceneChange("key", "A brass key appeared", 0.95)
+        second = SceneChange("key", "A silver key appeared", 0.95)
+        pet._consider_speech("robot-01", first, generation)
+        await wait_for(lambda: pet.status("robot-01")["spontaneous_speech_turns"] == 1)
+        await wait_for(lambda: pet._speech_task is None or pet._speech_task.done())
+        pet._consider_speech("robot-01", second, generation)
+        await wait_for(lambda: pet.status("robot-01")["spontaneous_speech_turns"] == 2)
+        await wait_for(lambda: pet._speech_task is None or pet._speech_task.done())
+        # Matching semantic text with different case and whitespace is one event.
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "  A   SILVER key appeared ", 0.95),
+            generation,
+        )
+        await asyncio.sleep(.02)
+        assert len(speaker.spoken) == 2
+        assert pet.status("robot-01")["suppressed_speech_candidates"] == 1
+        assert len(pet._event_kinds) == 2
+    finally:
+        await pet.close()
