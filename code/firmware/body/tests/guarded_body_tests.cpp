@@ -206,6 +206,31 @@ static void measured_local_calibration_is_atomic_and_never_arms() {
   CHECK(send(body, "calcommit", 4, true) == "ERR calcommit incomplete_stage");
 }
 
+static void optional_max30102_raw_never_authorizes_motion_or_diagnosis() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  char response[desk_robot::kReplyCapacity]{};
+  body.execute("aux", 3, 1, response, sizeof(response));
+  CHECK(std::string(response).find("\"present\":false") != std::string::npos);
+  CHECK(std::string(response).find("\"bpm\":null") != std::string::npos);
+  desk_robot::OpticalRaw sample{};
+  sample.present = true;
+  sample.valid = true;
+  sample.part_id = 0x15;
+  sample.red = 11000;
+  sample.ir = 55000;
+  sample.at_ms = 100;
+  body.set_paw_pulse(sample);
+  body.execute("aux", 3, 150, response, sizeof(response));
+  CHECK(std::string(response).find("\"part_id\":21") != std::string::npos);
+  CHECK(std::string(response).find("\"ir\":55000") != std::string::npos);
+  CHECK(std::string(response).find("\"age_ms\":50") != std::string::npos);
+  body.execute("aux", 3, 500, response, sizeof(response));
+  CHECK(std::string(response).find("\"valid\":false") != std::string::npos);
+  CHECK(send(body, "arm", 501) == "ERR arm safety_interlock");
+  CHECK(!body.state().armed);
+}
+
 static void extra_three_ranging_channels_are_diagnostics_only() {
   desk_robot::CliffGuard guard;
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
@@ -500,6 +525,7 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     optional_sensor_inputs_never_arm_or_forge_boot_events();
+    optional_max30102_raw_never_authorizes_motion_or_diagnosis();
     extra_three_ranging_channels_are_diagnostics_only();
     cap_petting_zones_are_optional_and_never_arm();
     touch_telemetry_never_grants_motion();

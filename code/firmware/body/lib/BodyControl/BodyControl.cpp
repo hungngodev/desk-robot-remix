@@ -286,13 +286,14 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool keepalive = std::strcmp(command, "keepalive") == 0;
   const bool ping = std::strcmp(command, "ping") == 0;
   const bool status = std::strcmp(command, "status") == 0;
+  const bool aux = std::strcmp(command, "aux") == 0;
   const bool calfloor = std::strcmp(command, "calfloor") == 0;
   const bool calfront = std::strcmp(command, "calfront") == 0;
   const bool calfresh = std::strcmp(command, "calfresh") == 0;
   const bool calcommit = std::strcmp(command, "calcommit") == 0;
   const bool calabort = std::strcmp(command, "calabort") == 0;
   const bool calibration = calfloor || calfront || calfresh || calcommit || calabort;
-  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || calibration)) {
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || calibration)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
@@ -409,6 +410,22 @@ void BodyControl::execute(const char* line, std::size_t length,
 
   if (ping) {
     std::snprintf(reply, capacity, "OK ping");
+  } else if (aux) {
+    const auto& raw = state_.paw_pulse;
+    const std::uint32_t age = raw.valid ? now_ms - raw.at_ms : 0U;
+    // Independent bounded read-only telemetry reply. Keep the safety status
+    // compact and do not add optional sensor reads to a motion command.
+    std::snprintf(
+        reply, capacity,
+        "{\"pulse\":{\"present\":%s,\"valid\":%s,\"part_id\":%u,"
+        "\"red\":%lu,\"ir\":%lu,\"age_ms\":%lu,"
+        "\"bpm\":null,\"medical\":false}}",
+        raw.present ? "true" : "false",
+        raw.valid && age <= 250U ? "true" : "false",
+        static_cast<unsigned>(raw.part_id),
+        static_cast<unsigned long>(raw.red),
+        static_cast<unsigned long>(raw.ir),
+        static_cast<unsigned long>(age));
   } else if (status) {
     // Five read-only measurements retain missing/invalid/age information
     // separately. Never use these values to bypass the local cliff latch.

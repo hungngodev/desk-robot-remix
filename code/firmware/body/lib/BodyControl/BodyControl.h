@@ -5,6 +5,7 @@
 
 #include "CliffGuard.h"
 #include "BerryImu.h"
+#include "OpticalRaw.h"
 
 namespace desk_robot {
 
@@ -36,6 +37,7 @@ struct State {
   std::uint32_t side_at_ms[3]{};
   bool side_present[3]{};
   bool side_valid[3]{};
+  OpticalRaw paw_pulse{};
   std::uint8_t extra_mask = 0; // bumper bit0, reed bit1, PIR bit2
   bool bumper_raw = false;
   bool bumper_active = false;
@@ -77,6 +79,8 @@ class BodyControl {
   void sample_touch_input(bool active);  // raw GPIO level, no gesture count
   // Optional multi-zone petting. No movement authority and no fabricated reads.
   void set_cap(bool valid, std::uint8_t zones);
+  // Raw optical paw telemetry; never infer BPM or heartbeat from one FIFO read.
+  void set_paw_pulse(const OpticalRaw& sample) { state_.paw_pulse = sample; }
   // Left/right/rear read-only ToF samples never grant motor permission.
   void sample_side_range(std::uint8_t index, std::uint16_t mm,
                          bool valid, std::uint32_t now_ms);

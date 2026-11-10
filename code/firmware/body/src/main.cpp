@@ -8,6 +8,7 @@
 #include "StepperDrive.h"
 #include "TofBus.h"
 #include "ExpansionTouch.h"
+#include "PulsePad.h"
 #include <Preferences.h>
 #endif
 
@@ -21,6 +22,7 @@ desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
 desk_robot::TofBus tof;
 desk_robot::ExpansionTouch cap1188;
+desk_robot::PulsePad paw_pulse;
 desk_robot::BerryImu berry_imu;  // One six-axis adapter, MPU6050 or BerryIMU; shares Wire
 // AT42QT1010 owns the input threshold. Sample without internal pullups
 // (GPIO34 is input-only), debounce three equal 25ms samples, and retain
@@ -362,6 +364,9 @@ void setup() {
   const bool petting_present = cap1188.begin(Wire);
   Serial.println(petting_present ? "INFO cap1188_read_only_available" :
                    "INFO cap1188_missing_or_wrong_id");
+  const bool paw_present = paw_pulse.begin(Wire);
+  Serial.println(paw_present ? "INFO max30102_raw_optical_available" :
+                               "INFO max30102_optional_unavailable");
   if (load_calibration()) {
     Serial.println("OK calibration_loaded samples_and_local_rearm_required");
   } else {
@@ -400,6 +405,8 @@ void loop() {
     if (cap1188.poll(millis(), cap_zones)) control.set_cap(true, cap_zones);
     else if (!cap1188.verified()) control.set_cap(false, 0);
   }
+  paw_pulse.poll(millis());
+  control.set_paw_pulse(paw_pulse.sample());
 #endif
   control.tick(millis());
   apply_outputs();
