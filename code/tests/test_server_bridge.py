@@ -521,3 +521,51 @@ async def test_interrupt_while_opus_encoding_cannot_resurrect_obsolete_tts(
     await handlers["/session"](
         body_request({"device_ids": ids, "enabled": False})
     )
+
+
+async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monkeypatch):
+    sent = []
+    cleared = []
+    connection = conn("mac-01")
+    connection.conn_from_mqtt_gateway = False
+    connection.session_id = "session"
+    connection.last_activity_time = 0
+    connection.clearSpeakStatus = lambda: cleared.append(True)
+
+    class Socket:
+        async def send(self, frame):
+            sent.append(frame)
+
+    connection.websocket = Socket()
+    bridge.register(connection)
+    bridge.lease_ids = frozenset({"mac-01"})
+    bridge.lease_until = time.monotonic() + 20
+
+    async def send_tts(c, state, text=None):
+        sent.append(state)
+
+    monkeypatch.setitem(
+        sys.modules, "core.handle.sendAudioHandle",
+        SimpleNamespace(send_tts_message=send_tts),
+    )
+    handlers = {
+        route.resource.canonical: route.handler
+        for route in bridge.create_app().router.routes()
+    }
+    task = asyncio.create_task(
+        bridge.transmit(connection, "old reply", [b"first", b"second", b"third"])
+    )
+    async with asyncio.timeout(2):
+        while b"first" not in sent:
+            await asyncio.sleep(.001)
+    response = await handlers["/interrupt"](
+        body_request({"device_id": "mac-01"})
+    )
+    assert response.status == 200
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await task
+    assert b"second" not in sent and b"third" not in sent
+    assert any(
+        isinstance(frame, str) and '"flush": true' in frame for frame in sent
+    )
+    assert cleared == [True]
