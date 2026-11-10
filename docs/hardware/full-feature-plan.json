@@ -580,7 +580,7 @@
     "critical_policy": "Existing WROOM TofBus checks for an optional TCA9548A at 0x71 at boot and sets all its lanes off. If fitted, it forces its lanes off before each local 0x70 safety range transaction; a failed quiesce faults the local guard. New optional sensor drivers and timing tests remain unimplemented and must never delay the five present cliff samples or 500ms watchdog.",
     "head_policy": "Sense camera/mic are fixed; GPIO9 can be RGB only after confirming SD disabled and actual shipped board routing. Face bus 5/6 never connected to body Wire.",
     "power_policy": "One protected 1S cell/pack and charger with load sharing, 5V regulator sized to measured concurrent head/WROOM/steppers/servo/audio current, independent 3.3V sensor regulator. No bare cell charger contacts or 5V MCU GPIO.",
-    "voltage_policy": "Only 3.3V I2C/GPIO at WROOM. Check every generic carrier VCC rail, pullups and level shifting. GPIO34 to 39 have no internal pulls. Bumper is NC series with external 3.3V pullup.",
+    "voltage_policy": "Only 3.3V I2C/GPIO at WROOM. Check every generic carrier VCC rail, pullups and level shifting. GPIO34 to 39 have no internal pulls. Bumper is two NC contacts in series to ground with external 3.3V pullup; normal LOW, collision or disconnected cable HIGH, local raw trip immediately. GPIO35 is input only and has no internal pullup.",
     "pca9685_policy": "Not in selected fixed head and two servo system; moving ears, tail or head pan/tilt would require separate validated actuator variant, not a surprise third servo on occupied pins."
   },
   "room_pod": {

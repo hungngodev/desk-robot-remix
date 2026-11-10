@@ -34,6 +34,9 @@ def test_no_wroom_gpio_collisions_and_sense_pin_budget():
         assert len(pins) == len(set(pins)), f"Duplicate {controller} GPIO"
     b = p["bus"]["body_gpio"]
     assert b["head_touch"] == 34 and b["bumper_nc_series"] == 35
+    source = (Path(__file__).resolve().parents[1] / "firmware/body/src/main.cpp").read_text()
+    assert "bumper = digitalRead(body_pins::kBumperInput) == HIGH" in source
+    assert "NC contacts in series" in p["bus"]["voltage_policy"]
     assert b["sda"] == 21 and b["scl"] == 22
     assert set(b["left_stepper"] + b["right_stepper"]) == {13,14,25,26,27,32,33,23}
     assert p["bus"]["sense_gpio"]["rgb_data"] == 9

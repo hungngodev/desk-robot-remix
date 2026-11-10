@@ -38,7 +38,7 @@ void poll_optional(std::uint32_t now_ms) {
   bool bumper = false, reed = false, pir = false;
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
   mask |= 1U;
-  bumper = digitalRead(body_pins::kBumperInput) == LOW; // NC to ground, external pullup
+  bumper = digitalRead(body_pins::kBumperInput) == HIGH; // NC series to GND; open or unplugged -> HIGH trip
 #endif
 #if defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED
   mask |= 2U;

@@ -21,6 +21,8 @@ constexpr int kMuxReset = -1;
 // Adafruit AT42QT1010 OUT: active high, 3.3V logic. GPIO34 is input only.
 constexpr int kTouchOutput = 34;
 // Reserved disabled-by-default input-only GPIOs. No internal pull resistors.
+// NC switches wired in series to ground, external 3.3V pullup.
+// Normal continuity drives LOW; collision or broken wire opens -> HIGH trip.
 constexpr int kBumperInput = 35;
 constexpr int kReedInput = 36;
 constexpr int kPirInput = 39;

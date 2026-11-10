@@ -104,6 +104,8 @@ The five optical safety sensors already have a source driver. The full selected 
 | 1 | head uart rx |
 | 9 | rgb data |
 
+**NC bumper safety polarity:** Wire two normally-closed switches in **series** from WROOM GPIO35 to ground, with external pullup to 3.3V. Both unpressed contacts closed means normal LOW. Either collision, unplugged plug or broken lead opens circuit and reads HIGH. The enabled WROOM GPIO reader now treats HIGH as immediate motor stop. Actual circuit must be qualified before enabling this optional sensor.
+
 **Do not attach another I2C master to the Sense OLED wires.** **Critical physical XIAO Sense J3 gate:** Seeed's official Sense microSD wiki says GPIO7 (SCK), GPIO8 (MISO), GPIO9 (MOSI) are physically shared with the SD slot and the slot link J3 is enabled by default on the camera/mic expansion board. Our I2S speaker uses GPIO7/8 and optional RGB uses GPIO9. The final assembly requires the exact shipped Sense revision be checked and the expansion board **J3 SD link physically cut/opened per Seeed's own official guide** if the pin map is retained. Remove the camera before modifying J3 and verify no SD slot function survives. Never install or initialize an SD card with this design. A compiler test cannot prove this mechanical electrical isolation. Reference: https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/ .
 
  Head and body exchange UART only (TX/RX crossed, plus GND), with separate regulated supplies and a common reference. Do not use GPIO34/35/36/39 as outputs or expect internal pull resistors.
