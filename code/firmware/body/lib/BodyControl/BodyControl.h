@@ -23,7 +23,10 @@ struct State {
   bool armed = false;
   bool servos_attached = false;
   bool touch_active = false;
-  std::uint32_t touch_count = 0;
+  std::uint32_t touch_count = 0;  // debounced rising edges
+  std::uint32_t touch_taps = 0;
+  std::uint32_t touch_double_taps = 0;
+  std::uint32_t touch_holds = 0;
   int left = 0;
   int right = 0;
   int lift = 90;       // commanded angle, NOT a position measurement
@@ -47,7 +50,7 @@ class BodyControl {
   // Hardware adapter may force disarm on a fault without renewing the lease.
   void force_disarm();
   // Hardware GPIO input only; never grants or clears a motion permit.
-  void set_touch(bool active);
+  void set_touch(bool active, std::uint32_t now_ms = 0);
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
   std::uint32_t drive_remaining(std::uint32_t now_ms) const;
 
@@ -59,6 +62,10 @@ class BodyControl {
   std::uint32_t drive_started_ms_ = 0;
   std::uint32_t drive_duration_ms_ = 0;
   std::uint32_t last_servo_step_ms_ = 0;
+  std::uint32_t touch_started_ms_ = 0;
+  std::uint32_t touch_released_ms_ = 0;
+  bool touch_pending_tap_ = false;
+  bool touch_hold_emitted_ = false;
   void stop_motion();
   // Local USB only: stage all five measured safety limits atomically.
   // No network or AI path can set or persist them.
