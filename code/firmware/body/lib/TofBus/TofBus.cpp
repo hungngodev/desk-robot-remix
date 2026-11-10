@@ -1,4 +1,5 @@
 #include "TofBus.h"
+#include "BerryImu.h"
 
 #if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
 
@@ -103,6 +104,7 @@ ImuIdentity TofBus::probe_imu() {
     std::uint8_t id = 0;
     if (identity(addr, id) && (id == 0xd4 || id == 0x68 || id == 0x6a)) {
       result.gyro_id = id;
+      result.gyro_address = addr;
       break;
     }
   }
@@ -112,12 +114,15 @@ ImuIdentity TofBus::probe_imu() {
     std::uint8_t id = 0;
     if (identity(addr, id) && (id == 0x49 || id == 0x3d)) {
       result.aux_id = id;
+      result.aux_address = addr;
       break;
     }
   }
-  if (result.gyro_id == 0xd4 && result.aux_id == 0x49) result.family = 1;
-  if (result.gyro_id == 0x68 && result.aux_id == 0x3d) result.family = 2;
-  if (result.gyro_id == 0x6a && result.aux_id == 0x3d) result.family = 3;
+  // Reuse the same paired model classifier as the 6-axis sampler.
+  const BerryModel model = BerryImu::identify(result.gyro_id, result.aux_id);
+  if (model == BerryModel::V1Lsm9ds0 || model == BerryModel::V2Lsm9ds1 ||
+      model == BerryModel::V3Lsm6dsl)
+    result.family = static_cast<std::uint8_t>(model);
   // All nonmatching combinations remain unknown, never treated as qualified.
   return result;
 }
