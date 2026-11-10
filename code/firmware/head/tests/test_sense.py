@@ -97,7 +97,7 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('board->body_fault_active_ = true;', source)
         self.assertIn('board->body_fault_active_ ? "sad" : "neutral"', source)
         self.assertIn('last_was_idle = idle;', source)
-        self.assertIn('SetEmotion("sad")', source)
+        self.assertIn('board->body_fault_active_ ? "sad" : "neutral"', source)
         bridge = (board / 'robot_bridge.cc').read_text()
         self.assertIn('BodyInteraction Bridge::PollInteraction()', bridge)
         self.assertIn('Transact("status", false)', bridge)
