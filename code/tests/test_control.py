@@ -177,7 +177,8 @@ async def test_real_pickup_rejects_sub_three_second_hold(settings, tmp_path):
     settings.robots[0].calibration = measured
     c, head = make(settings)
     try:
-        await c.operator_arm("robot-01")
+        # Pickup validates physical hold time before consuming a motion permit,
+        # so no synthetic body preflight or arm is needed for this rejection.
         with pytest.raises(OperationError, match="three seconds"):
             c.pickup("robot-01", "key")
         assert head.commands == []
