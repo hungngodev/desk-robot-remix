@@ -17,6 +17,7 @@ class RobotConfig(BaseModel):
     token_env: str
     device_id: str = ""
     motion_enabled: bool = False
+    exploration_qualified: bool = False  # Explicit real swept-path trial gate; not a simulation claim.
     calibration: Path | None = None
     voice: str = "af_heart"
 

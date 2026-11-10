@@ -319,3 +319,61 @@ async def test_hardware_motion_permitted_only_when_all_status_fields_clear(setti
         assert head.commands.count("drive 0 0 10") == 1
     finally:
         await coordinator.close()
+
+
+async def test_exploration_persists_under_one_permit_until_explicit_stop(settings):
+    c, head = make(settings)
+    settings.max_job_seconds = 1
+    try:
+        with pytest.raises(OperationError, match="permit"):
+            c.explore("robot-01")
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        async with asyncio.timeout(4):
+            while head.commands.count("drive 20 20 100") < 3:
+                await asyncio.sleep(.01)
+        assert job.state == "running"
+        assert head.commands.count("stop") >= 3
+        assert head.commands.count("arm") == 1
+        assert c.tasks[job.id].done() is False
+        await c.stop("robot-01")
+        assert job.state == "cancelled"
+        assert head.commands[-1] == "stop"
+        assert c.permits.get("robot-01") is None
+    finally:
+        await c.close()
+
+
+async def test_exploration_drops_on_body_disarm_and_never_rearms(settings):
+    c, head = make(settings)
+    await c.operator_arm("robot-01")
+    original = head.status
+    calls = 0
+    async def status():
+        nonlocal calls
+        calls += 1
+        data = await original()
+        if calls >= 2:
+            data["armed"] = False
+        return data
+    head.status = status
+    try:
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], 4)
+        assert job.state == "failed"
+        assert "disarmed" in job.error
+        assert head.commands.count("arm") == 1
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()
+
+
+async def test_hardware_exploration_requires_real_swept_path_qualification(settings):
+    c, head = make(settings)
+    settings.mode = "hardware"
+    try:
+        with pytest.raises(OperationError, match="swept-path"):
+            c.explore("robot-01")
+        assert head.commands == []
+    finally:
+        await c.close()

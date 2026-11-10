@@ -18,6 +18,7 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
         operator = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
         assert client.get("/v1/robots", headers=tool).json()["mode"] == "simulation"
         assert client.post("/v1/robots/robot-01/enable", headers=tool).status_code == 403
+        assert client.post("/v1/robots/robot-01/explore", headers=tool).status_code == 403
         assert (
             client.post(
                 "/v1/robots/robot-01/move", headers=tool, json={"command": "lift 90"}

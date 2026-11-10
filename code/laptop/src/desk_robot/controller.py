@@ -165,6 +165,13 @@ class Coordinator:
             raise OperationError("Operator permit missing or expired; enable one operation first")
         if (
             self.closed
+            or (
+                self.settings.mode == "hardware"
+                and any(
+                    job.robot_id != robot_id and job.state in {"queued", "running"}
+                    for job in self.jobs.values()
+                )
+            )
             or self.locks[robot_id].locked()
             or any(
                 j.robot_id == robot_id and j.state in {"queued", "running"}
@@ -206,7 +213,12 @@ class Coordinator:
                 keeper = asyncio.create_task(self._keepalive(job.robot_id))
                 operation = asyncio.create_task(work(job))
                 # A failed keepalive cancels the operation immediately; do not continue blindly.
-                async with asyncio.timeout(self.settings.max_job_seconds):
+                # Exploration is a single persistent operator-approved job;
+                # never require another two-minute token while it is safely
+                # running. Body pulses still expire in <=250ms and the local
+                # 500ms watchdog remains independent of the Mac.
+                timeout = None if job.kind == "exploration" else self.settings.max_job_seconds
+                async with asyncio.timeout(timeout):
                     done, _ = await asyncio.wait(
                         {keeper, operation}, return_when=asyncio.FIRST_COMPLETED
                     )
@@ -254,6 +266,76 @@ class Coordinator:
             return result
 
         return self._submit(robot_id, "manual", work)
+
+    def explore(self, robot_id: str) -> Job:
+        """Start operator enabled, persistent but locally guarded exploration.
+
+        Movement always uses the same Coordinator._run session and WROOM local
+        cliff/watchdog authority as pickup. No model free-text can choose speed
+        or send bypass commands. Firmware and physical swept-space qualification
+        are necessary before enabling this on an assembled desk.
+        """
+        robot = self.robot(robot_id)
+        if not robot.motion_enabled:
+            raise OperationError("Exploration requires motion_enabled=true")
+        if self.settings.mode == "hardware" and not robot.exploration_qualified:
+            raise OperationError(
+                "Hardware exploration needs measured swept-path qualification"
+            )
+        return self._submit(robot_id, "exploration", self._explore)
+
+    async def _explore(self, job: Job) -> dict:
+        head = self.heads[job.robot_id]
+        steps = 0
+        # This loop persists until a stop, quiet mode, failure, or disconnect.
+        # There is no unbounded drive: every track movement expires after 100ms.
+        while True:
+            body = await head.status()
+            if not isinstance(body, dict) or body.get("armed") is not True:
+                raise OperationError("Exploration stopped: body disarmed or unavailable")
+            if self.settings.mode == "hardware":
+                safety = body.get("safety")
+                ranges = body.get("ranges")
+                imu = body.get("imu")
+                touch = body.get("touch")
+                if (
+                    not isinstance(safety, dict)
+                    or safety.get("ready") is not True
+                    or safety.get("fault") != "none"
+                    or not isinstance(ranges, dict)
+                    or ranges.get("present_mask") != 31
+                    or ranges.get("valid_mask") != 31
+                    or not isinstance(ranges.get("mm"), list)
+                    or len(ranges["mm"]) != 5
+                    or not isinstance(ranges.get("age_ms"), list)
+                    or len(ranges["age_ms"]) != 5
+                    or any(type(n) is not int or not 1 <= n <= 1300 for n in ranges["mm"])
+                    or any(type(age) is not int or not 0 <= age <= 150
+                           for age in ranges["age_ms"])
+                    or ranges["mm"][4] <= 250
+                    or not isinstance(imu, dict)
+                    or imu.get("valid") is not True
+                    or type(imu.get("age_ms")) is not int
+                    or not 0 <= imu["age_ms"] <= 200
+                    or not isinstance(touch, dict)
+                    or touch.get("active") is not False
+                ):
+                    await head.command("stop")
+                    raise OperationError("Exploration blocked by local sensor or corridor")
+            # The reused Sense camera source must be alive before and after
+            # each short pulse; an image does not by itself prove a clear path.
+            await head.snapshot()
+            await head.command("drive 20 20 100")
+            await asyncio.sleep(0.12)
+            await head.command("stop")
+            steps += 1
+            if len(job.events) >= 96:
+                job.events.pop(0)
+            job.events.append(f"bounded exploration pulse {steps}, stopped for reobservation")
+            await head.snapshot()
+            # No blind reverse/turn when only one forward beam exists. Swept
+            # turns need real footprint and obstacle qualification.
+            await asyncio.sleep(0.35)
 
     def pickup(self, robot_id: str, target: str) -> Job:
         robot = self.robot(robot_id)

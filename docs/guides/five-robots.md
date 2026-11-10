@@ -180,3 +180,25 @@ identity mixups and endless peer chatter. Start stationary, then human-enabled
 short motion; stops/faults/lease expiry cancel queued activity with no auto-resume.
 RoboEyes is GPL3 and needs an ESP-IDF adapter. No new face/pet/cliff code is
 implemented by the documentation update.
+
+
+## Persistent operator-enabled exploration using the existing body controller
+
+The Mac `POST /v1/robots/{robot_id}/explore` endpoint now starts an explicitly
+operator approved, persistent exploration job after the normal one-use permit.
+It never renews a two-minute operator token. It reuses the existing Coordinator
+one-runner-per-robot, head camera snapshot, WROOM 100ms pulse, 500ms watchdog,
+local five-channel cliff stop, touch interlock and IMU heartbeat; it stops to
+reobserve after each pulse. A disarm, status failure, missing forward clearance,
+pressed touch, local stop, quiet mode or network loss cancels the job. `/stop`
+remains callable with the authenticated tool token, so voice stop can preempt
+exploration. Only one hardware moving job is admitted across the fleet.
+
+For actual hardware, `exploration_qualified` defaults to false and physical
+operation is refused until swept-path, side-obstacle, wheel-slip and stopping
+trials support enabling it. The initial compiled navigation uses short forward
+segments only. Reverse and turns are not silently inferred safe from a single
+forward optical beam. Full autonomous route choice remains part of the complete
+product requirement and needs verified swept-space coverage and state estimation
+before enabling unrestricted traversals. The simulation tests persistent
+start/stop and recovery logic; they do not establish that desk navigation is safe.

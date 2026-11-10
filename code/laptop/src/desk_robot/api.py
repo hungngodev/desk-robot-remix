@@ -135,6 +135,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     async def move(robot_id: str, request: CommandRequest):
         return coordinator().manual(robot_id, request.command).data()
 
+    @app.post("/v1/robots/{robot_id}/explore", dependencies=[Depends(operator)], status_code=202)
+    async def explore(robot_id: str):
+        if app.state.runtime.pet.states[robot_id].quiet:
+            raise OperationError("Quiet mode blocks exploration")
+        return coordinator().explore(robot_id).data()
+
     @app.post("/v1/robots/{robot_id}/pickup", dependencies=[Depends(authorize)], status_code=202)
     async def pickup(robot_id: str, request: PickupRequest):
         return coordinator().pickup(robot_id, request.target).data()

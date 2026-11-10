@@ -24,6 +24,8 @@ head_url = "http://192.168.1.101:8081"
 token_env = "DESK_ROBOT_HEAD_01_TOKEN"
 device_id = ""
 motion_enabled = false
+# Do not enable exploration until real sensor, stopping and swept-space trials pass.
+exploration_qualified = false
 calibration = "calibration.example.json"
 voice = "af_heart"
 persona = "You are Pip, a curious desk robot. Speak one short sentence and take turns with the group."
