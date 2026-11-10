@@ -55,6 +55,14 @@ void BodyControl::stop_motion() {
   state_.grip_target = state_.grip;
 }
 
+void BodyControl::touch_trip() {
+  if (state_.armed) {
+    // Never touch servo PWM attachment here: gripper may hold a key.
+    stop_motion();
+    state_.armed = false;
+  }
+}
+
 void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
   if (active == state_.touch_active) return;
   state_.touch_active = active;
@@ -62,11 +70,9 @@ void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
     ++state_.touch_count;
     touch_started_ms_ = now_ms;
     touch_hold_emitted_ = false;
-    // A touched moving robot stops locally; no Mac event or model is needed.
-    if (state_.armed) {
-      stop_motion();
-      state_.armed = false;
-    }
+    // The un-debounced GPIO path normally tripped already. Keep a second
+    // stop here for any alternative adapter invoking only set_touch().
+    touch_trip();
     return;
   }
 
