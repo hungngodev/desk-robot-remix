@@ -145,6 +145,31 @@ class PetController:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
+    async def _store_observation(
+        self, robot_id: str, change: SceneChange
+    ) -> None:
+        """Same text/event ID, different eyewitness provenance per local DB.
+
+        Use the existing MemoryStore and its provenance validation. Never send
+        JPEG/PCM to another head and never claim a peer saw this firsthand.
+        Operator must explicitly enable text sharing in local settings.
+        """
+        event_id, observed_at = uuid.uuid4().hex, time.time()
+        await asyncio.to_thread(
+            self.memory.remember, robot_id, event_id, change.description,
+            kind=change.kind, source_robot=robot_id, witnessed=True,
+            observed_at=observed_at, confidence=change.confidence,
+        )
+        if self.settings.fleet_text_sharing_enabled:
+            for peer in self.settings.robots:
+                if peer.id != robot_id:
+                    await asyncio.to_thread(
+                        self.memory.remember, peer.id, event_id,
+                        change.description, kind=change.kind,
+                        source_robot=robot_id, witnessed=False,
+                        observed_at=observed_at, confidence=change.confidence,
+                    )
+
     async def _remember_touch(
         self, robot_id: str, generation: int, kind: str, description: str
     ) -> None:
@@ -154,16 +179,11 @@ class PetController:
         change = SceneChange(kind, description, 1.0)
         state.events += 1
         state.last_event = description
-        await asyncio.to_thread(
-            self.memory.remember,
-            robot_id, uuid.uuid4().hex, description,
-            kind=kind, source_robot=robot_id, witnessed=True,
-            observed_at=time.time(), confidence=1.0,
-        )
         if kind == "touch_hold":
-            # A deliberate long press is a silent, local-sensor-originated
-            # quiet request, never a motion permit or automatic rearm.
+            # Local long-touch quiet preempts speech before disk I/O; never
+            # authorizes motors or clears the body safety latch.
             await self.set_quiet(robot_id, True)
+        await self._store_observation(robot_id, change)
         if state.enabled and state.generation == generation:
             self._consider_speech(robot_id, change, generation)
 
@@ -252,17 +272,7 @@ class PetController:
                     if change is not None and state.enabled and state.generation == generation:
                         state.events += 1
                         state.last_event = change.description
-                        await asyncio.to_thread(
-                            self.memory.remember,
-                            robot_id,
-                            uuid.uuid4().hex,
-                            change.description,
-                            kind=change.kind,
-                            source_robot=robot_id,
-                            witnessed=True,
-                            observed_at=time.time(),
-                            confidence=change.confidence,
-                        )
+                        await self._store_observation(robot_id, change)
                         self._consider_speech(robot_id, change, generation)
             except asyncio.CancelledError:
                 raise
