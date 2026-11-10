@@ -800,3 +800,35 @@ async def test_selective_only_mode_copies_single_existing_eyewitness_event(fleet
         assert received.source_robot == "robot-01" and not received.witnessed
     finally:
         await pet.close()
+
+
+async def test_optional_bumper_magnet_pir_are_real_masked_fleet_events(fleet, tmp_path):
+    cancellations = []
+    async def stop(robot_id):
+        cancellations.append(robot_id)
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(),
+                        on_local_fault=stop, speech_cooldown=120)
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 3
+    def status(mask, bumps, reed, pir):
+        return {"extras": {"mask": mask, "bumper": bool(bumps),
+                "bumps": bumps, "reed": bool(reed), "reed_count": reed,
+                "pir": bool(pir), "pir_count": pir}}
+    try:
+        await pet._observe_optional("robot-01", 3, status(7, 0, 0, 0))
+        await pet._observe_optional("robot-01", 3, status(7, 1, 1, 1))
+        await pet._observe_optional("robot-01", 3, status(7, 1, 1, 1))
+        kinds = [row.kind for row in memory.recent("robot-01")]
+        assert sorted(kinds) == ["bumper", "magnet", "pir"]
+        assert cancellations == ["robot-01"]
+        assert memory.count("robot-02") == 0
+        await pet._observe_optional("robot-01", 3, status(7, 0, 0, 0))
+        await pet._observe_optional("robot-01", 3, status(0, 5, 5, 5))
+        assert memory.count("robot-01") == 3
+        assert cancellations == ["robot-01"]
+    finally:
+        state.enabled = False
+        await pet.close()

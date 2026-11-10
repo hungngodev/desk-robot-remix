@@ -42,6 +42,8 @@ class PetState:
     last_touch_events: dict[str, int] | None = None
     last_safety_fault: str | None = None
     safety_fault_events: int = 0
+    last_extra_mask: int | None = None
+    last_extra_events: dict[str, int] | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
@@ -369,6 +371,52 @@ class PetController:
             "safety_fault", description, 1.0
         ))
 
+    async def _observe_optional(self, robot_id: str, generation: int, body: dict) -> None:
+        """Use real WROOM mask and counters, without inventing sensor evidence."""
+        extra = body.get("extras")
+        if not isinstance(extra, dict):
+            return
+        mask = extra.get("mask")
+        if type(mask) is not int or not 0 <= mask <= 7:
+            return
+        keys = ("bumps", "reed_count", "pir_count")
+        if any(type(extra.get(key)) is not int or not 0 <= extra[key] <= 0xffffffff
+               for key in keys):
+            return
+        if any(type(extra.get(key)) is not bool for key in ("bumper", "reed", "pir")):
+            return
+        state = self.states[robot_id]
+        values = {key: extra[key] for key in keys}
+        previous = state.last_extra_events
+        previous_mask = state.last_extra_mask
+        state.last_extra_mask, state.last_extra_events = mask, values
+        if (previous is None or previous_mask != mask or not state.enabled
+                or state.generation != generation):
+            return
+        for key, bit, kind, description in (
+            ("bumps", 1, "bumper", "My optional bumper registered a contact and stopped my tracks"),
+            ("reed_count", 2, "magnet", "My optional reed switch detected a magnetic accessory closure"),
+            ("pir_count", 4, "pir", "My optional PIR detected changing infrared motion, not an identified person"),
+        ):
+            if not mask & bit:
+                continue
+            delta = values[key] - previous[key]
+            if delta <= 0 or delta > 20:
+                continue
+            if key == "bumps":
+                if self.on_local_fault is not None:
+                    try:
+                        await self.on_local_fault(robot_id)
+                    except Exception as exc:
+                        state.last_error = f"Bumper stop: {type(exc).__name__}: {str(exc)[:80]}"
+                await self._cancel_speech(robot_id)
+            state.events += 1
+            state.last_event = description
+            change = SceneChange(kind, description, 1.0)
+            await self._store_observation(robot_id, change)
+            if key != "bumps" and state.enabled and state.generation == generation:
+                self._consider_speech(robot_id, change, generation)
+
     async def _touch_from_body(self, robot_id: str, generation: int) -> None:
         """Consume firmware edge and gesture counters, never manufacture touch frames.
 
@@ -382,6 +430,7 @@ class PetController:
         body = await getter()
         if isinstance(body, dict):
             await self._observe_body_safety(robot_id, generation, body)
+            await self._observe_optional(robot_id, generation, body)
         touch = body.get("touch") if isinstance(body, dict) else None
         if not isinstance(touch, dict):
             return
