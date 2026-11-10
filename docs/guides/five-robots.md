@@ -56,14 +56,19 @@ automatic fleet fanout. Reuse the existing Mac authenticated API; do not add
 another peer database, network bus, camera stream or speech worker.
 
 ```sh
+# List robot 01's recent private text memories to obtain an event ID.
+curl http://127.0.0.1:8765/v1/pet/robot-01/memories?limit=12 \
+  -H "Authorization: Bearer $DESK_ROBOT_API_TOKEN"
+
+# Copy one already witnessed event to robot 03.
 curl -X POST http://127.0.0.1:8765/v1/pet/robot-01/share \
   -H "Authorization: Bearer $DESK_ROBOT_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"to_robot":"robot-03","event_id":"<existing-event-id>"}'
 ```
 
-Supply an actual `event_id` already stored by the source robot, obtained from
-the private memory store. An operator credential is mandatory; a model/tool
+Supply an actual `event_id` from the operator-only read-only memories endpoint.
+It exposes bounded text and original source/witness tags, not JPEG or audio. An operator credential is mandatory; a model/tool
 token alone cannot share. Repeating the same event to that peer is idempotent:
 `stored=false` means no new copy was created. Each original local observation
 remains `witnessed=true` only for its own camera or touch; the recipient stores
