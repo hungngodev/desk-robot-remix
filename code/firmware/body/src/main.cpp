@@ -38,7 +38,7 @@ void poll_touch(std::uint32_t now_ms) {
   }
   if (touch_candidate_samples >= 3 && touch_candidate != touch_stable) {
     touch_stable = touch_candidate;
-    control.set_touch(touch_stable);
+    control.set_touch(touch_stable, now_ms);
   }
 }
 
