@@ -33,7 +33,7 @@ void poll_touch(std::uint32_t now_ms) {
   // One raw active sample stops the body in this same WROOM loop. Gesture
   // counters still require three matching samples, so contact noise may
   // conservatively stop the robot but cannot fake a counted tap/hold.
-  if (active) control.touch_trip();
+  control.sample_touch_input(active);
   if (active != touch_candidate) {
     touch_candidate = active;
     touch_candidate_samples = 1;
