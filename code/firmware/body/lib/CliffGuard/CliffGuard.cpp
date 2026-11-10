@@ -94,6 +94,14 @@ void CliffGuard::bus_fault() {
   for (auto& sample : samples_) sample = Sample{};
 }
 
+RangeDiagnostic CliffGuard::diagnostic(std::uint8_t channel,
+                                       std::uint32_t now_ms) const {
+  if (channel >= kCliffSensorCount) return {};
+  const auto& sample = samples_[channel];
+  return {sample.present, sample.valid, sample.mm,
+          sample.present ? now_ms - sample.at_ms : 0U};
+}
+
 bool CliffGuard::evaluate(std::uint32_t now_ms) {
   CliffFault reason;
   std::uint8_t sensor;
