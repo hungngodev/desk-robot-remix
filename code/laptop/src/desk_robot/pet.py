@@ -214,6 +214,59 @@ class PetController:
                         f"Peer memory {peer_id}: {type(result).__name__}: {str(result)[:80]}"
                     )
 
+    async def share_with_peer(
+        self, from_robot: str, to_robot: str, event_id: str
+    ) -> dict:
+        """Operator selected text-only relay recovered from historical PR #4.
+
+        A stored eyewitness event is copied to another robot's private SQLite
+        store as secondhand context. Never copy an image, synthesize an
+        observation, reclassify a relay as eyewitness evidence, or grant motion.
+        The automatic fanout, when enabled, already uses the same event ID so
+        a manual copy of that event is an idempotent no-op.
+        """
+        self.settings.robot(from_robot)
+        self.settings.robot(to_robot)
+        if not self.settings.fleet_text_sharing_enabled:
+            raise ValueError("Enable explicit local fleet text sharing first")
+        if from_robot == to_robot:
+            raise ValueError("Source and receiving robot must be different")
+        if not isinstance(event_id, str) or not 1 <= len(event_id) <= 96:
+            raise ValueError("Invalid memory event ID")
+
+        source = next(
+            (
+                entry for entry in await asyncio.to_thread(
+                    self.memory.recent, from_robot, limit=50
+                )
+                if entry.event_id == event_id
+            ),
+            None,
+        )
+        if source is None:
+            raise ValueError("Unknown or expired source event")
+        # Historical PR #4 permitted relaying hearsay with a separate
+        # told_by field. The current schema has no teller chain, so refusing
+        # secondhand relay avoids misrepresenting who passed on that memory.
+        if not source.witnessed or source.source_robot != from_robot:
+            raise ValueError("Only the original eyewitness may share this event")
+        stored = await asyncio.to_thread(
+            self.memory.remember,
+            to_robot, source.event_id, source.summary,
+            kind=source.kind, source_robot=source.source_robot,
+            witnessed=False, observed_at=source.observed_at,
+            confidence=source.confidence,
+        )
+        return {
+            "from_robot": from_robot,
+            "to_robot": to_robot,
+            "source_robot": source.source_robot,
+            "event_id": source.event_id,
+            "stored": stored,
+            "witnessed": False,
+            "text_only": True,
+        }
+
     async def _remember_touch(
         self, robot_id: str, generation: int, kind: str, description: str
     ) -> None:
