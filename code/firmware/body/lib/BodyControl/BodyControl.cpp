@@ -149,6 +149,13 @@ void BodyControl::tick(std::uint32_t now_ms) {
     // A floor/bus fault must not deliberately release a held payload.
     return;
   }
+  if (imu_motion_required_ && !imu_fresh(now_ms)) {
+    // Missing, failed or stale compulsory motion sensor locally disarms.
+    // This is not a tilt interlock: orientation calibration is still required.
+    stop_motion();
+    state_.armed = false;
+    return;
+  }
   if (!state_.armed) return;
   // Unsigned elapsed arithmetic remains correct when millis() wraps.
   if (now_ms - last_control_ms_ >= kWatchdogMs) {
@@ -355,8 +362,7 @@ void BodyControl::execute(const char* line, std::size_t length,
       }
     }
     const std::uint32_t imu_age = now_ms - imu_.at_ms;
-    const bool imu_valid = imu_.valid && imu_.model != BerryModel::Unknown &&
-                           imu_age <= 200U;
+    const bool imu_valid = imu_fresh(now_ms);
     const int written = std::snprintf(
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
@@ -426,6 +432,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     if (profile_ == BodyProfile::StepperGuarded &&
         (guard_ == nullptr || !guard_->evaluate(now_ms))) {
       std::snprintf(reply, capacity, "ERR arm safety_interlock");
+      return;
+    }
+    if (imu_motion_required_ && !imu_fresh(now_ms)) {
+      std::snprintf(reply, capacity, "ERR arm imu_missing_or_stale");
       return;
     }
     // Explicit re-arm also clears earlier targets; it never resumes old motion.
