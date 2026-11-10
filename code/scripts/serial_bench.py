@@ -117,7 +117,37 @@ def inspect_status(status: dict) -> dict:
                 "reported": True, "valid": cap_ok, "zone_mask": zones,
                 "rising_zone_events": events, "physical_qualification_pass": False,
             }
+    side_input = {"reported": False, "present_mask": 0, "valid_mask": 0,
+                  "readings": [], "motion_certified": False,
+                  "physical_qualification_pass": False}
+    side = status.get("side_ranges")
+    if side is not None:
+        if not isinstance(side, dict):
+            raise ValueError("Malformed left/right/rear ToF diagnostics")
+        mm, age = side.get("mm"), side.get("age_ms")
+        present, valid = side.get("present_mask"), side.get("valid_mask")
+        if (not isinstance(mm, list) or len(mm) != 3
+                or not isinstance(age, list) or len(age) != 3
+                or any(type(v) is not int or not 0 <= v <= 1300 for v in mm)
+                or any(type(v) is not int or v < 0 for v in age)
+                or type(present) is not int or not 0 <= present <= 7
+                or type(valid) is not int or not 0 <= valid <= 7
+                or valid & ~present
+                or side.get("motion_certified") is not False
+                or any(not 1 <= mm[i] <= 1300 for i in range(3) if valid & (1 << i))):
+            raise ValueError("Invalid read-only side and rear ToF data")
+        side_input = {
+            "reported": True, "present_mask": present, "valid_mask": valid,
+            "readings": [
+                {"direction": label, "distance_mm": mm[i],
+                 "age_ms": age[i], "present": bool(present & (1 << i)),
+                 "valid": bool(valid & (1 << i))}
+                for i, label in enumerate(("left", "right", "rear"))
+            ],
+            "motion_certified": False, "physical_qualification_pass": False,
+        }
     return {
+        "side_ranges": side_input,
         "cap_touch": cap_input,
         "optional_inputs": extra_data,
         "imu": {

@@ -250,6 +250,40 @@ def test_usb_optional_sensor_mask_levels_and_bumper_manual_rearm_gate():
 
 
 
+
+def test_usb_extra_left_right_rear_ranges_are_read_only_and_source_checked():
+    base = {
+        "backend": "stepper_28byj48", "armed": False,
+        "touch": {"active": False},
+        "safety": {"ready": False, "fault": "missing_sample"},
+        "ranges": {"mm": [50, 50, 50, 50, 200],
+                   "age_ms": [1, 1, 1, 1, 1],
+                   "present_mask": 31, "valid_mask": 31},
+        "side_ranges": {"mm": [310, 295, 0], "age_ms": [6, 7, 0],
+                        "present_mask": 3, "valid_mask": 3,
+                        "motion_certified": False},
+    }
+    report = inspect_status(base)
+    assert report["side_ranges"]["reported"]
+    assert [v["direction"] for v in report["side_ranges"]["readings"]] == [
+        "left", "right", "rear",
+    ]
+    assert report["side_ranges"]["readings"][2]["present"] is False
+    assert not report["side_ranges"]["motion_certified"]
+    assert not report["side_ranges"]["physical_qualification_pass"]
+    for change in (
+        {"valid_mask": 7}, {"present_mask": 8}, {"valid_mask": True},
+        {"mm": [1, 2]}, {"mm": [0, 20, 0]},
+        {"age_ms": [1, -1, 0]}, {"motion_certified": True},
+        {"motion_certified": "false"},
+    ):
+        invalid = {**base, "side_ranges": {**base["side_ranges"], **change}}
+        with pytest.raises(ValueError):
+            inspect_status(invalid)
+    without = dict(base)
+    without.pop("side_ranges")
+    assert inspect_status(without)["side_ranges"]["reported"] is False
+
 def test_usb_cap1188_eight_touch_zones_are_diagnostic_not_motion_authority():
     status = {
         "backend": "stepper_28byj48", "armed": False,

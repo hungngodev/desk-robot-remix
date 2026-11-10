@@ -211,3 +211,8 @@ A new bounded WROOM adapter reads Microchip CAP1188 ID 0xFD = 0x50 and manufactu
 ## Additional left, right and rear VL53L4CD source reuse
 
 The new `esp32_full` firmware profile initializes and samples all eight TCA9548A `0x70` lanes using the **same pinned Pololu VL53L4CD Arduino source** as the original critical five, without a new ranging library. Channels 0 to 4 continue to feed the local floor/front CliffGuard; channels 5 to 7 are left, right and rear diagnostic samples with validity and age. A failed full eight sensor boot does not authorize movement. The existing `esp32_stepper` five sensor profile remains available for testing owned hardware before the three additional carriers are installed. Hardware side/rear clearance thresholds, skid, chassis sweep and stopping trial evidence are still required before these lanes can authorize reversing or turning. [Pololu library](https://github.com/pololu/vl53l4cd-arduino).
+
+
+## Real eight channel USB bench report
+
+The preexisting USB `serial_bench.py --inspect` output now parses the **actual** `side_ranges` WROOM telemetry into three named left/right/rear range observations, with raw distances, ages, presence/validity and `motion_certified=false`. It is read-only; forged masks, nonexistent channels, stale source formats or any attempt to claim `motion_certified=true` are rejected. An unconnected five sensor WROOM still reports side sensing absent, not three fabricated values. This can be reused for a future measured swept-turn calibration, but is not its acceptance evidence.
