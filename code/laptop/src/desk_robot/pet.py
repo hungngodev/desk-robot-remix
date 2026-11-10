@@ -192,7 +192,8 @@ class PetController:
             kind=change.kind, source_robot=robot_id, witnessed=True,
             observed_at=observed_at, confidence=change.confidence,
         )
-        if self.settings.fleet_text_sharing_enabled:
+        if (self.settings.fleet_text_sharing_enabled
+                and self.settings.fleet_text_auto_fanout_enabled):
             # Per-robot SQLite databases are independent. A failed or busy
             # peer must not erase the eyewitness fact or suppress its reply.
             destinations = [r.id for r in self.settings.robots if r.id != robot_id]
