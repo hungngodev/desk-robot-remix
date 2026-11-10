@@ -54,7 +54,7 @@ def cores3_files(target: Path) -> dict[str, bytes]:
     )
     files[f"{BOARD}/desk_robot_core_s3.cc"] = source.encode()
     for path in (HERE / "overlay").iterdir():
-        if path.suffix in (".h", ".cc"):
+        if path.suffix in (".h", ".cc", ".hpp"):
             files[f"{BOARD}/{path.name}"] = path.read_bytes()
     config = json.loads((stock / "config.json").read_text())
     config["manufacturer"] = "desk-robot"
@@ -292,7 +292,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
             files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
     for path in (HERE / "overlay").iterdir():
-        if path.suffix in (".h", ".cc"):
+        if path.suffix in (".h", ".cc", ".hpp"):
             files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
 
     guard = "#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3"
