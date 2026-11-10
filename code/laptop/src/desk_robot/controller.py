@@ -47,6 +47,51 @@ class Coordinator:
         except KeyError as exc:
             raise OperationError("Unknown robot") from exc
 
+    async def _hardware_preflight(self, robot_id: str) -> None:
+        """Read the actual WROOM safety state, never infer safety from a permit.
+
+        The head transports this status from the body UART. This is an extra
+        software refusal gate, not a substitute for the WROOM's independent
+        fail-closed cliff, touch and watchdog enforcement.
+        """
+        if self.settings.mode != "hardware":
+            return
+        status = await self.heads[robot_id].status()
+        if not isinstance(status, dict) or status.get("robot_id") != robot_id:
+            raise OperationError("Hardware preflight: body identity missing or mismatched")
+        if status.get("backend") != "stepper_28byj48" or status.get("armed") is not False:
+            raise OperationError("Hardware preflight: stepper body must be present and disarmed")
+        touch = status.get("touch")
+        if not isinstance(touch, dict) or touch.get("active") is not False:
+            raise OperationError("Hardware preflight: touch input unavailable or pressed")
+        safety = status.get("safety")
+        if (
+            not isinstance(safety, dict)
+            or safety.get("required") is not True
+            or safety.get("ready") is not True
+            or safety.get("fault") != "none"
+        ):
+            raise OperationError("Hardware preflight: five-channel local safety not clear")
+        ranges = status.get("ranges")
+        if not isinstance(ranges, dict):
+            raise OperationError("Hardware preflight: range diagnostics unavailable")
+        if (
+            type(ranges.get("present_mask")) is not int
+            or ranges["present_mask"] != 31
+            or type(ranges.get("valid_mask")) is not int
+            or ranges["valid_mask"] != 31
+        ):
+            raise OperationError("Hardware preflight: missing or invalid ToF channels")
+        ages = ranges.get("age_ms")
+        readings = ranges.get("mm")
+        if (
+            not isinstance(ages, list) or len(ages) != 5
+            or not isinstance(readings, list) or len(readings) != 5
+            or any(type(age) is not int or not 0 <= age < 200 for age in ages)
+            or any(type(mm) is not int or not 1 <= mm <= 1300 for mm in readings)
+        ):
+            raise OperationError("Hardware preflight: stale or malformed ranging telemetry")
+
     async def operator_arm(self, robot_id: str):
         robot = self.robot(robot_id)
         if self.closed:
@@ -57,6 +102,8 @@ class Coordinator:
             j.robot_id == robot_id and j.state in {"queued", "running"} for j in self.jobs.values()
         ):
             raise OperationError("Robot busy")
+        self.permits.pop(robot_id, None)
+        await self._hardware_preflight(robot_id)
         self.permits[robot_id] = time.monotonic() + 30
         return {
             "robot_id": robot_id,
@@ -129,6 +176,10 @@ class Coordinator:
             keeper = None
             operation = None
             try:
+                # A head can disconnect, touch can be pressed and a floor
+                # sample can expire after the operator granted the permit.
+                # Recheck the real body immediately before requesting arm.
+                await self._hardware_preflight(job.robot_id)
                 await self.heads[job.robot_id].command(
                     "arm"
                 )  # only after consuming operator permit
