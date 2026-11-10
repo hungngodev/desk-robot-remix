@@ -31,7 +31,7 @@ private:
     stackchan::behavior::HsmBehavior face_behavior_{0x5a17};
     bool face_was_speaking_ = false;
     desk_robot::Bridge* body_bridge_ = nullptr;  // existing single UART owner
-    bool body_fault_active_ = false;
+    bool body_fault_active_ = true;  // offline or unchecked body is not a healthy pet
     TaskHandle_t face_task_ = nullptr;
 
     static const char* MoodName(stackchan::behavior::Mood mood) {
@@ -51,6 +51,8 @@ private:
         auto* board = static_cast<DeskRobotSenseBoard*>(context);
         using namespace stackchan::behavior;
         uint32_t last_body_poll_ms = 0;
+        bool last_rendered_fault = false;
+        bool last_was_idle = false;
         while (true) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
             // Stackchan-agent already defines kTouched. Supply the actual
@@ -65,13 +67,11 @@ private:
                         board->face_behavior_.pushEvent(
                             Event(EventType::kTouched));
                     }
-                    if (body.fault != board->body_fault_active_) {
-                        board->body_fault_active_ = body.fault;
-                        if (!body.fault) {
-                            board->face_behavior_.pushEvent(
-                                Event(EventType::kPersonLost));
-                        }
-                    }
+                    board->body_fault_active_ = body.fault;
+                } else {
+                    // A missing WROOM cannot be treated as a safe idle state.
+                    // Network or UART status loss never creates fake touches.
+                    board->body_fault_active_ = true;
                 }
             }
             const auto device_state = Application::GetInstance().GetDeviceState();
@@ -87,15 +87,20 @@ private:
             // Xiaozhi owns speaking/listening/status expressions. The reused
             // Stackchan idle picker may update the existing OLED only when
             // the device is idle; never write its motion actions to the body.
-            if (device_state == kDeviceStateIdle &&
-                board->display_ != nullptr) {
-                // Local safety fault always outweighs decorative idle picks.
-                if (board->body_fault_active_) {
-                    board->display_->SetEmotion("sad");
-                } else if (action.set_mood) {
+            const bool idle = device_state == kDeviceStateIdle;
+            if (idle && board->display_ != nullptr) {
+                // Update only on a change or return from conversation, not
+                // through 10 redundant LVGL/I2C writes every second.
+                if (board->body_fault_active_ != last_rendered_fault ||
+                    !last_was_idle) {
+                    board->display_->SetEmotion(
+                        board->body_fault_active_ ? "sad" : "neutral");
+                    last_rendered_fault = board->body_fault_active_;
+                } else if (!board->body_fault_active_ && action.set_mood) {
                     board->display_->SetEmotion(MoodName(action.mood));
                 }
             }
+            last_was_idle = idle;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
