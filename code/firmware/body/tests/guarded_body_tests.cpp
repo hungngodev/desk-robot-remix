@@ -215,7 +215,7 @@ static void touch_telemetry_never_grants_motion() {
   CHECK(body.state().touch_count == 1 && body.state().touch_active);
   CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":1}") !=
         std::string::npos);
-  CHECK(send(body, "arm", 0) == "ERR arm safety_interlock");
+  CHECK(send(body, "arm", 0) == "ERR arm touch_active");
   body.set_touch(false);
   CHECK(!body.state().touch_active && body.state().touch_count == 1);
   body.set_touch(true);
