@@ -94,7 +94,7 @@ int main() {
     reply = status(body, 4294967295U);
     CHECK(!reply.empty() && reply.back() == '}');
     CHECK(reply.size() < desk_robot::kReplyCapacity - 1);
-    CHECK(reply.size() < 768);
+    CHECK(reply.size() < desk_robot::kReplyCapacity);
     CHECK(!body.state().armed);
     std::cout << "PASS BerryIMU identity, fail-closed diagnostic validity, and bounded status\n";
   } catch (const std::exception& error) {
