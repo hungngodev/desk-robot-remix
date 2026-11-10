@@ -43,12 +43,12 @@ bool BerryImu::begin(TwoWire& wire) {
   reading_ = BerryReading{};
   ever_polled_ = false;
   std::uint8_t matches = 0;
-  for (std::uint8_t gyro_address : {static_cast<std::uint8_t>(0x6a),
-                                    static_cast<std::uint8_t>(0x6b)}) {
+  const std::uint8_t gyro_addresses[] = {0x6a, 0x6b};
+  const std::uint8_t extra_addresses[] = {0x1c, 0x1e};
+  for (std::uint8_t gyro_address : gyro_addresses) {
     std::uint8_t gyro_who = 0;
     if (!read_bytes(gyro_address, 0x0f, &gyro_who, 1)) continue;
-    for (std::uint8_t extra_address : {static_cast<std::uint8_t>(0x1c),
-                                       static_cast<std::uint8_t>(0x1e)}) {
+    for (std::uint8_t extra_address : extra_addresses) {
       std::uint8_t extra_who = 0;
       if (!read_bytes(extra_address, 0x0f, &extra_who, 1)) continue;
       const BerryModel model = identify(gyro_who, extra_who);
