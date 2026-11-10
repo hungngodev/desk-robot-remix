@@ -20,7 +20,8 @@ def sample(robot="robot-01"):
         "power": {"cell_mv": 3900, "soc_centi": 7500, "bus_mv": 5000,
                   "shunt_uv": -100, "fuel_valid": True, "monitor_valid": True,
                   "current_calibrated": False},
-        "proximity": {"raw": 99, "valid": True, "gesture": None},
+        "proximity": {"raw": 99, "valid": True, "gesture": 1,
+                      "gesture_events": 3, "physically_qualified": False},
     }
 
 
@@ -45,6 +46,8 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
         ("power", "cell_mv", 99000), ("power", "current_calibrated", True),
         ("power", "fuel_valid", 1), ("proximity", "raw", 256),
         ("proximity", "gesture", "left"),
+        ("proximity", "gesture_events", -1),
+        ("proximity", "physically_qualified", True),
     ],
 )
 def test_aux_rejects_forged_invalid_or_calibrated_sensors(group, field, value):

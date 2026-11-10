@@ -1,4 +1,5 @@
 #include "AccessoryReadings.h"
+#include "GestureDecoder.h"
 #include <iostream>
 #include <stdexcept>
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
@@ -15,6 +16,29 @@ int main() {
     CHECK(desk_robot::ina226_bus_mv(9584) == 11980);
     CHECK(desk_robot::ina226_shunt_uv(8000) == 20000);
     CHECK(desk_robot::ina226_shunt_uv(-8000) == -20000);
+    desk_robot::GestureDecoder gesture;
+    // Strong vertical swipe: first UP, finally DOWN, output UP.
+    gesture.push(180, 30, 85, 85);
+    gesture.push(90, 90, 85, 85);
+    gesture.push(30, 180, 85, 85);
+    CHECK(gesture.finish() == 1);
+    CHECK(gesture.finish() == 0); // no replay without fresh FIFO
+    gesture.push(30, 180, 85, 85);
+    gesture.push(90, 90, 85, 85);
+    gesture.push(180, 30, 85, 85);
+    CHECK(gesture.finish() == 2);
+    gesture.push(85, 85, 180, 30);
+    gesture.push(85, 85, 90, 90);
+    gesture.push(85, 85, 30, 180);
+    CHECK(gesture.finish() == 3);
+    gesture.push(85, 85, 30, 180);
+    gesture.push(85, 85, 90, 90);
+    gesture.push(85, 85, 180, 30);
+    CHECK(gesture.finish() == 4);
+    gesture.push(85, 85, 90, 85);
+    gesture.push(86, 84, 90, 84);
+    gesture.push(85, 85, 86, 90);
+    CHECK(gesture.finish() == 0);
     desk_robot::AccessoryReadings uninitialized{};
     for (const auto& a : uninitialized.angle) CHECK(!a.present && !a.valid);
     CHECK(!uninitialized.gauge.fuel_valid);

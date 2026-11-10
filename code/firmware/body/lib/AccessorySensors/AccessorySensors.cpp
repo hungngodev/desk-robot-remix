@@ -16,7 +16,7 @@ bool AccessorySensors::probe(std::uint8_t address) {
 }
 bool AccessorySensors::read(std::uint8_t address, std::uint8_t reg,
                              std::uint8_t* dest, std::uint8_t count) {
-  if (!dest || !count || count > 6) return false;
+  if (!dest || !count || count > 16) return false;
   wire_->beginTransmission(address);
   if (wire_->write(reg) != 1 || wire_->endTransmission(false) != 0)
     return false;
@@ -63,13 +63,29 @@ bool AccessorySensors::begin(TwoWire& wire) {
   next_lane_ = 1;
   started_ = false;
   sht_pending_ = ads_pending_ = false;
+  gesture_.reset();
+  gesture_collecting_ = false;
   if (!mux_present_) return false;
   // Validate APDS9960 manufacturer ID before enabling low-level proximity.
   if (select(1)) {
     std::uint8_t id = 0;
-    data_.proximity.present = read(0x39, 0x92, &id, 1) &&
-                              (id == 0xAB || id == 0x9C) &&
-                              write8(0x39, 0x80, 0x05);
+    // SparkFun defaults, adjusted without the blocking readGesture loop.
+    // The device must report a recognized ID before enabling optical LEDs.
+    const bool recognized =
+        read(0x39, 0x92, &id, 1) && (id == 0xAB || id == 0x9C);
+    data_.proximity.present = recognized &&
+        write8(0x39, 0x80, 0x00) &&  // power off for configuration
+        write8(0x39, 0x83, 0xFF) &&  // minimal wait interval
+        write8(0x39, 0x8E, 0x89) &&  // proximity pulses
+        write8(0x39, 0xA0, 40) &&    // gesture entry threshold
+        write8(0x39, 0xA1, 30) &&    // gesture exit threshold
+        write8(0x39, 0xA2, 0x40) &&  // FIFO threshold config
+        write8(0x39, 0xA3, 0x20) &&  // 2x gesture gain, no extra LED boost
+        write8(0x39, 0xA6, 0x89) &&  // gesture pulse
+        write8(0x39, 0xAA, 0x00) &&  // all four directions enabled
+        write8(0x39, 0xAB, 0x01) &&  // gesture mode, no IRQ
+        write8(0x39, 0x80, 0x4D);    // PON + WEN + PEN + GEN
+    data_.proximity.gesture_decoder_available = data_.proximity.present;
   }
   if (!close()) return false;
   // Probe only. No unverified output pin or high-power peripheral is enabled.
@@ -104,12 +120,62 @@ void AccessorySensors::angle(std::uint8_t index, std::uint32_t now_ms) {
   if (a.valid) a.at_ms = now_ms;
   // Angle alone is NOT travelled distance or traction calibration.
 }
+void AccessorySensors::gesture_fifo(std::uint32_t now_ms) {
+  auto& p = data_.proximity;
+  if (!p.gesture_decoder_available) return;
+  std::uint8_t state = 0;
+  if (!read(0x39, 0xAF, &state, 1)) { gesture_.reset(); gesture_collecting_ = false; return; }
+  if (state & 0x02U) { // gesture FIFO overrun is not a real gesture event
+    gesture_.reset();
+    gesture_collecting_ = false;
+    return;
+  }
+  if ((state & 0x01U) == 0) {
+    if (gesture_collecting_) {
+      const auto result = gesture_.finish();
+      if (result != 0) {
+        p.gesture_direction = result;
+        ++p.gesture_events;
+        p.at_ms = now_ms;
+      }
+      gesture_collecting_ = false;
+    }
+    return;
+  }
+  if (gesture_collecting_ && now_ms - gesture_started_ms_ > 700U) {
+    gesture_.reset();
+    gesture_collecting_ = false;
+    return;
+  }
+  std::uint8_t available = 0;
+  if (!read(0x39, 0xAE, &available, 1)) return;
+  const std::uint8_t n = available > 4 ? 4 : available;
+  if (!n) return;
+  std::uint8_t records[16]{};
+  // Only up to four (U,D,L,R) quads per pass, never SparkFun's
+  // long repeated I2C loop or a delayed safety/cliff refresh.
+  if (!read(0x39, 0xFC, records, n * 4)) {
+    gesture_.reset();
+    gesture_collecting_ = false;
+    return;
+  }
+  if (!gesture_collecting_) {
+    gesture_collecting_ = true;
+    gesture_started_ms_ = now_ms;
+    gesture_.reset();
+  }
+  for (std::uint8_t i = 0; i < n; ++i)
+    gesture_.push(records[i * 4], records[i * 4 + 1],
+                  records[i * 4 + 2], records[i * 4 + 3]);
+}
+
 void AccessorySensors::gesture_proximity(std::uint32_t now_ms) {
   auto& p = data_.proximity;
   if (p.present) {
     std::uint8_t raw = 0;
     p.valid = read(0x39, 0x9C, &raw, 1);
     if (p.valid) { p.raw = raw; p.at_ms = now_ms; }
+    gesture_fifo(now_ms);
   }
   angle(0, now_ms);
 }

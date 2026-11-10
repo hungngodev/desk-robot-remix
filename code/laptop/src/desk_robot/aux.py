@@ -75,6 +75,8 @@ def validate_aux(data: dict, robot_id: str) -> dict:
 
     if (not _uint(proximity.get("raw"), 255)
             or not _bool(proximity.get("valid"))
-            or proximity.get("gesture", "missing") is not None):
+            or not _uint(proximity.get("gesture"), 4)
+            or not _uint(proximity.get("gesture_events"), 0xffffffff)
+            or proximity.get("physically_qualified") is not False):
         raise ValueError("Invalid APDS9960 source")
     return data

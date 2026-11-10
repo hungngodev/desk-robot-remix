@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "AccessoryReadings.h"
+#include "GestureDecoder.h"
 namespace desk_robot {
 // One optional mux operation per 12ms after the critical ranging pass.
 // Reuses manufacturer register maps and Sensirion CRC, never Arduino libraries
@@ -24,6 +25,9 @@ class AccessorySensors {
   std::uint8_t ads_channel_ = 0;
   std::uint32_t ads_started_ = 0;
   AccessoryReadings data_{};
+  GestureDecoder gesture_{};
+  std::uint32_t gesture_started_ms_ = 0;
+  bool gesture_collecting_ = false;
   bool mux(std::uint8_t address, std::uint8_t mask);
   bool select(std::uint8_t lane);
   bool close();
@@ -36,6 +40,7 @@ class AccessorySensors {
   bool write_command(std::uint8_t address, std::uint8_t command);
   void angle(std::uint8_t index, std::uint32_t now_ms);
   void gesture_proximity(std::uint32_t now_ms);
+  void gesture_fifo(std::uint32_t now_ms);
   void force(std::uint32_t now_ms);
   void climate(std::uint32_t now_ms);
   void power(std::uint32_t now_ms);

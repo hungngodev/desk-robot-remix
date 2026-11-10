@@ -443,7 +443,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"power\":{\"cell_mv\":%u,\"soc_centi\":%u,\"bus_mv\":%u,"
         "\"shunt_uv\":%d,\"fuel_valid\":%s,\"monitor_valid\":%s,"
         "\"current_calibrated\":false},"
-        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":null}}",
+        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"physically_qualified\":false}}",
         raw.present ? "true" : "false",
         raw.valid && age <= 250U ? "true" : "false",
         static_cast<unsigned>(raw.part_id),
@@ -466,7 +466,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         a.gauge.shunt_uv, fuel_fresh ? "true" : "false",
         monitor_fresh ? "true" : "false",
         static_cast<unsigned>(a.proximity.raw),
-        proximity_fresh ? "true" : "false");
+        proximity_fresh ? "true" : "false",
+        static_cast<unsigned>(a.proximity.gesture_direction),
+        static_cast<unsigned long>(a.proximity.gesture_events));
     if (written < 0 || static_cast<std::size_t>(written) >= capacity)
       std::snprintf(reply, capacity, "ERR aux response_too_long");
   } else if (status) {

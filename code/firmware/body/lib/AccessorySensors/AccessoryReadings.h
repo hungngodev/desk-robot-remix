@@ -60,6 +60,9 @@ struct ProximityRaw {
   bool present = false, valid = false;
   std::uint8_t raw = 0;
   std::uint32_t at_ms = 0;
+  std::uint8_t gesture_direction = 0; // decoded candidate; not physically qualified
+  std::uint32_t gesture_events = 0;
+  bool gesture_decoder_available = false;
 };
 struct AccessoryReadings {
   AngleRaw angle[3]{}; // index 0 nose, 1 left track, 2 right track
