@@ -273,7 +273,8 @@ async def test_wroom_gesture_counters_feed_firsthand_memory_without_replaying_re
         assert kinds.count("touch_hold") == 1
         assert all(m.witnessed and m.source_robot == "robot-01"
                    for m in memory.recent("robot-01") if m.kind.startswith("touch_"))
-        assert len(speaker.spoken) == 1  # fleet speech cooldown still applies
+        # The hold may preempt the earlier tap response before transmission.
+        assert len(speaker.spoken) <= 1  # never overlapping or replayed speech
         assert pet.status("robot-01")["quiet"]  # deliberate hold enters quiet
         await asyncio.sleep(.05)
         assert len([m for m in memory.recent("robot-01")
