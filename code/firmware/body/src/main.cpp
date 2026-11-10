@@ -293,6 +293,15 @@ void setup() {
   } else {
     Serial.println("OK sensor_init five_vl53l4cd_channels");
   }
+  // The same upstream Wire bus can read WHO_AM_I from the owned BerryIMU
+  // before motion is ever enabled. No IMU driver, sensor fusion, second
+  // controller or unqualified safety thresholds are silently installed.
+  const auto imu = tof.probe_imu();
+  control.set_imu_identity(imu.family, imu.gyro_id, imu.aux_id);
+  Serial.printf("INFO imu_probe family=%u gyro_id=0x%02x aux_id=0x%02x unqualified\\r\\n",
+                static_cast<unsigned>(imu.family),
+                static_cast<unsigned>(imu.gyro_id),
+                static_cast<unsigned>(imu.aux_id));
   if (load_calibration()) {
     Serial.println("OK calibration_loaded samples_and_local_rearm_required");
   } else {
