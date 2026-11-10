@@ -8,7 +8,11 @@
 #include "config.h"
 #include "esp32_camera.h"
 #include "robot_bridge.h"
+#include "stackchan_behavior.hpp"
 
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <driver/i2c_master.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
@@ -21,6 +25,48 @@ private:
     Display* display_ = nullptr;
     Esp32Camera* camera_ = nullptr;
     Button boot_button_;
+    // Pinned Stackchan-agent HSM controls OLED mood only, NEVER tracks/claw.
+    stackchan::behavior::HsmBehavior face_behavior_{0x5a17};
+    bool face_was_speaking_ = false;
+    TaskHandle_t face_task_ = nullptr;
+
+    static const char* MoodName(stackchan::behavior::Mood mood) {
+        using stackchan::behavior::Mood;
+        switch (mood) {
+            case Mood::kSmile: return "happy";
+            case Mood::kSad: return "sad";
+            case Mood::kSleepy: return "sleepy";
+            case Mood::kDoubt: return "thinking";
+            case Mood::kSurprised: return "surprised";
+            case Mood::kAngry: return "angry";
+            default: return "neutral";
+        }
+    }
+
+    static void FaceTask(void* context) {
+        auto* board = static_cast<DeskRobotSenseBoard*>(context);
+        using namespace stackchan::behavior;
+        while (true) {
+            const auto device_state = Application::GetInstance().GetDeviceState();
+            const bool speaking = device_state == kDeviceStateSpeaking;
+            if (speaking && !board->face_was_speaking_) {
+                board->face_behavior_.pushEvent(Event(EventType::kSpeakRequest, ""));
+            } else if (!speaking && board->face_was_speaking_) {
+                board->face_behavior_.pushEvent(Event(EventType::kSpeechFinished));
+            }
+            board->face_was_speaking_ = speaking;
+            const Observation obs{static_cast<uint32_t>(esp_timer_get_time() / 1000)};
+            const Action action = board->face_behavior_.update(obs);
+            // Xiaozhi owns speaking/listening/status expressions. The reused
+            // Stackchan idle picker may update the existing OLED only when
+            // the device is idle; never write its motion actions to the body.
+            if (device_state == kDeviceStateIdle && action.set_mood &&
+                board->display_ != nullptr) {
+                board->display_->SetEmotion(MoodName(action.mood));
+            }
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
 
     void InitializeDisplay() {
         i2c_master_bus_config_t bus_config = {};
@@ -109,6 +155,11 @@ public:
         static desk_robot::Bridge robot_bridge(camera_);
         static std::once_flag bridge_once;
         std::call_once(bridge_once, [] { robot_bridge.Start(); });
+        // One local OLED mood task; no new speech stack, camera task or motor
+        // service. Keep idle expressions out of Xiaozhi active voice UI.
+        if (!face_task_) {
+            xTaskCreate(FaceTask, "stackchan_idle_face", 4096, this, 1, &face_task_);
+        }
     }
 
     AudioCodec* GetAudioCodec() override {
