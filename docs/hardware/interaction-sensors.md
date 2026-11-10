@@ -101,7 +101,10 @@ these are not existing supported wire commands.
   version-detection/register examples as a reviewed reference, not an assumed
   drop-in LSM6 driver. LSM6DS/BusIO/Unified Sensor applies only to that conditional
   replacement. The AT42QT1010 needs a digital event adapter rather than a special
-  library. No BerryIMU driver has been imported, compiled or physically tested.
+  library. The existing WROOM now compiles a bounded raw six-axis BerryIMU
+  reader for the identified V1/V2/V3 chip, reusing the existing TofBus identity
+  and upstream Wire bus. Actual voltage, identity and response remain physically
+  untested. No calibrated safety reaction is enabled.
 
 ## Optional later ideas, without a sensor shopping spree
 
@@ -164,23 +167,47 @@ remains `family=0`, not an assumed driver or a claimed functioning IMU.
 
 A bounded `status.imu` object exposes `family`, `gyro_id` and `aux_id`
 for the direct USB inspection tool and through the existing Sense UART bridge.
-Reading chip IDs does **not** establish sample timing, orientation, signed
-acceleration, tilt/shake threshold, or held detection. It never grants movement,
-changes local cliff decisions or clears fault latches. The Mac bench diagnostic
-therefore reports `motion_driver_active=false` and
-`physical_qualification_pass=false` regardless of the detected ID.
+Firmware now additionally configures the matching V1/V2/V3 accelerometer and
+gyro at conservative data rates and samples six raw signed axes every 50ms.
+The `status.imu` object retains the three original identity fields and adds
+`valid`, `acc`, `gyro` and `age_ms`. Samples older than 200ms become invalid.
+The same read-only fields appear in the existing local USB serial bench tool,
+which reports `motion_driver_active=true` only for a currently valid raw
+sample. This means a driver is reporting data, **not** that tilt is safe or
+calibrated. `physical_qualification_pass=false` is always retained.
+Nothing grants movement, changes the five-sensor cliff decisions or clears
+the locally latched faults.
 
 The V1 candidate has mature reusable
 [Adafruit LSM9DS0 Arduino code](https://github.com/adafruit/Adafruit_LSM9DS0_Library)
 with a BSD license and
 [SparkFun LSM9DS0 Arduino code](https://github.com/sparkfun/SparkFun_LSM9DS0_Arduino_Library)
-with explicit Beerware reuse terms. Their I2C addresses and error handling
-must be checked against the **actual** 0x6A/0x1E board and the existing
-15 ms safety-critical I2C timeout before pinning one. Do not copy the OzzMaker
-examples without confirming their source terms. V2/V3 require their matching
-chip family driver, not a mislabeled V1 translation.
+with explicit Beerware reuse terms. Their I2C addresses and error handling must still be checked against the
+**actual** chip and the existing 15ms I2C timeout. The selected code adapts
+the OzzMaker register mappings directly rather than loading a second competing
+sensor library. Keep its provenance and upstream terms under review.
+V2/V3 use their respective chip register layouts, never V1 registers.
 
 Qualification still needs a real stationary gravity sample, known PCB axes,
 gyro bias, tilt/shake vibration rejection with steppers and servos operating,
 pickup/setdown fusion with four downward ranges, timing and a local drive
 inhibit when unsafe. None of those physical A11 tests has been performed.
+
+
+## Six-axis sampling and actual mounting qualification
+
+The latest WROOM code reuses `TofBus::probe_imu` rather than probing the I2C
+bus twice. After identifying the model and addresses, the `BerryImu` adapter
+reads three accelerometer and three gyroscope register pairs using the same
+upstream 3.3V GPIO21/22 Wire bus. No second I2C controller, new user-facing
+server or sensor-to-motor permission is created. The 320G family is explicitly
+unsupported pending a matching register mapping and verification.
+
+All values are raw signed register counts. They are **not** tilt degrees or
+meters per second squared. First verify the breakout supply and printed pins,
+then test a stationary gravity sample, each known physical axis, motion
+vibration, motor noise, disconnect/reconnect, and the actual ages through
+`code/scripts/serial_bench.py --inspect` with the robot on a catch tray.
+The current six-axis driver does not implement local tilt stops or reliable
+picked-up/set-down recognition. Those require calibrated board orientation,
+noise thresholds and physical tests before trusted body interlocks can be armed.
