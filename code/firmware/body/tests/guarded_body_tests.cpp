@@ -225,6 +225,36 @@ static void touch_telemetry_never_grants_motion() {
   CHECK(!body.state().armed);
 }
 
+static void touch_is_local_human_stop_and_requires_fresh_arm() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "arm", 0) == "OK arm");
+  CHECK(send(body, "drive 20 20 250", 0).find("OK drive") == 0);
+  CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
+  body.tick(20);
+  const int held = body.state().grip;
+  CHECK(body.state().left != 0 && body.state().armed);
+  body.set_touch(true);
+  CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+  CHECK(body.state().grip == held && body.state().grip_target == held);
+  CHECK(body.state().servos_attached);  // no deliberate payload drop
+  CHECK(send(body, "keepalive", 21) == "ERR keepalive disarmed");
+  CHECK(send(body, "drive 20 20 250", 21) == "ERR drive disarmed");
+  CHECK(send(body, "arm", 21) == "ERR arm touch_active");
+  body.set_touch(true);
+  CHECK(body.state().touch_count == 1);
+  body.set_touch(false);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "keepalive", 22) == "ERR keepalive disarmed");
+  // A new explicit arm is still needed after releasing touch. No auto-resume.
+  fresh(guard, 22);
+  CHECK(send(body, "arm", 22) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -237,6 +267,8 @@ int main() {
     CHECK(status.front() == '{' && status.back() == '}');
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     touch_telemetry_never_grants_motion();
+    touch_is_local_human_stop_and_requires_fresh_arm();
+    std::cout << "PASS physical touch stops motion locally without remote rearm\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
     recovery_is_local_and_not_an_arm();
