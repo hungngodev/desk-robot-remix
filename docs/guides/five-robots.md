@@ -41,6 +41,12 @@ This does not pretend five cameras saw the exact same thing.
 To enable sharing explicitly, set `fleet_text_sharing_enabled = true` at the
 top of a private `config/local.toml`, not inside an individual robot section.
 The default and the public example are `false` to protect room privacy.
+The separate `fleet_text_auto_fanout_enabled` switch defaults to `true`,
+preserving automatic sharing **only after** the operator enables text sharing.
+For strictly selective memory transfer, set `fleet_text_sharing_enabled = true`
+and `fleet_text_auto_fanout_enabled = false`: new observations stay on their
+witness robot until an operator copies a particular event to a named peer.
+This still never grants any motion authority.
 Neither images, audio, video files, raw model prompts nor motor permissions are
 propagated between heads; the shared Mac only persists a bounded observation
 description. Only a separately enabled robot's camera or touch produces its
