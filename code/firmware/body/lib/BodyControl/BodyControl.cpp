@@ -68,6 +68,40 @@ void BodyControl::sample_touch_input(bool active) {
   if (active) touch_trip();  // before debounce and before motor output
 }
 
+void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
+                                         bool reed, bool pir) {
+  enabled_mask &= 0x07U;
+  state_.extra_mask = enabled_mask;
+  state_.bumper_raw = (enabled_mask & 1U) && bumper;
+  if (state_.bumper_raw) touch_trip(); // immediate local motor disarm
+  const bool levels[3] = {bool((enabled_mask & 1U) && bumper),
+                          bool((enabled_mask & 2U) && reed),
+                          bool((enabled_mask & 4U) && pir)};
+  bool* stable[3] = {&state_.bumper_active, &state_.reed_active, &state_.pir_active};
+  std::uint32_t* counts[3] = {&state_.bumper_events, &state_.reed_events, &state_.pir_events};
+  if (!extras_initialized_) {
+    for (int i = 0; i < 3; ++i) {
+      *stable[i] = levels[i];
+      extra_candidates_[i] = levels[i];
+      extra_streaks_[i] = 1;
+    }
+    extras_initialized_ = true;
+    return; // boot baseline, not a real new event
+  }
+  for (int i = 0; i < 3; ++i) {
+    if (levels[i] != extra_candidates_[i]) {
+      extra_candidates_[i] = levels[i];
+      extra_streaks_[i] = 1;
+    } else if (extra_streaks_[i] < 3) {
+      ++extra_streaks_[i];
+    }
+    if (extra_streaks_[i] == 3 && levels[i] != *stable[i]) {
+      *stable[i] = levels[i];
+      if (levels[i]) ++*counts[i];
+    }
+  }
+}
+
 void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
   if (active == state_.touch_active) return;
   state_.touch_active = active;
@@ -425,6 +459,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (state_.extra_mask & 1U && (state_.bumper_raw || state_.bumper_active)) {
+      std::snprintf(reply, capacity, "ERR arm bumper_active");
+      return;
+    }
     if (state_.touch_active || state_.touch_raw_active) {
       std::snprintf(reply, capacity, "ERR arm touch_active");
       return;

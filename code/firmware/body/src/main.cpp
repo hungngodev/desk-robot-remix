@@ -28,6 +28,27 @@ bool touch_candidate = false;
 std::uint8_t touch_candidate_samples = 0;
 std::uint32_t touch_last_sample_ms = 0;
 
+std::uint32_t last_extra_sample_ms = 0;
+void poll_optional(std::uint32_t now_ms) {
+  if (now_ms - last_extra_sample_ms < 25) return;
+  last_extra_sample_ms = now_ms;
+  std::uint8_t mask = 0;
+  bool bumper = false, reed = false, pir = false;
+#if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
+  mask |= 1U;
+  bumper = digitalRead(body_pins::kBumperInput) == LOW; // NC to ground, external pullup
+#endif
+#if defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED
+  mask |= 2U;
+  reed = digitalRead(body_pins::kReedInput) == LOW; // closes to ground, external pullup
+#endif
+#if defined(DESK_ROBOT_ENABLE_PIR) && DESK_ROBOT_ENABLE_PIR
+  mask |= 4U;
+  pir = digitalRead(body_pins::kPirInput) == HIGH; // validated 3.3V output only
+#endif
+  control.sample_optional_inputs(mask, bumper, reed, pir);
+}
+
 void poll_touch(std::uint32_t now_ms) {
   if (now_ms - touch_last_sample_ms < 25) return;
   touch_last_sample_ms = now_ms;
@@ -266,6 +287,15 @@ void setup() {
   // The touch breakout OUT is actively driven and powered at 3.3V.
   // GPIO34 has no internal pullup; do not leave it floating when fitted.
   pinMode(body_pins::kTouchOutput, INPUT);
+#if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
+  pinMode(body_pins::kBumperInput, INPUT); // external pullup mandatory
+#endif
+#if defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED
+  pinMode(body_pins::kReedInput, INPUT); // external pullup mandatory
+#endif
+#if defined(DESK_ROBOT_ENABLE_PIR) && DESK_ROBOT_ENABLE_PIR
+  pinMode(body_pins::kPirInput, INPUT); // measured 3.3V output and pull-down
+#endif
 #endif
   for (int pin : body_pins::kServoPins) {
     pinMode(pin, OUTPUT);
@@ -348,6 +378,7 @@ void loop() {
   berry_imu.poll(millis());   // read-only; no motor permission even if ToF fails
   control.set_imu(berry_imu.reading());
   poll_touch(millis());
+  poll_optional(millis());
 #endif
   control.tick(millis());
   apply_outputs();

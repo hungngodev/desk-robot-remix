@@ -29,6 +29,14 @@ struct State {
   std::uint32_t touch_taps = 0;
   std::uint32_t touch_double_taps = 0;
   std::uint32_t touch_holds = 0;
+  std::uint8_t extra_mask = 0; // bumper bit0, reed bit1, PIR bit2
+  bool bumper_raw = false;
+  bool bumper_active = false;
+  bool reed_active = false;
+  bool pir_active = false;
+  std::uint32_t bumper_events = 0;
+  std::uint32_t reed_events = 0;
+  std::uint32_t pir_events = 0;
   std::uint8_t imu_family = 0;   // 0 unverified, 1..3 BerryIMU, 4 MPU6050
   std::uint8_t imu_gyro_id = 0;
   std::uint8_t imu_aux_id = 0;
@@ -60,6 +68,9 @@ class BodyControl {
   // without fabricating a recognized gesture or releasing servo holding PWM.
   void touch_trip();
   void sample_touch_input(bool active);  // raw GPIO level, no gesture count
+  // Optional active 3.3V digital inputs; no software can authorize motion.
+  void sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
+                              bool reed, bool pir);
   // Boot-time read-only identity; does not confer tilt safety or arm privilege.
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   // Raw, read-only diagnostics. No tilt or motor permission follows from it.
@@ -90,6 +101,9 @@ class BodyControl {
   std::uint32_t touch_released_ms_ = 0;
   bool touch_pending_tap_ = false;
   bool touch_hold_emitted_ = false;
+  bool extras_initialized_ = false;
+  bool extra_candidates_[3]{};
+  std::uint8_t extra_streaks_[3]{};
   void stop_motion();
   // Local USB only: stage all five measured safety limits atomically.
   // No network or AI path can set or persist them.
