@@ -307,9 +307,13 @@ void setup() {
   // The same upstream Wire bus can read WHO_AM_I from the owned BerryIMU
   // before motion is ever enabled. No IMU driver, sensor fusion, second
   // controller or unqualified safety thresholds are silently installed.
-  const auto imu = tof.ready() ? tof.probe_imu() : desk_robot::ImuIdentity{};
+  // Sensor bringup is independently diagnosable on USB. Even if one ToF
+  // channel fails to initialize, Wire was opened with a bounded timeout by
+  // TofBus.begin. We can identify the owned upstream IMU without granting
+  // movement: the ToF guard remains fault-latched.
+  const auto imu = tof.probe_imu();
   control.set_imu_identity(imu.family, imu.gyro_id, imu.aux_id);
-  if (tof.ready() && imu.family != 0 &&
+  if (imu.family != 0 &&
       !berry_imu.begin(Wire, desk_robot::BerryImu::identify(imu.gyro_id, imu.aux_id),
                       imu.gyro_address, imu.aux_address)) {
     Serial.println("WARN berryimu_raw_sample_init_failed");
@@ -338,11 +342,9 @@ void loop() {
 #if DESK_ROBOT_STEPPER
   // Real I2C sampling precedes every physical motor update. The pure
   // CliffGuard remains the only local motion/safety authority.
-  if (tof.ready()) {
-    tof.poll(cliff_guard, millis());
-    berry_imu.poll(millis());
-    control.set_imu(berry_imu.reading());
-  }
+  if (tof.ready()) tof.poll(cliff_guard, millis());
+  berry_imu.poll(millis());   // read-only; no motor permission even if ToF fails
+  control.set_imu(berry_imu.reading());
   poll_touch(millis());
 #endif
   control.tick(millis());
