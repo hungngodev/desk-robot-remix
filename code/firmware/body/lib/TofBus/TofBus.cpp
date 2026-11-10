@@ -99,13 +99,19 @@ ImuIdentity TofBus::probe_imu() {
     value = static_cast<std::uint8_t>(byte);
     return true;
   };
+  // OzzMaker exposes several BerryIMU revisions. A WHO_AM_I response is
+  // not unique to one address; reject ambiguous multi-device probes rather
+  // than quietly selecting whichever chip responds first.
+  std::uint8_t gyro_matches = 0;
+  std::uint8_t aux_matches = 0;
   for (std::uint8_t addr : {static_cast<std::uint8_t>(0x6a),
                             static_cast<std::uint8_t>(0x6b)}) {
     std::uint8_t id = 0;
-    if (identity(addr, id) && (id == 0xd4 || id == 0x68 || id == 0x6a)) {
+    if (identity(addr, id) && (id == 0xd4 || id == 0x68 ||
+                              id == 0x6a || id == 0x73)) {
+      ++gyro_matches;
       result.gyro_id = id;
       result.gyro_address = addr;
-      break;
     }
   }
   for (std::uint8_t addr : {static_cast<std::uint8_t>(0x1e),
@@ -113,10 +119,13 @@ ImuIdentity TofBus::probe_imu() {
                             static_cast<std::uint8_t>(0x1c)}) {
     std::uint8_t id = 0;
     if (identity(addr, id) && (id == 0x49 || id == 0x3d)) {
+      ++aux_matches;
       result.aux_id = id;
       result.aux_address = addr;
-      break;
     }
+  }
+  if (gyro_matches != 1 || aux_matches != 1) {
+    return ImuIdentity{};  // no guessed chip, no movement permission
   }
   // Reuse the same paired model classifier as the 6-axis sampler.
   const BerryModel model = BerryImu::identify(result.gyro_id, result.aux_id);

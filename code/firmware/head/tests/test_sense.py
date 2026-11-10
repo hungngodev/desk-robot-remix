@@ -155,6 +155,21 @@ class SenseSelectionTests(unittest.TestCase):
             )
             subprocess.run([str(exe)], check=True)
 
+    def test_owned_sensor_implementations_remain_single_and_fail_closed(self):
+        # Source-level ownership checks supplement real native/ESP32 builds.
+        body = ROOT / "firmware/body"
+        tof = (body / "lib/TofBus/TofBus.cpp").read_text()
+        imu = (body / "lib/BerryImu/BerryImu.cpp").read_text()
+        self.assertIn("gyro_matches != 1 || aux_matches != 1", tof)
+        self.assertIn("id == 0x73", tof)
+        self.assertIn("BerryImu::identify", tof)
+        self.assertIn("Unsupported320G", imu)
+        self.assertIn("read_register(0x0031, &ready, 1)", tof)
+        self.assertIn("(ready & 1U) != 0U", tof)  # active-low data ready
+        self.assertIn("(result[0] & 0x1fU) == 9U", tof)  # Pololu ULD valid raw code
+        self.assertIn("result[3] > 0", tof)  # reject zero SPAD quality
+        self.assertIn("!write_byte(0x0086, 0x01)", tof)  # checked IRQ clear
+
     def test_sense_build_uses_separate_copy(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

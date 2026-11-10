@@ -232,3 +232,16 @@ is on a desk or level. All movement remains blocked by the five real ToF
 requirements until measured calibration and local USB rearm. Before any desk
 trial, the operator must additionally establish each board axis, loaded
 stopping distance, power integrity and tilt/held thresholds on a catch tray.
+
+
+### BerryIMU upstream identity collision handling
+
+This build adapts the paired WHO_AM_I approach from the existing OzzMaker
+BerryIMU Arduino `detectIMU()` implementation. It scans both possible
+acceleration/gyro addresses and the three known accessory addresses. Multiple
+recognized devices on either side now produce **unknown**, rather than
+selecting the first reply and driving potentially mismatched registers.
+A 320G WHO_AM_I value `0x73` is observed for diagnosis but deliberately
+cannot arm the V1/V2/V3 sampler. This is not equivalent to a physical revision
+check or to a board voltage measurement. See OzzMaker's original quick-start
+for V3 I2C versus SPI jumper settings.
