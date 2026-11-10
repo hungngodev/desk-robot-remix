@@ -34,6 +34,8 @@ private:
     bool uart_ready_ = false;
     bool enabled_ = false;
     std::atomic<bool> camera_busy_{false};
+    std::uint32_t camera_sequence_ = 0; // camera_busy ensures one producer
+    std::uint32_t boot_nonce_ = 0; // changes across physical Sense reboots
     // Owned by the one Sense face task, not shared with HTTP handlers.
     bool touch_baselined_ = false;
     std::uint32_t touch_last_ = 0;

@@ -69,6 +69,44 @@ async def test_ack_must_match_command_and_robot(settings, tokens, reply, identit
         assert len(calls) == 1
 
 
+async def test_camera_completion_sequence_and_boot_id_protect_five_pet_capture(settings, tokens):
+    calls = 0
+    frames = [
+        ("12", "1", "10000"),
+        ("12", "2", "20000"),
+        ("12", "2", "20000"),  # replay, must not be a new observation
+        ("13", "1", "5000"),   # reset after real Sense reboot
+    ]
+    async def handler(request):
+        nonlocal calls
+        assert request.url.path == "/api/camera.jpg"
+        index = min(calls, len(frames) - 1)
+        calls += 1
+        return httpx.Response(200, headers=dict(zip(
+            ("X-Desk-Camera-Boot", "X-Desk-Camera-Sequence",
+             "X-Desk-Camera-Complete-Us"), frames[index],
+        )), content=b"\xff\xd8frame")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        assert await head.snapshot() == b"\xff\xd8frame"
+        assert await head.snapshot() == b"\xff\xd8frame"
+        with pytest.raises(HeadError, match="stale or replayed"):
+            await head.snapshot()
+        assert await head.snapshot() == b"\xff\xd8frame"
+        assert calls == 4
+
+
+async def test_hardware_camera_requires_true_capture_metadata(settings, tokens):
+    async def handler(request):
+        return httpx.Response(200, content=b"\xff\xd8unmarked")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        with pytest.raises(HeadError, match="metadata"):
+            await head.snapshot()
+
+
 def test_calibration_rejects_examples_and_degenerate_geometry(settings):
     path = settings.robots[0].calibration
     c = Calibration.load(path)

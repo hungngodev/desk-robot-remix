@@ -57,10 +57,16 @@ def expected_ack(command: str) -> str:
 
 
 class HttpHead:
-    def __init__(self, config: RobotConfig, client: httpx.AsyncClient):
+    def __init__(
+        self, config: RobotConfig, client: httpx.AsyncClient,
+        *, strict_capture: bool = False
+    ):
         self.config = config
         self.client = client
         self.lock = asyncio.Lock()
+        self.capture_lock = asyncio.Lock()
+        self.strict_capture = strict_capture
+        self._last_camera: tuple[int, int, int] | None = None
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
@@ -94,8 +100,29 @@ class HttpHead:
             return data
 
     async def snapshot(self) -> bytes:
-        # Camera may take longer than a keepalive transaction; head itself serializes UART/camera.
-        response = await self._request("GET", "/api/camera.jpg")
-        if len(response.content) > 4_000_000 or not response.content.startswith(b"\xff\xd8"):
-            raise HeadError("Camera did not return a bounded JPEG")
-        return response.content
+        # Separate camera serialization: concurrent Mac pet/pickup callers must
+        # not trip the Sense single-capture worker or block body keepalives.
+        async with self.capture_lock:
+            response = await self._request("GET", "/api/camera.jpg")
+            if len(response.content) > 4_000_000 or not response.content.startswith(b"\xff\xd8"):
+                raise HeadError("Camera did not return a bounded JPEG")
+            names = (
+                "X-Desk-Camera-Boot", "X-Desk-Camera-Sequence",
+                "X-Desk-Camera-Complete-Us",
+            )
+            values = [response.headers.get(name) for name in names]
+            if self.strict_capture or any(value is not None for value in values):
+                if not all(value is not None and 1 <= len(value) <= 20
+                           and value.isascii() and value.isdecimal()
+                           for value in values):
+                    raise HeadError("Camera completion metadata missing or malformed")
+                boot, sequence, completed = map(int, values)
+                if not 0 <= boot <= 0xffffffff or not 1 <= sequence <= 0xffffffff or completed <= 0:
+                    raise HeadError("Camera completion metadata out of bounds")
+                earlier = self._last_camera
+                if earlier and earlier[0] == boot and (
+                    sequence <= earlier[1] or completed <= earlier[2]
+                ):
+                    raise HeadError("Camera returned stale or replayed frame metadata")
+                self._last_camera = (boot, sequence, completed)
+            return response.content

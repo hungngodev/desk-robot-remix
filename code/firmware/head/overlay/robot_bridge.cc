@@ -1,6 +1,8 @@
 #include "robot_bridge.h"
 
 #include <algorithm>
+#include <cstdio>
+#include "esp_random.h"
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -73,6 +75,7 @@ Bridge::Bridge(Camera* camera) : camera_(camera) {}
 
 void Bridge::Start() {
     enabled_ = ValidConfiguration();
+    boot_nonce_ = esp_random();
     if (!enabled_) {
         ESP_LOGW(kTag, "Robot API and movement tools disabled: configure unique ID and private token (32..128 characters)");
         return;
@@ -224,8 +227,16 @@ void Bridge::CameraTask(void* context) {
         if (!jpeg) {
             bridge->Json(req, 503, Envelope(false, jpeg.error()));
         } else {
+            // Completion, not guessed exposure time. The Mac can reject old
+            // frames from the same boot without synchronizing ESP32/Mac clocks.
+            const std::string nonce = std::to_string(bridge->boot_nonce_);
+            const std::string sequence = std::to_string(++bridge->camera_sequence_);
+            const std::string completed_us = std::to_string(esp_timer_get_time());
             httpd_resp_set_type(req, "image/jpeg");
             httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            httpd_resp_set_hdr(req, "X-Desk-Camera-Boot", nonce.c_str());
+            httpd_resp_set_hdr(req, "X-Desk-Camera-Sequence", sequence.c_str());
+            httpd_resp_set_hdr(req, "X-Desk-Camera-Complete-Us", completed_us.c_str());
             httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
         }
     }  // Destroy JPEG storage before vTaskDelete (which does not unwind C++ locals).
