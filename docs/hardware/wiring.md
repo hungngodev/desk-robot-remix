@@ -215,3 +215,45 @@ replacement invalidates prior readings. Until the physical sensors and
 floor samples are qualified, no valid mask or visually reasonable reading
 authorizes motion. Native tests verify all five arrays, reset handling and
 bounded JSON responses; neither the Mac nor model gains local USB rearm rights.
+
+## Direct USB bringup for the owned boards
+
+Reuse `code/scripts/serial_bench.py` rather than creating a second serial
+console or independently controlling the actuators through a model. On a
+**stationary, disconnected motor stand or catch tray** with the correct
+3.3 V sensor wiring, run from the `code/` directory:
+
+```sh
+uv run --extra dev python scripts/serial_bench.py --port /dev/ttyUSB0 --inspect --samples 10
+```
+
+Substitute the real WROOM USB port. This command issues only ten `status`
+reads, reports each raw five-channel distance, age and validity, the body
+fault and the BerryIMU WHO_AM_I identity, and **never** arms, calibrates, rearms,
+flashes or moves a robot. It does not call software output a measured physical
+pass. Validate wiring, power rails and board ID against the actual breakout,
+and measure the four corner optical heights and forward obstacle detection on
+the intended surfaces. When I2C is absent, the board reports missing, not safe.
+
+After the **real** local `calfloor` / `calfront` / `calfresh` / `calcommit`
+sequence has been measured and saved through WROOM USB, a trained operator
+may use a separate supervised, contained rig test such as:
+
+```sh
+uv run --extra dev python scripts/serial_bench.py --port /dev/ttyUSB0 --command "grip 95" --local-rearm
+```
+
+The explicit `--local-rearm` flag exists because opening a WROOM serial
+port can reset it, and reboot deliberately leaves the local safety latch
+disarmed. It asks the actual body over **local USB only** to clear a fault;
+the body rejects this request if measured calibration or any fresh sensor is
+unhealthy. This flag is not available via Sense, HTTP, Mac AI tools or a
+background pet. The operator must already have qualified the physical
+hardware on a catch tray. Remove servo horns/loads for initial tests.
+
+In the normal Mac runtime, an operator permit and the actual bounded job
+both perform a fresh read-only safety preflight through the existing Sense
+HTTP status and WROOM UART. Five present/valid/still-recent ToF readings,
+no touch, clear guard, correct robot identity, expected stepper backend and
+disarmed state are required. This is additional software refusal, **never**
+proof that the physical stop margin, IMU attitude safety or supply is qualified.
