@@ -243,8 +243,8 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         # Add only to the selected Sense menu. The upstream remains untouched.
         files[path] = replace_once(
             files[path].decode(),
-            'config DESK_ROBOT_DIRECT_MOTION_TOOLS\\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\\n    default n\\nendmenu\\n',
-            'config DESK_ROBOT_DIRECT_MOTION_TOOLS\\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\\n    default n\\nconfig DESK_ROBOT_AEC_DELAY_MS\\n    int "Sense playback reference delay in milliseconds (measure physically)"\\n    range 0 250\\n    default 90\\nendmenu\\n',
+            'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nendmenu\n',
+            'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nconfig DESK_ROBOT_AEC_DELAY_MS\n    int "Sense playback reference delay in milliseconds (measure physically)"\n    range 0 250\n    default 90\nendmenu\n',
         ).encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
         # not a second decoder or audio transport. Normal TTS stops retain the
