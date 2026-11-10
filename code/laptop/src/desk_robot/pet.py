@@ -40,6 +40,8 @@ class PetState:
     last_error: str | None = None
     last_touch_count: int | None = None
     last_touch_events: dict[str, int] | None = None
+    last_safety_fault: str | None = None
+    safety_fault_events: int = 0
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
@@ -103,6 +105,8 @@ class PetController:
             "spontaneous_speech_turns": state.spoken,
             "suppressed_speech_candidates": state.suppressed,
             "stale_camera_events_dropped": state.stale_camera_events,
+            "local_safety_fault_events": state.safety_fault_events,
+            "last_local_safety_fault": state.last_safety_fault,
             "last_event": state.last_event,
             "last_error": state.last_error,
             "motor_control_enabled_by_pet": False,
@@ -127,6 +131,7 @@ class PetController:
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
         state.last_touch_count = None
         state.last_touch_events = None
+        state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
         state.enabled = True
         state.last_error = None
         state.task = asyncio.create_task(self._observe(robot_id, state.generation))
@@ -251,6 +256,54 @@ class PetController:
                 state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
             await asyncio.sleep(self.touch_interval)
 
+    async def _observe_body_safety(
+        self, robot_id: str, generation: int, body: dict
+    ) -> None:
+        """Record actual local WROOM fault transitions, never inferred movement.
+
+        The WROOM guard, not the Mac, has already disarmed the motor outputs.
+        Startup with a pre-existing fault is only a baseline; it is not an
+        incident and must not create repeated autobiographical memories.
+        """
+        safety = body.get("safety")
+        if not isinstance(safety, dict):
+            return
+        fault = safety.get("fault")
+        if (
+            not isinstance(fault, str) or not 1 <= len(fault) <= 48
+            or safety.get("required") is not True
+            or type(safety.get("ready")) is not bool
+            or any(ch not in "abcdefghijklmnopqrstuvwxyz_" for ch in fault)
+        ):
+            return
+        state = self.states[robot_id]
+        previous = state.last_safety_fault
+        state.last_safety_fault = fault
+        if (
+            previous is None or previous == fault or
+            fault in ("none", "not_required") or
+            safety["ready"] is True or not state.enabled or
+            state.generation != generation
+        ):
+            return
+        sensor = safety.get("sensor")
+        location = (
+            f" at channel {sensor}" if type(sensor) is int and 0 <= sensor <= 4
+            else ""
+        )
+        description = (
+            f"My WROOM body reported a latched {fault} safety fault{location} "
+            "and disarmed motion"
+        )
+        state.safety_fault_events += 1
+        state.events += 1
+        state.last_event = description
+        # Report the firmware's own status, not an inferred physical drop,
+        # desk height, or an unverified cliff-stop distance.
+        await self._store_observation(robot_id, SceneChange(
+            "safety_fault", description, 1.0
+        ))
+
     async def _touch_from_body(self, robot_id: str, generation: int) -> None:
         """Consume firmware edge and gesture counters, never manufacture touch frames.
 
@@ -262,6 +315,8 @@ class PetController:
         if getter is None:
             return
         body = await getter()
+        if isinstance(body, dict):
+            await self._observe_body_safety(robot_id, generation, body)
         touch = body.get("touch") if isinstance(body, dict) else None
         if not isinstance(touch, dict):
             return
