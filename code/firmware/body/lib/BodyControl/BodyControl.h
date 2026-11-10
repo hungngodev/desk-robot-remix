@@ -22,7 +22,8 @@ constexpr std::uint32_t kServoStepMs = 20;  // at most 50 commanded degrees/sec
 struct State {
   bool armed = false;
   bool servos_attached = false;
-  bool touch_active = false;
+  bool touch_active = false;       // gesture-debounced input
+  bool touch_raw_active = false;   // immediate electrical interlock
   std::uint32_t touch_count = 0;  // debounced rising edges
   std::uint32_t touch_taps = 0;
   std::uint32_t touch_double_taps = 0;
@@ -57,6 +58,7 @@ class BodyControl {
   // Un-debounced local reflex: even one sensed high stops wheels and ramp,
   // without fabricating a recognized gesture or releasing servo holding PWM.
   void touch_trip();
+  void sample_touch_input(bool active);  // raw GPIO level, no gesture count
   // Boot-time read-only identity; does not confer tilt safety or arm privilege.
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
