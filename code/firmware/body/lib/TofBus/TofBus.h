@@ -44,6 +44,7 @@ class TofBus {
 
  private:
   static constexpr std::uint8_t kMuxAddress = 0x70;
+  static constexpr std::uint8_t kOptionalMuxAddress = 0x71;
   static constexpr std::uint8_t kSensorAddress = 0x29;
   static constexpr std::uint8_t kFloorAndFrontCount = 5;
   static constexpr std::uint8_t kMaxSampleBytes = 15;
@@ -51,8 +52,11 @@ class TofBus {
   VL53L4CD device_{};
   std::uint8_t next_channel_ = 0;
   bool initialized_ = false;
+  bool optional_mux_present_ = false; // second 8-lane interaction bus if fitted
   std::uint32_t bus_errors_ = 0;
 
+  // Always quiesce any fitted interaction mux before a critical range read.
+  bool quiesce_optional_mux();
   bool select(std::uint8_t channel);
   bool read_register(std::uint16_t reg, std::uint8_t* dest, std::uint8_t bytes);
   bool write_byte(std::uint16_t reg, std::uint8_t value);

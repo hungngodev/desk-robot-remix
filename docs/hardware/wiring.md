@@ -1,3 +1,5 @@
+> **Canonical full five pet wiring allocation:** [complete feature and electrical plan](full-feature-wiring-and-shopping.md). The five-channel implementation below remains the actual installed firmware foundation; the extra three ranging lanes and most optional modules require drivers and physical qualification. The 0x71 expansion mux is now quiesced before critical range reads if fitted.
+
 > 2026-11-10 sensor correction: MPU6050 is the preferred six-axis module for the prototype, per the user's new hardware identification. Preserve the photographed BerryIMU as an optional alternative. Firmware probes MPU WHO_AM_I at register 0x75 expecting 0x68; never use BerryIMU register 0x0F for MPU. Both share WROOM GPIO21/22 I2C at 3.3V logic. Verify **this particular breakout**, its VCC regulator and pullups before power. No new GPIO is needed. A second installed IMU makes autodetection ambiguous and blocks motion. The original paragraphs below are historical build guidance and do not override this revision.
 
 # Wiring and power — proposed stepper/sensor revision

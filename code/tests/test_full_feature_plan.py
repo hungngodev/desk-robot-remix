@@ -63,4 +63,8 @@ def test_no_unearned_hardware_acceptance():
     assert p["prices_complete"] is False
     assert p["physical_trial_count"] == 0
     assert "never" in p["bus"]["critical_policy"].lower()
+    source = (Path(__file__).resolve().parents[1] / "firmware/body/lib/TofBus/TofBus.cpp").read_text()
+    assert "kOptionalMuxAddress" in source
+    assert "quiesce_optional_mux()" in source
+    assert "optional_mux_present_" in source
     assert "two servo" in p["bus"]["pca9685_policy"].lower()

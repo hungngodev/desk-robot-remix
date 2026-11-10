@@ -139,7 +139,7 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 
 **MCP23017:** controls only noncritical PN532 IRQ/reset and haptic switch, plus dock detection. All outputs must have hardware-safe default pull resistors. Never put motor phases, servo lift/grip outputs, emergency stops, required head touch or optical cliff timing through the expander.
 
-**Bus ownership:** existing WROOM ToF driver must run first; optional reads have lower priority and strict timeout. The new mux must remain disabled until the new sensor drivers are written and verified. No optional sensor is allowed to rearm a body, clear a fault, grant a permit, or monopolize the bus.
+**Bus ownership:** existing WROOM ToF driver must run first; optional reads have lower priority and strict timeout. The existing WROOM ToF driver now probes a fitted 0x71 mux and disables all its lanes before each critical 0x70 range read; a failed reset of those optional lanes faults the local safety guard. No new sensor driver is claimed working until implemented and tested. No optional sensor is allowed to rearm a body, clear a fault, grant a permit, or monopolize the bus.
 
 **Wheel encoders:** two AS5600s each live on their own mux channel 6 or 7 because both answer 0x36. A third AS5600 at channel 1 reads the nose. These provide measured magnetic angles only after proper mechanical coupling, not automatic absolute navigation. No optical encoder is silently assumed compatible with the existing tracked wheels.
 

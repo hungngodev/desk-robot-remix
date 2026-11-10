@@ -5,8 +5,18 @@
 
 namespace desk_robot {
 
+bool TofBus::quiesce_optional_mux() {
+  if (!optional_mux_present_) return true;
+  // A fitted optional bus must not keep a channel selected while the local
+  // guard acquires the 0x70 floor sensor. A nonresponding second mux becomes
+  // a real bus fault, rather than allowing unsafe mixed channel reads.
+  wire_.beginTransmission(kOptionalMuxAddress);
+  const bool wrote = wire_.write(static_cast<std::uint8_t>(0)) == 1;
+  return wrote && wire_.endTransmission(true) == 0;
+}
+
 bool TofBus::select(std::uint8_t channel) {
-  if (channel >= kFloorAndFrontCount) return false;
+  if (channel >= kFloorAndFrontCount || !quiesce_optional_mux()) return false;
   wire_.beginTransmission(kMuxAddress);
   if (wire_.write(static_cast<std::uint8_t>(1U << channel)) != 1) return false;
   return wire_.endTransmission(true) == 0;
@@ -51,6 +61,13 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   // requests also require Wire's own 15ms timeout, independent of the sensor.
   wire_.begin(sda, scl, 400000);
   wire_.setTimeOut(15);
+  // Optional second mux: 0x71 (A0 high, A1/A2 low). No second board is
+  // required for the existing five sensor firmware, and an absent board NACK
+  // must not block prototype diagnostics. A fitted board is always set to
+  // zero selected lanes before any critical ranging transaction.
+  wire_.beginTransmission(kOptionalMuxAddress);
+  optional_mux_present_ = wire_.endTransmission(true) == 0;
+  if (optional_mux_present_ && !quiesce_optional_mux()) return false;
   // The final WROOM allocation does not have a spare boot-safe output.
   // With mux_reset_pin = -1, physically tie TCA9548A RESET high to 3.3V.
   if (mux_reset_pin >= 0) {
@@ -83,6 +100,7 @@ ImuIdentity TofBus::probe_imu() {
   ImuIdentity result{};
   // TCA9548A may have left a downstream branch selected. Disconnect it for
   // the upstream IMU read, without changing the active ToF measurement plan.
+  if (!quiesce_optional_mux()) return ImuIdentity{};
   wire_.beginTransmission(kMuxAddress);
   if (wire_.write(static_cast<std::uint8_t>(0)) == 1) {
     wire_.endTransmission(true);

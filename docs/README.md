@@ -14,7 +14,8 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | Find every requested idea and link | [200 feature entries](source-map.md#original-html-feature-and-sensor-idea-register) and [131 original HTML URLs](source-map.md#complete-original-html-research-link-index) |
 | Check the hard behavior and proactive requirements | [System contract](product-definition.md) and [acceptance A1–A12](records/verification.md) |
 | See the exact proposed code and firmware changes | [Implementation file map](PLAN.md) and [source reuse decisions](research/2026-11-03-active-pet-sources.md) |
-| Check what I own and what I still need | [Parts and shopping list](hardware/parts.md) |
+| Check the selected full five-pet wiring and exact purchase quantities | [Finalized full feature wiring and shopping](hardware/full-feature-wiring-and-shopping.md) and [machine-readable allocation](hardware/full-feature-plan.json) |
+| Check reported stock and historical prototype quote | [Owned inventory](hardware/fleet-inventory.json) and [historical prototype BOM](hardware/bom.json) |
 | Start the first physical check | [Gripper fit and bench guide](guides/first-gripper-test.md) |
 
 **Next step.** First settle the day-zero architecture, part variant, final fit and full delivered cost gates, then check one MG90S servo in the saved gripper before printing the whole robot. Keep robot motion disabled during fit work.
