@@ -197,7 +197,7 @@ def main():
             port.write((command + "\n").encode("ascii"))
             deadline = time.monotonic() + 0.5
             while time.monotonic() < deadline:
-                line = port.readline(768).decode("ascii", errors="strict").strip()
+                line = port.readline(1152).decode("ascii", errors="strict").strip()
                 if line.startswith("ERR "):
                     raise RuntimeError(line)
                 if command == "status" and line.startswith("{"):

@@ -326,3 +326,8 @@ has measured voltage levels, hardware pull resistors and a real enclosure mount.
 An active bumper also blocks the tool's *eligibility diagnostic* for a local
 rearm; only actual physical calibration and the separate direct USB command can
 clear the WROOM safety latch. No web or model endpoint gets that authority.
+
+
+## Source-verified bounded WROOM status size
+
+The original body reply array 752B and Sense bridge UART read cap 768B were dangerously tight after adding eight touch zones, optional event counters and future telemetry. A valid long-lived robot with several 32-bit event counters approaching 10 digits could return an `ERR status response_too_long`, hiding health diagnostics. This patch raises WROOM reply buffer to **1100 bytes**, Sense bridge maximum UART line to **1152 bytes** and local USB inspector read bound to **1152 bytes**, retaining the same strict line limits and malformed-frame rejection. The body still uses a fixed allocation and never emits a truncated JSON status as healthy. This change **does not** increase model motor permissions or alter local cliff fault handling. It is verified by the existing compiler and native tests, not yet a physical UART trace.

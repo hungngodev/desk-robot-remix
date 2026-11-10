@@ -71,3 +71,13 @@ def test_no_unearned_hardware_acceptance():
     assert "quiesce_optional_mux()" in source
     assert "optional_mux_present_" in source
     assert "two servo" in p["bus"]["pca9685_policy"].lower()
+
+def test_status_uart_and_usb_bounds_are_consistent_after_petting_telemetry():
+    root = Path(__file__).resolve().parents[1]
+    body = (root / "firmware/body/lib/BodyControl/BodyControl.h").read_text()
+    bridge = (root / "firmware/head/overlay/robot_bridge.cc").read_text()
+    usb = (root / "scripts/serial_bench.py").read_text()
+    assert "kReplyCapacity = 1100" in body
+    assert "kMaxReply = 1152" in bridge
+    assert "port.readline(1152)" in usb
+
