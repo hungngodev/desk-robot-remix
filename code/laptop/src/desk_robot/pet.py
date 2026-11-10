@@ -35,6 +35,7 @@ class PetState:
     events: int = 0
     spoken: int = 0
     suppressed: int = 0
+    stale_camera_events: int = 0
     last_event: str | None = None
     last_error: str | None = None
     last_touch_count: int | None = None
@@ -62,20 +63,30 @@ class PetController:
         interval: float = 1.2,
         speech_cooldown: float = 120.0,
         group_window: float = 3.0,
+        max_observation_age: float = 10.0,
     ):
-        if not 0 < interval <= 60 or not 0 <= speech_cooldown <= 3600 or group_window <= 0:
+        if (
+            not 0 < interval <= 60
+            or not 0 <= speech_cooldown <= 3600
+            or not 0 < group_window <= 60
+            or not 0 < max_observation_age <= 60
+        ):
             raise ValueError("Invalid pet intervals")
         self.settings, self.heads = settings, heads
         self.conversation, self.memory, self.scene = conversation, memory, scene
         self.interval, self.speech_cooldown, self.group_window = (
             interval, speech_cooldown, group_window
         )
+        self.max_observation_age = max_observation_age
         self.states = {robot.id: PetState() for robot in settings.robots}
         self._vision_lock = asyncio.Lock()
         self._speech_task: asyncio.Task | None = None
         self._speech_robot: str | None = None
         self._group_last_spoken = -math.inf
-        self._event_kinds: dict[str, float] = {}
+        # Same class alone is not an identity: two distinct keys appearing
+        # in rapid succession must not be merged. Descriptions remain model
+        # assessments, not measured spatial event identities.
+        self._event_kinds: dict[tuple[str, str], float] = {}
         self._closed = False
 
     def status(self, robot_id: str) -> dict:
@@ -87,6 +98,7 @@ class PetController:
             "camera_change_events": state.events,
             "spontaneous_speech_turns": state.spoken,
             "suppressed_speech_candidates": state.suppressed,
+            "stale_camera_events_dropped": state.stale_camera_events,
             "last_event": state.last_event,
             "last_error": state.last_error,
             "motor_control_enabled_by_pet": False,
@@ -281,6 +293,13 @@ class PetController:
                 if previous is not None:
                     async with self._vision_lock:
                         change = await self.scene.compare(previous, jpeg)
+                    # Restore the stale-inference gate preserved in the old
+                    # PR #4 prototype. A local VLM may finish long after the
+                    # scene changed. Monotonic time here is Mac receive time,
+                    # NOT a device exposure timestamp or sensor certification.
+                    if time.monotonic() - received > self.max_observation_age:
+                        state.stale_camera_events += 1
+                        continue
                     if change is not None and state.enabled and state.generation == generation:
                         state.events += 1
                         state.last_event = change.description
@@ -300,10 +319,17 @@ class PetController:
     def _consider_speech(self, robot_id: str, change: SceneChange, generation: int) -> None:
         state = self.states[robot_id]
         now = time.monotonic()
-        # A simple class+time cross-camera coalescer. It can suppress distinct
-        # simultaneous similar events; do NOT pretend calibrated spatial ID.
-        previous = self._event_kinds.get(change.kind, -math.inf)
-        self._event_kinds[change.kind] = now
+        # Restore content-aware cross-camera deduplication from the earlier
+        # source prototype instead of suppressing all distinct "object" events.
+        # This remains text-based, NOT calibrated multi-camera spatial tracking.
+        event_key = (change.kind, " ".join(change.description.casefold().split()))
+        previous = self._event_kinds.get(event_key, -math.inf)
+        if len(self._event_kinds) >= 64:
+            self._event_kinds = {
+                key: seen for key, seen in self._event_kinds.items()
+                if now - seen < self.group_window
+            }
+        self._event_kinds[event_key] = now
         if (
             state.quiet
             or now - previous < self.group_window
