@@ -219,6 +219,36 @@ def test_usb_mpu6050_raw_diagnostic_and_family_validation():
             inspect_status(changed)
 
 
+def test_usb_optional_sensor_mask_levels_and_bumper_manual_rearm_gate():
+    status = {
+        "backend": "stepper_28byj48", "armed": False,
+        "touch": {"active": False},
+        "safety": {"ready": True, "fault": "none"},
+        "ranges": {"mm": [35, 35, 35, 35, 300],
+                   "age_ms": [5, 5, 5, 5, 5],
+                   "present_mask": 31, "valid_mask": 31},
+        "extras": {"mask": 7, "bumper": True, "bumps": 1,
+                   "reed": False, "reed_count": 2,
+                   "pir": True, "pir_count": 3},
+    }
+    result = inspect_status(status)
+    assert result["optional_inputs"]["enabled_mask"] == 7
+    assert result["optional_inputs"]["pir_events"] == 3
+    assert result["optional_inputs"]["bumper_events"] == 1
+    assert not result["eligible_for_manual_local_rearm"]
+    assert not result["optional_inputs"]["physical_qualification_pass"]
+    for bad in (
+        {"mask": 8}, {"mask": True}, {"bumper": 1}, {"bumps": -1},
+        {"reed_count": 2**32}, {"pir": "true"},
+    ):
+        changed = {**status, "extras": {**status["extras"], **bad}}
+        with pytest.raises(ValueError):
+            inspect_status(changed)
+    changed = {**status, "extras": {**status["extras"], "mask": 0}}
+    with pytest.raises(ValueError, match="Unenabled"):
+        inspect_status(changed)
+
+
 @pytest.mark.parametrize("change", [
     {"backend": "dc_pwm"},
     {"imu": {"family": 5, "gyro_id": 0, "aux_id": 0}},

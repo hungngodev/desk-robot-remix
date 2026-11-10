@@ -68,7 +68,40 @@ def inspect_status(status: dict) -> dict:
             or (raw_valid and (family == 0 or sample_age > 200))
         ):
             raise ValueError("Malformed or stale IMU six-axis diagnostics")
+    extras = status.get("extras")
+    if extras is None:
+        extra_data = {
+            "status_reported": False, "enabled_mask": 0,
+            "bumper": False, "bumper_events": 0,
+            "reed": False, "reed_events": 0,
+            "pir": False, "pir_events": 0,
+            "physical_qualification_pass": False,
+        }
+    else:
+        if not isinstance(extras, dict):
+            raise ValueError("Malformed optional WROOM extras")
+        mask = extras.get("mask")
+        if type(mask) is not int or not 0 <= mask <= 7:
+            raise ValueError("Invalid optional sensor enable mask")
+        for key in ("bumper", "reed", "pir"):
+            if type(extras.get(key)) is not bool:
+                raise ValueError("Invalid optional sensor input level")
+        for key in ("bumps", "reed_count", "pir_count"):
+            if type(extras.get(key)) is not int or not 0 <= extras[key] <= 0xffffffff:
+                raise ValueError("Invalid optional sensor edge counter")
+        if any(extras[name] for bit, name in (
+            (1, "bumper"), (2, "reed"), (4, "pir")
+        ) if not mask & bit):
+            raise ValueError("Unenabled optional sensor cannot report active")
+        extra_data = {
+            "status_reported": True, "enabled_mask": mask,
+            "bumper": extras["bumper"], "bumper_events": extras["bumps"],
+            "reed": extras["reed"], "reed_events": extras["reed_count"],
+            "pir": extras["pir"], "pir_events": extras["pir_count"],
+            "physical_qualification_pass": False,
+        }
     return {
+        "optional_inputs": extra_data,
         "imu": {
             "family": ("unverified", "berryimu_v1", "berryimu_v2", "berryimu_v3", "mpu6050")[family],
             "gyro_who_am_i": gyro,
@@ -102,6 +135,7 @@ def inspect_status(status: dict) -> dict:
         "eligible_for_manual_local_rearm": (
             status.get("armed") is False
             and touch["active"] is False
+            and not extra_data["bumper"]
             and present == 31 and valid == 31
             and all(1 <= value <= 1300 for value in mm)
             and all(0 <= age < 200 for age in ages)

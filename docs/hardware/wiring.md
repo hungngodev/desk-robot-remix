@@ -310,3 +310,17 @@ the actual hardware. Its address may conflict with an optional Berry pressure
 chip if someone wires both upstream: isolate it on mux lane 5. No extra I2C
 sampling may starve five-channel floor polling. None of this bypasses WROOM
 local guard, MPU heartbeat, one-use operator permit, or the robot's $50 cap.
+
+
+### Inspect extra sensor and MPU wiring without arming motors
+
+With a qualified and physically disconnected motor supply, run the existing
+`code/scripts/serial_bench.py --port <actual-WROOM-USB-port> --inspect` on
+the WROOM USB serial interface. The inspection now exposes MPU6050 (family4)
+raw six-axis data and the `optional_inputs` enabled bit mask, bumper/reed/PIR
+levels and rising counters. It reports false physical qualification even when
+values are fresh. GPIO35/36/39 remain disabled in default firmware until each
+has measured voltage levels, hardware pull resistors and a real enclosure mount.
+An active bumper also blocks the tool's *eligibility diagnostic* for a local
+rearm; only actual physical calibration and the separate direct USB command can
+clear the WROOM safety latch. No web or model endpoint gets that authority.
