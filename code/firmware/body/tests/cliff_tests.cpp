@@ -228,6 +228,35 @@ void unsigned_clock_rollover() {
   CHECK(guard.evaluate(start + 82U));
 }
 
+void diagnostics_read_only_and_bounded() {
+  CliffGuard guard;
+  auto missing = guard.diagnostic(0, 0);
+  CHECK(!missing.present && !missing.valid && missing.distance_mm == 0);
+  CHECK(guard.configure(config()));
+  healthy_samples(guard, 10);
+  CHECK(guard.fault() == CliffFault::MissingSample);
+  auto observed = guard.diagnostic(2, 25);
+  CHECK(observed.present && observed.valid);
+  CHECK(observed.distance_mm == 45 && observed.age_ms == 15);
+  CHECK(!guard.diagnostic(255, 25).present);
+  // Reading does not automatically rearm or clear the sticky fault.
+  CHECK(guard.fault() == CliffFault::MissingSample);
+  CHECK(guard.try_rearm(25));
+  guard.sample(3, 800, false, 30);
+  const auto bad = guard.diagnostic(3, 31);
+  CHECK(bad.present && !bad.valid);
+  CHECK(bad.distance_mm == 800 && bad.age_ms == 1);
+  CHECK(guard.fault() == CliffFault::InvalidSample);
+  guard.bus_fault();
+  CHECK(!guard.diagnostic(3, 32).present);
+  CHECK(guard.fault() == CliffFault::InvalidSample);
+  // Millis wrap measures elapsed age using unsigned arithmetic.
+  CliffGuard another;
+  CHECK(another.configure(config()));
+  another.sample(0, 50, true, 0xfffffff0U);
+  CHECK(another.diagnostic(0, 0x10U).age_ms == 32U);
+}
+
 void fault_names() {
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::None), "none") == 0);
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::Unconfigured), "unconfigured") == 0);
@@ -256,7 +285,8 @@ int main(int argc, char** argv) {
       {"configuration_replacement_invalidates_samples", configuration_replacement_invalidates_samples},
       {"first_fault_and_invalid_channel", first_fault_and_invalid_channel},
       {"unsigned_clock_rollover", unsigned_clock_rollover},
-      {"fault_names", fault_names}};
+      {"fault_names", fault_names},
+      {"diagnostics_read_only_and_bounded", diagnostics_read_only_and_bounded}};
   int ran = 0;
   for (const auto& test : tests) {
     if (argc > 1 && std::strcmp(argv[1], test.first) != 0) continue;
