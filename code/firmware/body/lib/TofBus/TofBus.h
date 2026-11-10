@@ -24,6 +24,8 @@ struct ImuIdentity {
   std::uint8_t family = 0;
   std::uint8_t gyro_id = 0;
   std::uint8_t aux_id = 0;
+  std::uint8_t gyro_address = 0;
+  std::uint8_t aux_address = 0;
 };
 
 class TofBus {
