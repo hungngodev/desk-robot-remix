@@ -368,3 +368,25 @@ The [existing host workflow](../../.github/workflows/host-verification.yml) alre
 7. Build/flash task for the real XIAO Sense ESP-IDF target with pinned upstream/toolchain. CI build is not an acoustic acceptance substitute.
 
 **Exit of final robot one** is all A1–A12 measured on final hardware plus E01–E10 experience evidence. Then test each duplicate and fleet goals before saying the project is completed.
+
+
+## 2026-11-10 ten connected engineering passes, not ten physical trials
+
+The consolidated PR #17 now includes code and tests for these connected paths:
+WROOM latched fault to Mac job cancellation; Pololu VL53L4CD and OzzMaker
+BerryIMU identity verification; native touch to Stackchan OLED reaction;
+fail-closed head fault display; per-board Sense AEC reference delay; replay
+resistant JPEG completion metadata; correct distinction among own utterances,
+heard peers and sensory evidence; continuous operator-enabled but physically
+gated exploration; shared real WROOM health verification through grip and
+placement; and full five-robot simulated conversation, local private memories
+and single moving pet acceptance tests.
+
+All changes target the user's existing **full five-pet feature requirements**.
+The new real hardware exploration default is locked until measured swept path
+clearance and current floor/IMU calibration, not because exploration was
+removed from the product. The real gripper and microphone still need their
+specified 8/10 key, 8/10 candy, 19/20 voice interruption, and five unit trials.
+Do not stamp these passes green from older runs: check GitHub Actions against
+the *final PR #17 head SHA* and retain all physical gates as pending until
+independently recorded evidence exists.

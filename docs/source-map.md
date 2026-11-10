@@ -572,3 +572,70 @@ This table is extracted from the **actual uploaded HTML structure**, rather than
 | 41 | `repos` | Older open source starter projects | Research only | [View](source-map.md) |
 
 **Important:** Section IDs and link set are source provenance. The table does **not** imply each external article has been visited, that an old wiring example is safe, or that every speculative sensor fits the current chassis and $50 cap. Use the full 131 URL list and feature IDs for deeper source inspection. Do not reinstate deprecated Xiaozhi era pinouts or the interactive simulator's cliff reversal.
+
+
+## Ten detailed integration reviews of the full five-robot product, November 10, 2026
+
+This is an engineering audit of the **complete requested system**, not a
+reduced beginner robot. See the same consolidated draft PR #17 for executable
+changes. Reviewed first-party source boundaries were compared before code reuse:
+
+1. The already existing WROOM local cliff fault and Mac one-use permit had
+   independent stop handlers. Connected the Mac pet status fault transition to
+   the existing Coordinator stop/cancel path so an in-flight pickup/exploration
+   job cannot carry on after the WROOM disarms locally.
+2. Rechecked Pololu's [VL53L4CD Arduino ULD-derived source](https://github.com/pololu/vl53l4cd-arduino/blob/master/src/VL53L4CD.cpp).
+   Confirmed the active-low GPIO status, raw range status 9, nonzero SPAD and
+   checked interrupt clear. Retained the selected VL53L4CD and mux adapter,
+   not obsolete VL53L0X imports. Rechecked the paired identity detection in
+   [OzzMaker's BerryIMU Arduino source](https://github.com/ozzmaker/BerryIMU/blob/master/arduino-BerryIMU/IMU.cpp).
+   Refuse ambiguous WHO_AM_I combinations and unsupported LSM6DSV320X.
+3. Compared the actual vendored MIT
+   [Stackchan-agent Behavior.hpp](https://github.com/botamochi6277/stackchan-agent/blob/bfb98fb8bdb4f8ecc4b7c1c4aed39bb7d84bdefe613/include/Behavior.hpp)
+   with our Sense face task. Connected the real WROOM body UART touch count
+   to its existing HSM `kTouched` event and OLED expression without another
+   motor controller or invented pan/tilt servo.
+4. Reused the same HSM for fail-closed face response when the WROOM is offline
+   or reports a fault. Updated OLED only on transitions instead of repeating
+   the same display write continuously; restore idle state after recovery.
+5. Compared real Sense MR 16 kHz microphone/reference AFE contract with
+   [Espressif ESP-SR AFE](https://docs.espressif.com/projects/esp-sr/en/latest/esp32/audio_front_end/README.html)
+   and the owned-board-compatible
+   [RIO source](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant).
+   Retained existing Xiaozhi I2S, device AEC and ring resampler. Exposed
+   reference delay (default 90ms, 0..250ms private per-board build setting)
+   instead of falsely assuming room acoustics calibrated.
+6. Connected the existing Sense `SnapshotJpeg` camera endpoint and Mac
+   `HttpHead` with a boot nonce, per-boot capture sequence and head-side
+   JPEG completion timestamp, serializing camera capture per physical head
+   without blocking WROOM keepalive. This **is not** a true sensor exposure
+   timestamp and does not synchronize device clocks; an actual stale or
+   replayed completion is rejected before it drives proactive or pickup logic.
+7. Reconciled five independent SQLite memory and peer dialogue semantics:
+   a robot's own spoken line now says `I said`; another robot's line says
+   `I heard robot-N say`; only real witnessed sensor events use `I witnessed`.
+   Conversation and proactive prompts share this provenance distinction.
+8. Compared
+   [Reachy Mini's weighted idle policy](https://github.com/pollen-robotics/reachy_mini_conversation_app/blob/e90192559149d6281d782c1c4aed39bb7d84bdef/src/reachy_mini_conversation_app/idle_policy.py)
+   and [Microduck's proposed 16-state autonomous design](https://github.com/pollen-robotics/microduck/blob/54e0789635ae28120be9ea0dd51750a494ab50ac/docs/ideas/autonomous_behavior.md).
+   Reachy dispatches registered local idle tools with weighted stillness;
+   Microduck's document is a *proposal* and not a finished motor navigation
+   stack. Used the existing Coordinator one job / WROOM motion authority to
+   implement persistent operator-enabled exploration with 100ms bounded
+   pulses and fresh optical/IMU checks. Full swept turns and autonomous route
+   decisions still require mechanical and sensor qualification.
+9. Refactored the same sensor-health readout into pickup and exploration.
+   Rechecks actual WROOM armed state, 5 ToF channels, IMU and touch between
+   100ms approach pulses and lift, hold, release, withdrawal and verification.
+   No user trust in simulation images as physical 10mm lift evidence.
+10. Added a single five-robot integration simulation with five independent
+   stores, 10 sequential digital conversation turns, per-peer memory/source
+   separation, persistent one-pet movement, stop and no other pet movement.
+   This is an executable software test of wiring, not five assembled robots.
+
+**Not yet accepted:** attached sensor pullups and supply, identified board
+revisions, physically calibrated tilt/handling, final CAD/gripper fit, delivered
+price, motor slip and swept turn margins, 19/20 natural interruption latency,
+8/10 real key and candy pickups, and five actual head + body trials. None of
+these original user requirements was removed, and CI cannot substitute for
+real mechanical or acoustic evidence.

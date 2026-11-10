@@ -11,6 +11,7 @@ from desk_robot.api import create_app
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation, conversation_turns
 from desk_robot.memory import MemoryStore
+from desk_robot.runtime import Runtime
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 from fastapi.testclient import TestClient
 
@@ -373,6 +374,57 @@ async def test_five_robot_conversation_persists_peer_hearsay_without_identity_le
     again = Conversation(fleet, SimulatedChat(), SimulatedSpeaker(), memory=memory)
     await again.run(IDS[:2], "A follow up", 1)
     assert "untrusted historical text" in again.histories["robot-01"][0]["content"]
-    assert "I was told by robot-02" in again.histories["robot-01"][0]["content"]
-    assert "I witnessed" in again.histories["robot-01"][0]["content"]
+    assert "I heard robot-02 say" in again.histories["robot-01"][0]["content"]
+    assert "I said" in again.histories["robot-01"][0]["content"]
     assert memory.count("robot-03") == 5
+
+
+async def test_all_five_full_system_simulated_integration_and_persistent_motion(fleet, tmp_path):
+    # One integrated runtime, NOT a five-system mock or independent plan:
+    # five local head adapters, one coordinator, one speaker owner, five DBs.
+    # No physical sensor, acoustics or grip claim can follow from this test.
+    fleet.memory_dir = tmp_path / "private_memories"
+    fleet.max_job_seconds = 1
+    runtime = Runtime(fleet)
+    try:
+        assert list(runtime.coordinator.heads) == IDS
+        assert set(runtime.pet.states) == set(IDS)
+        for robot in fleet.robots:
+            assert robot.motion_enabled
+            assert runtime.pet.start(robot.id)["enabled"] is True
+            status = await runtime.coordinator.heads[robot.id].status()
+            assert status["robot_id"] == robot.id and status["armed"] is False
+        transcript = await runtime.conversation.run(IDS, "Plan an imaginative pet game", 10)
+        assert [line["robot_id"] for line in transcript] == IDS * 2
+        assert [i for i, _ in runtime.conversation.speaker.spoken] == IDS * 2
+        for robot in fleet.robots:
+            records = runtime.memory.recent(robot.id, limit=12)
+            assert len(records) == 10
+            assert sum(row.kind == "own_utterance" and row.witnessed
+                       for row in records) == 2
+            assert sum(row.kind == "peer_utterance" and not row.witnessed
+                       for row in records) == 8
+            assert len({row.source_robot for row in records}) == 5
+        # One permit starts persistent guarded movement for only one pet.
+        await runtime.coordinator.operator_arm("robot-01")
+        job = runtime.coordinator.explore("robot-01")
+        async with asyncio.timeout(4):
+            while runtime.coordinator.heads["robot-01"].commands.count(
+                "drive 20 20 100"
+            ) < 2:
+                await asyncio.sleep(0.01)
+        assert job.state == "running"
+        assert all(
+            not runtime.coordinator.heads[robot_id].commands
+            for robot_id in IDS[1:]
+        )
+        await runtime.coordinator.stop("robot-01")
+        assert job.state == "cancelled"
+        assert not runtime.coordinator.heads["robot-01"].armed
+        assert runtime.memory.count("robot-05") == 10
+        assert await runtime.pet.pause("robot-05")
+        assert runtime.pet.status("robot-05")["enabled"] is False
+        # No re-enable or cross-robot identity contamination on close.
+    finally:
+        await runtime.close()
+    assert len(list((tmp_path / "private_memories").glob("*.sqlite3"))) == 5
