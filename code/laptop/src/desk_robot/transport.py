@@ -6,6 +6,7 @@ from typing import Protocol
 
 import httpx
 
+from .aux import validate_aux
 from .config import RobotConfig, secret
 
 
@@ -101,26 +102,13 @@ class HttpHead:
             return data
 
     async def aux_status(self) -> dict:
-        """Authenticated read-only optional sensor path, never an arm command."""
+        """Authenticate and validate all optional sensor provenance, never arm."""
         async with self.lock:
             data = (await self._request("GET", "/api/aux")).json()
-            if not isinstance(data, dict) or data.get("robot_id") != self.config.id:
-                raise HeadError("Aux telemetry robot identity mismatch")
-            pulse = data.get("pulse")
-            if not isinstance(pulse, dict):
-                raise HeadError("Optical paw telemetry unavailable")
-            if (type(pulse.get("present")) is not bool
-                    or type(pulse.get("valid")) is not bool
-                    or type(pulse.get("part_id")) is not int
-                    or not 0 <= pulse["part_id"] <= 255
-                    or any(type(pulse.get(key)) is not int or not 0 <= pulse[key] <= maximum
-                           for key, maximum in (("red", 262143), ("ir", 262143),
-                                                ("age_ms", 0xffffffff)))
-                    or pulse.get("bpm", "missing") is not None
-                    or pulse.get("medical") is not False
-                    or (pulse["valid"] and not pulse["present"])):
-                raise HeadError("Malformed untrusted optical paw source")
-            return data
+            try:
+                return validate_aux(data, self.config.id)
+            except ValueError as exc:
+                raise HeadError(str(exc)) from exc
 
     async def snapshot(self) -> bytes:
         # Separate camera serialization: concurrent Mac pet/pickup callers must
