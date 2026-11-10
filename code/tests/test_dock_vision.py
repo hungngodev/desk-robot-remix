@@ -4,8 +4,11 @@ import math
 import pytest
 
 from desk_robot.dock_vision import (
-    DockAssessment, DockCameraCalibration, DockPose,
-    assess_dock, detect_apriltag,
+    DockAssessment,
+    DockCameraCalibration,
+    DockPose,
+    assess_dock,
+    detect_apriltag,
 )
 
 
