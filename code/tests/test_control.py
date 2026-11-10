@@ -32,6 +32,21 @@ async def test_permit_is_operator_only_one_use_per_robot(settings):
         await c.close()
 
 
+async def test_two_argument_drive_uses_firmware_default_duration(settings):
+    c, head = make(settings)
+    try:
+        await c.operator_arm("robot-01")
+        job = c.manual("robot-01", "drive 20 20")
+        await c.tasks[job.id]
+        assert job.state == "succeeded", job.error
+        assert head.commands.count("drive 20 20") == 1
+        assert head.commands[-1] == "stop"
+        # This was once a post-command IndexError in the Mac coordinator.
+        assert not any("IndexError" in event for event in job.events)
+    finally:
+        await c.close()
+
+
 async def test_permit_expiry_motion_default_and_simulation_calibration(settings):
     c, head = make(settings)
     settings.robots[0].motion_enabled = False
