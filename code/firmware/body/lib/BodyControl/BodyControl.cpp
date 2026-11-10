@@ -63,6 +63,11 @@ void BodyControl::touch_trip() {
   }
 }
 
+void BodyControl::sample_touch_input(bool active) {
+  state_.touch_raw_active = active;
+  if (active) touch_trip();  // before debounce and before motor output
+}
+
 void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
   if (active == state_.touch_active) return;
   state_.touch_active = active;
@@ -364,7 +369,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(watchdog_remaining(now_ms)),
         static_cast<unsigned long>(drive_remaining(now_ms)),
         profile_ == BodyProfile::StepperGuarded ? "stepper_28byj48" : "dc_pwm",
-        state_.touch_active ? "true" : "false",
+        (state_.touch_active || state_.touch_raw_active) ? "true" : "false",
         static_cast<unsigned long>(state_.touch_count),
         static_cast<unsigned long>(state_.touch_taps),
         static_cast<unsigned long>(state_.touch_double_taps),
@@ -407,7 +412,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
-    if (state_.touch_active) {
+    if (state_.touch_active || state_.touch_raw_active) {
       std::snprintf(reply, capacity, "ERR arm touch_active");
       return;
     }
