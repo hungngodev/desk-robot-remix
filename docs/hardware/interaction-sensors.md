@@ -94,11 +94,43 @@ these are not existing supported wire commands.
 - Reachy supplies speech/listening arbitration and orientation reporting;
   Google's agent supplies camera-event handling. Neither automatically supplies
   our held-state fusion. See [complete source map](../source-map.md).
-- WROOM driver route: identify the owned BerryIMU version first; use the maker's
-  version-detection/register examples as a reviewed reference, not an assumed
-  drop-in LSM6 driver. LSM6DS/BusIO/Unified Sensor applies only to that conditional
-  replacement. The AT42QT1010 needs a digital event adapter rather than a special
-  library. No BerryIMU driver has been imported, compiled or physically tested.
+- The existing WROOM firmware now has a shared Wire BerryIMU adapter adapted
+  from OzzMaker's [Arduino model detection and register maps](https://github.com/ozzmaker/BerryIMU/tree/master/arduino-BerryIMU).
+  It matches both chip IDs to distinguish V1 LSM9DS0, V2 LSM9DS1 and V3
+  LSM6DSL; a 320G returns an unsupported identity rather than being driven
+  with incompatible registers. One six-axis raw sample every 50ms feeds the
+  existing authenticated body status and head UART bridge. **No mounting-axis
+  conversion or tilt safety threshold has been qualified**; read-only raw
+  telemetry does not replace actual guarded-tilt/held tests. No identity is
+  assumed until physical wiring and readout succeed. The AT42QT1010 remains
+  the existing digital touch adapter; do not duplicate its owner.
+
+## BerryIMU bench wiring and read-only verification
+
+The identified **board voltage and its printed SDA/SCL/VCC labels take priority**
+over this proposal. With power disconnected, visually identify the board
+revision. Measure its supply and pullups before connecting: WROOM and its I2C
+bus are 3.3V logic. Put the actual BerryIMU SDA and SCL on WROOM GPIO21 and
+GPIO22 **upstream of** TCA9548A; share ground. The five ToF sensors remain
+downstream on TCA channels 0..4. Do not put the IMU on a mux channel or connect
+it to GPIO4. Do not attach optional pressure and magnetometer devices separately.
+
+After the five mandatory ToF sensors initialize, the WROOM performs a bounded
+identity probe at 0x6A/0x6B and 0x1C/0x1E. V1 uses matching identity 0xD4 and
+0x49; V2 uses 0x68 and 0x3D; V3 uses 0x6A and 0x3D. Other/ambiguous results
+are rejected. A 320G (0x73) is identified but not sampled with the wrong
+driver. The body reports `OK berryimu_detected_raw_only` or a warning over USB
+on boot. Inspect authenticated status `imu.model`, `imu.valid`, `imu.acc`,
+`imu.gyro`, and `imu.age_ms` through the existing head bridge, with no new
+network service. A sample older than 200ms is explicitly invalid and cannot
+authorize movement. The sensor has no motor authority yet.
+
+With drive physically disabled, rotate and tilt the mounted board and verify
+axis sign, magnitude, gravity orientation and actual sample age. Disconnect and
+reconnect to test failure indication. Never infer safe tilt from the absolute
+raw value before confirming the chip revision, mounted orientation and measured
+motor vibration. This integration is code verified only, not electrically
+qualified or a complete held-state safety interlock.
 
 ## Optional later ideas, without a sensor shopping spree
 
