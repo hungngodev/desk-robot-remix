@@ -237,13 +237,17 @@ static void raw_touch_trip_preempts_debounce_without_forging_a_tap() {
   body.tick(20);
   const int commanded_hold = body.state().grip;
   CHECK(body.state().left != 0 && body.state().armed);
-  body.touch_trip();  // one raw GPIO high, debounced state still false
+  body.sample_touch_input(true);  // one raw GPIO high, gesture state still false
   CHECK(!body.state().armed && body.state().left == 0);
   CHECK(body.state().right == 0);
   CHECK(body.state().servos_attached);
   CHECK(body.state().grip == commanded_hold &&
         body.state().grip_target == commanded_hold);
-  CHECK(!body.state().touch_active && body.state().touch_count == 0);
+  CHECK(!body.state().touch_active && body.state().touch_raw_active);
+  CHECK(body.state().touch_count == 0);
+  CHECK(send(body, "status", 21).find("\"touch\":{\"active\":true,\"count\":0") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 21) == "ERR arm touch_active");
   CHECK(body.state().touch_taps == 0 && body.state().touch_holds == 0);
   CHECK(send(body, "keepalive", 21) == "ERR keepalive disarmed");
   CHECK(send(body, "drive 30 30 250", 21) == "ERR drive disarmed");
@@ -253,6 +257,7 @@ static void raw_touch_trip_preempts_debounce_without_forging_a_tap() {
   CHECK(!body.state().armed && body.state().left == 0);
   CHECK(send(body, "arm", 75) == "ERR arm touch_active");
   body.set_touch(false, 160);
+  body.sample_touch_input(false);  // one raw low still requires explicit arm
   CHECK(!body.state().armed);
   CHECK(send(body, "keepalive", 160) == "ERR keepalive disarmed");
 }
