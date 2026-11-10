@@ -732,3 +732,37 @@ def test_selected_peer_share_api_requires_operator_and_existing_opt_in(fleet, to
         ).status_code == 404
         fleet.fleet_text_sharing_enabled = False
         assert client.post(path, headers=operator, json=payload).status_code == 400
+
+
+async def test_selective_only_mode_copies_single_existing_eyewitness_event(fleet, tmp_path):
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = False
+    camera, scene = ChangingCamera(), KeyScene()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+    )
+    pet = PetController(
+        fleet, {"robot-01": camera}, conversation, memory, scene,
+        interval=.01, speech_cooldown=120,
+    )
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: any(
+            row.kind == "key" for row in memory.recent("robot-01")
+        ))
+        observed = next(
+            row for row in memory.recent("robot-01") if row.kind == "key"
+        )
+        assert observed.witnessed
+        assert memory.count("robot-02") == memory.count("robot-03") == 0
+        shared = await pet.share_with_peer(
+            "robot-01", "robot-03", observed.event_id
+        )
+        assert shared["stored"] and not shared["witnessed"]
+        assert memory.count("robot-02") == 0
+        received = memory.recent("robot-03")[0]
+        assert received.event_id == observed.event_id
+        assert received.source_robot == "robot-01" and not received.witnessed
+    finally:
+        await pet.close()
