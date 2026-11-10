@@ -472,3 +472,105 @@ async def test_different_observations_of_same_kind_are_not_falsely_coalesced(
         assert len(pet._event_kinds) == 2
     finally:
         await pet.close()
+
+
+async def test_independent_touch_poll_silences_pet_while_camera_vlm_is_blocked(
+    fleet, tmp_path
+):
+    class WaitingScene:
+        def __init__(self):
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def compare(self, before, after):
+            self.entered.set()
+            await self.release.wait()
+            return SceneChange("key", "A new key appeared on the desk", .95)
+
+    class LiveTouchAndCamera(ChangingCamera):
+        def __init__(self):
+            super().__init__()
+            self.hold = False
+            self.status_calls = 0
+
+        async def status(self):
+            self.status_calls += 1
+            return {
+                "touch": {
+                    "active": self.hold,
+                    "count": 1 if self.hold else 0,
+                    "tap_count": 0,
+                    "double_count": 0,
+                    "hold_count": 1 if self.hold else 0,
+                }
+            }
+
+    scene = WaitingScene()
+    head = LiveTouchAndCamera()
+    speaker = SimulatedSpeaker()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": head},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, scene, interval=.01, touch_interval=.01,
+    )
+    try:
+        pet.start("robot-01")
+        await asyncio.wait_for(scene.entered.wait(), 2)
+        head.hold = True
+        # The VLM is still blocked. This must not wait for inference to finish.
+        await wait_for(lambda: pet.status("robot-01")["quiet"])
+        assert not scene.release.is_set()
+        assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
+        assert not speaker.spoken
+        assert any(m.kind == "touch_hold" for m in memory.recent("robot-01"))
+        scene.release.set()
+        await wait_for(lambda: pet.status("robot-01")["camera_change_events"] == 2)
+        await asyncio.sleep(.02)
+        assert not speaker.spoken
+        before_pause = head.status_calls
+        await pet.pause("robot-01")
+        await asyncio.sleep(.05)
+        assert head.status_calls == before_pause
+    finally:
+        scene.release.set()
+        await pet.close()
+
+
+async def test_touch_bridge_disconnect_disables_pet_without_automatic_reconnect(
+    fleet, tmp_path
+):
+    from desk_robot.transport import HeadError
+
+    class LostStatusHead:
+        def __init__(self):
+            self.status_calls = 0
+
+        async def status(self):
+            self.status_calls += 1
+            if self.status_calls == 1:
+                return {"touch": {"active": False, "count": 0}}
+            raise HeadError("body UART lost")
+
+        async def snapshot(self):
+            return WHITE
+
+    head = LostStatusHead()
+    speaker = SimulatedSpeaker()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": head},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), interval=.01, touch_interval=.01,
+    )
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: not pet.status("robot-01")["enabled"])
+        assert "HeadError" in pet.status("robot-01")["last_error"]
+        before = head.status_calls
+        await asyncio.sleep(.04)
+        assert head.status_calls == before
+        assert not speaker.spoken
+        assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
+    finally:
+        await pet.close()
