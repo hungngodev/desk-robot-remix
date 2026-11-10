@@ -364,3 +364,37 @@ async def test_opt_in_touch_event_shares_peer_report_without_reclassifying_as_fi
         assert all(m.summary == "Someone has just touched my body" for m in facts)
     finally:
         await pet.close()
+
+
+async def test_failing_peer_storage_does_not_erase_eyewitness_or_block_speech(
+    fleet, tmp_path
+):
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    remember = memory.remember
+
+    def one_peer_fails(robot_id, *args, **kwargs):
+        if robot_id == "robot-03":
+            raise OSError("temporary test peer unavailable")
+        return remember(robot_id, *args, **kwargs)
+
+    memory.remember = one_peer_fails
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {"robot-01": ChangingCamera()}, conversation,
+        memory, KeyScene(), interval=.01,
+    )
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: any(m.kind == "key" for m in memory.recent("robot-05")))
+        await wait_for(lambda: len(speaker.spoken) == 1)
+        assert memory.count("robot-03") == 0
+        fact = next(m for m in memory.recent("robot-01") if m.kind == "key")
+        assert fact.witnessed and fact.source_robot == "robot-01"
+        fact = next(m for m in memory.recent("robot-05") if m.kind == "key")
+        assert not fact.witnessed and fact.source_robot == "robot-01"
+        assert "Peer memory robot-03" in pet.status("robot-01")["last_error"]
+        assert len(speaker.spoken) == 1
+    finally:
+        await pet.close()
