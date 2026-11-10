@@ -72,6 +72,26 @@ class Coordinator:
             or safety.get("fault") != "none"
         ):
             raise OperationError("Hardware preflight: five-channel local safety not clear")
+        # Fresh six-axis identity and data are compulsory in the actual WROOM
+        # motion profile. This is only a presence/freshness gate; no unmeasured
+        # tilt angle or handheld state is inferred from raw sensor units.
+        imu = status.get("imu")
+        if (
+            not isinstance(imu, dict)
+            or type(imu.get("family")) is not int
+            or imu["family"] not in (1, 2, 3)
+            or imu.get("valid") is not True
+            or type(imu.get("age_ms")) is not int
+            or not 0 <= imu["age_ms"] <= 200
+            or any(
+                not isinstance(imu.get(axis), list)
+                or len(imu[axis]) != 3
+                or any(type(v) is not int or not -32768 <= v <= 32767
+                       for v in imu[axis])
+                for axis in ("acc", "gyro")
+            )
+        ):
+            raise OperationError("Hardware preflight: six-axis IMU missing or stale")
         ranges = status.get("ranges")
         if not isinstance(ranges, dict):
             raise OperationError("Hardware preflight: range diagnostics unavailable")
