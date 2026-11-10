@@ -26,6 +26,7 @@
 | TCA9548A I2C multiplexer | **2** (0x70 safety, 0x71 extras) |
 | MAX98357A I2S mono amplifier and 8 ohm 1 W 20mm speaker | 1 each |
 | CAP1188 8 zone I2C capacitive touch module, selectable address 0x28 | 1 |
+| MAX30102 optical heartbeat paw pad | 1, reported owned in HTML, count/photo unverified |
 | Copper touch electrode tape and insulation | 1 set |
 | APDS9960 color, gesture, proximity and light sensor | 1 |
 | FSR402 type force pad | 2 |
@@ -64,7 +65,6 @@ One full robot has eight VL53L4CD modules, so **40 total for five** if no stock 
 | SCD40 real CO2 sensor | 1 |
 | BME688 VOC and air quality sensor | 1 |
 | LD2410C presence radar | 1 |
-| MAX30102 finger pulse pad | Check old HTML claim of 5 before buying; optional consent only |
 | Capacitive soil probe | 1 if plant game wanted |
 | AMG8833 thermal array | 1 if thermal game wanted |
 | NFC tags, magnetic hats, game pieces | One shared prop set |

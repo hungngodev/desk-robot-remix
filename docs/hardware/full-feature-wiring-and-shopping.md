@@ -51,6 +51,7 @@
 | Component | 1 robot | 5 robots total | Inventory note |
 | --- | ---: | ---: | --- |
 | CAP1188 8 zone capacitive touch breakout | 1 | 5 | None verified owned |
+| MAX30102 optical heartbeat paw pad breakout | 1 | 5 | HTML claims about five owned, photo confirmation missing |
 | Copper tape touch electrode and insulating backing set | 1 | 5 | None verified owned |
 | APDS9960 gesture proximity color light module | 1 | 5 | None verified owned |
 | FSR402 type force sensing resistor | 2 | 10 | None verified owned |
@@ -126,7 +127,7 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 
 | Lane | Module and address | Purpose |
 | --- | --- | --- |
-| 0 | CAP1188 (0x28) | eight petting electrodes |
+| 0 | CAP1188 (0x28), MAX30102 (0x57) | Petting electrodes and user-approved heartbeat pad |
 | 1 | APDS9960 (0x39), AS5600 nose (0x36) | gesture + twist nose |
 | 2 | ADS1115 (0x48) | force feedback |
 | 3 | SHT41 (0x44), BMP280 (0x76) | humidity + reported pressure board |
@@ -134,6 +135,8 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 | 5 | PN532 I2C (0x24), MCP23017 (0x20) | NFC and auxiliary digital control |
 | 6 | AS5600 (0x36) | left wheel rotation |
 | 7 | AS5600 (0x36) | right wheel rotation |
+
+**MAX30102 correction:** The original HTML approved one **robot-mounted** heartbeat paw pad and reported a box of around five MAX30102 boards. Photo confirmation is missing, so count stock before purchasing. Reserve WROOM 0x71 mux lane 0 at 0x57, share lane with CAP1188 0x28 after voltage and breakout checks. **Never** use XIAO Sense GPIO41/42 because those are the PDM microphone wires. Opt-in playful feedback only, not medical use.
 
 **CAP1188 rather than MPR121:** Microchip marks CAP1188 in production, whereas NXP archives MPR121. Use a CAP1188 I2C breakout configured to **0x28**, not its common breakout default 0x29, so it cannot share the same address as the optical modules even if a mux lane is left selected. Its 8 electrodes cover head, back and belly; retain the existing dedicated AT42QT1010 as the **local physical stop touch**, never routed through an optional mux. Check actual breakout address-selection circuitry before ordering.
 

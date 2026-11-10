@@ -71,6 +71,14 @@
       "group": "pet"
     },
     {
+      "id": "max30102",
+      "name": "MAX30102 optical heartbeat paw pad breakout",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Original user HTML says this is APPROVED as a robot-mounted paw pad and claims about five are already owned. Independent photo audit did not establish exact stock. No purchase before recount and module voltage check. Use WROOM I2C 0x57, not Sense GPIO41/42 PDM mic.",
+      "group": "pet"
+    },
+    {
       "id": "cliff_obstacle",
       "name": "VL53L4CD time of flight carrier",
       "per_robot": 8,
@@ -458,11 +466,15 @@
       "channels": [
         {
           "channel": 0,
-          "purpose": "eight petting electrodes",
+          "purpose": "Eight petting electrodes plus owned/unverified approved heartbeat pad",
           "devices": [
             {
               "name": "CAP1188",
               "address": 40
+            },
+            {
+              "name": "MAX30102 paw pad",
+              "address": 87
             }
           ],
           "firmware": "new_adapter_required",
@@ -590,12 +602,6 @@
         "location": "fixed room pod UART"
       },
       {
-        "name": "MAX30102 heartbeat pad",
-        "quantity_per_room": 1,
-        "location": "consented tabletop contact accessory",
-        "inventory_note": "Original HTML suggested five owned, physical count not confirmed; do not order blind"
-      },
-      {
         "name": "Capacitive soil probe",
         "quantity_per_room": 1,
         "location": "external plant accessory"
@@ -645,6 +651,7 @@
     "https://www.nxp.com/products/MPR121",
     "https://www.pololu.com/product/3692",
     "https://look.ams-osram.com/m/3ac60b27c91075b5/original/AS5600-FS000133-2-00.pdf",
-    "https://www.nxp.com/docs/en/user-guide/141520.pdf"
+    "https://www.nxp.com/docs/en/user-guide/141520.pdf",
+    "https://www.analog.com/en/products/max30102.html"
   ]
 }

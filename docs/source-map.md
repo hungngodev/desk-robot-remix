@@ -665,3 +665,10 @@ light/camera gestures and environmental sensors occupy the remaining mux lanes
 only after exact model, power, pullup and cost review, not as blind wired bags.
 
 Primary sources: [InvenSense MPU6050 register map](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Register-Map.pdf), [Bosch BMP280 datasheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmp280-ds001.pdf), [Adafruit AT42QT1010 product](https://www.adafruit.com/product/1374) and [Espressif ESP32 GPIO reference](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/gpio.html).
+
+
+## November 10 full original HTML followup
+
+The uploaded 1,074,994-byte original HTML was directly found and inspected again, with matching SHA256 `12a0068f3bcec7daa6065cc180478294ccc1d0cc5e439250774684f3b2008b5d`. The file contains 131 unique external links. This file's L001..L131 index matches its URL count, aggregate URL-length checksum 8,786, and character-code checksum 821,563, including identical first and last URL. The source map also retains the 39 F, 30 B, 75 S, 46 G and 10 H entries, with no numeric gaps, for **200** categorised ideas. Source preservation is not verification of every link's contents.
+
+**Correction:** Original HTML explicitly approved and reportedly owned about five MAX30102 fingerprint heartbeat boards for an onboard pet paw pad. The photo audit did not independently establish their presence, so it is **reported unverified**, not a buy. Preserve it on WROOM I2C via the optional mux, not on Sense GPIO41/42 because of PDM audio. Other original research ideas such as piezo knock, coin mouth, tea probe, a second screen, compass and servo tail remain catalogued but not secretly declared physically built. [Review findings](research/2026-11-10-original-html-link-and-hardware-audit.md).
