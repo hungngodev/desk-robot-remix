@@ -259,6 +259,7 @@ static void five_range_status_reports_real_samples_not_a_permission() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
   fresh(guard, 1);
+  CHECK(guard.try_rearm(1));  // guard is healthy, but body was never armed
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   auto value = send(body, "status", 10);
   CHECK(value.size() < desk_robot::kReplyCapacity - 1);
@@ -266,7 +267,7 @@ static void five_range_status_reports_real_samples_not_a_permission() {
   CHECK(value.find("\"age_ms\":[9,9,9,9,9]") != std::string::npos);
   CHECK(value.find("\"present_mask\":31,\"valid_mask\":31") != std::string::npos);
   CHECK(!body.state().armed);
-  CHECK(guard.fault() == desk_robot::CliffFault::MissingSample);
+  CHECK(guard.fault() == desk_robot::CliffFault::None);
   guard.sample(3, 1000, false, 11);
   value = send(body, "status", 12);
   CHECK(value.find("\"mm\":[50,50,50,1000,200]") != std::string::npos);
