@@ -12,7 +12,15 @@ int main() {
     desk_robot::AccessorySensors accessories;
     desk_robot::PulsePad pulse;
     desk_robot::ExpansionTouch touch;
-    CHECK(accessories.begin(Wire));
+    const bool accessories_initialized = accessories.begin(Wire);
+    if (!accessories_initialized) {
+      std::cerr << "ACCESSORY_INIT_FAILURE last_addr=" << unsigned(Wire.current_address)
+                << " muxA=" << unsigned(Wire.ranges)
+                << " muxB=" << unsigned(Wire.extras)
+                << " transactions=" << Wire.transactions
+                << " outbound_bytes=" << Wire.outbound.size() << '\n';
+    }
+    CHECK(accessories_initialized);
     CHECK(pulse.begin(Wire));
     CHECK(touch.begin(Wire));
     CHECK(Wire.ranges == 0 && Wire.extras == 0);
