@@ -64,6 +64,15 @@ class BodyControl {
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   // Raw, read-only diagnostics. No tilt or motor permission follows from it.
   void set_imu(const BerryReading& reading) { imu_ = reading; }
+  // Physical WROOM assembly requires a fresh identified 6-axis sample, even
+  // though actual tilt thresholds are NOT yet calibrated. DC test profile
+  // and host policy tests opt in explicitly rather than changing their ABI.
+  void require_imu_for_motion(bool required) { imu_motion_required_ = required; }
+  bool imu_fresh(std::uint32_t now_ms) const {
+    return imu_.valid && imu_.model != BerryModel::Unknown &&
+           imu_.model != BerryModel::Unsupported320G &&
+           now_ms - imu_.at_ms <= 200U;
+  }
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
   std::uint32_t drive_remaining(std::uint32_t now_ms) const;
 
@@ -72,6 +81,7 @@ class BodyControl {
   CliffGuard* guard_;
   State state_{};
   BerryReading imu_{};
+  bool imu_motion_required_ = false;
   std::uint32_t last_control_ms_ = 0;
   std::uint32_t drive_started_ms_ = 0;
   std::uint32_t drive_duration_ms_ = 0;
