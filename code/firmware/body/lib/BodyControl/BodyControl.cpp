@@ -343,7 +343,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         if (ranges[i].present && ranges[i].valid) valid_mask |= 1U << i;
       }
     }
-    std::snprintf(
+    const int written = std::snprintf(
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
@@ -383,6 +383,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(ranges[3].age_ms),
         static_cast<unsigned long>(ranges[4].age_ms),
         present_mask, valid_mask);
+    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
+      std::snprintf(reply, capacity, "ERR status response_too_long");
   } else if (rearm) {
     // Head/HTTP/MCP jobs may arm only an already-clear body. A new local USB
     // action is required after a fault; an older job permit cannot clear it.
