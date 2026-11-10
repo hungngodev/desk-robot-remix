@@ -9,6 +9,7 @@
 // This is a real PCM reference path, NOT an assertion that the physical
 // loudspeaker/microphone acoustic delay has been calibrated or A2 passed.
 #include "codecs/no_audio_codec.h"
+#include "sdkconfig.h"
 
 #include <array>
 #include <cstdint>
@@ -35,7 +36,10 @@ private:
     static constexpr uint32_t kRingSize = 16384;   // 1024 ms at 16 kHz
     static constexpr uint32_t kMicRate = 16000;
     static constexpr uint32_t kSpeakerRate = 24000;
-    static constexpr uint32_t kDelaySamples = 1440; // 90 ms starting point, CALIBRATE
+    // Per-unit ESP-IDF private build setting, default 90 ms only as a bench
+    // starting point. It is not a physical acoustic calibration.
+    static constexpr uint32_t kDelaySamples =
+        CONFIG_DESK_ROBOT_AEC_DELAY_MS * (kMicRate / 1000);
     static constexpr uint32_t kMaxGapSamples = kRingSize;
     static_assert((kRingSize & (kRingSize - 1)) == 0);
     std::mutex reference_mutex_;

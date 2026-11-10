@@ -84,6 +84,10 @@ class SenseOverlayTests(unittest.TestCase):
                                               32, 33, 34, 35, 36, 37, 43, 44})
         source = (board / 'desk_robot_sense.cc').read_text()
         self.assertIn('SenseReferenceCodec audio_codec', source)
+        kconfig = (self.root / 'main/Kconfig.projbuild').read_text()
+        self.assertIn('config DESK_ROBOT_AEC_DELAY_MS', kconfig)
+        self.assertIn('range 0 250', kconfig)
+        self.assertIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS', (board / 'sense_reference_codec.h').read_text())
         self.assertIn('#include "stackchan_behavior.hpp"', source)
         self.assertIn('HsmBehavior face_behavior_', source)
         self.assertIn('body_bridge_->PollInteraction()', source)
@@ -229,6 +233,19 @@ class SenseSelectionTests(unittest.TestCase):
                 private.main()
             settings = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
             self.assertIn('CONFIG_DESK_ROBOT_ID="robot-05"', settings)
+            self.assertIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS=90', settings)
+            args.extend(['--aec-delay-ms', '115'])
+            with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \
+                    patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32):
+                private.main()
+            calibrated = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
+            self.assertIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS=115', calibrated)
+            self.assertNotIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS=90', calibrated)
+            args[-1] = '251'
+            with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \
+                    patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32), \
+                    self.assertRaises(SystemExit):
+                private.main()
             self.assertIn('CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y', settings)
             self.assertEqual((board / 'config.private.json').stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads((board / 'config.json').read_text()), source)

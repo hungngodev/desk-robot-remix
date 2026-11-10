@@ -31,6 +31,8 @@ def main():
     p.add_argument("--config", type=Path, default=ROOT / "config/fleet.example.toml")
     p.add_argument("--secrets", type=Path, default=ROOT / "config/local.env")
     p.add_argument("--board", choices=["cores3", "modular", "sense", "waveshare"], default="cores3")
+    p.add_argument("--aec-delay-ms", type=int, default=90,
+                   help="Sense-only measured acoustic reference alignment (0..250ms)")
     p.add_argument(
         "--server-ip", required=True, help="Mac LAN IPv4 address, reachable from the head"
     )
@@ -42,6 +44,10 @@ def main():
         p.error(str(error))
     if address.version != 4 or address.is_loopback or address.is_unspecified:
         p.error("Use the Mac's reachable LAN IPv4 address")
+    if not 0 <= args.aec_delay_ms <= 250:
+        p.error("Sense AEC delay must be within 0..250 ms")
+    if args.board != "sense" and args.aec_delay_ms != 90:
+        p.error("Custom AEC reference delay is for the Sense board only")
     values = dict(
         line.split("=", 1)
         for line in (args.secrets.read_text().splitlines() if args.secrets.exists() else [])
@@ -70,6 +76,14 @@ def main():
         f'CONFIG_DESK_ROBOT_TOKEN="{token}"',
         f'CONFIG_OTA_URL="http://{address}:8003/xiaozhi/ota/"',
     ]
+    if args.board == "sense":
+        config["builds"][0]["sdkconfig_append"] = [
+            item for item in config["builds"][0]["sdkconfig_append"]
+            if not item.startswith("CONFIG_DESK_ROBOT_AEC_DELAY_MS=")
+        ]
+        config["builds"][0]["sdkconfig_append"].append(
+            f"CONFIG_DESK_ROBOT_AEC_DELAY_MS={args.aec_delay_ms}"
+        )
     target = board / "config.private.json"
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as stream:

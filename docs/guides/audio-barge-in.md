@@ -190,3 +190,23 @@ Existing Sense build success remains historical software evidence. The RIO port,
 streamed-frame path and complete interruption chain remain to be implemented and
 tested. A compiled head profile establishes software integration only. No hardware
 has been flashed by this project and no interruption test has passed.
+
+
+## Per-robot playback reference alignment in the pinned Sense build
+
+The ESP-SR AFE input remains two-channel interleaved `MR` at 16 kHz;
+`SenseReferenceCodec` still resamples only the accepted 24 kHz speaker
+output and uses the existing Xiaozhi I2S writer. The earlier fixed 90 ms
+reference alignment is now a Kconfig setting named
+`CONFIG_DESK_ROBOT_AEC_DELAY_MS` (0 to 250 ms). That **does not** make the
+robot acoustically calibrated. Each actual assembled robot must measure the
+reference-to-microphone lag and run the 20 interruption trials at different
+speaker volumes, distances and motor load.
+
+For a private physical Sense build, pass `--board sense --aec-delay-ms 115`
+to the existing `firmware/head/private_config.py` command after measuring a
+115 ms reference lag. Use its other required robot ID, config, secrets and LAN
+server options as before. The field is written only to the private firmware
+configuration, without changing the upstream ESP-SR implementation. A 90 ms
+default is retained for a first bench measurement, never as proof of AEC
+performance or as an acceptable substitute for retained human utterances.
