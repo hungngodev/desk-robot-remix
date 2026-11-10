@@ -4,6 +4,7 @@
 #include "BodyPins.h"
 #if DESK_ROBOT_STEPPER
 #include "CliffGuard.h"
+#include "BerryImu.h"
 #include "StepperDrive.h"
 #include "TofBus.h"
 #include <Preferences.h>
@@ -18,6 +19,7 @@ desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
 desk_robot::TofBus tof;
+desk_robot::BerryImu berry_imu;  // Shares upstream Wire and existing identity probe
 // AT42QT1010 owns the input threshold. Sample without internal pullups
 // (GPIO34 is input-only), debounce three equal 25ms samples, and retain
 // an edge counter so the Mac can detect short taps between status polls.
@@ -300,8 +302,13 @@ void setup() {
   // The same upstream Wire bus can read WHO_AM_I from the owned BerryIMU
   // before motion is ever enabled. No IMU driver, sensor fusion, second
   // controller or unqualified safety thresholds are silently installed.
-  const auto imu = tof.probe_imu();
+  const auto imu = tof.ready() ? tof.probe_imu() : desk_robot::ImuIdentity{};
   control.set_imu_identity(imu.family, imu.gyro_id, imu.aux_id);
+  if (tof.ready() && imu.family != 0 &&
+      !berry_imu.begin(Wire, desk_robot::BerryImu::identify(imu.gyro_id, imu.aux_id),
+                      imu.gyro_address, imu.aux_address)) {
+    Serial.println("WARN berryimu_raw_sample_init_failed");
+  }
   Serial.printf("INFO imu_probe family=%u gyro_id=0x%02x aux_id=0x%02x unqualified",
                 static_cast<unsigned>(imu.family),
                 static_cast<unsigned>(imu.gyro_id),
@@ -326,7 +333,11 @@ void loop() {
 #if DESK_ROBOT_STEPPER
   // Real I2C sampling precedes every physical motor update. The pure
   // CliffGuard remains the only local motion/safety authority.
-  if (tof.ready()) tof.poll(cliff_guard, millis());
+  if (tof.ready()) {
+    tof.poll(cliff_guard, millis());
+    berry_imu.poll(millis());
+    control.set_imu(berry_imu.reading());
+  }
   poll_touch(millis());
 #endif
   control.tick(millis());
