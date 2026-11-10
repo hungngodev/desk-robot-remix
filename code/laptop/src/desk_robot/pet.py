@@ -161,13 +161,25 @@ class PetController:
             observed_at=observed_at, confidence=change.confidence,
         )
         if self.settings.fleet_text_sharing_enabled:
-            for peer in self.settings.robots:
-                if peer.id != robot_id:
-                    await asyncio.to_thread(
-                        self.memory.remember, peer.id, event_id,
+            # Per-robot SQLite databases are independent. A failed or busy
+            # peer must not erase the eyewitness fact or suppress its reply.
+            destinations = [r.id for r in self.settings.robots if r.id != robot_id]
+            results = await asyncio.gather(
+                *(
+                    asyncio.to_thread(
+                        self.memory.remember, peer_id, event_id,
                         change.description, kind=change.kind,
                         source_robot=robot_id, witnessed=False,
                         observed_at=observed_at, confidence=change.confidence,
+                    )
+                    for peer_id in destinations
+                ),
+                return_exceptions=True,
+            )
+            for peer_id, result in zip(destinations, results, strict=True):
+                if isinstance(result, BaseException):
+                    self.states[robot_id].last_error = (
+                        f"Peer memory {peer_id}: {type(result).__name__}: {str(result)[:80]}"
                     )
 
     async def _remember_touch(
