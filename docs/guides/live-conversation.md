@@ -60,3 +60,34 @@ is reviewed. No additional microphone or replacement board is required now.
 See [mandatory physical voice trials](audio-barge-in.md). Mocked tests establish
 state transitions and cancellation behavior only; no assembled robot has passed
 voice, camera, edge, power or pickup acceptance.
+
+
+## Authenticated device interrupt recovered from closed PR #7
+
+The current Xiaozhi server adapter now exposes its original authenticated
+`POST /interrupt` endpoint on the existing local speech bridge port 8766.
+`KokoroHeadSpeaker.interrupt` already calls this route when Mac proactive
+speech is cancelled. Before recovery, that call targeted a missing endpoint,
+so a cancelled Python task could leave audible device audio running.
+
+```sh
+curl -X POST http://127.0.0.1:8766/interrupt \
+  -H "Authorization: Bearer $DESK_ROBOT_SPEECH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"<real-private-xiaozhi-device-id>"}'
+```
+
+The bridge rejects unregistered or unknown head IDs. The target head receives
+`{"type":"tts","state":"stop","flush":true}` on its existing WebSocket,
+matching the current Sense urgent decoder and I2S output reset rather than the
+older PR #7 `tts abort` shape. This call does not wait for the fleet speaker
+lock. A per-device generation counter rejects older speech requests waiting
+on the global lock, encoding in the worker pool or already streaming, and does
+not cancel an unrelated robot's playback.
+
+Automatic user speech interruption through AEC/VAD also advances that
+generation. The returned `head_flush_requested=true` only means that the
+server sent the stop frame; `head_flush_acknowledged=false` and
+`audible_stop_verified=false` remain the truthful status until a real Sense
+microphone, speaker, DMA and room test establishes stop latency and 19/20
+successful natural speech interruptions within 500 ms.
