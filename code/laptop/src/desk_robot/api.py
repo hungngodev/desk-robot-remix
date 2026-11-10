@@ -118,6 +118,15 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         return await coordinator().heads[robot_id].status()
 
+    @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])
+    async def aux(robot_id: str):
+        coordinator().robot(robot_id)
+        getter = getattr(coordinator().heads[robot_id], "aux_status", None)
+        if not callable(getter):
+            return {"robot_id": robot_id, "available": False,
+                    "reason": "No physical accessory telemetry adapter"}
+        return await getter()
+
     @app.get("/v1/robots/{robot_id}/camera.jpg", dependencies=[Depends(authorize)])
     async def camera(robot_id: str):
         coordinator().robot(robot_id)

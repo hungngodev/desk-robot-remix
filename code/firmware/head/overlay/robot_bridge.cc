@@ -52,6 +52,30 @@ bool StatusValid(cJSON* json) {
     return cJSON_IsNumber(watchdog) && watchdog->valuedouble == watchdog->valueint &&
            watchdog->valueint >= 0 && watchdog->valueint <= 500;
 }
+
+bool AuxValid(cJSON* json) {
+    if (!cJSON_IsObject(json)) return false;
+    auto pulse = cJSON_GetObjectItemCaseSensitive(json, "pulse");
+    if (!cJSON_IsObject(pulse)) return false;
+    auto present = cJSON_GetObjectItemCaseSensitive(pulse, "present");
+    auto valid = cJSON_GetObjectItemCaseSensitive(pulse, "valid");
+    auto bpm = cJSON_GetObjectItemCaseSensitive(pulse, "bpm");
+    auto medical = cJSON_GetObjectItemCaseSensitive(pulse, "medical");
+    if (!cJSON_IsBool(present) || !cJSON_IsBool(valid) ||
+        !cJSON_IsNull(bpm) || !cJSON_IsFalse(medical)) return false;
+    auto bounded_uint = [pulse](const char* name, double max) {
+        auto v = cJSON_GetObjectItemCaseSensitive(pulse, name);
+        return cJSON_IsNumber(v) && std::isfinite(v->valuedouble) &&
+               v->valuedouble == std::floor(v->valuedouble) &&
+               v->valuedouble >= 0 && v->valuedouble <= max;
+    };
+    if (!bounded_uint("part_id", 255) ||
+        !bounded_uint("red", 262143) || !bounded_uint("ir", 262143) ||
+        !bounded_uint("age_ms", 4294967295.0)) return false;
+    if (cJSON_IsTrue(valid) && !cJSON_IsTrue(present)) return false;
+    return true;
+}
+
 std::string Envelope(bool ok, const std::string& reply) {
     auto json = JsonPtr(cJSON_CreateObject(), cJSON_Delete);
     cJSON_AddBoolToObject(json.get(), "ok", ok);
@@ -95,7 +119,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 3;
+    config.max_uri_handlers = 4;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -103,7 +127,8 @@ void Bridge::Start() {
         return;
     }
     for (const auto& entry : std::vector<std::pair<const char*, httpd_method_t>>{
-             {"/api/status", HTTP_GET}, {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET}}) {
+             {"/api/status", HTTP_GET}, {"/api/aux", HTTP_GET},
+             {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET}}) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
         uri.method = entry.second;
@@ -138,9 +163,11 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         if (c == '\r') continue;
         if (c == '\n') {
             if (MatchingError(line, command)) return {400, false, line};
-            if (command.verb == "status") {
+            if (command.verb == "status" || command.verb == "aux") {
                 auto json = Parse(line);
-                if (json && StatusValid(json.get())) return {200, true, line};
+                if (json && (command.verb == "status" ?
+                             StatusValid(json.get()) : AuxValid(json.get())))
+                    return {200, true, line};
             } else if (line == ExpectedAck(command)) return {200, true, line};
             line.clear();  // EVT, startup output, and unrelated ACKs are never success.
         } else {
@@ -263,8 +290,10 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         }
         return ESP_OK;
     }
-    if (strcmp(req->uri, "/api/status") == 0) {
-        auto reply = Transact("status", false);
+    if (strcmp(req->uri, "/api/status") == 0 ||
+        strcmp(req->uri, "/api/aux") == 0) {
+        const bool aux = strcmp(req->uri, "/api/aux") == 0;
+        auto reply = Transact(aux ? "aux" : "status", false);
         if (!reply.ok) return Json(req, reply.status, Envelope(false, reply.text));
         auto json = Parse(reply.text);
         cJSON_AddStringToObject(json.get(), "robot_id", CONFIG_DESK_ROBOT_ID);

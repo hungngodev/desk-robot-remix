@@ -9,6 +9,10 @@ int main() {
     assert(ExpectedAck(c) != "OK drive left=40 right=-40 ms=150");
     assert(ParseCommand("drive 0 0", false, c));
     assert(ExpectedAck(c) == "OK drive left=0 right=0 ms=250");
+    assert(ParseCommand("aux", false, c));
+    assert(c.verb == "aux");
+    assert(!ParseCommand("aux 1", false, c));
+    assert(!ParseCommand("aux urgent", true, c));
     assert(ParseCommand("grip 60", false, c));
     assert(ExpectedAck(c) == "OK grip angle=60");
     assert(MatchingError("ERR grip disarmed", c));

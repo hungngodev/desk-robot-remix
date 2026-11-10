@@ -16,6 +16,7 @@ class HeadError(RuntimeError):
 class Head(Protocol):
     async def command(self, command: str) -> dict: ...
     async def status(self) -> dict: ...
+    async def aux_status(self) -> dict: ...
     async def snapshot(self) -> bytes: ...
 
 
@@ -97,6 +98,28 @@ class HttpHead:
             data = (await self._request("GET", "/api/status")).json()
             if data.get("robot_id") != self.config.id:
                 raise HeadError("Status robot identity mismatch")
+            return data
+
+    async def aux_status(self) -> dict:
+        """Authenticated read-only optional sensor path, never an arm command."""
+        async with self.lock:
+            data = (await self._request("GET", "/api/aux")).json()
+            if not isinstance(data, dict) or data.get("robot_id") != self.config.id:
+                raise HeadError("Aux telemetry robot identity mismatch")
+            pulse = data.get("pulse")
+            if not isinstance(pulse, dict):
+                raise HeadError("Optical paw telemetry unavailable")
+            if (type(pulse.get("present")) is not bool
+                    or type(pulse.get("valid")) is not bool
+                    or type(pulse.get("part_id")) is not int
+                    or not 0 <= pulse["part_id"] <= 255
+                    or any(type(pulse.get(key)) is not int or not 0 <= pulse[key] <= maximum
+                           for key, maximum in (("red", 262143), ("ir", 262143),
+                                                ("age_ms", 0xffffffff)))
+                    or pulse.get("bpm", "missing") is not None
+                    or pulse.get("medical") is not False
+                    or (pulse["valid"] and not pulse["present"])):
+                raise HeadError("Malformed untrusted optical paw source")
             return data
 
     async def snapshot(self) -> bytes:
