@@ -156,7 +156,7 @@ is a separate historical objective, not a robot dependency.
 | `F015` | Continuous ToF polling and 40ms proposed scan | MEASURE | Bounded mux selection/status/timestamp, quality and freshness; no unmeasured 40ms guarantee |
 | `F016` | Cliff classifier and fail-closed behavior | REQUIRED | No blind reverse, sensor degradation drive or auto-resume, local USB recovery only and operator arming |
 | `F017` | Owned head touch + boot calibration | REQUIRED | AT42QT1010 through shell, tap/hold patterns, false activation, touch during motion pauses |
-| `F018` | BerryIMU revision and handling | REQUIRED | Detect actual older board chip IDs; tilt, shake, suspected pickup combined with floor context; motor vibration rejection |
+| `F018` | Six-axis motion and handling (MPU6050 preferred, BerryIMU spare) | REQUIRED | Detect real MPU6050 via register 0x75 and six raw axes; tilt, shake, suspected pickup still require mounted calibration, floor fusion and motor vibration rejection |
 | `F019` | Optional force/vibration/magnet handling | RESERVE NOW | FSR402, piezo, Hall/reed, SW-18010P and pet/belly accessory interfaces; no assumed stock |
 | `F020` | Audio RIO AEC and actual user barge-in | REQUIRED | Software reference calibration, double-talk; 19/20 audible stop ≤500ms and 18/20 new request; echo only 10min zero false |
 | `F021` | Erle/latency report targets | MEASURE | HTML's 15–25dB ERLE and 18/20 700ms rates are not accepted proof; record measured metrics without weakening canonical A2 |
@@ -232,8 +232,8 @@ is a separate historical objective, not a robot dependency.
 | `S012` | FSR402 force strip | EXPANSION | Force/belly/grip event, analog ADC front end and calibration; not precision force control |
 | `S013` | Piezo knock sensor | EXPANSION | Knock recognition; analog protection and motor vibration suppression |
 | `S014` | SW-18010P vibration switch | VERIFY STOCK | HTML claims 2, repo has no confident model count; digital contact and debounce |
-| `S015` | BerryIMU older multi-sensor | REQUIRED | Owned likely V1, actual chip/addresses/rails must be identified; accel + gyro |
-| `S016` | MPU6050 IMU | ALTERNATIVE | Older research only, don't silently buy if BerryIMU works |
+| `S015` | BerryIMU older multi-sensor | OPTIONAL ALTERNATIVE | Photographed likely V1, actual chip/addresses/rails unverified; retain driver for spare only |
+| `S016` | MPU6050 IMU | ACTIVE REQUIRED SENSOR | User says MPU6050 is in use; firmware uses official 0x75 ID and 0x3B 14-byte six-axis read, no proven physical handling calibration |
 | `S017` | LSM6DS3TR-C six-axis IMU | CONDITIONAL | Replacement only after owned BerryIMU test fails |
 | `S018` | GY-61 accelerometer | OPTIONAL STOCK | Cannot replace gyro-assisted handling fusion by itself |
 | `S019` | QMC5883L magnetometer | EXPANSION | Yaw/reference demo, not track odometry |

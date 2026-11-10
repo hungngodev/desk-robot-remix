@@ -1,3 +1,5 @@
+> 2026-11-10 inventory correction: user reports using the popular **MPU6050**. The matching existing WROOM driver, Mac preflight, USB diagnostics and test family are now implemented. The old BerryIMU first choice references later in this document are superseded. Count/measure the user's MPU6050 before any replacement order.
+
 # Combined electronics inventory and build gaps
 
 Reconciled 2026-11-06 against the earlier ownership reports, the reported
@@ -26,7 +28,8 @@ keep known subtotal separate from an incomplete total.
 |ULN2003 driver |2 /10 |5 | **5 additional drivers for the fleet** |
 |MG90S positional servo |2 /10 | About10, user estimate | Count/type/condition, pocket/horn and loaded lift/grip fit |
 | Adafruit AT42QT1010 momentary touch #1374 | 1 / 5 | At least 1 by package label | Bench-test the pad through the shell. Four more touch inputs if only one is owned |
-|BerryIMU motion board |1 /5 | At least1 photographed, likely older V1 | Exact revision/chips/pins, working condition and mount. Four further equivalents unconfirmed if only one is owned |
+| MPU6050 motion board | 1 / 5 | User reports using one; quantity, voltage breakout and working state unconfirmed | Preferred six axis IMU; exact module and available quantity to check before ordering four fleet equivalents |
+| BerryIMU motion board | 0 required | At least one photographed, likely older V1 | Retained alternative/spare; no need to buy additional BerryIMUs when MPU6050 route works |
 |Filament / DuPont ribbons | As needed | Filament and10 ribbons | Print mass/stock; DuPont is signal wiring, not main actuator power |
 
 ## Other reported and photographed stock

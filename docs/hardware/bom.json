@@ -155,12 +155,12 @@
       "fit": "IMG_3907 package label. Zero additional purchase outlay; receipt price unrecorded. Proposed 3.3 V supply and active-high OUT to WROOM GPIO34. Check pad response through the printed shell."
     },
     {
-      "item": "Owned BerryIMU for prototype motion sensing (revision/working condition to verify)",
+      "item": "User-reported MPU6050 six-axis module for prototype (quantity and breakout to verify)",
       "quantity": 1,
       "unit_usd": 0,
       "price_status": "inventory_check",
       "url": "https://ozzmaker.com/product/berryimu-accelerometer-gyroscope-magnetometer-barometricaltitude-sensor/",
-      "fit": "At least one shown in IMG_3893/3892; likely V1, exact chips/pins/voltage/working condition and mount unverified. Reuse candidate, not current LSM6 driver. Hold new IMU purchase until tested. One observed board does not cover all five cores."
+      "fit": "User reports using MPU6050, likely already on hand for prototype. Preferred over unverified BerryIMU. Need electrical module/pullup/board marking and working count verification. No additional sensor purchase authorized. Check full five robot quantities."
     },
     {
       "item": "Matched rechargeable1S cell/holder charging-protection-5V kit",
@@ -172,7 +172,7 @@
     }
   ],
   "head_configuration": "Active head is user-purchased XIAO ESP32S3 Sense. Retain existing compiled Sense baseline; reuse pinned RIO software AEC/cancellation and official Google/Pipecat streaming patterns before considering replacement. Voice interruption remains first-build gate, not yet passed. Waveshare is optional fallback only.",
-  "note": "No full total established for revised1S/compactToF/touch/IMU core. Null prices are unknown, not free. Historical basket archived. Cap50includesreportedSensemoney; exactreceiptstillunknown. OptionalRGB/bumper excluded from required core until selected. Photo audit holds the prototype new-IMU purchase in favor of owned BerryIMU; MAX9814 is analog mic input and does not replace MAX98357A speaker output. No working-condition/fit gate changed.",
+  "note": "No full total established for revised1S/compactToF/touch/IMU core. Null prices are unknown, not free. Historical basket archived. Cap50includesreportedSensemoney; exactreceiptstillunknown. OptionalRGB/bumper excluded from required core until selected. Photo audit holds the prototype new-IMU purchase in favor of owned BerryIMU; MAX9814 is analog mic input and does not replace MAX98357A speaker output. No working-condition/fit gate changed.\n2026-11-10 MPU6050 is user-preferred. BerryIMU remains reported owned optional spare, not required buy.",
   "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
   "qualification_checks": {
     "sense_board_configuration_and_8mb_build_confirmed": true,

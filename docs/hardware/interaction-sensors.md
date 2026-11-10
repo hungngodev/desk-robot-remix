@@ -1,3 +1,5 @@
+> 2026-11-10 correction: the MPU6050 is the preferred six-axis sensor. The user reports using it; whether the photographed older BerryIMU is electrically correct remains unconfirmed. Existing prose referring to mandatory BerryIMU is historical. A valid MPU raw sample is **not** a tested tilt, shaking or held-state interlock. See the current WROOM driver and [official register map](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Register-Map.pdf).
+
 # Touch, handling and expressive interactions
 
 Updated 2026-11-06. Required first additions: one head-touch input and one
@@ -18,7 +20,8 @@ Adafruit #1374 AT42QT1010 for robot one's head touch.
 | Part | Quantity per core | Proposed connection | Decision |
 | --- | ---: | --- | --- |
 | Owned AT42QT1010 touch breakout #1374 | 1 | WROOM GPIO34, powered at 3.3 V, common ground and momentary active-high OUT | One concealed head pad. Bench-test response through the shell and costume. TTP223 is a possible fleet equivalent |
-| Owned BerryIMU accelerometer+gyro board | 1 | WROOM I2C GPIO21/22 upstream of TCA9548A; verify actual board 3.3 V logic, pin orientation and addresses | Boot-time read-only WHO_AM_I probe distinguishes likely V1, V2 or V3 and reports raw IDs. No active motion driver or calibrated handling recognition yet. Reuse a licensed, matching upstream driver only after a real chip ID and bench samples. One photographed board does not cover five cores |
+| MPU6050 / likely GY-521 module (user reported) | 1 | WROOM GPIO21 SDA / GPIO22 SCL upstream of TCA9548A; verify 3.3 V logic and actual breakout power path | **Preferred prototype IMU**, family 4. Boot WHO_AM_I register 0x75 must return 0x68 at bus address 0x68 or 0x69. Six-axis signed samples via register 0x3B. Physical mounting and handling classification still unqualified. Stock count unknown | 
+| Photographed BerryIMU (optional compatible alternative) | 0 required | Same upstream I2C only if MPU6050 removed | Preserve V1/V2/V3 support; never join two unqualified IMUs or assume this photographed chip revision |
 | Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not use body GPIO4 for the mux reset: it is a boot strapping pin and
 the TCA9548A RESET must be pulled high to 3.3 V |
 | Mechanical bumper switch | 0 required;1 optional | BodyGPIO35 with external3.3V pullup | Useful cheap collision reflex after a small mount; not a substitute for floor sensors |
