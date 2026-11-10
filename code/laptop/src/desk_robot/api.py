@@ -31,6 +31,12 @@ class QuietRequest(BaseModel):
     quiet: bool
 
 
+class PeerShareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    to_robot: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,40}$")
+    event_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,96}$")
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     robot_ids: list[str] = Field(min_length=2, max_length=5)
@@ -162,6 +168,17 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if request.quiet:
             await coordinator().stop(robot_id)
         return result
+
+    @app.post("/v1/pet/{robot_id}/share", dependencies=[Depends(operator)])
+    async def pet_share(robot_id: str, request: PeerShareRequest):
+        # Operator authorizes a single text-only copy, never movement.
+        # Missing or unapproved source events do not reach another robot.
+        try:
+            return await app.state.runtime.pet.share_with_peer(
+                robot_id, request.to_robot, request.event_id
+            )
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
 
     @app.post("/v1/pet/{robot_id}/interrupt", dependencies=[Depends(authorize)])
     async def pet_interrupt(robot_id: str):
