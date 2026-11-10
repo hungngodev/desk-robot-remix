@@ -299,6 +299,11 @@ void setup() {
   } else {
     Serial.println("OK sensor_init five_vl53l4cd_channels");
   }
+  // This is a required sensor for the selected physical robot core. No
+  // optional board or stale sample is allowed to bypass the local arm gate.
+  // Orientation/tilt thresholds remain unqualified, and this gate alone
+  // is never a physical A11 handling acceptance.
+  control.require_imu_for_motion(true);
   // The same upstream Wire bus can read WHO_AM_I from the owned BerryIMU
   // before motion is ever enabled. No IMU driver, sensor fusion, second
   // controller or unqualified safety thresholds are silently installed.
