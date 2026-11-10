@@ -23,6 +23,7 @@ class RobotConfig(BaseModel):
     squeeze_raw_threshold: int | None = Field(default=None, ge=100, le=30000)
     proximity_near_raw_threshold: int | None = Field(default=None, ge=25, le=245)
     battery_low_percent: int = Field(default=20, ge=5, le=40)
+    gesture_interactions_qualified: bool = False  # measured hardware gate
     calibration: Path | None = None
     voice: str = "af_heart"
 

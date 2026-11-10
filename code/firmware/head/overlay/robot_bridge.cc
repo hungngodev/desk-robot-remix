@@ -116,7 +116,9 @@ bool AuxValid(cJSON* json) {
         !cJSON_IsFalse(get(power, "current_calibrated"))) return false;
     if (!bounded(get(proximity, "raw"), 0, 255) ||
         !cJSON_IsBool(get(proximity, "valid")) ||
-        !cJSON_IsNull(get(proximity, "gesture"))) return false;
+        !bounded(get(proximity, "gesture"), 0, 4) ||
+        !bounded(get(proximity, "gesture_events"), 0, 4294967295.0) ||
+        !cJSON_IsFalse(get(proximity, "physically_qualified"))) return false;
     return true;
 }
 

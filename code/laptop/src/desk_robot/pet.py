@@ -51,6 +51,7 @@ class PetState:
     last_nose_angle: int | None = None
     last_force_squeeze: bool | None = None
     last_near_hand: bool | None = None
+    last_gesture_events: int | None = None
     last_aux_kind: str | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
@@ -156,6 +157,7 @@ class PetController:
         state.last_nose_angle = None
         state.last_force_squeeze = None
         state.last_near_hand = None
+        state.last_gesture_events = None
         state.last_aux_kind = None
         state.enabled = True
         state.last_error = None
@@ -341,6 +343,7 @@ class PetController:
                 state.last_nose_angle = None
                 state.last_force_squeeze = None
                 state.last_near_hand = None
+                state.last_gesture_events = None
             await asyncio.sleep(1.0)
 
     async def _observe_aux(self, robot_id: str, generation: int, data: dict) -> None:
@@ -406,6 +409,20 @@ class PetController:
             state.last_near_hand = near
         else:
             state.last_near_hand = None
+
+        gesture = proximity["gesture"]
+        count = proximity["gesture_events"]
+        old = state.last_gesture_events
+        state.last_gesture_events = count if proximity["valid"] else None
+        if (
+            robot.gesture_interactions_qualified
+            and proximity["valid"]
+            and old is not None and 0 < count - old <= 3 and gesture in (1, 2, 3, 4)
+        ):
+            direction = {1: "up", 2: "down", 3: "left", 4: "right"}[gesture]
+            changes.append(SceneChange(
+                "hand_wave", f"My hand gesture sensor observed a {direction} wave", 1.0
+            ))
 
         for change in changes:
             if not state.enabled or state.generation != generation:

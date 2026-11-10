@@ -830,7 +830,8 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
             "power": {"cell_mv": 3700, "soc_centi": soc, "bus_mv": 5100,
                       "shunt_uv": 5, "fuel_valid": True, "monitor_valid": True,
                       "current_calibrated": False},
-            "proximity": {"raw": nearby, "valid": True, "gesture": None},
+            "proximity": {"raw": nearby, "valid": True, "gesture": 0,
+                          "gesture_events": 0, "physically_qualified": False},
         }
 
     try:
@@ -881,7 +882,8 @@ async def test_sensor_interactions_disabled_until_measured_thresholds(fleet, tmp
         "power": {"cell_mv": 3700, "soc_centi": 6000, "bus_mv": 5000,
                   "shunt_uv": 0, "fuel_valid": True, "monitor_valid": True,
                   "current_calibrated": False},
-        "proximity": {"raw": 255, "valid": True, "gesture": None},
+        "proximity": {"raw": 255, "valid": True, "gesture": 0,
+                      "gesture_events": 0, "physically_qualified": False},
     }
     try:
         await pet._observe_aux("robot-01", 5, base)
@@ -890,6 +892,48 @@ async def test_sensor_interactions_disabled_until_measured_thresholds(fleet, tmp
         assert state.aux_reads == 2
         assert not any(m.kind in {"nose_twist", "squeeze", "nearby_object"}
                        for m in memory.recent("robot-01"))
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_apds9960_gestures_are_real_counter_edges_after_qualification(fleet, tmp_path):
+    fleet.mode = "hardware"
+    fleet.robots[0].gesture_interactions_qualified = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 6
+
+    def payload(count, direction, valid=True):
+        return {
+            "robot_id": "robot-01",
+            "pulse": {"present": False, "valid": False, "part_id": 0,
+                      "red": 0, "ir": 0, "age_ms": 0, "bpm": None,
+                      "medical": False},
+            "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                       "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [0, 0], "valid": False, "calibrated": False},
+            "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
+            "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                      "shunt_uv": 0, "fuel_valid": False, "monitor_valid": False,
+                      "current_calibrated": False},
+            "proximity": {"raw": 0, "valid": valid, "gesture": direction,
+                          "gesture_events": count, "physically_qualified": False},
+        }
+
+    try:
+        await pet._observe_aux("robot-01", 6, payload(8, 0))
+        await pet._observe_aux("robot-01", 6, payload(9, 3))
+        assert sum(m.kind == "hand_wave" for m in memory.recent("robot-01")) == 1
+        await pet._observe_aux("robot-01", 6, payload(9, 3))
+        await pet._observe_aux("robot-01", 6, payload(400, 3))
+        assert sum(m.kind == "hand_wave" for m in memory.recent("robot-01")) == 1
+        await pet._observe_aux("robot-01", 6, payload(0, 0, False))
+        await pet._observe_aux("robot-01", 6, payload(2, 0))
+        await pet._observe_aux("robot-01", 6, payload(3, 1))
+        assert sum(m.kind == "hand_wave" for m in memory.recent("robot-01")) == 2
     finally:
         state.enabled = False
         await pet.close()
