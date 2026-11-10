@@ -257,3 +257,17 @@ HTTP status and WROOM UART. Five present/valid/still-recent ToF readings,
 no touch, clear guard, correct robot identity, expected stepper backend and
 disarmed state are required. This is additional software refusal, **never**
 proof that the physical stop margin, IMU attitude safety or supply is qualified.
+
+
+## Bounded BerryIMU six-axis bringup
+
+Use the already owned BerryIMU with its verified **3.3V compatible** supply,
+SDA and SCL on body GPIO21 and GPIO22 upstream of the TCA9548A. Do not infer
+VCC pin ordering from another revision, assume 5V tolerance or attach it to
+a downstream mux port. The firmware reuses the existing boot-time WHO_AM_I
+probe and only initializes the matching V1/V2/V3 gyro and accelerometer.
+The same status and USB inspection path reports raw acceleration, raw gyro and
+age with an explicit validity bit, not interpreted tilt or an optical cliff
+clearance. Keep actuators unloaded during board identification and measure the
+real axis orientation before considering tilt or held interlock thresholds.
+A valid raw IMU sample never substitutes for any missing VL53L4CD corner.
