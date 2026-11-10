@@ -231,3 +231,51 @@ async def test_touch_edge_from_real_body_status_creates_memory_and_proactive_rep
         assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
     finally:
         await pet.close()
+
+
+async def test_wroom_gesture_counters_feed_firsthand_memory_without_replaying_reset(fleet, tmp_path):
+    class GestureHead:
+        def __init__(self):
+            self.calls = 0
+            self.rows = [
+                (0, 0, 0, 0),  # baseline
+                (1, 0, 0, 0),  # debounced press, no tap until release/window
+                (1, 1, 0, 0),
+                (3, 1, 1, 0),  # two more presses, one double-tap
+                (4, 1, 1, 1),  # a long hold
+                (0, 0, 0, 0),  # board reboot; must not replay
+            ]
+
+        async def status(self):
+            row = self.rows[min(self.calls, len(self.rows) - 1)]
+            self.calls += 1
+            return {"touch": dict(zip(
+                ("count", "tap_count", "double_count", "hold_count"), row, strict=True
+            ))}
+
+        async def snapshot(self):
+            return WHITE
+
+    head = GestureHead()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {"robot-01": head}, conversation, memory, KeyScene(),
+        interval=.01, speech_cooldown=120,
+    )
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: head.calls >= 7)
+        kinds = [m.kind for m in memory.recent("robot-01")]
+        assert kinds.count("touch_tap") == 1
+        assert kinds.count("touch_double") == 1
+        assert kinds.count("touch_hold") == 1
+        assert all(m.witnessed and m.source_robot == "robot-01"
+                   for m in memory.recent("robot-01") if m.kind.startswith("touch_"))
+        assert len(speaker.spoken) == 1  # fleet speech cooldown still applies
+        await asyncio.sleep(.05)
+        assert len([m for m in memory.recent("robot-01")
+                    if m.kind.startswith("touch_")]) == 3
+    finally:
+        await pet.close()
