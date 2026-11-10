@@ -377,3 +377,58 @@ async def test_hardware_exploration_requires_real_swept_path_qualification(setti
         assert head.commands == []
     finally:
         await c.close()
+
+
+async def test_pickup_cancels_before_grip_when_body_loses_arm_mid_alignment(settings):
+    c, head = make(settings)
+    original = head.status
+    polls = 0
+    async def fail_status():
+        nonlocal polls
+        polls += 1
+        status = await original()
+        if polls >= 3:
+            status["armed"] = False
+        return status
+    head.status = fail_status
+    try:
+        await c.operator_arm("robot-01")
+        job = c.pickup("robot-01", "key")
+        await asyncio.wait_for(c.tasks[job.id], 5)
+        assert job.state == "failed" and "disarmed" in job.error
+        assert "grip 110" not in head.commands
+        assert head.commands[-1] == "stop"
+        assert head.commands.count("arm") == 1
+    finally:
+        await c.close()
+
+
+async def test_shared_body_armed_health_checks_do_not_assume_front_camera_safety(settings):
+    c, head = make(settings)
+    settings.mode = "hardware"
+    try:
+        head.armed = True
+        head.last_control = time.monotonic()
+        async def status():
+            return {
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {"mm": [30, 30, 30, 30, 220],
+                           "age_ms": [5, 5, 5, 5, 5],
+                           "present_mask": 31, "valid_mask": 31},
+                "imu": {"valid": True, "age_ms": 30},
+                "touch": {"active": False},
+            }
+        head.status = status
+        await c._assert_armed_health("robot-01")  # pickup may face target
+        with pytest.raises(OperationError, match="sensor or corridor"):
+            await c._assert_armed_health("robot-01", require_front_clearance=True)
+        async def fault_status():
+            body = await status()
+            body["safety"]["fault"] = "front_obstacle"
+            return body
+        head.status = fault_status
+        with pytest.raises(OperationError, match="sensor"):
+            await c._assert_armed_health("robot-01")
+    finally:
+        await c.close()

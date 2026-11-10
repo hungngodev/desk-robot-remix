@@ -90,3 +90,18 @@ After the first passes and routing/audio work on the second, follow
 its own camera, screen, voice, lift/gripper, power source, credentials and measured
 calibration. Five participants default to ten total utterances; pair sessions
 retain the six-utterance limit. All physical fleet tests remain unrun.
+
+
+### Live local health revalidation during the full grip and placement sequence
+
+The existing calibrated pickup routine now reuses the same armed five range,
+BerryIMU freshness, and touch checks as persistent exploration. It samples
+immediately before alignment, after every 100ms adjustment pulse, before
+closing or opening the gripper, during lift hold frames, and before observing
+final placement. It never retries an uncertain movement ACK, automatically
+clears a WROOM latch or treats a commanded servo angle as measured jaw height.
+A newly disarmed WROOM or stale reading causes the existing coordinator finally
+stop path to run. If the payload is held, the WROOM safety stop keeps the
+holding PWM attached rather than deliberately dropping it. Hardware grip
+strength and actual 10mm lift remain subject to the ten real trials each for
+flat keys and wrapped candy.

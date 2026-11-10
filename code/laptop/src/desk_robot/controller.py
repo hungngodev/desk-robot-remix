@@ -267,6 +267,51 @@ class Coordinator:
 
         return self._submit(robot_id, "manual", work)
 
+    async def _assert_armed_health(
+        self, robot_id: str, *, require_front_clearance: bool = False
+    ) -> dict:
+        """Recheck WROOM local sensor verdict before every physical movement.
+
+        This is shared by sustained exploration and each pickup phase.
+        A remote status never clears a local fault or creates a new permit.
+        """
+        body = await self.heads[robot_id].status()
+        if not isinstance(body, dict) or body.get("armed") is not True:
+            raise OperationError("Operation stopped: body disarmed or unavailable")
+        if self.settings.mode != "hardware":
+            return body
+        safety = body.get("safety")
+        ranges = body.get("ranges")
+        imu = body.get("imu")
+        touch = body.get("touch")
+        if (
+            not isinstance(safety, dict)
+            or safety.get("required") is not True
+            or safety.get("ready") is not True
+            or safety.get("fault") != "none"
+            or not isinstance(ranges, dict)
+            or type(ranges.get("present_mask")) is not int
+            or ranges["present_mask"] != 31
+            or type(ranges.get("valid_mask")) is not int
+            or ranges["valid_mask"] != 31
+            or not isinstance(ranges.get("mm"), list)
+            or len(ranges["mm"]) != 5
+            or not isinstance(ranges.get("age_ms"), list)
+            or len(ranges["age_ms"]) != 5
+            or any(type(n) is not int or not 1 <= n <= 1300 for n in ranges["mm"])
+            or any(type(age) is not int or not 0 <= age <= 150
+                   for age in ranges["age_ms"])
+            or (require_front_clearance and ranges["mm"][4] <= 250)
+            or not isinstance(imu, dict)
+            or imu.get("valid") is not True
+            or type(imu.get("age_ms")) is not int
+            or not 0 <= imu["age_ms"] <= 200
+            or not isinstance(touch, dict)
+            or touch.get("active") is not False
+        ):
+            raise OperationError("Operation blocked by local sensor or corridor")
+        return body
+
     def explore(self, robot_id: str) -> Job:
         """Start operator enabled, persistent but locally guarded exploration.
 
@@ -290,38 +335,7 @@ class Coordinator:
         # This loop persists until a stop, quiet mode, failure, or disconnect.
         # There is no unbounded drive: every track movement expires after 100ms.
         while True:
-            body = await head.status()
-            if not isinstance(body, dict) or body.get("armed") is not True:
-                raise OperationError("Exploration stopped: body disarmed or unavailable")
-            if self.settings.mode == "hardware":
-                safety = body.get("safety")
-                ranges = body.get("ranges")
-                imu = body.get("imu")
-                touch = body.get("touch")
-                if (
-                    not isinstance(safety, dict)
-                    or safety.get("ready") is not True
-                    or safety.get("fault") != "none"
-                    or not isinstance(ranges, dict)
-                    or ranges.get("present_mask") != 31
-                    or ranges.get("valid_mask") != 31
-                    or not isinstance(ranges.get("mm"), list)
-                    or len(ranges["mm"]) != 5
-                    or not isinstance(ranges.get("age_ms"), list)
-                    or len(ranges["age_ms"]) != 5
-                    or any(type(n) is not int or not 1 <= n <= 1300 for n in ranges["mm"])
-                    or any(type(age) is not int or not 0 <= age <= 150
-                           for age in ranges["age_ms"])
-                    or ranges["mm"][4] <= 250
-                    or not isinstance(imu, dict)
-                    or imu.get("valid") is not True
-                    or type(imu.get("age_ms")) is not int
-                    or not 0 <= imu["age_ms"] <= 200
-                    or not isinstance(touch, dict)
-                    or touch.get("active") is not False
-                ):
-                    await head.command("stop")
-                    raise OperationError("Exploration blocked by local sensor or corridor")
+            await self._assert_armed_health(job.robot_id, require_front_clearance=True)
             # The reused Sense camera source must be alive before and after
             # each short pulse; an image does not by itself prove a clear path.
             await head.snapshot()
@@ -369,11 +383,14 @@ class Coordinator:
 
     async def _pickup(self, job: Job, target: str, c: Calibration) -> dict:
         head = self.heads[job.robot_id]
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"grip {c.grip_open}")
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
         initial = None
         for attempt in range(24):
+            await self._assert_armed_health(job.robot_id)
             detection = await self._observe(job.robot_id, target, c)
             point = c.ground(detection.center)
             if not c.within(point):
@@ -392,10 +409,13 @@ class Coordinator:
             await head.command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
             await head.command("stop")
+            await self._assert_armed_health(job.robot_id)
         if initial is None:
             raise OperationError("Alignment attempt limit reached")
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"grip {c.grip_closed}")
         await asyncio.sleep(c.servo_settle_seconds)
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
         # Image evidence: same category moves upward into measured raised-jaw region and remains
@@ -406,6 +426,7 @@ class Coordinator:
         for sample in range(2):
             if sample:
                 await asyncio.sleep(c.hold_seconds)
+            await self._assert_armed_health(job.robot_id)
             detection = await self._observe(job.robot_id, target, c)
             px, py = detection.center
             if not (a <= px <= x and b <= py <= y):
@@ -439,6 +460,7 @@ class Coordinator:
         ):
             raise OperationError("Placement unverified: object not over calibrated release area")
 
+        await self._assert_armed_health(job.robot_id)
         # Release only after observing the object near the table, then raise
         # the empty jaws to distinguish a placed object from one stuck in them.
         await head.command(f"grip {c.grip_open}")
@@ -449,6 +471,7 @@ class Coordinator:
         for sample in range(2):
             if sample:
                 await asyncio.sleep(0.15)
+            await self._assert_armed_health(job.robot_id)
             placed = await self._observe(job.robot_id, target, c)
             ground = c.ground(placed.center)
             if (
