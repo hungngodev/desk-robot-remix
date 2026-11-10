@@ -44,6 +44,7 @@ struct ClimateRaw {
 };
 struct ForceRaw {
   bool present = false, valid = false;
+  std::uint8_t valid_mask = 0; // both ADC channels need independent fresh samples
   std::int16_t adc[2]{};
   std::uint32_t at_ms = 0;
 };

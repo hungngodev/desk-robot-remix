@@ -124,11 +124,15 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   }
   if (now_ms - ads_started_ < 9U) return; // nonblocking ADS1115 128SPS
   std::uint16_t value = 0;
-  f.valid = read16(0x48, 0x00, value);
-  if (f.valid) {
+  const bool fresh = read16(0x48, 0x00, value);
+  if (fresh) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
+    f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
     f.at_ms = now_ms;
+  } else {
+    f.valid_mask &= static_cast<std::uint8_t>(~(1U << ads_channel_));
   }
+  f.valid = f.valid_mask == 3U;
   ads_channel_ ^= 1U;
   ads_pending_ = false;
   // FSR-to-force and grasp confidence still require measured mechanical tuning.
@@ -143,9 +147,7 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
   }
   if (now_ms - sht_started_ < 12U) return;
   std::uint8_t b[6]{};
-  c.valid = read(0x44, 0x00, b, 6);
-  // SHT4x read has no register pointer: the read above writes 0x00 and is
-  // not valid. Use a plain I2C request below instead; clear result on error.
+  // SHT4x data read has no register pointer after a measurement command.
   c.valid = wire_->requestFrom(static_cast<std::uint8_t>(0x44),
                                static_cast<std::size_t>(6), true) == 6;
   for (int i = 0; i < 6 && c.valid; ++i) {
