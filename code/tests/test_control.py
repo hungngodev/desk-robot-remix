@@ -198,3 +198,98 @@ async def test_cancel_running_job_stops_and_ends_keepalive(settings):
         assert len(head.commands) == count
     finally:
         await c.close()
+
+class HardwareStatusHead(SimulatedHead):
+    """A simulated status transport, never a physical sensor or safety proof."""
+
+    def __init__(self, robot_id):
+        super().__init__(robot_id)
+        self.body_status = {
+            "robot_id": robot_id,
+            "backend": "stepper_28byj48",
+            "armed": False,
+            "touch": {"active": False, "count": 0},
+            "safety": {"required": True, "ready": True, "fault": "none"},
+            "ranges": {
+                "mm": [50, 50, 50, 50, 200],
+                "age_ms": [10, 10, 10, 10, 10],
+                "present_mask": 31,
+                "valid_mask": 31,
+            },
+        }
+
+    async def status(self):
+        return self.body_status
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("backend", "dc_pwm"),
+        ("robot_id", "robot-02"),
+        ("armed", True),
+        ("touch", {"active": True}),
+        ("touch", {}),
+        ("safety", {"required": True, "ready": False, "fault": "stale_sample"}),
+        ("ranges", {}),
+        ("ranges", {"mm": [50] * 5, "age_ms": [0] * 5,
+                    "present_mask": 31, "valid_mask": True}),
+        ("ranges", {"mm": [50] * 5, "age_ms": [0] * 5,
+                    "present_mask": 15, "valid_mask": 31}),
+        ("ranges", {"mm": [50] * 5, "age_ms": [200] * 5,
+                    "present_mask": 31, "valid_mask": 31}),
+        ("ranges", {"mm": [0] * 5, "age_ms": [0] * 5,
+                    "present_mask": 31, "valid_mask": 31}),
+    ],
+)
+async def test_hardware_enable_fails_closed_on_unqualified_body_status(
+    settings, field, replacement
+):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status[field] = replacement
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(OperationError, match="Hardware preflight"):
+            await coordinator.operator_arm("robot-01")
+        assert "robot-01" not in coordinator.permits
+        assert head.commands == []
+    finally:
+        await coordinator.close()
+
+
+async def test_hardware_motion_requires_new_safety_status_at_execution(settings):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        permit = await coordinator.operator_arm("robot-01")
+        assert permit["operator_permit"] and head.commands == []
+        # Touch happens after the operator allows the job but before it runs.
+        head.body_status["touch"]["active"] = True
+        job = coordinator.manual("robot-01", "drive 20 20 100")
+        await coordinator.tasks[job.id]
+        assert job.state == "failed"
+        assert "Hardware preflight" in job.error
+        assert "arm" not in head.commands
+        assert not any(cmd.startswith("drive") for cmd in head.commands)
+        assert head.commands[-1] == "stop"
+        assert "robot-01" not in coordinator.permits
+    finally:
+        await coordinator.close()
+
+
+async def test_hardware_motion_permitted_only_when_all_status_fields_clear(settings):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        await coordinator.operator_arm("robot-01")
+        job = coordinator.manual("robot-01", "drive 0 0 10")
+        await coordinator.tasks[job.id]
+        assert job.state == "succeeded", job.error
+        assert head.commands[0] == "arm"
+        assert head.commands[-1] == "stop"
+        assert head.commands.count("drive 0 0 10") == 1
+    finally:
+        await coordinator.close()
