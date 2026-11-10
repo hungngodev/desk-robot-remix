@@ -21,6 +21,17 @@ int main() {
     CHECK(BerryImu::identify(0x68, 0x3d) == BerryModel::V2Lsm9ds1);
     CHECK(BerryImu::identify(0x6a, 0x3d) == BerryModel::V3Lsm6dsl);
     CHECK(BerryImu::identify(0x73, 0x3d) == BerryModel::Unsupported320G);
+    CHECK(BerryImu::identify(0x68, 0x00) == BerryModel::Mpu6050);
+    CHECK(BerryImu::identify(0x68, 0x49) == BerryModel::Unknown);
+    desk_robot::BerryReading mpu;
+    mpu.model = BerryModel::Mpu6050;
+    const std::uint8_t mpu_wire[14] = {
+      0x40, 0x00, 0xc0, 0x00, 0x00, 0x02, 0xfa, 0xfa,
+      0xff, 0xf0, 0x00, 0x00, 0x01, 0x00
+    };
+    BerryImu::decode_mpu6050(mpu_wire, mpu);
+    CHECK(mpu.accel[0] == 16384 && mpu.accel[1] == -16384 && mpu.accel[2] == 2);
+    CHECK(mpu.gyro[0] == -16 && mpu.gyro[1] == 0 && mpu.gyro[2] == 256);
     CHECK(BerryImu::identify(0x6a, 0x49) == BerryModel::Unknown);
     CHECK(BerryImu::identify(0x00, 0x3d) == BerryModel::Unknown);
 
@@ -47,6 +58,16 @@ int main() {
     CHECK(reply.find("\"gyro\":[-5,31,2000]") != std::string::npos);
     CHECK(reply.find("\"age_ms\":20") != std::string::npos);
     CHECK(!body.state().armed);
+    mpu.valid = true;
+    mpu.at_ms = 200;
+    body.set_imu_identity(4, 0x68, 0);
+    body.set_imu(mpu);
+    reply = status(body, 215);
+    CHECK(reply.find("\"family\":4,\"gyro_id\":104,\"aux_id\":0,\"valid\":true") != std::string::npos);
+    CHECK(reply.find("\"acc\":[16384,-16384,2]") != std::string::npos);
+    // Switch back to Berry before the old expected status assertions.
+    body.set_imu_identity(1, 212, 73);
+    body.set_imu(reading);
 
     reply = status(body, 301);
     CHECK(reply.find("\"aux_id\":73,\"valid\":false") != std::string::npos);

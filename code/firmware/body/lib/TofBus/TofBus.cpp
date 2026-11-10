@@ -99,6 +99,21 @@ ImuIdentity TofBus::probe_imu() {
     value = static_cast<std::uint8_t>(byte);
     return true;
   };
+  // Standard MPU6050 WHO_AM_I is register 0x75 (NOT Berry 0x0f).
+  // AD0 selects either 0x68 or 0x69. Do not trust ACK without the 0x68 ID.
+  std::uint8_t mpu_matches = 0;
+  std::uint8_t mpu_address = 0;
+  for (std::uint8_t addr : {static_cast<std::uint8_t>(0x68), static_cast<std::uint8_t>(0x69)}) {
+    std::uint8_t id = 0;
+    wire_.beginTransmission(addr);
+    if (wire_.write(static_cast<std::uint8_t>(0x75)) == 1 &&
+        wire_.endTransmission(false) == 0 &&
+        wire_.requestFrom(addr, static_cast<size_t>(1), true) == 1 &&
+        wire_.available() >= 1) {
+      const int value = wire_.read();
+      if (value == 0x68) { ++mpu_matches; mpu_address = addr; }
+    }
+  }
   // OzzMaker exposes several BerryIMU revisions. A WHO_AM_I response is
   // not unique to one address; reject ambiguous multi-device probes rather
   // than quietly selecting whichever chip responds first.
@@ -123,6 +138,16 @@ ImuIdentity TofBus::probe_imu() {
       result.aux_id = id;
       result.aux_address = addr;
     }
+  }
+  if (mpu_matches > 0) {
+    if (mpu_matches != 1 || gyro_matches != 0 || aux_matches != 0)
+      return ImuIdentity{}; // ambiguous installed IMUs: fail closed
+    result.family = static_cast<std::uint8_t>(BerryModel::Mpu6050);
+    result.gyro_id = 0x68;
+    result.aux_id = 0;
+    result.gyro_address = mpu_address;
+    result.aux_address = 0;
+    return result;
   }
   if (gyro_matches != 1 || aux_matches != 1) {
     return ImuIdentity{};  // no guessed chip, no movement permission

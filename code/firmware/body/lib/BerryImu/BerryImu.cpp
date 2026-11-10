@@ -7,7 +7,17 @@ BerryModel BerryImu::identify(std::uint8_t gyro, std::uint8_t other) {
   if (gyro == 0x68 && other == 0x3d) return BerryModel::V2Lsm9ds1;
   if (gyro == 0x6a && other == 0x3d) return BerryModel::V3Lsm6dsl;
   if (gyro == 0x73 && other == 0x3d) return BerryModel::Unsupported320G;
+  if (gyro == 0x68 && other == 0x00) return BerryModel::Mpu6050;
   return BerryModel::Unknown;
+}
+
+void BerryImu::decode_mpu6050(const std::uint8_t (&bytes)[14], BerryReading& sample) {
+  for (int i = 0; i < 3; ++i) {
+    const auto accel = static_cast<std::uint16_t>((static_cast<unsigned>(bytes[2*i]) << 8) | bytes[2*i + 1]);
+    const auto gyro = static_cast<std::uint16_t>((static_cast<unsigned>(bytes[8 + 2*i]) << 8) | bytes[9 + 2*i]);
+    sample.accel[i] = static_cast<std::int16_t>(accel);
+    sample.gyro[i] = static_cast<std::int16_t>(gyro);
+  }
 }
 
 #if defined(ARDUINO)
@@ -16,7 +26,7 @@ BerryModel BerryImu::identify(std::uint8_t gyro, std::uint8_t other) {
 // select any TCA9548A downstream channel, or block waiting for data-ready.
 bool BerryImu::read_bytes(std::uint8_t address, std::uint8_t reg,
                          std::uint8_t* data, std::uint8_t length) {
-  if (wire_ == nullptr || data == nullptr || length == 0 || length > 6) return false;
+  if (wire_ == nullptr || data == nullptr || length == 0 || length > 14) return false;
   wire_->beginTransmission(address);
   if (wire_->write(reg) != 1 || wire_->endTransmission(false) != 0) return false;
   if (wire_->requestFrom(address, static_cast<size_t>(length), true) != length)
@@ -43,10 +53,13 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
   configured_ = false;
   reading_ = BerryReading{};
   ever_polled_ = false;
-  if (model == BerryModel::Unknown || model == BerryModel::Unsupported320G ||
-      (gyro_address != 0x6a && gyro_address != 0x6b) ||
-      (extra_address != 0x1c && extra_address != 0x1d &&
-       extra_address != 0x1e)) return false;
+  if (model == BerryModel::Unknown || model == BerryModel::Unsupported320G) return false;
+  if (model == BerryModel::Mpu6050) {
+    if ((gyro_address != 0x68 && gyro_address != 0x69) || extra_address != 0x00) return false;
+  } else if ((gyro_address != 0x6a && gyro_address != 0x6b) ||
+             (extra_address != 0x1c && extra_address != 0x1d && extra_address != 0x1e)) {
+    return false;
+  }
   reading_.model = model;
   gyro_address_ = gyro_address;
   extra_address_ = extra_address;
@@ -55,7 +68,17 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
   // configuration. Register meanings follow OzzMaker's original Arduino
   // BerryIMU variant definitions. Physical axes are NOT yet calibrated.
   bool ok = false;
-  if (reading_.model == BerryModel::V1Lsm9ds0) {
+  if (reading_.model == BerryModel::Mpu6050) {
+    // Official InvenSense RM-MPU-6000A register map, not BerryIMU registers.
+    // Wake from default sleep; all six axes; 1 kHz internal sample with
+    // DLPF=3, +/-2 g and +/-250 degrees/s. No DMP or extra task.
+    ok = write_byte(gyro_address_, 0x6b, 0x01) &&
+         write_byte(gyro_address_, 0x6c, 0x00) &&
+         write_byte(gyro_address_, 0x1a, 0x03) &&
+         write_byte(gyro_address_, 0x19, 0x09) &&  // output rate 100Hz
+         write_byte(gyro_address_, 0x1b, 0x00) &&
+         write_byte(gyro_address_, 0x1c, 0x00);
+  } else if (reading_.model == BerryModel::V1Lsm9ds0) {
     ok = write_byte(extra_address_, 0x20, 0x67) &&  // 100Hz XYZ accelerometer
          write_byte(extra_address_, 0x21, 0x00) &&  // +/-2g
          write_byte(gyro_address_, 0x20, 0x0f) &&   // 95Hz XYZ gyro
@@ -79,6 +102,17 @@ void BerryImu::poll(std::uint32_t now_ms) {
   if (!configured_ || (ever_polled_ && now_ms - last_poll_ms_ < 50U)) return;
   last_poll_ms_ = now_ms;
   ever_polled_ = true;
+  if (reading_.model == BerryModel::Mpu6050) {
+    std::uint8_t frame[14]{};
+    if (!read_bytes(gyro_address_, 0x3b, frame, 14)) {
+      reading_.valid = false;
+      return;
+    }
+    decode_mpu6050(frame, reading_);
+    reading_.at_ms = now_ms;
+    reading_.valid = true;
+    return;
+  }
   const std::uint8_t gyro_reg =
       reading_.model == BerryModel::V2Lsm9ds1 ? 0x18 :
       reading_.model == BerryModel::V3Lsm6dsl ? 0x22 : 0x28;

@@ -17,6 +17,7 @@ enum class BerryModel : std::uint16_t {
   V1Lsm9ds0 = 1,
   V2Lsm9ds1 = 2,
   V3Lsm6dsl = 3,
+  Mpu6050 = 4, // six-axis InvenSense sensor, no BerryIMU aux sensor
   Unsupported320G = 320
 };
 
@@ -32,6 +33,8 @@ class BerryImu {
  public:
   // Both identities must agree. A single I2C ACK is NOT a recognized IMU.
   static BerryModel identify(std::uint8_t gyro_who, std::uint8_t extra_who);
+  // Big-endian MPU sample: accel 0..5, temperature 6..7, gyro 8..13.
+  static void decode_mpu6050(const std::uint8_t (&bytes)[14], BerryReading& sample);
   const BerryReading& reading() const { return reading_; }
   bool configured() const { return configured_; }
   bool fresh(std::uint32_t now_ms) const {

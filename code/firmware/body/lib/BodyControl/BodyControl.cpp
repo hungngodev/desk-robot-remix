@@ -103,7 +103,7 @@ void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
 
 void BodyControl::set_imu_identity(std::uint8_t family, std::uint8_t gyro,
                                    std::uint8_t aux) {
-  state_.imu_family = family <= 3 ? family : 0;
+  state_.imu_family = family <= 4 ? family : 0;
   state_.imu_gyro_id = gyro;
   state_.imu_aux_id = aux;
   // This merely records chip identification. It never arms or clears a guard.
