@@ -124,24 +124,24 @@ def inspect_status(status: dict) -> dict:
     if side is not None:
         if not isinstance(side, dict):
             raise ValueError("Malformed left/right/rear ToF diagnostics")
-        mm, age = side.get("mm"), side.get("age_ms")
-        present, valid = side.get("present_mask"), side.get("valid_mask")
-        if (not isinstance(mm, list) or len(mm) != 3
-                or not isinstance(age, list) or len(age) != 3
-                or any(type(v) is not int or not 0 <= v <= 1300 for v in mm)
-                or any(type(v) is not int or v < 0 for v in age)
-                or type(present) is not int or not 0 <= present <= 7
-                or type(valid) is not int or not 0 <= valid <= 7
-                or valid & ~present
+        side_mm, side_age = side.get("mm"), side.get("age_ms")
+        side_present, side_valid = side.get("present_mask"), side.get("valid_mask")
+        if (not isinstance(side_mm, list) or len(side_mm) != 3
+                or not isinstance(side_age, list) or len(side_age) != 3
+                or any(type(v) is not int or not 0 <= v <= 1300 for v in side_mm)
+                or any(type(v) is not int or v < 0 for v in side_age)
+                or type(side_present) is not int or not 0 <= side_present <= 7
+                or type(side_valid) is not int or not 0 <= side_valid <= 7
+                or side_valid & ~side_present
                 or side.get("motion_certified") is not False
-                or any(not 1 <= mm[i] <= 1300 for i in range(3) if valid & (1 << i))):
+                or any(not 1 <= side_mm[i] <= 1300 for i in range(3) if side_valid & (1 << i))):
             raise ValueError("Invalid read-only side and rear ToF data")
         side_input = {
-            "reported": True, "present_mask": present, "valid_mask": valid,
+            "reported": True, "present_mask": side_present, "valid_mask": side_valid,
             "readings": [
-                {"direction": label, "distance_mm": mm[i],
-                 "age_ms": age[i], "present": bool(present & (1 << i)),
-                 "valid": bool(valid & (1 << i))}
+                {"direction": label, "distance_mm": side_mm[i],
+                 "age_ms": side_age[i], "present": bool(side_present & (1 << i)),
+                 "valid": bool(side_valid & (1 << i))}
                 for i, label in enumerate(("left", "right", "rear"))
             ],
             "motion_certified": False, "physical_qualification_pass": False,
