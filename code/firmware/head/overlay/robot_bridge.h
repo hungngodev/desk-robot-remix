@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include "esp_http_server.h"
@@ -13,10 +14,18 @@ struct Reply {
     std::string text;
 };
 
+struct BodyInteraction {
+    int touch_events = 0;
+    bool fault = false;
+    bool valid = false;
+};
+
 class Bridge {
 public:
     explicit Bridge(Camera* camera);
     void Start();
+    // One bounded local status transaction, no motor authority or second UART.
+    BodyInteraction PollInteraction();
 
 private:
     Camera* camera_;
@@ -25,6 +34,9 @@ private:
     bool uart_ready_ = false;
     bool enabled_ = false;
     std::atomic<bool> camera_busy_{false};
+    // Owned by the one Sense face task, not shared with HTTP handlers.
+    bool touch_baselined_ = false;
+    std::uint32_t touch_last_ = 0;
     static void CameraTask(void* context);
     Reply Transact(const std::string& command, bool operator_control);
     bool Authorize(httpd_req_t* req);

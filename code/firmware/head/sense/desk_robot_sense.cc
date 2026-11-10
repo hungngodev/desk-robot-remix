@@ -30,6 +30,8 @@ private:
     // Pinned Stackchan-agent HSM controls OLED mood only, NEVER tracks/claw.
     stackchan::behavior::HsmBehavior face_behavior_{0x5a17};
     bool face_was_speaking_ = false;
+    desk_robot::Bridge* body_bridge_ = nullptr;  // existing single UART owner
+    bool body_fault_active_ = false;
     TaskHandle_t face_task_ = nullptr;
 
     static const char* MoodName(stackchan::behavior::Mood mood) {
@@ -48,7 +50,30 @@ private:
     static void FaceTask(void* context) {
         auto* board = static_cast<DeskRobotSenseBoard*>(context);
         using namespace stackchan::behavior;
+        uint32_t last_body_poll_ms = 0;
         while (true) {
+            const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+            // Stackchan-agent already defines kTouched. Supply the actual
+            // WROOM GPIO34 touch edges via the existing head UART status path.
+            // This remains independent of Mac VLM latency and never calls a
+            // servo or motion tool.
+            if (board->body_bridge_ && now_ms - last_body_poll_ms >= 300) {
+                last_body_poll_ms = now_ms;
+                const auto body = board->body_bridge_->PollInteraction();
+                if (body.valid) {
+                    for (int i = 0; i < body.touch_events; ++i) {
+                        board->face_behavior_.pushEvent(
+                            Event(EventType::kTouched));
+                    }
+                    if (body.fault != board->body_fault_active_) {
+                        board->body_fault_active_ = body.fault;
+                        if (!body.fault) {
+                            board->face_behavior_.pushEvent(
+                                Event(EventType::kPersonLost));
+                        }
+                    }
+                }
+            }
             const auto device_state = Application::GetInstance().GetDeviceState();
             const bool speaking = device_state == kDeviceStateSpeaking;
             if (speaking && !board->face_was_speaking_) {
@@ -57,14 +82,19 @@ private:
                 board->face_behavior_.pushEvent(Event(EventType::kSpeechFinished));
             }
             board->face_was_speaking_ = speaking;
-            const Observation obs{static_cast<uint32_t>(esp_timer_get_time() / 1000)};
+            const Observation obs{now_ms};
             const Action action = board->face_behavior_.update(obs);
             // Xiaozhi owns speaking/listening/status expressions. The reused
             // Stackchan idle picker may update the existing OLED only when
             // the device is idle; never write its motion actions to the body.
-            if (device_state == kDeviceStateIdle && action.set_mood &&
+            if (device_state == kDeviceStateIdle &&
                 board->display_ != nullptr) {
-                board->display_->SetEmotion(MoodName(action.mood));
+                // Local safety fault always outweighs decorative idle picks.
+                if (board->body_fault_active_) {
+                    board->display_->SetEmotion("sad");
+                } else if (action.set_mood) {
+                    board->display_->SetEmotion(MoodName(action.mood));
+                }
             }
             vTaskDelay(pdMS_TO_TICKS(100));
         }
@@ -157,6 +187,7 @@ public:
         static desk_robot::Bridge robot_bridge(camera_);
         static std::once_flag bridge_once;
         std::call_once(bridge_once, [] { robot_bridge.Start(); });
+        body_bridge_ = &robot_bridge;
         // Each configured robot ID seeds Stackchan's EXISTING weighted idle
         // picker independently. Five copies need not blink/smile in sync.
         uint32_t pet_seed = 2166136261U;

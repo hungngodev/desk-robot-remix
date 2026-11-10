@@ -1,6 +1,8 @@
 #include "robot_bridge.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string_view>
@@ -144,6 +146,43 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         }
     }
     return {504, false, "body ACK timeout; command outcome uncertain"};
+}
+
+BodyInteraction Bridge::PollInteraction() {
+    BodyInteraction observation;
+    // Reuses the same locked, bounded body UART and the existing validated
+    // status frame. Never read body UART directly from the display task.
+    const Reply reply = Transact("status", false);
+    if (!reply.ok) {
+        touch_baselined_ = false; // next successful read is a baseline
+        return observation;
+    }
+    auto json = Parse(reply.text);
+    if (!json) return observation;
+    auto touch = cJSON_GetObjectItemCaseSensitive(json.get(), "touch");
+    auto count = cJSON_GetObjectItemCaseSensitive(touch, "count");
+    auto safety = cJSON_GetObjectItemCaseSensitive(json.get(), "safety");
+    auto fault = cJSON_GetObjectItemCaseSensitive(safety, "fault");
+    if (!cJSON_IsObject(touch) || !cJSON_IsNumber(count) ||
+        !std::isfinite(count->valuedouble) ||
+        count->valuedouble < 0 || count->valuedouble > 4294967295.0 ||
+        std::floor(count->valuedouble) != count->valuedouble ||
+        !cJSON_IsObject(safety) || !cJSON_IsString(fault)) return observation;
+    const auto current = static_cast<std::uint32_t>(count->valuedouble);
+    if (!touch_baselined_) {
+        touch_last_ = current;
+        touch_baselined_ = true;
+    } else {
+        const auto delta = current - touch_last_;
+        // Reject large jumps from WROOM reboot or corrupted counter rather
+        // than injecting hundreds of synthetic petting events into the HSM.
+        if (delta > 0 && delta <= 3) observation.touch_events = static_cast<int>(delta);
+        touch_last_ = current;
+    }
+    observation.fault = std::strcmp(fault->valuestring, "none") != 0 &&
+                        std::strcmp(fault->valuestring, "not_required") != 0;
+    observation.valid = true;
+    return observation;
 }
 
 bool Bridge::Authorize(httpd_req_t* req) {
