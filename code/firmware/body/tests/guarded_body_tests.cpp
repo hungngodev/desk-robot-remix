@@ -237,7 +237,7 @@ static void accessory_sensors_never_infer_grip_or_current_or_grant_arm() {
   CHECK(reply.find("\"calibrated\":false") != std::string::npos);
   CHECK(reply.find("\"cell_mv\":3690") != std::string::npos);
   CHECK(reply.find("\"current_calibrated\":false") != std::string::npos);
-  CHECK(reply.find("\"gesture\":null") != std::string::npos);
+  CHECK(reply.find("\"gesture\":0,\"gesture_events\":0") != std::string::npos);
   CHECK(send(body, "arm", 10) == "ERR arm safety_interlock");
   CHECK(!body.state().armed);
   const std::string stale = send(body, "aux", 400);
