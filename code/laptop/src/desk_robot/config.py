@@ -43,6 +43,7 @@ class Settings(BaseModel):
     speech_bridge_token_env: str = "DESK_ROBOT_SPEECH_TOKEN"
     vision_weights: Path | None = None
     vision_model: str = ""  # Explicit local Ollama VLM; never silently use a cloud model.
+    fleet_text_sharing_enabled: bool = False  # Opt-in local, provenance-tagged text only.
     max_job_seconds: float = Field(default=45, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
     memory_dir: Path = Path("../data/private/memory")
