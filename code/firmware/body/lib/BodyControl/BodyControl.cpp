@@ -56,7 +56,17 @@ void BodyControl::stop_motion() {
 }
 
 void BodyControl::set_touch(bool active) {
-  if (active && !state_.touch_active) ++state_.touch_count;
+  if (active && !state_.touch_active) {
+    ++state_.touch_count;
+    // Touch is a local human stop, not merely delayed Mac telemetry.
+    // Stop the tracks and any in-flight servo target before reporting the
+    // event. Preserve held servo PWM to avoid deliberately dropping a key.
+    // Neither an old drive pulse nor a keepalive may restart motion.
+    if (state_.armed) {
+      stop_motion();
+      state_.armed = false;
+    }
+  }
   state_.touch_active = active;
 }
 
@@ -317,6 +327,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (state_.touch_active) {
+      std::snprintf(reply, capacity, "ERR arm touch_active");
+      return;
+    }
     if (profile_ == BodyProfile::StepperGuarded &&
         (guard_ == nullptr || !guard_->evaluate(now_ms))) {
       std::snprintf(reply, capacity, "ERR arm safety_interlock");
