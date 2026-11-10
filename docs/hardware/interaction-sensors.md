@@ -172,9 +172,10 @@ gyro at conservative data rates and samples six raw signed axes every 50ms.
 The `status.imu` object retains the three original identity fields and adds
 `valid`, `acc`, `gyro` and `age_ms`. Samples older than 200ms become invalid.
 The same read-only fields appear in the existing local USB serial bench tool,
-which reports `motion_driver_active=true` only for a currently valid raw
-sample. This means a driver is reporting data, **not** that tilt is safe or
-calibrated. `physical_qualification_pass=false` is always retained.
+which reports `raw_six_axis_available=true` only for a currently
+valid raw sample, while `attitude_interlock_active=false` and
+`physical_qualification_pass=false` remain explicit. The readings do not
+mean tilt is safe or calibrated.
 Nothing grants movement, changes the five-sensor cliff decisions or clears
 the locally latched faults.
 
