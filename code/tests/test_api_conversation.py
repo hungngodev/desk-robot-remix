@@ -1,9 +1,9 @@
 import asyncio
-from desk_robot.memory import MemoryStore
 
 import pytest
 from desk_robot.api import create_app
 from desk_robot.conversation import Conversation
+from desk_robot.memory import MemoryStore
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 from fastapi.testclient import TestClient
 

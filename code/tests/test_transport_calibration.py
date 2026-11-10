@@ -84,7 +84,7 @@ async def test_camera_completion_sequence_and_boot_id_protect_five_pet_capture(s
         calls += 1
         return httpx.Response(200, headers=dict(zip(
             ("X-Desk-Camera-Boot", "X-Desk-Camera-Sequence",
-             "X-Desk-Camera-Complete-Us"), frames[index],
+             "X-Desk-Camera-Complete-Us"), frames[index], strict=True,
         )), content=b"\xff\xd8frame")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
