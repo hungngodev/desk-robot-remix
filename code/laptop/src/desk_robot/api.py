@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -168,6 +169,32 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if request.quiet:
             await coordinator().stop(robot_id)
         return result
+
+    @app.get("/v1/pet/{robot_id}/memories", dependencies=[Depends(operator)])
+    async def pet_memories(robot_id: str, limit: int = Query(default=12, ge=1, le=50)):
+        # Explicit operator view of bounded text provenance, never raw media.
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
+        records = await asyncio.to_thread(
+            app.state.runtime.memory.recent, robot_id, limit=limit
+        )
+        return {
+            "robot_id": robot_id,
+            "records": [
+                {
+                    "event_id": entry.event_id,
+                    "source_robot": entry.source_robot,
+                    "witnessed": entry.witnessed,
+                    "kind": entry.kind,
+                    "summary": entry.summary,
+                    "observed_at": entry.observed_at,
+                    "confidence": entry.confidence,
+                }
+                for entry in records
+            ],
+        }
 
     @app.post("/v1/pet/{robot_id}/share", dependencies=[Depends(operator)])
     async def pet_share(robot_id: str, request: PeerShareRequest):
