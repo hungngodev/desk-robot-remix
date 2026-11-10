@@ -32,6 +32,10 @@ struct State {
   bool cap_valid = false; // read-only CAP1188 zones, never a motor permit
   std::uint8_t cap_mask = 0;
   std::uint32_t cap_events = 0;
+  std::uint16_t side_mm[3]{};
+  std::uint32_t side_at_ms[3]{};
+  bool side_present[3]{};
+  bool side_valid[3]{};
   std::uint8_t extra_mask = 0; // bumper bit0, reed bit1, PIR bit2
   bool bumper_raw = false;
   bool bumper_active = false;
@@ -73,6 +77,9 @@ class BodyControl {
   void sample_touch_input(bool active);  // raw GPIO level, no gesture count
   // Optional multi-zone petting. No movement authority and no fabricated reads.
   void set_cap(bool valid, std::uint8_t zones);
+  // Left/right/rear read-only ToF samples never grant motor permission.
+  void sample_side_range(std::uint8_t index, std::uint16_t mm,
+                         bool valid, std::uint32_t now_ms);
   // Optional active 3.3V digital inputs; no software can authorize motion.
   void sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
                               bool reed, bool pir);

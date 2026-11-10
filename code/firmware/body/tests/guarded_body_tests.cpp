@@ -206,6 +206,23 @@ static void measured_local_calibration_is_atomic_and_never_arms() {
   CHECK(send(body, "calcommit", 4, true) == "ERR calcommit incomplete_stage");
 }
 
+static void extra_three_ranging_channels_are_diagnostics_only() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.sample_side_range(0, 125, true, 10);
+  body.sample_side_range(1, 0, false, 11);
+  body.sample_side_range(2, 300, true, 12);
+  body.sample_side_range(3, 150, true, 14); // invalid index ignored
+  const std::string status = send(body, "status", 30);
+  CHECK(status.find("\"side_ranges\":{") != std::string::npos);
+  CHECK(status.find("\"mm\":[125,0,300]") != std::string::npos);
+  CHECK(status.find("\"age_ms\":[20,19,18]") != std::string::npos);
+  CHECK(status.find("\"present_mask\":7,\"valid_mask\":5") != std::string::npos);
+  CHECK(status.find("\"motion_certified\":false") != std::string::npos);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 30) == "ERR arm safety_interlock");
+}
+
 static void cap_petting_zones_are_optional_and_never_arm() {
   desk_robot::CliffGuard guard;
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
@@ -483,6 +500,7 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     optional_sensor_inputs_never_arm_or_forge_boot_events();
+    extra_three_ranging_channels_are_diagnostics_only();
     cap_petting_zones_are_optional_and_never_arm();
     touch_telemetry_never_grants_motion();
     raw_touch_trip_preempts_debounce_without_forging_a_tap();

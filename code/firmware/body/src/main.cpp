@@ -381,7 +381,15 @@ void loop() {
 #if DESK_ROBOT_STEPPER
   // Real I2C sampling precedes every physical motor update. The pure
   // CliffGuard remains the only local motion/safety authority.
-  if (tof.ready()) tof.poll(cliff_guard, millis());
+  if (tof.ready()) {
+    const auto scan_ms = millis();
+    tof.poll(cliff_guard, scan_ms);
+    const auto extra = tof.new_extra_channel();
+    if (extra < 3) {
+      const auto sample = tof.extra_diagnostic(extra, scan_ms);
+      control.sample_side_range(extra, sample.distance_mm, sample.valid, scan_ms);
+    }
+  }
   berry_imu.poll(millis());   // read-only; no motor permission even if ToF fails
   control.set_imu(berry_imu.reading());
   poll_touch(millis());
