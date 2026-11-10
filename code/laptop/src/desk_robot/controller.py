@@ -246,7 +246,9 @@ class Coordinator:
         async def work(job):
             result = await self.heads[robot_id].command(command)
             if op == "drive":
-                await asyncio.sleep(int(command.split()[3]) / 1000)
+                parts = command.split()
+                duration_ms = int(parts[3]) if len(parts) == 4 else 250
+                await asyncio.sleep(duration_ms / 1000)
             else:
                 await asyncio.sleep(2)  # bounded ramp/settling; does not claim measured position
             return result
