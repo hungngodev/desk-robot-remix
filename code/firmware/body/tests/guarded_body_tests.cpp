@@ -281,6 +281,23 @@ static void five_range_status_reports_real_samples_not_a_permission() {
   CHECK(!body.state().armed);
 }
 
+static void imu_identity_is_diagnostic_only() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.set_imu_identity(1, 0xd4, 0x49);
+  auto status = send(body, "status", 0);
+  CHECK(status.find("\"imu\":{\"family\":1,\"gyro_id\":212,\"aux_id\":73}") !=
+        std::string::npos);
+  CHECK(status.size() < desk_robot::kReplyCapacity - 1);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 1) == "ERR arm safety_interlock");
+  body.set_imu_identity(255, 0, 0);
+  status = send(body, "status", 2);
+  CHECK(status.find("\"imu\":{\"family\":0,\"gyro_id\":0,\"aux_id\":0}") !=
+        std::string::npos);
+  CHECK(!body.state().armed);
+}
+
 static void touch_gesture_counters_survive_slow_status_polling() {
   desk_robot::BodyControl body;
   body.set_touch(true, 0);
@@ -332,6 +349,7 @@ int main() {
     touch_is_local_human_stop_and_requires_fresh_arm();
     touch_gesture_counters_survive_slow_status_polling();
     five_range_status_reports_real_samples_not_a_permission();
+    imu_identity_is_diagnostic_only();
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
