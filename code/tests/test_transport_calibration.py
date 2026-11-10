@@ -96,7 +96,8 @@ def test_usb_bench_reads_five_real_range_slots_without_arming():
     assert result["eligible_for_manual_local_rearm"]
     assert result["imu"]["family"] == "berryimu_v1"
     assert result["imu"]["gyro_who_am_i"] == 212
-    assert result["imu"]["motion_driver_active"] is False
+    assert result["imu"]["raw_six_axis_available"] is False
+    assert result["imu"]["attitude_interlock_active"] is False
     assert result["local_guard_fault"] == "missing_sample"
     assert not result["physical_qualification_pass"]
     status["ranges"]["present_mask"] = 23
@@ -120,7 +121,8 @@ def test_usb_bench_reports_raw_six_axis_without_claiming_tilt_safety():
                    "present_mask": 31, "valid_mask": 31},
     }
     result = inspect_status(status)
-    assert result["imu"]["motion_driver_active"] is True
+    assert result["imu"]["raw_six_axis_available"] is True
+    assert result["imu"]["attitude_interlock_active"] is False
     assert result["imu"]["accelerometer_raw"] == [-32768, 0, 16384]
     assert result["imu"]["gyroscope_raw"] == [-25, 33, 125]
     assert result["imu"]["sample_age_ms"] == 20
