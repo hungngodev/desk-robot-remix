@@ -248,3 +248,22 @@ A 320G WHO_AM_I value `0x73` is observed for diagnosis but deliberately
 cannot arm the V1/V2/V3 sampler. This is not equivalent to a physical revision
 check or to a board voltage measurement. See OzzMaker's original quick-start
 for V3 I2C versus SPI jumper settings.
+
+
+### Extra inputs now connected to event provenance, not to motor permission
+
+The WROOM `extras` status object includes an enabled physical mask, debounced
+bumper/magnet/PIR rising counters, and current levels. A single real bumper
+HIGH/LOW electrical contact trips motion locally before debounce, while the
+same event can later cancel a Mac coordinator job. PIR reports an infrared
+*change*, not an identified visitor; reed reports a magnetic closure, not a
+particular hat. A Mac robot records these as that robot's firsthand events and
+optional fleet sharing retains its reported source. Unplugged or unenabled
+sensor inputs cannot invent an event. This does not establish physical
+accuracy, installed pin voltage, or reliable detached/held handling.
+
+Both the AT42QT1010's HIGH-on-touch hardware output and MPU6050's WHO_AM_I
+are reviewed against vendor data. The optional BMP280 requires a different
+Bosch compensated pressure/temperature sensor library and a mux lane rather
+than silently reusing the six-axis MPU registers. No additional body sensor
+board was purchased or claimed functional.

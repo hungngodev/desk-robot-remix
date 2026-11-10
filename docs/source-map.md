@@ -639,3 +639,29 @@ price, motor slip and swept turn margins, 19/20 natural interruption latency,
 8/10 real key and candy pickups, and five actual head + body trials. None of
 these original user requirements was removed, and CI cannot substitute for
 real mechanical or acoustic evidence.
+
+
+## Extra-sensor integration priority and source distinction, November 10
+
+The full historical 75-sensor idea list remains intact. The latest user hardware
+selection is MPU6050, identified with the actual InvenSense register 0x75 and
+0x3B..0x48 14-byte raw sample, sharing WROOM I2C with the existing five range
+sensors. BerryIMU remains a photographed optional spare, not a second required
+purchase. The already owned AT42QT1010 momentary pad is the required petting
+input. Three distinct reserved input-only pins provide **disabled until fitted**
+WROOM bumper (GPIO35), magnet/reed costume closure (GPIO36), and PIR infrared
+motion (GPIO39). C++ edge counters connect to Mac private eyewitness memories;
+bumper invokes immediate local stop plus Mac job cancellation. These are not
+physical tests, and a PIR edge cannot establish who entered a room.
+
+The user-photographed BMP280 is **pressure and temperature, not humidity**.
+Bosch's datasheet specifies I2C 0x76/0x77 and register 0xD0 ID 0x58. It is
+reserved for isolated TCA9548A lane 5 to avoid possible 0x77 Berry pressure
+conflicts; no BMP driver or claimed reading is enabled before the physical
+board and a vendor-compatible compensated driver are verified. Optional MAX30102
+heartbeat requires user consent and a physically qualified 1.8V chip/breakout,
+never the Sense GPIO41/42 already assigned to its PDM microphone. Optional
+light/camera gestures and environmental sensors occupy the remaining mux lanes
+only after exact model, power, pullup and cost review, not as blind wired bags.
+
+Primary sources: [InvenSense MPU6050 register map](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Register-Map.pdf), [Bosch BMP280 datasheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmp280-ds001.pdf), [Adafruit AT42QT1010 product](https://www.adafruit.com/product/1374) and [Espressif ESP32 GPIO reference](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/gpio.html).

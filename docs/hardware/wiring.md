@@ -282,3 +282,31 @@ The Mac's authenticated permit preflight checks the same data. Neither this
 heartbeat nor the existing five optical channels replaces the pending,
 measured tilt/held acceptance trials. The read-only USB inspection may show
 valid raw counts while the robot is still unqualified for operation.
+
+
+## November 10 reserved optional sensor bus and digital inputs
+
+Source reviewed against the WROOM pin budget, Bosch BMP280 register map,
+InvenSense MPU6050 RM-MPU-6000A and Adafruit AT42QT1010 breakout:
+
+| Input or bus | Purpose and current ownership | Real electrical gate |
+| --- | --- | --- |
+| GPIO21 SDA / GPIO22 SCL, TCA9548A upstream | Preferred MPU6050 at 0x68 or 0x69; one selected IMU | Real MPU WHO_AM_I register 0x75 gives 0x68; 3.3 V logic, not a second Wire instance |
+| TCA9548A channels 0,1,2,3,4 | Four actual cliff footprints and one front VL53L4CD | Distinct mux lanes, sensor 0x29, floor calibration and stopping distance |
+| TCA9548A channel 5 reserved | Optional owned Bosch BMP280 at 0x76/0x77 | Confirm chip ID 0x58 and carrier power; pressure/temperature only, NOT humidity; channel is not currently sampled |
+| TCA9548A channels 6,7 reserved | Optional light sensor, touch-zone expander, opted-in accessory | One address/channel owner, timeout, external pullups and per-module actual VCC |
+| GPIO34 | Required active HIGH AT42QT1010 head pad | 3.3 V power and output, through-case physical false-touch trials |
+| GPIO35, build flag DESK_ROBOT_ENABLE_BUMPER | Optional normally-closed mechanical bumper, raw local trip | External 3.3 V pullup, active LOW; must be physically fitted and tested before enable |
+| GPIO36, build flag DESK_ROBOT_ENABLE_REED | Optional magnetic costume accessory reed closure | External 3.3 V pullup, active LOW; magnet interference and contact bounce |
+| GPIO39, build flag DESK_ROBOT_ENABLE_PIR | Optional photographed PIR motion output | Measure HIGH <=3.3 V and actual timing; external pulldown; PIR is not a person recognizer |
+
+Those three digital extras are disabled in normal builds, even if their firmware
+can decode host simulated test vectors. GPIO34 through GPIO39 have no internal
+pull resistors. Do not plug an anonymous PIR 5 V logic output into the ESP32;
+use a qualified level converter when required. A reed contact near the motors
+may trigger from their magnetic fields. The BMP280 can add atmospheric pressure
+and temperature *only* if its existing vendor driver is selected and tested on
+the actual hardware. Its address may conflict with an optional Berry pressure
+chip if someone wires both upstream: isolate it on mux lane 5. No extra I2C
+sampling may starve five-channel floor polling. None of this bypasses WROOM
+local guard, MPU heartbeat, one-use operator permit, or the robot's $50 cap.
