@@ -576,3 +576,64 @@ async def test_touch_bridge_disconnect_disables_pet_without_automatic_reconnect(
         assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
     finally:
         await pet.close()
+
+
+async def test_local_wroom_safety_transitions_are_firsthand_not_replayed(fleet, tmp_path):
+    class GuardedHead:
+        def __init__(self):
+            self.calls = 0
+            self.faults = [
+                ("missing_sample", False),  # startup baseline, not a new event
+                ("missing_sample", False),
+                ("none", True),            # operator locally cleared the latch
+                ("floor_out_of_range", False),
+                ("floor_out_of_range", False),
+                ("none", True),
+                ("front_obstacle", False),
+                ("front_obstacle", False),
+            ]
+
+        async def status(self):
+            index = min(self.calls, len(self.faults) - 1)
+            self.calls += 1
+            fault, ready = self.faults[index]
+            return {
+                "touch": {"active": False, "count": 0, "tap_count": 0,
+                          "double_count": 0, "hold_count": 0},
+                "safety": {"required": True, "ready": ready,
+                           "fault": fault, "sensor": 2},
+            }
+
+        async def snapshot(self):
+            return WHITE
+
+    head = GuardedHead()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {"robot-01": head}, conversation, memory, KeyScene(),
+        interval=.01, touch_interval=.01,
+    )
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: head.calls >= 10)
+        status = pet.status("robot-01")
+        assert status["local_safety_fault_events"] == 2
+        assert status["last_local_safety_fault"] == "front_obstacle"
+        records = [record for record in memory.recent("robot-01")
+                   if record.kind == "safety_fault"]
+        assert len(records) == 2
+        assert all(record.witnessed and record.source_robot == "robot-01"
+                   for record in records)
+        assert "floor_out_of_range" in records[1].summary
+        assert "front_obstacle" in records[0].summary
+        assert not speaker.spoken  # no generated safety speech, motion or rearm
+        assert status["motor_control_enabled_by_pet"] is False
+        await pet.pause("robot-01")
+        # Explicit re-enable resets the status baseline, not the stored facts.
+        pet.start("robot-01")
+        await wait_for(lambda: head.calls >= 12)
+        assert pet.status("robot-01")["local_safety_fault_events"] == 2
+    finally:
+        await pet.close()
