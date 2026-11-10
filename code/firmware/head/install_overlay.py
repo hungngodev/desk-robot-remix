@@ -204,7 +204,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         }
         for folder in (HERE / "waveshare", HERE / "overlay"):
             for path in folder.iterdir():
-                if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+                if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
                     files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
         path = "main/Kconfig.projbuild"
         files[path] = replace_once(
@@ -229,7 +229,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         }
         for folder in (HERE / "sense", HERE / "overlay"):
             for path in folder.iterdir():
-                if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+                if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
                     files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
         # Only Sense has a real playback reference. Permit Xiaozhi's existing
         # ESP-SR AFE device AEC for this exact board, without enabling it for
@@ -289,7 +289,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     )
     files["main/CMakeLists.txt"] = cmake.encode()
     for path in (HERE / "modular").iterdir():
-        if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+        if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
             files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
     for path in (HERE / "overlay").iterdir():
         if path.suffix in (".h", ".cc", ".hpp"):
