@@ -119,8 +119,12 @@ produce another reaction already possible with the existing camera/mic/ToFs.
 
 - A10: detect tap/double/hold through actual case; suppress bounce/repeated events;
   touching during motion stops/pauses before the expression path. Existing body
-  firmware implements single rising touch and local motion stop, but double tap,
-  long hold and physical shell timing still require implementation and trials.
+  firmware now distinguishes single tap, double tap and long hold using debounced
+  edges and local uptime, while retaining immediate local motion stop. Candidate
+  software windows are a short touch up to 600 ms, a second tap ending within
+  350 ms of the first release, and a hold of at least 900 ms. The final windows
+  and touch response through the shell still require measured trials. Typed
+  counters flow through the existing head UART status to firsthand Mac memory.
   It cannot rearm.
 - A11: recognize intended tilt/shake and suspected handling while rejecting normal
   loaded motor/servo vibration. Held/unsafe attitude inhibits tracks. Putdown,
