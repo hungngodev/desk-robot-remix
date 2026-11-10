@@ -335,6 +335,48 @@ static void imu_identity_is_diagnostic_only() {
   CHECK(!body.state().armed);
 }
 
+static void required_imu_is_a_local_freshness_interlock() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 50);
+  CHECK(guard.try_rearm(50));
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_imu_for_motion(true);
+  CHECK(send(body, "arm", 50) == "ERR arm imu_missing_or_stale");
+  CHECK(!body.state().armed);
+  desk_robot::BerryReading reading;
+  reading.model = desk_robot::BerryModel::V1Lsm9ds0;
+  reading.valid = true;
+  reading.at_ms = 50;
+  reading.accel[2] = 16384;  // synthetic raw 1g, not a physical orientation test
+  body.set_imu(reading);
+  CHECK(send(body, "arm", 50) == "OK arm");
+  CHECK(send(body, "drive 20 20 250", 50).find("OK drive") == 0);
+  fresh(guard, 180);
+  body.tick(180);
+  CHECK(body.state().armed);
+  CHECK(body.state().left != 0);
+  fresh(guard, 251);
+  body.tick(251);  // stale IMU before the 500ms communication watchdog
+  CHECK(!body.state().armed);
+  CHECK(body.state().left == 0 && body.state().right == 0);
+  CHECK(body.state().servos_attached);  // no deliberate drop of held object
+  CHECK(send(body, "arm", 252) == "ERR arm imu_missing_or_stale");
+  reading.valid = false;
+  reading.at_ms = 252;
+  body.set_imu(reading);
+  CHECK(send(body, "arm", 252) == "ERR arm imu_missing_or_stale");
+  reading.valid = true;
+  body.set_imu(reading);
+  CHECK(send(body, "arm", 252) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+  // Unrecognized model cannot claim a valid raw sample.
+  reading.model = desk_robot::BerryModel::Unknown;
+  body.set_imu(reading);
+  body.tick(253);
+  CHECK(!body.state().armed);
+}
+
 static void touch_gesture_counters_survive_slow_status_polling() {
   desk_robot::BodyControl body;
   body.set_touch(true, 0);
@@ -388,6 +430,7 @@ int main() {
     touch_gesture_counters_survive_slow_status_polling();
     five_range_status_reports_real_samples_not_a_permission();
     imu_identity_is_diagnostic_only();
+    required_imu_is_a_local_freshness_interlock();
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
