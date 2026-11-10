@@ -2,7 +2,6 @@
 import math
 
 import pytest
-
 from desk_robot.dock_vision import (
     DockAssessment,
     DockCameraCalibration,
