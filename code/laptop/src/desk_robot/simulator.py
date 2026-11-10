@@ -55,7 +55,7 @@ class SimulatedHead:
         if op in {"arm", "drive", "lift", "grip", "keepalive"}:
             self.last_control = time.monotonic()
         if op == "drive":
-            left, right, _ = map(int, command.split()[1:])
+            left, right = map(int, command.split()[1:3])
             if left == -right:
                 self.position[0] -= 10 if left > 0 else -10
             else:
