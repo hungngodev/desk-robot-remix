@@ -333,6 +333,9 @@ async def test_exploration_persists_under_one_permit_until_explicit_stop(setting
             while head.commands.count("drive 20 20 100") < 3:
                 await asyncio.sleep(.01)
         assert job.state == "running"
+        async with asyncio.timeout(2):
+            while head.commands.count("stop") < 3:
+                await asyncio.sleep(.01)
         assert head.commands.count("stop") >= 3
         assert head.commands.count("arm") == 1
         assert c.tasks[job.id].done() is False

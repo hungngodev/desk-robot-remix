@@ -420,7 +420,10 @@ async def test_all_five_full_system_simulated_integration_and_persistent_motion(
         )
         await runtime.coordinator.stop("robot-01")
         assert job.state == "cancelled"
-        assert not runtime.coordinator.heads["robot-01"].armed
+        # Stop freezes movement and revokes the Mac permit; WROOM may
+        # retain its short control lease until its separate 500ms watchdog.
+        assert runtime.coordinator.heads["robot-01"].commands[-1] == "stop"
+        assert runtime.coordinator.permits.get("robot-01") is None
         assert runtime.memory.count("robot-05") == 10
         assert await runtime.pet.pause("robot-05")
         assert runtime.pet.status("robot-05")["enabled"] is False
