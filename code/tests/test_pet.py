@@ -700,6 +700,15 @@ def test_selected_peer_share_api_requires_operator_and_existing_opt_in(fleet, to
             "robot-01", "event123", "A wrapped candy arrived",
             kind="candy", source_robot="robot-01", witnessed=True
         )
+        list_path = "/v1/pet/robot-01/memories"
+        assert client.get(list_path, headers=tool).status_code == 403
+        listed = client.get(list_path, headers=operator, params={"limit": 1})
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["robot_id"] == "robot-01"
+        assert listed.json()["records"][0]["event_id"] == "event123"
+        assert listed.json()["records"][0]["witnessed"] is True
+        assert client.get(list_path, headers=operator, params={"limit": 51}).status_code == 422
+        assert client.get("/v1/pet/missing/memories", headers=operator).status_code == 404
         path = "/v1/pet/robot-01/share"
         payload = {"to_robot": "robot-03", "event_id": "event123"}
         assert client.post(path, headers=tool, json=payload).status_code == 403
@@ -709,6 +718,9 @@ def test_selected_peer_share_api_requires_operator_and_existing_opt_in(fleet, to
         assert result.json()["stored"] is True
         assert client.post(path, headers=operator, json=payload).json()["stored"] is False
         assert memory.recent("robot-03")[0].witnessed is False
+        listing = client.get("/v1/pet/robot-03/memories", headers=operator)
+        assert listing.json()["records"][0]["witnessed"] is False
+        assert listing.json()["records"][0]["source_robot"] == "robot-01"
         assert memory.count("robot-02") == 0
         assert client.post(
             path, headers=operator,
