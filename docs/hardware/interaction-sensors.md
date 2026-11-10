@@ -2,7 +2,9 @@
 
 Updated 2026-11-06. Required first additions: one head-touch input and one
 six-axis motion sensor per robot. RGB lighting is optional. This specifies
-integration and tests; none of these add-ons has been wired, flashed or qualified.
+integration and tests. The owned AT42QT1010 now has WROOM input polling,
+debounced status and a local stop interlock in firmware, but no physical
+wiring, shell test, flashing or qualifying trial has been completed.
 The [photo inventory](photo-inventory-2026-11-04.md) now identifies an owned
 BerryIMU and other spares. Hold a new prototype IMU purchase until the owned unit
 has been identified and tested. The follow-up photo identifies an owned
@@ -14,7 +16,8 @@ Adafruit #1374 AT42QT1010 for robot one's head touch.
 | --- | ---: | --- | --- |
 | Owned AT42QT1010 touch breakout #1374 | 1 | WROOM GPIO34, powered at 3.3 V, common ground and momentary active-high OUT | One concealed head pad. Bench-test response through the shell and costume. TTP223 is a possible fleet equivalent |
 | Owned BerryIMU accelerometer+gyro board | 1 | Proposed body I2C21/22 upstream of mux; exact older-board pins/supply/addresses to verify | Prototype reuse first. Likely V1, not proven; identify chips and acquire real samples before choosing driver. One photographed board does not cover five cores. LSM6DS3TR-C remains a conditional replacement only |
-| Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not steal bodyGPIO4, already allocated to mux reset |
+| Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not use body GPIO4 for the mux reset: it is a boot strapping pin and
+the TCA9548A RESET must be pulled high to 3.3 V |
 | Mechanical bumper switch | 0 required;1 optional | BodyGPIO35 with external3.3V pullup | Useful cheap collision reflex after a small mount; not a substitute for floor sensors |
 
 BerryIMU supplies the required acceleration and gyro functions without requiring
@@ -52,7 +55,7 @@ independently; the first build uses eyes/audio and optional diffused light.
 | Event | Reaction | Guard |
 | --- | --- | --- |
 | Head pat, stationary | Happy eyes/short sound, brief interaction state | Debounce/coalesce; no movement implicitly authorized |
-| Touch during exploration | Pause movement locally first, then show response | Touch is not an automatic rearm/resume command |
+| Touch during exploration | Body disarms drive locally on the debounced rising edge, holds last servo output and then reports the touch | Touch is not an automatic rearm/resume command; no arm while pressed |
 | Double tap, stationary | Invite conversation or show attention | Respect active speech, quiet settings and cooldown |
 | Deliberate long touch | Quiet/pause state | Never authorize motors through this gesture |
 | Gentle tilt/rotation | Eyes lean/look curious; short sound if appropriate | Excessive tilt suppresses drive; thresholds are calibrated on actual hardware |
@@ -115,7 +118,10 @@ produce another reaction already possible with the existing camera/mic/ToFs.
 ## Acceptance before duplication
 
 - A10: detect tap/double/hold through actual case; suppress bounce/repeated events;
-  touching during motion stops/pauses before the expression path. It cannot rearm.
+  touching during motion stops/pauses before the expression path. Existing body
+  firmware implements single rising touch and local motion stop, but double tap,
+  long hold and physical shell timing still require implementation and trials.
+  It cannot rearm.
 - A11: recognize intended tilt/shake and suspected handling while rejecting normal
   loaded motor/servo vibration. Held/unsafe attitude inhibits tracks. Putdown,
   reconnect and reboot do not automatically resume them. Record thresholds/data.
