@@ -55,24 +55,68 @@ bool StatusValid(cJSON* json) {
 
 bool AuxValid(cJSON* json) {
     if (!cJSON_IsObject(json)) return false;
-    auto pulse = cJSON_GetObjectItemCaseSensitive(json, "pulse");
-    if (!cJSON_IsObject(pulse)) return false;
-    auto present = cJSON_GetObjectItemCaseSensitive(pulse, "present");
-    auto valid = cJSON_GetObjectItemCaseSensitive(pulse, "valid");
-    auto bpm = cJSON_GetObjectItemCaseSensitive(pulse, "bpm");
-    auto medical = cJSON_GetObjectItemCaseSensitive(pulse, "medical");
-    if (!cJSON_IsBool(present) || !cJSON_IsBool(valid) ||
-        !cJSON_IsNull(bpm) || !cJSON_IsFalse(medical)) return false;
-    auto bounded_uint = [pulse](const char* name, double max) {
-        auto v = cJSON_GetObjectItemCaseSensitive(pulse, name);
-        return cJSON_IsNumber(v) && std::isfinite(v->valuedouble) &&
-               v->valuedouble == std::floor(v->valuedouble) &&
-               v->valuedouble >= 0 && v->valuedouble <= max;
+    auto group = [json](const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(json, key);
     };
-    if (!bounded_uint("part_id", 255) ||
-        !bounded_uint("red", 262143) || !bounded_uint("ir", 262143) ||
-        !bounded_uint("age_ms", 4294967295.0)) return false;
-    if (cJSON_IsTrue(valid) && !cJSON_IsTrue(present)) return false;
+    auto get = [](cJSON* parent, const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(parent, key);
+    };
+    auto bounded = [](cJSON* n, double low, double high) {
+        return cJSON_IsNumber(n) && std::isfinite(n->valuedouble) &&
+               n->valuedouble == std::floor(n->valuedouble) &&
+               n->valuedouble >= low && n->valuedouble <= high;
+    };
+    auto bounded_array = [get, bounded](cJSON* parent, const char* key,
+                                       int expected, double low, double high) {
+        auto array = get(parent, key);
+        if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != expected) return false;
+        for (int i = 0; i < expected; ++i)
+            if (!bounded(cJSON_GetArrayItem(array, i), low, high)) return false;
+        return true;
+    };
+    auto pulse = group("pulse");
+    auto angles = group("angles");
+    auto force = group("force");
+    auto climate = group("climate");
+    auto power = group("power");
+    auto proximity = group("proximity");
+    if (!cJSON_IsObject(pulse) || !cJSON_IsObject(angles) ||
+        !cJSON_IsObject(force) || !cJSON_IsObject(climate) ||
+        !cJSON_IsObject(power) || !cJSON_IsObject(proximity)) return false;
+    if (!cJSON_IsBool(get(pulse, "present")) || !cJSON_IsBool(get(pulse, "valid")) ||
+        !cJSON_IsNull(get(pulse, "bpm")) || !cJSON_IsFalse(get(pulse, "medical")) ||
+        !bounded(get(pulse, "part_id"), 0, 255) ||
+        !bounded(get(pulse, "red"), 0, 262143) ||
+        !bounded(get(pulse, "ir"), 0, 262143) ||
+        !bounded(get(pulse, "age_ms"), 0, 4294967295.0) ||
+        (cJSON_IsTrue(get(pulse, "valid")) && !cJSON_IsTrue(get(pulse, "present"))))
+        return false;
+    auto present = get(angles, "present_mask");
+    auto valid = get(angles, "valid_mask");
+    if (!bounded(present, 0, 7) || !bounded(valid, 0, 7) ||
+        ((valid->valueint & ~present->valueint) != 0) ||
+        !bounded_array(angles, "raw", 3, 0, 4095) ||
+        !bounded_array(angles, "magnet", 3, 0, 56)) return false;
+    for (int i = 0; i < 3; ++i)
+        if ((valid->valueint & (1 << i)) &&
+            cJSON_GetArrayItem(get(angles, "magnet"), i)->valueint != 32)
+            return false;
+    if (!bounded_array(force, "adc", 2, -32768, 32767) ||
+        !cJSON_IsBool(get(force, "valid")) ||
+        !cJSON_IsFalse(get(force, "calibrated"))) return false;
+    if (!bounded(get(climate, "temp_centi"), -4500, 13000) ||
+        !bounded(get(climate, "rh_centi"), 0, 10000) ||
+        !cJSON_IsBool(get(climate, "valid"))) return false;
+    if (!bounded(get(power, "cell_mv"), 0, 4500) ||
+        !bounded(get(power, "soc_centi"), 0, 10000) ||
+        !bounded(get(power, "bus_mv"), 0, 40959) ||
+        !bounded(get(power, "shunt_uv"), -81920, 81920) ||
+        !cJSON_IsBool(get(power, "fuel_valid")) ||
+        !cJSON_IsBool(get(power, "monitor_valid")) ||
+        !cJSON_IsFalse(get(power, "current_calibrated"))) return false;
+    if (!bounded(get(proximity, "raw"), 0, 255) ||
+        !cJSON_IsBool(get(proximity, "valid")) ||
+        !cJSON_IsNull(get(proximity, "gesture"))) return false;
     return true;
 }
 
