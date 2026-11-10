@@ -68,4 +68,6 @@
 
 **Source audit:** Original [1.07MB HTML full link and idea audit](../research/2026-11-10-original-html-link-and-hardware-audit.md). All 131 original unique links are preserved, all 200 source-map categories have no missing entry. This does not mean every repository was integrated. Thirty GitHub source roots were checked for current public metadata; details and exceptions in audit.
 
+**Cannot call this hardware-complete:****Important for the XIAO you ordered:** The planned speaker uses GPIO7/8 and RGB GPIO9. The Sense's microSD expansion link J3 occupies those pins by default, so a physical revision-checked J3 disable/isolation is required before wiring. [Seeed official J3 instructions](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/). No electronics claimed tested.
+
 **Cannot call this hardware-complete:** no final current-rated protected battery charger and power path is chosen, only five critical ToF lanes are actually handled by the current firmware, advanced modules need adapters, body fit/stop latency and speech barge-in have no physical acceptance. Avoid bulk purchasing unqualified breakouts. Original $50 budget cap is not achievable with the selected rich sensor layout at known reference prices. Generic modules can be purchased from non-Adafruit vendors, but breakout voltage and pin ordering still require actual checking.

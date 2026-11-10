@@ -35,7 +35,9 @@ add autofocus controls or establish optical/pickup performance.
 
 Native USB19/20, debug UART43/44, strapping GPIO3 and flash/PSRAM pins are not
 assigned to external peripherals. Amplifier7/8 reuse SD signals, so never insert
-an SD card or initialize SD. No touch pad is allocated. Floor/obstacle sensors
+an SD card or initialize SD. No touch pad is allocated. Floor/obstacle sensors**Required real-board mod for the chosen audio+RGB pins:** The microSD slot shares S3 GPIO7, GPIO8 and GPIO9 via the Sense expansion's **J3 solder bridge, shipped enabled by default**. Merely disabling SD software does **not** electrically remove the slot. Before connecting speaker amp on GPIO7/8 or optional RGB on GPIO9, use Seeed's [official J3 instructions](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/) on the actual shipped expansion revision: remove camera to protect the lens, open J3 for SPI header use, then electrically inspect and confirm no microSD routing is active. **No SD card**, no SD.begin(). The current firmware compile does not verify physical J3.
+
+No touch pad is allocated. Floor/obstacle sensors
 belong to the WROOM bus, not this head's display bus.
 
 SSD1306 pin order/voltage, address, orientation and the rounded Sparky bezel fit still need

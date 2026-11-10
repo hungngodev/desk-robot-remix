@@ -49,7 +49,15 @@ Other roots queried: `DirkzeSoft/weather_station_esphome`, `EARTKEY/LF_Alpha`, `
 
 **Remaining 101 non-GitHub-root links** were preserved in the index but were not individually opened and checked in this pass. Product images, Amazon listings and old tutorials may be stale; each candidate must be validated before purchase/reuse.
 
-## Implementation versus aspiration
+## Implementation versus aspiration## New physical board issue found in direct manufacturer crosscheck
+
+Seeed's [Sense microSD documentation](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/) states its GPIO7/8/9 pin sharing and J3 physical solder link default. The proposed speaker I2S LRCLK/DIN on GPIO7/8 and optional RGB GPIO9 therefore require **actual J3 SD physical isolation**, not only excluding the SD driver from software. This is now recorded in the head and assembly guide. No modification has been performed on the user's board.
+
+The linked XiaoZhi v2.5 upstream note says ESP-IDF 6.0.1+ and recommends release/v6.1; our CI already builds the Sense target with ESP-IDF6.1; upstream tag and local overlay revisions still need compatibility checks. Source: https://xiaozhi.dev/en/blog/xiaozhi-esp32-v2-5-release-notes/.
+
+All 131 original external URLs were attempted for current web reachability or original GitHub repository metadata across this audit. Many targets do not yield readable content via automatic fetch (video pages, paid listings, old tutorials, redirects or blocked URLs). **Only URL provenance and GitHub repo metadata have comprehensive verified coverage.** These failures do not establish that the content was read, reviewed for license or compatible with the physical robot. Do not call 131 projects validated; preserve the 200 idea register and original links separately from actual integrated drivers.
+
+
 
 CI compiles both current boards, passes Python tests and simulated native C++ tests on the prior PR commit. No complete physical robot has been assembled. Five critical ToFs, MPU6050 identity/raw samples and basic head touch have code; 3 extra ToFs and most additional pet sensors have only selected bus lanes, not verified sensor drivers. Full echo-cancelled natural interruption, calibrated cliff stopping, grasp and dock autonomy remain unverified hardware acceptance gates. No claim of project completion.
 

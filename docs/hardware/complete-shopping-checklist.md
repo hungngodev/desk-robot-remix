@@ -72,4 +72,6 @@ One full robot has eight VL53L4CD modules, so **40 total for five** if no stock 
 
 **Not needed:** MPR121 and CAP1188 together, a separate camera or microphone, another BerryIMU, a Raspberry Pi, an extra analog amplifier/DAC, RC522 plus PN532, or five CO2 sensors for one room. NXP's MPR121 is discontinued, while Microchip's CAP1188 remains in production.
 
+**Engineering status:****XIAO Sense physical pin gate:** GPIO7/8 I2S speaker and GPIO9 RGB share the camera expansion microSD circuit. Seeed says the J3 link must be opened to isolate SD before this pin map is physically wired; check actual board revision and do not insert an SD card. [Vendor instruction](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/).
+
 **Engineering status:** Electrical bus and pin assignments are selected, documented and collision checked. The five sensor safety code exists; the extra modules, physical battery rating, enclosure fit, charging dock and 8 beam safety trials are not yet qualified. Do not claim a complete assembled robot until those tests are recorded. [Full wiring details](full-feature-wiring-and-shopping.md).
