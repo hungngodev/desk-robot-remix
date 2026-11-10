@@ -15,7 +15,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/
 | 18 / 19 | Lift / grip MG90S signal |
 | 13, 14, 25, 26 | Left ULN2003 IN1–IN4, phase order to verify |
 | 27, 32, 33, 23 | Right ULN2003 IN1–IN4, phase order to verify |
-| 21 / 22 | Body I²C SDA / SCL to mux upstream |
+| 21 / 22 | Shared upstream 3.3V I²C SDA / SCL to mux and identified BerryIMU; five VL53L4CD modules remain behind mux channels 0..4 |
 | No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not ESP32 strapping GPIO4 |
 | GND | Head, body, sensors and actuator-supply common logic reference |
 |34 | Owned Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Firmware has debounced tap, double tap, hold and local motion stop; actual connection, shell timing and noise testing remain open |
@@ -215,3 +215,25 @@ replacement invalidates prior readings. Until the physical sensors and
 floor samples are qualified, no valid mask or visually reasonable reading
 authorizes motion. Native tests verify all five arrays, reset handling and
 bounded JSON responses; neither the Mac nor model gains local USB rearm rights.
+
+
+## Owned BerryIMU on the existing I2C bus
+
+The first robot reuses the owned BerryIMU rather than adding a sixth distance
+sensor or a new controller. Do not connect until its board revision, VCC labeling,
+and voltage levels have been checked physically. The WROOM's GPIO21 SDA and
+GPIO22 SCL already own the shared 3.3V upstream bus. Use the BerryIMU board's
+marked SDA/SCL, a common ground and only its verified supply input. Put the
+IMU upstream of the TCA9548A; leave all five VL53L4CD modules on mux channels
+0 to 4. Do not guess board pin ordering from an image of a different BerryIMU
+generation.
+
+The reused OzzMaker detection identifies V1 LSM9DS0, V2 LSM9DS1 or V3
+LSM6DSL through paired WHO_AM_I results. Raw 3-axis acceleration and gyro
+data are exported as `imu` on the existing WROOM `status` response, with
+sample freshness and identity. An unsupported 320G or absent/ambiguous
+board stays invalid. All six axis readings are **uncalibrated raw signed
+samples**; they do not give trustworthy tilt angles or held-state verdicts
+until actual hardware orientation, motor noise and thresholds are measured.
+The local five-ToF cliff guard still owns arming and fault recovery.
+See [interaction sensor acceptance](interaction-sensors.md).
