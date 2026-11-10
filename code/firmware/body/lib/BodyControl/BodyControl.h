@@ -27,6 +27,9 @@ struct State {
   std::uint32_t touch_taps = 0;
   std::uint32_t touch_double_taps = 0;
   std::uint32_t touch_holds = 0;
+  std::uint8_t imu_family = 0;   // 0 unverified, 1 V1, 2 V2, 3 V3
+  std::uint8_t imu_gyro_id = 0;
+  std::uint8_t imu_aux_id = 0;
   int left = 0;
   int right = 0;
   int lift = 90;       // commanded angle, NOT a position measurement
@@ -51,6 +54,8 @@ class BodyControl {
   void force_disarm();
   // Hardware GPIO input only; never grants or clears a motion permit.
   void set_touch(bool active, std::uint32_t now_ms = 0);
+  // Boot-time read-only identity; does not confer tilt safety or arm privilege.
+  void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
   std::uint32_t drive_remaining(std::uint32_t now_ms) const;
 
