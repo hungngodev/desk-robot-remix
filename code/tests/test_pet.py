@@ -821,13 +821,18 @@ async def test_optional_bumper_magnet_pir_are_real_masked_fleet_events(fleet, tm
         await pet._observe_optional("robot-01", 3, status(7, 0, 0, 0))
         await pet._observe_optional("robot-01", 3, status(7, 1, 1, 1))
         await pet._observe_optional("robot-01", 3, status(7, 1, 1, 1))
-        kinds = [row.kind for row in memory.recent("robot-01")]
+        # An independent proactive voice task may legitimately remember its
+        # own spoken line while these inputs arrive. Test sensor provenance
+        # and deduplication rather than freezing unrelated pet speech.
+        sensor_kinds = {"bumper", "magnet", "pir"}
+        kinds = [row.kind for row in memory.recent("robot-01")
+                 if row.kind in sensor_kinds]
         assert sorted(kinds) == ["bumper", "magnet", "pir"]
         assert cancellations == ["robot-01"]
         assert memory.count("robot-02") == 0
         await pet._observe_optional("robot-01", 3, status(7, 0, 0, 0))
         await pet._observe_optional("robot-01", 3, status(0, 5, 5, 5))
-        assert memory.count("robot-01") == 3
+        assert sum(row.kind in sensor_kinds for row in memory.recent("robot-01")) == 3
         assert cancellations == ["robot-01"]
     finally:
         state.enabled = False
