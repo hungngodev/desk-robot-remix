@@ -225,6 +225,38 @@ static void touch_telemetry_never_grants_motion() {
   CHECK(!body.state().armed);
 }
 
+static void raw_touch_trip_preempts_debounce_without_forging_a_tap() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "arm", 0) == "OK arm");
+  CHECK(send(body, "drive 30 30 250", 0).find("OK drive") == 0);
+  CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
+  body.tick(20);
+  const int commanded_hold = body.state().grip;
+  CHECK(body.state().left != 0 && body.state().armed);
+  body.touch_trip();  // one raw GPIO high, debounced state still false
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(body.state().right == 0);
+  CHECK(body.state().servos_attached);
+  CHECK(body.state().grip == commanded_hold &&
+        body.state().grip_target == commanded_hold);
+  CHECK(!body.state().touch_active && body.state().touch_count == 0);
+  CHECK(body.state().touch_taps == 0 && body.state().touch_holds == 0);
+  CHECK(send(body, "keepalive", 21) == "ERR keepalive disarmed");
+  CHECK(send(body, "drive 30 30 250", 21) == "ERR drive disarmed");
+  // The later debounced edge records the touch exactly once but never arms.
+  body.set_touch(true, 75);
+  CHECK(body.state().touch_active && body.state().touch_count == 1);
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "arm", 75) == "ERR arm touch_active");
+  body.set_touch(false, 160);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "keepalive", 160) == "ERR keepalive disarmed");
+}
+
 static void touch_is_local_human_stop_and_requires_fresh_arm() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -346,6 +378,7 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     touch_telemetry_never_grants_motion();
+    raw_touch_trip_preempts_debounce_without_forging_a_tap();
     touch_is_local_human_stop_and_requires_fresh_arm();
     touch_gesture_counters_survive_slow_status_polling();
     five_range_status_reports_real_samples_not_a_permission();
