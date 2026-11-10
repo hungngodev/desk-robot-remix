@@ -56,7 +56,7 @@ automatic fleet fanout. Reuse the existing Mac authenticated API; do not add
 another peer database, network bus, camera stream or speech worker.
 
 ```sh
-curl -X POST http://127.0.0.1:8000/v1/pet/robot-01/share \
+curl -X POST http://127.0.0.1:8765/v1/pet/robot-01/share \
   -H "Authorization: Bearer $DESK_ROBOT_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"to_robot":"robot-03","event_id":"<existing-event-id>"}'
