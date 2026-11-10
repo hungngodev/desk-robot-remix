@@ -2,10 +2,15 @@
 
 Updated 2026-11-06. Required first additions: one head-touch input and one
 six-axis motion sensor per robot. RGB lighting is optional. This specifies
-integration and tests; none of these add-ons has been wired, flashed or qualified.
+integration and tests. The owned AT42QT1010 now has WROOM input polling,
+debounced status and a local stop interlock in firmware, but no physical
+wiring, shell test, flashing or qualifying trial has been completed.
 The [photo inventory](photo-inventory-2026-11-04.md) now identifies an owned
-BerryIMU and other spares. Hold a new prototype IMU purchase until the owned unit
-has been identified and tested. The follow-up photo identifies an owned
+BerryIMU and other spares. A new WROOM boot-time WHO_AM_I probe now
+reports likely V1/V2/V3 chip identity in `status.imu` using the existing
+upstream I2C bus. This does not read actual acceleration/gyro data, implement
+tilt interlocks or prove a mounted working sensor. Hold additional IMU purchases
+until the owned unit is identified and tested. The follow-up photo identifies an owned
 Adafruit #1374 AT42QT1010 for robot one's head touch.
 
 ## Minimal hardware and current pin feasibility
@@ -13,8 +18,9 @@ Adafruit #1374 AT42QT1010 for robot one's head touch.
 | Part | Quantity per core | Proposed connection | Decision |
 | --- | ---: | --- | --- |
 | Owned AT42QT1010 touch breakout #1374 | 1 | WROOM GPIO34, powered at 3.3 V, common ground and momentary active-high OUT | One concealed head pad. Bench-test response through the shell and costume. TTP223 is a possible fleet equivalent |
-| Owned BerryIMU accelerometer+gyro board | 1 | Proposed body I2C21/22 upstream of mux; exact older-board pins/supply/addresses to verify | Prototype reuse first. Likely V1, not proven; identify chips and acquire real samples before choosing driver. One photographed board does not cover five cores. LSM6DS3TR-C remains a conditional replacement only |
-| Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not steal bodyGPIO4, already allocated to mux reset |
+| Owned BerryIMU accelerometer+gyro board | 1 | WROOM I2C GPIO21/22 upstream of TCA9548A; verify actual board 3.3 V logic, pin orientation and addresses | Boot-time read-only WHO_AM_I probe distinguishes likely V1, V2 or V3 and reports raw IDs. No active motion driver or calibrated handling recognition yet. Reuse a licensed, matching upstream driver only after a real chip ID and bench samples. One photographed board does not cover five cores |
+| Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not use body GPIO4 for the mux reset: it is a boot strapping pin and
+the TCA9548A RESET must be pulled high to 3.3 V |
 | Mechanical bumper switch | 0 required;1 optional | BodyGPIO35 with external3.3V pullup | Useful cheap collision reflex after a small mount; not a substitute for floor sensors |
 
 BerryIMU supplies the required acceleration and gyro functions without requiring
@@ -52,9 +58,9 @@ independently; the first build uses eyes/audio and optional diffused light.
 | Event | Reaction | Guard |
 | --- | --- | --- |
 | Head pat, stationary | Happy eyes/short sound, brief interaction state | Debounce/coalesce; no movement implicitly authorized |
-| Touch during exploration | Pause movement locally first, then show response | Touch is not an automatic rearm/resume command |
+| Touch during exploration | Body disarms drive locally on the debounced rising edge, holds last servo output and then reports the touch | Touch is not an automatic rearm/resume command; no arm while pressed |
 | Double tap, stationary | Invite conversation or show attention | Respect active speech, quiet settings and cooldown |
-| Deliberate long touch | Quiet/pause state | Never authorize motors through this gesture |
+| Deliberate long touch | WROOM hold event enters Mac pet quiet mode, cancelling its active spontaneous reply | Never authorize motors or clear faults through this gesture; physical response still unqualified |
 | Gentle tilt/rotation | Eyes lean/look curious; short sound if appropriate | Excessive tilt suppresses drive; thresholds are calibrated on actual hardware |
 | Shake | Surprised/dizzy reaction | Reject normal track/servo vibration and own animated motion; cooldown repeated events |
 | Suspected pickup | Stop tracks before expression/voice; held-like response | Fuse IMU transient/attitude, multiple floor-range changes and touch/context. IMU alone cannot prove a level robot is held still |
@@ -115,7 +121,16 @@ produce another reaction already possible with the existing camera/mic/ToFs.
 ## Acceptance before duplication
 
 - A10: detect tap/double/hold through actual case; suppress bounce/repeated events;
-  touching during motion stops/pauses before the expression path. It cannot rearm.
+  touching during motion stops/pauses before the expression path. Existing body
+  firmware now distinguishes single tap, double tap and long hold using debounced
+  edges and local uptime. One **raw sampled high** independently stops the
+  current WROOM motor lease before three-sample gesture classification, and
+  blocks a new arm while raw or stable input remains pressed. Candidate
+  software windows are a short touch up to 600 ms, a second tap ending within
+  350 ms of the first release, and a hold of at least 900 ms. The final windows
+  and touch response through the shell still require measured trials. Typed
+  counters flow through the existing head UART status to firsthand Mac memory.
+  It cannot rearm.
 - A11: recognize intended tilt/shake and suspected handling while rejecting normal
   loaded motor/servo vibration. Held/unsafe attitude inhibits tracks. Putdown,
   reconnect and reboot do not automatically resume them. Record thresholds/data.
@@ -134,3 +149,38 @@ Primary electrical references include
 [Espressif GPIO](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/gpio.html),
 [LED driver](https://components.espressif.com/components/espressif/led_strip),
 [TI level buffer](https://www.ti.com/product/SN74AHCT1G125).
+
+## Read-only BerryIMU identity gate before any motion driver
+
+The WROOM firmware now uses the **already initialized body Wire bus** to check
+WHO_AM_I register 0x0F at the maker's known BerryIMU address candidates.
+It briefly disconnects downstream TCA9548A ports for the probe; subsequent
+ToF polls select their own channels again. The published chip pairs used only
+for classification are: **V1 LSM9DS0** gyro 0xD4 and accel/mag 0x49,
+**V2 LSM9DS1** gyro/accel 0x68 and magnetometer 0x3D, and
+**V3 LSM6DSL/LIS3MDL** gyro/accel 0x6A and magnetometer 0x3D.
+The board may use either documented address option, and a nonmatching pair
+remains `family=0`, not an assumed driver or a claimed functioning IMU.
+
+A bounded `status.imu` object exposes `family`, `gyro_id` and `aux_id`
+for the direct USB inspection tool and through the existing Sense UART bridge.
+Reading chip IDs does **not** establish sample timing, orientation, signed
+acceleration, tilt/shake threshold, or held detection. It never grants movement,
+changes local cliff decisions or clears fault latches. The Mac bench diagnostic
+therefore reports `motion_driver_active=false` and
+`physical_qualification_pass=false` regardless of the detected ID.
+
+The V1 candidate has mature reusable
+[Adafruit LSM9DS0 Arduino code](https://github.com/adafruit/Adafruit_LSM9DS0_Library)
+with a BSD license and
+[SparkFun LSM9DS0 Arduino code](https://github.com/sparkfun/SparkFun_LSM9DS0_Arduino_Library)
+with explicit Beerware reuse terms. Their I2C addresses and error handling
+must be checked against the **actual** 0x6A/0x1E board and the existing
+15 ms safety-critical I2C timeout before pinning one. Do not copy the OzzMaker
+examples without confirming their source terms. V2/V3 require their matching
+chip family driver, not a mislabeled V1 translation.
+
+Qualification still needs a real stationary gravity sample, known PCB axes,
+gyro bias, tilt/shake vibration rejection with steppers and servos operating,
+pickup/setdown fusion with four downward ranges, timing and a local drive
+inhibit when unsafe. None of those physical A11 tests has been performed.

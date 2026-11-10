@@ -55,6 +55,60 @@ void BodyControl::stop_motion() {
   state_.grip_target = state_.grip;
 }
 
+void BodyControl::touch_trip() {
+  if (state_.armed) {
+    // Never touch servo PWM attachment here: gripper may hold a key.
+    stop_motion();
+    state_.armed = false;
+  }
+}
+
+void BodyControl::sample_touch_input(bool active) {
+  state_.touch_raw_active = active;
+  if (active) touch_trip();  // before debounce and before motor output
+}
+
+void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
+  if (active == state_.touch_active) return;
+  state_.touch_active = active;
+  if (active) {
+    ++state_.touch_count;
+    touch_started_ms_ = now_ms;
+    touch_hold_emitted_ = false;
+    // The un-debounced GPIO path normally tripped already. Keep a second
+    // stop here for any alternative adapter invoking only set_touch().
+    touch_trip();
+    return;
+  }
+
+  const std::uint32_t held_ms = now_ms - touch_started_ms_;
+  if (held_ms >= 900 && !touch_hold_emitted_) {
+    ++state_.touch_holds;
+    touch_hold_emitted_ = true;
+  }
+  if (touch_hold_emitted_ || held_ms > 600) {
+    if (touch_pending_tap_) ++state_.touch_taps;
+    touch_pending_tap_ = false;
+    return;
+  }
+  if (touch_pending_tap_ && now_ms - touch_released_ms_ <= 350) {
+    ++state_.touch_double_taps;
+    touch_pending_tap_ = false;
+  } else {
+    if (touch_pending_tap_) ++state_.touch_taps;
+    touch_pending_tap_ = true;
+    touch_released_ms_ = now_ms;
+  }
+}
+
+void BodyControl::set_imu_identity(std::uint8_t family, std::uint8_t gyro,
+                                   std::uint8_t aux) {
+  state_.imu_family = family <= 3 ? family : 0;
+  state_.imu_gyro_id = gyro;
+  state_.imu_aux_id = aux;
+  // This merely records chip identification. It never arms or clears a guard.
+}
+
 void BodyControl::force_disarm() {
   stop_motion();
   state_.armed = false;
@@ -74,6 +128,20 @@ std::uint32_t BodyControl::drive_remaining(std::uint32_t now_ms) const {
 }
 
 void BodyControl::tick(std::uint32_t now_ms) {
+  // Local gesture classification survives slow Mac camera polling.
+  // Unsigned subtraction also handles millis rollover.
+  if (state_.touch_active && !touch_hold_emitted_ &&
+      now_ms - touch_started_ms_ >= 900) {
+    ++state_.touch_holds;
+    touch_hold_emitted_ = true;
+    if (touch_pending_tap_) ++state_.touch_taps;
+    touch_pending_tap_ = false;
+  }
+  if (touch_pending_tap_ && !state_.touch_active &&
+      now_ms - touch_released_ms_ > 350) {
+    ++state_.touch_taps;
+    touch_pending_tap_ = false;
+  }
   if (profile_ == BodyProfile::StepperGuarded &&
       (guard_ == nullptr || !guard_->evaluate(now_ms))) {
     stop_motion();
@@ -150,14 +218,22 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool keepalive = std::strcmp(command, "keepalive") == 0;
   const bool ping = std::strcmp(command, "ping") == 0;
   const bool status = std::strcmp(command, "status") == 0;
-  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status)) {
+  const bool calfloor = std::strcmp(command, "calfloor") == 0;
+  const bool calfront = std::strcmp(command, "calfront") == 0;
+  const bool calfresh = std::strcmp(command, "calfresh") == 0;
+  const bool calcommit = std::strcmp(command, "calcommit") == 0;
+  const bool calabort = std::strcmp(command, "calabort") == 0;
+  const bool calibration = calfloor || calfront || calfresh || calcommit || calabort;
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || calibration)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
   }
   if ((drive && count != 3 && count != 4) ||
-      ((lift || grip) && count != 2) ||
-      (!(drive || lift || grip) && count != 1)) {
+      ((lift || grip || calfresh) && count != 2) ||
+      (calfront && count != 3) ||
+      (calfloor && count != 4) ||
+      (!(drive || lift || grip || calfloor || calfront || calfresh) && count != 1)) {
     std::snprintf(reply, capacity, "ERR %s bad_arguments", command);
     return;
   }
@@ -187,29 +263,139 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
   }
 
+  if (calibration) {
+    if (!local_safety_rearm || profile_ != BodyProfile::StepperGuarded || guard_ == nullptr) {
+      std::snprintf(reply, capacity, "ERR calibration local_usb_only");
+      return;
+    }
+    if (state_.armed) {
+      std::snprintf(reply, capacity, "ERR calibration disarm_first");
+      return;
+    }
+    if (calabort) {
+      calibration_stage_ = CliffConfig{};
+      calibration_stage_mask_ = 0;
+      std::snprintf(reply, capacity, "OK calabort");
+      return;
+    }
+    if (calfloor) {
+      int channel = 0, minimum = 0, maximum = 0;
+      if (!parse_integer(tokens[1], channel) ||
+          !parse_integer(tokens[2], minimum) ||
+          !parse_integer(tokens[3], maximum) ||
+          channel < 0 || channel >= kFloorSensorCount ||
+          minimum < 1 || maximum < minimum || maximum > 1300) {
+        std::snprintf(reply, capacity, "ERR calfloor channel_0to3_min_max_1to1300");
+        return;
+      }
+      calibration_stage_.floor[channel].min_mm = static_cast<std::uint16_t>(minimum);
+      calibration_stage_.floor[channel].max_mm = static_cast<std::uint16_t>(maximum);
+      calibration_stage_mask_ |= static_cast<std::uint8_t>(1U << channel);
+      std::snprintf(reply, capacity, "OK calfloor channel=%d", channel);
+      return;
+    }
+    if (calfront) {
+      int near_mm = 0, far_mm = 0;
+      if (!parse_integer(tokens[1], near_mm) ||
+          !parse_integer(tokens[2], far_mm) ||
+          near_mm < 1 || far_mm <= near_mm || far_mm > 1300) {
+        std::snprintf(reply, capacity, "ERR calfront near_far_1to1300");
+        return;
+      }
+      calibration_stage_.front_obstacle_mm = static_cast<std::uint16_t>(near_mm);
+      calibration_stage_.front_max_mm = static_cast<std::uint16_t>(far_mm);
+      calibration_stage_mask_ |= 0x10U;
+      std::snprintf(reply, capacity, "OK calfront");
+      return;
+    }
+    if (calfresh) {
+      int max_age_ms = 0;
+      if (!parse_integer(tokens[1], max_age_ms) ||
+          max_age_ms < 30 || max_age_ms > 200) {
+        std::snprintf(reply, capacity, "ERR calfresh measured_30to200ms");
+        return;
+      }
+      calibration_stage_.freshness_ms = static_cast<std::uint32_t>(max_age_ms);
+      calibration_stage_mask_ |= 0x20U;
+      std::snprintf(reply, capacity, "OK calfresh");
+      return;
+    }
+    // All four measured floor intervals, front clearance and sample-age
+    // policy must be staged before a SINGLE atomic configure. No default
+    // sensor geometry is silently adopted or committed by a network command.
+    if (calibration_stage_mask_ != 0x3fU) {
+      std::snprintf(reply, capacity, "ERR calcommit incomplete_stage");
+      return;
+    }
+    calibration_stage_.calibrated = true;
+    if (!guard_->configure(calibration_stage_)) {
+      std::snprintf(reply, capacity, "ERR calcommit invalid_intervals");
+      return;
+    }
+    force_disarm();
+    calibration_stage_ = CliffConfig{};
+    calibration_stage_mask_ = 0;
+    std::snprintf(reply, capacity, "OK calcommit");
+    return;
+  }
+
   if (ping) {
     std::snprintf(reply, capacity, "OK ping");
   } else if (status) {
-    std::snprintf(
+    // Five read-only measurements retain missing/invalid/age information
+    // separately. Never use these values to bypass the local cliff latch.
+    RangeDiagnostic ranges[kCliffSensorCount]{};
+    unsigned present_mask = 0;
+    unsigned valid_mask = 0;
+    if (guard_ != nullptr) {
+      for (std::uint8_t i = 0; i < kCliffSensorCount; ++i) {
+        ranges[i] = guard_->diagnostic(i, now_ms);
+        if (ranges[i].present) present_mask |= 1U << i;
+        if (ranges[i].present && ranges[i].valid) valid_mask |= 1U << i;
+      }
+    }
+    const int written = std::snprintf(
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
-        "\"backend\":\"%s\",\"safety\":{\"required\":%s,\"ready\":%s,"
-        "\"fault\":\"%s\",\"sensor\":%u}}",
+        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u},\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
+        "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
         state_.lift, state_.grip, state_.lift_target, state_.grip_target,
         state_.servos_attached ? "true" : "false",
         static_cast<unsigned long>(watchdog_remaining(now_ms)),
         static_cast<unsigned long>(drive_remaining(now_ms)),
         profile_ == BodyProfile::StepperGuarded ? "stepper_28byj48" : "dc_pwm",
+        (state_.touch_active || state_.touch_raw_active) ? "true" : "false",
+        static_cast<unsigned long>(state_.touch_count),
+        static_cast<unsigned long>(state_.touch_taps),
+        static_cast<unsigned long>(state_.touch_double_taps),
+        static_cast<unsigned long>(state_.touch_holds),
+        static_cast<unsigned>(state_.imu_family),
+        static_cast<unsigned>(state_.imu_gyro_id),
+        static_cast<unsigned>(state_.imu_aux_id),
         profile_ == BodyProfile::StepperGuarded ? "true" : "false",
         profile_ == BodyProfile::StepperGuarded && guard_ != nullptr &&
             guard_->evaluate(now_ms) ? "true" : "false",
         profile_ != BodyProfile::StepperGuarded ? "not_required" :
             guard_ == nullptr ? "missing_guard" : CliffGuard::fault_name(guard_->fault()),
-        static_cast<unsigned>(guard_ == nullptr ? kNoFaultSensor : guard_->fault_sensor()));
+        static_cast<unsigned>(guard_ == nullptr ? kNoFaultSensor : guard_->fault_sensor()),
+        static_cast<unsigned>(ranges[0].distance_mm),
+        static_cast<unsigned>(ranges[1].distance_mm),
+        static_cast<unsigned>(ranges[2].distance_mm),
+        static_cast<unsigned>(ranges[3].distance_mm),
+        static_cast<unsigned>(ranges[4].distance_mm),
+        static_cast<unsigned long>(ranges[0].age_ms),
+        static_cast<unsigned long>(ranges[1].age_ms),
+        static_cast<unsigned long>(ranges[2].age_ms),
+        static_cast<unsigned long>(ranges[3].age_ms),
+        static_cast<unsigned long>(ranges[4].age_ms),
+        present_mask, valid_mask);
+    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
+      std::snprintf(reply, capacity, "ERR status response_too_long");
   } else if (rearm) {
     // Head/HTTP/MCP jobs may arm only an already-clear body. A new local USB
     // action is required after a fault; an older job permit cannot clear it.
@@ -226,6 +412,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (state_.touch_active || state_.touch_raw_active) {
+      std::snprintf(reply, capacity, "ERR arm touch_active");
+      return;
+    }
     if (profile_ == BodyProfile::StepperGuarded &&
         (guard_ == nullptr || !guard_->evaluate(now_ms))) {
       std::snprintf(reply, capacity, "ERR arm safety_interlock");

@@ -1,8 +1,9 @@
-> Design update 2026-11-03: this documents the existing DC-body/Freenove protocol.
-> Body status now adds protocol2, backend and safety state. Stepper/guard policy
-> compiles but real sensor I/O/calibration is absent, so the stepper build cannot arm.
-> `rearm` is local body USB only, rejected by the bridge/laptop; ordinary arm
-> cannot clear a fault. Face events/pet lease remain planned. See firmware-foundation.md.
+> Updated 2026-11-10. The current stepper firmware integrates five VL53L4CD
+> channels through the TCA9548A, local fault latching, USB-only measured
+> calibration, touch interruption and read-only range diagnostics. This is
+> compiled software, not a flashed, fitted or physically qualified assembly.
+> `rearm` is local WROOM USB only, never the head, Mac or model; ordinary arm
+> cannot clear a fault. See firmware-foundation.md and the verification record.
 
 # Integration contract (implementation baseline)
 
@@ -84,7 +85,8 @@ name, camera/pickup calibration, and explicit `motion_enabled` (default false).
 Never label examples as measured calibration. Refuse pickup without valid
 calibration and explicit motion enable. Use POST for movement and operator arms.
 
-Controller uses the head API, stops in `finally` on cancel/error/lost detection,
+Controller uses the existing head API (including read-only WROOM telemetry),
+stops in `finally` on cancel/error/lost detection,
 never retries an uncertain drive ACK, bounds attempts/time, and serializes jobs
 per robot. Capture -> YOLO-World detections -> calibrated pixel/ground alignment
 -> short drive pulses -> grip/lift -> separate visual verification. A detection
@@ -97,9 +99,22 @@ an overlay/plugin to route spoken pickup requests to the right robot/coordinator
 Keep model/vision/speech imports optional so base tests run without model weights.
 Measured calibration is a private JSON file; human physical trials are recorded
 in the CSV and summarized by `scripts/check_trials.py`, separately from the API.
-Operator `/enable` grants a 30-second one-use permit for one bounded job. The
-body is actually armed only when the job starts. Model tools have a separate
+Operator `/enable` grants a 30-second one-use permit for one bounded job.
+For hardware mode, the coordinator first fetches the existing authenticated
+Sense `/api/status` response and refuses a permit unless the actual WROOM
+reports its expected stepper backend, correct robot identity, disarmed state,
+unpressed touch, clear local five-channel safety and five present, valid,
+recent readings. It checks **again immediately before the job arms**; a touch,
+disconnect, stale reading or fault between permit and execution therefore
+fails the job without requesting motor power. Missing fields fail closed.
+The body itself remains the sole safety authority and rechecks sensors before
+every motor output; a successful Mac preflight is not a replacement for local
+USB calibration, manual safety rearm or measured stop distance.
+
+The body is actually armed only when the job starts. Model tools have a separate
 token and cannot grant permits. Keepalive runs only while the job is active.
+Simulation deliberately skips physical preflight but must never count as a
+physical trial.
 
 Conversation: shared speaker lock, independent robot histories, distinct IDs,
 maximum six **utterances total** for two/three participants, eight for four,

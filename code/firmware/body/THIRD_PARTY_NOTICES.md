@@ -11,5 +11,4 @@ keep their own upstream notices and are not relicensed by this repository.
 
 The new StepperDrive and CliffGuard policy are original integration code under
 the repository MIT license. No wtlx sketches or unlicensed video code were copied.
-No external ToF driver has been incorporated; its license/transport behavior must
-be verified before future integration.
+The stepper firmware now pins Pololu's VL53L4CD Arduino library to commit bc865905fc97085f40ca9edab478210c01195fde, derived from ST ULD, BSD 3-Clause Clear. Upstream notices remain with its package. The critical runtime uses bounded raw I2C sampling rather than Pololu's generic read parser due to its invalid-SPAD division. No actual sensor optical geometry or physical stop has been proven.

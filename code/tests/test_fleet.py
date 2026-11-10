@@ -10,6 +10,7 @@ from desk_robot import cli
 from desk_robot.api import create_app
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation, conversation_turns
+from desk_robot.memory import MemoryStore
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 from fastapi.testclient import TestClient
 
@@ -286,3 +287,92 @@ async def test_fleet_demo_uses_all_five_and_reports_simulation(fleet):
     result = await cli.demo(fleet)
     assert result["mode"] == "simulation" and result["physical_acceptance_pass"] is False
     assert [line["robot_id"] for line in result["conversation"]] == IDS * 2
+
+
+
+def test_robot_memory_is_persistent_separate_and_provenance_checked(tmp_path):
+    memory = MemoryStore(tmp_path / "private", IDS)
+    assert memory.remember(
+        "robot-01", "sighting-01", "I saw a wrapped candy",
+        kind="object_seen", source_robot="robot-01", witnessed=True,
+        observed_at=100.0,
+    )
+    assert not memory.remember(
+        "robot-01", "sighting-01", "Someone changed the evidence",
+        kind="object_seen", source_robot="robot-01", witnessed=True,
+        observed_at=101.0,
+    )
+    assert memory.remember(
+        "robot-02", "sighting-01", "Pip saw a candy",
+        kind="peer_report", source_robot="robot-01", witnessed=False,
+        observed_at=102.0,
+    )
+    again = MemoryStore(tmp_path / "private", IDS)
+    assert again.count("robot-01") == again.count("robot-02") == 1
+    assert again.count("robot-03") == 0
+    first = again.recent("robot-01")[0]
+    second = again.recent("robot-02")[0]
+    assert first.witnessed and first.source_robot == "robot-01"
+    assert first.summary == "I saw a wrapped candy"
+    assert not second.witnessed and second.source_robot == "robot-01"
+    with pytest.raises(ValueError, match="witnessed"):
+        memory.remember(
+            "robot-02", "spoof", "I personally saw it",
+            kind="object_seen", source_robot="robot-01", witnessed=True,
+        )
+    with pytest.raises(ValueError, match="Unknown"):
+        memory.remember(
+            "unknown", "spoof", "hello", kind="object_seen",
+            source_robot="robot-01", witnessed=False,
+        )
+    assert not (tmp_path / "private" / "unknown.sqlite3").exists()
+
+
+def test_memory_bounded_and_rejects_bad_data(tmp_path):
+    memory = MemoryStore(tmp_path, IDS)
+    for i in range(260):
+        memory.remember(
+            "robot-01", f"event_{i:03}", f"Observed action {i}",
+            kind="scene", source_robot="robot-01", witnessed=True,
+            observed_at=float(i),
+        )
+    assert memory.count("robot-01") == 250
+    assert memory.recent("robot-01", limit=1)[0].summary == "Observed action 259"
+    for value in ("bad\x00text", "", "x" * 301):
+        with pytest.raises(ValueError):
+            memory.remember(
+                "robot-01", "bad", value, kind="scene",
+                source_robot="robot-01", witnessed=True,
+            )
+    with pytest.raises(ValueError, match="Confidence"):
+        memory.remember(
+            "robot-01", "bad", "A thing", kind="scene",
+            source_robot="robot-01", witnessed=True, confidence=2,
+        )
+    with pytest.raises(ValueError, match="Nonfinite"):
+        memory.remember(
+            "robot-01", "bad", "A thing", kind="scene",
+            source_robot="robot-01", witnessed=True, confidence=float("nan"),
+        )
+
+
+async def test_five_robot_conversation_persists_peer_hearsay_without_identity_leak(
+    fleet, tmp_path
+):
+    memory = MemoryStore(tmp_path, IDS)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker, memory=memory)
+    transcript = await conversation.run(IDS, "Talk about candy", 5)
+    assert len(transcript) == 5
+    for robot in fleet.robots:
+        observations = memory.recent(robot.id)
+        assert len(observations) == 5
+        assert len([o for o in observations if o.witnessed]) == 1
+        assert all(o.source_robot in IDS for o in observations)
+        assert all(o.kind in {"own_utterance", "peer_utterance"} for o in observations)
+    again = Conversation(fleet, SimulatedChat(), SimulatedSpeaker(), memory=memory)
+    await again.run(IDS[:2], "A follow up", 1)
+    assert "untrusted historical text" in again.histories["robot-01"][0]["content"]
+    assert "I was told by robot-02" in again.histories["robot-01"][0]["content"]
+    assert "I witnessed" in again.histories["robot-01"][0]["content"]
+    assert memory.count("robot-03") == 5

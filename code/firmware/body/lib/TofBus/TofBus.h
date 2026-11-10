@@ -1,0 +1,62 @@
+#pragma once
+
+#if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
+
+// Five independent ST VL53L4CD measurements via TCA9548A channels 0..4.
+// Reuse the pinned Pololu implementation for sensor initialization/ranging,
+// but use bounded checked Wire reads on the safety path. The upstream helper
+// divides by the reported SPAD count without guarding against zero, so do NOT
+// call its read() method in an edge-critical loop.
+// Source: https://github.com/pololu/vl53l4cd-arduino
+// License: ST/Pololu BSD 3-Clause Clear. This adapter adds no motion authority.
+
+#include <Arduino.h>
+#include <Wire.h>
+#include <VL53L4CD.h>
+#include "CliffGuard.h"
+
+namespace desk_robot {
+
+// Only reads WHO_AM_I: no sensor fusion, driver selection or motion authority.
+// The photographed owned BerryIMU is likely V1 but its chip is unverified.
+// 1 = V1 LSM9DS0, 2 = V2 LSM9DS1, 3 = V3 LSM6DSL, 0 = unknown.
+struct ImuIdentity {
+  std::uint8_t family = 0;
+  std::uint8_t gyro_id = 0;
+  std::uint8_t aux_id = 0;
+};
+
+class TofBus {
+ public:
+  // These are board pins, not alternate addresses; every device is 0x29.
+  bool begin(int sda, int scl, int mux_reset_pin);
+  // Poll exactly one channel per call. Never block waiting for ready.
+  // Any bus fault or invalid data immediately feeds the local CliffGuard.
+  void poll(CliffGuard& guard, std::uint32_t now_ms);
+  bool ready() const { return initialized_; }
+  std::uint8_t last_channel() const { return next_channel_; }
+  std::uint32_t errors() const { return bus_errors_; }
+  // One-time read-only probe on the existing upstream 3.3V I2C bus,
+  // after Wire has initialized. Do not call from the motor polling loop.
+  ImuIdentity probe_imu();
+
+ private:
+  static constexpr std::uint8_t kMuxAddress = 0x70;
+  static constexpr std::uint8_t kSensorAddress = 0x29;
+  static constexpr std::uint8_t kFloorAndFrontCount = 5;
+  static constexpr std::uint8_t kMaxSampleBytes = 15;
+  TwoWire& wire_ = Wire;
+  VL53L4CD device_{};
+  std::uint8_t next_channel_ = 0;
+  bool initialized_ = false;
+  std::uint32_t bus_errors_ = 0;
+
+  bool select(std::uint8_t channel);
+  bool read_register(std::uint16_t reg, std::uint8_t* dest, std::uint8_t bytes);
+  bool write_byte(std::uint16_t reg, std::uint8_t value);
+  void failed(CliffGuard& guard);
+};
+
+}  // namespace desk_robot
+
+#endif  // DESK_ROBOT_STEPPER

@@ -3,13 +3,15 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "CliffGuard.h"
+
 namespace desk_robot {
 
 // Protocol and direction/PWM conventions adapted from VerdureBuddyRover (MIT).
 // See ../../THIRD_PARTY_NOTICES.md. This controller adds a control lease and
 // deliberately omits upstream commands that could bypass speed/time limits.
 constexpr std::size_t kMaxLineLength = 95;
-constexpr std::size_t kReplyCapacity = 640;
+constexpr std::size_t kReplyCapacity = 704;  // below Sense bridge 768-byte UART line
 constexpr std::uint32_t kWatchdogMs = 500;
 constexpr std::uint32_t kMaxDriveMs = 250;
 constexpr int kSpeedLimitPercent = 40;
@@ -20,6 +22,15 @@ constexpr std::uint32_t kServoStepMs = 20;  // at most 50 commanded degrees/sec
 struct State {
   bool armed = false;
   bool servos_attached = false;
+  bool touch_active = false;       // gesture-debounced input
+  bool touch_raw_active = false;   // immediate electrical interlock
+  std::uint32_t touch_count = 0;  // debounced rising edges
+  std::uint32_t touch_taps = 0;
+  std::uint32_t touch_double_taps = 0;
+  std::uint32_t touch_holds = 0;
+  std::uint8_t imu_family = 0;   // 0 unverified, 1 V1, 2 V2, 3 V3
+  std::uint8_t imu_gyro_id = 0;
+  std::uint8_t imu_aux_id = 0;
   int left = 0;
   int right = 0;
   int lift = 90;       // commanded angle, NOT a position measurement
@@ -28,7 +39,6 @@ struct State {
   int grip_target = 90;
 };
 
-class CliffGuard;
 enum class BodyProfile { DcPwm, StepperGuarded };
 
 class BodyControl {
@@ -43,6 +53,14 @@ class BodyControl {
                char* reply, std::size_t capacity, bool local_safety_rearm = false);
   // Hardware adapter may force disarm on a fault without renewing the lease.
   void force_disarm();
+  // Hardware GPIO input only; never grants or clears a motion permit.
+  void set_touch(bool active, std::uint32_t now_ms = 0);
+  // Un-debounced local reflex: even one sensed high stops wheels and ramp,
+  // without fabricating a recognized gesture or releasing servo holding PWM.
+  void touch_trip();
+  void sample_touch_input(bool active);  // raw GPIO level, no gesture count
+  // Boot-time read-only identity; does not confer tilt safety or arm privilege.
+  void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
   std::uint32_t drive_remaining(std::uint32_t now_ms) const;
 
@@ -54,7 +72,15 @@ class BodyControl {
   std::uint32_t drive_started_ms_ = 0;
   std::uint32_t drive_duration_ms_ = 0;
   std::uint32_t last_servo_step_ms_ = 0;
+  std::uint32_t touch_started_ms_ = 0;
+  std::uint32_t touch_released_ms_ = 0;
+  bool touch_pending_tap_ = false;
+  bool touch_hold_emitted_ = false;
   void stop_motion();
+  // Local USB only: stage all five measured safety limits atomically.
+  // No network or AI path can set or persist them.
+  CliffConfig calibration_stage_{};
+  std::uint8_t calibration_stage_mask_ = 0;
 };
 
 // Each transport has its own bounded receiver. It discards an entire malformed

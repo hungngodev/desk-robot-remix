@@ -172,6 +172,203 @@ static void drive_expiry_stops_coils_even_with_keepalive() {
   CHECK(motor.update(50000, body.state().left, body.state().armed) == 0);
 }
 
+static void measured_local_calibration_is_atomic_and_never_arms() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "calfloor 0 40 60", 0) == "ERR calibration local_usb_only");
+  CHECK(send(body, "calcommit", 0, true) == "ERR calcommit incomplete_stage");
+  CHECK(send(body, "calfloor 4 40 60", 0, true).find("ERR calfloor") == 0);
+  CHECK(send(body, "calfloor 0 60 40", 0, true).find("ERR calfloor") == 0);
+  for (int i = 0; i < 4; ++i)
+    CHECK(send(body, "calfloor " + std::to_string(i) + " 40 60", 0, true) ==
+          "OK calfloor channel=" + std::to_string(i));
+  CHECK(send(body, "calfront 30 1000", 0, true) == "OK calfront");
+  CHECK(send(body, "calfresh 1000", 0, true).find("ERR calfresh") == 0);
+  CHECK(send(body, "calfresh 100", 0, true) == "OK calfresh");
+  CHECK(send(body, "calcommit", 0) == "ERR calibration local_usb_only");
+  CHECK(!guard.configured());
+  CHECK(send(body, "calcommit", 0, true) == "OK calcommit");
+  CHECK(guard.configured());
+  CHECK(guard.configuration().floor[0].min_mm == 40);
+  CHECK(guard.configuration().front_obstacle_mm == 30);
+  CHECK(guard.configuration().freshness_ms == 100);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 1) == "ERR arm safety_interlock");
+  fresh(guard, 2);
+  CHECK(send(body, "rearm", 2) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 2, true) == "OK rearm");
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 2) == "OK arm");
+  CHECK(send(body, "calfloor 0 40 60", 3, true) ==
+        "ERR calibration disarm_first");
+  CHECK(send(body, "disarm", 3) == "OK disarm");
+  CHECK(send(body, "calabort", 4, true) == "OK calabort");
+  CHECK(send(body, "calcommit", 4, true) == "ERR calcommit incomplete_stage");
+}
+
+static void touch_telemetry_never_grants_motion() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(!body.state().armed && body.state().touch_count == 0);
+  body.set_touch(true);
+  body.set_touch(true);
+  CHECK(body.state().touch_count == 1 && body.state().touch_active);
+  CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":1,\"tap_count\":0") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 0) == "ERR arm touch_active");
+  body.set_touch(false);
+  CHECK(!body.state().touch_active && body.state().touch_count == 1);
+  body.set_touch(true);
+  CHECK(body.state().touch_count == 2);
+  CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":2,\"tap_count\":0") !=
+        std::string::npos);
+  CHECK(!body.state().armed);
+}
+
+static void raw_touch_trip_preempts_debounce_without_forging_a_tap() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "arm", 0) == "OK arm");
+  CHECK(send(body, "drive 30 30 250", 0).find("OK drive") == 0);
+  CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
+  body.tick(20);
+  const int commanded_hold = body.state().grip;
+  CHECK(body.state().left != 0 && body.state().armed);
+  body.sample_touch_input(true);  // one raw GPIO high, gesture state still false
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(body.state().right == 0);
+  CHECK(body.state().servos_attached);
+  CHECK(body.state().grip == commanded_hold &&
+        body.state().grip_target == commanded_hold);
+  CHECK(!body.state().touch_active && body.state().touch_raw_active);
+  CHECK(body.state().touch_count == 0);
+  CHECK(send(body, "status", 21).find("\"touch\":{\"active\":true,\"count\":0") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 21) == "ERR arm touch_active");
+  CHECK(body.state().touch_taps == 0 && body.state().touch_holds == 0);
+  CHECK(send(body, "keepalive", 21) == "ERR keepalive disarmed");
+  CHECK(send(body, "drive 30 30 250", 21) == "ERR drive disarmed");
+  // The later debounced edge records the touch exactly once but never arms.
+  body.set_touch(true, 75);
+  CHECK(body.state().touch_active && body.state().touch_count == 1);
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "arm", 75) == "ERR arm touch_active");
+  body.set_touch(false, 160);
+  body.sample_touch_input(false);  // one raw low still requires explicit arm
+  CHECK(!body.state().armed);
+  CHECK(send(body, "keepalive", 160) == "ERR keepalive disarmed");
+}
+
+static void touch_is_local_human_stop_and_requires_fresh_arm() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "arm", 0) == "OK arm");
+  CHECK(send(body, "drive 20 20 250", 0).find("OK drive") == 0);
+  CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
+  body.tick(20);
+  const int held = body.state().grip;
+  CHECK(body.state().left != 0 && body.state().armed);
+  body.set_touch(true);
+  CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+  CHECK(body.state().grip == held && body.state().grip_target == held);
+  CHECK(body.state().servos_attached);  // no deliberate payload drop
+  CHECK(send(body, "keepalive", 21) == "ERR keepalive disarmed");
+  CHECK(send(body, "drive 20 20 250", 21) == "ERR drive disarmed");
+  CHECK(send(body, "arm", 21) == "ERR arm touch_active");
+  body.set_touch(true);
+  CHECK(body.state().touch_count == 1);
+  body.set_touch(false);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "keepalive", 22) == "ERR keepalive disarmed");
+  // A new explicit arm is still needed after releasing touch. No auto-resume.
+  fresh(guard, 22);
+  CHECK(send(body, "arm", 22) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+}
+
+static void five_range_status_reports_real_samples_not_a_permission() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 1);
+  CHECK(guard.try_rearm(1));  // guard is healthy, but body was never armed
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  auto value = send(body, "status", 10);
+  CHECK(value.size() < desk_robot::kReplyCapacity - 1);
+  CHECK(value.find("\"mm\":[50,50,50,50,200]") != std::string::npos);
+  CHECK(value.find("\"age_ms\":[9,9,9,9,9]") != std::string::npos);
+  CHECK(value.find("\"present_mask\":31,\"valid_mask\":31") != std::string::npos);
+  CHECK(!body.state().armed);
+  CHECK(guard.fault() == desk_robot::CliffFault::None);
+  guard.sample(3, 1000, false, 11);
+  value = send(body, "status", 12);
+  CHECK(value.find("\"mm\":[50,50,50,1000,200]") != std::string::npos);
+  CHECK(value.find("\"present_mask\":31,\"valid_mask\":23") != std::string::npos);
+  CHECK(value.find("\"invalid_sample\"") != std::string::npos);
+  CHECK(!body.state().armed);
+  guard.bus_fault();
+  value = send(body, "status", 13);
+  CHECK(value.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
+  CHECK(value.find("\"mm\":[0,0,0,0,0]") != std::string::npos);
+  CHECK(!body.state().armed);
+}
+
+static void imu_identity_is_diagnostic_only() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.set_imu_identity(1, 0xd4, 0x49);
+  auto status = send(body, "status", 0);
+  CHECK(status.find("\"imu\":{\"family\":1,\"gyro_id\":212,\"aux_id\":73}") !=
+        std::string::npos);
+  CHECK(status.size() < desk_robot::kReplyCapacity - 1);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 1) == "ERR arm safety_interlock");
+  body.set_imu_identity(255, 0, 0);
+  status = send(body, "status", 2);
+  CHECK(status.find("\"imu\":{\"family\":0,\"gyro_id\":0,\"aux_id\":0}") !=
+        std::string::npos);
+  CHECK(!body.state().armed);
+}
+
+static void touch_gesture_counters_survive_slow_status_polling() {
+  desk_robot::BodyControl body;
+  body.set_touch(true, 0);
+  body.set_touch(false, 100);
+  CHECK(body.state().touch_taps == 0);  // wait for possible second tap
+  body.tick(451);
+  CHECK(body.state().touch_taps == 1 && body.state().touch_double_taps == 0);
+
+  body.set_touch(true, 1000);
+  body.set_touch(false, 1090);
+  body.set_touch(true, 1180);
+  body.set_touch(false, 1280);
+  body.tick(1750);
+  CHECK(body.state().touch_double_taps == 1 && body.state().touch_taps == 1);
+
+  body.set_touch(true, 2000);
+  body.tick(2899);
+  CHECK(body.state().touch_holds == 0);
+  body.tick(2900);
+  CHECK(body.state().touch_holds == 1);
+  body.set_touch(false, 2950);
+  CHECK(body.state().touch_holds == 1 && body.state().touch_taps == 1);
+
+  // Unsigned elapsed arithmetic survives the 32-bit millis rollover.
+  body.set_touch(true, 0xfffffff0U);
+  body.set_touch(false, 0x00000040U);
+  body.tick(0x000001a0U);
+  CHECK(body.state().touch_taps == 2);
+  CHECK(body.state().touch_count == 5);
+  const auto status = send(body, "status", 0x000001a0U);
+  CHECK(status.find("\"double_count\":1") != std::string::npos);
+  CHECK(status.find("\"hold_count\":1") != std::string::npos);
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -182,7 +379,18 @@ int main() {
     CHECK(status.find("stepper_28byj48") != std::string::npos);
     CHECK(status.find("missing_guard") != std::string::npos);
     CHECK(status.front() == '{' && status.back() == '}');
+    CHECK(status.size() < desk_robot::kReplyCapacity - 1);
+    CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
+    touch_telemetry_never_grants_motion();
+    raw_touch_trip_preempts_debounce_without_forging_a_tap();
+    touch_is_local_human_stop_and_requires_fresh_arm();
+    touch_gesture_counters_survive_slow_status_polling();
+    five_range_status_reports_real_samples_not_a_permission();
+    imu_identity_is_diagnostic_only();
+    std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
+    measured_local_calibration_is_atomic_and_never_arms();
+    std::cout << "PASS USB calibration staged atomically with no arming\\n";
     recovery_is_local_and_not_an_arm();
     std::cout << "PASS only local recovery can clear a healthy fault latch\n";
     receiver_recovery_authority_is_not_shared();

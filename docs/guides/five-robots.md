@@ -28,6 +28,32 @@ digitally to all the other histories. One transmission at a time, with all
 participating microphones suppressed during coordinated speech. Stop/disconnect
 paths are tested; measured sound/playback timing still needs physical tests.
 
+## Optional witnessed versus told peer memories
+
+The existing Mac `PetController` can now propagate **text-only** camera scene
+changes and touch events to each of the five private local SQLite databases.
+Every observation has one event ID and one source robot. The observing pet keeps
+`witnessed=true`; the other four store `witnessed=false` with
+`source_robot` identifying the reporting pet. The existing conversational
+memory builder tells a pet whether it witnessed a fact or was told by a peer.
+This does not pretend five cameras saw the exact same thing.
+
+To enable sharing explicitly, set `fleet_text_sharing_enabled = true` at the
+top of a private `config/local.toml`, not inside an individual robot section.
+The default and the public example are `false` to protect room privacy.
+Neither images, audio, video files, raw model prompts nor motor permissions are
+propagated between heads; the shared Mac only persists a bounded observation
+description. Only a separately enabled robot's camera or touch produces its
+own firsthand observation. If five cameras see a change at once, they still
+have individually witnessed events, while the existing global speech owner
+serializes responses and applies spontaneous cooldown.
+
+This is implemented host software with provenance tests, not measured five-head
+optical overlap, physical Wi-Fi load or acoustics. `fleet_text_sharing_enabled`
+should be enabled only when the user explicitly chooses local peer memory
+sharing and understands these memories persist in the Mac private directory.
+
+
 Try a bounded word game with the local models after real speech setup, e.g.
 “Take turns naming a new animal; do not repeat a previous animal.” This is a
 conversation prompt, not a deterministic game referee. Autonomous chasing,

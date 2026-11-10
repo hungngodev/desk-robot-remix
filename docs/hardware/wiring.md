@@ -1,14 +1,13 @@
 # Wiring and power — proposed stepper/sensor revision
 
 Updated 2026-11-06. **Use only the matching profile.** Default `esp32_stepper` now compiles with
-eight phase outputs and portable cliff policy, but no sensor I/O/calibration:
-it refuses to arm. Explicit `esp32dev` preserves four DC H-bridge inputs and
+eight phase outputs and five sensor acquisition channels. It still refuses to arm without real mounted sensors, measured local calibration and manual USB rearm. Explicit `esp32dev` preserves four DC H-bridge inputs and
 must never be connected to this stepper map. This is not physically qualified.
 
 ## Proposed WROOM allocation
 
 Check actual ESP32-WROOM-32 development-board labels and exposed pins first.
-Avoid flash GPIO6–11, strapping GPIO0/2/5/12/15 and programming UART0 GPIO1/3.
+Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/3.
 
 | WROOM GPIO | Proposed use |
 | --- | --- |
@@ -17,9 +16,9 @@ Avoid flash GPIO6–11, strapping GPIO0/2/5/12/15 and programming UART0 GPIO1/3.
 | 13, 14, 25, 26 | Left ULN2003 IN1–IN4, phase order to verify |
 | 27, 32, 33, 23 | Right ULN2003 IN1–IN4, phase order to verify |
 | 21 / 22 | Body I²C SDA / SCL to mux upstream |
-| 4 | Mux active-low RESET, only if board exposes and electrically supports it |
+| No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not ESP32 strapping GPIO4 |
 | GND | Head, body, sensors and actuator-supply common logic reference |
-|34 | Proposed Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Bench test and firmware integration pending |
+|34 | Owned Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Firmware has debounced tap, double tap, hold and local motion stop; actual connection, shell timing and noise testing remain open |
 | Optional35/36/39 | Input-only bumper/interrupt signals with **external** pullups as needed; not implemented |
 
 The conservative output set has 15 pins. Steppers8 + servos2 + UART2 + I²C2
@@ -46,15 +45,15 @@ acceleration, loaded speed, stop/hold current and thermal limits need measuremen
 ```text
 WROOM GPIO21/22 -> owned BerryIMU upstream (revision/addresses to verify), candidate
                -> TCA9548A upstream I²C
-                  channel 0 -> front-left downward VL6180X
-                  channel 1 -> front-right downward VL6180X
-                  channel 2 -> rear-left downward VL6180X
-                  channel 3 -> rear-right downward VL6180X
-                  channel 4 -> separate forward-facing obstacle VL53L0X
+                  channel 0 -> front-left downward VL53L4CD candidate, 0x29
+                  channel 1 -> front-right downward VL53L4CD candidate, 0x29
+                  channel 2 -> rear-left downward VL53L4CD candidate, 0x29
+                  channel 3 -> rear-right downward VL53L4CD candidate, 0x29
+                  channel 4 -> separate forward VL53L4CD candidate, 0x29
 Sense -> separate head-owned OLED bus
 ```
 
-Each ToF keeps its default **7-bit 0x29** address; select only one corresponding
+The proposed ST VL6180X downrange part is obsolete. A compatible short-range part must be selected after a one-sample physical desk-height test and the corresponding driver/mount must be reviewed; the four corner roles do not change. The 7-bit **0x29** address applies to the currently named ST ToF family and must be checked for the finally selected sensor. Select only one corresponding
 channel for reads/configuration. Confirm channel numbering in firmware, module
 supply, reset behavior, default mux address and **3.3 V signal pullups**. Generic
 boards vary; an IC voltage range does not establish breakout level shifting.
@@ -88,8 +87,7 @@ qualification is still pending, and its SD slot must stay empty/disabled.
 [RIO's reference](../research/2026-11-03-sense-realtime-reuse.md) uses speaker
 BCLK7/LRC8/DIN9 and amplifier SD44. Those are **not** the compiled allocation
 above. Port software/reference handling to one checked map before wiring; do not
-mix the two tables or add an SD44 wire to the current build. Software echo
-cancellation and ordinary-speech interruption remain unimplemented in this target.
+mix the two tables or add an SD44 wire to the current build. Sense AEC software reference and urgent PCM flush are in the stacked firmware implementation. No hardware acoustic interruption gate has passed.
 
 Initial two-USB head/body test joins **TX, RX and GND only**; keep 5 V rails
 separate. Do not flash CoreS3/Freenove firmware onto Sense, or S3 firmware onto
@@ -151,3 +149,111 @@ cliff checks must meet measured clearance deadlines locally. Stop should hold
 servo targets without dropping payload; explicit disarm/power-off can release
 servos, so support the object first. Stepper coil hold/coast policy must be
 qualified for stopping distance, current and heat. No unprotected tabletop trial.
+
+## 2026-11-09 HTML research reconciliation
+
+The separate `ESP32 Deskpet Ideas.html` is not an as-built wiring diagram. It
+incorrectly directs the optional GY-MAX30102 heartbeat pad to Sense GPIO41/42:
+these are **the onboard PDM microphone data and clock**, not spare I2C pins.
+The optional MAX30102 must instead be reviewed on the WROOM body I2C
+GPIO21 SDA / GPIO22 SCL, potentially through mux channel 5. Do **not** wire
+it until the actual purple breakout has been identified and its regulator,
+level shifting, pullups and voltage limits are verified. The reported quantity
+of about five remains an unconfirmed inventory claim, not an approved BOM line.
+See [Seeed's Sense pin allocation](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/)
+and [the MAX30102 datasheet](https://www.analog.com/en/products/max30102.html).
+
+ST now labels the proposed VL6180X **obsolete and out of production**. The
+existing sensor channel plan is still a proposed baseline, not a fleet
+procurement authorization. Bench evaluate one supported short range
+[VL53L4CD](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html)
+against the intended surfaces and height before substituting: it requires a
+different driver and may exceed the existing budget at current breakout prices.
+No optical scan time, stopping margin or surface support is physically
+qualified. [Full evidence and blockers](../research/2026-11-09-html-verification.md).
+
+## Five-channel sensor integration and measured local USB calibration
+
+The current esp32_stepper target selects the same **VL53L4CD driver for all five sensors**, reusing pinned Pololu ST-derived code for device setup and start, plus bounded checked Wire measurement reads. Neither actual breakout part, case optic fit, five-unit purchase or loaded stop margin is qualified. Historic VL6180X and VL53L0X suggestions are **not** the current firmware purchase list.
+
+WROOM GPIO21 SDA and GPIO22 SCL go to TCA9548A at 0x70, with channels 0,1,2,3 allocated to individual downward corners and channel 4 to forward obstacle. Each VL53L4CD uses isolated 0x29 I2C. Shared 3.3V logic and ground, verified pullups. Connect mux active-low RESET to 3.3V pullup, never strapping GPIO4.
+
+Local measured calibration commands are accepted only on the WROOM programming USB Serial. They are rejected over the head UART or Mac network service. **The values below must come from a real measured rig**, actual black/glossy/transparent surfaces and loaded stopping/scan latency with a catch tray:
+
+    calfloor 0 MIN_MM MAX_MM
+    calfloor 1 MIN_MM MAX_MM
+    calfloor 2 MIN_MM MAX_MM
+    calfloor 3 MIN_MM MAX_MM
+    calfront NEAR_MM MAX_MM
+    calfresh MAX_SAMPLE_AGE_MS
+    calcommit
+    rearm
+
+Limits range 1..1300 mm; freshness is 30..200ms. All four floor, front and freshness settings must be staged before the atomic commit; calabort clears the stage. The body saves a versioned checksummed calibration in NVS, leaves motors disarmed, and requires five fresh measurements plus a NEW direct USB rearm before motion. Reboot and recovering I2C never resume old motion. Any stale/invalid/out-of-range sensor or bus fault latches stop, with no blind reversal. Measure real lead and stopping margin before putting tracks on a desk.
+
+The pinned Pololu generic read helper can divide by zero for zero SPAD returns; the runtime uses only its initialization and start functions, and a checked raw I2C results path. All of this is software integration, **not** a verified physical stop test or a solution to the current $50 delivered budget contradiction.
+
+## Five read-only range diagnostics
+
+The WROOM `status` response exposes five raw measurements through the existing
+Sense UART bridge and authenticated Mac `Head.status()`; no second server,
+motor command, new I2C transaction or calibration privilege is needed.
+
+The `ranges.mm` array is indexed 0 through 4 (four downward corners and
+one forward channel). `ranges.age_ms` is each last sample's elapsed age in
+WROOM monotonic milliseconds. `ranges.present_mask` and
+`ranges.valid_mask` are five-bit integers, with bit 0 for channel 0 and
+bit 4 for channel 4. A zero distance accompanied by a cleared presence bit
+means **missing**, not a measurement of zero clearance. A raw distance with a
+cleared valid bit is **invalid**, even if the number looks plausible.
+The existing `safety.ready`, `safety.fault` and fault sensor remain
+authoritative for movement. Raw ranges are for diagnosing wiring, actual
+sensor geometry and calibration on the catch tray, never for bypassing a stop.
+
+Missing readings and a bus reset clear all presence flags; calibration
+replacement invalidates prior readings. Until the physical sensors and
+floor samples are qualified, no valid mask or visually reasonable reading
+authorizes motion. Native tests verify all five arrays, reset handling and
+bounded JSON responses; neither the Mac nor model gains local USB rearm rights.
+
+## Direct USB bringup for the owned boards
+
+Reuse `code/scripts/serial_bench.py` rather than creating a second serial
+console or independently controlling the actuators through a model. On a
+**stationary, disconnected motor stand or catch tray** with the correct
+3.3 V sensor wiring, run from the `code/` directory:
+
+```sh
+uv run --extra dev python scripts/serial_bench.py --port /dev/ttyUSB0 --inspect --samples 10
+```
+
+Substitute the real WROOM USB port. This command issues only ten `status`
+reads, reports each raw five-channel distance, age and validity, the body
+fault and the BerryIMU WHO_AM_I identity, and **never** arms, calibrates, rearms,
+flashes or moves a robot. It does not call software output a measured physical
+pass. Validate wiring, power rails and board ID against the actual breakout,
+and measure the four corner optical heights and forward obstacle detection on
+the intended surfaces. When I2C is absent, the board reports missing, not safe.
+
+After the **real** local `calfloor` / `calfront` / `calfresh` / `calcommit`
+sequence has been measured and saved through WROOM USB, a trained operator
+may use a separate supervised, contained rig test such as:
+
+```sh
+uv run --extra dev python scripts/serial_bench.py --port /dev/ttyUSB0 --command "grip 95" --local-rearm
+```
+
+The explicit `--local-rearm` flag exists because opening a WROOM serial
+port can reset it, and reboot deliberately leaves the local safety latch
+disarmed. It asks the actual body over **local USB only** to clear a fault;
+the body rejects this request if measured calibration or any fresh sensor is
+unhealthy. This flag is not available via Sense, HTTP, Mac AI tools or a
+background pet. The operator must already have qualified the physical
+hardware on a catch tray. Remove servo horns/loads for initial tests.
+
+In the normal Mac runtime, an operator permit and the actual bounded job
+both perform a fresh read-only safety preflight through the existing Sense
+HTTP status and WROOM UART. Five present/valid/still-recent ToF readings,
+no touch, clear guard, correct robot identity, expected stepper backend and
+disarmed state are required. This is additional software refusal, **never**
+proof that the physical stop margin, IMU attitude safety or supply is qualified.

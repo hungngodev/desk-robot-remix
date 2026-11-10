@@ -44,8 +44,19 @@ def files(root):
     source = (root / path).read_text()
     source = once(
         source,
+        "    # 服务端AEC功能需要实时触发打断",
+        "    import desk_robot_bridge\n"
+        "    await desk_robot_bridge.interrupt_for_user_voice(conn, have_voice)\n"
+        "    # 服务端AEC功能需要实时触发打断",
+    )
+    source = once(
+        source,
         'async def startToChat(conn: "ConnectionHandler", text):',
-        'async def startToChat(conn: "ConnectionHandler", text):\n    import desk_robot_bridge\n    if desk_robot_bridge.muted(conn.device_id):\n        return',
+        'async def startToChat(conn: "ConnectionHandler", text):\n'
+        '    import desk_robot_bridge\n'
+        '    if (desk_robot_bridge.muted(conn.device_id)\n'
+        '            and not desk_robot_bridge.was_interrupted_by_human(conn.device_id)):\n'
+        '        return',
     )
     changes[path] = source
     path = "app.py"

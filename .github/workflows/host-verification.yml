@@ -1,0 +1,107 @@
+name: Host verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - codex/initial-remix
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-and-head-host:
+    name: Python and head host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python and locked dependencies
+        working-directory: code
+        run: |
+          uv python install 3.11
+          uv sync --extra dev --python 3.11 --locked
+      - name: Restore pinned Xiaozhi server fixture
+        working-directory: code
+        run: |
+          git init upstream/xiaozhi-esp32-server
+          git -C upstream/xiaozhi-esp32-server remote add origin https://github.com/xinnan-tech/xiaozhi-esp32-server.git
+          git -C upstream/xiaozhi-esp32-server fetch --depth=1 origin d9c2e8c5d92627b670dec57d72a07a4226a410a3
+          git -C upstream/xiaozhi-esp32-server checkout --detach FETCH_HEAD
+          test "$(git -C upstream/xiaozhi-esp32-server rev-parse HEAD)" = "d9c2e8c5d92627b670dec57d72a07a4226a410a3"
+      - name: Restore pinned Xiaozhi device firmware fixture
+        working-directory: code
+        run: |
+          git init upstream/xiaozhi-esp32
+          git -C upstream/xiaozhi-esp32 remote add origin https://github.com/78/xiaozhi-esp32.git
+          git -C upstream/xiaozhi-esp32 fetch --depth=1 origin c435f99a88066029ec2dbd2d758c8cc9d051565b
+          git -C upstream/xiaozhi-esp32 checkout --detach FETCH_HEAD
+          test "$(git -C upstream/xiaozhi-esp32 rev-parse HEAD)" = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
+      - name: Host tests
+        working-directory: code
+        run: uv run --no-sync pytest -q -ra tests firmware/head/tests
+      - name: Python lint
+        working-directory: code
+        run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
+
+  body-platformio:
+    name: ESP32 WROOM firmware compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Compile guarded stepper firmware
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
+      - name: Compile preserved DC reference
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32dev
+
+  body-host:
+    name: Body C++ host tests with sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure portable C++ tests
+        run: cmake -S code/firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build /tmp/desk-robot-body-host --parallel 2
+      - name: Run tests
+        run: ctest --test-dir /tmp/desk-robot-body-host --output-on-failure
+
+  sense-idf:
+    name: XIAO Sense ESP-IDF 6.1 firmware compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    container:
+      image: espressif/idf:v6.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore pinned device source and generate isolated Sense overlay
+        working-directory: code
+        shell: bash
+        run: |
+          git init upstream/xiaozhi-esp32
+          git -C upstream/xiaozhi-esp32 remote add origin https://github.com/78/xiaozhi-esp32.git
+          git -C upstream/xiaozhi-esp32 fetch --depth=1 origin c435f99a88066029ec2dbd2d758c8cc9d051565b
+          git -C upstream/xiaozhi-esp32 checkout --detach FETCH_HEAD
+          test "$(git -C upstream/xiaozhi-esp32 rev-parse HEAD)" = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
+          python3 firmware/head/install_overlay.py --board sense --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi-sense
+          cp firmware/head/dependencies.lock firmware/head/build/xiaozhi-sense/dependencies.lock
+      - name: Compile real Sense board image with local AEC
+        working-directory: code/firmware/head/build/xiaozhi-sense
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          python scripts/build.py desk-robot/desk-robot-sense-s3 --name desk-robot-sense-s3 --language en-US --wake-word disabled
+      - name: Ensure real head firmware and asset fit
+        working-directory: code/firmware/head/build/xiaozhi-sense
+        shell: bash
+        run: |
+          test -f build/desk-robot-sense-s3.bin || test -f build/merged-binary.bin
+          test -f build/partition_table/partition-table.bin
+
+# This compiles the real ESP-IDF Sense target and both WROOM profiles but DOES
+# NOT flash hardware or verify physical AEC, cliff sensors, pickup or power.
+# Python/head tests are host checks only.
