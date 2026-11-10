@@ -1,4 +1,5 @@
 import asyncio
+from desk_robot.memory import MemoryStore
 
 import pytest
 from desk_robot.api import create_app
@@ -79,3 +80,39 @@ async def test_conversation_cancellation_releases_session(settings):
         await c.run(["robot-01", "robot-02"], "hello")
     await c.stop()
     assert task.cancelled() and c.active is None
+
+
+async def test_five_robot_social_history_labels_observation_and_speech_correctly(settings, tmp_path):
+    # Five distinct SQLite stores and personas; speech is not visual evidence.
+    ids = ["robot-01", "robot-02", "robot-03", "robot-04", "robot-05"]
+    settings.robots = [
+        settings.robots[0].model_copy(update={"id": robot_id, "name": robot_id})
+        for robot_id in ids
+    ]
+    memory = MemoryStore(tmp_path, ids)
+    memory.remember(
+        "robot-01", "camera_event", "A key appeared",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    memory.remember(
+        "robot-02", "camera_event", "A key appeared",
+        kind="key", source_robot="robot-01", witnessed=False,
+    )
+    speaker = SimulatedSpeaker()
+    c = Conversation(settings, SimulatedChat(), speaker, memory=memory)
+    transcripts = await c.run(ids, "Describe a new game", 5)
+    assert [line["robot_id"] for line in transcripts] == ids
+    assert len(speaker.spoken) == 5
+    assert "I witnessed: A key appeared" in c._persona_with_memory(settings.robots[0])
+    assert "I was told by robot-01: A key appeared" in c._persona_with_memory(settings.robots[1])
+    for robot_id in ids:
+        records = memory.recent(robot_id)
+        assert any(m.kind == "own_utterance" and m.source_robot == robot_id
+                   and m.witnessed for m in records)
+        assert sum(m.kind == "peer_utterance" and not m.witnessed for m in records) == 4
+        assert memory.count(robot_id) == (6 if robot_id in ids[:2] else 5)
+    context = c._persona_with_memory(settings.robots[1])
+    assert "I said: " in context
+    assert "I heard robot-01 say: " in context
+    assert "I witnessed: I see a candy" not in context
+    assert c.histories[ids[0]] is not c.histories[ids[1]]

@@ -506,9 +506,18 @@ class PetController:
         robot = self.settings.robot(robot_id)
         try:
             memory = await asyncio.to_thread(self.memory.recent, robot_id, limit=4)
+            # A firsthand spoken line is NOT a firsthand camera sighting.
+            # Peer utterances mean heard in the coordinated voice turn; other
+            # secondhand facts are reports, not this camera's observations.
+            def origin(entry):
+                if entry.kind == "own_utterance" and entry.witnessed:
+                    return "I said: "
+                if entry.kind == "peer_utterance" and not entry.witnessed:
+                    return f"I heard {entry.source_robot} say: "
+                return "I observed: " if entry.witnessed else f"{entry.source_robot} told me: "
+
             recent = "; ".join(
-                ("I saw: " if x.witnessed else f"{x.source_robot} told me: ") + x.summary
-                for x in reversed(memory)
+                origin(x) + x.summary for x in reversed(memory)
             )
             text = await self.conversation.chat.reply([
                 {

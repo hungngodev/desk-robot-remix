@@ -142,9 +142,17 @@ class Conversation:
         recent = self.memory.recent(robot.id, limit=6)
         if not recent:
             return robot.persona
+        # Preserve the difference between an actual sensor eyewitness record
+        # and a spoken social turn. The speaker did not "see" its own words.
+        def origin(entry):
+            if entry.kind == "own_utterance" and entry.witnessed:
+                return "I said"
+            if entry.kind == "peer_utterance" and not entry.witnessed:
+                return f"I heard {entry.source_robot} say"
+            return "I witnessed" if entry.witnessed else f"I was told by {entry.source_robot}"
+
         facts = "\n".join(
-            f"* {'I witnessed' if m.witnessed else 'I was told by ' + m.source_robot}: "
-            f"{m.summary}" for m in reversed(recent)
+            f"* {origin(m)}: {m.summary}" for m in reversed(recent)
         )
         return (
             robot.persona
