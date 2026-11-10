@@ -12,3 +12,11 @@ keep their own upstream notices and are not relicensed by this repository.
 The new StepperDrive and CliffGuard policy are original integration code under
 the repository MIT license. No wtlx sketches or unlicensed video code were copied.
 The stepper firmware now pins Pololu's VL53L4CD Arduino library to commit bc865905fc97085f40ca9edab478210c01195fde, derived from ST ULD, BSD 3-Clause Clear. Upstream notices remain with its package. The critical runtime uses bounded raw I2C sampling rather than Pololu's generic read parser due to its invalid-SPAD division. No actual sensor optical geometry or physical stop has been proven.
+
+The optional BerryIMU adapter follows OzzMaker's published Arduino BerryIMU
+model WHO_AM_I register pairings and initialization/sample register locations:
+https://github.com/ozzmaker/BerryIMU/tree/master/arduino-BerryIMU . Its
+bounded Wire transport, existing status integration, freshness checks and
+native tests are project-local adaptation. No upstream sketch is bundled.
+No physical identity, axis alignment, tilt or held-state safety qualification
+is claimed for the owned unit.
