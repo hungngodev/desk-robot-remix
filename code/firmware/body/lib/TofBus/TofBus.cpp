@@ -74,6 +74,54 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   return true;
 }
 
+ImuIdentity TofBus::probe_imu() {
+  // I2C address/WHO_AM_I pairs come from OzzMaker's BerryIMU version
+  // comparison and ST device datasheets, NOT an assumed photographed chip.
+  // This probe does not initialize or read movement sensors. We reuse Wire
+  // already initialized by begin(), so there is no second I2C controller.
+  ImuIdentity result{};
+  // TCA9548A may have left a downstream branch selected. Disconnect it for
+  // the upstream IMU read, without changing the active ToF measurement plan.
+  wire_.beginTransmission(kMuxAddress);
+  if (wire_.write(static_cast<std::uint8_t>(0)) == 1) {
+    wire_.endTransmission(true);
+  }
+
+  auto identity = [this](std::uint8_t address, std::uint8_t& value) {
+    wire_.beginTransmission(address);
+    if (wire_.write(static_cast<std::uint8_t>(0x0f)) != 1 ||
+        wire_.endTransmission(false) != 0) return false;
+    if (wire_.requestFrom(address, static_cast<size_t>(1), true) != 1 ||
+        wire_.available() < 1) return false;
+    const int byte = wire_.read();
+    if (byte < 0) return false;
+    value = static_cast<std::uint8_t>(byte);
+    return true;
+  };
+  for (std::uint8_t addr : {static_cast<std::uint8_t>(0x6a),
+                            static_cast<std::uint8_t>(0x6b)}) {
+    std::uint8_t id = 0;
+    if (identity(addr, id) && (id == 0xd4 || id == 0x68 || id == 0x6a)) {
+      result.gyro_id = id;
+      break;
+    }
+  }
+  for (std::uint8_t addr : {static_cast<std::uint8_t>(0x1e),
+                            static_cast<std::uint8_t>(0x1d),
+                            static_cast<std::uint8_t>(0x1c)}) {
+    std::uint8_t id = 0;
+    if (identity(addr, id) && (id == 0x49 || id == 0x3d)) {
+      result.aux_id = id;
+      break;
+    }
+  }
+  if (result.gyro_id == 0xd4 && result.aux_id == 0x49) result.family = 1;
+  if (result.gyro_id == 0x68 && result.aux_id == 0x3d) result.family = 2;
+  if (result.gyro_id == 0x6a && result.aux_id == 0x3d) result.family = 3;
+  // All nonmatching combinations remain unknown, never treated as qualified.
+  return result;
+}
+
 void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   if (!initialized_) {
     failed(guard);
