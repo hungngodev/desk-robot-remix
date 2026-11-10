@@ -212,3 +212,23 @@ vibration, motor noise, disconnect/reconnect, and the actual ages through
 The current six-axis driver does not implement local tilt stops or reliable
 picked-up/set-down recognition. Those require calibrated board orientation,
 noise thresholds and physical tests before trusted body interlocks can be armed.
+
+
+## Required raw IMU heartbeat before local arm
+
+The physical ESP32 WROOM firmware now requires an identified fresh BerryIMU
+six-axis sample before accepting `arm`; a missing, invalid or older than
+200ms sensor sample rejects arming. If it becomes missing or stale during an
+armed movement, WROOM freezes servo targets, zeros both tracks and disarms
+before its separate 500ms communication watchdog. The Mac checks the identical
+raw readout through the existing authenticated head status before an operator
+permit and again before a controlled job. Bench tests include a mid-drive
+expired sample and verify that neither a fresh network request nor a status
+read can resume motion automatically.
+
+This heartbeat **does not implement a calibrated tilt, shake or held-state
+interlock**. A fresh reading with a gravity vector is not proof that a robot
+is on a desk or level. All movement remains blocked by the five real ToF
+requirements until measured calibration and local USB rearm. Before any desk
+trial, the operator must additionally establish each board axis, loaded
+stopping distance, power integrity and tilt/held thresholds on a catch tray.
