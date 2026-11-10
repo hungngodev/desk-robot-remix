@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "CliffGuard.h"
+#include "BerryImu.h"
 
 namespace desk_robot {
 
@@ -11,7 +12,7 @@ namespace desk_robot {
 // See ../../THIRD_PARTY_NOTICES.md. This controller adds a control lease and
 // deliberately omits upstream commands that could bypass speed/time limits.
 constexpr std::size_t kMaxLineLength = 95;
-constexpr std::size_t kReplyCapacity = 704;  // below Sense bridge 768-byte UART line
+constexpr std::size_t kReplyCapacity = 752;  // below Sense bridge 768-byte UART line
 constexpr std::uint32_t kWatchdogMs = 500;
 constexpr std::uint32_t kMaxDriveMs = 250;
 constexpr int kSpeedLimitPercent = 40;
@@ -61,6 +62,8 @@ class BodyControl {
   void sample_touch_input(bool active);  // raw GPIO level, no gesture count
   // Boot-time read-only identity; does not confer tilt safety or arm privilege.
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
+  // Raw, read-only diagnostics. No tilt or motor permission follows from it.
+  void set_imu(const BerryReading& reading) { imu_ = reading; }
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
   std::uint32_t drive_remaining(std::uint32_t now_ms) const;
 
@@ -68,6 +71,7 @@ class BodyControl {
   BodyProfile profile_;
   CliffGuard* guard_;
   State state_{};
+  BerryReading imu_{};
   std::uint32_t last_control_ms_ = 0;
   std::uint32_t drive_started_ms_ = 0;
   std::uint32_t drive_duration_ms_ = 0;
