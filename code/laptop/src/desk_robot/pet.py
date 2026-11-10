@@ -19,7 +19,7 @@ from typing import Protocol
 from .config import Settings
 from .conversation import Conversation
 from .memory import MemoryStore
-from .transport import Head
+from .transport import Head, HeadError
 from .vision import SceneChange, VisualChangeGate
 
 
@@ -41,6 +41,7 @@ class PetState:
     last_touch_count: int | None = None
     last_touch_events: dict[str, int] | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
+    touch_task: asyncio.Task | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
 
 
@@ -64,12 +65,14 @@ class PetController:
         speech_cooldown: float = 120.0,
         group_window: float = 3.0,
         max_observation_age: float = 10.0,
+        touch_interval: float = 0.15,
     ):
         if (
             not 0 < interval <= 60
             or not 0 <= speech_cooldown <= 3600
             or not 0 < group_window <= 60
             or not 0 < max_observation_age <= 60
+            or not 0.01 <= touch_interval <= 5
         ):
             raise ValueError("Invalid pet intervals")
         self.settings, self.heads = settings, heads
@@ -78,6 +81,7 @@ class PetController:
             interval, speech_cooldown, group_window
         )
         self.max_observation_age = max_observation_age
+        self.touch_interval = touch_interval
         self.states = {robot.id: PetState() for robot in settings.robots}
         self._vision_lock = asyncio.Lock()
         self._speech_task: asyncio.Task | None = None
@@ -114,7 +118,10 @@ class PetController:
             raise ValueError("Configure an installed local vision_model before enabling pet mode")
         if state.enabled:
             return self.status(robot_id)
-        if state.task is not None and not state.task.done():
+        if (
+            (state.task is not None and not state.task.done())
+            or (state.touch_task is not None and not state.touch_task.done())
+        ):
             raise RuntimeError("Previous pet task still shutting down")
         state.generation += 1
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
@@ -123,17 +130,25 @@ class PetController:
         state.enabled = True
         state.last_error = None
         state.task = asyncio.create_task(self._observe(robot_id, state.generation))
+        if callable(getattr(self.heads[robot_id], "status", None)):
+            # Poll the same WROOM UART status independently from slow VLM,
+            # camera capture and TTS. No second firmware or transport owner.
+            state.touch_task = asyncio.create_task(
+                self._poll_touch(robot_id, state.generation)
+            )
         return self.status(robot_id)
 
     async def pause(self, robot_id: str) -> dict:
         state = self.states[robot_id]
         state.generation += 1
         state.enabled = False
-        await self._cancel_speech(robot_id)
-        task, state.task = state.task, None
-        if task is not None:
+        tasks = [t for t in (state.task, state.touch_task) if t is not None]
+        state.task = state.touch_task = None
+        for task in tasks:
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await self._cancel_speech(robot_id)
         return self.status(robot_id)
 
     async def set_quiet(self, robot_id: str, quiet: bool) -> dict:
@@ -211,6 +226,31 @@ class PetController:
         if state.enabled and state.generation == generation:
             self._consider_speech(robot_id, change, generation)
 
+    async def _poll_touch(self, robot_id: str, generation: int) -> None:
+        """Dedicated local body status reader; camera/VLM cannot starve touch.
+
+        Reuses the authenticated head status bridge and existing typed WROOM
+        counters. There is still only one touch event consumer per robot.
+        """
+        state = self.states[robot_id]
+        while state.enabled and state.generation == generation and not self._closed:
+            try:
+                await self._touch_from_body(robot_id, generation)
+            except asyncio.CancelledError:
+                raise
+            except HeadError as exc:
+                # An unavailable physical head must not silently reactivate on
+                # reconnect, and no queued spontaneous speech may survive it.
+                state.last_error = f"HeadError: {str(exc)[:120]}"
+                state.enabled = False
+                if state.task is not None:
+                    state.task.cancel()
+                await self._cancel_speech(robot_id)
+                return
+            except Exception as exc:
+                state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+            await asyncio.sleep(self.touch_interval)
+
     async def _touch_from_body(self, robot_id: str, generation: int) -> None:
         """Consume firmware edge and gesture counters, never manufacture touch frames.
 
@@ -272,12 +312,10 @@ class PetController:
         state = self.states[robot_id]
         while state.enabled and state.generation == generation and not self._closed:
             try:
-                # Touch must still be processed while this robot talks, so a
-                # hold can silence an active sentence. Head status is read-only
-                # and uses the existing UART bridge, never a motor command.
-                await self._touch_from_body(robot_id, generation)
-                # Camera and language inference continue to respect the
-                # exclusive conversation and speech owners.
+                # Touch has its own authenticated status polling task, so a
+                # long VLM/HTTP camera request cannot delay a physical hold.
+                # Camera and language inference still respect the exclusive
+                # conversation and speech owners.
                 if self.conversation.active is not None or (
                     self._speech_task is not None and not self._speech_task.done()
                 ):
