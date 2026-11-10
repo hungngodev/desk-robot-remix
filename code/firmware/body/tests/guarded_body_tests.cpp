@@ -352,10 +352,18 @@ static void required_imu_is_a_local_freshness_interlock() {
   body.set_imu(reading);
   CHECK(send(body, "arm", 50) == "OK arm");
   CHECK(send(body, "drive 20 20 250", 50).find("OK drive") == 0);
+  // Keep optical samples alive throughout the interval. CliffGuard
+  // deliberately latches any missed 100ms deadline even if data later arrives.
+  fresh(guard, 100);
+  body.tick(100);
+  fresh(guard, 150);
+  body.tick(150);
   fresh(guard, 180);
   body.tick(180);
   CHECK(body.state().armed);
   CHECK(body.state().left != 0);
+  fresh(guard, 230);
+  body.tick(230);
   fresh(guard, 251);
   body.tick(251);  // stale IMU before the 500ms communication watchdog
   CHECK(!body.state().armed);
