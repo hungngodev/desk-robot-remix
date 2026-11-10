@@ -71,7 +71,11 @@ def inspect_status(status: dict) -> dict:
             "family": ("unverified", "berryimu_v1", "berryimu_v2", "berryimu_v3")[family],
             "gyro_who_am_i": gyro,
             "aux_who_am_i": aux,
-            "motion_driver_active": raw_valid,
+            # A valid sample is diagnostic information, NOT an attitude
+            # interlock, drive authorization, gravity calibration or a
+            # proof of a correctly mounted breakout.
+            "raw_six_axis_available": raw_valid,
+            "attitude_interlock_active": False,
             "accelerometer_raw": accelerometer,
             "gyroscope_raw": gyroscope,
             "sample_age_ms": sample_age,
