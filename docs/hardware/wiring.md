@@ -18,7 +18,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/
 | 21 / 22 | Body I²C SDA / SCL to mux upstream |
 | No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not ESP32 strapping GPIO4 |
 | GND | Head, body, sensors and actuator-supply common logic reference |
-|34 | Proposed Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Bench test and firmware integration pending |
+|34 | Owned Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Firmware has debounced tap, double tap, hold and local motion stop; actual connection, shell timing and noise testing remain open |
 | Optional35/36/39 | Input-only bumper/interrupt signals with **external** pullups as needed; not implemented |
 
 The conservative output set has 15 pins. Steppers8 + servos2 + UART2 + I²C2
@@ -192,3 +192,26 @@ Local measured calibration commands are accepted only on the WROOM programming U
 Limits range 1..1300 mm; freshness is 30..200ms. All four floor, front and freshness settings must be staged before the atomic commit; calabort clears the stage. The body saves a versioned checksummed calibration in NVS, leaves motors disarmed, and requires five fresh measurements plus a NEW direct USB rearm before motion. Reboot and recovering I2C never resume old motion. Any stale/invalid/out-of-range sensor or bus fault latches stop, with no blind reversal. Measure real lead and stopping margin before putting tracks on a desk.
 
 The pinned Pololu generic read helper can divide by zero for zero SPAD returns; the runtime uses only its initialization and start functions, and a checked raw I2C results path. All of this is software integration, **not** a verified physical stop test or a solution to the current $50 delivered budget contradiction.
+
+## Five read-only range diagnostics
+
+The WROOM `status` response exposes five raw measurements through the existing
+Sense UART bridge and authenticated Mac `Head.status()`; no second server,
+motor command, new I2C transaction or calibration privilege is needed.
+
+The `ranges.mm` array is indexed 0 through 4 (four downward corners and
+one forward channel). `ranges.age_ms` is each last sample's elapsed age in
+WROOM monotonic milliseconds. `ranges.present_mask` and
+`ranges.valid_mask` are five-bit integers, with bit 0 for channel 0 and
+bit 4 for channel 4. A zero distance accompanied by a cleared presence bit
+means **missing**, not a measurement of zero clearance. A raw distance with a
+cleared valid bit is **invalid**, even if the number looks plausible.
+The existing `safety.ready`, `safety.fault` and fault sensor remain
+authoritative for movement. Raw ranges are for diagnosing wiring, actual
+sensor geometry and calibration on the catch tray, never for bypassing a stop.
+
+Missing readings and a bus reset clear all presence flags; calibration
+replacement invalidates prior readings. Until the physical sensors and
+floor samples are qualified, no valid mask or visually reasonable reading
+authorizes motion. Native tests verify all five arrays, reset handling and
+bounded JSON responses; neither the Mac nor model gains local USB rearm rights.
