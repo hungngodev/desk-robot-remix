@@ -2,7 +2,8 @@
 
 #if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
 
-// Five independent ST VL53L4CD measurements via TCA9548A channels 0..4.
+// Five critical ST VL53L4CD measurements via TCA9548A channels 0..4.
+// Full-feature profile adds three extra diagnostic directions on channels 5..7.
 // Reuse the pinned Pololu implementation for sensor initialization/ranging,
 // but use bounded checked Wire reads on the safety path. The upstream helper
 // divides by the reported SPAD count without guarding against zero, so do NOT
@@ -13,6 +14,10 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <VL53L4CD.h>
+
+#ifndef DESK_ROBOT_EXTRA_RANGERS
+#define DESK_ROBOT_EXTRA_RANGERS 0
+#endif
 #include "CliffGuard.h"
 
 namespace desk_robot {
@@ -38,6 +43,9 @@ class TofBus {
   bool ready() const { return initialized_; }
   std::uint8_t last_channel() const { return next_channel_; }
   std::uint32_t errors() const { return bus_errors_; }
+  // 0 left, 1 right, 2 rear. Read-only; no new motion permission.
+  RangeDiagnostic extra_diagnostic(std::uint8_t index, std::uint32_t now_ms) const;
+  std::uint8_t new_extra_channel() const { return new_extra_channel_; }
   // One-time read-only probe on the existing upstream 3.3V I2C bus,
   // after Wire has initialized. Do not call from the motor polling loop.
   ImuIdentity probe_imu();
@@ -47,10 +55,19 @@ class TofBus {
   static constexpr std::uint8_t kOptionalMuxAddress = 0x71;
   static constexpr std::uint8_t kSensorAddress = 0x29;
   static constexpr std::uint8_t kFloorAndFrontCount = 5;
+  static constexpr std::uint8_t kRangeCount = 5 + (DESK_ROBOT_EXTRA_RANGERS ? 3 : 0);
   static constexpr std::uint8_t kMaxSampleBytes = 15;
   TwoWire& wire_ = Wire;
   VL53L4CD device_{};
   std::uint8_t next_channel_ = 0;
+  std::uint8_t new_extra_channel_ = 255;
+  struct ExtraSample {
+    bool present = false;
+    bool valid = false;
+    std::uint16_t mm = 0;
+    std::uint32_t at_ms = 0;
+  };
+  ExtraSample extra_[3]{};
   bool initialized_ = false;
   bool optional_mux_present_ = false; // second 8-lane interaction bus if fitted
   std::uint32_t bus_errors_ = 0;

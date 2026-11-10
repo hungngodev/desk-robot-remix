@@ -16,7 +16,7 @@ bool TofBus::quiesce_optional_mux() {
 }
 
 bool TofBus::select(std::uint8_t channel) {
-  if (channel >= kFloorAndFrontCount || !quiesce_optional_mux()) return false;
+  if (channel >= kRangeCount || !quiesce_optional_mux()) return false;
   wire_.beginTransmission(kMuxAddress);
   if (wire_.write(static_cast<std::uint8_t>(1U << channel)) != 1) return false;
   return wire_.endTransmission(true) == 0;
@@ -57,6 +57,8 @@ void TofBus::failed(CliffGuard& guard) {
 
 bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   initialized_ = false;
+  new_extra_channel_ = 255;
+  for (auto& sample : extra_) sample = ExtraSample{};
   // Pololu sensor setup is bounded by its 80ms init timeout. Actual I2C
   // requests also require Wire's own 15ms timeout, independent of the sensor.
   wire_.begin(sda, scl, 400000);
@@ -79,7 +81,7 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   }
   device_.setBus(&wire_);
   device_.setTimeout(80);
-  for (std::uint8_t channel = 0; channel < kFloorAndFrontCount; ++channel) {
+  for (std::uint8_t channel = 0; channel < kRangeCount; ++channel) {
     if (!select(channel) || !device_.init() || device_.timeoutOccurred() ||
         !device_.setRangeTiming(20, 0)) {
       return false;
@@ -179,13 +181,26 @@ ImuIdentity TofBus::probe_imu() {
   return result;
 }
 
+RangeDiagnostic TofBus::extra_diagnostic(std::uint8_t index,
+                                         std::uint32_t now_ms) const {
+  RangeDiagnostic result{};
+  if (index >= 3 || !extra_[index].present) return result;
+  const auto& sample = extra_[index];
+  result.present = true;
+  result.valid = sample.valid;
+  result.distance_mm = sample.mm;
+  result.age_ms = now_ms - sample.at_ms;
+  return result;
+}
+
 void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
+  new_extra_channel_ = 255;
   if (!initialized_) {
     failed(guard);
     return;
   }
   const std::uint8_t channel = next_channel_;
-  next_channel_ = (next_channel_ + 1) % kFloorAndFrontCount;
+  next_channel_ = (next_channel_ + 1) % kRangeCount;
   if (!select(channel)) {
     failed(guard);
     return;
@@ -215,9 +230,19 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   // A zero-SPAD result is explicitly rejected; Pololu's generic reader
   // would divide by zero while calculating signal/spad.
   const bool spads_nonzero = result[3] > 0;
-  guard.sample(channel, distance,
-               valid && spads_nonzero && distance >= 1 && distance <= 1300,
-               now_ms);
+  const bool accepted =
+      valid && spads_nonzero && distance >= 1 && distance <= 1300;
+  if (channel < kFloorAndFrontCount) {
+    guard.sample(channel, distance, accepted, now_ms);
+  } else {
+    auto& sample = extra_[channel - kFloorAndFrontCount];
+    sample.present = true;
+    sample.valid = accepted;
+    sample.mm = distance;
+    sample.at_ms = now_ms;
+    new_extra_channel_ = channel - kFloorAndFrontCount;
+    // Extra measured ranges still require geometry, policy and stopping trials.
+  }
 }
 
 }  // namespace desk_robot
