@@ -57,6 +57,7 @@ int main() {
     CHECK(reply.find("\"acc\":[-32768,4567,16384]") != std::string::npos);
     CHECK(reply.find("\"gyro\":[-5,31,2000]") != std::string::npos);
     CHECK(reply.find("\"age_ms\":20") != std::string::npos);
+    CHECK(reply.find("\"extras\":{\"mask\":0") != std::string::npos);
     CHECK(!body.state().armed);
     mpu.valid = true;
     mpu.at_ms = 200;

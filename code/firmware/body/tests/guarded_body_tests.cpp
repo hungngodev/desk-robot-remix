@@ -419,6 +419,32 @@ static void touch_gesture_counters_survive_slow_status_polling() {
   CHECK(status.find("\"hold_count\":1") != std::string::npos);
 }
 
+static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
+  using desk_robot::BodyControl;
+  BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.sample_optional_inputs(7, false, false, false); // initial baseline
+  CHECK(body.state().bumper_events == 0 && body.state().reed_events == 0);
+  CHECK(send(body, "arm", 1) == "OK arm");
+  body.sample_optional_inputs(7, true, false, false);
+  CHECK(!body.state().armed && body.state().bumper_raw);
+  CHECK(body.state().bumper_events == 0);
+  body.sample_optional_inputs(7, true, false, false);
+  body.sample_optional_inputs(7, true, false, false);
+  CHECK(body.state().bumper_events == 1);
+  CHECK(send(body, "arm", 20) == "ERR arm bumper_active");
+  for (int i = 0; i < 3; ++i) body.sample_optional_inputs(7, false, false, false);
+  for (int i = 0; i < 3; ++i) body.sample_optional_inputs(7, false, true, true);
+  CHECK(body.state().reed_events == 1 && body.state().pir_events == 1);
+  CHECK(send(body, "arm", 40) == "OK arm");
+  const auto output = send(body, "status", 41);
+  CHECK(output.find("\"extras\":{\"mask\":7,\"bumper\":false,\"bumps\":1") != std::string::npos);
+  CHECK(output.find("\"reed_count\":1,\"pir\":true,\"pir_count\":1") != std::string::npos);
+  CHECK(output.size() < desk_robot::kReplyCapacity - 1);
+  body.sample_optional_inputs(0, false, false, false);
+  const auto disabled = send(body, "status", 45);
+  CHECK(disabled.find("\"extras\":{\"mask\":0") != std::string::npos);
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -432,6 +458,7 @@ int main() {
     CHECK(status.size() < desk_robot::kReplyCapacity - 1);
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
+    optional_sensor_inputs_never_arm_or_forge_boot_events();
     touch_telemetry_never_grants_motion();
     raw_touch_trip_preempts_debounce_without_forging_a_tap();
     touch_is_local_human_stop_and_requires_fresh_arm();

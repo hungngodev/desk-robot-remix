@@ -403,7 +403,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
-        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"age_ms\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"extras\":{\"mask\":%u,\"bumper\":%s,\"bumps\":%lu,\"reed\":%s,\"reed_count\":%lu,\"pir\":%s,\"pir_count\":%lu},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"age_ms\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
         "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
         "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
@@ -417,6 +417,13 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(state_.touch_taps),
         static_cast<unsigned long>(state_.touch_double_taps),
         static_cast<unsigned long>(state_.touch_holds),
+        static_cast<unsigned>(state_.extra_mask),
+        (state_.bumper_active || state_.bumper_raw) ? "true" : "false",
+        static_cast<unsigned long>(state_.bumper_events),
+        state_.reed_active ? "true" : "false",
+        static_cast<unsigned long>(state_.reed_events),
+        state_.pir_active ? "true" : "false",
+        static_cast<unsigned long>(state_.pir_events),
         static_cast<unsigned>(state_.imu_family),
         static_cast<unsigned>(state_.imu_gyro_id),
         static_cast<unsigned>(state_.imu_aux_id),
