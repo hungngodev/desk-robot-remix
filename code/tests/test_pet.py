@@ -637,3 +637,86 @@ async def test_local_wroom_safety_transitions_are_firsthand_not_replayed(fleet, 
         assert pet.status("robot-01")["local_safety_fault_events"] == 2
     finally:
         await pet.close()
+
+
+async def test_operator_selected_peer_memory_share_recovers_pr4_without_rewriting_witness(
+    fleet, tmp_path
+):
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    event_id = "witness_event_123"
+    memory.remember(
+        "robot-01", event_id, "I saw a key near my left wheel",
+        kind="key", source_robot="robot-01", witnessed=True,
+        observed_at=100.0, confidence=0.95,
+    )
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    try:
+        result = await pet.share_with_peer("robot-01", "robot-02", event_id)
+        assert result == {
+            "from_robot": "robot-01",
+            "to_robot": "robot-02",
+            "source_robot": "robot-01",
+            "event_id": event_id,
+            "stored": True,
+            "witnessed": False,
+            "text_only": True,
+        }
+        assert (await pet.share_with_peer("robot-01", "robot-02", event_id))["stored"] is False
+        assert memory.count("robot-01") == memory.count("robot-02") == 1
+        assert memory.count("robot-03") == 0
+        origin, received = memory.recent("robot-01")[0], memory.recent("robot-02")[0]
+        assert origin.witnessed and origin.source_robot == "robot-01"
+        assert not received.witnessed and received.source_robot == "robot-01"
+        assert received.kind == origin.kind and received.summary == origin.summary
+        assert received.observed_at == origin.observed_at
+        assert received.confidence == origin.confidence
+
+        with pytest.raises(ValueError, match="eyewitness"):
+            await pet.share_with_peer("robot-02", "robot-03", event_id)
+        with pytest.raises(ValueError, match="different"):
+            await pet.share_with_peer("robot-01", "robot-01", event_id)
+        with pytest.raises(ValueError, match="Unknown or expired"):
+            await pet.share_with_peer("robot-01", "robot-03", "missing")
+        fleet.fleet_text_sharing_enabled = False
+        with pytest.raises(ValueError, match="explicit local"):
+            await pet.share_with_peer("robot-01", "robot-03", event_id)
+        assert memory.count("robot-03") == 0
+    finally:
+        await pet.close()
+
+
+def test_selected_peer_share_api_requires_operator_and_existing_opt_in(fleet, tokens, tmp_path):
+    fleet.memory_dir = tmp_path / "memory"
+    fleet.fleet_text_sharing_enabled = True
+    tool = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    operator = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    with TestClient(create_app(fleet)) as client:
+        memory = client.app.state.runtime.memory
+        memory.remember(
+            "robot-01", "event123", "A wrapped candy arrived",
+            kind="candy", source_robot="robot-01", witnessed=True
+        )
+        path = "/v1/pet/robot-01/share"
+        payload = {"to_robot": "robot-03", "event_id": "event123"}
+        assert client.post(path, headers=tool, json=payload).status_code == 403
+        assert memory.count("robot-03") == 0
+        result = client.post(path, headers=operator, json=payload)
+        assert result.status_code == 200, result.text
+        assert result.json()["stored"] is True
+        assert client.post(path, headers=operator, json=payload).json()["stored"] is False
+        assert memory.recent("robot-03")[0].witnessed is False
+        assert memory.count("robot-02") == 0
+        assert client.post(
+            path, headers=operator,
+            json={"to_robot": "robot-03", "event_id": "bad name"}
+        ).status_code == 422
+        assert client.post(
+            path, headers=operator,
+            json={"to_robot": "missing", "event_id": "event123"}
+        ).status_code == 404
+        fleet.fleet_text_sharing_enabled = False
+        assert client.post(path, headers=operator, json=payload).status_code == 400
