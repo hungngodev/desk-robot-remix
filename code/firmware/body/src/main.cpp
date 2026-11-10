@@ -30,6 +30,10 @@ void poll_touch(std::uint32_t now_ms) {
   if (now_ms - touch_last_sample_ms < 25) return;
   touch_last_sample_ms = now_ms;
   const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
+  // One raw active sample stops the body in this same WROOM loop. Gesture
+  // counters still require three matching samples, so contact noise may
+  // conservatively stop the robot but cannot fake a counted tap/hold.
+  if (active) control.touch_trip();
   if (active != touch_candidate) {
     touch_candidate = active;
     touch_candidate_samples = 1;
