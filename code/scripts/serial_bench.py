@@ -100,7 +100,25 @@ def inspect_status(status: dict) -> dict:
             "pir": extras["pir"], "pir_events": extras["pir_count"],
             "physical_qualification_pass": False,
         }
+    cap_input = {"reported": False, "valid": False, "zone_mask": 0,
+                 "rising_zone_events": 0, "physical_qualification_pass": False}
+    if extras is not None:
+        cap_keys = ("cap", "cap_ok", "cap_events")
+        if any(key in extras for key in cap_keys):
+            if not all(key in extras for key in cap_keys):
+                raise ValueError("Incomplete CAP1188 optional telemetry")
+            zones, cap_ok, events = (extras[key] for key in cap_keys)
+            if (type(zones) is not int or not 0 <= zones <= 255
+                    or type(cap_ok) is not bool
+                    or type(events) is not int or not 0 <= events <= 0xffffffff
+                    or (not cap_ok and zones != 0)):
+                raise ValueError("Invalid CAP1188 touch source or zone mask")
+            cap_input = {
+                "reported": True, "valid": cap_ok, "zone_mask": zones,
+                "rising_zone_events": events, "physical_qualification_pass": False,
+            }
     return {
+        "cap_touch": cap_input,
         "optional_inputs": extra_data,
         "imu": {
             "family": ("unverified", "berryimu_v1", "berryimu_v2", "berryimu_v3", "mpu6050")[family],

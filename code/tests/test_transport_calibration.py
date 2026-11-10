@@ -249,6 +249,41 @@ def test_usb_optional_sensor_mask_levels_and_bumper_manual_rearm_gate():
         inspect_status(changed)
 
 
+
+def test_usb_cap1188_eight_touch_zones_are_diagnostic_not_motion_authority():
+    status = {
+        "backend": "stepper_28byj48", "armed": False,
+        "touch": {"active": False},
+        "safety": {"ready": False, "fault": "missing_sample"},
+        "ranges": {"mm": [50, 50, 50, 50, 200],
+                   "age_ms": [1, 1, 1, 1, 1],
+                   "present_mask": 31, "valid_mask": 31},
+        "extras": {"mask": 0, "bumper": False, "bumps": 0,
+                   "reed": False, "reed_count": 0,
+                   "pir": False, "pir_count": 0,
+                   "cap": 0b10000001, "cap_ok": True, "cap_events": 7},
+    }
+    report = inspect_status(status)
+    assert report["cap_touch"]["zone_mask"] == 129
+    assert report["cap_touch"]["rising_zone_events"] == 7
+    assert report["cap_touch"]["valid"]
+    assert not report["cap_touch"]["physical_qualification_pass"]
+    assert not report["eligible_for_manual_local_rearm"]
+    for broken in (
+        {"cap": 256}, {"cap": -1}, {"cap": True},
+        {"cap_ok": 1}, {"cap_events": -2},
+        {"cap_events": 2**32},
+        {"cap": 1, "cap_ok": False},
+    ):
+        corrupted = {**status, "extras": {**status["extras"], **broken}}
+        with pytest.raises(ValueError):
+            inspect_status(corrupted)
+    incomplete = {**status, "extras": {key: value for key, value
+                                     in status["extras"].items()
+                                     if key != "cap_events"}}
+    with pytest.raises(ValueError):
+        inspect_status(incomplete)
+
 @pytest.mark.parametrize("change", [
     {"backend": "dc_pwm"},
     {"imu": {"family": 5, "gyro_id": 0, "aux_id": 0}},

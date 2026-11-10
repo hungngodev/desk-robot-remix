@@ -267,3 +267,8 @@ are reviewed against vendor data. The optional BMP280 requires a different
 Bosch compensated pressure/temperature sensor library and a mux lane rather
 than silently reusing the six-axis MPU registers. No additional body sensor
 board was purchased or claimed functional.
+
+
+## Single-robot CAP1188 read-only USB diagnostics
+
+The existing `code/scripts/serial_bench.py --inspect --samples 10` now reports `cap_touch.reported`, `cap_touch.valid`, `cap_touch.zone_mask` (0..255) and `cap_touch.rising_zone_events` from *actual* WROOM CAP1188 telemetry. It rejects partial, forged or out-of-range fields and always reports `physical_qualification_pass=false`; it never arms or recovers the local guard. This is the same USB inspection path used for five VL53L4CD, MPU6050, bumper, PIR and reed. New Python tests include an 8-zone mask, missing fields, invalid types and counts. The actual electrode padding and through-shell physical trial remains open.
