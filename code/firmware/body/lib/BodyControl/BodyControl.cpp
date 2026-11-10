@@ -412,20 +412,63 @@ void BodyControl::execute(const char* line, std::size_t length,
     std::snprintf(reply, capacity, "OK ping");
   } else if (aux) {
     const auto& raw = state_.paw_pulse;
+    const auto& a = state_.accessories;
     const std::uint32_t age = raw.valid ? now_ms - raw.at_ms : 0U;
-    // Independent bounded read-only telemetry reply. Keep the safety status
-    // compact and do not add optional sensor reads to a motion command.
-    std::snprintf(
+    unsigned angle_present = 0, angle_valid = 0;
+    for (unsigned i = 0; i < 3; ++i) {
+      if (a.angle[i].present) angle_present |= 1U << i;
+      if (a.angle[i].present && a.angle[i].valid &&
+          now_ms - a.angle[i].at_ms < 350U) angle_valid |= 1U << i;
+    }
+    const bool force_fresh = a.force.valid &&
+                             now_ms - a.force.at_ms < 500U;
+    const bool climate_fresh = a.climate.valid &&
+                               now_ms - a.climate.at_ms < 1000U;
+    const bool fuel_fresh = a.gauge.fuel_valid &&
+                            now_ms - a.gauge.at_ms < 500U;
+    const bool monitor_fresh = a.gauge.monitor_valid &&
+                               now_ms - a.gauge.at_ms < 500U;
+    const bool proximity_fresh = a.proximity.valid &&
+                                 now_ms - a.proximity.at_ms < 350U;
+    // Independent bounded read-only telemetry. No synthesized heartbeat,
+    // grip force, wheel odometry, current amps or gesture direction.
+    const int written = std::snprintf(
         reply, capacity,
         "{\"pulse\":{\"present\":%s,\"valid\":%s,\"part_id\":%u,"
-        "\"red\":%lu,\"ir\":%lu,\"age_ms\":%lu,"
-        "\"bpm\":null,\"medical\":false}}",
+        "\"red\":%lu,\"ir\":%lu,\"age_ms\":%lu,\"bpm\":null,\"medical\":false},"
+        "\"angles\":{\"raw\":[%u,%u,%u],\"present_mask\":%u,"
+        "\"valid_mask\":%u,\"magnet\":[%u,%u,%u]},"
+        "\"force\":{\"adc\":[%d,%d],\"valid\":%s,\"calibrated\":false},"
+        "\"climate\":{\"temp_centi\":%d,\"rh_centi\":%d,\"valid\":%s},"
+        "\"power\":{\"cell_mv\":%u,\"soc_centi\":%u,\"bus_mv\":%u,"
+        "\"shunt_uv\":%d,\"fuel_valid\":%s,\"monitor_valid\":%s,"
+        "\"current_calibrated\":false},"
+        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":null}}",
         raw.present ? "true" : "false",
         raw.valid && age <= 250U ? "true" : "false",
         static_cast<unsigned>(raw.part_id),
         static_cast<unsigned long>(raw.red),
         static_cast<unsigned long>(raw.ir),
-        static_cast<unsigned long>(age));
+        static_cast<unsigned long>(age),
+        static_cast<unsigned>(a.angle[0].angle),
+        static_cast<unsigned>(a.angle[1].angle),
+        static_cast<unsigned>(a.angle[2].angle),
+        angle_present, angle_valid,
+        static_cast<unsigned>(a.angle[0].magnet_status),
+        static_cast<unsigned>(a.angle[1].magnet_status),
+        static_cast<unsigned>(a.angle[2].magnet_status),
+        static_cast<int>(a.force.adc[0]),
+        static_cast<int>(a.force.adc[1]),
+        force_fresh ? "true" : "false",
+        a.climate.temp_centi, a.climate.humidity_centi,
+        climate_fresh ? "true" : "false",
+        a.gauge.cell_mv, a.gauge.soc_centi, a.gauge.bus_mv,
+        a.gauge.shunt_uv, fuel_fresh ? "true" : "false",
+        monitor_fresh ? "true" : "false",
+        static_cast<unsigned>(a.proximity.raw),
+        proximity_fresh ? "true" : "false");
+    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
+      std::snprintf(reply, capacity, "ERR aux response_too_long");
   } else if (status) {
     // Five read-only measurements retain missing/invalid/age information
     // separately. Never use these values to bypass the local cliff latch.

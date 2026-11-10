@@ -206,6 +206,44 @@ static void measured_local_calibration_is_atomic_and_never_arms() {
   CHECK(send(body, "calcommit", 4, true) == "ERR calcommit incomplete_stage");
 }
 
+static void accessory_sensors_never_infer_grip_or_current_or_grant_arm() {
+  desk_robot::CliffGuard guard;
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  desk_robot::AccessoryReadings readings{};
+  readings.angle[0].present = true;
+  readings.angle[0].valid = true;
+  readings.angle[0].angle = 2000;
+  readings.angle[0].magnet_status = 0x20;
+  readings.angle[0].at_ms = 5;
+  readings.force.present = true;
+  readings.force.valid = true;
+  readings.force.adc[0] = 123;
+  readings.force.adc[1] = -456;
+  readings.force.at_ms = 5;
+  readings.gauge.fuel_present = true;
+  readings.gauge.fuel_valid = true;
+  readings.gauge.cell_mv = 3690;
+  readings.gauge.soc_centi = 6400;
+  readings.gauge.at_ms = 5;
+  readings.proximity.present = true;
+  readings.proximity.valid = true;
+  readings.proximity.raw = 90;
+  readings.proximity.at_ms = 5;
+  body.set_accessories(readings);
+  const std::string reply = send(body, "aux", 10);
+  CHECK(reply.find("\"angles\":{\"raw\":[2000,0,0]") != std::string::npos);
+  CHECK(reply.find("\"present_mask\":1,\"valid_mask\":1") != std::string::npos);
+  CHECK(reply.find("\"adc\":[123,-456]") != std::string::npos);
+  CHECK(reply.find("\"calibrated\":false") != std::string::npos);
+  CHECK(reply.find("\"cell_mv\":3690") != std::string::npos);
+  CHECK(reply.find("\"current_calibrated\":false") != std::string::npos);
+  CHECK(reply.find("\"gesture\":null") != std::string::npos);
+  CHECK(send(body, "arm", 10) == "ERR arm safety_interlock");
+  CHECK(!body.state().armed);
+  const std::string stale = send(body, "aux", 400);
+  CHECK(stale.find("\"valid_mask\":0") != std::string::npos);
+}
+
 static void optional_max30102_raw_never_authorizes_motion_or_diagnosis() {
   desk_robot::CliffGuard guard;
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
@@ -525,6 +563,7 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     optional_sensor_inputs_never_arm_or_forge_boot_events();
+    accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
     extra_three_ranging_channels_are_diagnostics_only();
     cap_petting_zones_are_optional_and_never_arm();
