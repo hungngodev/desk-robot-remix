@@ -160,6 +160,10 @@ class PetController:
             kind=kind, source_robot=robot_id, witnessed=True,
             observed_at=time.time(), confidence=1.0,
         )
+        if kind == "touch_hold":
+            # A deliberate long press is a silent, local-sensor-originated
+            # quiet request, never a motion permit or automatic rearm.
+            await self.set_quiet(robot_id, True)
         if state.enabled and state.generation == generation:
             self._consider_speech(robot_id, change, generation)
 
@@ -224,14 +228,17 @@ class PetController:
         state = self.states[robot_id]
         while state.enabled and state.generation == generation and not self._closed:
             try:
-                # Preserve the existing conversation owner and avoid competing
-                # with mic/transport during explicit or spontaneous TTS.
+                # Touch must still be processed while this robot talks, so a
+                # hold can silence an active sentence. Head status is read-only
+                # and uses the existing UART bridge, never a motor command.
+                await self._touch_from_body(robot_id, generation)
+                # Camera and language inference continue to respect the
+                # exclusive conversation and speech owners.
                 if self.conversation.active is not None or (
                     self._speech_task is not None and not self._speech_task.done()
                 ):
                     await asyncio.sleep(self.interval)
                     continue
-                await self._touch_from_body(robot_id, generation)
                 started = time.monotonic()
                 jpeg = await self.heads[robot_id].snapshot()
                 received = time.monotonic()
