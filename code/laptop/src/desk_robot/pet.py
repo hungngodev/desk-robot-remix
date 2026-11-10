@@ -45,6 +45,13 @@ class PetState:
     last_extra_mask: int | None = None
     last_extra_events: dict[str, int] | None = None
     last_cap_events: int | None = None
+    aux_task: asyncio.Task | None = field(default=None, repr=False)
+    aux_reads: int = 0
+    last_battery_low: bool | None = None
+    last_nose_angle: int | None = None
+    last_force_squeeze: bool | None = None
+    last_near_hand: bool | None = None
+    last_aux_kind: str | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
@@ -113,6 +120,9 @@ class PetController:
             "local_safety_fault_events": state.safety_fault_events,
             "last_local_safety_fault": state.last_safety_fault,
             "last_event": state.last_event,
+            "aux_sensor_reads": state.aux_reads,
+            "last_aux_interaction": state.last_aux_kind,
+            "aux_sensors_physically_qualified": False,
             "last_error": state.last_error,
             "motor_control_enabled_by_pet": False,
             "source_capture_timestamp_verified": False,
@@ -130,6 +140,7 @@ class PetController:
         if (
             (state.task is not None and not state.task.done())
             or (state.touch_task is not None and not state.touch_task.done())
+            or (state.aux_task is not None and not state.aux_task.done())
         ):
             raise RuntimeError("Previous pet task still shutting down")
         state.generation += 1
@@ -140,6 +151,12 @@ class PetController:
         state.last_extra_events = None
         state.last_extra_mask = None
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
+        state.aux_reads = 0
+        state.last_battery_low = None
+        state.last_nose_angle = None
+        state.last_force_squeeze = None
+        state.last_near_hand = None
+        state.last_aux_kind = None
         state.enabled = True
         state.last_error = None
         state.task = asyncio.create_task(self._observe(robot_id, state.generation))
@@ -149,14 +166,24 @@ class PetController:
             state.touch_task = asyncio.create_task(
                 self._poll_touch(robot_id, state.generation)
             )
+        # Aux is a lower-priority read-only task. Never start it in simulation,
+        # and never let optional I2C responses gate the cliff-stop path.
+        if (self.settings.mode == "hardware"
+                and callable(getattr(self.heads[robot_id], "aux_status", None))):
+            state.aux_task = asyncio.create_task(
+                self._poll_aux(robot_id, state.generation)
+            )
         return self.status(robot_id)
 
     async def pause(self, robot_id: str) -> dict:
         state = self.states[robot_id]
         state.generation += 1
         state.enabled = False
-        tasks = [t for t in (state.task, state.touch_task) if t is not None]
-        state.task = state.touch_task = None
+        tasks = [
+            t for t in (state.task, state.touch_task, state.aux_task)
+            if t is not None
+        ]
+        state.task = state.touch_task = state.aux_task = None
         for task in tasks:
             task.cancel()
         if tasks:
@@ -291,6 +318,102 @@ class PetController:
             await self.set_quiet(robot_id, True)
         await self._store_observation(robot_id, change)
         if state.enabled and state.generation == generation:
+            self._consider_speech(robot_id, change, generation)
+
+
+    async def _poll_aux(self, robot_id: str, generation: int) -> None:
+        """Poll optional accessories slowly, never interleave with safety stops."""
+        state = self.states[robot_id]
+        getter = getattr(self.heads[robot_id], "aux_status", None)
+        if not callable(getter):
+            return
+        while state.enabled and state.generation == generation and not self._closed:
+            try:
+                sample = await getter()  # HttpHead does strict schema validation
+                await self._observe_aux(robot_id, generation, sample)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Loss of an OPTIONAL sensor is not an excuse to bypass or
+                # overwrite the independent WROOM local motion safety guard.
+                state.last_error = f"Optional sensor: {type(exc).__name__}: {str(exc)[:80]}"
+                state.last_battery_low = None
+                state.last_nose_angle = None
+                state.last_force_squeeze = None
+                state.last_near_hand = None
+            await asyncio.sleep(1.0)
+
+    async def _observe_aux(self, robot_id: str, generation: int, data: dict) -> None:
+        """Record only real, fresh and optionally calibrated sensor transitions."""
+        if self.settings.mode != "hardware":
+            return
+        from .aux import validate_aux
+
+        validate_aux(data, robot_id)
+        state = self.states[robot_id]
+        if not state.enabled or state.generation != generation or self._closed:
+            return
+        state.aux_reads += 1
+        robot = self.settings.robot(robot_id)
+        changes: list[SceneChange] = []
+
+        power = data["power"]
+        if power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500:
+            low = power["soc_centi"] <= robot.battery_low_percent * 100
+            if state.last_battery_low is False and low:
+                changes.append(SceneChange(
+                    "battery_low", "My battery fuel gauge reports a low charge", 1.0
+                ))
+            state.last_battery_low = low
+        else:
+            state.last_battery_low = None
+
+        angles = data["angles"]
+        if robot.nose_twist_threshold_counts is not None and angles["valid_mask"] & 1:
+            angle = angles["raw"][0]
+            previous = state.last_nose_angle
+            if previous is not None:
+                difference = abs((angle - previous + 2048) % 4096 - 2048)
+                if difference >= robot.nose_twist_threshold_counts:
+                    changes.append(SceneChange(
+                        "nose_twist", "My magnetic nose dial was rotated", 1.0
+                    ))
+            state.last_nose_angle = angle
+        else:
+            state.last_nose_angle = None
+
+        force = data["force"]
+        if robot.squeeze_raw_threshold is not None and force["valid"]:
+            # An FSR is a nonlinear pad. Raw ADC only, no fabricated Newtons.
+            squeezed = max(force["adc"]) >= robot.squeeze_raw_threshold
+            if state.last_force_squeeze is False and squeezed:
+                changes.append(SceneChange(
+                    "squeeze", "Someone pressed my calibrated pressure pad", 1.0
+                ))
+            state.last_force_squeeze = squeezed
+        else:
+            state.last_force_squeeze = None
+
+        proximity = data["proximity"]
+        if robot.proximity_near_raw_threshold is not None and proximity["valid"]:
+            near = proximity["raw"] >= robot.proximity_near_raw_threshold
+            if state.last_near_hand is False and near:
+                changes.append(SceneChange(
+                    "nearby_object",
+                    "My calibrated proximity sensor noticed a nearby object",
+                    1.0,
+                ))
+            state.last_near_hand = near
+        else:
+            state.last_near_hand = None
+
+        for change in changes:
+            if not state.enabled or state.generation != generation:
+                return
+            state.events += 1
+            state.last_event = change.description
+            state.last_aux_kind = change.kind
+            await self._store_observation(robot_id, change)
             self._consider_speech(robot_id, change, generation)
 
     async def _poll_touch(self, robot_id: str, generation: int) -> None:

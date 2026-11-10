@@ -18,6 +18,11 @@ class RobotConfig(BaseModel):
     device_id: str = ""
     motion_enabled: bool = False
     exploration_qualified: bool = False  # Explicit real swept-path trial gate; not a simulation claim.
+    # Optional physical sensor-triggered interactions. None means NOT calibrated.
+    nose_twist_threshold_counts: int | None = Field(default=None, ge=80, le=1800)
+    squeeze_raw_threshold: int | None = Field(default=None, ge=100, le=30000)
+    proximity_near_raw_threshold: int | None = Field(default=None, ge=25, le=245)
+    battery_low_percent: int = Field(default=20, ge=5, le=40)
     calibration: Path | None = None
     voice: str = "af_heart"
 

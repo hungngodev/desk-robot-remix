@@ -802,6 +802,98 @@ async def test_selective_only_mode_copies_single_existing_eyewitness_event(fleet
         await pet.close()
 
 
+
+async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, tmp_path):
+    from desk_robot.aux import validate_aux
+
+    fleet.mode = "hardware"
+    fleet.robots[0].nose_twist_threshold_counts = 500
+    fleet.robots[0].squeeze_raw_threshold = 8000
+    fleet.robots[0].proximity_near_raw_threshold = 120
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    robot_id = "robot-01"
+    state = pet.states[robot_id]
+    state.enabled = True
+    state.generation = 3
+
+    def report(soc, nose, pressure, nearby):
+        return {
+            "robot_id": robot_id,
+            "pulse": {"present": False, "valid": False, "part_id": 0,
+                      "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
+            "angles": {"raw": [nose, 0, 0], "present_mask": 1,
+                       "valid_mask": 1, "magnet": [32, 0, 0]},
+            "force": {"adc": [pressure, 0], "valid": True, "calibrated": False},
+            "climate": {"temp_centi": 2150, "rh_centi": 5000, "valid": True},
+            "power": {"cell_mv": 3700, "soc_centi": soc, "bus_mv": 5100,
+                      "shunt_uv": 5, "fuel_valid": True, "monitor_valid": True,
+                      "current_calibrated": False},
+            "proximity": {"raw": nearby, "valid": True, "gesture": None},
+        }
+
+    try:
+        first = report(5000, 100, 100, 40)
+        assert validate_aux(first, robot_id) is first
+        await pet._observe_aux(robot_id, 3, first)
+        assert not any(m.kind in {"battery_low", "nose_twist", "squeeze", "nearby_object"}
+                       for m in memory.recent(robot_id))
+        await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150))
+        kind = {m.kind for m in memory.recent(robot_id)}
+        assert {"battery_low", "nose_twist", "squeeze", "nearby_object"} <= kind
+        assert memory.count("robot-02") == 0
+        before = sum(m.kind in kind for m in memory.recent(robot_id))
+        await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150))
+        assert sum(m.kind in kind for m in memory.recent(robot_id)) == before
+
+        # Same readings after invalid sensor data must not imply continuing contact.
+        invalid = report(1900, 900, 10000, 150)
+        invalid["force"]["valid"] = False
+        invalid["proximity"]["valid"] = False
+        invalid["power"]["fuel_valid"] = False
+        invalid["angles"]["valid_mask"] = 0
+        await pet._observe_aux(robot_id, 3, invalid)
+        assert sum(m.kind in kind for m in memory.recent(robot_id)) == before
+        state.enabled = False
+        await pet._observe_aux(robot_id, 3, report(1900, 2000, 15000, 200))
+        assert sum(m.kind in kind for m in memory.recent(robot_id)) == before
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_sensor_interactions_disabled_until_measured_thresholds(fleet, tmp_path):
+    fleet.mode = "hardware"
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 5
+    base = {
+        "robot_id": "robot-01",
+        "pulse": {"present": False, "valid": False, "part_id": 0,
+                  "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
+        "angles": {"raw": [1000, 0, 0], "present_mask": 1,
+                   "valid_mask": 1, "magnet": [32, 0, 0]},
+        "force": {"adc": [30000, 30000], "valid": True, "calibrated": False},
+        "climate": {"temp_centi": 2300, "rh_centi": 5000, "valid": True},
+        "power": {"cell_mv": 3700, "soc_centi": 6000, "bus_mv": 5000,
+                  "shunt_uv": 0, "fuel_valid": True, "monitor_valid": True,
+                  "current_calibrated": False},
+        "proximity": {"raw": 255, "valid": True, "gesture": None},
+    }
+    try:
+        await pet._observe_aux("robot-01", 5, base)
+        base["angles"]["raw"][0] = 3500
+        await pet._observe_aux("robot-01", 5, base)
+        assert state.aux_reads == 2
+        assert not any(m.kind in {"nose_twist", "squeeze", "nearby_object"}
+                       for m in memory.recent("robot-01"))
+    finally:
+        state.enabled = False
+        await pet.close()
+
 async def test_cap1188_touch_memory_carries_real_edge_provenance(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
     conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
