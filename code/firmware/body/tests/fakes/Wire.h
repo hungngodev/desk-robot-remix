@@ -45,9 +45,11 @@ class TwoWire {
     ++transactions;
     if (!connected(current_address)) return 4;
     if (current_address == 0x70) {
+      if (outbound.empty()) return 0; // address-only I2C ACK probe
       if (outbound.size() != 1) return 4;
       ranges = outbound[0];
     } else if (current_address == 0x71) {
+      if (outbound.empty()) return 0; // address-only TCA9548A probe
       if (outbound.size() != 1) return 4;
       extras = outbound[0];
       if (extras && ranges) unsafe_parallel_mux = true;
