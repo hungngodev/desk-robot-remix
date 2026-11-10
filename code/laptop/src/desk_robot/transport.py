@@ -30,11 +30,12 @@ def validate_command(command: str) -> str:
     op = tokens[0]
     if op in {"ping", "status", "arm", "disarm", "stop", "keepalive"} and len(tokens) == 1:
         return op
-    if op == "drive" and len(tokens) == 4:
+    if op == "drive" and len(tokens) in (3, 4):
         values = tokens[1:]
         if not all(re.fullmatch(r"-?[0-9]{1,3}", x) for x in values):
             raise ValueError("drive arguments must be integers")
-        left, right, duration = map(int, values)
+        left, right = map(int, values[:2])
+        duration = int(values[2]) if len(values) == 3 else 250
         if -40 <= left <= 40 and -40 <= right <= 40 and 1 <= duration <= 250:
             return op
     if op in {"lift", "grip"} and len(tokens) == 2 and tokens[1].isdigit():
@@ -47,7 +48,8 @@ def expected_ack(command: str) -> str:
     op = validate_command(command)
     args = command.split()[1:]
     if op == "drive":
-        left, right, ms = map(int, args)
+        left, right = map(int, args[:2])
+        ms = int(args[2]) if len(args) == 3 else 250
         return f"OK drive left={left} right={right} ms={ms}"
     if op in {"lift", "grip"}:
         return f"OK {op} angle={int(args[0])}"
