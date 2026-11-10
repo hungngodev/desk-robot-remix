@@ -123,7 +123,9 @@ produce another reaction already possible with the existing camera/mic/ToFs.
 - A10: detect tap/double/hold through actual case; suppress bounce/repeated events;
   touching during motion stops/pauses before the expression path. Existing body
   firmware now distinguishes single tap, double tap and long hold using debounced
-  edges and local uptime, while retaining immediate local motion stop. Candidate
+  edges and local uptime. One **raw sampled high** independently stops the
+  current WROOM motor lease before three-sample gesture classification, and
+  blocks a new arm while raw or stable input remains pressed. Candidate
   software windows are a short touch up to 600 ms, a second tap ending within
   350 ms of the first release, and a hold of at least 900 ms. The final windows
   and touch response through the shell still require measured trials. Typed
