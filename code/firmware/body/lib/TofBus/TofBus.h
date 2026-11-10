@@ -17,6 +17,15 @@
 
 namespace desk_robot {
 
+// Only reads WHO_AM_I: no sensor fusion, driver selection or motion authority.
+// The photographed owned BerryIMU is likely V1 but its chip is unverified.
+// 1 = V1 LSM9DS0, 2 = V2 LSM9DS1, 3 = V3 LSM6DSL, 0 = unknown.
+struct ImuIdentity {
+  std::uint8_t family = 0;
+  std::uint8_t gyro_id = 0;
+  std::uint8_t aux_id = 0;
+};
+
 class TofBus {
  public:
   // These are board pins, not alternate addresses; every device is 0x29.
@@ -27,6 +36,9 @@ class TofBus {
   bool ready() const { return initialized_; }
   std::uint8_t last_channel() const { return next_channel_; }
   std::uint32_t errors() const { return bus_errors_; }
+  // One-time read-only probe on the existing upstream 3.3V I2C bus,
+  // after Wire has initialized. Do not call from the motor polling loop.
+  ImuIdentity probe_imu();
 
  private:
   static constexpr std::uint8_t kMuxAddress = 0x70;
