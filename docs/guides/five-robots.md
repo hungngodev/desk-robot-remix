@@ -48,6 +48,35 @@ own firsthand observation. If five cameras see a change at once, they still
 have individually witnessed events, while the existing global speech owner
 serializes responses and applies spontaneous cooldown.
 
+### Operator selected one event relay, recovered from historical PR #4
+
+With `fleet_text_sharing_enabled = true`, an operator may copy **one already
+witnessed text memory** to one named peer rather than relying only on the
+automatic fleet fanout. Reuse the existing Mac authenticated API; do not add
+another peer database, network bus, camera stream or speech worker.
+
+```sh
+curl -X POST http://127.0.0.1:8000/v1/pet/robot-01/share \
+  -H "Authorization: Bearer $DESK_ROBOT_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"to_robot":"robot-03","event_id":"<existing-event-id>"}'
+```
+
+Supply an actual `event_id` already stored by the source robot, obtained from
+the private memory store. An operator credential is mandatory; a model/tool
+token alone cannot share. Repeating the same event to that peer is idempotent:
+`stored=false` means no new copy was created. Each original local observation
+remains `witnessed=true` only for its own camera or touch; the recipient stores
+the same text, origin and observation timestamp with `witnessed=false`.
+When auto fanout has already delivered that event, a manual share does not
+duplicate it.
+
+The former PR #4 could reforward secondhand stories with an explicit teller
+chain. Our current schema preserves **origin identity** but does not store
+intermediate tellers; to avoid falsified provenance, manual relay only accepts
+firsthand source records until teller-chain support is properly designed.
+Sharing does not speak, move, rearm or make recipients claim they saw a scene.
+
 This is implemented host software with provenance tests, not measured five-head
 optical overlap, physical Wi-Fi load or acoustics. `fleet_text_sharing_enabled`
 should be enabled only when the user explicitly chooses local peer memory
