@@ -323,6 +323,18 @@ void BodyControl::execute(const char* line, std::size_t length,
   if (ping) {
     std::snprintf(reply, capacity, "OK ping");
   } else if (status) {
+    // Five read-only measurements retain missing/invalid/age information
+    // separately. Never use these values to bypass the local cliff latch.
+    RangeDiagnostic ranges[kCliffSensorCount]{};
+    unsigned present_mask = 0;
+    unsigned valid_mask = 0;
+    if (guard_ != nullptr) {
+      for (std::uint8_t i = 0; i < kCliffSensorCount; ++i) {
+        ranges[i] = guard_->diagnostic(i, now_ms);
+        if (ranges[i].present) present_mask |= 1U << i;
+        if (ranges[i].present && ranges[i].valid) valid_mask |= 1U << i;
+      }
+    }
     std::snprintf(
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
@@ -330,7 +342,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
         "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
-        "\"fault\":\"%s\",\"sensor\":%u}}",
+        "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
+        "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
         state_.lift, state_.grip, state_.lift_target, state_.grip_target,
         state_.servos_attached ? "true" : "false",
@@ -347,7 +360,18 @@ void BodyControl::execute(const char* line, std::size_t length,
             guard_->evaluate(now_ms) ? "true" : "false",
         profile_ != BodyProfile::StepperGuarded ? "not_required" :
             guard_ == nullptr ? "missing_guard" : CliffGuard::fault_name(guard_->fault()),
-        static_cast<unsigned>(guard_ == nullptr ? kNoFaultSensor : guard_->fault_sensor()));
+        static_cast<unsigned>(guard_ == nullptr ? kNoFaultSensor : guard_->fault_sensor()),
+        static_cast<unsigned>(ranges[0].distance_mm),
+        static_cast<unsigned>(ranges[1].distance_mm),
+        static_cast<unsigned>(ranges[2].distance_mm),
+        static_cast<unsigned>(ranges[3].distance_mm),
+        static_cast<unsigned>(ranges[4].distance_mm),
+        static_cast<unsigned long>(ranges[0].age_ms),
+        static_cast<unsigned long>(ranges[1].age_ms),
+        static_cast<unsigned long>(ranges[2].age_ms),
+        static_cast<unsigned long>(ranges[3].age_ms),
+        static_cast<unsigned long>(ranges[4].age_ms),
+        present_mask, valid_mask);
   } else if (rearm) {
     // Head/HTTP/MCP jobs may arm only an already-clear body. A new local USB
     // action is required after a fault; an older job permit cannot clear it.
