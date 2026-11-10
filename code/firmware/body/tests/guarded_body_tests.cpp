@@ -213,14 +213,14 @@ static void touch_telemetry_never_grants_motion() {
   body.set_touch(true);
   body.set_touch(true);
   CHECK(body.state().touch_count == 1 && body.state().touch_active);
-  CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":1}") !=
+  CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":1,\"tap_count\":0") !=
         std::string::npos);
   CHECK(send(body, "arm", 0) == "ERR arm touch_active");
   body.set_touch(false);
   CHECK(!body.state().touch_active && body.state().touch_count == 1);
   body.set_touch(true);
   CHECK(body.state().touch_count == 2);
-  CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":2}") !=
+  CHECK(send(body, "status", 0).find("\"touch\":{\"active\":true,\"count\":2,\"tap_count\":0") !=
         std::string::npos);
   CHECK(!body.state().armed);
 }
@@ -255,6 +255,40 @@ static void touch_is_local_human_stop_and_requires_fresh_arm() {
   CHECK(body.state().left == 0 && body.state().right == 0);
 }
 
+static void touch_gesture_counters_survive_slow_status_polling() {
+  desk_robot::BodyControl body;
+  body.set_touch(true, 0);
+  body.set_touch(false, 100);
+  CHECK(body.state().touch_taps == 0);  // wait for possible second tap
+  body.tick(451);
+  CHECK(body.state().touch_taps == 1 && body.state().touch_double_taps == 0);
+
+  body.set_touch(true, 1000);
+  body.set_touch(false, 1090);
+  body.set_touch(true, 1180);
+  body.set_touch(false, 1280);
+  body.tick(1750);
+  CHECK(body.state().touch_double_taps == 1 && body.state().touch_taps == 1);
+
+  body.set_touch(true, 2000);
+  body.tick(2899);
+  CHECK(body.state().touch_holds == 0);
+  body.tick(2900);
+  CHECK(body.state().touch_holds == 1);
+  body.set_touch(false, 2950);
+  CHECK(body.state().touch_holds == 1 && body.state().touch_taps == 1);
+
+  // Unsigned elapsed arithmetic survives the 32-bit millis rollover.
+  body.set_touch(true, 0xfffffff0U);
+  body.set_touch(false, 0x00000040U);
+  body.tick(0x000001a0U);
+  CHECK(body.state().touch_taps == 2);
+  CHECK(body.state().touch_count == 5);
+  const auto status = send(body, "status", 0x000001a0U);
+  CHECK(status.find("\"double_count\":1") != std::string::npos);
+  CHECK(status.find("\"hold_count\":1") != std::string::npos);
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -268,7 +302,8 @@ int main() {
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     touch_telemetry_never_grants_motion();
     touch_is_local_human_stop_and_requires_fresh_arm();
-    std::cout << "PASS physical touch stops motion locally without remote rearm\\n";
+    touch_gesture_counters_survive_slow_status_polling();
+    std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
     recovery_is_local_and_not_an_arm();
