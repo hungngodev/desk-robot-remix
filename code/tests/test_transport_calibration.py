@@ -73,6 +73,7 @@ def test_usb_bench_reads_five_real_range_slots_without_arming():
 
     status = {
         "backend": "stepper_28byj48", "armed": False,
+        "imu": {"family": 1, "gyro_id": 212, "aux_id": 73},
         "touch": {"active": False, "count": 2},
         "safety": {"required": True, "ready": False, "fault": "missing_sample", "sensor": 0},
         "ranges": {
@@ -87,6 +88,9 @@ def test_usb_bench_reads_five_real_range_slots_without_arming():
     ]
     assert [s["distance_mm"] for s in result["ranges"]] == [50, 51, 49, 52, 200]
     assert result["eligible_for_manual_local_rearm"]
+    assert result["imu"]["family"] == "berryimu_v1"
+    assert result["imu"]["gyro_who_am_i"] == 212
+    assert result["imu"]["motion_driver_active"] is False
     assert result["local_guard_fault"] == "missing_sample"
     assert not result["physical_qualification_pass"]
     status["ranges"]["present_mask"] = 23
@@ -99,6 +103,8 @@ def test_usb_bench_reads_five_real_range_slots_without_arming():
 
 @pytest.mark.parametrize("change", [
     {"backend": "dc_pwm"},
+    {"imu": {"family": 4, "gyro_id": 0, "aux_id": 0}},
+    {"imu": {"family": True, "gyro_id": 212, "aux_id": 73}},
     {"touch": {"active": "false"}},
     {"safety": None},
     {"ranges": {}},
