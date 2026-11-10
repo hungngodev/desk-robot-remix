@@ -120,6 +120,7 @@ async def test_one_real_change_initiates_one_grounded_speech_and_memory(fleet, t
     assert len(speaker.spoken) == 1
     assert chat.prompts and "A flat key appeared" in chat.prompts[0][1]["content"]
     assert memory.count("robot-01") == 2
+    assert all(memory.count(r.id) == 0 for r in fleet.robots if r.id != "robot-01")
     records = memory.recent("robot-01")
     assert records[0].kind == "own_utterance"
     assert records[1].kind == "key" and records[1].witnessed
@@ -279,5 +280,87 @@ async def test_wroom_gesture_counters_feed_firsthand_memory_without_replaying_re
         await asyncio.sleep(.05)
         assert len([m for m in memory.recent("robot-01")
                     if m.kind.startswith("touch_")]) == 3
+    finally:
+        await pet.close()
+
+
+async def test_opt_in_camera_observation_shares_only_text_with_correct_fleet_provenance(
+    fleet, tmp_path
+):
+    fleet.fleet_text_sharing_enabled = True
+    head, chat, speaker, scene = (
+        ChangingCamera(), GroundedChat(), SimulatedSpeaker(), KeyScene()
+    )
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, chat, speaker, memory=memory)
+    pet = PetController(
+        fleet, {"robot-01": head}, conversation, memory, scene,
+        interval=.01, speech_cooldown=120,
+    )
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: all(
+            len([m for m in memory.recent(r.id) if m.kind == "key"]) == 1
+            for r in fleet.robots
+        ))
+        await wait_for(lambda: len(speaker.spoken) == 1)
+        observed = []
+        for robot in fleet.robots:
+            records = [m for m in memory.recent(robot.id) if m.kind == "key"]
+            assert len(records) == 1
+            item = records[0]
+            assert item.summary == "A flat key appeared on the desk"
+            assert item.source_robot == "robot-01"
+            assert item.witnessed is (robot.id == "robot-01")
+            observed.append(item)
+        assert len({m.event_id for m in observed}) == 1
+        assert len({m.observed_at for m in observed}) == 1
+        assert len({m.confidence for m in observed}) == 1
+        assert len(speaker.spoken) == 1
+        assert scene.calls == 1
+        assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
+    finally:
+        await pet.close()
+
+
+async def test_opt_in_touch_event_shares_peer_report_without_reclassifying_as_firsthand(
+    fleet, tmp_path
+):
+    fleet.fleet_text_sharing_enabled = True
+
+    class TouchHead:
+        def __init__(self):
+            self.calls = 0
+
+        async def status(self):
+            self.calls += 1
+            count = 1 if self.calls > 1 else 0
+            return {"touch": {"count": count, "active": False}}
+
+        async def snapshot(self):
+            return WHITE
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {"robot-01": TouchHead()}, conversation, memory, KeyScene(),
+        interval=.01,
+    )
+    try:
+        pet.start("robot-01")
+        await wait_for(lambda: all(
+            any(m.kind == "touch" for m in memory.recent(r.id))
+            for r in fleet.robots
+        ))
+        facts = [
+            next(m for m in memory.recent(r.id) if m.kind == "touch")
+            for r in fleet.robots
+        ]
+        assert len({m.event_id for m in facts}) == 1
+        assert facts[0].witnessed
+        assert all(not m.witnessed and m.source_robot == "robot-01"
+                   for m in facts[1:])
+        assert all(m.summary == "Someone has just touched my body" for m in facts)
     finally:
         await pet.close()
