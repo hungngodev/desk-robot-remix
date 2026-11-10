@@ -228,3 +228,44 @@ def test_obsolete_floor_sensor_is_not_an_active_purchase_item():
     assert "front-left downward VL53L4CD candidate" in wiring
     assert "downward VL6180X" not in wiring
     assert not module("check_budget").budget(data)["purchase_ready"]
+
+
+def test_actual_wroom_stepper_wiring_has_unique_boot_safe_pins():
+    """Prevent a future firmware pin change from silently corrupting the harness.
+
+    This checks source pin ownership, not voltage, current, continuity or a
+    physically fitted board. The DC reference is a different binary/profile.
+    """
+    pins = (ROOT / "firmware/body/include/BodyPins.h").read_text()
+    stepper = pins.split("#if DESK_ROBOT_STEPPER", 1)[1].split("#else", 1)[0]
+
+    def values(name, source):
+        found = re.search(rf"constexpr int {name}\[\] = \{{([^}}]+)\}};", source)
+        assert found, f"Missing {name} pin array"
+        return [int(x.strip()) for x in found.group(1).split(",")]
+
+    def one(name, source):
+        found = re.search(rf"constexpr int {name} = (-?\d+);", source)
+        assert found, f"Missing {name} pin"
+        return int(found.group(1))
+
+    wheels = values("kLeftStepperPins", stepper) + values("kRightStepperPins", stepper)
+    phases = values("kMotorPins", stepper)
+    assert len(wheels) == len(phases) == 8
+    assert wheels == phases
+    assert one("kMuxReset", stepper) == -1  # passive 3.3 V pullup, no GPIO4
+    external = [
+        *wheels,
+        one("kUartRx", pins), one("kUartTx", pins),
+        one("kSensorSda", stepper), one("kSensorScl", stepper),
+        one("kLiftServo", pins), one("kGripServo", pins),
+        one("kTouchOutput", stepper),
+    ]
+    assert len(external) == len(set(external)) == 15
+    assert one("kTouchOutput", stepper) == 34  # input only, no internal pullup
+    motor_outputs = set(external) - {34}
+    forbidden = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 34, 35, 36, 39}
+    assert motor_outputs.isdisjoint(forbidden)
+    assert one("kSensorSda", stepper) == 21
+    assert one("kSensorScl", stepper) == 22
+    assert (one("kUartRx", pins), one("kUartTx", pins)) == (16, 17)
