@@ -14,6 +14,7 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | Find every requested idea and link | [200 feature entries](source-map.md#original-html-feature-and-sensor-idea-register) and [131 original HTML URLs](source-map.md#complete-original-html-research-link-index) and [original file followup](research/2026-11-10-original-html-link-and-hardware-audit.md) |
 | Check the hard behavior and proactive requirements | [System contract](product-definition.md) and [acceptance A1–A12](records/verification.md) |
 | See the exact proposed code and firmware changes | [Implementation file map](PLAN.md) and [source reuse decisions](research/2026-11-03-active-pet-sources.md) |
+| See actual reused open source implementations and new tests | [November 10 open source integration pass](research/2026-11-10-active-open-source-reuse-pass.md) |
 | Check the selected full five-pet wiring and exact purchase quantities | [One robot inventory and buy table](hardware/one-robot-inventory-and-shopping.md), [finalized full feature wiring and shopping](hardware/full-feature-wiring-and-shopping.md) and [machine-readable allocation](hardware/full-feature-plan.json) |
 | Check reported stock and historical prototype quote | [Owned inventory](hardware/fleet-inventory.json) and [historical prototype BOM](hardware/bom.json) |
 | Start the first physical check | [Gripper fit and bench guide](guides/first-gripper-test.md) |
