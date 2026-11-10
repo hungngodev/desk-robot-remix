@@ -54,6 +54,9 @@ class BodyControl {
   void force_disarm();
   // Hardware GPIO input only; never grants or clears a motion permit.
   void set_touch(bool active, std::uint32_t now_ms = 0);
+  // Un-debounced local reflex: even one sensed high stops wheels and ramp,
+  // without fabricating a recognized gesture or releasing servo holding PWM.
+  void touch_trip();
   // Boot-time read-only identity; does not confer tilt safety or arm privilege.
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
