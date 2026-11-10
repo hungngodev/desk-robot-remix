@@ -2,6 +2,10 @@
 # Enter each head's actual LAN address, unique device ID and measured calibration.
 # Hats/costumes are removable cosmetics; every unit keeps its camera and gripper.
 mode = "hardware"
+# Default OFF. Opt in only if sharing each pet's observed scene/touch text with
+# all five separate local memories is acceptable for room privacy. No JPEG,
+# microphone PCM, video, or motion authority is shared.
+fleet_text_sharing_enabled = false
 ollama_model = "qwen3:8b"
 # Choose and separately install a locally compatible multimodal Ollama model.
 # This name is a candidate; no model download, five-feed benchmark or accuracy claim is implied.
