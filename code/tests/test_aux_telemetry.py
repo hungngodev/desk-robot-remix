@@ -30,7 +30,9 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
     assert result["pulse"]["bpm"] is None
     assert result["force"]["calibrated"] is False
     assert result["power"]["current_calibrated"] is False
-    assert result["proximity"]["gesture"] is None
+    assert result["proximity"]["gesture"] == 1
+    assert result["proximity"]["gesture_events"] == 3
+    assert result["proximity"]["physically_qualified"] is False
 
 
 @pytest.mark.parametrize(
