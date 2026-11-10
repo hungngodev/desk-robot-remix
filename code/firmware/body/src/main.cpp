@@ -4,6 +4,7 @@
 #include "BodyPins.h"
 #if DESK_ROBOT_STEPPER
 #include "CliffGuard.h"
+#include "BerryImu.h"
 #include "StepperDrive.h"
 #include "TofBus.h"
 #include <Preferences.h>
@@ -18,6 +19,7 @@ desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
 desk_robot::TofBus tof;
+desk_robot::BerryImu berry_imu;  // shares the upstream Wire bus with ToF mux
 // AT42QT1010 owns the input threshold. Sample without internal pullups
 // (GPIO34 is input-only), debounce three equal 25ms samples, and retain
 // an edge counter so the Mac can detect short taps between status polls.
@@ -293,6 +295,14 @@ void setup() {
   } else {
     Serial.println("OK sensor_init five_vl53l4cd_channels");
   }
+  // Identity pairing and raw samples only: do not infer a verified tilt limit.
+  // Never probe the accessory until the five mandatory ranging devices are
+  // initialized. Unexpected I2C timeouts occur with motors still disarmed.
+  if (tof.ready()) {
+    Serial.println(berry_imu.begin(Wire) ?
+        "OK berryimu_detected_raw_only" :
+        "WARN berryimu_unidentified_or_unsupported_raw_only");
+  }
   if (load_calibration()) {
     Serial.println("OK calibration_loaded samples_and_local_rearm_required");
   } else {
@@ -312,7 +322,11 @@ void loop() {
 #if DESK_ROBOT_STEPPER
   // Real I2C sampling precedes every physical motor update. The pure
   // CliffGuard remains the only local motion/safety authority.
-  if (tof.ready()) tof.poll(cliff_guard, millis());
+  if (tof.ready()) {
+    tof.poll(cliff_guard, millis());
+    berry_imu.poll(millis());
+    control.set_imu(berry_imu.reading());
+  }
   poll_touch(millis());
 #endif
   control.tick(millis());
