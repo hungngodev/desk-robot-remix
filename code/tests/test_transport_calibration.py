@@ -268,7 +268,17 @@ def test_usb_cap1188_eight_touch_zones_are_diagnostic_not_motion_authority():
     assert report["cap_touch"]["rising_zone_events"] == 7
     assert report["cap_touch"]["valid"]
     assert not report["cap_touch"]["physical_qualification_pass"]
-    assert not report["eligible_for_manual_local_rearm"]
+    # Optional petting never grants nor revokes local USB safety recovery.
+    # The diagnostic must be identical to an otherwise identical body status
+    # with CAP fields absent. Actual WROOM guard remains authoritative.
+    without_cap = {
+        **status, "extras": {
+            key: value for key, value in status["extras"].items()
+            if key not in ("cap", "cap_ok", "cap_events")
+        },
+    }
+    assert (report["eligible_for_manual_local_rearm"] ==
+            inspect_status(without_cap)["eligible_for_manual_local_rearm"])
     for broken in (
         {"cap": 256}, {"cap": -1}, {"cap": True},
         {"cap_ok": 1}, {"cap_events": -2},
