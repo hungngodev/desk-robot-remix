@@ -298,10 +298,11 @@ void setup() {
   // controller or unqualified safety thresholds are silently installed.
   const auto imu = tof.probe_imu();
   control.set_imu_identity(imu.family, imu.gyro_id, imu.aux_id);
-  Serial.printf("INFO imu_probe family=%u gyro_id=0x%02x aux_id=0x%02x unqualified\\r\\n",
+  Serial.printf("INFO imu_probe family=%u gyro_id=0x%02x aux_id=0x%02x unqualified",
                 static_cast<unsigned>(imu.family),
                 static_cast<unsigned>(imu.gyro_id),
                 static_cast<unsigned>(imu.aux_id));
+  Serial.println();
   if (load_calibration()) {
     Serial.println("OK calibration_loaded samples_and_local_rearm_required");
   } else {
