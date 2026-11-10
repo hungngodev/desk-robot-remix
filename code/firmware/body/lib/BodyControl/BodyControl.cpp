@@ -90,6 +90,14 @@ void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
   }
 }
 
+void BodyControl::set_imu_identity(std::uint8_t family, std::uint8_t gyro,
+                                   std::uint8_t aux) {
+  state_.imu_family = family <= 3 ? family : 0;
+  state_.imu_gyro_id = gyro;
+  state_.imu_aux_id = aux;
+  // This merely records chip identification. It never arms or clears a guard.
+}
+
 void BodyControl::force_disarm() {
   stop_motion();
   state_.armed = false;
@@ -341,7 +349,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
-        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u},\"safety\":{\"required\":%s,\"ready\":%s,"
         "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
         "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
@@ -355,6 +363,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(state_.touch_taps),
         static_cast<unsigned long>(state_.touch_double_taps),
         static_cast<unsigned long>(state_.touch_holds),
+        static_cast<unsigned>(state_.imu_family),
+        static_cast<unsigned>(state_.imu_gyro_id),
+        static_cast<unsigned>(state_.imu_aux_id),
         profile_ == BodyProfile::StepperGuarded ? "true" : "false",
         profile_ == BodyProfile::StepperGuarded && guard_ != nullptr &&
             guard_->evaluate(now_ms) ? "true" : "false",
