@@ -45,12 +45,36 @@ def inspect_status(status: dict) -> dict:
         raise ValueError("Malformed optional IMU chip identity")
     if family > 3:
         raise ValueError("Unsupported IMU family code")
+    raw_present = any(key in imu for key in ("valid", "acc", "gyro", "age_ms"))
+    raw_valid = False
+    accelerometer = gyroscope = None
+    sample_age = None
+    if raw_present:
+        raw_valid = imu.get("valid")
+        accelerometer = imu.get("acc")
+        gyroscope = imu.get("gyro")
+        sample_age = imu.get("age_ms")
+        if (
+            type(raw_valid) is not bool
+            or any(
+                not isinstance(axis, list) or len(axis) != 3
+                or any(type(value) is not int or not -32768 <= value <= 32767
+                       for value in axis)
+                for axis in (accelerometer, gyroscope)
+            )
+            or type(sample_age) is not int or sample_age < 0
+            or (raw_valid and (family == 0 or sample_age > 200))
+        ):
+            raise ValueError("Malformed or stale IMU six-axis diagnostics")
     return {
         "imu": {
             "family": ("unverified", "berryimu_v1", "berryimu_v2", "berryimu_v3")[family],
             "gyro_who_am_i": gyro,
             "aux_who_am_i": aux,
-            "motion_driver_active": False,
+            "motion_driver_active": raw_valid,
+            "accelerometer_raw": accelerometer,
+            "gyroscope_raw": gyroscope,
+            "sample_age_ms": sample_age,
             "physical_qualification_pass": False,
         },
         "armed": status.get("armed") is True,
