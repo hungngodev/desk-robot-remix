@@ -170,20 +170,37 @@ void BodyControl::set_imu_identity(std::uint8_t family, std::uint8_t gyro,
   // This merely records chip identification. It never arms or clears a guard.
 }
 
+bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
+  const auto& dock = state_.accessories.dock;
+  // Once the optional physical MCP23017 was found at boot, its I2C
+  // acquisition, independent sequence and timestamp are compulsory for
+  // moving. A missing module is NOT manufactured into a fake valid sample.
+  return dock.present && (!dock.valid || dock.sample_seq == 0U ||
+                          now_ms - dock.at_ms >= 500U);
+}
+
 void BodyControl::set_accessories(const AccessoryReadings& readings) {
   state_.accessories = readings;
   const auto& dock = readings.dock;
-  if (dock.present && dock.valid) {
-    if (dock.input_good && dock.left_seated && dock.right_seated) {
+  if (dock.present && dock.valid && dock.sample_seq != 0U) {
+    if (dock.input_good || dock.left_seated || dock.right_seated) {
+      // Even ONE seat switch indicates possible mechanical contact.
+      // Waiting for both seat switches plus power risks driving into pins.
       dock_power_lockout_ = true;
-    } else if (!dock.input_good &&
-               !dock.left_seated && !dock.right_seated) {
-      // Only a genuinely observed removal and absent charger power can
-      // clear the latch. A failed I2C read cannot magically undock the pet.
+    } else {
+      // Clear only on a new valid physically observed full removal.
+      // No automatic rearm or speculative charger enable.
       dock_power_lockout_ = false;
     }
   }
-  if (dock_power_lockout_) force_disarm();
+  if (dock_power_lockout_) {
+    force_disarm();
+  } else if (dock.present && (!dock.valid || dock.sample_seq == 0U)) {
+    // Broken dock-status transport must stop motion, but retain servo PWM
+    // on an unpowered sensor dropout to avoid dropping a held object.
+    stop_motion();
+    state_.armed = false;
+  }
 }
 
 void BodyControl::force_disarm() {
@@ -229,6 +246,13 @@ void BodyControl::tick(std::uint32_t now_ms) {
   if (imu_motion_required_ && !imu_fresh(now_ms)) {
     // Missing, failed or stale compulsory motion sensor locally disarms.
     // This is not a tilt interlock: orientation calibration is still required.
+    stop_motion();
+    state_.armed = false;
+    return;
+  }
+  if (dock_telemetry_bad(now_ms)) {
+    // Optional installed dock input is a mandatory local interlock once
+    // present. Never keep stepping toward contacts on stale input data.
     stop_motion();
     state_.armed = false;
     return;
@@ -611,6 +635,10 @@ void BodyControl::execute(const char* line, std::size_t length,
   } else if (arm) {
     if (dock_power_lockout_) {
       std::snprintf(reply, capacity, "ERR arm dock_power_connected");
+      return;
+    }
+    if (dock_telemetry_bad(now_ms)) {
+      std::snprintf(reply, capacity, "ERR arm dock_gpio_missing_or_stale");
       return;
     }
     if (state_.extra_mask & 1U && (state_.bumper_raw || state_.bumper_active)) {
