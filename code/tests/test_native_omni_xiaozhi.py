@@ -435,3 +435,27 @@ async def test_native_audio_racing_with_new_human_vad_refuses_tts_start(native):
     assert service._generation == 1
     assert sent == []
     assert module._output_owner is None
+
+
+async def test_native_opus_packet_checks_live_human_floor_even_after_reply_started(
+    native,
+):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = service
+    conn.client_is_speaking = True
+    module._output_owner = "mac-01"
+    bridge.human_speech_active = lambda: True
+    await service._send_device_opus(b"encoded-opus-packet", service._generation)
+    assert not any(isinstance(item, bytes) for item in sent)
+    assert any(isinstance(item, str) and '"flush": true' in item for item in sent)
+    assert not conn.client_is_speaking
+    assert service._generation == 1
+    assert service.wire.accept_output is False
+    assert service.head_packets == 0
+    assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
