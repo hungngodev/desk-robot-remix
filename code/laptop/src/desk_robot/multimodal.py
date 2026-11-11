@@ -281,6 +281,15 @@ class MultimodalOrchestrator:
         # Prevent five large JPEG decoders/encoders from running at once.
         self._preprocess_budget = asyncio.Semaphore(2)
         self._vision_timeout_s = 15.0  # bounded responsiveness, not SLA
+        self._metrics = {
+            robot.id: {
+                "camera_requests": 0, "camera_successes": 0,
+                "camera_errors": 0, "visual_questions": 0,
+                "visual_answers": 0, "visual_errors": 0,
+                "camera_latency_last_ms": None,
+                "model_latency_last_ms": None,
+            } for robot in settings.robots
+        }
         self._turn_epoch = {r.id: 0 for r in settings.robots}
         self._question_epoch = {r.id: 0 for r in settings.robots}
         self._closed = False
@@ -290,6 +299,7 @@ class MultimodalOrchestrator:
         return {
             "robot_id": robot_id,
             "frames_in_ram": len(self.hub.frames[robot_id]),
+            "software_timings": dict(self._metrics[robot_id]),
             "voice_trigger_until_monotonic": (
                 self.hub.voice_until[robot_id]
                 if math.isfinite(self.hub.voice_until[robot_id]) else None
@@ -354,19 +364,31 @@ class MultimodalOrchestrator:
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
+            metrics = self._metrics[robot_id]
+            metrics["camera_requests"] += 1
+            started = time.monotonic()
             generation = self.hub._generation[robot_id]
             # Camera latency is measured before CPU postprocessing. A new
             # human voice can still preempt the event loop during decoding.
-            jpeg = await asyncio.wait_for(
-                self.heads[robot_id].snapshot(), timeout=4
-            )
-            received = time.monotonic()
-            async with self._preprocess_budget:
-                prepared = await asyncio.to_thread(_prepare, jpeg)
-            return self.hub.offer_prepared(
-                robot_id, prepared, received, source=source,
-                generation=generation,
-            )
+            try:
+                jpeg = await asyncio.wait_for(
+                    self.heads[robot_id].snapshot(), timeout=4
+                )
+                received = time.monotonic()
+                async with self._preprocess_budget:
+                    prepared = await asyncio.to_thread(_prepare, jpeg)
+                evidence = self.hub.offer_prepared(
+                    robot_id, prepared, received, source=source,
+                    generation=generation,
+                )
+                metrics["camera_successes"] += 1
+                metrics["camera_latency_last_ms"] = round(
+                    (time.monotonic() - started) * 1000
+                )
+                return evidence
+            except Exception:
+                metrics["camera_errors"] += 1
+                raise
 
     async def offer_proactive(self, robot_id: str, jpeg: bytes, now: float) -> None:
         # Pet snapshots share the same authenticated head.capture_lock. Only
@@ -389,6 +411,8 @@ class MultimodalOrchestrator:
             raise ValueError("A short real visual question is required")
         if self._closed:
             raise RuntimeError("Visual conversation already shut down")
+        metrics = self._metrics[robot_id]
+        metrics["visual_questions"] += 1
         turn = self._turn_epoch[robot_id]
         self._question_epoch[robot_id] += 1
         question_epoch = self._question_epoch[robot_id]
@@ -421,11 +445,15 @@ class MultimodalOrchestrator:
                 # Local 4B+ vision inference can be much slower than the
                 # source exposure. Do not let a 45 second provider request
                 # claim a scene is still current or delay new user turns.
+                model_started = time.monotonic()
                 try:
                     async with asyncio.timeout(self._vision_timeout_s):
                         answer = await self.scene.answer(
                             question, [frame.jpeg for frame in chosen]
                         )
+                    metrics["model_latency_last_ms"] = round(
+                        (time.monotonic() - model_started) * 1000
+                    )
                 except TimeoutError as exc:
                     raise RuntimeError(
                         "Live visual analysis timed out; do not describe old scene"
@@ -434,6 +462,7 @@ class MultimodalOrchestrator:
                 raise RuntimeError("Visual answer superseded by new speech")
             if time.monotonic() - chosen[-1].received_at > 16:
                 raise RuntimeError("Camera observation expired during visual analysis")
+            metrics["visual_answers"] += 1
             return {
                 "robot_id": robot_id,
                 "answer": answer,
@@ -451,7 +480,11 @@ class MultimodalOrchestrator:
                 "motor_authorized": False,
                 "charging_authorized": False,
             }
+        except Exception:
+            metrics["visual_errors"] += 1
+            raise
         except asyncio.CancelledError:
+            metrics["visual_errors"] += 1
             if not current_turn():
                 reason = (
                     "newer speech" if self._turn_epoch[robot_id] != turn
