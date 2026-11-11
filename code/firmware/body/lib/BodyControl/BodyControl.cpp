@@ -175,8 +175,9 @@ bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
   // Once the optional physical MCP23017 was found at boot, its I2C
   // acquisition, independent sequence and timestamp are compulsory for
   // moving. A missing module is NOT manufactured into a fake valid sample.
-  return dock.present && (!dock.valid || dock.sample_seq == 0U ||
-                          now_ms - dock.at_ms >= 500U);
+  return (dock.present || dock_monitor_required_) &&
+         (!dock.present || !dock.valid || dock.sample_seq == 0U ||
+          now_ms - dock.at_ms >= 500U);
 }
 
 void BodyControl::set_accessories(const AccessoryReadings& readings) {
@@ -195,9 +196,10 @@ void BodyControl::set_accessories(const AccessoryReadings& readings) {
   }
   if (dock_power_lockout_) {
     force_disarm();
-  } else if (dock.present && (!dock.valid || dock.sample_seq == 0U)) {
-    // Broken dock-status transport must stop motion, but retain servo PWM
-    // on an unpowered sensor dropout to avoid dropping a held object.
+  } else if ((dock.present || dock_monitor_required_) &&
+             (!dock.present || !dock.valid || dock.sample_seq == 0U)) {
+    // A required but missing MCP23017 is not an optional absent sensor.
+    // Preserve jaw PWM on transport loss to avoid dropping a held object.
     stop_motion();
     state_.armed = false;
   }
