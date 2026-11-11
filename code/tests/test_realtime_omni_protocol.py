@@ -103,6 +103,11 @@ def test_interrupt_ignores_old_response_until_new_pcm_committed():
     wire.append_audio(b"\0" * 3200, speech=True)
     wire.commit()
     wire.handle_event({
+        "type": "response.created", "response_id": "very_old",
+        "response": {"id": "very_old", "metadata": {"epoch": 0}},
+    })
+    assert wire.handle_event(delta("very_old")) is None
+    wire.handle_event({
         "type": "response.created", "response_id": "new",
         "response": {"id": "new", "metadata": {"epoch": 2}},
     })
