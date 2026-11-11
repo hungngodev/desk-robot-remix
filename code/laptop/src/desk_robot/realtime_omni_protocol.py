@@ -48,6 +48,9 @@ class OmniDuplexWire:
         self.played_ms = 0
         self.accept_output = True
         self.frames_sent = 0
+        self._needs_new_input = False
+        self._input_after_interrupt = False
+        self._server_response_epoch: int | None = None
 
     def session_update(self) -> dict:
         return {
@@ -93,6 +96,8 @@ class OmniDuplexWire:
             "audio_end_ms": self.input_ms,
             "is_speech": speech,
         }
+        if self._needs_new_input:
+            self._input_after_interrupt = True
         if jpeg is not None:
             if (not isinstance(jpeg, bytes)
                     or not 10 <= len(jpeg) <= self.MAX_IMAGE_BYTES
@@ -108,6 +113,8 @@ class OmniDuplexWire:
     def commit(self, *, final: bool = True) -> dict:
         if type(final) is not bool:
             raise ValueError("Final must be a boolean")
+        if self._needs_new_input and self._input_after_interrupt:
+            self._needs_new_input = False
         return {
             "type": "input_audio_buffer.commit",
             "final": final,
@@ -121,6 +128,9 @@ class OmniDuplexWire:
         self.response_id = None
         self.generated_bytes = 0
         self.played_ms = 0
+        self._needs_new_input = True
+        self._input_after_interrupt = False
+        self._server_response_epoch = None
         return (
             {"type": "response.cancel"},
             {"type": "output_audio_buffer.clear"},
@@ -136,6 +146,10 @@ class OmniDuplexWire:
             self.accept_output = True
             return None
         if kind == "response.created":
+            # A queued response from before an interruption must not restart
+            # physical speech while the new human turn is still being heard.
+            if self._needs_new_input:
+                return None
             response = event.get("response")
             response_id = (
                 event.get("response_id") or (
@@ -144,6 +158,14 @@ class OmniDuplexWire:
             )
             if not isinstance(response_id, str) or not 1 <= len(response_id) <= 128:
                 raise ValueError("Missing realtime response identity")
+            metadata = response.get("metadata") if isinstance(response, dict) else None
+            server_epoch = (
+                metadata.get("epoch") if isinstance(metadata, dict)
+                else event.get("epoch")
+            )
+            if server_epoch is not None and type(server_epoch) is not int:
+                raise ValueError("Invalid realtime response epoch")
+            self._server_response_epoch = server_epoch
             self.response_id = response_id
             self.generated_bytes = 0
             self.played_ms = 0
@@ -156,7 +178,9 @@ class OmniDuplexWire:
                 return None  # Old backend response after a new human turn.
             meta = event.get("metadata")
             if isinstance(meta, dict) and meta.get("epoch") is not None:
-                if type(meta["epoch"]) is not int or meta["epoch"] != self.epoch:
+                if (type(meta["epoch"]) is not int
+                        or (self._server_response_epoch is not None
+                            and meta["epoch"] != self._server_response_epoch)):
                     return None
             if event.get("format") != "pcm16" or event.get("sample_rate_hz") != 24000:
                 raise ValueError("Unrecognized realtime audio codec or sample rate")
@@ -176,7 +200,9 @@ class OmniDuplexWire:
                 total_generated_ms=self.generated_bytes * 1000
                 // (self.OUTPUT_RATE * 2),
             )
-        if kind in ("response.done", "output_audio_buffer.cleared"):
+        if kind == "response.done" and event.get("response_id") == self.response_id:
+            self.accept_output = False
+        if kind == "output_audio_buffer.cleared":
             self.accept_output = False
         return None
 
