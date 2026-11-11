@@ -102,6 +102,7 @@ bool AuxValid(cJSON* json) {
             cJSON_GetArrayItem(get(angles, "magnet"), i)->valueint != 32)
             return false;
     if (!bounded_array(force, "adc", 2, -32768, 32767) ||
+        !bounded(get(force, "jaw_seq"), 0, 4294967295.0) ||
         !cJSON_IsBool(get(force, "valid")) ||
         !cJSON_IsFalse(get(force, "calibrated"))) return false;
     if (!bounded(get(climate, "temp_centi"), -4500, 13000) ||

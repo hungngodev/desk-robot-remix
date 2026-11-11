@@ -1,4 +1,4 @@
-"""Bounded tactile grasp using an ADS1115 FSR, never blind servo closure."""
+"""Bounded tactile grasp using distinct fresh ADS1115 jaw sample sequences."""
 from __future__ import annotations
 
 import asyncio
@@ -19,15 +19,22 @@ def grip_angles(start: int, end: int, step: int) -> tuple[int, ...]:
     return tuple([start, *range(start + direction * step, end, direction * step), end])
 
 
-def force_adc(payload: dict) -> int:
+def force_observation(payload: dict) -> tuple[int, int]:
+    """Raw ADC jaw + independent hardware conversion sequence."""
     group = payload.get("force") if isinstance(payload, dict) else None
     if (not isinstance(group, dict) or group.get("valid") is not True
             or group.get("calibrated") is not False
             or not isinstance(group.get("adc"), list) or len(group["adc"]) != 2
             or type(group["adc"][1]) is not int
-            or not -32768 <= group["adc"][1] <= 32767):
-        raise ValueError("Missing, invalid or stale ADS1115 gripper force")
-    return group["adc"][1]
+            or not -32768 <= group["adc"][1] <= 32767
+            or type(group.get("jaw_seq")) is not int
+            or not 1 <= group["jaw_seq"] <= 0xffffffff):
+        raise ValueError("Missing, invalid or stale ADS1115 gripper sample")
+    return group["adc"][1], group["jaw_seq"]
+
+
+def force_adc(payload: dict) -> int:
+    return force_observation(payload)[0]
 
 
 async def guarded_grasp(
@@ -41,26 +48,34 @@ async def guarded_grasp(
     if threshold is None or ceiling is None:
         raise OperationError("Measured gripper sensor calibration missing")
     try:
-        baseline_a = force_adc(await head.aux_status())
-        await asyncio.sleep(0.10)
-        baseline_b = force_adc(await head.aux_status())
+        baseline_a, seq_a = force_observation(await head.aux_status())
+        # One ADS1115 jaw channel conversion approximately every 144ms;
+        # require distinct observations, not repeated reads of one ADC value.
+        await asyncio.sleep(0.18)
+        baseline_b, seq_b = force_observation(await head.aux_status())
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise OperationError("Fresh force feedback required before moving jaw") from exc
+    if seq_b <= seq_a:
+        raise OperationError("No new ADS1115 jaw sample; jaw not moved")
     if abs(baseline_a - baseline_b) > max(40, threshold // 3):
         raise OperationError("Gripper baseline unstable; jaw not moved")
     baseline = (baseline_a + baseline_b) // 2
     confirmed = 0
+    latest_seq = seq_b
     for angle in grip_angles(
         calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
     )[1:]:
         await health()
         await head.command(f"grip {angle}")
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.18)
         await health()
         try:
-            measured = force_adc(await head.aux_status())
+            measured, seq = force_observation(await head.aux_status())
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise OperationError("Lost fresh force sensor during closing") from exc
+        if seq <= latest_seq:
+            raise OperationError("No new jaw sample after servo movement")
+        latest_seq = seq
         raw_delta = (measured - baseline) * calibration.grip_force_sign
         if raw_delta > ceiling:
             raise OperationError("Gripper raw force ceiling exceeded")

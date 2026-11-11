@@ -55,6 +55,7 @@ def validate_aux(data: dict, robot_id: str) -> dict:
         raise ValueError("Invalid AS5600 magnetic angle source")
 
     if (not _array(force.get("adc"), 2, lambda n: _sint(n, -32768, 32767))
+            or not _uint(force.get("jaw_seq"), 0xffffffff)
             or not _bool(force.get("valid"))
             or force.get("calibrated") is not False):
         raise ValueError("Invalid uncalibrated FSR sample")

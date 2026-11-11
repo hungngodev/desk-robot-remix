@@ -1,4 +1,4 @@
-"""Force-driven gripper must not close without real, fresh sensor data."""
+"""Gripper only accepts two physically new ADC conversions to confirm contact."""
 import pytest
 from desk_robot.controller import OperationError
 from desk_robot.grasp_feedback import force_adc, grip_angles, guarded_grasp
@@ -8,12 +8,19 @@ class FakeHead:
     def __init__(self, samples):
         self.samples = iter(samples)
         self.commands = []
+        self.seq = 0
 
     async def aux_status(self):
-        v = next(self.samples)
-        if v is None:
-            return {"force": {"valid": False, "calibrated": False, "adc": [0, 0]}}
-        return {"force": {"valid": True, "calibrated": False, "adc": [0, v]}}
+        value = next(self.samples)
+        if value is None:
+            return {"force": {"valid": False, "calibrated": False,
+                              "jaw_seq": self.seq, "adc": [0, 0]}}
+        if isinstance(value, tuple):
+            value, self.seq = value
+        else:
+            self.seq += 1
+        return {"force": {"valid": True, "calibrated": False,
+                          "jaw_seq": self.seq, "adc": [0, value]}}
 
     async def command(self, command):
         self.commands.append(command)
@@ -65,6 +72,16 @@ async def test_stale_feedback_fails_before_next_servo_pulse(monkeypatch):
     with pytest.raises(OperationError, match="Lost fresh"):
         await guarded_grasp(head, Settings(), health=healthy)
     assert head.commands == ["grip 65"]
+
+
+async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([(100, 1), (100, 2), (240, 3), (240, 3)])
+    with pytest.raises(OperationError, match="No new jaw sample"):
+        await guarded_grasp(head, Settings(), health=healthy)
+    assert head.commands == ["grip 65", "grip 70"]
 
 
 async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):

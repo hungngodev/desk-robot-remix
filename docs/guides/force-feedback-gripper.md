@@ -12,3 +12,8 @@ The existing measured camera calibration JSON supports these additional fields, 
     "grip_step_deg": 4
 
 With no measured thresholds, real hardware pickup is intentionally blocked. The user only needs to read the raw ADS1115 channel 1 values at open jaw and with a representative object, then record first contact threshold, ceiling and polarity. These are relative ADC values, not calibrated Newtons. No premature physical grasp success is claimed.
+
+
+## Distinct ADC sample protection
+
+Actual WROOM ADS1115 channel one conversions now carry a monotonic jaw_sample_seq counter into the read-only aux JSON field jaw_seq. Mac force guided grasp requires a new sequence number for the second unloaded baseline and for each post movement contact confirmation. Repeated HTTP polling of one sensor frame can no longer fabricate two physical contacts. Sensor driver and Mac validation reject stale, missing or malformed sequence numbers. The jaw closes more slowly at approximately 180ms between commands so the multiplexed ADS1115 has time to produce a new conversion. This is still not a measured grip strength in Newtons.

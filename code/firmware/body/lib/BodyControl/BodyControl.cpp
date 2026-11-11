@@ -438,7 +438,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"red\":%lu,\"ir\":%lu,\"age_ms\":%lu,\"bpm\":null,\"medical\":false},"
         "\"angles\":{\"raw\":[%u,%u,%u],\"present_mask\":%u,"
         "\"valid_mask\":%u,\"magnet\":[%u,%u,%u]},"
-        "\"force\":{\"adc\":[%d,%d],\"valid\":%s,\"calibrated\":false},"
+        "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"valid\":%s,\"calibrated\":false},"
         "\"climate\":{\"temp_centi\":%d,\"rh_centi\":%d,\"valid\":%s},"
         "\"power\":{\"cell_mv\":%u,\"soc_centi\":%u,\"bus_mv\":%u,"
         "\"shunt_uv\":%d,\"fuel_valid\":%s,\"monitor_valid\":%s,"
@@ -459,6 +459,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned>(a.angle[2].magnet_status),
         static_cast<int>(a.force.adc[0]),
         static_cast<int>(a.force.adc[1]),
+        static_cast<unsigned long>(a.force.jaw_sample_seq),
         force_fresh ? "true" : "false",
         a.climate.temp_centi, a.climate.humidity_centi,
         climate_fresh ? "true" : "false",
