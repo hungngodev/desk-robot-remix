@@ -190,3 +190,33 @@ async def test_idle_speech_start_uses_current_xiaozhi_vad_not_fake_aec():
         assert await listener.poll() == 1
         assert delivered == [("robot-01", "speech_start")]
         assert listener.cursor == 3
+
+
+async def test_shared_fleet_audio_is_preempted_only_once_on_event_gap():
+    called = []
+
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 1, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(200, json={
+            "cursor": 100, "events": [], "reset": False, "lost": True,
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def individual(robot, reason):
+            called.append(("individual", robot, reason))
+
+        async def global_cancel(reason):
+            called.append(("global", reason))
+
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={f"robot-0{i}" for i in range(1, 6)},
+            on_interrupt=individual,
+            on_global_interrupt=global_cancel,
+        )
+        assert await listener.poll() == 0
+        assert await listener.poll() == 0
+        assert called == [("global", "gap")]
