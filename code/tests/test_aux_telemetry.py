@@ -83,3 +83,33 @@ async def test_authenticated_head_aux_rejects_wrong_robot(settings, tokens):
         head = HttpHead(settings.robots[0], client)
         with pytest.raises(HeadError):
             await head.aux_status()
+
+
+def test_optional_bmp280_factory_compensation_is_raw_ambient_not_qualification():
+    d = sample()
+    d["bmp280"] = {
+        "present": True, "valid": True, "chip_id": 0x58,
+        "temp_centi": 2508, "pressure_pa": 100653,
+        "physically_verified": False,
+    }
+    assert validate_aux(d, "robot-01")["bmp280"]["pressure_pa"] == 100653
+
+
+@pytest.mark.parametrize("patch", [
+    {"chip_id": 0x60},  # BME280 is not BMP280
+    {"pressure_pa": 0},
+    {"pressure_pa": 150000},
+    {"physically_verified": True},
+    {"temp_centi": float("nan")},
+    {"valid": False},
+])
+def test_bmp280_bad_identity_stale_or_unqualified_claim_rejected(patch):
+    d = sample()
+    d["bmp280"] = {
+        "present": True, "valid": True, "chip_id": 0x58,
+        "temp_centi": 2508, "pressure_pa": 100653,
+        "physically_verified": False,
+    }
+    d["bmp280"].update(patch)
+    with pytest.raises(ValueError):
+        validate_aux(d, "robot-01")
