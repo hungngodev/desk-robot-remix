@@ -173,12 +173,17 @@ void BodyControl::set_imu_identity(std::uint8_t family, std::uint8_t gyro,
 void BodyControl::set_accessories(const AccessoryReadings& readings) {
   state_.accessories = readings;
   const auto& dock = readings.dock;
-  if (dock.present && dock.valid && dock.input_good &&
-      dock.left_seated && dock.right_seated) {
-    // Body controller never energizes contacts. Physical charger operates
-    // independently; whenever it signals physically seated, drive is off.
-    force_disarm();
+  if (dock.present && dock.valid) {
+    if (dock.input_good && dock.left_seated && dock.right_seated) {
+      dock_power_lockout_ = true;
+    } else if (!dock.input_good &&
+               !dock.left_seated && !dock.right_seated) {
+      // Only a genuinely observed removal and absent charger power can
+      // clear the latch. A failed I2C read cannot magically undock the pet.
+      dock_power_lockout_ = false;
+    }
   }
+  if (dock_power_lockout_) force_disarm();
 }
 
 void BodyControl::force_disarm() {
@@ -591,9 +596,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
-    const auto& dock = state_.accessories.dock;
-    if (dock.present && dock.valid && dock.input_good &&
-        dock.left_seated && dock.right_seated) {
+    if (dock_power_lockout_) {
       std::snprintf(reply, capacity, "ERR arm dock_power_connected");
       return;
     }

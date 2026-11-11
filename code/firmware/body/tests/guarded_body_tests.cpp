@@ -537,16 +537,19 @@ static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
   body.set_accessories(read);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 2) == "ERR arm dock_power_connected");
-  read.dock.left_seated = false;
+  read.dock.valid = false; // lost expander must not clear the contact latch
   body.set_accessories(read);
-  CHECK(send(body, "arm", 3) == "OK arm");
-  // Charger PGOOD alone with mechanical contact not established is not proof
-  // of docking. Normal guard, bumper and operator authorization still apply.
+  CHECK(send(body, "arm", 3) == "ERR arm dock_power_connected");
+  read.dock.valid = true;
+  read.dock.left_seated = false; // one switch not enough to clear
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 4) == "ERR arm dock_power_connected");
+  read.dock.right_seated = false;
   read.dock.input_good = false;
-  read.dock.left_seated = true;
   body.set_accessories(read);
+  CHECK(send(body, "arm", 5) == "OK arm");
   CHECK(body.state().armed);
-  CHECK(send(body, "disarm", 4) == "OK disarm");
+  CHECK(send(body, "disarm", 6) == "OK disarm");
 }
 
 static void optional_sensor_inputs_never_arm_or_forge_boot_events() {

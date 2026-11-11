@@ -124,6 +124,7 @@ class BodyControl {
   bool touch_hold_emitted_ = false;
   bool cap_initialized_ = false;
   bool extras_initialized_ = false;
+  bool dock_power_lockout_ = false;  // stays latched across missing I2C samples
   bool extra_candidates_[3]{};
   std::uint8_t extra_streaks_[3]{};
   void stop_motion();
