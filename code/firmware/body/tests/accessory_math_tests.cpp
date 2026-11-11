@@ -1,4 +1,5 @@
 #include "AccessoryReadings.h"
+#include "Bmp280Math.h"
 #include "GestureDecoder.h"
 #include <iostream>
 #include <stdexcept>
@@ -16,6 +17,21 @@ int main() {
     CHECK(desk_robot::ina226_bus_mv(9584) == 11980);
     CHECK(desk_robot::ina226_shunt_uv(8000) == 20000);
     CHECK(desk_robot::ina226_shunt_uv(-8000) == -20000);
+    // Bosch BMP280 datasheet example: T=25.08C, P=100653Pa.
+    desk_robot::Bmp280Trim trim{};
+    trim.t1 = 27504; trim.t2 = 26435; trim.t3 = -1000;
+    trim.p1 = 36477; trim.p2 = -10685; trim.p3 = 3024;
+    trim.p4 = 2855; trim.p5 = 140; trim.p6 = -7;
+    trim.p7 = 15500; trim.p8 = -14600; trim.p9 = 6000;
+    int bmp_t = 0;
+    unsigned bmp_p = 0;
+    CHECK(desk_robot::bmp280_compensate(trim, 519888, 415148, bmp_t, bmp_p));
+    CHECK(bmp_t == 2508);
+    CHECK(bmp_p >= 100652 && bmp_p <= 100654);
+    CHECK(!desk_robot::bmp280_compensate(trim, 0x80000, 415148, bmp_t, bmp_p));
+    CHECK(!desk_robot::bmp280_compensate(trim, 519888, 0x80000, bmp_t, bmp_p));
+    desk_robot::Bmp280Trim invalid{};
+    CHECK(!desk_robot::bmp280_compensate(invalid, 519888, 415148, bmp_t, bmp_p));
     desk_robot::GestureDecoder gesture;
     // Strong vertical swipe: first UP, finally DOWN, output UP.
     gesture.push(180, 30, 85, 85);
