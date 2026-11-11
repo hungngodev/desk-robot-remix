@@ -467,7 +467,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"current_calibrated\":false},"
         "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"physically_qualified\":false},"
         "\"dock\":{\"present\":%s,\"valid\":%s,\"left_seated\":%s,\"right_seated\":%s,"
-        "\"input_good\":%s,\"charge_indicated\":%s,\"charging_verified\":false}}",
+        "\"input_good\":%s,\"charge_indicated\":%s,\"seq\":%lu,\"age_ms\":%lu,"
+        "\"charging_verified\":false}}",
         raw.present ? "true" : "false",
         raw.valid && age <= 250U ? "true" : "false",
         static_cast<unsigned>(raw.part_id),
@@ -503,7 +504,10 @@ void BodyControl::execute(const char* line, std::size_t length,
         dock_fresh && a.dock.left_seated ? "true" : "false",
         dock_fresh && a.dock.right_seated ? "true" : "false",
         dock_fresh && a.dock.input_good ? "true" : "false",
-        dock_fresh && a.dock.charge_indicated ? "true" : "false");
+        dock_fresh && a.dock.charge_indicated ? "true" : "false",
+        static_cast<unsigned long>(a.dock.sample_seq),
+        static_cast<unsigned long>(
+            a.dock.present ? now_ms - a.dock.at_ms : 0U));
     if (written < 0 || static_cast<std::size_t>(written) >= capacity)
       std::snprintf(reply, capacity, "ERR aux response_too_long");
   } else if (status) {
