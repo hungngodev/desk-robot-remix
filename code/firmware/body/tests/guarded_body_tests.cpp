@@ -554,6 +554,36 @@ static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
   CHECK(send(body, "disarm", 6) == "OK disarm");
 }
 
+static void complete_robot_requires_boot_installed_and_fresh_dock_expander() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_dock_monitor(true);  // only the full physical firmware boot sets this
+  CHECK(send(body, "arm", 1) == "ERR arm dock_gpio_missing_or_stale");
+  CHECK(!body.state().armed);
+  desk_robot::AccessoryReadings read{};
+  read.dock.present = true;
+  read.dock.valid = false;
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 2) == "ERR arm dock_gpio_missing_or_stale");
+  read.dock.valid = true;
+  read.dock.sample_seq = 1;
+  read.dock.at_ms = 3;
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 4) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 5).find("OK drive") == 0);
+  read.dock.present = false; // module disappeared, not an optional absence
+  body.set_accessories(read);
+  CHECK(!body.state().armed);
+  CHECK(body.state().left == 0 && body.state().right == 0);
+  CHECK(send(body, "arm", 6) == "ERR arm dock_gpio_missing_or_stale");
+  read.dock.present = true;
+  read.dock.valid = true;
+  read.dock.sample_seq = 2;
+  read.dock.at_ms = 7;
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 8) == "OK arm");
+  CHECK(send(body, "disarm", 9) == "OK disarm");
+}
+
 static void installed_dock_i2c_loss_or_single_seat_stops_local_motors() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   desk_robot::AccessoryReadings read{};
@@ -671,6 +701,7 @@ int main() {
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
+    complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
