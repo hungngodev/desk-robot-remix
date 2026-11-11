@@ -151,6 +151,9 @@ class PetController:
         self._vision_lock = asyncio.Lock()
         self._vision_inflight: asyncio.Task | None = None
         self.multimodal = None  # Hardware runtime attaches the ONE camera hub.
+        # No unsolicited physical speaker output before Xiaozhi VAD has
+        # authenticated a healthy live event stream. Simulation stays usable.
+        self.voice_monitor_ready = settings.mode != "hardware"
         self._speech_task: asyncio.Task | None = None
         self._speech_robot: str | None = None
         self._group_last_spoken = -math.inf
@@ -159,6 +162,11 @@ class PetController:
         # assessments, not measured spatial event identities.
         self._event_kinds: dict[tuple[str, str], float] = {}
         self._closed = False
+
+    def set_voice_monitor_ready(self, ready: bool) -> None:
+        if type(ready) is not bool:
+            raise ValueError("Voice monitor readiness must be boolean")
+        self.voice_monitor_ready = ready
 
     def status(self, robot_id: str) -> dict:
         state = self.states[robot_id]
@@ -181,6 +189,7 @@ class PetController:
             "aux_sensors_physically_qualified": False,
             "last_error": state.last_error,
             "motor_control_enabled_by_pet": False,
+            "voice_event_monitor_ready": self.voice_monitor_ready,
             "source_capture_timestamp_verified": False,
             "physical_audio_interruption_verified": False,
         }
@@ -922,6 +931,10 @@ class PetController:
             state.low_value_speech_candidates += 1
             state.last_initiative_suppression = "insufficient_grounded_context"
             return
+        if not self.voice_monitor_ready:
+            state.suppressed += 1
+            state.last_initiative_suppression = "voice_monitor_unavailable"
+            return
         # Restore content-aware cross-camera deduplication from the earlier
         # source prototype instead of suppressing all distinct "object" events.
         # This remains text-based, NOT calibrated multi-camera spatial tracking.
@@ -998,6 +1011,10 @@ class PetController:
             if not text:
                 state.suppressed += 1
                 state.last_initiative_suppression = "model_reply_not_concise"
+                return
+            if not self.voice_monitor_ready:
+                state.suppressed += 1
+                state.last_initiative_suppression = "voice_monitor_unavailable"
                 return
             if (not state.enabled or state.quiet
                     or state.generation != generation
