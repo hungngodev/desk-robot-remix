@@ -48,6 +48,20 @@ idle_voice_quiet_frames: dict[str, int] = {}
 human_vad_until: dict[str, float] = {}
 
 
+def active_idle_speech_robots() -> list[str]:
+    """Current authenticated, debounced VAD turn state, never a voice sample.
+
+    Idle speech_start is set until real speech_end or device unregister. AEC
+    normal/group interruptions are deliberately excluded: no paired end event
+    is guaranteed for those, so Mac handles them with a bounded lease.
+    """
+    current = device_map()
+    return sorted(
+        robot_id for robot_id, device in current.items()
+        if device in idle_voice_emitted and device in connections
+    )
+
+
 def human_speech_active() -> bool:
     now = time.monotonic()
     return any(
@@ -592,17 +606,20 @@ def create_app():
             return web.json_response({
                 "cursor": voice_event_cursor, "events": [],
                 "reset": False, "lost": False,
+                "active_human_robots": active_idle_speech_robots(),
             })
         if after > voice_event_cursor:
             return web.json_response({
                 "cursor": voice_event_cursor, "events": [],
                 "reset": True, "lost": False,
+                "active_human_robots": active_idle_speech_robots(),
             })
         earliest = voice_event_history[0]["seq"] if voice_event_history else voice_event_cursor + 1
         return web.json_response({
             "cursor": voice_event_cursor,
             "events": [item for item in voice_event_history if item["seq"] > after],
             "reset": False, "lost": after < earliest - 1,
+            "active_human_robots": active_idle_speech_robots(),
         })
 
     app.router.add_get("/events", voice_events)
