@@ -179,3 +179,119 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
         assert head.commands == []
     finally:
         await controller.close()
+
+
+async def test_dock_refuses_stale_pre_camera_safety_after_sensor_fault(
+    settings, monkeypatch,
+):
+    """A good pre-camera WROOM reading cannot authorize a later drive."""
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration, DockPose
+
+    settings.mode = "hardware"
+
+    class HeadWithMidframeFault:
+        def __init__(self):
+            self.commands = []
+            self.armed = True
+            self.reads = 0
+
+        async def status(self):
+            self.reads += 1
+            return {
+                "armed": self.armed,
+                "safety": {"required": True, "ready": self.armed,
+                           "fault": "none" if self.armed else "missing_sample"},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [50, 50, 50, 50, 610],
+                           "age_ms": [5, 5, 5, 5, 5]},
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+                "side_ranges": {"valid_mask": 7,
+                                "age_ms": [10, 10, 10],
+                                "mm": [600, 600, 600]},
+            }
+
+        async def snapshot(self):
+            # Cliff or bumper fault occurred WHILE camera was receiving.
+            self.armed = False
+            return b"real-frame-shaped-placeholder"
+
+        async def command(self, line):
+            self.commands.append(line)
+
+    head = HeadWithMidframeFault()
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    camera = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    monkeypatch.setattr(
+        "desk_robot.controller.detect_apriltag",
+        lambda jpeg, cal, *, captured_at: DockPose(
+            0, 0, 500, 0.5, captured_at,
+        ),
+    )
+    try:
+        with pytest.raises(OperationError, match="body disarmed"):
+            await controller._dock_approach(
+                Job("dock-race", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
+            )
+        assert head.reads == 2
+        assert head.commands == []
+    finally:
+        await controller.close()
+
+
+async def test_dock_refuses_new_side_obstacle_after_camera_frame(
+    settings, monkeypatch,
+):
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration, DockPose
+
+    settings.mode = "hardware"
+
+    class SideChangedHead:
+        def __init__(self):
+            self.commands = []
+            self.blocked = False
+
+        async def status(self):
+            return {
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [50, 50, 50, 50, 600],
+                           "age_ms": [5, 5, 5, 5, 5]},
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+                "side_ranges": {
+                    "valid_mask": 7 if not self.blocked else 0,
+                    "age_ms": [10, 10, 10],
+                    "mm": [600, 600, 600],
+                },
+            }
+
+        async def snapshot(self):
+            self.blocked = True
+            return b"real-frame-shaped-placeholder"
+
+        async def command(self, line):
+            self.commands.append(line)
+
+    head = SideChangedHead()
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    camera = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    monkeypatch.setattr(
+        "desk_robot.controller.detect_apriltag",
+        lambda jpeg, cal, *, captured_at: DockPose(
+            80, 0, 500, 0.5, captured_at,
+        ),
+    )
+    try:
+        with pytest.raises(OperationError, match="side and rear"):
+            await controller._dock_approach(
+                Job("dock-side-race", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
+            )
+        assert head.commands == []
+    finally:
+        await controller.close()
