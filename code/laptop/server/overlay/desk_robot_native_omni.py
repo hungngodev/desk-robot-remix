@@ -32,6 +32,44 @@ except ModuleNotFoundError:
 _sessions: dict[str, "NativeOmniSession"] = {}
 _output_owner: str | None = None
 _output_owner_lock = asyncio.Lock()
+# Keep only bounded error diagnostics, never PCM/video or recovered transcripts.
+_terminal_errors: dict[str, str] = {}
+_retry_after: dict[str, float] = {}
+
+
+def verify_native_server(greeting: dict, requested_model: str) -> None:
+    """Strict upstream vLLM-Omni capability negotiation, not model guessing.
+
+    Reuse docs/serving/realtime_duplex_api.md's session.created contract.
+    An arbitrary Realtime-compatible text backend must never receive XIAO PCM
+    or claim native camera and duplex support by returning only an event type.
+    """
+    if not isinstance(greeting, dict) or greeting.get("type") != "session.created":
+        raise RuntimeError("Native realtime server did not create a session")
+    session = greeting.get("session")
+    if not isinstance(session, dict) or session.get("model") != requested_model:
+        raise RuntimeError("Model identity mismatch in native session.created")
+    capabilities = session.get("capabilities")
+    if (not isinstance(capabilities, dict)
+            or capabilities.get("implementation_level") != "model_native_duplex"
+            or capabilities.get("supports_input_append") is not True
+            or capabilities.get("supports_barge_in") is not True
+            or type(capabilities.get("chunk_period_ms")) is not int
+            or capabilities["chunk_period_ms"] != 1000):
+        raise RuntimeError("Model lacks required native duplex or 1s video/audio capability")
+    if (session.get("input_audio_format") != "pcm16"
+            or session.get("output_audio_format") != "pcm16"):
+        raise RuntimeError("Native model did not negotiate PCM16 input and output")
+    audio = session.get("audio")
+    input_fmt = audio.get("input") if isinstance(audio, dict) else None
+    output_fmt = audio.get("output") if isinstance(audio, dict) else None
+    input_hz = input_fmt.get("sample_rate_hz") if isinstance(input_fmt, dict) else None
+    output_codec = output_fmt.get("format") if isinstance(output_fmt, dict) else None
+    output_hz = (
+        output_codec.get("rate") if isinstance(output_codec, dict) else None
+    )
+    if input_hz != 16000 or output_hz != 24000:
+        raise RuntimeError("Native model PCM rates incompatible with XIAO Opus bridge")
 
 
 def approved_backend_url(url: str) -> str:
@@ -79,7 +117,11 @@ def active(device: str) -> bool:
 def status(device: str) -> dict:
     s = _sessions.get(device)
     if s is None:
-        return {"native_omni_enabled": False, "native_backend_connected": False,
+        return {"native_omni_enabled": device in _terminal_errors,
+                "native_backend_connected": False,
+                "retry_delay_seconds": round(max(
+                    0.0, _retry_after.get(device, 0) - time.monotonic()), 2),
+                "last_error": _terminal_errors.get(device),
                 "head_audio_playback_acknowledged": False,
                 "audio_video_latency_physically_measured": False}
     return {
