@@ -280,6 +280,7 @@ class MultimodalOrchestrator:
         }
         # Prevent five large JPEG decoders/encoders from running at once.
         self._preprocess_budget = asyncio.Semaphore(2)
+        self._vision_timeout_s = 15.0  # bounded responsiveness, not SLA
         self._turn_epoch = {r.id: 0 for r in settings.robots}
         self._question_epoch = {r.id: 0 for r in settings.robots}
         self._closed = False
@@ -421,7 +422,7 @@ class MultimodalOrchestrator:
                 # source exposure. Do not let a 45 second provider request
                 # claim a scene is still current or delay new user turns.
                 try:
-                    async with asyncio.timeout(15):
+                    async with asyncio.timeout(self._vision_timeout_s):
                         answer = await self.scene.answer(
                             question, [frame.jpeg for frame in chosen]
                         )
