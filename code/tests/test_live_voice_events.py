@@ -220,3 +220,33 @@ async def test_shared_fleet_audio_is_preempted_only_once_on_event_gap():
         assert await listener.poll() == 0
         assert await listener.poll() == 0
         assert called == [("global", "gap")]
+
+
+async def test_idle_speech_end_event_is_authenticated_and_ordered():
+    delivered = []
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 10, "events": [], "reset": False, "lost": False
+            })
+        return httpx.Response(200, json={
+            "cursor": 12, "reset": False, "lost": False,
+            "events": [
+                {"seq": 11, "robot_id": "robot-01", "kind": "speech_start",
+                 "source": "xiaozhi_server_vad"},
+                {"seq": 12, "robot_id": "robot-01", "kind": "speech_end",
+                 "source": "xiaozhi_server_vad"},
+            ]
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def handle(robot, event):
+            delivered.append((robot, event))
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=handle,
+        )
+        await listener.poll()
+        assert await listener.poll() == 2
+    assert delivered == [
+        ("robot-01", "speech_start"), ("robot-01", "speech_end")
+    ]
