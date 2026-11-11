@@ -24,6 +24,13 @@ class VoiceEventListener:
         self.cursor: int | None = None
         self.handled = 0
         self.last_error: str | None = None
+        self._stream_failed = False
+
+    async def _preempt_all(self, reason: str) -> None:
+        # Loss of the voice event stream means a human interruption could have
+        # been missed. Silencing all Mac-owned audio is safer than guessing.
+        for robot_id in sorted(self.robot_ids):
+            await self.on_interrupt(robot_id, reason)
 
     async def _fetch(self, bootstrap: bool = False) -> dict:
         query = {"after": str(self.cursor if self.cursor is not None else 0)}
@@ -51,18 +58,23 @@ class VoiceEventListener:
             if data["events"]:
                 raise ValueError("Bootstrapping must not replay stale audio events")
             self.cursor = data["cursor"]
+            self._stream_failed = False
             return 0
         data = await self._fetch()
         if data["reset"]:
+            # Server restart invalidates the old speech generation. No stale
+            # events replay, but old Mac audio must not survive a lost VAD.
+            await self._preempt_all("reset")
             self.cursor = None
+            self._stream_failed = False
             return 0
         if data["cursor"] < self.cursor:
             raise ValueError("Voice event cursor rolled backward without a restart")
         if data["lost"]:
             # Any missed interruption could have left obsolete Mac TTS running.
-            for robot_id in sorted(self.robot_ids):
-                await self.on_interrupt(robot_id, "gap")
+            await self._preempt_all("gap")
             self.cursor = data["cursor"]
+            self._stream_failed = False
             return 0
         current = self.cursor
         for event in data["events"]:
@@ -82,6 +94,7 @@ class VoiceEventListener:
         if self.cursor != data["cursor"]:
             raise ValueError("Voice server skipped sequence without marking a gap")
         self.last_error = None
+        self._stream_failed = False
         return len(data["events"])
 
     async def run(self) -> None:
@@ -93,4 +106,13 @@ class VoiceEventListener:
                 raise
             except (httpx.HTTPError, RuntimeError, ValueError, KeyError) as exc:
                 self.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+                # A broken, delayed or malformed event stream is NOT proof
+                # that the user is silent. Cancel audio once per outage;
+                # a successful authenticated poll rearms event monitoring.
+                if not self._stream_failed:
+                    self._stream_failed = True
+                    try:
+                        await self._preempt_all("stream_unavailable")
+                    except Exception as cancel_exc:
+                        self.last_error += f"; preempt failed: {type(cancel_exc).__name__}"
                 await asyncio.sleep(1)
