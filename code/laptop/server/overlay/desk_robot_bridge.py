@@ -77,6 +77,13 @@ def record_human_voice(conn, kind: str) -> bool:
         "source": "xiaozhi_server_vad" if kind in ("speech_start", "speech_end")
                   else "xiaozhi_aec_vad",
     })
+    if kind in ("speech_start", "normal", "group"):
+        native = _native_adapter()
+        if native is not None:
+            # Never block original AEC/VAD while silencing other native pets.
+            asyncio.get_running_loop().create_task(
+                native.preempt_others_for_human(device)
+            )
     return True
 
 
