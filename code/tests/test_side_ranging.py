@@ -1,0 +1,112 @@
+"""Three existing extra VL53L4CD read-only directions become qualified pet events."""
+import asyncio
+from pathlib import Path
+
+from desk_robot.config import load_settings
+from desk_robot.conversation import Conversation
+from desk_robot.memory import MemoryStore
+from desk_robot.pet import PetController
+from desk_robot.side_ranging import SideRangeEvents
+from desk_robot.simulator import SimulatedChat, SimulatedScene, SimulatedSpeaker
+
+
+def body(*, mm=(600, 600, 600), ages=(30, 30, 30),
+         present=7, valid=7):
+    return {
+        "side_ranges": {
+            "mm": list(mm), "age_ms": list(ages),
+            "present_mask": present, "valid_mask": valid,
+            "motion_certified": False,
+        },
+    }
+
+
+def test_side_near_requires_two_independent_new_samples_and_far_rearm():
+    tracker = SideRangeEvents()
+    assert tracker.observe(body(), now=10.00, near_mm=170) == []
+    assert tracker.observe(body(mm=(100, 600, 600)), now=10.10, near_mm=170) == []
+    # Duplicate body status with stale 130ms age is not a second ADC reading.
+    assert tracker.observe(body(mm=(100, 600, 600), ages=(130, 30, 30)),
+                           now=10.20, near_mm=170) == []
+    assert tracker.observe(body(mm=(95, 600, 600)), now=10.26,
+                           near_mm=170) == [("left", 95)]
+    # Repeated near data do not make new events.
+    assert tracker.observe(body(mm=(90, 600, 600)), now=10.40,
+                           near_mm=170) == []
+    assert tracker.observe(body(), now=10.54, near_mm=170) == []
+    assert tracker.observe(body(), now=10.68, near_mm=170) == []
+    assert tracker.observe(body(mm=(100, 600, 600)), now=10.82,
+                           near_mm=170) == []
+    assert tracker.observe(body(mm=(105, 600, 600)), now=10.96,
+                           near_mm=170) == [("left", 105)]
+
+
+def test_invalid_channel_and_stale_age_cannot_invent_rearm_events():
+    tracker = SideRangeEvents()
+    tracker.observe(body(), now=1.0, near_mm=180)
+    assert tracker.observe(body(mm=(120, 600, 600), valid=6),
+                           now=1.2, near_mm=180) == []
+    assert tracker.observe(body(mm=(120, 600, 600)), now=1.3,
+                           near_mm=180) == []  # first sample is baseline
+    assert tracker.observe(body(mm=(120, 600, 600), ages=(600, 30, 30)),
+                           now=1.5, near_mm=180) == []
+    assert tracker.observe(body(mm=(120, 600, 600)), now=1.7,
+                           near_mm=180) == []
+    assert tracker.observe(body(mm=(110, 600, 600)), now=1.9,
+                           near_mm=180) == []
+
+
+def test_side_masks_and_untrusted_ranges_fail_closed():
+    tracker = SideRangeEvents()
+    for invalid in (
+        {"mm": [100, 100], "age_ms": [20, 20, 20],
+         "present_mask": 7, "valid_mask": 7,
+         "motion_certified": False},
+        {"mm": [100, 100, 100], "age_ms": [20, 20, 20],
+         "present_mask": 0, "valid_mask": 7,
+         "motion_certified": False},
+        {"mm": [100, 100, 100], "age_ms": [20, 20, 20],
+         "present_mask": 7, "valid_mask": 7,
+         "motion_certified": True},
+    ):
+        assert tracker.observe({"side_ranges": invalid}, now=1.0,
+                               near_mm=180) == []
+    assert tracker.observe({"side_ranges": "forged"}, now=1.0,
+                           near_mm=180) == []
+
+
+async def test_real_side_event_is_one_robot_memory_not_motion(tmp_path):
+    settings = load_settings(
+        Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    )
+    settings.mode = "hardware"
+    settings.robots[0].side_interactions_qualified = True
+    settings.robots[0].side_near_threshold_mm = 180
+    memory = MemoryStore(tmp_path, [r.id for r in settings.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(
+        settings, SimulatedChat(), speaker, memory=memory
+    )
+    pet = PetController(settings, {}, conversation, memory, SimulatedScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.quiet, state.generation = True, True, 3
+    try:
+        await pet._observe_side_ranges("robot-01", 3, body())
+        await asyncio.sleep(.08)
+        await pet._observe_side_ranges("robot-01", 3,
+                                       body(mm=(600, 75, 600)))
+        await asyncio.sleep(.08)
+        await pet._observe_side_ranges("robot-01", 3,
+                                       body(mm=(600, 80, 600)))
+        records = [m for m in memory.recent("robot-01")
+                   if m.kind == "side_object"]
+        assert len(records) == 1
+        assert "right" in records[0].summary
+        assert records[0].witnessed
+        assert memory.count("robot-02") == 0
+        assert not speaker.spoken
+        # A model event cannot arm WROOM or claim this direction motion safe.
+        assert state.last_aux_kind == "side_object"
+    finally:
+        state.enabled = False
+        await pet.close()
