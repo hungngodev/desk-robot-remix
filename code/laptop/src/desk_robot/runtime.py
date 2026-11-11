@@ -89,6 +89,14 @@ class Runtime:
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
         if robot_id not in {robot.id for robot in self.settings.robots}:
             raise KeyError(f"Unknown voice source: {robot_id}")
+        if kind == "speech_end":
+            # A real VAD-negative transition only slows camera sampling.
+            # It MUST NOT stop current Xiaozhi playback or clear the last
+            # visual evidence needed by the human's just-finished question.
+            visual = getattr(self, "multimodal", None)
+            if visual is not None:
+                visual.voice_ended(robot_id)
+            return
         # Human speech cancels one shared five-pet speech floor once.
         await self._preempt_audio_floor()
         # VAD event is a signal, never a blocking image request. Schedule
