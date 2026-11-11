@@ -24,6 +24,8 @@ class RobotConfig(BaseModel):
     proximity_near_raw_threshold: int | None = Field(default=None, ge=25, le=245)
     battery_low_percent: int = Field(default=20, ge=5, le=40)
     gesture_interactions_qualified: bool = False  # measured hardware gate
+    side_near_threshold_mm: int | None = Field(default=None, ge=35, le=1000)
+    side_interactions_qualified: bool = False  # measured 3-direction geometry, no motor permit
     calibration: Path | None = None
     dock_calibration: Path | None = None
     dock_motion_qualified: bool = False
