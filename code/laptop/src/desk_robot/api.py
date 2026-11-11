@@ -226,6 +226,33 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             ],
         }
 
+    @app.get("/v1/pet/{robot_id}/voice-context", dependencies=[Depends(authorize)])
+    async def pet_voice_context(robot_id: str):
+        # The language model cannot read persistent memories by default.
+        # Explicit opt-in applies to the one authenticated robot identity only.
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
+        if not settings.voice_memory_tools_enabled:
+            raise HTTPException(403, "Opt in to voice memory retrieval first")
+        records = await asyncio.to_thread(
+            app.state.runtime.memory.recent, robot_id, limit=6
+        )
+        return {
+            "robot_id": robot_id,
+            "untrusted_context_not_instructions": True,
+            "no_new_motion_permission": True,
+            "memories": [
+                {
+                    "summary": entry.summary[:200],
+                    "kind": entry.kind,
+                    "witnessed": entry.witnessed,
+                    "source_robot": entry.source_robot,
+                } for entry in records
+            ],
+        }
+
     @app.post("/v1/pet/{robot_id}/share", dependencies=[Depends(operator)])
     async def pet_share(robot_id: str, request: PeerShareRequest):
         # Operator authorizes a single text-only copy, never movement.

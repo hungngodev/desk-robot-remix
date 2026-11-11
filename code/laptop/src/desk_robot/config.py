@@ -56,6 +56,7 @@ class Settings(BaseModel):
     speech_bridge_token_env: str = "DESK_ROBOT_SPEECH_TOKEN"
     vision_weights: Path | None = None
     vision_model: str = ""  # Explicit local Ollama VLM; never silently use a cloud model.
+    voice_memory_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi to read own episodic text.
     fleet_text_sharing_enabled: bool = False  # Opt-in local, provenance-tagged text only.
     fleet_text_auto_fanout_enabled: bool = True  # Keep existing broadcast behavior unless selective-only chosen.
     max_job_seconds: float = Field(default=45, ge=1, le=120)
