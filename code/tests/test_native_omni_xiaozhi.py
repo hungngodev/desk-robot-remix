@@ -20,8 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def native(monkeypatch):
-    fake_bridge = SimpleNamespace(connections={}, robot_for_device=lambda dev:
-                                  "robot-01" if dev == "mac-01" else None)
+    fake_bridge = SimpleNamespace(
+        connections={},
+        robot_for_device=lambda dev: "robot-01" if dev == "mac-01" else None,
+        lease_stopping=False, lease_ids=frozenset(), lease_until=0.0,
+    )
     monkeypatch.setitem(sys.modules, "desk_robot_bridge", fake_bridge)
     spec = importlib.util.spec_from_file_location(
         "desk_robot_native_omni",
