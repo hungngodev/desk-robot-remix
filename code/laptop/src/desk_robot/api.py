@@ -63,6 +63,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise ValueError("Operator and tool tokens must be different")
         app.state.runtime = runtime or Runtime(settings)
         try:
+            start = getattr(app.state.runtime, "start", None)
+            if callable(start):
+                await start()
             yield
         finally:
             await app.state.runtime.close()
