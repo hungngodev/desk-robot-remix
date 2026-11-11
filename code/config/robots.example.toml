@@ -1,4 +1,4 @@
-# Copy to local.toml and enter the two heads' LAN addresses/device IDs after assembly.
+# Copy to local.toml and enter the actual heads' LAN addresses/device IDs after assembly.
 # Head tokens must match the selected head's private build settings. Never put tokens here.
 mode = "hardware"
 ollama_model = "qwen3:8b"
@@ -9,10 +9,7 @@ vision_model = ""
 voice_vision_tools_enabled = false
 # Install a LOCAL multimodal model in Ollama, then select its actual name.
 # Set this only after running ollama pull MODEL and evaluating real scene accuracy.
-# ollama_vision_model = "qwen3-vl:4b"
 memory_dir = "../data/private/pet-memory"
-pet_poll_seconds = 1.0
-pet_spontaneous_gap_seconds = 120.0
 trials_file = "../data/physical-trials.jsonl"
 vision_weights = "../models/yolov8s-worldv2.pt"
 
