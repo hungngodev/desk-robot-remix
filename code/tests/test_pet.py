@@ -1056,6 +1056,37 @@ async def test_autonomous_pause_cannot_release_live_human_vad(fleet, tmp_path):
         await pet.close()
 
 
+async def test_unverified_voice_monitor_cannot_launch_spontaneous_speech(
+    fleet, tmp_path,
+):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    chat = GroundedChat()
+    conversation = Conversation(fleet, chat, speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 9
+    try:
+        pet.set_voice_monitor_ready(False)
+        assert pet.status("robot-01")["voice_event_monitor_ready"] is False
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A real key appeared", 0.98), 9
+        )
+        assert state.last_initiative_suppression == "voice_monitor_unavailable"
+        assert speaker.spoken == []
+        assert chat.prompts == []
+        assert pet._speech_task is None
+        pet.set_voice_monitor_ready(True)
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A new brass key appeared", 0.98), 9
+        )
+        await wait_for(lambda: state.spoken == 1)
+        assert len(speaker.spoken) == 1
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 def test_reachy_style_initiative_gate_prunes_uncertain_chatter_not_sensor_memory():
     # A high-confidence first-hand CAP1188 event is different from a guessed
     # camera person's identity. Pure policy has no hardware/motor side effect.
