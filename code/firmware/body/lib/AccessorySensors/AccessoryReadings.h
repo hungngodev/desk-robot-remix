@@ -42,6 +42,13 @@ struct ClimateRaw {
   int temp_centi = 0, humidity_centi = 0;
   std::uint32_t at_ms = 0;
 };
+struct BarometerRaw {
+  bool present = false, valid = false;
+  std::uint8_t address = 0, chip_id = 0;
+  int temp_centi = 0;
+  unsigned pressure_pa = 0;
+  std::uint32_t at_ms = 0;
+};
 struct ForceRaw {
   bool present = false, valid = false;
   std::uint8_t valid_mask = 0; // both ADC channels need independent fresh samples
@@ -74,6 +81,7 @@ struct DockPinRaw {
 struct AccessoryReadings {
   AngleRaw angle[3]{}; // index 0 nose, 1 left track, 2 right track
   ClimateRaw climate{};
+  BarometerRaw barometer{}; // user's BMP280, independent of SHT41
   ForceRaw force{};
   GaugeRaw gauge{};
   DockPinRaw dock{};
