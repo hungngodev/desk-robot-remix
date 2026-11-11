@@ -203,8 +203,14 @@ class PetController:
         return self.status(robot_id)
 
     async def interrupt(self, robot_id: str) -> dict:
-        """Call when actual user speech is detected. Does not claim mic VAD wiring."""
+        """Real human speech takes the floor over proactive narration.
+
+        The authenticated Xiaozhi VAD bridge is the source in hardware mode.
+        Hold off autonomous remarks for the existing cooldown after interruption
+        rather than starting a fresh observation line while a person is talking.
+        """
         self.states[robot_id]  # Unknown identity fails explicitly.
+        self._group_last_spoken = time.monotonic()
         await self._cancel_speech(robot_id)
         return self.status(robot_id)
 

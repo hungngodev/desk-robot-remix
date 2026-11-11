@@ -1009,3 +1009,24 @@ async def test_optional_bumper_magnet_pir_are_real_masked_fleet_events(fleet, tm
     finally:
         state.enabled = False
         await pet.close()
+
+async def test_real_voice_interrupt_suppresses_proactive_banter_for_cooldown(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(),
+                        speech_cooldown=120)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 1
+    try:
+        await pet.interrupt("robot-01")
+        before = state.suppressed
+        pet._consider_speech(
+            "robot-01", SceneChange("touch", "Someone touched my head", 1.0), 1
+        )
+        assert state.suppressed == before + 1
+        assert pet._speech_task is None
+        assert speaker.spoken == []
+    finally:
+        state.enabled = False
+        await pet.close()
