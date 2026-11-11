@@ -424,6 +424,7 @@ class NativeOmniSession:
                     _output_owner = None
 
     async def _send_device_opus(self, packet: bytes, generation: int) -> None:
+        global _output_owner
         if self.closed or generation != self._generation:
             return
         import desk_robot_bridge as bridge
@@ -444,6 +445,9 @@ class NativeOmniSession:
         if blocked_by_human:
             events = await self._invalidate_head_first()
             self._schedule_remote_cancel(events)
+            async with _output_owner_lock:
+                if _output_owner == self.device:
+                    _output_owner = None
             return
         # 60ms Opus audio pacing, not an acoustic playback confirmation.
         await asyncio.sleep(0.060)
@@ -585,10 +589,16 @@ async def flush_head(session: NativeOmniSession) -> None:
 
 async def preempt_others_for_human(source_device: str) -> None:
     """Human conversation takes priority over every native-model pet."""
+    global _output_owner
     for device, session in list(_sessions.items()):
         if device != source_device and session.conn.client_is_speaking:
             events = await session._invalidate_head_first()
             session._schedule_remote_cancel(events)
+    async with _output_owner_lock:
+        # A previous model speaker must not remain recorded as the owner
+        # after its audio was stopped for a new human voice.
+        if _output_owner is not None and _output_owner != source_device:
+            _output_owner = None
 
 
 def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
