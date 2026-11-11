@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-10",
+  "updated_at": "2026-11-11",
   "target_robots": 5,
   "decision": "selected_full_five_pet_electrical_and_module_architecture_not_physically_qualified",
   "fixed_scope": "Five autonomous tracked desk pets with distinct memory and speech, natural interruption, OLED, camera, touch and handling, lift/grip, exploration, games and optional physical accessory modules. One fully featured core repeated five times.",
@@ -435,7 +435,8 @@
               "address": 41
             }
           ],
-          "firmware": "reserved_driver_required"
+          "firmware": "implemented_read_only_esp32_full_not_physically_qualified",
+          "note": "Source has actual VL53L4CD acquisition and Mac side event consumers. Never grants drive or backward movement permission."
         },
         {
           "channel": 6,
@@ -446,7 +447,8 @@
               "address": 41
             }
           ],
-          "firmware": "reserved_driver_required"
+          "firmware": "implemented_read_only_esp32_full_not_physically_qualified",
+          "note": "Source has actual VL53L4CD acquisition and Mac side event consumers. Never grants drive or backward movement permission."
         },
         {
           "channel": 7,
@@ -457,7 +459,8 @@
               "address": 41
             }
           ],
-          "firmware": "reserved_driver_required"
+          "firmware": "implemented_read_only_esp32_full_not_physically_qualified",
+          "note": "Source has actual VL53L4CD acquisition and Mac side event consumers. Never grants drive or backward movement permission."
         }
       ]
     },
@@ -477,7 +480,7 @@
               "address": 87
             }
           ],
-          "firmware": "new_adapter_required",
+          "firmware": "implemented_cap1188_and_max30102_raw_not_physically_qualified",
           "note": "CAP1188 strap address 0x28 to avoid 0x29 cliff sensor collision even under mux fault"
         },
         {
@@ -493,7 +496,7 @@
               "address": 54
             }
           ],
-          "firmware": "new_adapter_required"
+          "firmware": "implemented_apds9960_and_as5600_raw_not_physically_qualified"
         },
         {
           "channel": 2,
@@ -504,7 +507,7 @@
               "address": 72
             }
           ],
-          "firmware": "new_adapter_required"
+          "firmware": "implemented_ads1115_raw_force_not_physically_qualified"
         },
         {
           "channel": 3,
@@ -519,7 +522,7 @@
               "address": 118
             }
           ],
-          "firmware": "new_adapter_required",
+          "firmware": "implemented_sht41_and_bmp280_raw_not_physically_qualified",
           "note": "BMP280 chip address may be 0x76 or 0x77; inspect actual breakout"
         },
         {
@@ -535,7 +538,7 @@
               "address": 54
             }
           ],
-          "firmware": "new_adapter_required"
+          "firmware": "implemented_max17048_ina226_raw_no_calibrated_current"
         },
         {
           "channel": 5,
@@ -550,7 +553,7 @@
               "address": 32
             }
           ],
-          "firmware": "new_adapter_required",
+          "firmware": "implemented_mcp23017_dock_gpio_only_pn532_not_yet_integrated",
           "note": "Verify PN532 7-bit address and 3.3V I2C module, connect its IRQ and reset only through expander after driver review"
         },
         {
@@ -562,7 +565,7 @@
               "address": 54
             }
           ],
-          "firmware": "new_adapter_required"
+          "firmware": "implemented_as5600_wheel_raw_not_physical_odometry"
         },
         {
           "channel": 7,
@@ -573,15 +576,29 @@
               "address": 54
             }
           ],
-          "firmware": "new_adapter_required"
+          "firmware": "implemented_as5600_wheel_raw_not_physical_odometry"
         }
       ]
     },
-    "critical_policy": "Existing WROOM TofBus checks for an optional TCA9548A at 0x71 at boot and sets all its lanes off. If fitted, it forces its lanes off before each local 0x70 safety range transaction; a failed quiesce faults the local guard. New optional sensor drivers and timing tests remain unimplemented and must never delay the five present cliff samples or 500ms watchdog.",
+    "critical_policy": "Firmware in code/firmware/body/TofBus and AccessorySensors already implements eight VL53L4CD in esp32_full and bounded raw reads for the listed 0x71 channels except PN532 NFC, which is reserved but NOT implemented. 0x71 mux is quiesced ahead of critical 0x70 ToF reads; failed quiesce faults the local guard. The complete esp32_full profile additionally REQUIRES an installed fresh MCP23017 dock monitor; missing/invalid/stale GPIOA data or either seat contact locally blocks or stops motion. All source drivers require real breakout-specific voltage, lens, time, and behavior measurements and no camera or AI can arm the motor guard.",
     "head_policy": "Sense camera/mic are fixed; GPIO9 can be RGB only after confirming SD disabled and actual shipped board routing. Face bus 5/6 never connected to body Wire.",
     "power_policy": "One protected 1S cell/pack and charger with load sharing, 5V regulator sized to measured concurrent head/WROOM/steppers/servo/audio current, independent 3.3V sensor regulator. No bare cell charger contacts or 5V MCU GPIO.",
     "voltage_policy": "Only 3.3V I2C/GPIO at WROOM. Check every generic carrier VCC rail, pullups and level shifting. GPIO34 to 39 have no internal pulls. Bumper is two NC contacts in series to ground with external 3.3V pullup; normal LOW, collision or disconnected cable HIGH, local raw trip immediately. GPIO35 is input only and has no internal pullup.",
-    "pca9685_policy": "Not in selected fixed head and two servo system; moving ears, tail or head pan/tilt would require separate validated actuator variant, not a surprise third servo on occupied pins."
+    "pca9685_policy": "Not in selected fixed head and two servo system; moving ears, tail or head pan/tilt would require separate validated actuator variant, not a surprise third servo on occupied pins.",
+    "implementation_evidence": {
+      "ranges": "code/firmware/body/lib/TofBus/TofBus.cpp",
+      "raw_expansion": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "touch": "code/firmware/body/lib/ExpansionTouch/ExpansionTouch.cpp",
+      "pulse": "code/firmware/body/lib/PulsePad/PulsePad.cpp",
+      "dock": "code/firmware/body/lib/BodyControl/BodyControl.cpp",
+      "pet_consumer": "code/laptop/src/desk_robot/pet.py",
+      "side_consumer": "code/laptop/src/desk_robot/side_ranging.py",
+      "full_profile": "code/firmware/body/platformio.ini",
+      "test_contracts": "code/firmware/body/tests/optional_i2c_io_tests.cpp",
+      "sensor_hardware_qualified": false,
+      "charging_current_electrically_verified": false,
+      "room_station_audio_video_verified": false
+    }
   },
   "room_pod": {
     "compute": "Reuse the owned Feather nRF52840 by USB as a stationary room pod if it has a suitable UART and I2C allocation; otherwise one generic ESP32C3 module, not five new MCUs.",
