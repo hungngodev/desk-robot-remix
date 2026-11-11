@@ -25,8 +25,16 @@ def payload():
             "present": True, "valid": True, "left_seated": True,
             "right_seated": True, "input_good": True,
             "charge_indicated": True, "charging_verified": False,
+            "seq": 1, "age_ms": 35,
         },
     }
+
+
+def fresh_samples(count=3):
+    readings = [payload() for _ in range(count)]
+    for seq, sample in enumerate(readings, 1):
+        sample["dock"]["seq"] = seq
+    return readings
 
 
 class FakeHead:
@@ -45,7 +53,7 @@ async def test_three_stable_charger_indications_are_not_battery_proof(monkeypatc
     async def fast(_seconds):
         pass
     monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
-    head = FakeHead([payload() for _ in range(3)])
+    head = FakeHead(fresh_samples())
     result = await observe_dock_evidence(head, "robot-01")
     assert result["state"] == "charger_reports_active"
     assert result["stable_three_samples"] is True
@@ -62,11 +70,18 @@ async def test_asymmetric_switch_or_changing_input_refuses_seated_claim(monkeypa
     monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
     asym = payload()
     asym["dock"]["right_seated"] = False
-    head = FakeHead([copy.deepcopy(asym) for _ in range(3)])
+    asym_frames = [copy.deepcopy(asym) for _ in range(3)]
+    for seq, frame in enumerate(asym_frames, 1):
+        frame["dock"]["seq"] = seq
+    head = FakeHead(asym_frames)
     assert (await observe_dock_evidence(head, "robot-01"))["state"] == "asymmetric_seat_or_fault"
     changed = payload()
     changed["dock"]["charge_indicated"] = False
-    head = FakeHead([payload(), changed, changed])
+    first = payload()
+    second = copy.deepcopy(changed)
+    third = copy.deepcopy(changed)
+    second["dock"]["seq"], third["dock"]["seq"] = 2, 3
+    head = FakeHead([first, second, third])
     result = await observe_dock_evidence(head, "robot-01")
     assert result["state"] == "dock_evidence_changed"
     assert result["stable_three_samples"] is False
@@ -94,3 +109,41 @@ async def test_dock_evidence_refuses_forged_battery_charge_and_robot_identity():
     head = FakeHead([payload()])
     with pytest.raises(ValueError):
         await observe_dock_evidence(head, "robot-02")
+
+
+async def test_replayed_cached_dock_status_is_not_independent_physical_evidence(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    same = payload()
+    result = await observe_dock_evidence(
+        FakeHead([copy.deepcopy(same) for _ in range(3)]), "robot-01",
+    )
+    assert result["state"] == "dock_sample_replayed_or_reset"
+    assert result["stable_three_samples"] is False
+    assert result["charging_verified"] is False
+
+
+async def test_out_of_order_or_rebooted_dock_sequence_fails_closed(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    samples[1]["dock"]["seq"] = 9
+    samples[2]["dock"]["seq"] = 1
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["state"] == "dock_sample_replayed_or_reset"
+    assert not result["stable_three_samples"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("seq", 0), ("seq", "1"), ("seq", True), ("age_ms", 500),
+    ("age_ms", -1), ("age_ms", 0.5),
+])
+async def test_dock_status_cannot_claim_valid_without_fresh_hardware_sample(
+    field, value,
+):
+    bad = payload()
+    bad["dock"][field] = value
+    with pytest.raises(ValueError):
+        await observe_dock_evidence(FakeHead([bad]), "robot-01")
