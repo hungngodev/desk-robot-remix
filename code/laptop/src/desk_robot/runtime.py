@@ -9,6 +9,7 @@ from .controller import Coordinator
 from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
 from .live_voice_events import VoiceEventListener
 from .memory import MemoryStore
+from .multimodal import MultimodalOrchestrator
 from .pet import PetController
 from .simulator import (
     SimulatedChat,
@@ -42,6 +43,14 @@ class Runtime:
             settings, heads, self.conversation, self.memory, scene,
             on_local_fault=self.coordinator.stop,
         )
+        self.multimodal: MultimodalOrchestrator | None = None
+        if settings.mode == "hardware":
+            # One lock serves background visual comparison and user question
+            # inference across ALL five pets; no second camera transport.
+            self.multimodal = MultimodalOrchestrator(
+                settings, heads, scene, self.pet._vision_lock
+            )
+            self.pet.multimodal = self.multimodal
         self.voice_events: VoiceEventListener | None = None
         self._voice_task: asyncio.Task | None = None
 
@@ -70,6 +79,10 @@ class Runtime:
             await self.pet.interrupt(robot.id)
         # Also stop any robot-to-robot scripted conversation.
         await self.conversation.stop()
+        # VAD event is a signal, never a blocking image request. Schedule
+        # camera sampling AFTER the urgent audio cancellation path.
+        if kind in ("normal", "group") and self.multimodal is not None:
+            self.multimodal.voice_started(robot_id)
 
     async def close(self):
         if self._voice_task is not None:
@@ -77,6 +90,8 @@ class Runtime:
             await asyncio.gather(self._voice_task, return_exceptions=True)
             self._voice_task = None
         await self.pet.close()
+        if self.multimodal is not None:
+            await self.multimodal.close()
         await self.conversation.stop()
         await self.coordinator.close()
         await self.client.aclose()
