@@ -1,6 +1,6 @@
 # MiniCPM-o 4.5 as the native realtime audio + video option
 
-Status November 10, 2026: protocol source and isolated backend probe committed. This is a **real model-side protocol implementation**, not a completed device speaker cutover, and not an acoustic qualification. The original five full-feature desk pets, Xiaozhi hardware, Mac camera event/memory orchestration, eight ToF, force-feedback grasp, docking and power requirements remain unchanged.
+Status November 11, 2026: opt-in real Xiaozhi head PCM/Opus server routing, local camera retrieval and the upstream duplex wire implementation exist in source. The hardware speaker, physical echo cancellation and full model backend have **not been bench qualified**. This is not a completed, production-ready live voice system. The original five full-feature desk pets, Xiaozhi hardware, Mac camera event/memory orchestration, eight ToF, force-feedback grasp, docking and power requirements remain unchanged.
 
 ## November 11: Xiaozhi real microphone and speaker route committed
 
@@ -48,6 +48,17 @@ The host loopback tests in `code/tests/test_native_omni_xiaozhi.py` exercise a r
 The original GitHub Actions jobs currently fail with **zero visible job steps** and unavailable log blobs. This is unresolved verification infrastructure; do not report tests passing or promote the PR to ready. Physical docking, charging electronics, fully dimensioned final 3D CAD and calibrated grasp also remain separate unqualified gates.
 
 ---
+
+
+## November 11 upstream protocol verification and operational limitations
+
+The official [vLLM Omni Realtime Duplex API](https://github.com/vllm-project/vllm-omni/blob/main/docs/serving/realtime_duplex_api.md) explicitly negotiates **model-owned duplex capabilities** on `session.created`: `implementation_level=model_native_duplex`, `supports_input_append=true`, `supports_barge_in=true` and `chunk_period_ms=1000` for MiniCPM-o 4.5. Its published `audio.input.sample_rate_hz` is 16000 and `audio.output.format.rate` is 24000. Our native adapter now checks these exact values, the selected model identity and both `pcm16` codec fields **before** it forwards live microphone frames. Any incompatible model, wrong audio clock or fake Realtime server fails closed. This prevents two competing audio implementations or corrupt audio from starting by accident.
+
+When the model server cannot connect or refuses these capabilities, the native session reports the bounded error in `voice-readiness` for the device and imposes a 15-second retry cooldown. Repeated inbound microphone callbacks may not spin up hundreds of competing WebSocket handshakes. The default Xiaozhi pipeline remains the required fallback for a user who has **not** explicitly selected native mode; to disable native, remove that robot from `DESK_ROBOT_OMNI_ROBOTS` and restart the server instead of disabling privacy or speaker guards.
+
+**Mac hardware feasibility matters.** The official [MiniCPM-o 4.5 serving recipe](https://github.com/vllm-project/vllm-omni/blob/main/recipes/OpenBMB/MiniCPM-o-4_5.md#hardware-support) documents Linux and a large-memory GPU, with two GPUs recommended for low-latency continuous batching. That is **not evidence** of a native `vllm-omni` deployment on the user's macOS M1 Max laptop. Do not claim that setting the WebSocket environment variable on macOS starts the model. The existing pinned Xiaozhi FunASR/Ollama/Kokoro staged pipeline remains the usable source foundation pending explicit actual model hosting and physical speaker tests.
+
+**Source validation vs actual proof:** `code/tests/test_native_omni_xiaozhi.py` now includes an upstream-shaped `session.created` mock, explicit rejected capability and codec cases, and a no-retry-flood check. These tests are **committed** but not verified green. GitHub run [43100939229](https://github.com/hungngodev/desk-robot-remix/actions/runs/43100939229) marked all four jobs failed with zero recorded steps and missing log blobs. An inability to fetch logs is not a code test failure diagnosis or a pass.
 
 ## The actual open source foundation
 
@@ -119,7 +130,7 @@ The Mac XIAO camera currently gives JPEG capture completion metadata and a fresh
 
 * Native model protocol tests: software integration, not hardware validated.
 * Offline realtime server probe: executable if a compatible model server exists, but not yet run against a real server here.
-* Xiaozhi speaker cutover, actual audio resampling and DMA playback acknowledgement: NOT IMPLEMENTED.
+* Xiaozhi speaker cutover and 24kHz-to-16kHz resampling: IMPLEMENTED in opt-in source but NOT hardware or model verified. Genuine DMA/I2S playback acknowledgement: NOT IMPLEMENTED and **must not** be invented from Opus send counters.
 * End-to-end physical voice interruption, human speech latency, proactive audiovisual correctness and the complete assembled robot: NOT VERIFIED.
 * Autonomous docking, protected 1S charger and gripper contact force still require physical measurements, independent of the AI backend.
 
