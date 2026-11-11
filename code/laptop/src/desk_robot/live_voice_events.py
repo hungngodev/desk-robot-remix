@@ -17,6 +17,7 @@ class VoiceEventListener:
         robot_ids: set[str], on_interrupt: Callable[[str, str], Awaitable[None]],
         on_global_interrupt: Callable[[str], Awaitable[None]] | None = None,
         on_monitor_ready: Callable[[bool], Awaitable[None]] | None = None,
+        on_speech_snapshot: Callable[[frozenset[str]], Awaitable[None]] | None = None,
     ):
         if not robot_ids or len(token) < 24:
             raise ValueError("Known robot IDs and private speech token required")
@@ -25,6 +26,7 @@ class VoiceEventListener:
         self.on_interrupt = on_interrupt
         self.on_global_interrupt = on_global_interrupt
         self.on_monitor_ready = on_monitor_ready
+        self.on_speech_snapshot = on_speech_snapshot
         self.monitor_ready = False
         self.cursor: int | None = None
         self.handled = 0
@@ -70,7 +72,22 @@ class VoiceEventListener:
                 or not isinstance(data.get("events"), list)
                 or len(data["events"]) > 128):
             raise ValueError("Malformed or oversized voice event stream")
+        active = data.get("active_human_robots")
+        if active is not None and (
+            not isinstance(active, list)
+            or len(active) > len(self.robot_ids)
+            or any(type(robot_id) is not str or robot_id not in self.robot_ids
+                   for robot_id in active)
+            or len(set(active)) != len(active)
+        ):
+            raise ValueError("Invalid authenticated live VAD snapshot")
         return data
+
+    async def _reconcile_snapshot(self, data: dict) -> None:
+        # Supported by our pinned bridge; legacy fixtures without this field
+        # retain the event-only behavior but cannot certify gap recovery.
+        if self.on_speech_snapshot is not None and "active_human_robots" in data:
+            await self.on_speech_snapshot(frozenset(data["active_human_robots"]))
 
     async def poll(self) -> int:
         if self.cursor is None:
@@ -79,6 +96,7 @@ class VoiceEventListener:
                 raise ValueError("Bootstrapping must not replay stale audio events")
             self.cursor = data["cursor"]
             self._stream_failed = False
+            await self._reconcile_snapshot(data)
             await self._set_monitor_ready(True)
             return 0
         data = await self._fetch()
@@ -96,6 +114,7 @@ class VoiceEventListener:
             await self._set_monitor_ready(False)
             # Any missed interruption could have left obsolete Mac TTS running.
             await self._preempt_all("gap")
+            await self._reconcile_snapshot(data)
             self.cursor = data["cursor"]
             self._stream_failed = False
             return 0
@@ -124,6 +143,7 @@ class VoiceEventListener:
             raise ValueError("Voice server skipped sequence without marking a gap")
         self.last_error = None
         self._stream_failed = False
+        await self._reconcile_snapshot(data)
         await self._set_monitor_ready(True)
         return len(data["events"])
 
