@@ -44,8 +44,8 @@ def files(root):
     source = (root / path).read_text()
     source = once(
         source,
-        "    import desk_robot_native_omni\\n"
-        "    if desk_robot_native_omni.route_audio(conn, pcm_frame, have_voice):\\n"
+        "    import desk_robot_native_omni\n"
+        "    if desk_robot_native_omni.route_audio(conn, pcm_frame, have_voice):\n"
         "        return\\n"
         "    # 服务端AEC功能需要实时触发打断",
         "    import desk_robot_bridge\n"
