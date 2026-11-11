@@ -188,7 +188,9 @@ class NativeOmniSession:
         while not self.closed:
             packet = await self.incoming.get()
             self.audio_frames += 1
-            self._user_was_talking = packet.speech
+            was_talking = self._user_was_talking
+            if packet.speech:
+                self._user_was_talking = True
             jpeg = None
             age = None
             if self.latest_jpeg is not None:
@@ -202,7 +204,7 @@ class NativeOmniSession:
             ))
             if packet.speech:
                 self._silent_frames = 0
-            elif self._user_was_talking:
+            elif was_talking:
                 self._silent_frames += 1
                 if self._silent_frames >= 3:
                     await self._send(self.wire.commit(final=True))
@@ -256,7 +258,6 @@ class NativeOmniSession:
                 continue
             response_id, chunk24k = item
             if (self.wire.response_id != response_id
-                    or not self.wire.accept_output
                     or self.closed):
                 continue
             if current_response != response_id or generation != self._generation:
@@ -317,7 +318,7 @@ class NativeOmniSession:
             async with aiohttp.ClientSession() as http:
                 async with http.ws_connect(
                     self.url, heartbeat=20, max_msg_size=2_000_000,
-                    timeout=aiohttp.ClientTimeout(total=8),
+                    timeout=8,
                 ) as ws:
                     self._socket = ws
                     await self._send(self.wire.session_update())
