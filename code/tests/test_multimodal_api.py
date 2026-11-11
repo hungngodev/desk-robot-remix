@@ -87,3 +87,37 @@ def test_native_omni_frame_requires_consent_real_hardware_and_tool_token(setting
     settings.voice_vision_tools_enabled = False
     with TestClient(create_app(settings, runtime=FakeRuntime())) as client:
         assert client.get(url, headers=tool).status_code == 403
+
+
+def test_native_model_instructions_contain_only_own_pet_persona_without_unapproved_memory(
+    settings, tokens,
+):
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    pet = settings.robots[0]
+
+    class StubRuntime:
+        coordinator = SimpleNamespace(robot=lambda rid: (
+            pet if rid == pet.id else (_ for _ in ()).throw(KeyError(rid))
+        ))
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    with TestClient(create_app(settings, runtime=StubRuntime())) as client:
+        tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+        result = client.get(f"/v1/pet/{pet.id}/omni-context", headers=tool)
+        assert result.status_code == 200
+        body = result.json()
+        assert body["robot_id"] == pet.id
+        assert pet.persona in body["instructions"]
+        assert body["memory_enabled"] is False
+        assert body["model_can_arm_motors"] is False
+        assert len(body["instructions"]) <= 2000
+        assert client.get(f"/v1/pet/{pet.id}/omni-context").status_code == 401
