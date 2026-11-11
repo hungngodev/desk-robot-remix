@@ -1,8 +1,24 @@
 #include <cassert>
 #include <string>
 #include "robot_protocol.h"
+#include "real_touch_edges.h"
 using namespace desk_robot;
 int main() {
+    RealTouchEdges head;
+    assert(head.Observe(10) == 0); // first read is baseline
+    assert(head.Observe(11) == 1);
+    assert(head.Observe(11) == 0);
+    assert(head.Observe(12) == 1);
+    assert(head.Observe(0) == 0); // unplug, reset or reboot
+    assert(head.Observe(1) == 1);
+    assert(head.Observe(99) == 0); // huge jump cannot forge touch
+    head.Reset();
+    assert(head.Observe(8) == 0);
+    RealTouchEdges cap;
+    assert(cap.Observe(4294967295U) == 0);
+    assert(cap.Observe(0) == 0); // wrap never fabricates a contact
+    assert(cap.Observe(3) == 3);
+
     Command c;
     assert(ParseCommand("drive 100 -100 250", false, c));
     assert(ExpectedAck(c) == "OK drive left=40 right=-40 ms=250");

@@ -6,6 +6,7 @@
 #include "esp_http_server.h"
 #include "camera.h"
 #include "robot_protocol.h"
+#include "real_touch_edges.h"
 
 namespace desk_robot {
 struct Reply {
@@ -16,6 +17,7 @@ struct Reply {
 
 struct BodyInteraction {
     int touch_events = 0;
+    int cap_touch_events = 0; // actual optional eight-zone CAP1188 rise counters
     bool fault = false;
     bool valid = false;
 };
@@ -37,8 +39,8 @@ private:
     std::uint32_t camera_sequence_ = 0; // camera_busy ensures one producer
     std::uint32_t boot_nonce_ = 0; // changes across physical Sense reboots
     // Owned by the one Sense face task, not shared with HTTP handlers.
-    bool touch_baselined_ = false;
-    std::uint32_t touch_last_ = 0;
+    RealTouchEdges head_touch_edges_{};
+    RealTouchEdges body_cap_edges_{};
     static void CameraTask(void* context);
     Reply Transact(const std::string& command, bool operator_control);
     bool Authorize(httpd_req_t* req);

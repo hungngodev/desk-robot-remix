@@ -227,15 +227,18 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
 
 BodyInteraction Bridge::PollInteraction() {
     BodyInteraction observation;
-    // Reuses the same locked, bounded body UART and the existing validated
-    // status frame. Never read body UART directly from the display task.
     const Reply reply = Transact("status", false);
     if (!reply.ok) {
-        touch_baselined_ = false; // next successful read is a baseline
+        head_touch_edges_.Reset();
+        body_cap_edges_.Reset();
         return observation;
     }
     auto json = Parse(reply.text);
-    if (!json) return observation;
+    if (!json) {
+        head_touch_edges_.Reset();
+        body_cap_edges_.Reset();
+        return observation;
+    }
     auto touch = cJSON_GetObjectItemCaseSensitive(json.get(), "touch");
     auto count = cJSON_GetObjectItemCaseSensitive(touch, "count");
     auto safety = cJSON_GetObjectItemCaseSensitive(json.get(), "safety");
@@ -244,17 +247,34 @@ BodyInteraction Bridge::PollInteraction() {
         !std::isfinite(count->valuedouble) ||
         count->valuedouble < 0 || count->valuedouble > 4294967295.0 ||
         std::floor(count->valuedouble) != count->valuedouble ||
-        !cJSON_IsObject(safety) || !cJSON_IsString(fault)) return observation;
+        !cJSON_IsObject(safety) || !cJSON_IsString(fault)) {
+        head_touch_edges_.Reset();
+        body_cap_edges_.Reset();
+        return observation;
+    }
     const auto current = static_cast<std::uint32_t>(count->valuedouble);
-    if (!touch_baselined_) {
-        touch_last_ = current;
-        touch_baselined_ = true;
+    observation.touch_events = head_touch_edges_.Observe(current);
+
+    // CAP1188 is optional and never replaces the dedicated WROOM touch stop.
+    // Explicit device-valid flag, range-checked zone mask and bounded counter
+    // avoid producing synthetic petting when wiring is unplugged or rebooted.
+    auto extras = cJSON_GetObjectItemCaseSensitive(json.get(), "extras");
+    auto cap_ok = cJSON_GetObjectItemCaseSensitive(extras, "cap_ok");
+    auto cap_mask = cJSON_GetObjectItemCaseSensitive(extras, "cap");
+    auto cap_events = cJSON_GetObjectItemCaseSensitive(extras, "cap_events");
+    if (cJSON_IsObject(extras) && cJSON_IsTrue(cap_ok) &&
+        cJSON_IsNumber(cap_mask) &&
+        std::isfinite(cap_mask->valuedouble) &&
+        std::floor(cap_mask->valuedouble) == cap_mask->valuedouble &&
+        cap_mask->valuedouble >= 0 && cap_mask->valuedouble <= 255 &&
+        cJSON_IsNumber(cap_events) &&
+        std::isfinite(cap_events->valuedouble) &&
+        std::floor(cap_events->valuedouble) == cap_events->valuedouble &&
+        cap_events->valuedouble >= 0 && cap_events->valuedouble <= 4294967295.0) {
+        observation.cap_touch_events = body_cap_edges_.Observe(
+            static_cast<std::uint32_t>(cap_events->valuedouble));
     } else {
-        const auto delta = current - touch_last_;
-        // Reject large jumps from WROOM reboot or corrupted counter rather
-        // than injecting hundreds of synthetic petting events into the HSM.
-        if (delta > 0 && delta <= 3) observation.touch_events = static_cast<int>(delta);
-        touch_last_ = current;
+        body_cap_edges_.Reset();
     }
     observation.fault = std::strcmp(fault->valuestring, "none") != 0 &&
                         std::strcmp(fault->valuestring, "not_required") != 0;

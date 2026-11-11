@@ -63,7 +63,12 @@ private:
                 last_body_poll_ms = now_ms;
                 const auto body = board->body_bridge_->PollInteraction();
                 if (body.valid) {
-                    for (int i = 0; i < body.touch_events; ++i) {
+                    // Dedicated head pad and verified CAP1188 zones both
+                    // drive immediate local eyes, without waiting for Mac VLM.
+                    // Bound a burst to protect the Stackchan event queue.
+                    int real_pets = body.touch_events + body.cap_touch_events;
+                    if (real_pets > 3) real_pets = 3;
+                    for (int i = 0; i < real_pets; ++i) {
                         board->face_behavior_.pushEvent(
                             Event(EventType::kTouched));
                     }
