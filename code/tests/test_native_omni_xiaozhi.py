@@ -28,6 +28,7 @@ def native(monkeypatch):
         ROOT / "laptop/server/overlay/desk_robot_native_omni.py",
     )
     module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni", module)
     spec.loader.exec_module(module)
     return module, fake_bridge
 
