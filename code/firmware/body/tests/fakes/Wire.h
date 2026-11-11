@@ -17,6 +17,9 @@ class TwoWire {
   std::vector<std::uint8_t> inbound;
   std::size_t pos = 0;
   bool pending_sht = false;
+  bool fail_dock_gpio = false;
+  unsigned dock_gpio_reads = 0;
+  std::uint8_t dock_gpioA = 0x0F; // switches closed, no input or charger
 
   void beginTransmission(std::uint8_t addr) {
     current_address = addr;
@@ -35,6 +38,7 @@ class TwoWire {
       case 4: return addr == 0x48;
       case 8: return addr == 0x44;
       case 16: return addr == 0x36 || addr == 0x40;
+      case 32: return addr == 0x20; // optional MCP23017 dock GPIOA
       case 64: return addr == 0x36;
       case 128: return addr == 0x36;
       default: return false;
@@ -68,7 +72,11 @@ class TwoWire {
     inbound.clear();
     pos = 0;
     if (!connected(addr)) return 0;
-    if (addr == 0x44 && pending_sht && count == 6) {
+    if (addr == 0x20 && register_address == 0x12) {
+      if (fail_dock_gpio) return 0;
+      ++dock_gpio_reads;
+      inbound = {dock_gpioA};
+    } else if (addr == 0x44 && pending_sht && count == 6) {
       const std::uint8_t temp[2] = {0x66, 0x66};
       const std::uint8_t humidity[2] = {0x80, 0x00};
       inbound = {temp[0], temp[1], desk_robot::sensirion_crc(temp, 2),
