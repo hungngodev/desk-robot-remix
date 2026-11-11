@@ -127,6 +127,13 @@ async def test_voice_vision_tool_gets_real_authenticated_head_frames_without_act
         assert model.calls[0][1][0].startswith(b"\xff\xd8")
         assert result["latest_frame_age_ms"] >= 0
         assert result["recent_sensor_events"] == []
+        timing = service.status("robot-01")["software_timings"]
+        assert timing["camera_requests"] == 1
+        assert timing["camera_successes"] == 1
+        assert timing["visual_questions"] == 1
+        assert timing["visual_answers"] == 1
+        assert timing["camera_latency_last_ms"] >= 0
+        assert timing["model_latency_last_ms"] >= 0
     finally:
         await service.close()
 
@@ -379,6 +386,10 @@ async def test_never_speak_delayed_live_scene_after_vlm_timeout():
     try:
         with pytest.raises(RuntimeError, match="timed out"):
             await service.look("robot-01", "What do you see right now?")
+        stats = service.status("robot-01")["software_timings"]
+        assert stats["visual_questions"] == 1
+        assert stats["visual_answers"] == 0
+        assert stats["visual_errors"] == 1
         assert not service._look_tasks
         assert service.hub.frames["robot-01"]  # no fake model answer added
     finally:
