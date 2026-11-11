@@ -14,7 +14,7 @@ I retrieved GitHub's actual per-file patches for **all 15 implementation PRs, #3
 | #5, #6 | Actual active visual observation loop, spontaneous chatter, 5 camera fairness | `pet.py`, `vision.py`, `multimodal.py`, `test_pet.py` | Current observer source and lease exist; no end-to-end five physical cameras measured. |
 | #7 | Authentic human VAD interrupt and head decoder flush | `desk_robot_bridge.py`, `desk_robot_native_omni.py`, `test_server_bridge.py` | Native model now sends decoder stop before remote cancellation; acoustic interruption unmeasured. |
 | #8 | ESP-SR Sense AEC speaker reference and urgent TTS reset | `sense_reference_codec.cc/.h`, Sense overlay install, `test_sense.py` | Source reference and playback reset exist; no actual I2S played-sample acknowledgement. |
-| #9 | Earlier 5-channel USB floor calibration and TofArray | `TofBus/`, `CliffGuard/`, `BodyControl/`, `test_cliff_tests.cpp` successor | Original `TofArray.cpp/.h` intentionally replaced. No actual desk-surface stopping trial. |
+| #9 | Earlier 5-channel USB floor calibration and TofArray | `TofBus/`, `CliffGuard/`, `BodyControl/`, `code/firmware/body/tests/cliff_tests.cpp` successor | Original `TofArray.cpp/.h` intentionally replaced. No actual desk-surface stopping trial. |
 | #10 | Combined AEC/voice firmware and proactive Mac | Sense overlay, pinned Xiaozhi server bridge, `pet.py`, `test_server_bridge.py` | Integrated source, not physical audible completion. |
 | #11 | Pinned Pololu VL53L4CD physical driver, local guard, fail-closed stale readings | `TofBus/`, `CliffGuard/`, `BodyControl/`, `platformio.ini` | Now includes eight VL53L4CD full-profile directions. Only 5 floor/front channels may affect motor guard. No physical sensor qualification. |
 | #12 | Owned AT42 head-touch to private memory | `BodyControl/`, `main.cpp`, `pet.py`, `test_pet.py` | Direct WROOM touch and source edge counters; electrode shell and GPIO electrical test pending. |
@@ -22,7 +22,7 @@ I retrieved GitHub's actual per-file patches for **all 15 implementation PRs, #3
 | #14 | Immediate local touch hardware disarms motion | `BodyControl.cpp` `touch_trip` and `sample_touch_input` | Stop happens before gesture debounce; actual local GPIO/servo load trial pending. |
 | #15 | Long hold, tap, double tap WROOM event classifier | `BodyControl.cpp`, `pet.py` `_remember_touch`, `test_pet.py` | Typed edges source exists, does not assert human identity. Physical classifier jitter trial pending. |
 | #16 | Five real WROOM range diagnostics with source freshness | `CliffGuard.cpp`, `BodyControl.cpp`, `test_side_ranging.py` | Read-only status remains and expanded 3 extra directions. Real detection margins pending. |
-| #18 | Version-aware BerryIMU raw six-axis source | `BerryImu/`, `test_berry_imu_tests.cpp`, MPU6050 family 4 | Older unknown BerryIMU retained as spare, preferred real MPU6050 six-axis WROOM source + Mac handling memory/camera edges. Real chip/mount qualification pending. |
+| #18 | Version-aware BerryIMU raw six-axis source | `BerryImu/`, `code/firmware/body/tests/berry_imu_tests.cpp`, MPU6050 family 4 | Older unknown BerryIMU retained as spare, preferred real MPU6050 six-axis WROOM source + Mac handling memory/camera edges. Real chip/mount qualification pending. |
 
 ## Cross-cutting findings from actual code, not old PR titles
 
