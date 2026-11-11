@@ -417,11 +417,22 @@ class MultimodalOrchestrator:
                 # busy five-robot VLM. Never evaluate a stale older question.
                 if not current_turn():
                     raise RuntimeError("Visual question superseded while queued")
-                answer = await self.scene.answer(
-                    question, [frame.jpeg for frame in chosen]
-                )
+                # Local 4B+ vision inference can be much slower than the
+                # source exposure. Do not let a 45 second provider request
+                # claim a scene is still current or delay new user turns.
+                try:
+                    async with asyncio.timeout(15):
+                        answer = await self.scene.answer(
+                            question, [frame.jpeg for frame in chosen]
+                        )
+                except TimeoutError as exc:
+                    raise RuntimeError(
+                        "Live visual analysis timed out; do not describe old scene"
+                    ) from exc
             if not current_turn():
                 raise RuntimeError("Visual answer superseded by new speech")
+            if time.monotonic() - chosen[-1].received_at > 16:
+                raise RuntimeError("Camera observation expired during visual analysis")
             return {
                 "robot_id": robot_id,
                 "answer": answer,
