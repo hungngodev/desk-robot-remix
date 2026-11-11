@@ -321,12 +321,12 @@ class NativeOmniSession:
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
-        if state == "start":
-            self.conn.client_abort = False
-            self.conn.client_is_speaking = True
         async with self._device_send_lock:
             if self.closed or generation != self._generation:
                 return
+            if state == "start":
+                self.conn.client_abort = False
+                self.conn.client_is_speaking = True
             await self.conn.websocket.send(json.dumps({
                 "type": "tts", "state": state, "session_id": self.conn.session_id,
             }))
