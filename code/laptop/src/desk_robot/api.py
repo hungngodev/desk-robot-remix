@@ -24,6 +24,11 @@ class CommandRequest(BaseModel):
     command: str = Field(max_length=95)
 
 
+class VisionQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=3, max_length=280)
+
+
 class PickupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target: Literal["key", "candy"]
@@ -242,6 +247,28 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 for entry in records
             ],
         }
+
+    @app.get("/v1/pet/{robot_id}/vision-status", dependencies=[Depends(authorize)])
+    async def vision_status(robot_id: str):
+        coordinator().robot(robot_id)
+        visual = getattr(app.state.runtime, "multimodal", None)
+        if visual is None:
+            return {"robot_id": robot_id, "available": False,
+                    "physical_vad_video_sync_verified": False}
+        return visual.status(robot_id)
+
+    @app.post("/v1/pet/{robot_id}/look", dependencies=[Depends(authorize)])
+    async def vision_question(robot_id: str, request: VisionQuestion):
+        """One authenticated real camera plus local VLM tool invocation.
+
+        This endpoint has no body movement or charger permission. Tool token
+        cannot use it to obtain operator-only movement permissions.
+        """
+        coordinator().robot(robot_id)
+        visual = getattr(app.state.runtime, "multimodal", None)
+        if visual is None:
+            raise OperationError("No physically connected multimodal vision runtime")
+        return await visual.look(robot_id, request.question)
 
     @app.get("/v1/pet/{robot_id}/voice-context", dependencies=[Depends(authorize)])
     async def pet_voice_context(robot_id: str):
