@@ -670,6 +670,7 @@ async def test_real_xiaozhi_voice_events_are_authenticated_replayable_metadata(b
         boot = await client.get("/events?after=0&bootstrap=1", headers=headers)
         assert await boot.json() == {
             "cursor": 2, "events": [], "lost": False, "reset": False,
+            "active_human_robots": [],
         }
         result = await client.get("/events?after=0", headers=headers)
         data = await result.json()
@@ -682,6 +683,27 @@ async def test_real_xiaozhi_voice_events_are_authenticated_replayable_metadata(b
         result = await client.get("/events?after=900", headers=headers)
         assert (await result.json())["reset"] is True
         assert (await client.get("/events?after=-1", headers=headers)).status == 400
+
+
+async def test_events_snapshot_recovers_missed_active_vad_and_cleans_up(bridge):
+    first = conn("mac-01")
+    first.client_listen_mode = "realtime"
+    bridge.register(first)
+    assert bridge.observe_idle_human_voice(first, True) is False
+    assert bridge.observe_idle_human_voice(first, True) is True
+    assert bridge.active_idle_speech_robots() == ["robot-01"]
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        snapshot = await client.get("/events?after=0&bootstrap=1", headers=headers)
+        payload = await snapshot.json()
+        assert payload["active_human_robots"] == ["robot-01"]
+        assert payload["events"] == []  # Live state even without replay.
+        assert not bridge.observe_idle_human_voice(first, False)
+        assert not bridge.observe_idle_human_voice(first, False)
+        ended = await client.get("/events?after=1", headers=headers)
+        assert (await ended.json())["active_human_robots"] == []
+    bridge.unregister(first)
+    assert bridge.active_idle_speech_robots() == []
 
 
 async def test_real_voice_event_ring_overflow_detected(bridge):
