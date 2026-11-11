@@ -381,12 +381,14 @@ class Coordinator:
         """Real camera observations + local guard only; no charger operation."""
         head = self.heads[job.robot_id]
         for attempt in range(16):
-            body = await self._assert_armed_health(
+            # Check before vision and AGAIN afterwards: camera and PnP may
+            # pause for seconds while the hardware floor/front state changes.
+            await self._assert_armed_health(
                 job.robot_id, require_front_clearance=True
             )
             # Camera receipt time is NOT equivalent to image exposure time.
             # Local WROOM cliff stop remains mandatory for every short pulse.
-            jpeg = await head.snapshot()
+            jpeg = await asyncio.wait_for(head.snapshot(), timeout=2.0)
             received_at = time.monotonic()
             pose = detect_apriltag(jpeg, camera, captured_at=received_at)
             decision = assess_dock(
@@ -398,6 +400,11 @@ class Coordinator:
                     "phase": "hold", "reason": decision.reason,
                     "charging_authorized": False, "physical_acceptance_pass": False,
                 }
+            # A healthy pre-camera response is NEVER reused as movement
+            # authority after a slow snapshot or AprilTag inference.
+            body = await self._assert_armed_health(
+                job.robot_id, require_front_clearance=True
+            )
             if decision.phase == "align":
                 side = body.get("side_ranges")
                 if (not isinstance(side, dict)
