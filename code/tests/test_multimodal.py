@@ -80,6 +80,10 @@ def test_frame_hub_speech_adaptive_priority_and_identity():
     assert hub.due("robot-01", 104.6)
     hub.notify("robot-01", "petting_zone", 104.7)
     assert hub.due("robot-01", 104.7)
+    events = hub.recent_events("robot-01", 105)
+    assert [x["kind"] for x in events] == ["human_voice", "petting_zone"]
+    assert events[0]["source"] == "xiaozhi_vad"
+    assert events[1]["source"] == "wroom_sensed_event"
     with pytest.raises(ValueError):
         hub.notify("robot-99", "human_voice", 110)
     with pytest.raises(ValueError):
@@ -116,6 +120,7 @@ async def test_voice_vision_tool_gets_real_authenticated_head_frames_without_act
         assert len(model.calls[0][1]) == 1
         assert model.calls[0][1][0].startswith(b"\xff\xd8")
         assert result["latest_frame_age_ms"] >= 0
+        assert result["recent_sensor_events"] == []
     finally:
         await service.close()
 
