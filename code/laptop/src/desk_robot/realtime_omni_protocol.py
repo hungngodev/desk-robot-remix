@@ -85,6 +85,14 @@ class OmniDuplexWire:
         if len(pcm16) % 32:
             raise ValueError("PCM must contain an integral millisecond at 16 kHz")
         duration = len(pcm16) // 32
+        if jpeg is not None and (
+            not isinstance(jpeg, bytes)
+            or not 10 <= len(jpeg) <= self.MAX_IMAGE_BYTES
+            or not jpeg.startswith(b"\xff\xd8")
+            or type(camera_age_ms) is not int
+            or not 0 <= camera_age_ms <= 1000
+        ):
+            raise ValueError("Only fresh bounded JPEG from current head allowed")
         previous_ms = self.input_ms
         self.input_ms += duration
         event = {
@@ -99,12 +107,6 @@ class OmniDuplexWire:
         if self._needs_new_input:
             self._input_after_interrupt = True
         if jpeg is not None:
-            if (not isinstance(jpeg, bytes)
-                    or not 10 <= len(jpeg) <= self.MAX_IMAGE_BYTES
-                    or not jpeg.startswith(b"\xff\xd8")
-                    or type(camera_age_ms) is not int
-                    or not 0 <= camera_age_ms <= 1000):
-                raise ValueError("Only fresh bounded JPEG from current head allowed")
             if self.input_ms // 1000 > previous_ms // 1000:
                 event["video_frames"] = [base64.b64encode(jpeg).decode("ascii")]
                 self.frames_sent += 1
