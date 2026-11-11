@@ -14,8 +14,10 @@ def _cut(buffer: str, target: int) -> tuple[str, str] | None:
     # Only cut after an actual sentence punctuation boundary, not at the first
     # arbitrary token. A long run-on paragraph is split at a word boundary.
     for pos, char in enumerate(buffer):
+        # A period at the fragment boundary might be part of a decimal.
+        # Wait for following whitespace before streaming that sentence.
         if char in ".!?" and pos >= 2 and (
-            pos + 1 == len(buffer) or buffer[pos + 1].isspace()
+            pos + 1 < len(buffer) and buffer[pos + 1].isspace()
         ):
             return buffer[:pos + 1].strip(), buffer[pos + 1:].lstrip()
     if len(buffer) >= target:
