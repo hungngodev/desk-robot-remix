@@ -430,6 +430,8 @@ void BodyControl::execute(const char* line, std::size_t length,
                                now_ms - a.gauge.at_ms < 500U;
     const bool proximity_fresh = a.proximity.valid &&
                                  now_ms - a.proximity.at_ms < 350U;
+    const bool dock_fresh = a.dock.present && a.dock.valid &&
+                            now_ms - a.dock.at_ms < 500U;
     // Independent bounded read-only telemetry. No synthesized heartbeat,
     // grip force, wheel odometry, current amps or gesture direction.
     const int written = std::snprintf(
@@ -443,7 +445,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"power\":{\"cell_mv\":%u,\"soc_centi\":%u,\"bus_mv\":%u,"
         "\"shunt_uv\":%d,\"fuel_valid\":%s,\"monitor_valid\":%s,"
         "\"current_calibrated\":false},"
-        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"physically_qualified\":false}}",
+        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"physically_qualified\":false},"
+        "\"dock\":{\"present\":%s,\"valid\":%s,\"left_seated\":%s,\"right_seated\":%s,"
+        "\"input_good\":%s,\"charge_indicated\":%s,\"charging_verified\":false}}",
         raw.present ? "true" : "false",
         raw.valid && age <= 250U ? "true" : "false",
         static_cast<unsigned>(raw.part_id),
@@ -469,7 +473,12 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned>(a.proximity.raw),
         proximity_fresh ? "true" : "false",
         static_cast<unsigned>(a.proximity.gesture_direction),
-        static_cast<unsigned long>(a.proximity.gesture_events));
+        static_cast<unsigned long>(a.proximity.gesture_events),
+        a.dock.present ? "true" : "false", dock_fresh ? "true" : "false",
+        dock_fresh && a.dock.left_seated ? "true" : "false",
+        dock_fresh && a.dock.right_seated ? "true" : "false",
+        dock_fresh && a.dock.input_good ? "true" : "false",
+        dock_fresh && a.dock.charge_indicated ? "true" : "false");
     if (written < 0 || static_cast<std::size_t>(written) >= capacity)
       std::snprintf(reply, capacity, "ERR aux response_too_long");
   } else if (status) {

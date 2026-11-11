@@ -44,6 +44,7 @@ class AccessorySensors {
   void force(std::uint32_t now_ms);
   void climate(std::uint32_t now_ms);
   void power(std::uint32_t now_ms);
+  void dock_status(std::uint32_t now_ms);
 };
 } // namespace desk_robot
 #endif

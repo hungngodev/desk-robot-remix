@@ -80,4 +80,18 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or not _uint(proximity.get("gesture_events"), 0xffffffff)
             or proximity.get("physically_qualified") is not False):
         raise ValueError("Invalid APDS9960 source")
+    dock = data.get("dock")
+    if dock is not None:
+        if (not isinstance(dock, dict)
+                or any(not _bool(dock.get(key)) for key in (
+                    "present", "valid", "left_seated", "right_seated",
+                    "input_good", "charge_indicated",
+                ))
+                or dock.get("charging_verified") is not False
+                or (dock["charge_indicated"] and not dock["input_good"])
+                or (not dock["valid"] and any(dock[key] for key in (
+                    "left_seated", "right_seated", "input_good",
+                    "charge_indicated",
+                )))):
+            raise ValueError("Invalid optional read only dock pin status")
     return data

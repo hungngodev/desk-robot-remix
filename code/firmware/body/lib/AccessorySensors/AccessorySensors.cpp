@@ -100,6 +100,18 @@ bool AccessorySensors::begin(TwoWire& wire) {
     data_.gauge.fuel_present = probe(0x36);
   }
   if (!close()) return false;
+  // MCP23017 on accessory mux lane 5 only READS physical dock evidence.
+  // GPA0/1: normally closed independent dock stop switches, HIGH when open.
+  // GPA2: charger PGOOD open drain, LOW when input valid.
+  // GPA3: charger CHG open drain, LOW when chip indicates charging.
+  // This is not a charge enable. A broken switch alone cannot declare a
+  // charging battery. Never connect raw 5V pad voltage to a 3.3V input.
+  if (select(5)) {
+    data_.dock.present = probe(0x20) &&
+        write8(0x20, 0x00, 0xFF) &&  // all GPIOA inputs
+        write8(0x20, 0x0C, 0x0F);    // 3.3V pullups GPA0..3
+  }
+  if (!close()) return false;
   for (std::uint8_t i = 0; i < 3; ++i) {
     const std::uint8_t lane = i == 0 ? 1 : i == 1 ? 6 : 7;
     if (select(lane)) data_.angle[i].present = probe(0x36);
@@ -258,6 +270,19 @@ void AccessorySensors::power(std::uint32_t now_ms) {
   if (g.fuel_valid || g.monitor_valid) g.at_ms = now_ms;
   // Never infer amps from shunt voltage without a measured, rated shunt.
 }
+void AccessorySensors::dock_status(std::uint32_t now_ms) {
+  auto& dock = data_.dock;
+  if (!dock.present) return;
+  std::uint8_t bits = 0;
+  dock.valid = read(0x20, 0x12, &bits, 1);
+  if (!dock.valid) return;
+  dock.left_seated = (bits & 0x01U) != 0;
+  dock.right_seated = (bits & 0x02U) != 0;
+  dock.input_good = (bits & 0x04U) == 0;
+  dock.charge_indicated = (bits & 0x08U) == 0 && dock.input_good;
+  dock.at_ms = now_ms;
+}
+
 void AccessorySensors::poll(std::uint32_t now_ms) {
   if (!mux_present_ || (started_ && now_ms - last_ms_ < 12U)) return;
   started_ = true;
@@ -270,6 +295,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
     case 2: force(now_ms); break;
     case 3: climate(now_ms); break;
     case 4: power(now_ms); break;
+    case 5: dock_status(now_ms); break;
     case 6: angle(1, now_ms); break;
     case 7: angle(2, now_ms); break;
     default: break;
@@ -278,7 +304,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
     // 0x70 ToF owner will also fail closed if this mux cannot quiesce.
     data_.climate.valid = data_.force.valid =
       data_.proximity.valid = data_.gauge.fuel_valid =
-      data_.gauge.monitor_valid = false;
+      data_.gauge.monitor_valid = data_.dock.valid = false;
     for (auto& sample : data_.angle) sample.valid = false;
   }
 }

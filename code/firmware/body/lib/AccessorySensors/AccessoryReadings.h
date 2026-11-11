@@ -65,11 +65,18 @@ struct ProximityRaw {
   std::uint32_t gesture_events = 0;
   bool gesture_decoder_available = false;
 };
+struct DockPinRaw {
+  bool present = false, valid = false;
+  bool left_seated = false, right_seated = false;
+  bool input_good = false, charge_indicated = false;
+  std::uint32_t at_ms = 0;
+};
 struct AccessoryReadings {
   AngleRaw angle[3]{}; // index 0 nose, 1 left track, 2 right track
   ClimateRaw climate{};
   ForceRaw force{};
   GaugeRaw gauge{};
+  DockPinRaw dock{};
   ProximityRaw proximity{};
 };
 } // namespace desk_robot

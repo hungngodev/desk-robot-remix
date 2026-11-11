@@ -80,6 +80,7 @@ bool AuxValid(cJSON* json) {
     auto climate = group("climate");
     auto power = group("power");
     auto proximity = group("proximity");
+    auto dock = group("dock");
     if (!cJSON_IsObject(pulse) || !cJSON_IsObject(angles) ||
         !cJSON_IsObject(force) || !cJSON_IsObject(climate) ||
         !cJSON_IsObject(power) || !cJSON_IsObject(proximity)) return false;
@@ -115,6 +116,20 @@ bool AuxValid(cJSON* json) {
         !cJSON_IsBool(get(power, "fuel_valid")) ||
         !cJSON_IsBool(get(power, "monitor_valid")) ||
         !cJSON_IsFalse(get(power, "current_calibrated"))) return false;
+    // Present only on new head/body builds. Previous versions stay read only.
+    if (dock) {
+        if (!cJSON_IsObject(dock) ||
+            !cJSON_IsBool(get(dock, "present")) ||
+            !cJSON_IsBool(get(dock, "valid")) ||
+            !cJSON_IsBool(get(dock, "left_seated")) ||
+            !cJSON_IsBool(get(dock, "right_seated")) ||
+            !cJSON_IsBool(get(dock, "input_good")) ||
+            !cJSON_IsBool(get(dock, "charge_indicated")) ||
+            !cJSON_IsFalse(get(dock, "charging_verified")) ||
+            (cJSON_IsTrue(get(dock, "charge_indicated")) &&
+             !cJSON_IsTrue(get(dock, "input_good"))))
+            return false;
+    }
     if (!bounded(get(proximity, "raw"), 0, 255) ||
         !cJSON_IsBool(get(proximity, "valid")) ||
         !bounded(get(proximity, "gesture"), 0, 4) ||
