@@ -70,7 +70,9 @@ def _robot_id(conn) -> str | None:
 
 def active(device: str) -> bool:
     s = _sessions.get(device)
-    return s is not None and not s.closed and s.connected
+    # A connecting native backend already owns the audio route. Do not
+    # grant a competing Mac Kokoro speaker lease during its handshake.
+    return s is not None and not s.closed
 
 
 def status(device: str) -> dict:
@@ -232,7 +234,8 @@ class NativeOmniSession:
                     self.outgoing.put_nowait((pcm.response_id, pcm.pcm24k))
                 except asyncio.QueueFull as exc:
                     raise RuntimeError("Model audio too fast for XIAO speaker") from exc
-            elif kind == "response.done":
+            elif (kind == "response.done"
+                  and event.get("response_id") == self.wire.response_id):
                 await self.outgoing.put(None)
 
     async def _play(self) -> None:
@@ -375,7 +378,12 @@ def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
     """Opted-in real PCM bypasses legacy Xiaozhi ASR/LLM/TTS, not in parallel."""
     if not opted_in(conn):
         return False
+    import desk_robot_bridge as bridge
     device = conn.device_id
+    # Never make a second audio owner while group/peer speech has the
+    # exclusive existing Xiaozhi lease. The real VAD still interrupts it.
+    if bridge.muted(device) or bridge.lease_stopping:
+        return True
     session = _sessions.get(device)
     if session is None:
         try:
