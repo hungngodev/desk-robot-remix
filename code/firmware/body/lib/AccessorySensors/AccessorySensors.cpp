@@ -314,6 +314,7 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
   dock.input_good = (bits & 0x04U) == 0;
   dock.charge_indicated = (bits & 0x08U) == 0 && dock.input_good;
   dock.at_ms = now_ms;
+  ++dock.sample_seq;  // only a completed independent physical GPIOA read
 }
 
 void AccessorySensors::poll(std::uint32_t now_ms) {
