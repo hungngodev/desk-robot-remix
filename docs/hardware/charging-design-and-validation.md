@@ -53,6 +53,10 @@ body becomes disarmed or side/rear clearance fails during the image. Both
 must yield **no motor command**. Tests were committed but no passing host
 or physical trial has been recorded.
 
+### Full build boot and hot removal behavior
+
+The `esp32_full` PlatformIO environment now compiles `DESK_ROBOT_REQUIRE_DOCK_MONITOR=1` and the WROOM setup calls `control.require_dock_monitor(true)` locally before any network or head commands. This refuses arming when the MCP23017 is missing from startup, when a required I2C GPIOA read has never succeeded, or when samples are invalid or over 500 ms old. A single seated switch, not just both switches, or PGOOD immediately latches contact stop; after full removal and restored fresh sensing, rearming still requires the operator. An unpowered sensor loss stops wheels but retains servo holding PWM rather than dropping a carried object. Source-level C++ tests cover absence, hot removal, old samples, single contact and recovery. No charger output or battery connection is enabled by these changes.
+
 ## Last centimeter of autonomous docking
 
 Actual AprilTag camera geometry and body safety can approach a visible guide, but the current `Coordinator._dock_approach` intentionally holds before powered contacts. **No control loop may infer charging contact from an image.** To finish autonomous physical seating, measure actual camera intrinsics, marker location, wheel steering scale, 8 sensor geometry, switch travel and stop distances, and add a physically qualified low-speed contact approach using multiple independent contact checks. Keep local cliff guard, one-use operator permit, 500ms watchdog and dock power motion lockout intact. No uncontrolled charging or movement.
