@@ -187,3 +187,39 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
     assert service.wire.accept_output is False
     assert service.wire.played_ms == 0
     assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
+
+
+async def test_fleet_native_speaker_claim_flushes_old_pet_before_second_pet_talks(native):
+    module, bridge = native
+    first, sent = connection()
+    bridge.connections["mac-01"] = first
+    second = SimpleNamespace(
+        device_id="mac-02",
+        conn_from_mqtt_gateway=False, client_listen_mode="realtime",
+        client_is_speaking=False, client_abort=False,
+        session_id="second-session", websocket=first.websocket,
+    )
+    bridge.connections["mac-02"] = second
+    bridge.robot_for_device = lambda dev: {
+        "mac-01": "robot-01", "mac-02": "robot-02"
+    }.get(dev)
+    previous = module.NativeOmniSession(
+        first, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    newer = module.NativeOmniSession(
+        second, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions.update({"mac-01": previous, "mac-02": newer})
+    module._output_owner = "mac-01"
+    first.client_is_speaking = True
+    await module.claim_speaker(newer)
+    assert previous._generation == 1
+    assert first.client_is_speaking is False
+    assert any(isinstance(x, str) and '"flush": true' in x for x in sent)
+    assert module._output_owner == "mac-02"
+    newer.conn.client_is_speaking = True
+    await module.preempt_others_for_human("mac-01")
+    assert newer._generation == 1
+    assert newer.conn.client_is_speaking is False
