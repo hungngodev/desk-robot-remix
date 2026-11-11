@@ -37,12 +37,16 @@ human_interrupted_devices: set[str] = set()
 # PCM, transcripts, images and bearer tokens never enter this replay buffer.
 voice_event_cursor = 0
 voice_event_history: deque[dict] = deque(maxlen=128)
+# Independent idle-speech start gate, not shared with double-talk counters.
+idle_voice_count: dict[str, int] = {}
+idle_voice_last_at: dict[str, float] = {}
+idle_voice_emitted: set[str] = set()
 
 
 def record_human_voice(conn, kind: str) -> bool:
     """Only a CURRENT authenticated Xiaozhi websocket can publish human VAD."""
     global voice_event_cursor
-    if kind not in ("normal", "group"):
+    if kind not in ("normal", "group", "speech_start"):
         raise ValueError("Unknown interruption class")
     device = getattr(conn, "device_id", None)
     if connections.get(device) is not conn:
@@ -53,7 +57,9 @@ def record_human_voice(conn, kind: str) -> bool:
     voice_event_cursor += 1
     voice_event_history.append({
         "seq": voice_event_cursor, "robot_id": robot_id,
-        "kind": kind, "source": "xiaozhi_aec_vad",
+        "kind": kind,
+        "source": "xiaozhi_server_vad" if kind == "speech_start"
+                  else "xiaozhi_aec_vad",
     })
     return True
 
@@ -84,6 +90,9 @@ def register(conn):
 def unregister(conn):
     if connections.get(conn.device_id) is conn:
         connections.pop(conn.device_id, None)
+        idle_voice_count.pop(conn.device_id, None)
+        idle_voice_last_at.pop(conn.device_id, None)
+        idle_voice_emitted.discard(conn.device_id)
         # A queued request may outlive this socket and a replacement register.
         interrupt_generation[conn.device_id] = (
             interrupt_generation.get(conn.device_id, 0) + 1
@@ -102,6 +111,42 @@ def duplex_available(conn) -> bool:
     A successful physical A2 trial is still required.
     """
     return getattr(conn, "client_listen_mode", "") == "realtime"
+
+
+def observe_idle_human_voice(conn, have_voice: bool) -> bool:
+    """Emit real human VAD START while Xiaozhi is listening and not talking.
+
+    Native Xiaozhi ASR still receives every original audio packet. This
+    function never stops device speech, changes ASR, or manufactures a
+    transcript. Double-talk is handled by the existing separate AEC path.
+    """
+    device = getattr(conn, "device_id", None)
+    if not have_voice:
+        idle_voice_count.pop(device, None)
+        idle_voice_last_at.pop(device, None)
+        idle_voice_emitted.discard(device)
+        return False
+    if (connections.get(device) is not conn
+            or muted(device) or lease_stopping
+            or getattr(conn, "client_is_speaking", False)
+            or getattr(conn, "client_abort", False)
+            or getattr(conn, "client_listen_mode", "") not in ("auto", "realtime")):
+        idle_voice_count.pop(device, None)
+        idle_voice_last_at.pop(device, None)
+        return False
+    if device in idle_voice_emitted:
+        return False
+    now = time.monotonic()
+    gap = now - idle_voice_last_at.get(device, -1e9)
+    count = idle_voice_count.get(device, 0) + 1 if 0 <= gap <= 0.3 else 1
+    idle_voice_count[device] = min(count, 2)
+    idle_voice_last_at[device] = now
+    if count < 2:
+        return False
+    if not record_human_voice(conn, "speech_start"):
+        return False
+    idle_voice_emitted.add(device)
+    return True
 
 
 def was_interrupted_by_human(device_id):
