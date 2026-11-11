@@ -88,6 +88,10 @@ def test_mpu_shake_needs_synchronized_accel_and_rotation_with_cooldown():
     assert qualified(gate, shaking, 102.30) == ()
     assert qualified(gate, shaking, 102.45) == ()
     assert qualified(gate, sample(), 102.60) == ()
+    # Maintain the same live observation stream instead of accidentally
+    # exercising a disconnected/reconnected IMU generation.
+    for when in (103.1, 103.6, 104.1, 104.6, 105.1):
+        assert qualified(gate, sample(), when) == ()
     assert qualified(gate, shaking, 105.20) == ()
     assert qualified(gate, shaking, 105.40) == ("handling_shake",)
 
@@ -121,10 +125,6 @@ def test_invalid_qualification_parameters_refuse_events(bad):
     # Each caller must supply a coherent boolean and bounded measured knobs.
     gate = HandlingGate()
     qualified, angle, delta = bad
-    if type(qualified) is bool and angle == 24 or delta == 1900:
-        with pytest.raises(ValueError):
-            gate.observe(sample(), 1, qualified=qualified,
-                         tilt_threshold_deg=angle, shake_delta_mg=delta)
-    else:
-        assert gate.observe(sample(), 1, qualified=False,
-                            tilt_threshold_deg=angle, shake_delta_mg=delta) == ()
+    with pytest.raises(ValueError):
+        gate.observe(sample(), 1, qualified=qualified,
+                     tilt_threshold_deg=angle, shake_delta_mg=delta)
