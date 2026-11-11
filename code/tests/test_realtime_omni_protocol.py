@@ -61,7 +61,7 @@ def test_real_generated_pcm_is_not_automatically_acknowledged():
     wire = OmniDuplexWire()
     wire.handle_event({
         "type": "response.created", "response_id": "r1",
-        "response": {"id": "r1", "metadata": {"epoch": 0}},
+        "response": {"id": "r1", "metadata": {"duplex_event": {"epoch": 0}}},
     })
     packet = wire.handle_event(delta())
     assert packet is not None and packet.pcm24k == b"\0" * 4800
@@ -87,7 +87,7 @@ def test_interrupt_ignores_old_response_until_new_pcm_committed():
     wire = OmniDuplexWire()
     wire.handle_event({
         "type": "response.created", "response_id": "old",
-        "response": {"id": "old", "metadata": {"epoch": 0}},
+        "response": {"id": "old", "metadata": {"duplex_event": {"epoch": 0}}},
     })
     assert wire.handle_event(delta("old")) is not None
     messages = wire.interrupt()
@@ -97,19 +97,19 @@ def test_interrupt_ignores_old_response_until_new_pcm_committed():
     assert wire.handle_event(delta("old")) is None
     wire.handle_event({
         "type": "response.created", "response_id": "old_late",
-        "response": {"id": "old_late", "metadata": {"epoch": 0}},
+        "response": {"id": "old_late", "metadata": {"duplex_event": {"epoch": 0}}},
     })
     assert wire.handle_event(delta("old_late")) is None
     wire.append_audio(b"\0" * 3200, speech=True)
     wire.commit()
     wire.handle_event({
         "type": "response.created", "response_id": "very_old",
-        "response": {"id": "very_old", "metadata": {"epoch": 0}},
+        "response": {"id": "very_old", "metadata": {"duplex_event": {"epoch": 0}}},
     })
     assert wire.handle_event(delta("very_old")) is None
     wire.handle_event({
         "type": "response.created", "response_id": "new",
-        "response": {"id": "new", "metadata": {"epoch": 2}},
+        "response": {"id": "new", "metadata": {"duplex_event": {"epoch": 2}}},
     })
     assert wire.handle_event(delta("old")) is None
     assert wire.handle_event(delta("new", epoch=2)) is not None
