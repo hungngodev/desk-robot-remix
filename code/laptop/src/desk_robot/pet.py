@@ -986,6 +986,18 @@ class PetController:
                     ),
                 },
             ])
+            # Concise output is an actual speaker budget, not just an LLM
+            # instruction. Do not arbitrarily truncate a long generated
+            # thought and then pretend it was an intentional natural remark.
+            if not isinstance(text, str) or not 1 <= len(text.strip()) <= 280:
+                state.suppressed += 1
+                state.last_initiative_suppression = "model_reply_not_concise"
+                return
+            text = " ".join(text.split())
+            if not text:
+                state.suppressed += 1
+                state.last_initiative_suppression = "model_reply_not_concise"
+                return
             if (not state.enabled or state.quiet
                     or state.generation != generation
                     or self._human_active_in_fleet(time.monotonic())
