@@ -46,7 +46,7 @@ def files(root):
         source,
         "    import desk_robot_native_omni\n"
         "    if desk_robot_native_omni.route_audio(conn, pcm_frame, have_voice):\n"
-        "        return\\n"
+        "        return\n"
         "    # 服务端AEC功能需要实时触发打断",
         "    import desk_robot_bridge\n"
         "    await desk_robot_bridge.interrupt_for_user_voice(conn, have_voice)\n"
