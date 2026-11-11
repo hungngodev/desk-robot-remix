@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import math
 from dataclasses import dataclass
 
 
@@ -51,6 +50,8 @@ class OmniDuplexWire:
         self._needs_new_input = False
         self._input_after_interrupt = False
         self._server_response_epoch: int | None = None
+        self._min_server_epoch: int | None = None
+        self._interrupted = False
 
     def session_update(self) -> dict:
         return {
@@ -126,6 +127,9 @@ class OmniDuplexWire:
     def interrupt(self) -> tuple[dict, ...]:
         """Cancel stale backend speech; the separate head MUST flush its DMA."""
         self.epoch += 1
+        self._interrupted = True
+        if self._server_response_epoch is not None:
+            self._min_server_epoch = self._server_response_epoch + 1
         self.accept_output = False
         self.response_id = None
         self.generated_bytes = 0
@@ -167,6 +171,17 @@ class OmniDuplexWire:
             )
             if server_epoch is not None and type(server_epoch) is not int:
                 raise ValueError("Invalid realtime response epoch")
+            # Server cancellation increments the native session epoch.
+            # After our first barge-in, an old response may arrive AFTER
+            # another audio commit. Do not accept it based on timing alone.
+            if self._interrupted and (
+                server_epoch is None or (
+                    self._min_server_epoch is not None
+                    and server_epoch < self._min_server_epoch
+                )
+            ):
+                return None
+            self._interrupted = False
             self._server_response_epoch = server_epoch
             self.response_id = response_id
             self.generated_bytes = 0
