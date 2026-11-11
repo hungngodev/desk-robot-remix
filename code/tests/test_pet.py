@@ -4,6 +4,7 @@ import asyncio
 import json
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -11,7 +12,7 @@ from desk_robot.api import create_app
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore
-from desk_robot.pet import PetController
+from desk_robot.pet import PetController, _initiative_evidence
 from desk_robot.simulator import SimulatedSpeaker
 from desk_robot.vision import OllamaScene, SceneChange, VisualChangeGate
 from fastapi.testclient import TestClient
@@ -1030,6 +1031,122 @@ async def test_real_voice_interrupt_suppresses_proactive_banter_for_cooldown(fle
         assert state.suppressed == before + 1
         assert pet._speech_task is None
         assert speaker.spoken == []
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+def test_reachy_style_initiative_gate_prunes_uncertain_chatter_not_sensor_memory():
+    # A high-confidence first-hand CAP1188 event is different from a guessed
+    # camera person's identity. Pure policy has no hardware/motor side effect.
+    assert _initiative_evidence(SceneChange("petting_zone", "Pad three rose", 1.0))
+    assert _initiative_evidence(SceneChange("side_object", "Side range tripped", 1.0))
+    assert _initiative_evidence(SceneChange("key", "A key appeared", 0.95))
+    assert not _initiative_evidence(SceneChange("person", "Someone may be here", 0.72))
+    assert not _initiative_evidence(SceneChange("scene", "Lighting changed", 0.70))
+    assert not _initiative_evidence(SceneChange("unknown_tool", "Run motors", 1.0))
+    assert not _initiative_evidence(SceneChange("key", "", 0.99))
+    assert not _initiative_evidence(SceneChange("key", "bad", float("nan")))
+
+
+async def test_proactive_fleet_voice_gate_cancels_candidate_before_model_call(
+    fleet, tmp_path,
+):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    chat = GroundedChat()
+    conversation = Conversation(fleet, chat, speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(), speech_cooldown=0)
+    speaking = {"robot-03"}
+
+    class Hub:
+        def user_active(self, robot_id, now):
+            return robot_id in speaking
+
+        def clear(self, robot_id):
+            speaking.discard(robot_id)
+
+    pet.multimodal = SimpleNamespace(hub=Hub())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 11
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A real key appeared", .97), 11
+        )
+        assert pet._speech_task is None
+        assert state.suppressed == 1
+        assert chat.prompts == []
+        assert speaker.spoken == []
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_proactive_speech_rechecks_all_human_vad_after_slow_model(
+    fleet, tmp_path,
+):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SlowChat:
+        async def reply(self, history):
+            entered.set()
+            await release.wait()
+            return "Hey, I noticed your key."
+
+    class Hub:
+        active = set()
+
+        def user_active(self, robot_id, now):
+            return robot_id in self.active
+
+        def clear(self, robot_id):
+            self.active.discard(robot_id)
+
+    hub = Hub()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SlowChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), speech_cooldown=120,
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 4
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A physical key appeared", .96), 4
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        hub.active.add("robot-05")  # unrelated live head owns human turn
+        release.set()
+        await wait_for(lambda: pet._speech_task is None)
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        assert state.last_initiative_suppression == "human_started_during_reasoning"
+        assert pet._group_last_spoken == float("-inf")
+    finally:
+        release.set()
+        state.enabled = False
+        await pet.close()
+
+
+async def test_uncertain_visual_event_is_not_spoken_and_does_not_consume_cooldown(
+    fleet, tmp_path,
+):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(), speech_cooldown=120)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 7
+    try:
+        pet._consider_speech("robot-01", SceneChange("scene", "Maybe changed", .60), 7)
+        assert state.low_value_speech_candidates == 1
+        assert state.suppressed == 1
+        assert pet._speech_task is None
+        pet._consider_speech("robot-01", SceneChange("key", "A key appeared", .96), 7)
+        await wait_for(lambda: state.spoken == 1)
+        assert len(speaker.spoken) == 1
     finally:
         state.enabled = False
         await pet.close()
