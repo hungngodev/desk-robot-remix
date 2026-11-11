@@ -221,7 +221,10 @@ class MultimodalOrchestrator:
         return {
             "robot_id": robot_id,
             "frames_in_ram": len(self.hub.frames[robot_id]),
-            "voice_trigger_until_monotonic": self.hub.voice_until[robot_id],
+            "voice_trigger_until_monotonic": (
+                self.hub.voice_until[robot_id]
+                if math.isfinite(self.hub.voice_until[robot_id]) else None
+            ),
             "last_camera_received_at": (
                 self.hub.frames[robot_id][-1].received_at
                 if self.hub.frames[robot_id] else None
