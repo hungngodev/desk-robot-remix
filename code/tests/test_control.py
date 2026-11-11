@@ -460,3 +460,26 @@ async def test_pickup_never_drives_using_safety_from_before_slow_vision(settings
         assert head.commands[-1] == "stop"
     finally:
         await coordinator.close()
+
+
+async def test_pickup_never_drives_if_wroom_faults_during_object_detector(settings):
+    """YOLO inference cannot reuse the safety response from its first frame."""
+    c, head = make(settings)
+    original_detect = c.vision.detect
+
+    async def disarm_during_detector(image, label):
+        result = await original_detect(image, label)
+        head.armed = False
+        return result
+
+    c.vision.detect = disarm_during_detector
+    try:
+        await c.operator_arm("robot-01")
+        job = c.pickup("robot-01", "candy")
+        await c.tasks[job.id]
+        assert job.state == "failed"
+        assert job.result is None
+        assert all(not line.startswith("drive ") for line in head.commands)
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()
