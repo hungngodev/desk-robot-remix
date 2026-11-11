@@ -42,6 +42,18 @@ idle_voice_count: dict[str, int] = {}
 idle_voice_last_at: dict[str, float] = {}
 idle_voice_emitted: set[str] = set()
 idle_voice_quiet_frames: dict[str, int] = {}
+# Source-authenticated VAD leases. Audio is never stored here. Only current
+# registered heads can keep the floor reserved; absent speech automatically
+# expires even if an upstream connection never delivered speech_end.
+human_vad_until: dict[str, float] = {}
+
+
+def human_speech_active() -> bool:
+    now = time.monotonic()
+    return any(
+        device in connections and until > now
+        for device, until in human_vad_until.items()
+    )
 
 
 def _native_adapter():
@@ -70,6 +82,12 @@ def record_human_voice(conn, kind: str) -> bool:
     robot_id = robot_for_device(device)
     if robot_id is None:
         return False
+    if kind == "speech_end":
+        # A short hangover prevents a queued peer from beginning on the
+        # first VAD-negative window; it is not evidence of new speech.
+        human_vad_until[device] = time.monotonic() + 0.15
+    else:
+        human_vad_until[device] = time.monotonic() + 1.0
     voice_event_cursor += 1
     voice_event_history.append({
         "seq": voice_event_cursor, "robot_id": robot_id,
@@ -124,6 +142,7 @@ def unregister(conn):
         idle_voice_last_at.pop(conn.device_id, None)
         idle_voice_emitted.discard(conn.device_id)
         idle_voice_quiet_frames.pop(conn.device_id, None)
+        human_vad_until.pop(conn.device_id, None)
         # A queued request may outlive this socket and a replacement register.
         interrupt_generation[conn.device_id] = (
             interrupt_generation.get(conn.device_id, 0) + 1
@@ -177,6 +196,10 @@ def observe_idle_human_voice(conn, have_voice: bool) -> bool:
         return False
     idle_voice_quiet_frames.pop(device, None)
     if device in idle_voice_emitted:
+        # Real VAD continues to sustain this current human turn. Do not let
+        # the floor expire during a sentence longer than one second.
+        if connections.get(device) is conn:
+            human_vad_until[device] = time.monotonic() + 1.0
         return False
     now = time.monotonic()
     gap = now - idle_voice_last_at.get(device, -1e9)
