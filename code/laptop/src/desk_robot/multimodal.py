@@ -190,9 +190,17 @@ class CameraFrameHub:
         latest = fresh[-1]
         if not TEMPORAL_WORDS.search(question) or len(fresh) < 2:
             return [latest]
-        # Best previous changed frame, excluding current. Temporal comparison
-        # is never constructed from five unrelated robots' cameras.
-        prior = max(fresh[:-1], key=lambda frame: frame.motion_fraction)
+        # A motion peak marks the AFTER frame, not the BEFORE frame.
+        # Comparing that peak with a subsequent identical latest frame would
+        # make a freshly added object appear unchanged. Use the frame directly
+        # preceding the strongest transition, then the latest observation.
+        # If the strongest transition is the newest frame, choose its
+        # predecessor. All frames must belong to this exact robot identity.
+        transition = max(
+            range(1, len(fresh)),
+            key=lambda index: fresh[index].motion_fraction,
+        )
+        prior = fresh[transition - 1]
         return [prior, latest]
 
     def recent_events(self, robot_id: str, now: float) -> list[dict]:
