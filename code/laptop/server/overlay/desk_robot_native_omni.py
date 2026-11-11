@@ -163,6 +163,31 @@ class NativeOmniSession:
         async with self._socket_lock:
             await self._socket.send_json(event)
 
+    async def _load_private_persona(self, http: aiohttp.ClientSession) -> None:
+        """Ask the existing Mac authority for THIS robot's voice style.
+
+        Old memories are only included when the operator separately enabled
+        voice memory tools in local.toml. Backend failure keeps a safe generic
+        persona and does not change the native/legacy audio route.
+        """
+        url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-context"
+        try:
+            async with http.get(
+                url, headers={"Authorization": f"Bearer {self.token}"},
+                timeout=aiohttp.ClientTimeout(total=1.5),
+            ) as reply:
+                if reply.status != 200:
+                    return
+                data = await reply.json()
+                instructions = data.get("instructions")
+                if (data.get("robot_id") == self.robot
+                        and isinstance(instructions, str)
+                        and 1 <= len(instructions) <= 2000
+                        and data.get("model_can_arm_motors") is False):
+                    self.wire.instructions = instructions
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            return
+
     async def _camera(self, http: aiohttp.ClientSession) -> None:
         """Private authenticated Mac JPEG fetch, off the microphone hot path."""
         address = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-frame"
@@ -324,6 +349,7 @@ class NativeOmniSession:
     async def run(self) -> None:
         try:
             async with aiohttp.ClientSession() as http:
+                await self._load_private_persona(http)
                 async with http.ws_connect(
                     self.url, heartbeat=20, max_msg_size=2_000_000,
                     timeout=8,
