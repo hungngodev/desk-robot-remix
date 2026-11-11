@@ -226,3 +226,36 @@ async def test_fleet_native_speaker_claim_flushes_old_pet_before_second_pet_talk
     await module.preempt_others_for_human("mac-01")
     assert newer._generation == 1
     assert newer.conn.client_is_speaking is False
+
+
+async def test_native_cutover_flushes_pending_xiaozhi_legacy_speech_first(native):
+    from queue import Queue
+
+    module, bridge = native
+    conn, sent = connection()
+    conn.client_is_speaking = True
+    pending_audio = Queue()
+    pending_audio.put(b"legacy opus")
+    conn.tts = SimpleNamespace(tts_audio_queue=pending_audio, tts_text_queue=Queue())
+    cleared = []
+
+    def clear_queues():
+        cleared.append(True)
+        while not pending_audio.empty():
+            pending_audio.get_nowait()
+
+    conn.clear_queues = clear_queues
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    await service._retire_legacy_audio()
+    assert cleared == [True]
+    assert conn.client_is_speaking is False
+    assert conn.client_abort is True
+    assert any(isinstance(packet, str)
+               and '"flush": true' in packet for packet in sent)
+    # No second stop packet or legacy queue replay on repeated checks.
+    await service._retire_legacy_audio()
+    assert len(sent) == 1
