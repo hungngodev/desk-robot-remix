@@ -49,3 +49,29 @@ Do not make a new ESP32 voice stack, replace the XIAO mic or run Pipecat and Liv
 * Audio has no permission to energize the dock, arm motors or change physical safety calibrations. Those remain separate local WROOM and operator gates.
 
 Do not call this feature finished until the current branch checks pass AND acoustic acceptance is physically recorded. See `docs/guides/audio-barge-in.md` and `docs/research/2026-11-10-natural-voice-acceptance.md`.
+
+
+## November 11: actual pinned upstream streaming speech profile
+
+The server pinned at `d9c2e8c5d92627b670dec57d72a07a4226a410a3` already contains `AliyunBLStreamASR` (type `aliyunbl_stream`) and `HuoshanDoubleStreamTTSV2` (type `huoshan_double_stream`, resource `seed-tts-2.0`). These are actual established xinnan source modules, **not** pseudo provider names. The original server includes its own `performance_tester.py` to measure ASR, LLM, VLLM and TTS independently.
+
+The robot's private `code/laptop/server/configure.py` now has `--streaming-profile aliyun-volcengine`. This is optional: the default remains private local FunASR + Ollama + Kokoro, and the script will refuse to generate a profile when any required credential or activated voice ID is absent. The profile uses third-party services with possible charges and audio leaving the Mac. It is **not** an offline mode.
+
+```sh
+# Keys are provider-issued; never add them to GitHub or a shell history file.
+# Load them from a private environment file or password manager.
+export DASHSCOPE_API_KEY="YOUR_PROVIDER_KEY"
+export VOLCENGINE_TTS_APPID="YOUR_PROVIDER_APP_ID"
+export VOLCENGINE_TTS_ACCESS_TOKEN="YOUR_PROVIDER_TOKEN"
+export VOLCENGINE_TTS_SPEAKER="YOUR_ACTIVATED_ENGLISH_VOICE_ID"
+
+# Only for a NEW private .config.yaml. Do not overwrite a working config.
+python code/laptop/server/configure.py --server-ip YOUR_MAC_LAN_IPV4 \
+  --streaming-profile aliyun-volcengine
+```
+
+This selects the existing Xiaozhi streaming adapters and keeps its own Opus/websocket, VAD and tool registry, including `desk_robot_look`. For an existing private `.config.yaml`, preserve/backup it and migrate the documented `selected_module` entries and provider sections manually; the generator deliberately refuses to overwrite that file.
+
+From the overlaid server directory, benchmark `python performance_tester.py` on real credentials, then perform physical double-talk tests while the robot speaks. Record speech-start VAD, final ASR, first LLM token, first audio frame, physical I2S audible onset, 95th-percentile time to silence after interruption, and vision-tool latency, separately. The Mac `vision-status` software counters are NOT microphone-to-ear latency. A cost- or privacy-sensitive owner can stay entirely with local ASR/TTS and still use the new image and VAD orchestration.
+
+**Critical limitation**: Streaming ASR + streaming TTS is still recognition -> LLM -> synthesis. A Gemini Live native realtime speech/video model requires a separate actual provider-backed media transport adapter. This optional profile does not falsely claim that capability or certify an English speaker/acoustic echo quality.
