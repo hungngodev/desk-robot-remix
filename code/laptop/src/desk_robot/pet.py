@@ -19,6 +19,7 @@ from typing import Awaitable, Callable, Protocol
 from .config import Settings
 from .conversation import Conversation
 from .memory import MemoryStore
+from .handling import HandlingGate
 from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
 from .vision import SceneChange, VisualChangeGate
@@ -48,6 +49,8 @@ class PetState:
     last_cap_events: int | None = None
     last_cap_mask: int | None = None
     side_events: SideRangeEvents = field(default_factory=SideRangeEvents, repr=False)
+    handling_gate: HandlingGate = field(default_factory=HandlingGate, repr=False)
+    handling_events: int = 0
     aux_task: asyncio.Task | None = field(default=None, repr=False)
     aux_reads: int = 0
     last_battery_low: bool | None = None
@@ -127,6 +130,7 @@ class PetController:
             "last_local_safety_fault": state.last_safety_fault,
             "last_event": state.last_event,
             "aux_sensor_reads": state.aux_reads,
+            "qualified_handling_events": state.handling_events,
             "last_aux_interaction": state.last_aux_kind,
             "aux_sensors_physically_qualified": False,
             "last_error": state.last_error,
@@ -158,6 +162,8 @@ class PetController:
         state.last_cap_events = None
         state.last_cap_mask = None
         state.side_events = SideRangeEvents()  # new physical head generation
+        state.handling_gate.reset()  # first honest upright pose for this session
+        state.handling_events = 0
         state.last_extra_events = None
         state.last_extra_mask = None
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
@@ -486,6 +492,44 @@ class PetController:
                 state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
             await asyncio.sleep(self.touch_interval)
 
+    async def _observe_imu(self, robot_id: str, generation: int, body: dict) -> None:
+        """Connect genuine WROOM six-axis telemetry to contextual pet events.
+
+        Only the MPU6050 with the actual +/-2g and 250dps firmware settings
+        is currently accepted. Stationary startup posture is a relative
+        reference; no claim of absolute tilt angle, grasp or motor safety.
+        """
+        state = self.states[robot_id]
+        if not state.enabled or state.generation != generation or self._closed:
+            return
+        robot = self.settings.robot(robot_id)
+        events = state.handling_gate.observe(
+            body, time.monotonic(),
+            qualified=(
+                self.settings.mode == "hardware"
+                and robot.handling_interactions_qualified
+            ),
+            tilt_threshold_deg=robot.handling_tilt_threshold_deg,
+            shake_delta_mg=robot.handling_shake_delta_mg,
+        )
+        for kind in events:
+            if not state.enabled or state.generation != generation:
+                return
+            description = (
+                "My qualified MPU6050 sensed sustained movement away "
+                "from my startup upright orientation"
+                if kind == "handling_tilt" else
+                "My qualified MPU6050 sensed a short acceleration and rotation event"
+            )
+            change = SceneChange(kind, description, 1.0)
+            if self.multimodal is not None:
+                self.multimodal.hub.notify(robot_id, kind, time.monotonic())
+            state.events += 1
+            state.handling_events += 1
+            state.last_event = description
+            await self._store_observation(robot_id, change)
+            self._consider_speech(robot_id, change, generation)
+
     async def _observe_body_safety(
         self, robot_id: str, generation: int, body: dict
     ) -> None:
@@ -687,6 +731,7 @@ class PetController:
         body = await getter()
         if isinstance(body, dict):
             await self._observe_body_safety(robot_id, generation, body)
+            await self._observe_imu(robot_id, generation, body)
             await self._observe_optional(robot_id, generation, body)
             await self._observe_side_ranges(robot_id, generation, body)
         touch = body.get("touch") if isinstance(body, dict) else None
