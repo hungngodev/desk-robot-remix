@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections import deque
 import json
 import os
 import secrets
 import time
 import wave
+from collections import deque
 from io import BytesIO
 
 from aiohttp import web

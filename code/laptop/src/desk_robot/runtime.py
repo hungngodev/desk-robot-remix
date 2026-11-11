@@ -7,8 +7,8 @@ import httpx
 from .config import Settings, secret
 from .controller import Coordinator
 from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
-from .memory import MemoryStore
 from .live_voice_events import VoiceEventListener
+from .memory import MemoryStore
 from .pet import PetController
 from .simulator import (
     SimulatedChat,

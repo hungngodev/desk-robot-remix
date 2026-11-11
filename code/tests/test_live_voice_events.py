@@ -1,7 +1,6 @@
 """Mac event consumer keeps only physical Xiaozhi identity and ordered turns."""
 import httpx
 import pytest
-
 from desk_robot.live_voice_events import VoiceEventListener
 
 
