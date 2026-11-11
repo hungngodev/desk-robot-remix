@@ -236,6 +236,9 @@ class MultimodalOrchestrator:
         self.inference_lock = inference_lock
         self.hub = CameraFrameHub([r.id for r in settings.robots])
         self._capture_tasks: dict[str, asyncio.Task] = {}
+        self._look_tasks: dict[str, asyncio.Task] = {}
+        self._turn_epoch = {r.id: 0 for r in settings.robots}
+        self._question_epoch = {r.id: 0 for r in settings.robots}
         self._closed = False
 
     def status(self, robot_id: str) -> dict:
@@ -259,6 +262,12 @@ class MultimodalOrchestrator:
 
     def voice_started(self, robot_id: str) -> None:
         self.hub.notify(robot_id, "human_voice", time.monotonic())
+        self._turn_epoch[robot_id] += 1
+        # A second spoken utterance supersedes an in-flight camera answer;
+        # never let an old VLM response join the new Xiaozhi speech turn.
+        prior = self._look_tasks.get(robot_id)
+        if prior is not None and not prior.done():
+            prior.cancel()
         if self._closed or not self.settings.voice_vision_tools_enabled:
             return
         task = self._capture_tasks.get(robot_id)
@@ -311,42 +320,74 @@ class MultimodalOrchestrator:
             raise ValueError("Enable local voice vision and install a vision model")
         if not isinstance(question, str) or not 3 <= len(question.strip()) <= 280:
             raise ValueError("A short real visual question is required")
-        # Explicit tool query selects an up-to-date frame independent of the
-        # 0.3 FPS idle sampler. A stale frame must never answer "right now".
-        last = self.hub.frames[robot_id]
-        if not last or time.monotonic() - last[-1].received_at > 0.6:
-            await self.capture(robot_id, source="voice_question")
-        chosen = self.hub.selected(robot_id, question, time.monotonic())
-        if not chosen:
-            raise RuntimeError("No fresh authenticated camera images available")
-        async with self.inference_lock:
-            answer = await self.scene.answer(
-                question, [frame.jpeg for frame in chosen]
-            )
-        return {
-            "robot_id": robot_id,
-            "answer": answer,
-            "frames_used": len(chosen),
-            "latest_frame_age_ms": round(
-                1000 * (time.monotonic() - chosen[-1].received_at)
-            ),
-            "model": self.settings.vision_model,
-            "source": "authenticated_xiao_camera_and_local_vlm",
-            "recent_sensor_events": self.hub.recent_events(
-                robot_id, time.monotonic()
-            ),
-            "image_capture_exposure_verified": False,
-            "physical_multimodal_latency_verified": False,
-            "motor_authorized": False,
-            "charging_authorized": False,
-        }
+        if self._closed:
+            raise RuntimeError("Visual conversation already shut down")
+        turn = self._turn_epoch[robot_id]
+        self._question_epoch[robot_id] += 1
+        question_epoch = self._question_epoch[robot_id]
+        current = asyncio.current_task()
+        previous = self._look_tasks.get(robot_id)
+        if previous is not None and previous is not current and not previous.done():
+            previous.cancel()
+        if current is not None:
+            self._look_tasks[robot_id] = current
+
+        def current_turn() -> bool:
+            return (not self._closed
+                    and self._turn_epoch[robot_id] == turn
+                    and self._question_epoch[robot_id] == question_epoch)
+
+        try:
+            last = self.hub.frames[robot_id]
+            if not last or time.monotonic() - last[-1].received_at > 0.6:
+                await self.capture(robot_id, source="voice_question")
+            if not current_turn():
+                raise RuntimeError("Visual question superseded by new human speech")
+            chosen = self.hub.selected(robot_id, question, time.monotonic())
+            if not chosen:
+                raise RuntimeError("No fresh authenticated camera images available")
+            async with self.inference_lock:
+                # Higher-priority user turns can arrive while waiting for a
+                # busy five-robot VLM. Never evaluate a stale older question.
+                if not current_turn():
+                    raise RuntimeError("Visual question superseded while queued")
+                answer = await self.scene.answer(
+                    question, [frame.jpeg for frame in chosen]
+                )
+            if not current_turn():
+                raise RuntimeError("Visual answer superseded by new speech")
+            return {
+                "robot_id": robot_id,
+                "answer": answer,
+                "frames_used": len(chosen),
+                "latest_frame_age_ms": round(
+                    1000 * (time.monotonic() - chosen[-1].received_at)
+                ),
+                "model": self.settings.vision_model,
+                "source": "authenticated_xiao_camera_and_local_vlm",
+                "recent_sensor_events": self.hub.recent_events(
+                    robot_id, time.monotonic()
+                ),
+                "image_capture_exposure_verified": False,
+                "physical_multimodal_latency_verified": False,
+                "motor_authorized": False,
+                "charging_authorized": False,
+            }
+        except asyncio.CancelledError:
+            if not current_turn():
+                raise RuntimeError("Visual question cancelled by newer speech") from None
+            raise
+        finally:
+            if self._look_tasks.get(robot_id) is current:
+                self._look_tasks.pop(robot_id, None)
 
     async def close(self) -> None:
         self._closed = True
-        tasks = list(self._capture_tasks.values())
+        tasks = list(self._capture_tasks.values()) + list(self._look_tasks.values())
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._capture_tasks.clear()
+        self._look_tasks.clear()
         self.hub.close()
