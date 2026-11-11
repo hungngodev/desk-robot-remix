@@ -65,20 +65,32 @@ class Runtime:
             token=secret(self.settings.speech_bridge_token_env),
             robot_ids={robot.id for robot in self.settings.robots},
             on_interrupt=self._on_voice_interrupt,
+            on_global_interrupt=self._on_voice_global,
         )
         self._voice_task = asyncio.create_task(self.voice_events.run())
+
+    async def _preempt_audio_floor(self) -> None:
+        """Human and VAD transport failures share one five-pet audio owner."""
+        results = await asyncio.gather(
+            *(self.pet.interrupt(robot.id) for robot in self.settings.robots),
+            return_exceptions=True,
+        )
+        # Stop the peer audio lease even if an individual pet callback fails.
+        await self.conversation.stop()
+        failures = [result for result in results if isinstance(result, BaseException)]
+        if failures:
+            raise RuntimeError("Unable to preempt one or more pet speakers") from failures[0]
+
+    async def _on_voice_global(self, reason: str) -> None:
+        if reason not in ("gap", "reset", "stream_unavailable"):
+            raise ValueError("Unsupported global voice transport fault")
+        await self._preempt_audio_floor()
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
         if robot_id not in {robot.id for robot in self.settings.robots}:
             raise KeyError(f"Unknown voice source: {robot_id}")
-        # A human has priority over the shared five-pet speech floor. The
-        # original listener validated which live Sense produced this event;
-        # do not leave a DIFFERENT pet narrating while the human speaks.
-        # Pet.interrupt() only owns proactive audio and never a motor permit.
-        for robot in self.settings.robots:
-            await self.pet.interrupt(robot.id)
-        # Also stop any robot-to-robot scripted conversation.
-        await self.conversation.stop()
+        # Human speech cancels one shared five-pet speech floor once.
+        await self._preempt_audio_floor()
         # VAD event is a signal, never a blocking image request. Schedule
         # camera sampling AFTER the urgent audio cancellation path.
         visual = getattr(self, "multimodal", None)
