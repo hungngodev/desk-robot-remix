@@ -22,6 +22,14 @@ side_near_threshold_mm = 170
 
 **170 is only an example, not a measured default. Do NOT turn the flag on from a desk guess.** Measure the assembled actual left/right/rear sensor lens angles, track occlusion, bracket geometry and actual readings against a ruler. For each of three directions, collect near/far data with a book or cup at 10, 15, 20, 30 cm and verify 95% of valid, correctly identified active/clear trials. Select one conservative threshold based on actual sensor position and suppress cross-reflections. Establish normal room light and WiFi/Mac polling delays, too.
 
+Use `code/scripts/calibrate_side_ranges.py` to analyze 20 independently recorded near and 20 far readings **for each** of left, right and rear (120 total labeled readings). The input is a JSONL file; each line includes `robot_id`, `direction`, `label` (near or far), `sample_id`, and the unmodified authenticated WROOM `side_ranges` object from `GET /v1/robots/{id}/status`. The analyzer rejects stale, invalid, duplicate and overlapping measurements, suggests a single shared threshold and leaves `physical_acceptance_pass=false`. Sample IDs are operator provided; they are not proof of independent ADC conversions, so manually review the original serial timestamps and actual ruler distances.
+
+```bash
+cd code
+uv run --no-sync python scripts/calibrate_side_ranges.py \\
+  --robot robot-01 --input /path/to/labeled-side-ranges.jsonl
+```
+
 A camera/VLM may describe the triggered image but cannot claim a motor can safely turn or drive from these extra direction readings. Only channels 0..4 and the existing local verified WROOM safety guard are motion critical. No "motion certified" bit becomes true because the model noticed an object.
 
 ## Acceptance tests and limits
