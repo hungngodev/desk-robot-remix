@@ -1,6 +1,5 @@
 """Force-driven gripper must not close without real, fresh sensor data."""
 import pytest
-
 from desk_robot.controller import OperationError
 from desk_robot.grasp_feedback import force_adc, grip_angles, guarded_grasp
 

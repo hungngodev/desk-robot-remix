@@ -7,8 +7,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Awaitable, Callable
 
 from .calibration import Calibration
-from .grasp_feedback import guarded_grasp
 from .config import Settings
+from .grasp_feedback import guarded_grasp
 from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
 
