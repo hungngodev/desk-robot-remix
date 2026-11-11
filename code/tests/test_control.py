@@ -435,3 +435,28 @@ async def test_shared_body_armed_health_checks_do_not_assume_front_camera_safety
             await c._assert_armed_health("robot-01")
     finally:
         await c.close()
+
+
+async def test_pickup_never_drives_using_safety_from_before_slow_vision(settings):
+    """Body disarmed during first camera read: no movement based on old status."""
+    coordinator, head = make(settings)
+    original_snapshot = head.snapshot
+
+    async def loss_during_image():
+        image = await original_snapshot()
+        # A real WROOM could latch cliff/touch safety during YOLO inference.
+        # The mock disarm happens after the previously healthy status check.
+        head.armed = False
+        return image
+
+    head.snapshot = loss_during_image
+    try:
+        await coordinator.operator_arm("robot-01")
+        job = coordinator.pickup("robot-01", "key")
+        await coordinator.tasks[job.id]
+        assert job.state == "failed"
+        assert job.result is None
+        assert all(not command.startswith("drive ") for command in head.commands)
+        assert head.commands[-1] == "stop"
+    finally:
+        await coordinator.close()
