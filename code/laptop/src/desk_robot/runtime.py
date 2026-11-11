@@ -81,8 +81,9 @@ class Runtime:
         await self.conversation.stop()
         # VAD event is a signal, never a blocking image request. Schedule
         # camera sampling AFTER the urgent audio cancellation path.
-        if kind in ("normal", "group") and self.multimodal is not None:
-            self.multimodal.voice_started(robot_id)
+        visual = getattr(self, "multimodal", None)
+        if kind in ("normal", "group", "speech_start") and visual is not None:
+            visual.voice_started(robot_id)
 
     async def close(self):
         if self._voice_task is not None:
