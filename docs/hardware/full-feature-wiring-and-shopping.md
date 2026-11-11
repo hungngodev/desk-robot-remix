@@ -74,6 +74,8 @@
 | Keyed charging contacts and alignment switch set | 1 | 5 | None verified owned |
 | Printed docking cradle, printed camera marker and 5V charging input | 1 | 5 | None verified owned |
 
+**Full profile boot requirement:** The selected MCP23017 dock/status input module is now mandatory for `esp32_full` to allow arming. Allowing a completely absent or unresponsive dock board as an optional peripheral would defeat contact safety. Keep one module per robot in the existing parts list, plus the two independent normally closed seat switches and chip status pins; do not invent current sensing from PGOOD/CHG. The `esp32_stepper` staging profile can be used for unpowered bench checks before the dock electronics are assembled, but it does not qualify the full robot for free roaming or powered docking.
+
 The selected full `esp32_full` profile already contains source code to read **eight VL53L4CDs** from TCA9548A `0x70`: four independent downward cliff channels, one forward obstacle channel, and **three additional left, right, rear read-only channels**. The earlier `esp32_stepper` profile reads the five safety/facing channels only. The additional readings feed Mac event detection but **never grant motor permission or an automatic retreat**. All eight boards need actual carrier voltage, orientation, short-range performance, stale-data handling and stopping-envelope measurements before full movement approval. The source driver is not evidence that eight modules are already bought, wired or physically operational.
 
 ## Fixed pin wiring
