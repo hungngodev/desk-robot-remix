@@ -415,3 +415,10 @@ uvx --from platformio==6.1.18 pio run -d firmware/body -e esp32_full
 
 **Physical acceptance remains zero:** Neither a BQ24074 CHG indication nor three distinct GPIOA reads measure actual charge current; no battery protection, power-path, thermal or connector measurement was conducted. No terminal dock motor command, print fit or voice playback ACK was promoted to `ROBOT_VERIFIED`.
 
+
+## 2026-11-11 registered five-pet human voice and WROOM dock monitor source inspection
+
+This check was conducted by comparing **current GitHub branch file contents** in the same revision (not by running the robots). All 10 static source-consistency assertions returned true: full `esp32_full` requires dock GPIO, local WROOM validates nonzero sequenced samples newer than 500ms, any seat or PGOOD latches motion stop, C++ tests cover installed/missing/hot-removed cases, the pinned Xiaozhi VAD gate uses current authenticated connections and clears on disconnect, MiniCPM output START and each Opus packet obey that gate, tests cover spoken/start/packet races, all eight selected VL53L4CD lanes are represented correctly, PN532 is explicitly not integrated and physical trials remain zero, and source-manifest regression tests cover the same implementation evidence.
+
+**This is a STATIC audit, not `HOST_TESTED` or `FIRMWARE_COMPILED`.** The latest PR #17 workflow run [43110335948](https://github.com/hungngodev/desk-robot-remix/actions/runs/43110335948) finished with four failed jobs. Job step records remain absent and earlier log downloads returned `BlobNotFound`; no passing Python, C++ or ESP32 compile can be asserted. The full read-only expansion bus and actual purchased carrier wiring still need physical testing. The power charger, gripper fit, dock contact and original licensed mesh assembly are not completed by these safety reviews.
+
