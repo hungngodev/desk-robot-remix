@@ -372,6 +372,12 @@ void setup() {
   const bool accessory_mux = accessories.begin(Wire);
   Serial.println(accessory_mux ? "INFO optional_accessory_bus_probed" :
                                  "INFO optional_accessory_bus_unavailable");
+#if defined(DESK_ROBOT_REQUIRE_DOCK_MONITOR) && DESK_ROBOT_REQUIRE_DOCK_MONITOR
+  control.require_dock_monitor(true);
+  Serial.println(accessories.readings().dock.present ?
+      "INFO required_dock_gpio_found_unverified_until_first_read" :
+      "ERR required_dock_gpio_missing_motor_locked");
+#endif
   if (load_calibration()) {
     Serial.println("OK calibration_loaded samples_and_local_rearm_required");
   } else {
