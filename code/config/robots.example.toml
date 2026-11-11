@@ -2,6 +2,11 @@
 # Head tokens must match the selected head's private build settings. Never put tokens here.
 mode = "hardware"
 ollama_model = "qwen3:8b"
+# Install and test an actual local image-capable model before enabling.
+# Example only, model name must exist in your own Ollama installation.
+vision_model = ""
+# Explicit privacy opt-in for spoken visual questions and VAD camera sampling.
+voice_vision_tools_enabled = false
 # Install a LOCAL multimodal model in Ollama, then select its actual name.
 # Set this only after running ollama pull MODEL and evaluating real scene accuracy.
 # ollama_vision_model = "qwen3-vl:4b"
