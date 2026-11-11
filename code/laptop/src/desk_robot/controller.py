@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Awaitable, Callable
 
 from .calibration import Calibration
+from .grasp_feedback import guarded_grasp
 from .config import Settings
 from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
@@ -363,6 +364,8 @@ class Coordinator:
             raise OperationError("Simulation calibration cannot be used on hardware")
         if self.settings.mode == "hardware" and calibration.hold_seconds < 3:
             raise OperationError("Real pickup requires at least three seconds of verified hold")
+        if self.settings.mode == "hardware" and calibration.grip_force_delta_raw is None:
+            raise OperationError("Real pickup requires measured ADS1115 gripper contact threshold")
         return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
 
     async def _observe(self, robot_id: str, target: str, c: Calibration) -> Detection:
@@ -413,8 +416,17 @@ class Coordinator:
         if initial is None:
             raise OperationError("Alignment attempt limit reached")
         await self._assert_armed_health(job.robot_id)
-        await head.command(f"grip {c.grip_closed}")
-        await asyncio.sleep(c.servo_settle_seconds)
+        if self.settings.mode == "hardware":
+            tactile = await guarded_grasp(
+                head, c, health=lambda: self._assert_armed_health(job.robot_id)
+            )
+            job.events.append(
+                f"tactile contact delta={tactile['contact_delta_raw']} "
+                f"commanded_angle={tactile['commanded_angle']}; not physical acceptance"
+            )
+        else:
+            await head.command(f"grip {c.grip_closed}")
+            await asyncio.sleep(c.servo_settle_seconds)
         await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
