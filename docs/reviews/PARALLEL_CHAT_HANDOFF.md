@@ -6,6 +6,17 @@
 
 **One current repository and PR:** [hungngodev/desk-robot-remix](https://github.com/hungngodev/desk-robot-remix), [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17), `impl/mac-hardware-safety-preflight-2026-11-10`. The PR head changes as reviewers commit. Compare to actual current head, not a historical ChatGPT response.
 
+## November 11 followup: preserve human VAD through long speech and camera failures
+
+The current canonical branch adds four small source/test/documentation iterations after the Reachy Mini initiative gate. The risk was in the real Mac media coordinator, not a missing AI framework:
+
+* `CameraFrameHub.notify("human_voice")` previously guessed an end after seven seconds despite the server now emitting actual authenticated `speech_end`. It now keeps the human voice floor active until a real end or explicit disconnect/reset. This avoids reopening proactive speech during a long utterance. A missing end fails quiet rather than guessing silence.
+* Failed XIAO camera capture previously called the full `hub.clear`, which also erased human voice state. New `discard_video` invalidates stale JPEGs and in-flight generations without clearing the independent live VAD evidence. Background speech-frame sampling continues at the existing approximate 1 FPS for up to 60 opportunities per utterance, not indefinitely on a missing end.
+* `PetController.start` and `pause` now use the same video-only invalidation instead of clearing the Xiaozhi voice floor. Changing autonomous camera mode cannot tell the speech arbiter that a user stopped talking.
+* Added offline regression tests in the existing `code/tests/test_multimodal.py` and `code/tests/test_pet.py` for speech longer than seven seconds, camera failure while speaking and autonomous pause during a live user turn. The implementation and tests are committed to PR #17 but **not confirmed passing**. The latest GitHub Actions jobs finish failed with no published steps, so no source-test diagnosis or acoustic acceptance claim is justified.
+
+This is a small compatible reuse of the existing Xiaozhi VAD, LiveKit-inspired frame hub and PetController state owners, not a second media stack. The real XIAO microphone/speaker, live model speed, final printer assembly, grasp calibration, docking and protected charger remain unqualified.
+
 ## The user's cross-chat constraints, all retained
 
 1. **One complete robot, then four identical functional copies.** Five different personalities and removable costumes, not five different incomplete hardware architectures. Day zero design includes the entire desired core; physical bringup may still be staged for safe testing.
