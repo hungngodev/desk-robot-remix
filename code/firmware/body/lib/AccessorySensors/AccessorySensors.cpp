@@ -91,7 +91,26 @@ bool AccessorySensors::begin(TwoWire& wire) {
   // Probe only. No unverified output pin or high-power peripheral is enabled.
   if (select(2)) data_.force.present = probe(0x48);
   if (!close()) return false;
-  if (select(3)) data_.climate.present = probe(0x44);
+  if (select(3)) {
+    data_.climate.present = probe(0x44);
+    // User-owned BMP280 may be strapped to either 0x76 or 0x77.
+    // Reject BME280 0x60 and random ACKs; keep SHT41 independent.
+    for (const std::uint8_t addr : {static_cast<std::uint8_t>(0x76),
+                                    static_cast<std::uint8_t>(0x77)}) {
+      std::uint8_t chip = 0, coeff[24]{};
+      if (read(addr, 0xD0, &chip, 1) && chip == 0x58 &&
+          read(addr, 0x88, coeff, 12) &&
+          read(addr, 0x94, coeff + 12, 12) &&
+          bmp280_trim(coeff, bmp_trim_) &&
+          write8(addr, 0xF5, 0xA0) && // 1-second standby, no IIR
+          write8(addr, 0xF4, 0x27)) { // pressure/temp x1, normal
+        data_.barometer.present = true;
+        data_.barometer.address = addr;
+        data_.barometer.chip_id = chip;
+        break;
+      }
+    }
+  }
   if (!close()) return false;
   if (select(4)) {
     std::uint16_t manufacturer = 0;
@@ -245,6 +264,20 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
   }
   sht_pending_ = false;
 }
+void AccessorySensors::barometer(std::uint32_t now_ms) {
+  auto& b = data_.barometer;
+  if (!b.present) return;
+  // Two raw 20-bit ADC words from a single bounded burst. No reusing an
+  // old pressure conversion if I2C fails or the NVM trim is implausible.
+  std::uint8_t frame[6]{};
+  if (!read(b.address, 0xF7, frame, 6)) { b.valid = false; return; }
+  const auto press_adc = bmp280_raw20(frame);
+  const auto temp_adc = bmp280_raw20(frame + 3);
+  b.valid = bmp280_compensate(bmp_trim_, temp_adc, press_adc,
+                              b.temp_centi, b.pressure_pa);
+  if (b.valid) b.at_ms = now_ms;
+}
+
 void AccessorySensors::power(std::uint32_t now_ms) {
   auto& g = data_.gauge;
   if (g.fuel_present) {
@@ -293,7 +326,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
   switch (lane) {
     case 1: gesture_proximity(now_ms); break;
     case 2: force(now_ms); break;
-    case 3: climate(now_ms); break;
+    case 3: climate(now_ms); barometer(now_ms); break;
     case 4: power(now_ms); break;
     case 5: dock_status(now_ms); break;
     case 6: angle(1, now_ms); break;
@@ -302,6 +335,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
   }
   if (!close()) {
     // 0x70 ToF owner will also fail closed if this mux cannot quiesce.
+    data_.barometer.valid = false;
     data_.climate.valid = data_.force.valid =
       data_.proximity.valid = data_.gauge.fuel_valid =
       data_.gauge.monitor_valid = data_.dock.valid = false;
