@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .config import Settings, secret
 from .controller import OperationError
 from .conversation import conversation_turns
+from .dock_runtime import observe_actual_dock
 from .runtime import Runtime
 from .transport import HeadError
 
@@ -126,6 +127,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             return {"robot_id": robot_id, "available": False,
                     "reason": "No physical accessory telemetry adapter"}
         return await getter()
+
+    @app.get("/v1/robots/{robot_id}/dock/observe", dependencies=[Depends(authorize)])
+    async def dock_observe(robot_id: str):
+        """Passive marker detection only, no motor or charger authority."""
+        robot = coordinator().robot(robot_id)
+        return await observe_actual_dock(coordinator().heads[robot_id], robot)
 
     @app.get("/v1/robots/{robot_id}/camera.jpg", dependencies=[Depends(authorize)])
     async def camera(robot_id: str):

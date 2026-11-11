@@ -25,6 +25,7 @@ class RobotConfig(BaseModel):
     battery_low_percent: int = Field(default=20, ge=5, le=40)
     gesture_interactions_qualified: bool = False  # measured hardware gate
     calibration: Path | None = None
+    dock_calibration: Path | None = None
     voice: str = "af_heart"
 
     @model_validator(mode="after")
@@ -87,6 +88,9 @@ def load_settings(path: str | Path) -> Settings:
     for robot in settings.robots:
         if robot.calibration and not robot.calibration.is_absolute():
             robot.calibration = (path.parent / robot.calibration).resolve()
+    for robot in settings.robots:
+        if robot.dock_calibration and not robot.dock_calibration.is_absolute():
+            robot.dock_calibration = (path.parent / robot.dock_calibration).resolve()
     if settings.vision_weights and not settings.vision_weights.is_absolute():
         settings.vision_weights = (path.parent / settings.vision_weights).resolve()
     if not settings.trials_file.is_absolute():
