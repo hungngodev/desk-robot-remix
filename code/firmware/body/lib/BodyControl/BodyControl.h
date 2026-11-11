@@ -86,6 +86,9 @@ class BodyControl {
   // Fresh physical dock switch + charger PGOOD is an independent local
   // DISARM interlock. It never enables charging, nor grants movement.
   void set_accessories(const AccessoryReadings& readings);
+  // Full-feature build requires the dock input even if it failed at boot.
+  // Cannot be activated or relaxed by UART, AI, or a peer message.
+  void require_dock_monitor(bool required) { dock_monitor_required_ = required; }
   // Left/right/rear read-only ToF samples never grant motor permission.
   void sample_side_range(std::uint8_t index, std::uint16_t mm,
                          bool valid, std::uint32_t now_ms);
@@ -125,6 +128,7 @@ class BodyControl {
   bool cap_initialized_ = false;
   bool extras_initialized_ = false;
   bool dock_power_lockout_ = false;  // stays latched across missing I2C samples
+  bool dock_monitor_required_ = false; // full robot build, set at boot only
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};
   std::uint8_t extra_streaks_[3]{};
