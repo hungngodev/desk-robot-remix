@@ -60,6 +60,8 @@ class Runtime:
         self._voice_task = asyncio.create_task(self.voice_events.run())
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
+        if robot_id not in {robot.id for robot in self.settings.robots}:
+            raise KeyError(f"Unknown voice source: {robot_id}")
         # A human has priority over the shared five-pet speech floor. The
         # original listener validated which live Sense produced this event;
         # do not leave a DIFFERENT pet narrating while the human speaks.
