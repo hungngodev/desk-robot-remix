@@ -128,6 +128,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                     "reason": "No physical accessory telemetry adapter"}
         return await getter()
 
+    @app.post("/v1/robots/{robot_id}/dock/approach",
+              dependencies=[Depends(operator)], status_code=202)
+    async def dock_approach(robot_id: str):
+        return coordinator().dock(robot_id).data()
+
     @app.get("/v1/robots/{robot_id}/dock/observe", dependencies=[Depends(authorize)])
     async def dock_observe(robot_id: str):
         """Passive marker detection only, no motor or charger authority."""

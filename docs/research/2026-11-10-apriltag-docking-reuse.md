@@ -41,3 +41,24 @@ from this observer. Mac image receipt time is not claimed to equal exposure time
 
 Physical final contact approach, charging power electronics and actual printed
 mechanical fit remain explicitly unverified.
+
+
+## Operator permitted guarded approach, not automatic charge
+
+The Mac Coordinator now has a dock_approach job, exposed only through
+operator-authorized POST /v1/robots/{robot_id}/dock/approach.
+The robot config must explicitly set dock_motion_qualified true after real
+swept-path and track calibration, include measured dock_turn_sign and
+dock_forward_sign, and have a physically measured dock_calibration file.
+The job consumes an ordinary operator permit and uses the existing WROOM
+arm, cliff guard, stop, keepalive and watchdog authority. It takes at most
+16 short 100ms movement pulses, reobserving the marker after each.
+Turns require all three read-only lateral/rear ToF readings to be fresh and
+far enough; unknown directions cannot trigger a blind turn.
+
+The approach intentionally stops for front obstacles and never moves to
+the last unqualified centimeters or turns on charging contacts.
+Because head snapshots currently expose a receipt timestamp rather than a
+calibrated exposure timestamp, any autonomous approach needs real motion
+and image latency qualification before setting dock_motion_qualified true.
+No automatic battery low docking is claimed.

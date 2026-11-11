@@ -26,12 +26,17 @@ class RobotConfig(BaseModel):
     gesture_interactions_qualified: bool = False  # measured hardware gate
     calibration: Path | None = None
     dock_calibration: Path | None = None
+    dock_motion_qualified: bool = False
+    dock_turn_sign: int | None = Field(default=None, ge=-1, le=1)
+    dock_forward_sign: int | None = Field(default=None, ge=-1, le=1)
     voice: str = "af_heart"
 
     @model_validator(mode="after")
     def local_http(self):
         from urllib.parse import urlparse
 
+        if self.dock_turn_sign == 0 or self.dock_forward_sign == 0:
+            raise ValueError("Dock movement polarity cannot be zero")
         u = urlparse(self.head_url)
         if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
             raise ValueError("head_url must be an http(s) URL without embedded credentials")

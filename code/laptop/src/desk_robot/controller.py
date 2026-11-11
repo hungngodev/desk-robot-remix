@@ -8,6 +8,8 @@ from typing import Awaitable, Callable
 
 from .calibration import Calibration
 from .config import Settings
+from .dock_runtime import load_real_dock_calibration
+from .dock_vision import assess_dock, detect_apriltag
 from .grasp_feedback import guarded_grasp
 from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
@@ -351,6 +353,87 @@ class Coordinator:
             # No blind reverse/turn when only one forward beam exists. Swept
             # turns need real footprint and obstacle qualification.
             await asyncio.sleep(0.35)
+
+    def dock(self, robot_id: str) -> Job:
+        """Permit-gated camera approach ending BEFORE unqualified charge contacts."""
+        robot = self.robot(robot_id)
+        if not robot.motion_enabled or not robot.dock_motion_qualified:
+            raise OperationError("Dock motion requires measured physical qualification")
+        if self.settings.mode != "hardware":
+            raise OperationError("Dock approach requires physically qualified hardware")
+        if robot.dock_turn_sign not in (-1, 1) or robot.dock_forward_sign not in (-1, 1):
+            raise OperationError("Dock turn and forward motor polarity are not measured")
+        try:
+            camera, target_mm = load_real_dock_calibration(robot.dock_calibration)
+        except (OSError, ValueError, TypeError) as exc:
+            raise OperationError(f"Dock calibration required: {exc}") from exc
+        return self._submit(
+            robot_id, "dock_approach",
+            lambda job: self._dock_approach(
+                job, camera, target_mm, robot.dock_turn_sign, robot.dock_forward_sign
+            ),
+        )
+
+    async def _dock_approach(
+        self, job: Job, camera, target_mm: float,
+        turn_sign: int, forward_sign: int
+    ) -> dict:
+        """Real camera observations + local guard only; no charger operation."""
+        head = self.heads[job.robot_id]
+        for attempt in range(16):
+            body = await self._assert_armed_health(
+                job.robot_id, require_front_clearance=True
+            )
+            # Camera receipt time is NOT equivalent to image exposure time.
+            # Local WROOM cliff stop remains mandatory for every short pulse.
+            jpeg = await head.snapshot()
+            received_at = time.monotonic()
+            pose = detect_apriltag(jpeg, camera, captured_at=received_at)
+            decision = assess_dock(
+                pose, now=received_at, target_distance_mm=target_mm
+            )
+            job.events.append(f"dock observation {attempt}: {decision.phase}")
+            if decision.phase == "hold":
+                return {
+                    "phase": "hold", "reason": decision.reason,
+                    "charging_authorized": False, "physical_acceptance_pass": False,
+                }
+            if decision.phase == "align":
+                side = body.get("side_ranges")
+                if (not isinstance(side, dict)
+                        or type(side.get("valid_mask")) is not int
+                        or side["valid_mask"] != 7
+                        or not isinstance(side.get("age_ms"), list)
+                        or len(side["age_ms"]) != 3
+                        or any(type(n) is not int or not 0 <= n <= 350
+                               for n in side["age_ms"])
+                        or not isinstance(side.get("mm"), list)
+                        or len(side["mm"]) != 3
+                        or any(type(n) is not int or n < 300 for n in side["mm"])):
+                    raise OperationError(
+                        "Dock turn refused: side and rear clearance unqualified"
+                    )
+                direction = turn_sign if pose.x_mm > 0 else -turn_sign
+                command = f"drive {20 * direction} {-20 * direction} 100"
+            else:
+                # Stopping at least 300mm away from a detected frontal surface
+                # is intentional. The final cm and charging contacts need a
+                # separate physical state machine with actual contact sensing.
+                if body["ranges"]["mm"][4] < 350:
+                    return {
+                        "phase": "hold", "reason": "Front clearance stop",
+                        "charging_authorized": False, "physical_acceptance_pass": False,
+                    }
+                command = f"drive {20 * forward_sign} {20 * forward_sign} 100"
+            await head.command(command)
+            await asyncio.sleep(0.12)
+            await head.command("stop")
+            await asyncio.sleep(0.05)
+        return {
+            "phase": "hold",
+            "reason": "Maximum guarded approach pulses reached",
+            "charging_authorized": False, "physical_acceptance_pass": False,
+        }
 
     def pickup(self, robot_id: str, target: str) -> Job:
         robot = self.robot(robot_id)
