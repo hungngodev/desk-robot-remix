@@ -106,13 +106,58 @@ async def test_restart_never_replays_old_server_voice():
         return httpx.Response(200, json={
             "cursor": 1, "events": [], "reset": False, "lost": False,
         })
+    delivered = []
     async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
         async def cancel(robot, source):
-            raise AssertionError("No stale event should be delivered")
+            delivered.append((robot, source))
         watcher = VoiceEventListener(
             client, url="http://127.0.0.1:8766", token="s" * 32,
             robot_ids={"robot-01"}, on_interrupt=cancel,
         )
         await watcher.poll()
         assert await watcher.poll() == 0 and watcher.cursor is None
+        # Cancel potentially obsolete audio on reset, but never replay
+        # server events from the old epoch.
+        assert delivered == [("robot-01", "reset")]
         assert await watcher.poll() == 0 and watcher.cursor == 1
+        assert delivered == [("robot-01", "reset")]
+
+
+async def test_event_transport_failure_preempts_once_until_recovered():
+    import asyncio
+
+    requests = 0
+    cancelled = []
+
+    def mock(request):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return httpx.Response(200, json={
+                "cursor": 4, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(503, json={"error": "temporarily unavailable"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def cancel(robot, source):
+            cancelled.append((robot, source))
+
+        watcher = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-02", "robot-01"}, on_interrupt=cancel,
+        )
+        assert await watcher.poll() == 0
+        task = asyncio.create_task(watcher.run())
+        try:
+            for _ in range(100):
+                if cancelled:
+                    break
+                await asyncio.sleep(0.01)
+            assert cancelled == [
+                ("robot-01", "stream_unavailable"),
+                ("robot-02", "stream_unavailable"),
+            ]
+            assert watcher.last_error is not None
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
