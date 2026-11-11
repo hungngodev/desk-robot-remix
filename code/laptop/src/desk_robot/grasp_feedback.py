@@ -62,28 +62,40 @@ async def guarded_grasp(
     baseline = (baseline_a + baseline_b) // 2
     confirmed = 0
     latest_seq = seq_b
-    for angle in grip_angles(
-        calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
-    )[1:]:
-        await health()
-        await head.command(f"grip {angle}")
-        await asyncio.sleep(0.18)
-        await health()
+    try:
+        for angle in grip_angles(
+            calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
+        )[1:]:
+            await health()
+            await head.command(f"grip {angle}")
+            await asyncio.sleep(0.18)
+            await health()
+            try:
+                measured, seq = force_observation(await head.aux_status())
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                raise OperationError("Lost fresh force sensor during closing") from exc
+            if seq <= latest_seq:
+                raise OperationError("No new jaw sample after servo movement")
+            latest_seq = seq
+            raw_delta = (measured - baseline) * calibration.grip_force_sign
+            if raw_delta > ceiling:
+                raise OperationError("Gripper raw force ceiling exceeded")
+            confirmed = confirmed + 1 if raw_delta >= threshold else 0
+            if confirmed >= 2:
+                return {
+                    "commanded_angle": angle, "contact_delta_raw": raw_delta,
+                    "baseline_raw": baseline, "position_measured": False,
+                    "force_newtons_measured": False, "physical_acceptance_pass": False,
+                }
+        raise OperationError("Closed jaw limit reached with no tactile contact")
+    except OperationError:
+        # A failed partial grasp can leave a powered MG90S squeezing an object.
+        # Attempt to relax ONLY through the already measured 'open' angle and
+        # ONLY while the WROOM still reports fresh local safety authority.
+        # If touch/cliff/IMU disarmed the body, NEVER bypass that interlock.
         try:
-            measured, seq = force_observation(await head.aux_status())
-        except (KeyError, TypeError, ValueError, AttributeError) as exc:
-            raise OperationError("Lost fresh force sensor during closing") from exc
-        if seq <= latest_seq:
-            raise OperationError("No new jaw sample after servo movement")
-        latest_seq = seq
-        raw_delta = (measured - baseline) * calibration.grip_force_sign
-        if raw_delta > ceiling:
-            raise OperationError("Gripper raw force ceiling exceeded")
-        confirmed = confirmed + 1 if raw_delta >= threshold else 0
-        if confirmed >= 2:
-            return {
-                "commanded_angle": angle, "contact_delta_raw": raw_delta,
-                "baseline_raw": baseline, "position_measured": False,
-                "force_newtons_measured": False, "physical_acceptance_pass": False,
-            }
-    raise OperationError("Closed jaw limit reached with no tactile contact")
+            await health()
+            await head.command(f"grip {calibration.grip_open}")
+        except Exception:
+            pass  # Preserve the primary failure; body stop/watchdog is next.
+        raise
