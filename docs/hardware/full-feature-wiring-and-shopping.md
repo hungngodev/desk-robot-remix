@@ -74,7 +74,7 @@
 | Keyed charging contacts and alignment switch set | 1 | 5 | None verified owned |
 | Printed docking cradle, printed camera marker and 5V charging input | 1 | 5 | None verified owned |
 
-The five optical safety sensors already have a source driver. The full selected expansion allocates **three more VL53L4CDs** for left, right and rear. All eight modules must use a compatible verified breakout; extra three lanes are allocated but firmware still reads five, and no all-direction roaming is physically approved.
+The selected full `esp32_full` profile already contains source code to read **eight VL53L4CDs** from TCA9548A `0x70`: four independent downward cliff channels, one forward obstacle channel, and **three additional left, right, rear read-only channels**. The earlier `esp32_stepper` profile reads the five safety/facing channels only. The additional readings feed Mac event detection but **never grant motor permission or an automatic retreat**. All eight boards need actual carrier voltage, orientation, short-range performance, stale-data handling and stopping-envelope measurements before full movement approval. The source driver is not evidence that eight modules are already bought, wired or physically operational.
 
 ## Fixed pin wiring
 
