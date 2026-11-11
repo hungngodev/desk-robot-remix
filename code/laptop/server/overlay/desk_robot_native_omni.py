@@ -380,6 +380,7 @@ class NativeOmniSession:
                 await self._send_device_opus(encoder.encode(frame, 960), generation)
 
     async def _send_device_state(self, state: str, generation: int) -> None:
+        global _output_owner
         if self.closed or generation != self._generation:
             return
         import desk_robot_bridge as bridge
@@ -412,14 +413,12 @@ class NativeOmniSession:
         if speech_raced:
             events = await self._invalidate_head_first()
             self._schedule_remote_cancel(events)
-            global _output_owner
             async with _output_owner_lock:
                 if _output_owner == self.device:
                     _output_owner = None
             return
         if state == "stop":
             self.conn.client_is_speaking = False
-            global _output_owner
             async with _output_owner_lock:
                 if _output_owner == self.device:
                     _output_owner = None
