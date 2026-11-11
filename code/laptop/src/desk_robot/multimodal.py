@@ -137,9 +137,10 @@ class CameraFrameHub:
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
         if kind == "human_voice":
-            # The Xiaozhi event bridge currently sends VAD start only.
-            # A timeout is a hint, NOT proof of speech endpoint detection.
-            self.voice_until[robot_id] = max(self.voice_until[robot_id], now + 7.0)
+            # Real Xiaozhi speech_end (or explicit disconnect/clear) owns
+            # release. A 7s guess previously unmuted proactive speech while
+            # someone was still talking. Missing end must fail quiet.
+            self.voice_until[robot_id] = math.inf
 
     def speech_ended(self, robot_id: str, now: float) -> None:
         """End a VAD-confirmed user utterance without dropping its last images."""
@@ -248,16 +249,20 @@ class CameraFrameHub:
             if 0 <= now - seen_at <= 8.0
         ]
 
-    def clear(self, robot_id: str) -> None:
+    def discard_video(self, robot_id: str) -> None:
+        """Drop failed camera evidence without releasing a live human VAD turn."""
         self._check(robot_id)
         self._generation[robot_id] += 1
         self.frames[robot_id].clear()
-        self.event_history[robot_id].clear()
         self.previous_gray.pop(robot_id, None)
         self.last_capture[robot_id] = -math.inf
-        self.voice_until[robot_id] = -math.inf
         self.changed_streak[robot_id] = 0
         self.urgent[robot_id] = False
+
+    def clear(self, robot_id: str) -> None:
+        self.discard_video(robot_id)
+        self.event_history[robot_id].clear()
+        self.voice_until[robot_id] = -math.inf
 
     def close(self) -> None:
         for robot_id in self.robots:
@@ -341,7 +346,10 @@ class MultimodalOrchestrator:
 
     async def _speech_frames(self, robot_id: str) -> None:
         try:
-            for _ in range(5):
+            # Keep the 1 FPS visual stream for a genuinely long utterance,
+            # but cap unacknowledged camera work if a VAD end is lost. The
+            # voice floor itself remains held until explicit end/disconnect.
+            for _ in range(60):
                 if (self._closed or not self.hub.user_active(
                     robot_id, time.monotonic()
                 )):
@@ -350,9 +358,9 @@ class MultimodalOrchestrator:
                     try:
                         await self.capture(robot_id, source="speech")
                     except Exception:
-                        # A lost board yields no fresh visual evidence.
-                        # The existing voice conversation remains audio only.
-                        self.hub.clear(robot_id)
+                        # Camera failure does NOT prove the human stopped
+                        # speaking. Only discard stale frames, never VAD state.
+                        self.hub.discard_video(robot_id)
                         break
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
