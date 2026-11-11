@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections import deque
 import json
 import os
 import secrets
@@ -32,6 +33,30 @@ active_device_id: str | None = None
 voice_frames: dict[str, int] = {}
 voice_last_frame_at: dict[str, float] = {}
 human_interrupted_devices: set[str] = set()
+# Authenticated, bounded, text-only events for the Mac cancellation owner.
+# PCM, transcripts, images and bearer tokens never enter this replay buffer.
+voice_event_cursor = 0
+voice_event_history: deque[dict] = deque(maxlen=128)
+
+
+def record_human_voice(conn, kind: str) -> bool:
+    """Only a CURRENT authenticated Xiaozhi websocket can publish human VAD."""
+    global voice_event_cursor
+    if kind not in ("normal", "group"):
+        raise ValueError("Unknown interruption class")
+    device = getattr(conn, "device_id", None)
+    if connections.get(device) is not conn:
+        return False
+    robot_id = robot_for_device(device)
+    if robot_id is None:
+        return False
+    voice_event_cursor += 1
+    voice_event_history.append({
+        "seq": voice_event_cursor, "robot_id": robot_id,
+        "kind": kind, "source": "xiaozhi_aec_vad",
+    })
+    return True
+
 
 
 def device_map():
@@ -169,6 +194,7 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
         conn.clearSpeakStatus()
         voice_frames.pop(device, None)
         voice_last_frame_at.pop(device, None)
+    record_human_voice(conn, "normal")
     return True
 
 
@@ -200,6 +226,7 @@ async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
         "type": "tts", "state": "stop", "session_id": conn.session_id,
         "flush": True,
     }))
+    record_human_voice(conn, "group")
     return True
 
 
@@ -423,6 +450,32 @@ def create_app():
             "natural_barge_in_certified": False,
         })
 
+    async def voice_events(request):
+        """Replay actual interruption metadata without raw voice or model text."""
+        raw = request.query.get("after", "0")
+        if not raw.isascii() or not raw.isdecimal() or len(raw) > 19:
+            raise ValueError("Invalid voice event cursor")
+        after = int(raw)
+        if after > 0x7fffffffffffffff:
+            raise ValueError("Voice event cursor out of range")
+        if request.query.get("bootstrap") == "1":
+            return web.json_response({
+                "cursor": voice_event_cursor, "events": [],
+                "reset": False, "lost": False,
+            })
+        if after > voice_event_cursor:
+            return web.json_response({
+                "cursor": voice_event_cursor, "events": [],
+                "reset": True, "lost": False,
+            })
+        earliest = voice_event_history[0]["seq"] if voice_event_history else voice_event_cursor + 1
+        return web.json_response({
+            "cursor": voice_event_cursor,
+            "events": [item for item in voice_event_history if item["seq"] > after],
+            "reset": False, "lost": after < earliest - 1,
+        })
+
+    app.router.add_get("/events", voice_events)
     app.router.add_post("/session", session)
     app.router.add_post("/speak", speak)
     app.router.add_post("/interrupt", interrupt)

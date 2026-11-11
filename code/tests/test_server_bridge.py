@@ -653,3 +653,47 @@ async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monke
         isinstance(frame, str) and '"flush": true' in frame for frame in sent
     )
     assert cleared == [True]
+
+async def test_real_xiaozhi_voice_events_are_authenticated_replayable_metadata(bridge):
+    one = conn("mac-01")
+    bridge.register(one)
+    assert bridge.record_human_voice(one, "normal")
+    assert bridge.record_human_voice(one, "group")
+    bridge.unregister(one)
+    assert not bridge.record_human_voice(one, "normal")
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        assert (await client.get("/events?after=0")).status == 401
+        boot = await client.get("/events?after=0&bootstrap=1", headers=headers)
+        assert await boot.json() == {
+            "cursor": 2, "events": [], "lost": False, "reset": False,
+        }
+        result = await client.get("/events?after=0", headers=headers)
+        data = await result.json()
+        assert data["cursor"] == 2 and not data["lost"]
+        assert [e["kind"] for e in data["events"]] == ["normal", "group"]
+        assert all(e["robot_id"] == "robot-01" for e in data["events"])
+        assert all("audio" not in e and "transcript" not in e for e in data["events"])
+        result = await client.get("/events?after=1", headers=headers)
+        assert [e["seq"] for e in (await result.json())["events"]] == [2]
+        result = await client.get("/events?after=900", headers=headers)
+        assert (await result.json())["reset"] is True
+        assert (await client.get("/events?after=-1", headers=headers)).status == 400
+
+
+async def test_real_voice_event_ring_overflow_detected(bridge):
+    one = conn("mac-01")
+    bridge.register(one)
+    for _ in range(135):
+        assert bridge.record_human_voice(one, "normal")
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        result = await client.get("/events?after=1", headers={
+            "Authorization": "Bearer " + "s" * 40,
+        })
+        data = await result.json()
+        assert data["cursor"] == 135
+        assert data["lost"] is True
+        assert len(data["events"]) == 128
+        assert data["events"][0]["seq"] == 8
+
+
