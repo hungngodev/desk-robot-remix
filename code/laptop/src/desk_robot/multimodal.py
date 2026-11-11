@@ -33,6 +33,7 @@ TRIGGERS = frozenset({
     "human_voice", "touch_tap", "touch_double", "touch_hold",
     "petting_zone", "hand_wave", "nearby_object", "nose_twist",
     "squeeze", "bumper", "magnet", "pir", "battery_low", "safety_fault",
+    "side_object",
 })
 
 
