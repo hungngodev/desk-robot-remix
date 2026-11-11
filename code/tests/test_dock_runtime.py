@@ -3,7 +3,6 @@ import json
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot import dock_runtime
 from desk_robot.dock_vision import DockPose
 
