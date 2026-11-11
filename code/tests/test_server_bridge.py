@@ -728,3 +728,45 @@ async def test_physical_normal_barge_in_emits_only_from_live_registered_connecti
     assert bridge.voice_event_cursor == 1
     bridge.unregister(one)
     assert not bridge.record_human_voice(one, "normal")
+
+
+def test_idle_real_human_vad_queues_one_voice_video_hint_per_utterance(bridge):
+    one = conn("mac-01")
+    one.client_listen_mode = "auto"
+    bridge.register(one)
+    assert not bridge.observe_idle_human_voice(one, False)
+    assert not bridge.observe_idle_human_voice(one, True)
+    assert bridge.observe_idle_human_voice(one, True)
+    assert not bridge.observe_idle_human_voice(one, True)
+    assert len(bridge.voice_event_history) == 1
+    first = bridge.voice_event_history[-1]
+    assert first["kind"] == "speech_start"
+    assert first["source"] == "xiaozhi_server_vad"
+    assert first["robot_id"] == "robot-01"
+    assert not bridge.observe_idle_human_voice(one, False)
+    assert not bridge.observe_idle_human_voice(one, True)
+    assert bridge.observe_idle_human_voice(one, True)
+    assert len(bridge.voice_event_history) == 2
+    one.client_is_speaking = True
+    bridge.observe_idle_human_voice(one, False)
+    assert not bridge.observe_idle_human_voice(one, True)
+    assert len(bridge.voice_event_history) == 2
+    bridge.unregister(one)
+
+
+def test_idle_voice_must_come_from_current_registered_head_and_listen_mode(bridge):
+    first = conn("mac-01")
+    first.client_listen_mode = "auto"
+    forgery = conn("mac-01")
+    forgery.client_listen_mode = "realtime"
+    bridge.register(first)
+    assert not bridge.observe_idle_human_voice(forgery, True)
+    assert not bridge.observe_idle_human_voice(forgery, True)
+    first.client_listen_mode = "manual"
+    assert not bridge.observe_idle_human_voice(first, True)
+    first.client_listen_mode = "realtime"
+    assert not bridge.observe_idle_human_voice(first, True)
+    assert bridge.observe_idle_human_voice(first, True)
+    assert len(bridge.voice_event_history) == 1
+    bridge.unregister(first)
+    assert not bridge.observe_idle_human_voice(first, True)
