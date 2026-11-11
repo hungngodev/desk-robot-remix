@@ -171,6 +171,7 @@ class NativeOmniSession:
         self.latest_jpeg: bytes | None = None
         self.latest_frame_time = 0.0
         self._tasks: list[asyncio.Task] = []
+        self._pending_cancels: set[asyncio.Task] = set()
         self._socket = None
         self._socket_lock = asyncio.Lock()
         self._device_send_lock = asyncio.Lock()
@@ -420,25 +421,43 @@ class NativeOmniSession:
         # 60ms Opus audio pacing, not an acoustic playback confirmation.
         await asyncio.sleep(0.060)
 
-    async def barge(self) -> None:
-        """Stop real head audio FIRST, then cancel remote model work.
-
-        Native cancellation may take seconds under remote inference/backpressure.
-        Local generation invalidation and XIAO decoder flush must never wait
-        on the model socket. This is a request for immediate speaker silence,
-        not an I2S playback completion acknowledgement.
-        """
+    async def _invalidate_head_first(self) -> tuple[dict, ...]:
+        """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
         while not self.outgoing.empty():
             try:
                 self.outgoing.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        events = self.wire.interrupt()  # even when model transport is offline
+        events = self.wire.interrupt()  # even without a connected backend
         await flush_head(self)
+        return events
+
+    async def _cancel_remote(self, events: tuple[dict, ...]) -> None:
         if self.connected and not self.closed:
-            for message in events:
-                await self._send(message)
+            try:
+                for event in events:
+                    # A wedged model must not delay or repeatedly restart
+                    # audio. Source owner remains the registered XIAO head.
+                    await asyncio.wait_for(self._send(event), timeout=0.8)
+            except (asyncio.TimeoutError, aiohttp.ClientError, RuntimeError) as exc:
+                self.fail(f"Native model interrupt failed: {type(exc).__name__}")
+
+    def _schedule_remote_cancel(self, events: tuple[dict, ...]) -> None:
+        """After physical flush, free the shared five pet audio floor fast."""
+        if not self.connected or self.closed:
+            return
+        if len(self._pending_cancels) >= 3:
+            self.fail("Native cancellation queue overloaded")
+            return
+        task = asyncio.create_task(self._cancel_remote(events))
+        self._pending_cancels.add(task)
+        task.add_done_callback(self._pending_cancels.discard)
+
+    async def barge(self) -> None:
+        """The actual XIAO gets its flush before remote model cancellation."""
+        events = await self._invalidate_head_first()
+        await self._cancel_remote(events)
 
     async def run(self) -> None:
         try:
@@ -479,10 +498,13 @@ class NativeOmniSession:
             self.connected = False
             self.closed = True
             self._generation += 1
-            for task in self._tasks:
+            for task in (*self._tasks, *self._pending_cancels):
                 task.cancel()
-            if self._tasks:
-                await asyncio.gather(*self._tasks, return_exceptions=True)
+            if self._tasks or self._pending_cancels:
+                await asyncio.gather(
+                    *self._tasks, *self._pending_cancels,
+                    return_exceptions=True,
+                )
             try:
                 if self.conn.client_is_speaking:
                     await self.conn.websocket.send(json.dumps({
@@ -512,8 +534,10 @@ async def claim_speaker(session: NativeOmniSession) -> None:
         if other_id is not None and other_id != session.device:
             previous = _sessions.get(other_id)
             if previous is not None and not previous.closed:
-                await previous.barge()
-                await flush_head(previous)
+                # Do not hold the shared five-pet speaker lock while the
+                # previous robot's remote model is slow to cancel.
+                events = await previous._invalidate_head_first()
+                previous._schedule_remote_cancel(events)
         _output_owner = session.device
 
 
@@ -532,8 +556,8 @@ async def preempt_others_for_human(source_device: str) -> None:
     """Human conversation takes priority over every native-model pet."""
     for device, session in list(_sessions.items()):
         if device != source_device and session.conn.client_is_speaking:
-            await session.barge()
-            await flush_head(session)
+            events = await session._invalidate_head_first()
+            session._schedule_remote_cancel(events)
 
 
 def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
