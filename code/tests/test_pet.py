@@ -957,11 +957,14 @@ async def test_cap1188_touch_memory_carries_real_edge_provenance(fleet, tmp_path
         rows = [m for m in memory.recent("robot-01") if m.kind == "petting_zone"]
         assert len(rows) == 1
         assert rows[0].source_robot == "robot-01" and rows[0].witnessed
+        assert "pad 1" in rows[0].summary
         assert memory.count("robot-02") == 0
         await pet._observe_optional("robot-01", 4, {"extras": extra(0, False, 12)})
         await pet._observe_optional("robot-01", 4, {"extras": extra(0, True, 15)})
         await pet._observe_optional("robot-01", 4, {"extras": extra(2, True, 16)})
         assert sum(m.kind == "petting_zone" for m in memory.recent("robot-01")) == 2
+        assert any("pad 2" in m.summary for m in memory.recent("robot-01")
+                   if m.kind == "petting_zone")
         # Bad fields and a giant counter jump never fabricate remembered touch.
         await pet._observe_optional("robot-01", 4, {"extras": extra(2, True, 600)})
         await pet._observe_optional("robot-01", 4, {"extras": extra(2, "true", 601)})
