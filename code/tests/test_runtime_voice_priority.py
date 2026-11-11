@@ -108,3 +108,30 @@ async def test_speech_end_only_stops_video_sampling_not_live_xiaozhi_audio():
     runtime.multimodal = Visual()
     await runtime._on_voice_interrupt("robot-01", "speech_end")
     assert events == [("video_idle", "robot-01")]
+
+
+async def test_lost_voice_transport_blocks_proactive_before_audio_cancel():
+    events = []
+
+    class Pet:
+        def set_voice_monitor_ready(self, ready):
+            events.append(("monitor", ready))
+
+        async def interrupt(self, robot_id):
+            events.append(("pet", robot_id))
+
+    class Conversation:
+        async def stop(self):
+            events.append(("speaker", "stop"))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id="robot-01")])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+
+    await runtime._on_voice_global("stream_unavailable")
+    assert events == [
+        ("monitor", False), ("pet", "robot-01"), ("speaker", "stop"),
+    ]
+    await runtime._on_voice_monitor_ready(True)
+    assert events[-1] == ("monitor", True)
