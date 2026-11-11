@@ -337,3 +337,51 @@ def test_native_configuration_error_preserved_and_retries_throttled(native, monk
     assert module.status("mac-01")["retry_delay_seconds"] > 0
     assert module.status("mac-01")["last_error"] is not None
     assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
+
+
+async def test_human_voice_flushes_physical_head_before_slow_remote_cancel(native):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    conn.client_is_speaking = True
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    service.wire.handle_event({
+        "type": "response.created",
+        "response_id": "old-response",
+        "response": {"id": "old-response",
+                     "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    entered_remote_cancel = asyncio.Event()
+    release_remote_cancel = asyncio.Event()
+    remote_events = []
+
+    class SlowModelSocket:
+        async def send_json(self, payload):
+            remote_events.append(payload)
+            entered_remote_cancel.set()
+            await release_remote_cancel.wait()
+
+    service._socket = SlowModelSocket()
+    service.connected = True
+    task = asyncio.create_task(service.barge())
+    try:
+        async with asyncio.timeout(1):
+            await entered_remote_cancel.wait()
+        # The remote model is still blocked. Physical stop must already have
+        # reached the registered XIAO and all old Opus sends are invalid.
+        assert not task.done()
+        assert service._generation == 1
+        assert service.wire.response_id is None
+        assert service.wire.played_ms == 0
+        assert conn.client_is_speaking is False
+        assert any(isinstance(item, str) and '"flush": true' in item
+                   for item in sent)
+        assert remote_events[0]["type"] == "response.cancel"
+    finally:
+        release_remote_cancel.set()
+        await task
+    assert any(x["type"] == "output_audio_buffer.clear" for x in remote_events)
+    assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
