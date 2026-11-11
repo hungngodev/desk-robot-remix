@@ -19,7 +19,7 @@ Sources and reuse boundaries: [source-map.md](source-map.md).
 | Local compute | Shared M1Max/64GB Mac supplies speech/vision/reasoning; no new Pi/Pico/Uno. Local-first remains active; Google optional cloud is not silently enabled |
 | Initiative | Notice camera events and choose activities without a voice prompt. Face/sound reflexes, visual attention, activity memory and task execution need separate timing/ownership |
 | Motion session | Enable until user pauses/stops; supersedes recurring120/300s renewal proposal. Short per-drive deadlines/watchdog and fault/disconnect/restart cancellation remain |
-| Edge sensing | Compact candidate4VL6180X down+1L0X front+mux replaces old5L0X. Concealed boards/open optical windows; local measured stops and surface qualification required |
+| Edge sensing (historical proposal, superseded) | The early four VL6180X plus forward VL53L0X plan is **not** the current design. As of November 11 the selected full source has eight VL53L4CDs: four downward cliff + one forward guarded channel, three left/right/rear read-only channels on TCA9548A 0x70. No physically measured stop clearance or carrier selection is yet qualified. See `docs/product-definition.md` and `docs/hardware/full-feature-plan.json` |
 | Power/budget | Matched rechargeable1S kit replaces required consumer-bank direction. Exact cell/charge/protection/5V output remains unselected. $50delivered prototype cap includes money already spent; no updated complete quote |
 |2026-11-04 source audit | Preserve full supplied-source mapping, not just six chosen repos. Concrete stronger candidates: Google robotics agent observation/event components, HF local voice/vision engine, Reachy activity arbitration, Stackchan-agent reaction controller. These are reviewed candidates, not integrated features |
 |2026-11-04 interaction request | Add head touch and six-axis tilt/shake/handling awareness. TTP223+LSM6DS3TR-C is proposed new baseline; evaluate owned equivalents when simpler. RGB/bumper/Hall/light extras remain optional; no visible laser selected |
@@ -38,12 +38,14 @@ This is a **planning commitment**, not approval of an exact untested IP5306 boar
 ## Continuing recording rule
 
 Record meaningful decisions, rationale, source/terms and superseded choices in
-these canonical documents; update inventory only from actual reports. Store
-small, self-contained durable project knowledge in Cognee dataset
-`desk-robot-remix`, with links back here. Source code symbols belong in the code
-graph and personal cross-project preferences belong in authenticated Mem0, not
-in a copied chat transcript. Never store credentials/raw captures or every
-one-off status update. Verify memory writes and retrieval before claiming saved.
+these canonical GitHub documents and the repository [parallel chat handoff](reviews/PARALLEL_CHAT_HANDOFF.md);
+update inventory only from actual reports. GitHub remains the common source
+of truth for separate coding agents and chats. External memory systems such as
+Cognee, Mem0, Notion or Obsidian are **optional**, never a prerequisite to
+reading or updating the project. Do not copy credentials, raw microphone/video
+captures or every one-off status update. Verify the GitHub commit and current
+source after a write; confirm any optional memory write by retrieval before
+claiming it was saved.
 
 
 ---
