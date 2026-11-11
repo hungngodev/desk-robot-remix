@@ -36,6 +36,23 @@ Status November 10, 2026: **source-verified electrical design references, NOT an
 * A lab reviewer should confirm NTC fail behavior, fused charger input, overcurrent protection, undervoltage and accidental short behavior before regular use. The MCP23017 is read-only and **does not activate charging**.
 * Do not turn `charging_verified` true in firmware or UX based on simulated pin evidence. New authenticated `GET /v1/robots/{id}/dock/evidence` reports stable repeated status classifications while leaving both charge and motion authorization false.
 
+## Fresh safety after each camera image
+
+The existing calibrated AprilTag guarded approach previously called WROOM
+`_assert_armed_health` **before** snapshot and PnP. A large camera delay
+could make that Mac safety response obsolete by the time the pulse command
+was generated. The controller now checks local body safety again
+**after** the real camera and marker inference, immediately before every
+100 ms turn/forward pulse. The camera fetch is bounded to two seconds.
+Changed cliff, touch, IMU or side/rear clearance status refuses the pulse.
+The physical WROOM watchdog and local guard remain the ultimate authority,
+and the final contact approach stays disabled.
+
+`code/tests/test_dock_motion.py` includes synthetic status races where the
+body becomes disarmed or side/rear clearance fails during the image. Both
+must yield **no motor command**. Tests were committed but no passing host
+or physical trial has been recorded.
+
 ## Last centimeter of autonomous docking
 
 Actual AprilTag camera geometry and body safety can approach a visible guide, but the current `Coordinator._dock_approach` intentionally holds before powered contacts. **No control loop may infer charging contact from an image.** To finish autonomous physical seating, measure actual camera intrinsics, marker location, wheel steering scale, 8 sensor geometry, switch travel and stop distances, and add a physically qualified low-speed contact approach using multiple independent contact checks. Keep local cliff guard, one-use operator permit, 500ms watchdog and dock power motion lockout intact. No uncontrolled charging or movement.
