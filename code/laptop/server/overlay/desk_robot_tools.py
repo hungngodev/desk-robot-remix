@@ -21,6 +21,11 @@ async def call(conn, route, payload=None):
             response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
         elif route == "voice-context":
             response = await client.get(f"/v1/pet/{robot}/voice-context")
+        elif route == "look":
+            response = await client.post(
+                f"/v1/pet/{robot}/look", json=payload or {},
+                timeout=50,
+            )
         else:
             response = await client.post(f"/v1/robots/{robot}/{route}", json=payload or {})
         if response.status_code >= 400:
@@ -101,3 +106,28 @@ async def desk_robot_job(conn):
 async def desk_robot_memories(conn):
     data = await call(conn, "voice-context")
     return ActionResponse(Action.REQLLM, result=data)
+
+
+@register_function(
+    "desk_robot_look",
+    description(
+        "desk_robot_look",
+        "Use THIS robot's real current XIAO camera and local vision model to answer "
+        "an actual human question about what is visible or what just changed. "
+        "Use when the person asks you to look, see, read, identify an object, "
+        "or describe something they are holding. Not for general chat or "
+        "automatic surveillance. A visual answer is model interpretation, "
+        "not proof of physical grasping, identity or a completed action. "
+        "This tool cannot move, dock or charge any robot.",
+        {"question": {"type": "string", "minLength": 3, "maxLength": 280}},
+        ["question"],
+    ),
+    ToolType.IOT_CTL,
+)
+async def desk_robot_look(conn, question):
+    if not isinstance(question, str) or not 3 <= len(question.strip()) <= 280:
+        return ActionResponse(
+            Action.REQLLM, result={"error": "Ask a short specific visual question"}
+        )
+    result = await call(conn, "look", {"question": question.strip()})
+    return ActionResponse(Action.REQLLM, result=result)
