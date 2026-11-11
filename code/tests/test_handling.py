@@ -1,6 +1,4 @@
 """Source-grounded MPU6050 handling behavior, not physical calibration proof."""
-import math
-
 import pytest
 
 from desk_robot.handling import HandlingGate, raw_mpu6050
