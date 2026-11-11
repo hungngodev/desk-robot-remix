@@ -744,13 +744,21 @@ def test_idle_real_human_vad_queues_one_voice_video_hint_per_utterance(bridge):
     assert first["source"] == "xiaozhi_server_vad"
     assert first["robot_id"] == "robot-01"
     assert not bridge.observe_idle_human_voice(one, False)
+    # A single momentary silent VAD frame must NOT end a live phrase.
+    assert not bridge.observe_idle_human_voice(one, True)
+    assert not bridge.observe_idle_human_voice(one, True)
+    assert len(bridge.voice_event_history) == 1
+    assert not bridge.observe_idle_human_voice(one, False)
+    assert not bridge.observe_idle_human_voice(one, False)
+    assert bridge.voice_event_history[-1]["kind"] == "speech_end"
+    assert bridge.voice_event_history[-1]["source"] == "xiaozhi_server_vad"
     assert not bridge.observe_idle_human_voice(one, True)
     assert bridge.observe_idle_human_voice(one, True)
-    assert len(bridge.voice_event_history) == 2
+    assert len(bridge.voice_event_history) == 3
     one.client_is_speaking = True
     bridge.observe_idle_human_voice(one, False)
     assert not bridge.observe_idle_human_voice(one, True)
-    assert len(bridge.voice_event_history) == 2
+    assert len(bridge.voice_event_history) == 3
     bridge.unregister(one)
 
 
