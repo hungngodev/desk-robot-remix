@@ -80,6 +80,21 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or not _uint(proximity.get("gesture_events"), 0xffffffff)
             or proximity.get("physically_qualified") is not False):
         raise ValueError("Invalid APDS9960 source")
+    bmp = data.get("bmp280")
+    if bmp is not None:
+        if (not isinstance(bmp, dict)
+                or not _bool(bmp.get("present"))
+                or not _bool(bmp.get("valid"))
+                or not _uint(bmp.get("chip_id"), 255)
+                or not _sint(bmp.get("temp_centi"), -4000, 8500)
+                or not _uint(bmp.get("pressure_pa"), 120000)
+                or bmp.get("physically_verified") is not False
+                or (bmp["valid"] and (not bmp["present"]
+                    or bmp["chip_id"] != 0x58
+                    or not 30000 <= bmp["pressure_pa"] <= 120000))
+                or (not bmp["valid"] and (
+                    bmp["pressure_pa"] != 0 or bmp["temp_centi"] != 0))):
+            raise ValueError("Invalid optional BMP280 ambient sample")
     dock = data.get("dock")
     if dock is not None:
         if (not isinstance(dock, dict)
