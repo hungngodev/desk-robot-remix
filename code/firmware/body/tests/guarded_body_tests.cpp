@@ -534,6 +534,8 @@ static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
   read.dock.right_seated = true;
   read.dock.input_good = true; // actual MCP23017 and BQ PGOOD source
   read.dock.charge_indicated = false;
+  read.dock.sample_seq = 1; // genuine completed GPIOA conversion
+  read.dock.at_ms = 1;
   body.set_accessories(read);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 2) == "ERR arm dock_power_connected");
@@ -550,6 +552,54 @@ static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
   CHECK(send(body, "arm", 5) == "OK arm");
   CHECK(body.state().armed);
   CHECK(send(body, "disarm", 6) == "OK disarm");
+}
+
+static void installed_dock_i2c_loss_or_single_seat_stops_local_motors() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  desk_robot::AccessoryReadings read{};
+  read.dock.present = true;
+  read.dock.valid = false; // installed but no successful GPIO conversion yet
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 1) == "ERR arm dock_gpio_missing_or_stale");
+  read.dock.valid = true;
+  read.dock.sample_seq = 1;
+  read.dock.at_ms = 2;
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 3) == "OK arm");
+  CHECK(body.state().servos_attached);
+  CHECK(send(body, "drive 20 20 100", 4).find("OK drive") == 0);
+  CHECK(body.state().left == 20 && body.state().right == 20);
+  read.dock.valid = false; // missing I2C read during physical motion
+  body.set_accessories(read);
+  CHECK(!body.state().armed);
+  CHECK(body.state().left == 0 && body.state().right == 0);
+  CHECK(body.state().servos_attached); // keep jaw PWM on sensor dropout
+  CHECK(send(body, "arm", 5) == "ERR arm dock_gpio_missing_or_stale");
+  read.dock.valid = true;
+  read.dock.sample_seq = 2;
+  read.dock.at_ms = 6;
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 7) == "OK arm"); // manual explicit rearm
+  body.tick(507); // 501ms since last physical expander read
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 508) == "ERR arm dock_gpio_missing_or_stale");
+  read.dock.sample_seq = 3;
+  read.dock.at_ms = 509;
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 510) == "OK arm");
+  read.dock.left_seated = true; // even one seat without powered PGOOD
+  read.dock.sample_seq = 4;
+  read.dock.at_ms = 511;
+  body.set_accessories(read);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 512) == "ERR arm dock_power_connected");
+  read.dock.left_seated = false;
+  read.dock.sample_seq = 5;
+  read.dock.at_ms = 513;
+  body.set_accessories(read); // both open + no PGOOD is an observed removal
+  CHECK(!body.state().armed); // no resume merely because contacts cleared
+  CHECK(send(body, "arm", 514) == "OK arm");
+  CHECK(send(body, "disarm", 515) == "OK disarm");
 }
 
 static void dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof() {
@@ -620,6 +670,7 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
+    installed_dock_i2c_loss_or_single_seat_stops_local_motors();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
