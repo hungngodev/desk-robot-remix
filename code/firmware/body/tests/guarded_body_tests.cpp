@@ -567,16 +567,16 @@ static void dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof() {
   const std::string aux = send(body, "aux", 200);
   CHECK(!aux.empty() && aux.front() == '{' && aux.back() == '}');
   CHECK(aux.size() < desk_robot::kReplyCapacity - 1);
-  CHECK(aux.find("\\\"dock\\\":{\\\"present\\\":true,\\\"valid\\\":true")
+  CHECK(aux.find("\"dock\":{\"present\":true,\"valid\":true")
         != std::string::npos);
-  CHECK(aux.find("\\\"seq\\\":123,\\\"age_ms\\\":50,\\\"charging_verified\\\":false")
+  CHECK(aux.find("\"seq\":123,\"age_ms\":50,\"charging_verified\":false")
         != std::string::npos);
   CHECK(send(body, "arm", 201) == "ERR arm dock_power_connected");
   CHECK(!body.state().armed);
   // A now-old sample cannot be passed off as current.
   const std::string old = send(body, "aux", 800);
-  CHECK(old.find("\\\"valid\\\":false") != std::string::npos);
-  CHECK(old.find("\\\"seq\\\":123,\\\"age_ms\\\":650")
+  CHECK(old.find("\"valid\":false") != std::string::npos);
+  CHECK(old.find("\"seq\":123,\"age_ms\":650")
         != std::string::npos);
 }
 
