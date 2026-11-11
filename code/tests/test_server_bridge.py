@@ -781,3 +781,44 @@ def test_idle_voice_must_come_from_current_registered_head_and_listen_mode(bridg
     assert len(bridge.voice_event_history) == 1
     bridge.unregister(first)
     assert not bridge.observe_idle_human_voice(first, True)
+
+
+def test_human_speaker_floor_requires_authenticated_live_vad_and_cleans_up(bridge):
+    first, second, forged = conn("mac-01"), conn("mac-02"), conn("mac-01")
+    first.client_listen_mode = "realtime"
+    second.client_listen_mode = "realtime"
+    bridge.register(first)
+    bridge.register(second)
+    assert bridge.human_speech_active() is False
+    assert bridge.record_human_voice(forged, "speech_start") is False
+    assert bridge.human_speech_active() is False
+    assert bridge.record_human_voice(first, "speech_start") is True
+    assert bridge.human_speech_active() is True
+    assert bridge.record_human_voice(first, "speech_end") is True
+    assert bridge.human_speech_active() is True  # brief word pause
+    bridge.human_vad_until["mac-01"] = time.monotonic() - 1
+    assert bridge.human_speech_active() is False
+    assert bridge.record_human_voice(second, "group") is True
+    assert bridge.human_speech_active() is True
+    bridge.unregister(second)
+    assert bridge.human_speech_active() is False
+    bridge.unregister(first)
+
+
+def test_ongoing_voice_refreshes_floor_without_replaying_speech_start(bridge):
+    head = conn("mac-01")
+    head.client_listen_mode = "realtime"
+    bridge.register(head)
+    assert bridge.observe_idle_human_voice(head, True) is False
+    assert bridge.observe_idle_human_voice(head, True) is True
+    assert bridge.voice_event_cursor == 1
+    bridge.human_vad_until["mac-01"] = time.monotonic() - 1
+    assert bridge.human_speech_active() is False
+    assert bridge.observe_idle_human_voice(head, True) is False
+    assert bridge.voice_event_cursor == 1
+    assert bridge.human_speech_active() is True
+    assert not bridge.observe_idle_human_voice(head, False)
+    assert not bridge.observe_idle_human_voice(head, False)
+    assert bridge.voice_event_history[-1]["kind"] == "speech_end"
+    bridge.unregister(head)
+    assert bridge.human_speech_active() is False
