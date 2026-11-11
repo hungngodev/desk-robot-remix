@@ -142,6 +142,17 @@ class CameraFrameHub:
             # someone was still talking. Missing end must fail quiet.
             self.voice_until[robot_id] = math.inf
 
+    def barge_in(self, robot_id: str, now: float) -> None:
+        """AEC double talk has no guaranteed matching speech_end event.
+
+        Keep a bounded conservative VAD hold for this event, but preserve an
+        existing explicit idle speech_start lease if one already exists.
+        The head's urgent audio flush is a separate higher priority path.
+        """
+        self.notify(robot_id, "human_voice", now)
+        if self.voice_until[robot_id] == math.inf:
+            self.voice_until[robot_id] = now + 7.0
+
     def speech_ended(self, robot_id: str, now: float) -> None:
         """End a VAD-confirmed user utterance without dropping its last images."""
         self._check(robot_id)
@@ -321,7 +332,19 @@ class MultimodalOrchestrator:
         }
 
     def voice_started(self, robot_id: str) -> None:
-        self.hub.notify(robot_id, "human_voice", time.monotonic())
+        self._voice_activity(robot_id, end_expected=True)
+
+    def voice_interrupted(self, robot_id: str) -> None:
+        # Confirmed AEC double talk stops old robot speech but does not
+        # promise the server will emit an idle speech_end for this event.
+        self._voice_activity(robot_id, end_expected=False)
+
+    def _voice_activity(self, robot_id: str, *, end_expected: bool) -> None:
+        now = time.monotonic()
+        if end_expected:
+            self.hub.notify(robot_id, "human_voice", now)
+        else:
+            self.hub.barge_in(robot_id, now)
         self._turn_epoch[robot_id] += 1
         # A second spoken utterance supersedes an in-flight camera answer;
         # never let an old VLM response join the new Xiaozhi speech turn.
