@@ -382,22 +382,41 @@ class NativeOmniSession:
     async def _send_device_state(self, state: str, generation: int) -> None:
         if self.closed or generation != self._generation:
             return
-        if state == "start":
-            await claim_speaker(self)
-            if self.closed or generation != self._generation:
-                return
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
+        if state == "start":
+            # Source-authenticated human VAD has priority even if this model
+            # response was already queued. Never speak over another pet's user.
+            if not await claim_speaker(self):
+                events = await self._invalidate_head_first()
+                self._schedule_remote_cancel(events)
+                return
+            if self.closed or generation != self._generation:
+                return
+        speech_raced = False
         async with self._device_send_lock:
             if self.closed or generation != self._generation:
                 return
-            if state == "start":
-                self.conn.client_abort = False
-                self.conn.client_is_speaking = True
-            await self.conn.websocket.send(json.dumps({
-                "type": "tts", "state": state, "session_id": self.conn.session_id,
-            }))
+            # VAD may start between claim_speaker and acquiring the device
+            # send lock. Suppress the TTS START packet in that case.
+            if state == "start" and bridge.human_speech_active():
+                speech_raced = True
+            else:
+                if state == "start":
+                    self.conn.client_abort = False
+                    self.conn.client_is_speaking = True
+                await self.conn.websocket.send(json.dumps({
+                    "type": "tts", "state": state, "session_id": self.conn.session_id,
+                }))
+        if speech_raced:
+            events = await self._invalidate_head_first()
+            self._schedule_remote_cancel(events)
+            global _output_owner
+            async with _output_owner_lock:
+                if _output_owner == self.device:
+                    _output_owner = None
+            return
         if state == "stop":
             self.conn.client_is_speaking = False
             global _output_owner
@@ -526,10 +545,13 @@ class NativeOmniSession:
                     _output_owner = None
 
 
-async def claim_speaker(session: NativeOmniSession) -> None:
-    """At most one native-model pet may own the fleet's spontaneous floor."""
+async def claim_speaker(session: NativeOmniSession) -> bool:
+    """One native speaker owner, and NO new reply during human speech."""
     global _output_owner
+    import desk_robot_bridge as bridge
     async with _output_owner_lock:
+        if bridge.human_speech_active():
+            return False
         other_id = _output_owner
         if other_id is not None and other_id != session.device:
             previous = _sessions.get(other_id)
@@ -539,6 +561,7 @@ async def claim_speaker(session: NativeOmniSession) -> None:
                 events = await previous._invalidate_head_first()
                 previous._schedule_remote_cancel(events)
         _output_owner = session.device
+        return True
 
 
 async def flush_head(session: NativeOmniSession) -> None:
