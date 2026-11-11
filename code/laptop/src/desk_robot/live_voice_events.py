@@ -15,12 +15,14 @@ class VoiceEventListener:
     def __init__(
         self, client: httpx.AsyncClient, *, url: str, token: str,
         robot_ids: set[str], on_interrupt: Callable[[str, str], Awaitable[None]],
+        on_global_interrupt: Callable[[str], Awaitable[None]] | None = None,
     ):
         if not robot_ids or len(token) < 24:
             raise ValueError("Known robot IDs and private speech token required")
         self.client, self.url, self.token = client, url.rstrip("/"), token
         self.robot_ids = frozenset(robot_ids)
         self.on_interrupt = on_interrupt
+        self.on_global_interrupt = on_global_interrupt
         self.cursor: int | None = None
         self.handled = 0
         self.last_error: str | None = None
@@ -29,6 +31,12 @@ class VoiceEventListener:
     async def _preempt_all(self, reason: str) -> None:
         # Loss of the voice event stream means a human interruption could have
         # been missed. Silencing all Mac-owned audio is safer than guessing.
+        # The Mac runtime owns a single shared speech floor. Abort it ONCE,
+        # rather than executing the same five-pet cancellation five times.
+        if self.on_global_interrupt is not None:
+            await self.on_global_interrupt(reason)
+            return
+        # Existing independent consumers preserve their per-device callback.
         for robot_id in sorted(self.robot_ids):
             await self.on_interrupt(robot_id, reason)
 
