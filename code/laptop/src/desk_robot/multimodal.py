@@ -140,6 +140,13 @@ class CameraFrameHub:
             # A timeout is a hint, NOT proof of speech endpoint detection.
             self.voice_until[robot_id] = max(self.voice_until[robot_id], now + 7.0)
 
+    def speech_ended(self, robot_id: str, now: float) -> None:
+        """End a VAD-confirmed user utterance without dropping its last images."""
+        self._check(robot_id)
+        if not _finite(now):
+            raise ValueError("Invalid VAD end timestamp")
+        self.voice_until[robot_id] = min(self.voice_until[robot_id], now)
+
     def user_active(self, robot_id: str, now: float) -> bool:
         self._check(robot_id)
         return _finite(now) and now < self.voice_until[robot_id]
@@ -314,10 +321,18 @@ class MultimodalOrchestrator:
                 self._speech_frames(robot_id)
             )
 
+    def voice_ended(self, robot_id: str) -> None:
+        self.hub.speech_ended(robot_id, time.monotonic())
+        task = self._capture_tasks.get(robot_id)
+        if task is not None and not task.done():
+            task.cancel()  # Preserve captured visual context for current ASR.
+
     async def _speech_frames(self, robot_id: str) -> None:
         try:
             for _ in range(5):
-                if self._closed:
+                if (self._closed or not self.hub.user_active(
+                    robot_id, time.monotonic()
+                )):
                     break
                 if self.hub.due(robot_id, time.monotonic()):
                     try:
