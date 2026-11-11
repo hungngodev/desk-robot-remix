@@ -6,8 +6,10 @@ receipt quantity, arrival and delivered revision remain unconfirmed. This target
 separate from the preserved CoreS3 and Freenove targets. No board is flashed.
 
 Keep this purchased board. [RIO reuse research](../../../../docs/research/2026-11-03-sense-realtime-reuse.md)
-identifies software playback-reference/AEC code for Sense; it is not integrated
-in this compiled baseline. Ordinary-speech interruption must still pass the
+identifies software playback-reference/AEC code for Sense. The current
+SenseReferenceCodec is integrated, compiling, and supplies real microphone
+plus playback-reference PCM to the selected AFE. Acoustic timing remains
+unmeasured on the user's hardware. Ordinary-speech interruption must still pass the
 [audio gate](../../../../docs/guides/audio-barge-in.md). Do not set `input_reference` true
 without supplying actual synchronized mic/reference data. RIO's speaker pins
 differ from the table below; do not mix the two wiring maps.

@@ -210,3 +210,8 @@ server options as before. The field is written only to the private firmware
 configuration, without changing the upstream ESP-SR implementation. A 90 ms
 default is retained for a first bench measurement, never as proof of AEC
 performance or as an acceptable substitute for retained human utterances.
+
+
+## Xiaozhi natural realtime VAD and actual acoustic acceptance
+
+The pinned server overlay now uses real realtime listener VAD to preempt ordinary one to one assistant TTS, not only coordinated fleet speech. It requires two consecutive VAD positive frames within 300ms and sends an urgent true decoder/I2S speaker flush while preserving incoming ASR frames. The compiled SenseReferenceCodec already sends real PDM microphone and playback reference channels into ESP SR AEC. These statements concern code integration and tests, not an acoustic calibration on the user's actual head. The companion code/scripts/check_barge_in_trials.py checks real operator measured speaker stop and understanding records. Physical speaker/mic delay is estimated separately by code/scripts/estimate_aec_delay.py. Keep live spoken acceptance false until actual acoustic trials pass.

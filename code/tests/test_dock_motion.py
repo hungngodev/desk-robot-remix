@@ -2,7 +2,6 @@
 import json
 
 import pytest
-
 from desk_robot.controller import Coordinator, OperationError
 from desk_robot.simulator import SimulatedHead, SimulationVision
 
