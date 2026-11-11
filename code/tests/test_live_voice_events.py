@@ -222,6 +222,52 @@ async def test_shared_fleet_audio_is_preempted_only_once_on_event_gap():
         assert called == [("global", "gap")]
 
 
+async def test_monitor_health_is_lost_on_gap_until_authenticated_resumption():
+    polls = 0
+    health, faults = [], []
+
+    def mock(request):
+        nonlocal polls
+        polls += 1
+        if polls == 1:
+            return httpx.Response(200, json={
+                "cursor": 5, "events": [], "reset": False, "lost": False,
+            })
+        if polls == 2:
+            return httpx.Response(200, json={
+                "cursor": 19, "events": [], "reset": False, "lost": True,
+            })
+        return httpx.Response(200, json={
+            "cursor": 19, "events": [], "reset": False, "lost": False,
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def on_event(robot_id, kind):
+            raise AssertionError("No fake voice events may be delivered")
+
+        async def global_stop(reason):
+            faults.append(reason)
+
+        async def monitor_ready(ready):
+            health.append(ready)
+
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=on_event,
+            on_global_interrupt=global_stop,
+            on_monitor_ready=monitor_ready,
+        )
+        assert not listener.monitor_ready
+        await listener.poll()
+        assert listener.monitor_ready
+        await listener.poll()
+        assert not listener.monitor_ready
+        assert faults == ["gap"]
+        await listener.poll()
+        assert listener.monitor_ready
+        assert health == [True, False, True]
+
+
 async def test_idle_speech_end_event_is_authenticated_and_ordered():
     delivered = []
     def mock(request):
