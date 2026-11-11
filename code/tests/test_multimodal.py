@@ -92,6 +92,20 @@ def test_frame_hub_speech_adaptive_priority_and_identity():
     assert not hub.frames["robot-01"]
 
 
+def test_speech_floor_requires_real_end_not_a_seven_second_guess():
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-01", "human_voice", 100.0)
+    # Long human questions must never free the spontaneous speaker floor.
+    assert hub.user_active("robot-01", 108.0)
+    assert hub.user_active("robot-01", 170.0)
+    assert not hub.user_active("robot-02", 170.0)
+    hub.speech_ended("robot-01", 170.0)
+    assert not hub.user_active("robot-01", 170.0)
+    hub.notify("robot-01", "human_voice", 180.0)
+    hub.clear("robot-01")  # Explicit disconnect/operator reset is also release.
+    assert not hub.user_active("robot-01", 180.1)
+
+
 def test_temporal_question_selects_older_and_latest_in_same_robot():
     hub = CameraFrameHub(["robot-01", "robot-02"])
     hub.offer("robot-01", image(), 10.0, source="proactive")
@@ -299,6 +313,29 @@ async def test_speech_end_preserves_visual_evidence_and_stops_capture_task():
         assert service.hub.selected(
             "robot-01", "What do you see?", time.monotonic()
         )
+    finally:
+        await service.close()
+
+
+async def test_camera_failure_does_not_release_authenticated_human_speech():
+    class UnpluggedCamera(Head):
+        async def snapshot(self):
+            raise RuntimeError("XIAO camera unavailable")
+
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": UnpluggedCamera(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        service.voice_started("robot-01")
+        await asyncio.wait_for(service._capture_tasks["robot-01"], timeout=1)
+        assert service.hub.user_active("robot-01", time.monotonic())
+        assert not service.hub.frames["robot-01"]
+        # The original authenticated voice event was not erased by a JPEG fault.
+        assert any(event["kind"] == "human_voice" for event in
+                   service.hub.recent_events("robot-01", time.monotonic()))
+        service.voice_ended("robot-01")
+        assert not service.hub.user_active("robot-01", time.monotonic())
     finally:
         await service.close()
 
