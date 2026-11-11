@@ -2,7 +2,9 @@
 
 **Consolidated on 2026-11-11.** This is the shared context for independent GitHub reviewers working from different chats. It describes **requested complete behavior, source ownership, implementation evidence, unresolved blockers and the next verification cycles**. Do not treat a requirement, a proposed integration or a checked-in test as a physically working robot.
 
-**Actual prior PR patch audit:** [November 11 closed PR reconciliation](CLOSED_PR_RECONCILIATION.md) checks all implementation PR #3 through #16 and #18 against current source and records intentionally replaced files. Do not claim all closed PRs were merged.\n\n**One current repository and PR:** [hungngodev/desk-robot-remix](https://github.com/hungngodev/desk-robot-remix), [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17), `impl/mac-hardware-safety-preflight-2026-11-10`. The PR head changes as reviewers commit. Compare to actual current head, not a historical ChatGPT response.
+**Actual prior PR patch audit:** [November 11 closed PR reconciliation](CLOSED_PR_RECONCILIATION.md) checks all implementation PR #3 through #16 and #18 against current source and records intentionally replaced files. Do not claim all closed PRs were merged.
+
+**One current repository and PR:** [hungngodev/desk-robot-remix](https://github.com/hungngodev/desk-robot-remix), [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17), `impl/mac-hardware-safety-preflight-2026-11-10`. The PR head changes as reviewers commit. Compare to actual current head, not a historical ChatGPT response.
 
 ## The user's cross-chat constraints, all retained
 
