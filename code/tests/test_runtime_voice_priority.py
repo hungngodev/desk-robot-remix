@@ -167,3 +167,36 @@ async def test_aec_barge_uses_bounded_video_lease_not_unended_speech_start():
         ("pet", "robot-01"), ("audio", "stopped"),
         ("aec_video", "robot-01"),
     ]
+
+
+async def test_server_vad_snapshot_preempts_missing_start_and_releases_missing_end():
+    import time
+    from desk_robot.multimodal import CameraFrameHub
+
+    calls = []
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            calls.append(("pet", robot_id))
+
+    class Conversation:
+        async def stop(self):
+            calls.append(("speaker", "stop"))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[
+        SimpleNamespace(id="robot-01"), SimpleNamespace(id="robot-02"),
+    ])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    runtime.multimodal = SimpleNamespace(hub=hub)
+    await runtime._on_voice_snapshot(frozenset({"robot-02"}))
+    assert hub.user_active("robot-02", time.monotonic())
+    assert calls == [
+        ("pet", "robot-01"), ("pet", "robot-02"), ("speaker", "stop"),
+    ]
+    await runtime._on_voice_snapshot(frozenset({"robot-02"}))
+    assert len(calls) == 3  # Identical snapshot is not another interruption.
+    await runtime._on_voice_snapshot(frozenset())
+    assert not hub.user_active("robot-02", time.monotonic())
