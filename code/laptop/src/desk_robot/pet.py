@@ -202,7 +202,7 @@ class PetController:
         state.generation += 1
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
         if self.multimodal is not None:
-            self.multimodal.hub.clear(robot_id)
+            self.multimodal.hub.discard_video(robot_id)
         state.last_touch_count = None
         state.last_touch_events = None
         state.last_cap_events = None
@@ -253,9 +253,10 @@ class PetController:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self._cancel_speech(robot_id)
         if self.multimodal is not None:
-            # Pausing autonomous observation also drops this pet's RAM-only
-            # camera context; nothing persists after the operator stops it.
-            self.multimodal.hub.clear(robot_id)
+            # Pausing autonomous observation drops this pet's RAM-only
+            # camera context, but may NOT release Xiaozhi human speech VAD.
+            # The actual voice event owner supplies speech_end/disconnect.
+            self.multimodal.hub.discard_video(robot_id)
         return self.status(robot_id)
 
     async def set_quiet(self, robot_id: str, quiet: bool) -> dict:
