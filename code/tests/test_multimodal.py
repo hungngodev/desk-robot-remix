@@ -98,7 +98,13 @@ def test_temporal_question_selects_older_and_latest_in_same_robot():
     hub.offer("robot-01", image(square=True), 10.5, source="sensor")
     hub.offer("robot-01", image(square=True), 11.0, source="proactive")
     hub.offer("robot-02", image("red"), 11.0, source="proactive")
-    assert len(hub.selected("robot-01", "What changed just now?", 11.1)) == 2
+    chosen = hub.selected("robot-01", "What changed just now?", 11.1)
+    assert len(chosen) == 2
+    # The object appeared between 10.0 and 10.5. The camera did not move
+    # between 10.5 and 11.0, so comparing those latter two would be wrong.
+    assert chosen[0].received_at == 10.0
+    assert chosen[1].received_at == 11.0
+    assert chosen[0].jpeg != chosen[1].jpeg
     assert len(hub.selected("robot-01", "What is on the desk?", 11.1)) == 1
     assert hub.selected("robot-01", "What is it?", 18.0) == []
 
