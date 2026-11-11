@@ -29,6 +29,47 @@ class SceneComparator(Protocol):
     async def compare(self, before: bytes, after: bytes) -> SceneChange | None: ...
 
 
+# Two-stage initiative is adapted from the *decision boundary* in LlamaPIE,
+# ACM's Sensible Agent and ProAct, not a port of their trained models.
+# Fast, cheap evidence gating happens before a long VLM/LLM or audible reply.
+# These are testable candidate cutoffs, NOT physically learned engagement.
+_VISUAL_INITIATIVE_MIN_CONFIDENCE = {
+    "person": 0.88,
+    "hand": 0.86,
+    "key": 0.80,
+    "candy": 0.80,
+    "object": 0.92,
+    "scene": 0.95,
+}
+
+
+def _initiative_evidence(change: SceneChange) -> bool:
+    """Can this first-hand change justify *offering* an unsolicited remark?
+
+    The operator's physical sensors report certified raw event edges once
+    enabled; model-only visual classifications need a stricter cutoff.
+    Unknown/untrusted types, nonsensical confidence or blank descriptions
+    must never justify spontaneous speech. This is NOT event-memory deletion.
+    """
+    if (not isinstance(change.kind, str)
+            or not isinstance(change.description, str)
+            or not change.description.strip()
+            or not math.isfinite(change.confidence)
+            or not 0.0 <= change.confidence <= 1.0):
+        return False
+    threshold = _VISUAL_INITIATIVE_MIN_CONFIDENCE.get(change.kind)
+    if threshold is not None:
+        return change.confidence >= threshold
+    # Only known firmware edge categories may bypass visual model confidence
+    # thresholds. We do not infer a person's identity or a physical action.
+    return change.kind in {
+        "touch", "touch_tap", "touch_double", "touch_hold", "petting",
+        "squeeze", "hand_wave", "nose_twist", "nearby_object",
+        "battery_low", "magnet", "pir", "bumper",
+        "handling_tilt", "handling_shake", "side_near",
+    } and change.confidence >= 0.95
+
+
 @dataclass
 class PetState:
     enabled: bool = False
@@ -37,6 +78,8 @@ class PetState:
     events: int = 0
     spoken: int = 0
     suppressed: int = 0
+    low_value_speech_candidates: int = 0
+    last_initiative_suppression: str | None = None
     stale_camera_events: int = 0
     last_event: str | None = None
     last_error: str | None = None
@@ -125,6 +168,8 @@ class PetController:
             "camera_change_events": state.events,
             "spontaneous_speech_turns": state.spoken,
             "suppressed_speech_candidates": state.suppressed,
+            "low_value_speech_candidates": state.low_value_speech_candidates,
+            "last_initiative_suppression": state.last_initiative_suppression,
             "stale_camera_events_dropped": state.stale_camera_events,
             "local_safety_fault_events": state.safety_fault_events,
             "last_local_safety_fault": state.last_safety_fault,
@@ -860,9 +905,21 @@ class PetController:
                     break
             await asyncio.sleep(self.interval)
 
+    def _human_active_in_fleet(self, now: float) -> bool:
+        """One actual spoken human turn silences unsolicited *fleet* remarks."""
+        return self.multimodal is not None and any(
+            self.multimodal.hub.user_active(robot.id, now)
+            for robot in self.settings.robots
+        )
+
     def _consider_speech(self, robot_id: str, change: SceneChange, generation: int) -> None:
         state = self.states[robot_id]
         now = time.monotonic()
+        if not _initiative_evidence(change):
+            state.suppressed += 1
+            state.low_value_speech_candidates += 1
+            state.last_initiative_suppression = "insufficient_grounded_context"
+            return
         # Restore content-aware cross-camera deduplication from the earlier
         # source prototype instead of suppressing all distinct "object" events.
         # This remains text-based, NOT calibrated multi-camera spatial tracking.
@@ -876,16 +933,16 @@ class PetController:
         self._event_kinds[event_key] = now
         if (
             state.quiet
-            or (self.multimodal is not None
-                and self.multimodal.hub.user_active(robot_id, now))
+            or self._human_active_in_fleet(now)
             or now - previous < self.group_window
             or now - self._group_last_spoken < self.speech_cooldown
             or self.conversation.active is not None
             or (self._speech_task is not None and not self._speech_task.done())
         ):
             state.suppressed += 1
+            state.last_initiative_suppression = "quiet_voice_or_group_budget"
             return
-        self._group_last_spoken = now
+        state.last_initiative_suppression = None
         self._speech_robot = robot_id
         self._speech_task = asyncio.create_task(self._speak(robot_id, change, generation))
 
@@ -928,10 +985,18 @@ class PetController:
                     ),
                 },
             ])
-            if not state.enabled or state.quiet or state.generation != generation:
+            if (not state.enabled or state.quiet
+                    or state.generation != generation
+                    or self._human_active_in_fleet(time.monotonic())
+                    or self.conversation.active is not None):
+                state.suppressed += 1
+                state.last_initiative_suppression = "human_started_during_reasoning"
                 return
+            # Human VAD may begin during the LLM's slow thought. Only the
+            # current turn generation can hand the line to the same speaker.
             transmitted = await self.conversation.say_proactive(robot, text)
             if transmitted and state.enabled and not state.quiet and state.generation == generation:
+                self._group_last_spoken = time.monotonic()
                 state.spoken += 1
                 await asyncio.to_thread(
                     self.memory.remember, robot_id, uuid.uuid4().hex, text[:300],
