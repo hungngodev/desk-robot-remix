@@ -10,6 +10,7 @@ import httpx
 
 from .config import RobotConfig, Settings, secret
 from .memory import MemoryStore
+from .streamed_ollama import ollama_speech_segments
 
 
 class Chat(Protocol):
@@ -58,6 +59,25 @@ class OllamaChat:
         if not text or len(text) > 2000:
             raise RuntimeError("Ollama returned empty or oversized speech")
         return text
+
+
+    async def stream_reply(self, history: list[dict]):
+        """Speak the first sentence before Ollama finishes the entire reply."""
+        async with self.client.stream(
+            "POST",
+            self.settings.ollama_url.rstrip("/") + "/api/chat",
+            json={
+                "model": self.settings.ollama_model,
+                "messages": history,
+                "stream": True,
+                "think": False,
+                "options": {"num_predict": 100},
+            },
+            timeout=60,
+        ) as response:
+            response.raise_for_status()
+            async for segment in ollama_speech_segments(response.aiter_lines()):
+                yield segment
 
 
 class KokoroHeadSpeaker:
@@ -195,16 +215,30 @@ class Conversation:
             for r in robots
         }
         transcript = []
+        current_robot = None
         try:
             async with asyncio.timeout(300):
                 async with self.session_lock, self.speaker.session(robots):
                     for index in range(turns):
                         robot = robots[index % len(robots)]
-                        text = await self.chat.reply(list(self.histories[robot.id]))
+                        current_robot = robot
                         async with self.speaker_lock:
-                            await self.speaker.say(
-                                robot, text
-                            )  # await actual transmission + playback tail
+                            stream_reply = getattr(self.chat, "stream_reply", None)
+                            if callable(stream_reply):
+                                # Speech and generation share the same Xiaozhi
+                                # session. No detached TTS tasks outlive it.
+                                segments: list[str] = []
+                                async for segment in stream_reply(
+                                    list(self.histories[robot.id])
+                                ):
+                                    await self.speaker.say(robot, segment)
+                                    segments.append(segment)
+                                text = " ".join(segments)
+                            else:
+                                text = await self.chat.reply(
+                                    list(self.histories[robot.id])
+                                )
+                                await self.speaker.say(robot, text)
                         await self._persist_spoken_turn(robot, text, robots)
                         self.histories[robot.id].append({"role": "assistant", "content": text})
                         for peer in robots:
@@ -214,6 +248,16 @@ class Conversation:
                                 )
                         transcript.append({"robot_id": robot.id, "text": text})
             return transcript
+        except asyncio.CancelledError:
+            # Cancelling an HTTP request is not the same as draining the
+            # physical head's queued Opus decoder and I2S DMA.
+            interrupt = getattr(self.speaker, "interrupt", None)
+            if current_robot is not None and callable(interrupt):
+                try:
+                    await asyncio.wait_for(interrupt(current_robot), timeout=2.0)
+                except Exception:
+                    pass  # Cancellation still propagates; hardware unverified.
+            raise
         finally:
             self.active = None
 
