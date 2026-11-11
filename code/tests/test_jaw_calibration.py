@@ -33,7 +33,7 @@ def test_inverted_adc_polarity_supported():
     samples = measured_samples()
     for rows in samples.values():
         for i, row in enumerate(rows):
-            rows[i] = (-row[0], row[1])
+            rows[i] = (5000 - row[0], row[1])
     assert propose(samples)["grip_force_sign"] == -1
 
 
