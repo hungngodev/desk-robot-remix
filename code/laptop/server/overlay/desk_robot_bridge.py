@@ -428,8 +428,10 @@ def create_app():
             raise ValueError("Unknown or duplicate device identity")
         if body.get("enabled") is True:
             native = _native_adapter()
-            if native is not None and any(native.active(device) for device in selected):
-                raise RuntimeError("Native realtime model owns this device speaker")
+            if native is not None and any(
+                native.active(device) for device in device_map().values()
+            ):
+                raise RuntimeError("Native realtime model owns the shared fleet speech floor")
             if lease_stopping or time.monotonic() < lease_until:
                 raise RuntimeError("A coordinated session is already active")
             for device in selected:
