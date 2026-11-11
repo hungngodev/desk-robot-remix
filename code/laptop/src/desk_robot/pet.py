@@ -759,7 +759,7 @@ class PetController:
                     await asyncio.sleep(self.interval)
                     continue
                 if self.multimodal is not None:
-                    self.multimodal.offer_proactive(robot_id, jpeg, received)
+                    await self.multimodal.offer_proactive(robot_id, jpeg, received)
                     # Camera frames can be sampled during a human's utterance
                     # without launching a competing unsolicited VLM/TTS turn.
                     if self.multimodal.hub.user_active(robot_id, received):
