@@ -16,7 +16,6 @@ import statistics
 from pathlib import Path
 
 import httpx
-
 from desk_robot.grasp_feedback import force_observation
 
 
