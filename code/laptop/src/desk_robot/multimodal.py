@@ -115,6 +115,11 @@ class CameraFrameHub:
         self.urgent = {robot: False for robot in robot_ids}
         self.previous_gray: dict[str, bytes] = {}
         self.changed_streak = {robot: 0 for robot in robot_ids}
+        # Provenance-tagged VAD/touch/gesture hints travel alongside visual
+        # evidence. No inferred object detection, identity, raw PCM or video.
+        self.event_history = {
+            robot: deque(maxlen=12) for robot in robot_ids
+        }
 
     def _check(self, robot_id: str) -> None:
         if robot_id not in self.robots:
@@ -125,6 +130,7 @@ class CameraFrameHub:
         if kind not in TRIGGERS or not _finite(now):
             raise ValueError("Unknown physical event or invalid time")
         self.urgent[robot_id] = True
+        self.event_history[robot_id].append((kind, now))
         if kind == "human_voice":
             # The Xiaozhi event bridge currently sends VAD start only.
             # A timeout is a hint, NOT proof of speech endpoint detection.
@@ -189,9 +195,25 @@ class CameraFrameHub:
         prior = max(fresh[:-1], key=lambda frame: frame.motion_fraction)
         return [prior, latest]
 
+    def recent_events(self, robot_id: str, now: float) -> list[dict]:
+        self._check(robot_id)
+        if not _finite(now):
+            raise ValueError("Invalid event context time")
+        return [
+            {
+                "kind": kind,
+                "age_ms": round(1000 * (now - seen_at)),
+                "source": "xiaozhi_vad" if kind == "human_voice"
+                          else "wroom_sensed_event",
+            }
+            for kind, seen_at in list(self.event_history[robot_id])[-6:]
+            if 0 <= now - seen_at <= 8.0
+        ]
+
     def clear(self, robot_id: str) -> None:
         self._check(robot_id)
         self.frames[robot_id].clear()
+        self.event_history[robot_id].clear()
         self.previous_gray.pop(robot_id, None)
         self.last_capture[robot_id] = -math.inf
         self.voice_until[robot_id] = -math.inf
@@ -310,6 +332,9 @@ class MultimodalOrchestrator:
             ),
             "model": self.settings.vision_model,
             "source": "authenticated_xiao_camera_and_local_vlm",
+            "recent_sensor_events": self.hub.recent_events(
+                robot_id, time.monotonic()
+            ),
             "image_capture_exposure_verified": False,
             "physical_multimodal_latency_verified": False,
             "motor_authorized": False,
