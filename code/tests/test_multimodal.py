@@ -271,3 +271,95 @@ async def test_second_visual_tool_call_replaces_previous_stale_question():
         assert latest["motor_authorized"] is False
     finally:
         await service.close()
+
+
+async def test_speech_end_preserves_visual_evidence_and_stops_capture_task():
+    head = Head()
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        service.voice_started("robot-01")
+        async with asyncio.timeout(1):
+            while not service.hub.frames["robot-01"]:
+                await asyncio.sleep(0.005)
+        frames = len(service.hub.frames["robot-01"])
+        service.voice_ended("robot-01")
+        assert not service.hub.user_active("robot-01", time.monotonic())
+        await asyncio.sleep(0)
+        assert len(service.hub.frames["robot-01"]) == frames
+        assert service.hub.selected(
+            "robot-01", "What do you see?", time.monotonic()
+        )
+    finally:
+        await service.close()
+
+
+async def test_jpeg_resize_worker_cannot_block_new_vad_on_event_loop(monkeypatch):
+    import threading
+    import desk_robot.multimodal as module
+
+    entered = threading.Event()
+    release = threading.Event()
+    original = module._prepare
+
+    def slow_decode(jpeg):
+        entered.set()
+        if not release.wait(2):
+            raise AssertionError("test JPEG thread blocked")
+        return original(jpeg)
+
+    monkeypatch.setattr(module, "_prepare", slow_decode)
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        pending = asyncio.create_task(
+            service.capture("robot-01", source="speech")
+        )
+        assert await asyncio.to_thread(entered.wait, 1)
+        # This MUST run immediately while another worker decodes JPEG;
+        # it only changes VAD state, never waits on a Pillow worker.
+        service.voice_started("robot-02")
+        assert service.hub.user_active("robot-02", time.monotonic())
+        release.set()
+        await asyncio.wait_for(pending, 1)
+    finally:
+        release.set()
+        await service.close()
+
+
+async def test_preprocessing_finishing_after_pause_cannot_republish_frame(monkeypatch):
+    import threading
+    import desk_robot.multimodal as module
+
+    entered = threading.Event()
+    release = threading.Event()
+    original = module._prepare
+
+    def slow_decode(jpeg):
+        entered.set()
+        if not release.wait(2):
+            raise AssertionError("test JPEG thread blocked")
+        return original(jpeg)
+
+    monkeypatch.setattr(module, "_prepare", slow_decode)
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        pending = asyncio.create_task(service.offer_proactive(
+            "robot-01", image(), time.monotonic()
+        ))
+        assert await asyncio.to_thread(entered.wait, 1)
+        service.hub.clear("robot-01")
+        release.set()
+        with pytest.raises(RuntimeError, match="Old camera generation"):
+            await pending
+        assert not service.hub.frames["robot-01"]
+    finally:
+        release.set()
+        await service.close()
