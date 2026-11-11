@@ -57,6 +57,28 @@ or physical trial has been recorded.
 
 The `esp32_full` PlatformIO environment now compiles `DESK_ROBOT_REQUIRE_DOCK_MONITOR=1` and the WROOM setup calls `control.require_dock_monitor(true)` locally before any network or head commands. This refuses arming when the MCP23017 is missing from startup, when a required I2C GPIOA read has never succeeded, or when samples are invalid or over 500 ms old. A single seated switch, not just both switches, or PGOOD immediately latches contact stop; after full removal and restored fresh sensing, rearming still requires the operator. An unpowered sensor loss stops wheels but retains servo holding PWM rather than dropping a carried object. Source-level C++ tests cover absence, hot removal, old samples, single contact and recovery. No charger output or battery connection is enabled by these changes.
 
+## Reuse original OOMWOO dock design rather than inventing a final approach
+
+The user's original 23-section `ESP32 Deskpet Ideas` research (active project sections 1–16, section titled **Docking — the OOMWOO pattern**) includes a **two receiver 38 kHz NEC-burst beacon** for final alignment, a normally unpowered dock contact, a short verification window and at most three attempts. This idea **has not been implemented** in PR #17. The present AprilTag/OpenCV observation and guarded predock approach are **not** a substitute for the close-range homing evidence or an electrically qualified contact state machine.
+
+**Verified source reuse candidates:**
+
+* [makerspet/oomwoo, dock-cycle RFC](https://github.com/makerspet/oomwoo/blob/main/contributions/dock-cycle/README.md) separates navigation to predock from final IR alignment, unpowered contact sensing, verification and recovery. Its ROS2/Nav2 and Gazebo stack is a research/reference, **not** software to install on this WROOM/XIAO/Mac robot. Adapt its isolation and transition criteria to the existing WROOM local safety owner, rather than porting a second motion coordinator.
+* [wennycooper/Auto-Docking-Design](https://github.com/wennycooper/Auto-Docking-Design) is cited by OOMWOO as the modulated emitter and baffled receiver reference. The published docking RFC calls for two forward facing differential receivers for final homing, with wider-field receivers an optional independent search tier.
+* [Vishay TSOP38238 datasheet](https://www.vishay.com/docs/82491/tsop382.pdf): this receiver rejects continuous 38 kHz light under automatic gain control. It must see compatible **bursts** (such as NEC), not an always-on LED. That is an electrical and decoder contract, not proof that the user's current boards have two spare timer-capable pins.
+
+**Do not fabricate hardware pin assignments.** The chosen WROOM already has both steppers, two MG90S, physical touch/bumper/reed/PIR, UART, and I2C allocated. Decoding ~560-microsecond IR edges by occasional MCP23017 polling at 12 ms intervals is not technically sound. Before adding two TSOP receivers to the mandatory shopping list, identify and verify two physically usable interrupt/RMT inputs on the *actual board* or an existing physically capable head interface, and retain the local cliff and rear sensor fail-closed priority. No new head servo, chassis replacement, separate ROS2 computer or from-scratch driver is justified by this reference.
+
+**Proposed remaining software acceptance contract, not completed implementation:**
+
+1. Predock state comes only from measured calibrated AprilTag camera intrinsics and observed WROOM cliff/obstacle safety. No AI decides physical contact.
+2. Final alignment needs real timestamped left/right IR NEC burst observations from qualified hardware. Missing, conflicting, repeated or saturated receiver evidence yields **HOLD** and no forward motion. The final centimeter cannot rely only on camera pose.
+3. At first contact or charger PGOOD the WROOM already immediately disarms locally. The dock-side contacts must remain **deenergized** until an **independent, physically verified** safe seating/current-limit/interlock circuit approves them. Source code cannot substitute for hardware isolation.
+4. Verify bidirectional pack current and NTC/charger state under the complete load. A mere voltage rise within the originally suggested 10 seconds is not sufficient to prove net charging; BQ24074 PGOOD/CHG status alone also cannot prove it. A false or changed status cannot authorize power.
+5. Limit attempts, never reverse blindly near an edge, and only retry following a fresh complete floor, front, rear, bumper and power check. The original three-retry concept is a maximum **after** physical clearance measurement, not permission to back out automatically today.
+
+The complete robot remains **NOT DOCKING OR CHARGING VERIFIED** until the IR receiver pin budget, beacon, dock-side isolated charger/contact circuit, actual printed fit and a repeated hardware approach/charge bench record all exist. This note is intentionally a gap and source reconciliation, not a completed software feature or an unapproved new purchase.
+
 ## Last centimeter of autonomous docking
 
 Actual AprilTag camera geometry and body safety can approach a visible guide, but the current `Coordinator._dock_approach` intentionally holds before powered contacts. **No control loop may infer charging contact from an image.** To finish autonomous physical seating, measure actual camera intrinsics, marker location, wheel steering scale, 8 sensor geometry, switch travel and stop distances, and add a physically qualified low-speed contact approach using multiple independent contact checks. Keep local cliff guard, one-use operator permit, 500ms watchdog and dock power motion lockout intact. No uncontrolled charging or movement.
