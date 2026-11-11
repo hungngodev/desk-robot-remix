@@ -12,6 +12,7 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | --- | --- |
 | See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](PLAN.md#complete-linear-build-and-permanent-verification-stages) |
 | Continue work across parallel chats or coding agents | [Repository agent instructions](../AGENTS.md) and [cross-chat engineering handoff](reviews/PARALLEL_CHAT_HANDOFF.md) |
+| Check useful features in closed PRs before rewriting them | [Actual closed PR patch reconciliation](reviews/CLOSED_PR_RECONCILIATION.md) |
 | Find every requested idea and link | [200 feature entries](source-map.md#original-html-feature-and-sensor-idea-register) and [131 original HTML URLs](source-map.md#complete-original-html-research-link-index) and [original file followup](research/2026-11-10-original-html-link-and-hardware-audit.md) |
 | Check the hard behavior and proactive requirements | [System contract](product-definition.md) and [acceptance A1–A12](records/verification.md) |
 | See the exact proposed code and firmware changes | [Implementation file map](PLAN.md) and [source reuse decisions](research/2026-11-03-active-pet-sources.md) |
