@@ -100,6 +100,8 @@ class PetController:
         self.on_local_fault = on_local_fault  # existing Coordinator.stop, not a new motion authority
         self.states = {robot.id: PetState() for robot in settings.robots}
         self._vision_lock = asyncio.Lock()
+        self._vision_inflight: asyncio.Task | None = None
+        self.multimodal = None  # Hardware runtime attaches the ONE camera hub.
         self._speech_task: asyncio.Task | None = None
         self._speech_robot: str | None = None
         self._group_last_spoken = -math.inf
@@ -147,6 +149,8 @@ class PetController:
             raise RuntimeError("Previous pet task still shutting down")
         state.generation += 1
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
+        if self.multimodal is not None:
+            self.multimodal.hub.clear(robot_id)
         state.last_touch_count = None
         state.last_touch_events = None
         state.last_cap_events = None
@@ -213,6 +217,11 @@ class PetController:
         """
         self.states[robot_id]  # Unknown identity fails explicitly.
         self._group_last_spoken = time.monotonic()
+        # Priority inversion would let an old 45-second background VLM call
+        # block a human's direct look request. Abort the candidate analysis.
+        old_vision = self._vision_inflight
+        if old_vision is not None and not old_vision.done():
+            old_vision.cancel()
         await self._cancel_speech(robot_id)
         return self.status(robot_id)
 
@@ -320,6 +329,8 @@ class PetController:
         if not state.enabled or state.generation != generation:
             return
         change = SceneChange(kind, description, 1.0)
+        if self.multimodal is not None and kind in ("touch_tap", "touch_double", "touch_hold"):
+            self.multimodal.hub.notify(robot_id, kind, time.monotonic())
         state.events += 1
         state.last_event = description
         if kind == "touch_hold":
@@ -435,6 +446,8 @@ class PetController:
         for change in changes:
             if not state.enabled or state.generation != generation:
                 return
+            if self.multimodal is not None:
+                self.multimodal.hub.notify(robot_id, change.kind, time.monotonic())
             state.events += 1
             state.last_event = change.description
             state.last_aux_kind = change.kind
@@ -563,6 +576,8 @@ class PetController:
         state.events += 1
         state.last_event = description
         change = SceneChange("petting_zone", description, 1.0)
+        if self.multimodal is not None:
+            self.multimodal.hub.notify(robot_id, "petting_zone", time.monotonic())
         await self._store_observation(robot_id, change)
         self._consider_speech(robot_id, change, generation)
 
@@ -609,6 +624,8 @@ class PetController:
             state.events += 1
             state.last_event = description
             change = SceneChange(kind, description, 1.0)
+            if self.multimodal is not None:
+                self.multimodal.hub.notify(robot_id, kind, time.monotonic())
             await self._store_observation(robot_id, change)
             if key != "bumps" and state.enabled and state.generation == generation:
                 self._consider_speech(robot_id, change, generation)
@@ -686,16 +703,41 @@ class PetController:
                 ):
                     await asyncio.sleep(self.interval)
                     continue
+                if (self.multimodal is not None
+                        and not self.multimodal.hub.due(robot_id, time.monotonic())):
+                    await asyncio.sleep(self.interval)
+                    continue
                 started = time.monotonic()
                 jpeg = await self.heads[robot_id].snapshot()
                 received = time.monotonic()
                 if received - started > 2.0 or state.generation != generation:
                     await asyncio.sleep(self.interval)
                     continue
+                if self.multimodal is not None:
+                    self.multimodal.offer_proactive(robot_id, jpeg, received)
+                    # Camera frames can be sampled during a human's utterance
+                    # without launching a competing unsolicited VLM/TTS turn.
+                    if self.multimodal.hub.user_active(robot_id, received):
+                        await asyncio.sleep(self.interval)
+                        continue
                 previous = await asyncio.to_thread(state.gate.observe, jpeg)
                 if previous is not None:
                     async with self._vision_lock:
-                        change = await self.scene.compare(previous, jpeg)
+                        inference = asyncio.create_task(
+                            self.scene.compare(previous, jpeg)
+                        )
+                        self._vision_inflight = inference
+                        try:
+                            change = await inference
+                        except asyncio.CancelledError:
+                            # The human's voice cancelled background inference,
+                            # not the enclosing pet observation loop.
+                            if asyncio.current_task().cancelling():
+                                raise
+                            continue
+                        finally:
+                            if self._vision_inflight is inference:
+                                self._vision_inflight = None
                     # Restore the stale-inference gate preserved in the old
                     # PR #4 prototype. A local VLM may finish long after the
                     # scene changed. Monotonic time here is Mac receive time,
@@ -735,6 +777,8 @@ class PetController:
         self._event_kinds[event_key] = now
         if (
             state.quiet
+            or (self.multimodal is not None
+                and self.multimodal.hub.user_active(robot_id, now))
             or now - previous < self.group_window
             or now - self._group_last_spoken < self.speech_cooldown
             or self.conversation.active is not None
