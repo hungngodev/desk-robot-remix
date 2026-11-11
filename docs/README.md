@@ -11,6 +11,7 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | I want to… | Open |
 | --- | --- |
 | See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](PLAN.md#complete-linear-build-and-permanent-verification-stages) |
+| Continue work across parallel chats or coding agents | [Repository agent instructions](../AGENTS.md) and [cross-chat engineering handoff](reviews/PARALLEL_CHAT_HANDOFF.md) |
 | Find every requested idea and link | [200 feature entries](source-map.md#original-html-feature-and-sensor-idea-register) and [131 original HTML URLs](source-map.md#complete-original-html-research-link-index) and [original file followup](research/2026-11-10-original-html-link-and-hardware-audit.md) |
 | Check the hard behavior and proactive requirements | [System contract](product-definition.md) and [acceptance A1–A12](records/verification.md) |
 | See the exact proposed code and firmware changes | [Implementation file map](PLAN.md) and [source reuse decisions](research/2026-11-03-active-pet-sources.md) |
@@ -21,10 +22,18 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 
 **Next step.** First settle the day-zero architecture, part variant, final fit and full delivered cost gates, then check one MG90S servo in the saved gripper before printing the whole robot. Keep robot motion disabled during fit work.
 
-**Current status.** The head and body firmware compile, and the fleet demo
-runs with simulated inputs. Robot one still needs assembly, working floor
-sensors and physical tests. The prototype cap is **$50 delivered**, including
-money already spent. A complete delivered quote is still open.
+**Current status, 2026-11-11.** The canonical integration source and host
+tests live in draft [PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17).
+Earlier source builds and simulations are documented, but the current GitHub
+Actions run reports four failed jobs with unavailable execution logs, so the
+latest head is **not** certified as compiling or passing tests. Source includes
+five safety/facing VL53L4CD channels plus three read-only left/right/rear
+directions in the full profile; real modules are not assembled or physically
+validated. Native Xiaozhi/MiniCPM microphone and speaker bridging is opt-in
+software and not a verified acoustic experience. Robot one still needs a
+measured CAD fit, real powertrain, safe charger, terminal docking and grasp
+trials. The prototype cap is **$50 delivered**, including money already spent;
+a compliant full-feature delivered quote is still open.
 
 ## Reference
 
