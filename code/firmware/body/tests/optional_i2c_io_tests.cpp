@@ -58,6 +58,25 @@ int main() {
     CHECK(read.gauge.monitor_present && read.gauge.monitor_valid);
     CHECK(read.gauge.bus_mv == 5120);
     CHECK(read.gauge.shunt_uv == 40);
+    CHECK(read.dock.present && read.dock.valid);
+    CHECK(read.dock.sample_seq == Wire.dock_gpio_reads);
+    CHECK(read.dock.sample_seq >= 2);
+    const auto sampled = read.dock.sample_seq;
+    Wire.fail_dock_gpio = true;
+    for (std::uint32_t ms = 1608; ms < 2000; ms += 12) {
+      accessories.poll(ms);
+      CHECK(!Wire.unsafe_parallel_mux);
+    }
+    CHECK(!read.dock.valid);
+    CHECK(read.dock.sample_seq == sampled);
+    Wire.fail_dock_gpio = false;
+    for (std::uint32_t ms = 2004; ms < 2420; ms += 12) {
+      accessories.poll(ms);
+      CHECK(!Wire.unsafe_parallel_mux);
+    }
+    CHECK(read.dock.valid);
+    CHECK(read.dock.sample_seq > sampled);
+    CHECK(read.dock.sample_seq == Wire.dock_gpio_reads);
     std::cout << "PASS optional sensor register IO, validated mux isolation and no blocking samples\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
