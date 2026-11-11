@@ -375,7 +375,11 @@ class MultimodalOrchestrator:
             }
         except asyncio.CancelledError:
             if not current_turn():
-                raise RuntimeError("Visual question cancelled by newer speech") from None
+                reason = (
+                    "newer speech" if self._turn_epoch[robot_id] != turn
+                    else "newer visual question"
+                )
+                raise RuntimeError(f"Visual query cancelled by {reason}") from None
             raise
         finally:
             if self._look_tasks.get(robot_id) is current:
