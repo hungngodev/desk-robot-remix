@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "AccessoryReadings.h"
+#include "Bmp280Math.h"
 #include "GestureDecoder.h"
 namespace desk_robot {
 // One optional mux operation per 12ms after the critical ranging pass.
@@ -25,6 +26,7 @@ class AccessorySensors {
   std::uint8_t ads_channel_ = 0;
   std::uint32_t ads_started_ = 0;
   AccessoryReadings data_{};
+  Bmp280Trim bmp_trim_{};
   GestureDecoder gesture_{};
   std::uint32_t gesture_started_ms_ = 0;
   bool gesture_collecting_ = false;
@@ -43,6 +45,7 @@ class AccessorySensors {
   void gesture_fifo(std::uint32_t now_ms);
   void force(std::uint32_t now_ms);
   void climate(std::uint32_t now_ms);
+  void barometer(std::uint32_t now_ms);
   void power(std::uint32_t now_ms);
   void dock_status(std::uint32_t now_ms);
 };
