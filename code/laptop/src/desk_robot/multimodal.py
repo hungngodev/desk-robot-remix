@@ -181,7 +181,7 @@ class CameraFrameHub:
         if received_at <= self.last_capture[robot_id]:
             raise ValueError("Out of order camera reception timestamp")
         reduced, gray, _ = prepared
-        if (not isinstance(reduced, bytes) or not reduced.startswith(b"\\xff\\xd8")
+        if (not isinstance(reduced, bytes) or not reduced.startswith(b"\xff\xd8")
                 or len(reduced) > 1_000_000 or not isinstance(gray, bytes)
                 or len(gray) != 64 * 48):
             raise ValueError("Invalid preprocessed camera evidence")
