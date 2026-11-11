@@ -18,8 +18,8 @@ from typing import Awaitable, Callable, Protocol
 
 from .config import Settings
 from .conversation import Conversation
-from .memory import MemoryStore
 from .handling import HandlingGate
+from .memory import MemoryStore
 from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
 from .vision import SceneChange, VisualChangeGate
