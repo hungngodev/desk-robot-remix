@@ -149,8 +149,9 @@ class CameraFrameHub:
         existing explicit idle speech_start lease if one already exists.
         The head's urgent audio flush is a separate higher priority path.
         """
+        explicit_turn_active = self.voice_until[robot_id] == math.inf
         self.notify(robot_id, "human_voice", now)
-        if self.voice_until[robot_id] == math.inf:
+        if not explicit_turn_active:
             self.voice_until[robot_id] = now + 7.0
 
     def speech_ended(self, robot_id: str, now: float) -> None:
