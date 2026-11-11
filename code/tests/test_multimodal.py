@@ -214,3 +214,54 @@ async def test_vlm_rejects_invalid_or_unbounded_multimodal_result(out):
         model = OllamaScene(client, url="http://local:11434", model="local-vlm")
         with pytest.raises(ValueError):
             await model.answer("Tell me what you see", [image()])
+
+
+async def test_new_real_human_utterance_cancels_old_vlm_image_answer():
+    entered = asyncio.Event()
+    class SlowVision:
+        async def answer(self, question, frames):
+            entered.set()
+            await asyncio.Event().wait()
+            return "STALE visual answer"
+
+    head = Head()
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        SlowVision(), asyncio.Lock(),
+    )
+    try:
+        task = asyncio.create_task(service.look("robot-01", "What is this?"))
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        service.voice_started("robot-01")
+        with pytest.raises(RuntimeError, match="newer speech"):
+            await task
+        assert not service._look_tasks
+    finally:
+        await service.close()
+
+
+async def test_second_visual_tool_call_replaces_previous_stale_question():
+    first = asyncio.Event()
+    class TwoVision:
+        async def answer(self, question, frames):
+            if question == "What did I first show?":
+                first.set()
+                await asyncio.Event().wait()
+            return "The newest object."
+
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        TwoVision(), asyncio.Lock(),
+    )
+    try:
+        earlier = asyncio.create_task(
+            service.look("robot-01", "What did I first show?")
+        )
+        await asyncio.wait_for(first.wait(), timeout=1)
+        latest = await service.look("robot-01", "What is there now?")
+        assert latest["answer"] == "The newest object."
+        with pytest.raises(RuntimeError, match="newer speech"):
+            await earlier
+        assert latest["motor_authorized"] is False
+    finally:
+        await service.close()
