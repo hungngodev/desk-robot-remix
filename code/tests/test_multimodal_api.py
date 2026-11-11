@@ -10,6 +10,9 @@ def test_tool_token_can_request_visual_evidence_but_not_enable_motors(settings, 
         calls = []
 
         class Vision:
+            async def close(self):
+                pass
+
             def status(self, robot_id):
                 return {"robot_id": robot_id, "frames_in_ram": 0,
                         "motor_authorized": False}
