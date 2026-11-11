@@ -2,6 +2,53 @@
 
 Status November 10, 2026: protocol source and isolated backend probe committed. This is a **real model-side protocol implementation**, not a completed device speaker cutover, and not an acoustic qualification. The original five full-feature desk pets, Xiaozhi hardware, Mac camera event/memory orchestration, eight ToF, force-feedback grasp, docking and power requirements remain unchanged.
 
+## November 11: Xiaozhi real microphone and speaker route committed
+
+This section supersedes the old statements below saying the exclusive audio route and head output are completely unimplemented. **The source adapters are now implemented, but have NOT passed full end-to-end physical tests, and native vLLM model operation on the user's M1 Max is not established.**
+
+The pinned xinnan Xiaozhi server now receives an isolated `desk_robot_native_omni.py` overlay and copies the single shared `realtime_omni_protocol.py` protocol implementation. In an explicitly opted-in robot session, the actual decoded XIAO 16kHz mono PCM (from the same server Opus decoder and VAD) is diverted from legacy ASR into the upstream vLLM-Omni WebSocket. Real native 24kHz PCM16 deltas are converted to 16kHz and encoded in the *same pinned Xiaozhi 60ms Opus framing* for the actual head device websocket. It does not fake WAV/TTS or run another microphone or speaker stack. Device route and model model route are fenced by the real device ID, native response ID and cancellation generation. The existing urgent `tts stop flush:true` signal remains highest priority.
+
+### Explicit opt-in for ONE first pet, keep the complete fleet
+
+Start with a single robot selected for real native streaming validation; the other four retain their configured existing Xiaozhi voice providers. Keep the full physical feature set and five distinct robot IDs in the project.
+
+1. Deploy the official [vLLM-Omni realtime MiniCPM server](https://github.com/vllm-project/vllm-omni/blob/main/recipes/OpenBMB/MiniCPM-o-4_5.md) on supported hardware and confirm the official demo really works. The code assumes an actual `/v1/realtime?duplex=1` WebSocket and the upstream 16kHz input/24kHz output contract. A generic Ollama, llama.cpp HTTP or other Realtime-shaped service is **not** a substitute.
+2. Install or refresh the pinned Xiaozhi server build with `code/laptop/server/install_overlay.py`. It now includes `desk_robot_native_omni.py` and `desk_robot_omni_wire.py`. This is still the original Xiaozhi backend, not a second gateway. Build must first pass `test_overlay_targets_pinned_server_and_compiles`.
+3. Enter the genuine XIAO Sense `device_id`, `head_url`, private bearer tokens and normal five-robot settings. For real video and individual persona retrieval, set `voice_vision_tools_enabled = true` in the private Mac `local.toml`. Set `voice_memory_tools_enabled = true` **only** if you explicitly want prior private memories included in a native model prompt.
+4. Ensure `DESK_ROBOT_TOOL_TOKEN` is already in the existing private Mac/server environment (40+ random characters is recommended). The private authenticated `GET /v1/pet/{robot_id}/omni-context` includes that robot's persona and only opted-in past text memories, never motor permits. The private `GET /v1/pet/{robot_id}/omni-frame` returns a fresh source-authenticated JPEG, bounded to 1MB and received no more than 1000ms earlier, with `Cache-Control: no-store`.
+5. For **one** native pilot on a loopback model server, add the following values to the private `code/config/local.env` or export in the server's environment:
+
+```sh
+DESK_ROBOT_OMNI_ROBOTS=robot-01
+DESK_ROBOT_OMNI_URL=ws://127.0.0.1:8099/v1/realtime?duplex=1
+DESK_ROBOT_OMNI_MODEL=openbmb/MiniCPM-o-4_5
+```
+
+If the model is running on a different machine, the adapter **requires authenticated transport using a properly secured `wss://` endpoint** and the model server should be private. Do not send your microphone stream to a random plaintext `ws://` LAN address. Clear `DESK_ROBOT_OMNI_ROBOTS` to return that robot to the original Xiaozhi provider on restart, without changing or rewriting the base server. When explicitly enabled but unavailable, the adapter fails closed rather than secretly playing from two speech providers.
+
+6. Use the existing `code/laptop/server/run_server.py --config code/config/local.toml` after rebuilding the overlay, and confirm the real device is in Xiaozhi `realtime` listen mode. The backend becomes active when decoded audio frames from that authenticated live device arrive. No synthetic microphone PCM is inserted by the adapter.
+7. Use the authenticated loopback `GET http://127.0.0.1:8766/voice-readiness?device_id=YOUR_REAL_DEVICE_ID` with `DESK_ROBOT_SPEECH_TOKEN`. Its `native_omni` status distinguishes an actual connected model from a merely selected configuration. It separately records number of decoded mic frames, video JPEG frames, model PCM deltas and Opus packets transmitted to the head. It **always** reports `head_audio_playback_acknowledged = false` and `audio_video_latency_physically_measured = false` until a real board test establishes them.
+
+### Behavior now in source
+
+* Default off. Both a mapped current Xiaozhi websocket and explicit per-robot native selection are required. Group/peer speech lease and native model speech ownership cannot overlap.
+* Mic input uses the pinned server's real Opus decoded PCM and already existing AEC/VAD decisions. A bounded 50-frame queue prevents unbounded input latency and fails closed on overload.
+* The 9B model is upstream native inference. Audio and VLM software are not reimplemented. Per 1s model unit, a recent actual JPEG can accompany PCM in the documented `video_frames` wire field. An independent background camera task cannot delay microphone packet delivery; if no timely image arrives, send audio without making up a visual observation.
+* Native audio output gets a bounded 40-chunk queue, incremental 24kHz to 16kHz conversion using stateful `audioop.ratecv`, 960-sample Opus frames, paced at 60ms and sent through the original physical device websocket.
+* `response.cancel` plus `output_audio_buffer.clear` invalidate the model's old response, and the existing head `tts stop flush:true` requests immediate decoder reset. Stale older response IDs and `response.done` messages cannot stop the newer turn.
+* Native replies from different pets share one logical audio floor. One genuine human VAD speech start can request silence from the other native model pets without executing body or battery commands.
+* The native backend loads each robot's own voice style from its configured Mac persona, with optional separately authorized short text memories. Untrusted old information is not represented as current camera evidence.
+
+### Important caveats not solved by code alone
+
+The model's `playback.ack` contract must be based on **actual I2S played samples**, not transmitted Opus, so the adapter deliberately sends **no playback ACK**. Until the XIAO firmware provides generation-scoped played-frame counters, the backend may have imperfect listening/speaking state and cannot be called production ready. A physically confirmed 500ms audible barge-in target, proper echo reference, microphone and speaker clocks, long-running 5-robot session recovery and native model low latency remain **unmeasured**.
+
+The host loopback tests in `code/tests/test_native_omni_xiaozhi.py` exercise a real WebSocket handshake, actual PCM-shaped input, native model event responses, Opus-shaped head output, explicit model selection, identity, TLS rules, fleet speaker priority and the fact that no playback ACK is invented. They replace neither the real MiniCPM 9B model nor the ESP32 board. The `test_multimodal_api.py` tests verify the Mac source-authenticated JPEG route requires explicit hardware privacy consent.
+
+The original GitHub Actions jobs currently fail with **zero visible job steps** and unavailable log blobs. This is unresolved verification infrastructure; do not report tests passing or promote the PR to ready. Physical docking, charging electronics, fully dimensioned final 3D CAD and calibrated grasp also remain separate unqualified gates.
+
+---
+
 ## The actual open source foundation
 
 * [OpenBMB MiniCPM-o 4.5](https://github.com/OpenBMB/MiniCPM-V/blob/main/docs/minicpm_o4dot5_en.md) is a 9B multimodal model with native simultaneous audio, video and speech generation. This is a more appropriate **model** for the requested live behavior than buffered FunASR + Ollama + Kokoro.
