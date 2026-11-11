@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import audioop
+import ipaddress
 import json
 import os
 import time
-from collections import deque
 from dataclasses import dataclass
 from urllib.parse import urlsplit
-import ipaddress
 
 import aiohttp
 
@@ -386,7 +385,7 @@ class NativeOmniSession:
                         asyncio.create_task(self._play()),
                         asyncio.create_task(self._camera(http)),
                     ]
-                    done, pending = await asyncio.wait(
+                    done, _pending = await asyncio.wait(
                         self._tasks, return_when=asyncio.FIRST_COMPLETED
                     )
                     for task in done:
