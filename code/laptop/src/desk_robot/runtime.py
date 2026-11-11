@@ -66,6 +66,7 @@ class Runtime:
             robot_ids={robot.id for robot in self.settings.robots},
             on_interrupt=self._on_voice_interrupt,
             on_global_interrupt=self._on_voice_global,
+            on_monitor_ready=self._on_voice_monitor_ready,
         )
         self._voice_task = asyncio.create_task(self.voice_events.run())
 
@@ -81,9 +82,15 @@ class Runtime:
         if failures:
             raise RuntimeError("Unable to preempt one or more pet speakers") from failures[0]
 
+    async def _on_voice_monitor_ready(self, ready: bool) -> None:
+        # Re-enable spontaneous voice only after a successful authenticated
+        # event-stream bootstrap or ordered poll, never on a guessed timeout.
+        self.pet.set_voice_monitor_ready(ready)
+
     async def _on_voice_global(self, reason: str) -> None:
         if reason not in ("gap", "reset", "stream_unavailable"):
             raise ValueError("Unsupported global voice transport fault")
+        self.pet.set_voice_monitor_ready(False)
         await self._preempt_audio_floor()
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
@@ -106,6 +113,8 @@ class Runtime:
             visual.voice_started(robot_id)
 
     async def close(self):
+        if self.settings.mode == "hardware":
+            self.pet.set_voice_monitor_ready(False)
         if self._voice_task is not None:
             self._voice_task.cancel()
             await asyncio.gather(self._voice_task, return_exceptions=True)
