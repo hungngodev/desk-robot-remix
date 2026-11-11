@@ -45,6 +45,7 @@ class PetState:
     last_extra_mask: int | None = None
     last_extra_events: dict[str, int] | None = None
     last_cap_events: int | None = None
+    last_cap_mask: int | None = None
     aux_task: asyncio.Task | None = field(default=None, repr=False)
     aux_reads: int = 0
     last_battery_low: bool | None = None
@@ -149,6 +150,7 @@ class PetController:
         state.last_touch_count = None
         state.last_touch_events = None
         state.last_cap_events = None
+        state.last_cap_mask = None
         state.last_extra_events = None
         state.last_extra_mask = None
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
@@ -536,18 +538,28 @@ class PetController:
             return
         state = self.states[robot_id]
         old = state.last_cap_events
+        prior_mask = state.last_cap_mask
         state.last_cap_events = count if good else None
+        state.last_cap_mask = mask if good else None
         if (not good or old is None or count < old or count - old > 8
                 or not state.enabled or state.generation != generation):
             return
         delta = count - old
         if delta == 0:
             return
-        description = (
-            f"My physical CAP1188 petting pads registered {delta} new touch "
-            f"{'contact' if delta == 1 else 'contacts'}"
-            + (f"; currently active zones bitmask {mask}" if mask else "")
-        )
+        # One independently counted hardware rise and exactly one newly
+        # active CAP electrode identify a particular touch zone. When multiple
+        # edges were missed or the shell mapping is unknown, remain generic.
+        rising = mask & (~prior_mask & 0xFF) if prior_mask is not None else 0
+        if delta == 1 and rising.bit_count() == 1:
+            zone = rising.bit_length()
+            description = f"My physical CAP1188 petting pad {zone} was touched"
+        else:
+            description = (
+                f"My physical CAP1188 petting pads registered {delta} new touch "
+                f"{'contact' if delta == 1 else 'contacts'}"
+                + (f"; currently active zones bitmask {mask}" if mask else "")
+            )
         state.events += 1
         state.last_event = description
         change = SceneChange("petting_zone", description, 1.0)
