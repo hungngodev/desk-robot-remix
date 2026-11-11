@@ -1,0 +1,324 @@
+"""Bounded voice + camera context for the existing Xiaozhi and Mac runtime.
+
+Reuses LiveKit's VAD-adaptive frame cadence and Frigate's motion-first
+inference strategy. These are algorithmic reuses, not new media transports.
+Only the authenticated XIAO head supplies JPEGs. Frames live in RAM only,
+are never persisted, never authorize motors and expire on disconnect/close.
+"""
+from __future__ import annotations
+
+import asyncio
+import math
+import re
+import time
+from collections import deque
+from dataclasses import dataclass
+from io import BytesIO
+from typing import TYPE_CHECKING
+
+from PIL import Image, ImageOps, ImageStat
+
+if TYPE_CHECKING:
+    from .config import Settings
+    from .transport import Head
+    from .vision import OllamaScene
+
+TEMPORAL_WORDS = re.compile(
+    r"\b(chang(?:e|ed|ing)|mov(?:e|ed|ing)|happen(?:ed|ing)?|"
+    r"before|after|just|appear(?:ed)?|disappear(?:ed)?|"
+    r"pick(?:ed)?|put|drop(?:ped)?)\b", re.I
+)
+
+TRIGGERS = frozenset({
+    "human_voice", "touch_tap", "touch_double", "touch_hold",
+    "petting_zone", "hand_wave", "nearby_object", "nose_twist",
+    "squeeze", "bumper", "magnet", "pir", "battery_low", "safety_fault",
+})
+
+
+def _finite(value: float) -> bool:
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
+    """Encode bounded JPEG for the VLM and a tiny grayscale motion fingerprint."""
+    if not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000:
+        raise ValueError("Camera JPEG size invalid")
+    with Image.open(BytesIO(jpeg)) as im:
+        if im.format != "JPEG":
+            raise ValueError("Authenticated camera source must return JPEG")
+        im.load()
+        if not 1 <= im.width <= 4096 or not 1 <= im.height <= 4096:
+            raise ValueError("Camera dimensions invalid")
+        rgb = ImageOps.exif_transpose(im).convert("RGB")
+    rgb.thumbnail((max_side, max_side), Image.Resampling.BILINEAR)
+    gray = ImageOps.grayscale(rgb).resize((64, 48))
+    fingerprint = gray.tobytes()
+    brightness = ImageStat.Stat(gray).mean[0]
+    out = BytesIO()
+    rgb.save(out, "JPEG", quality=78, optimize=True)
+    encoded = out.getvalue()
+    if len(encoded) > 1_000_000:
+        raise ValueError("VLM JPEG exceeds bounded in-memory frame")
+    return encoded, fingerprint, brightness
+
+
+def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
+    """Ignore broad lighting shifts before detecting localized motion.
+
+    This cheap gate is not calibrated optical flow or object tracking.
+    """
+    if len(a) != len(b) or len(a) != 64 * 48:
+        raise ValueError("Frame fingerprints have incompatible dimensions")
+    shift = sum(y - x for x, y in zip(a, b, strict=True)) / len(a)
+    return sum(
+        1 for x, y in zip(a, b, strict=True)
+        if abs((y - x) - shift) >= threshold
+    ) / len(a)
+
+
+@dataclass(frozen=True)
+class CameraEvidence:
+    jpeg: bytes
+    received_at: float  # Mac receive time, NOT sensor exposure time.
+    motion_fraction: float
+    source: str
+
+
+class CameraFrameHub:
+    """Per-robot tiny RAM-only buffer with priority hints and bounded cadence.
+
+    Cadence resembles LiveKit VoiceActivityVideoSampler, with event priority
+    and a cheap Frigate-style motion score. No continuous video is claimed.
+    """
+
+    def __init__(
+        self, robot_ids: list[str], *,
+        idle_fps: float = 0.30, speaking_fps: float = 1.0,
+        active_fps: float = 0.8, max_frames: int = 3,
+    ):
+        if not robot_ids or len(set(robot_ids)) != len(robot_ids):
+            raise ValueError("Unique camera source identities required")
+        if any(not _finite(v) or not 0 < v <= 5 for v in
+               (idle_fps, speaking_fps, active_fps)):
+            raise ValueError("Invalid adaptive camera frame cadence")
+        if not 2 <= max_frames <= 4:
+            raise ValueError("Frame storage must remain bounded")
+        self.robots = frozenset(robot_ids)
+        self.idle_fps, self.speaking_fps = idle_fps, speaking_fps
+        self.active_fps = active_fps
+        self.frames: dict[str, deque[CameraEvidence]] = {
+            robot: deque(maxlen=max_frames) for robot in robot_ids
+        }
+        self.last_capture = {robot: -math.inf for robot in robot_ids}
+        self.voice_until = {robot: -math.inf for robot in robot_ids}
+        self.urgent = {robot: False for robot in robot_ids}
+        self.previous_gray: dict[str, bytes] = {}
+        self.changed_streak = {robot: 0 for robot in robot_ids}
+
+    def _check(self, robot_id: str) -> None:
+        if robot_id not in self.robots:
+            raise ValueError("Unknown robot camera identity")
+
+    def notify(self, robot_id: str, kind: str, now: float) -> None:
+        self._check(robot_id)
+        if kind not in TRIGGERS or not _finite(now):
+            raise ValueError("Unknown physical event or invalid time")
+        self.urgent[robot_id] = True
+        if kind == "human_voice":
+            # The Xiaozhi event bridge currently sends VAD start only.
+            # A timeout is a hint, NOT proof of speech endpoint detection.
+            self.voice_until[robot_id] = max(self.voice_until[robot_id], now + 7.0)
+
+    def user_active(self, robot_id: str, now: float) -> bool:
+        self._check(robot_id)
+        return _finite(now) and now < self.voice_until[robot_id]
+
+    def due(self, robot_id: str, now: float) -> bool:
+        self._check(robot_id)
+        if not _finite(now):
+            raise ValueError("Invalid clock")
+        if self.urgent[robot_id]:
+            return True
+        fps = (
+            self.speaking_fps if self.user_active(robot_id, now)
+            else self.active_fps if self.changed_streak[robot_id]
+            else self.idle_fps
+        )
+        return now - self.last_capture[robot_id] >= 1 / fps
+
+    def offer(self, robot_id: str, jpeg: bytes, received_at: float,
+              *, source: str) -> CameraEvidence:
+        self._check(robot_id)
+        if not _finite(received_at) or source not in {
+            "proactive", "speech", "voice_question", "sensor"
+        }:
+            raise ValueError("Unknown image source or invalid time")
+        if received_at <= self.last_capture[robot_id]:
+            raise ValueError("Out of order camera reception timestamp")
+        reduced, gray, _ = _prepare(jpeg)
+        prev = self.previous_gray.get(robot_id)
+        motion = change_fraction(prev, gray) if prev is not None else 0.0
+        self.previous_gray[robot_id] = gray
+        self.changed_streak[robot_id] = (
+            min(3, self.changed_streak[robot_id] + 1) if motion >= 0.01
+            else 0
+        )
+        self.last_capture[robot_id] = received_at
+        self.urgent[robot_id] = False
+        evidence = CameraEvidence(reduced, received_at, motion, source)
+        self.frames[robot_id].append(evidence)
+        return evidence
+
+    def selected(self, robot_id: str, question: str, now: float
+                 ) -> list[CameraEvidence]:
+        self._check(robot_id)
+        if not _finite(now):
+            raise ValueError("Invalid clock")
+        fresh = [
+            item for item in self.frames[robot_id]
+            if 0 <= now - item.received_at <= 6
+        ]
+        if not fresh:
+            return []
+        latest = fresh[-1]
+        if not TEMPORAL_WORDS.search(question) or len(fresh) < 2:
+            return [latest]
+        # Best previous changed frame, excluding current. Temporal comparison
+        # is never constructed from five unrelated robots' cameras.
+        prior = max(fresh[:-1], key=lambda frame: frame.motion_fraction)
+        return [prior, latest]
+
+    def clear(self, robot_id: str) -> None:
+        self._check(robot_id)
+        self.frames[robot_id].clear()
+        self.previous_gray.pop(robot_id, None)
+        self.last_capture[robot_id] = -math.inf
+        self.voice_until[robot_id] = -math.inf
+        self.changed_streak[robot_id] = 0
+        self.urgent[robot_id] = False
+
+    def close(self) -> None:
+        for robot_id in self.robots:
+            self.clear(robot_id)
+
+
+class MultimodalOrchestrator:
+    """Adapt real Xiaozhi audio events and head JPEGs into one Mac VLM owner."""
+
+    def __init__(self, settings: "Settings", heads: dict[str, "Head"],
+                 scene: "OllamaScene", inference_lock: asyncio.Lock):
+        self.settings = settings
+        self.heads = heads
+        self.scene = scene
+        self.inference_lock = inference_lock
+        self.hub = CameraFrameHub([r.id for r in settings.robots])
+        self._capture_tasks: dict[str, asyncio.Task] = {}
+        self._closed = False
+
+    def status(self, robot_id: str) -> dict:
+        self.hub._check(robot_id)
+        return {
+            "robot_id": robot_id,
+            "frames_in_ram": len(self.hub.frames[robot_id]),
+            "voice_trigger_until_monotonic": self.hub.voice_until[robot_id],
+            "last_camera_received_at": (
+                self.hub.frames[robot_id][-1].received_at
+                if self.hub.frames[robot_id] else None
+            ),
+            "multimodal_model_configured": bool(self.settings.vision_model),
+            "source_exposure_time_verified": False,
+            "physical_vad_video_sync_verified": False,
+            "motor_authorized": False,
+        }
+
+    def voice_started(self, robot_id: str) -> None:
+        self.hub.notify(robot_id, "human_voice", time.monotonic())
+        if self._closed or not self.settings.voice_vision_tools_enabled:
+            return
+        task = self._capture_tasks.get(robot_id)
+        if task is None or task.done():
+            # NEVER await a camera capture in the realtime VAD cancellation
+            # callback. Audio playback stops without waiting for JPEG/LLM.
+            self._capture_tasks[robot_id] = asyncio.create_task(
+                self._speech_frames(robot_id)
+            )
+
+    async def _speech_frames(self, robot_id: str) -> None:
+        try:
+            for _ in range(5):
+                if self._closed:
+                    break
+                if self.hub.due(robot_id, time.monotonic()):
+                    try:
+                        await self.capture(robot_id, source="speech")
+                    except Exception:
+                        # A lost board yields no fresh visual evidence.
+                        # The existing voice conversation remains audio only.
+                        self.hub.clear(robot_id)
+                        break
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            raise
+
+    async def capture(self, robot_id: str, *, source: str) -> CameraEvidence:
+        self.hub._check(robot_id)
+        if self._closed:
+            raise RuntimeError("Multimodal orchestrator closed")
+        # HttpHead.capture_lock provides serialization with pet observation,
+        # dock calibration and pickup. Do not bypass its strict source checks.
+        jpeg = await asyncio.wait_for(
+            self.heads[robot_id].snapshot(), timeout=4
+        )
+        now = time.monotonic()
+        return await asyncio.to_thread(
+            self.hub.offer, robot_id, jpeg, now, source=source
+        )
+
+    def offer_proactive(self, robot_id: str, jpeg: bytes, now: float) -> None:
+        # Must be called from the one event loop owner to preserve ordering.
+        self.hub.offer(robot_id, jpeg, now, source="proactive")
+
+    async def look(self, robot_id: str, question: str) -> dict:
+        self.hub._check(robot_id)
+        if (not self.settings.voice_vision_tools_enabled
+                or not self.settings.vision_model):
+            raise ValueError("Enable local voice vision and install a vision model")
+        if not isinstance(question, str) or not 3 <= len(question.strip()) <= 280:
+            raise ValueError("A short real visual question is required")
+        # Explicit tool query selects an up-to-date frame independent of the
+        # 0.3 FPS idle sampler. A stale frame must never answer "right now".
+        last = self.hub.frames[robot_id]
+        if not last or time.monotonic() - last[-1].received_at > 0.6:
+            await self.capture(robot_id, source="voice_question")
+        chosen = self.hub.selected(robot_id, question, time.monotonic())
+        if not chosen:
+            raise RuntimeError("No fresh authenticated camera images available")
+        async with self.inference_lock:
+            answer = await self.scene.answer(
+                question, [frame.jpeg for frame in chosen]
+            )
+        return {
+            "robot_id": robot_id,
+            "answer": answer,
+            "frames_used": len(chosen),
+            "latest_frame_age_ms": round(
+                1000 * (time.monotonic() - chosen[-1].received_at)
+            ),
+            "model": self.settings.vision_model,
+            "source": "authenticated_xiao_camera_and_local_vlm",
+            "image_capture_exposure_verified": False,
+            "physical_multimodal_latency_verified": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+
+    async def close(self) -> None:
+        self._closed = True
+        tasks = list(self._capture_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._capture_tasks.clear()
+        self.hub.close()
