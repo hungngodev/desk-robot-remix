@@ -390,3 +390,28 @@ specified 8/10 key, 8/10 candy, 19/20 voice interruption, and five unit trials.
 Do not stamp these passes green from older runs: check GitHub Actions against
 the *final PR #17 head SHA* and retain all physical gates as pending until
 independently recorded evidence exists.
+
+
+## 2026-11-11 docking GPIO sample provenance and realtime model handshake review
+
+**Actual GitHub Actions outcome:** [run 43100939229](https://github.com/hungngodev/desk-robot-remix/actions/runs/43100939229), PR #17 commit `19e0a1a6efa2f971dbb667443c6ac8f025ebe5d8`. All four jobs (Python/head, C++ host, WROOM PlatformIO, Sense ESP-IDF) concluded **failure**, with **zero steps reported** and job log endpoint returning `BlobNotFound`. That means the run has **NO usable test execution evidence**; do not attribute the failure to source without a log. No new passing build or physical trial was observed from this revision. Re-run or perform an actual local build before accepting software.
+
+**Docking readout flaw found:** Three identical cached `/api/aux` results previously counted as "stable three samples" despite no evidence of three new MCP23017 transfers. New firmware `DockPinRaw.sample_seq` increments only after `GPIOA=0x12` completes; WROOM UART reports `dock.seq` and `dock.age_ms` within the existing 1100-byte response. Mac source validation rejects missing/future/outdated or unsequenced samples; independent diagnostic requires three strictly increasing hardware sequence IDs and matching contact / PGOOD / CHG states. Host mock test now simulates MCP23017 success and I2C failure without incrementing sequence. Python tests include repeated, reordered, stale, changed and forged source cases. **Code and tests committed, not run.**
+
+**Bounded UART capacity source audit:** after adding `seq` and `age_ms`, the `BodyControl.cpp` auxiliary format string has 44 conversions. A source-based, intentionally oversized string substitution with 10 digits for every unsigned field and `-2147483648` for every signed field yields a 1073-byte JSON payload, below `kReplyCapacity=1100`. This is a static worst-case inspection, **not** a compiled host formatter test or byte-for-byte serial measurement.
+
+**Upstream audio contract reviewed:** [vLLM Omni realtime-duplex API](https://github.com/vllm-project/vllm-omni/blob/main/docs/serving/realtime_duplex_api.md) documents native session-created capability negotiation, 16kHz input PCM, 24kHz output PCM, output identity and model-owned barge-in. New adapter `verify_native_server` fails closed on wrong model, absent native-duplex capabilities, wrong chunk period or incompatible PCM rates before microphone streaming. A 15-second per-device retry backoff retains a bounded error diagnostic rather than creating one failed WebSocket per incoming audio frame. The official [MiniCPM-o 4.5 recipe](https://github.com/vllm-project/vllm-omni/blob/main/recipes/OpenBMB/MiniCPM-o-4_5.md) requires a supported Linux GPU setup; **macOS M1 Max serving is not established**. Native voice and acoustic interruption remain unverified.
+
+**Reproducible commands for actual verification** from `code/` with dependencies installed and pinned fixtures restored:
+
+```sh
+uv run --no-sync pytest -q tests/test_dock_evidence.py tests/test_dock_charge_pins.py tests/test_aux_telemetry.py tests/test_native_omni_xiaozhi.py tests/test_server_bridge.py
+uv run --no-sync ruff check laptop/src/desk_robot/aux.py laptop/src/desk_robot/dock_evidence.py laptop/server/overlay/desk_robot_native_omni.py tests/test_dock_evidence.py tests/test_native_omni_xiaozhi.py
+cmake -S firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/desk-robot-body-host --parallel 2
+ctest --test-dir /tmp/desk-robot-body-host --output-on-failure
+uvx --from platformio==6.1.18 pio run -d firmware/body -e esp32_full
+```
+
+**Physical acceptance remains zero:** Neither a BQ24074 CHG indication nor three distinct GPIOA reads measure actual charge current; no battery protection, power-path, thermal or connector measurement was conducted. No terminal dock motor command, print fit or voice playback ACK was promoted to `ROBOT_VERIFIED`.
+
