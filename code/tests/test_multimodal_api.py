@@ -51,7 +51,7 @@ def test_native_omni_frame_requires_consent_real_hardware_and_tool_token(setting
     import time
     from types import SimpleNamespace
 
-    jpeg = b"\\xff\\xd8" + b"actualjpeg" + b"\\xff\\xd9"
+    jpeg = b"\xff\xd8" + b"actualjpeg" + b"\xff\xd9"
 
     class FakeCamera:
         async def capture(self, robot_id, *, source):
