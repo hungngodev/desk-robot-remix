@@ -165,6 +165,32 @@ class NativeOmniSession:
         async with self._socket_lock:
             await self._socket.send_json(event)
 
+    async def _retire_legacy_audio(self) -> None:
+        """Clear any previous Xiaozhi welcome/TTS before native model output.
+
+        Only one voice provider may own the head decoder. This is a requested
+        firmware flush, NOT an ACK of physically completed I2S playback.
+        """
+        speaking = bool(getattr(self.conn, "client_is_speaking", False))
+        tts = getattr(self.conn, "tts", None)
+        pending = False
+        if tts is not None:
+            for name in ("tts_text_queue", "tts_audio_queue"):
+                queue = getattr(tts, name, None)
+                if queue is not None and callable(getattr(queue, "empty", None)):
+                    pending = pending or not queue.empty()
+        if speaking or pending:
+            self.conn.client_abort = True
+            clear = getattr(self.conn, "clear_queues", None)
+            if callable(clear):
+                clear()
+            async with self._device_send_lock:
+                await self.conn.websocket.send(json.dumps({
+                    "type": "tts", "state": "stop", "flush": True,
+                    "session_id": self.conn.session_id,
+                }))
+            self.conn.client_is_speaking = False
+
     async def _load_private_persona(self, http: aiohttp.ClientSession) -> None:
         """Ask the existing Mac authority for THIS robot's voice style.
 
@@ -366,6 +392,7 @@ class NativeOmniSession:
 
     async def run(self) -> None:
         try:
+            await self._retire_legacy_audio()
             async with aiohttp.ClientSession() as http:
                 await self._load_private_persona(http)
                 async with http.ws_connect(
