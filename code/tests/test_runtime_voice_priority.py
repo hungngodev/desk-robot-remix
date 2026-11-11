@@ -86,3 +86,25 @@ async def test_initial_human_speech_primes_video_only_after_urgent_audio_stop():
         ("stop_audio", None),
         ("start_camera", "robot-02"),
     ]
+
+
+async def test_speech_end_only_stops_video_sampling_not_live_xiaozhi_audio():
+    events = []
+    class Pet:
+        async def interrupt(self, robot_id):
+            events.append("pet_interrupted")
+    class Chat:
+        async def stop(self):
+            events.append("audio_stopped")
+    class Visual:
+        def voice_ended(self, robot_id):
+            events.append(("video_idle", robot_id))
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")]
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Chat()
+    runtime.multimodal = Visual()
+    await runtime._on_voice_interrupt("robot-01", "speech_end")
+    assert events == [("video_idle", "robot-01")]
