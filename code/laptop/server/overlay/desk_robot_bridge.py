@@ -81,9 +81,13 @@ def record_human_voice(conn, kind: str) -> bool:
         native = _native_adapter()
         if native is not None:
             # Never block original AEC/VAD while silencing other native pets.
-            asyncio.get_running_loop().create_task(
-                native.preempt_others_for_human(device)
-            )
+            # Synchronous test/diagnostic code has no running event loop.
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                loop.create_task(native.preempt_others_for_human(device))
     return True
 
 
@@ -281,7 +285,12 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
     # the native model audio generator so late PCM cannot restart that turn.
     native = _native_adapter()
     if native is not None:
-        await native.on_barge(conn)
+        try:
+            await native.on_barge(conn)
+        except Exception:
+            # A failing OPTIONAL model endpoint must never prevent the
+            # already-confirmed human voice event reaching the Mac listener.
+            pass
     record_human_voice(conn, "normal")
     return True
 
