@@ -48,6 +48,7 @@ def files(root):
         "    import desk_robot_bridge\n"
         "    await desk_robot_bridge.interrupt_for_user_voice(conn, have_voice)\n"
         "    await desk_robot_bridge.interrupt_for_normal_voice(conn, have_voice)\n"
+        "    desk_robot_bridge.observe_idle_human_voice(conn, have_voice)\n"
         "    # 服务端AEC功能需要实时触发打断",
     )
     source = once(
