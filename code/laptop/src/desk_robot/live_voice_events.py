@@ -83,8 +83,11 @@ class VoiceEventListener:
                     or event["seq"] != current + 1
                     or event["seq"] > data["cursor"]
                     or event.get("robot_id") not in self.robot_ids
-                    or event.get("kind") not in ("normal", "group")
-                    or event.get("source") != "xiaozhi_aec_vad"):
+                    or event.get("kind") not in ("normal", "group", "speech_start")
+                    or event.get("source") != (
+                        "xiaozhi_server_vad" if event.get("kind") == "speech_start"
+                        else "xiaozhi_aec_vad"
+                    )):
                 raise ValueError("Invalid real voice source, identity or sequence")
             await self.on_interrupt(event["robot_id"], event["kind"])
             current = event["seq"]
