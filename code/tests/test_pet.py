@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from desk_robot.api import create_app
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore
+from desk_robot.multimodal import CameraFrameHub
 from desk_robot.pet import PetController, _initiative_evidence
 from desk_robot.simulator import SimulatedSpeaker
 from desk_robot.vision import OllamaScene, SceneChange, VisualChangeGate
@@ -1036,6 +1038,24 @@ async def test_real_voice_interrupt_suppresses_proactive_banter_for_cooldown(fle
         await pet.close()
 
 
+async def test_autonomous_pause_cannot_release_live_human_vad(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    hub = CameraFrameHub([r.id for r in fleet.robots])
+    pet.multimodal = SimpleNamespace(hub=hub)
+    hub.notify("robot-02", "human_voice", time.monotonic())
+    try:
+        await pet.pause("robot-02")
+        assert hub.user_active("robot-02", time.monotonic())
+        # Only authenticated speech end, not a pet-mode toggle, frees floor.
+        hub.speech_ended("robot-02", time.monotonic())
+        assert not hub.user_active("robot-02", time.monotonic())
+    finally:
+        await pet.close()
+
+
 def test_reachy_style_initiative_gate_prunes_uncertain_chatter_not_sensor_memory():
     # A high-confidence first-hand CAP1188 event is different from a guessed
     # camera person's identity. Pure policy has no hardware/motor side effect.
@@ -1063,8 +1083,8 @@ async def test_proactive_fleet_voice_gate_cancels_candidate_before_model_call(
         def user_active(self, robot_id, now):
             return robot_id in speaking
 
-        def clear(self, robot_id):
-            speaking.discard(robot_id)
+        def discard_video(self, robot_id):
+            pass
 
     pet.multimodal = SimpleNamespace(hub=Hub())
     state = pet.states["robot-01"]
@@ -1099,8 +1119,8 @@ async def test_proactive_speech_rechecks_all_human_vad_after_slow_model(
         def user_active(self, robot_id, now):
             return robot_id in self.active
 
-        def clear(self, robot_id):
-            self.active.discard(robot_id)
+        def discard_video(self, robot_id):
+            pass
 
     hub = Hub()
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
