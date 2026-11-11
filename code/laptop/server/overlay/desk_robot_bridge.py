@@ -30,6 +30,7 @@ interrupt_generation: dict[str, int] = {}
 # Only the current device may contribute AEC-cleaned voice during group speech.
 active_device_id: str | None = None
 voice_frames: dict[str, int] = {}
+voice_last_frame_at: dict[str, float] = {}
 human_interrupted_devices: set[str] = set()
 
 
@@ -111,9 +112,64 @@ def _start_lease_cleanup() -> None:
             lease_stopping = False
             active_device_id = None
             voice_frames.clear()
+            voice_last_frame_at.clear()
             human_interrupted_devices.clear()
 
     lease_cleanup_task = asyncio.create_task(finish_stop())
+
+
+
+def sustained_voice(device_id: str, have_voice: bool) -> bool:
+    """Keep two consecutive VAD-positive real PCM frames within 300ms.
+
+    Missing frames or idle gaps reset confirmation. The first human frames are
+    still forwarded to ASR independently, never lost to this decision gate.
+    """
+    if not have_voice:
+        voice_frames.pop(device_id, None)
+        voice_last_frame_at.pop(device_id, None)
+        return False
+    now = time.monotonic()
+    previous = voice_last_frame_at.get(device_id, 0)
+    count = voice_frames.get(device_id, 0) if 0 <= now - previous <= 0.3 else 0
+    voice_frames[device_id] = min(count + 1, 2)
+    voice_last_frame_at[device_id] = now
+    return voice_frames[device_id] >= 2
+
+
+async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
+    """Barge in during ordinary Xiaozhi speech, not only group speech.
+
+    Reuses upstream abort semantics (queue invalidation) with our Sense
+    urgent flush extension. Device AEC + realtime listen mode is mandatory.
+    This does not claim unmeasured acoustic double-talk performance.
+    """
+    device = conn.device_id
+    if muted(device) or lease_stopping:
+        return False  # Coordinated sessions have their own interrupt path.
+    if (getattr(conn, "client_listen_mode", "") != "realtime"
+            or not getattr(conn, "client_is_speaking", False)):
+        voice_frames.pop(device, None)
+        voice_last_frame_at.pop(device, None)
+        return False
+    if not sustained_voice(device, have_voice):
+        return False
+    # Mirrored from the pinned upstream handleAbortMessage except the stop
+    # includes flush:true to discard old decoder PCM and speaker DMA.
+    conn.close_after_chat = False
+    conn.client_abort = True
+    conn.clear_queues()
+    interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
+    try:
+        await conn.websocket.send(json.dumps({
+            "type": "tts", "state": "stop",
+            "session_id": conn.session_id, "flush": True,
+        }))
+    finally:
+        conn.clearSpeakStatus()
+        voice_frames.pop(device, None)
+        voice_last_frame_at.pop(device, None)
+    return True
 
 
 async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
@@ -130,11 +186,7 @@ async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
     ):
         voice_frames.pop(device, None)
         return False
-    if not have_voice:
-        voice_frames.pop(device, None)
-        return False
-    voice_frames[device] = min(voice_frames.get(device, 0) + 1, 2)
-    if voice_frames[device] < 2:
+    if not sustained_voice(device, have_voice):
         return False
     # Never let an old unsolicited TTS resume after detecting human speech.
     human_interrupted_devices.add(device)
@@ -185,6 +237,7 @@ async def transmit(conn, text, frames):
     global active_device_id
     active_device_id = conn.device_id
     voice_frames.pop(conn.device_id, None)
+    voice_last_frame_at.pop(conn.device_id, None)
     if conn.conn_from_mqtt_gateway:
         raise ValueError("Speech bridge currently requires direct Xiaozhi WebSocket transport")
     # The speaker lock and callers serialize transmission, but cancellation

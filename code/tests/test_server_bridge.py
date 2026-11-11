@@ -280,6 +280,62 @@ def test_only_current_duplex_speaker_passes_microphone_while_group_talks(bridge)
     assert bridge.suppress_message(one, b"echo-only unclean PCM")
 
 
+
+async def test_normal_xiaozhi_realtime_listening_barges_into_its_own_tts(bridge):
+    sent, cleared = [], []
+
+    class Socket:
+        async def send(self, frame):
+            sent.append(json.loads(frame))
+
+    one = conn("mac-01")
+    one.client_listen_mode = "realtime"
+    one.client_is_speaking = True
+    one.session_id = "head-user-dialogue"
+    one.websocket = Socket()
+    one.clear_queues = lambda: cleared.append("queues")
+    one.clearSpeakStatus = lambda: (
+        cleared.append("speaker"),
+        setattr(one, "client_is_speaking", False),
+    )
+    assert not await bridge.interrupt_for_normal_voice(one, False)
+    assert not await bridge.interrupt_for_normal_voice(one, True)
+    assert sent == []
+    assert await bridge.interrupt_for_normal_voice(one, True)
+    assert one.client_abort and not one.client_is_speaking
+    assert cleared == ["queues", "speaker"]
+    assert sent == [{
+        "type": "tts", "state": "stop",
+        "session_id": "head-user-dialogue", "flush": True,
+    }]
+    assert not await bridge.interrupt_for_normal_voice(one, True)
+
+
+async def test_normal_barge_in_does_not_cut_off_auto_or_peer_speech(bridge):
+    first = conn("mac-01")
+    first.client_is_speaking = True
+    first.client_listen_mode = "auto"
+    for _ in range(3):
+        assert not await bridge.interrupt_for_normal_voice(first, True)
+    first.client_listen_mode = "realtime"
+    bridge.lease_ids = frozenset(["mac-01", "mac-02"])
+    bridge.lease_until = time.monotonic() + 10
+    assert not await bridge.interrupt_for_normal_voice(first, True)
+    assert bridge.voice_frames.get("mac-01") is None
+
+
+def test_sustained_voice_resets_after_gap_and_silence(bridge, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(bridge.time, "monotonic", lambda: clock[0])
+    assert not bridge.sustained_voice("mac-01", True)
+    clock[0] += 0.5
+    assert not bridge.sustained_voice("mac-01", True)
+    clock[0] += 0.05
+    assert bridge.sustained_voice("mac-01", True)
+    assert not bridge.sustained_voice("mac-01", False)
+    assert bridge.voice_frames.get("mac-01") is None
+
+
 async def test_real_time_user_double_talk_aborts_peer_speech_with_immediate_dma_flush(bridge):
     sent = []
 
@@ -332,6 +388,7 @@ async def test_server_overlay_routes_actual_double_talk_audio_to_guard(bridge):
     files = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
     audio = files["core/handle/receiveAudioHandle.py"]
     assert "await desk_robot_bridge.interrupt_for_user_voice(conn, have_voice)" in audio
+    assert "await desk_robot_bridge.interrupt_for_normal_voice(conn, have_voice)" in audio
     assert audio.index("await desk_robot_bridge.interrupt_for_user_voice") < audio.index(
         "await conn.asr.receive_audio"
     )
