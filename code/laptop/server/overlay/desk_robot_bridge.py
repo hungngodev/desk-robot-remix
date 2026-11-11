@@ -44,6 +44,21 @@ idle_voice_emitted: set[str] = set()
 idle_voice_quiet_frames: dict[str, int] = {}
 
 
+def _native_adapter():
+    """Optional module is installed in real pinned Xiaozhi builds only.
+
+    The host tests import this bridge standalone without ESP Opus codecs.
+    Fail loudly if native mode was explicitly requested but not installed.
+    """
+    try:
+        import desk_robot_native_omni
+        return desk_robot_native_omni
+    except ModuleNotFoundError:
+        if os.environ.get("DESK_ROBOT_OMNI_ROBOTS", "").strip():
+            raise
+        return None
+
+
 def record_human_voice(conn, kind: str) -> bool:
     """Only a CURRENT authenticated Xiaozhi websocket can publish human VAD."""
     global voice_event_cursor
@@ -90,8 +105,9 @@ def register(conn):
 
 def unregister(conn):
     if connections.get(conn.device_id) is conn:
-        import desk_robot_native_omni
-        desk_robot_native_omni.unregister(conn)
+        native = _native_adapter()
+        if native is not None:
+            native.unregister(conn)
         connections.pop(conn.device_id, None)
         idle_voice_count.pop(conn.device_id, None)
         idle_voice_last_at.pop(conn.device_id, None)
@@ -256,8 +272,9 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
         voice_last_frame_at.pop(device, None)
     # Physical speaker flush above has highest priority; also invalidate
     # the native model audio generator so late PCM cannot restart that turn.
-    import desk_robot_native_omni
-    await desk_robot_native_omni.on_barge(conn)
+    native = _native_adapter()
+    if native is not None:
+        await native.on_barge(conn)
     record_human_voice(conn, "normal")
     return True
 
@@ -403,8 +420,8 @@ def create_app():
         if len(selected) != len(ids) or not selected.issubset(set(device_map().values())):
             raise ValueError("Unknown or duplicate device identity")
         if body.get("enabled") is True:
-            import desk_robot_native_omni
-            if any(desk_robot_native_omni.active(device) for device in selected):
+            native = _native_adapter()
+            if native is not None and any(native.active(device) for device in selected):
                 raise RuntimeError("Native realtime model owns this device speaker")
             if lease_stopping or time.monotonic() < lease_until:
                 raise RuntimeError("A coordinated session is already active")
@@ -515,7 +532,11 @@ def create_app():
             "microphone_double_talk_measured": False,
             "audible_flush_measured": False,
             "natural_barge_in_certified": False,
-            "native_omni": __import__("desk_robot_native_omni").status(device),
+            "native_omni": (
+                native.status(device) if (native := _native_adapter()) is not None
+                else {"native_backend_connected": False,
+                      "head_audio_playback_acknowledged": False}
+            ),
         })
 
     async def voice_events(request):
