@@ -260,7 +260,7 @@ async def test_second_visual_tool_call_replaces_previous_stale_question():
         await asyncio.wait_for(first.wait(), timeout=1)
         latest = await service.look("robot-01", "What is there now?")
         assert latest["answer"] == "The newest object."
-        with pytest.raises(RuntimeError, match="newer speech"):
+        with pytest.raises(RuntimeError, match="newer visual question"):
             await earlier
         assert latest["motor_authorized"] is False
     finally:
