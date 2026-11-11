@@ -71,7 +71,7 @@ async def test_stale_feedback_fails_before_next_servo_pulse(monkeypatch):
     head = FakeHead([100, 100, None])
     with pytest.raises(OperationError, match="Lost fresh"):
         await guarded_grasp(head, Settings(), health=healthy)
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 65", "grip 60"]
 
 
 async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
@@ -81,7 +81,7 @@ async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
     head = FakeHead([(100, 1), (100, 2), (240, 3), (240, 3)])
     with pytest.raises(OperationError, match="No new jaw sample"):
         await guarded_grasp(head, Settings(), health=healthy)
-    assert head.commands == ["grip 65", "grip 70"]
+    assert head.commands == ["grip 65", "grip 70", "grip 60"]
 
 
 async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):
@@ -91,8 +91,29 @@ async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):
     head = FakeHead([100, 100, 800])
     with pytest.raises(OperationError, match="ceiling"):
         await guarded_grasp(head, Settings(), health=healthy)
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 65", "grip 60"]
     head = FakeHead([100, 250])
     with pytest.raises(OperationError, match="baseline"):
         await guarded_grasp(head, Settings(), health=healthy)
     assert head.commands == []
+
+
+async def test_local_disarm_never_bypassed_to_release_jaw(monkeypatch):
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 100, 900])
+    calls = 0
+
+    async def intermittent_health():
+        nonlocal calls
+        calls += 1
+        # First two checks permit a single closer pulse. Once it failed,
+        # the WROOM local safety gate has disarmed.
+        if calls > 2:
+            raise OperationError("Body disarmed")
+        return {"armed": True}
+
+    with pytest.raises(OperationError, match="Body disarmed"):
+        await guarded_grasp(head, Settings(), health=intermittent_health)
+    assert head.commands == ["grip 65"]
