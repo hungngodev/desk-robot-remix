@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Experimental native MiniCPM-o duplex backend smoke test, NO robot speaker.
+
+Exercise the published vLLM-Omni /v1/realtime?duplex=1 protocol with a REAL
+16kHz mono WAV and optional JPEG. The output is a 24kHz WAV file for offline
+review, not an acoustic playback ACK or head integration. No motor permissions.
+The backend must already be running in a supported execution environment.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import ipaddress
+import json
+import time
+import wave
+from pathlib import Path
+from urllib.parse import urlsplit
+
+import aiohttp
+
+from desk_robot.realtime_omni_protocol import OmniDuplexWire
+
+
+def server_url(url: str) -> str:
+    parsed = urlsplit(url)
+    if (parsed.scheme not in ("ws", "wss")
+            or parsed.username or parsed.password
+            or parsed.fragment
+            or parsed.path != "/v1/realtime"
+            or parsed.query != "duplex=1" or not parsed.hostname):
+        raise ValueError("Require a vLLM Omni /v1/realtime?duplex=1 WebSocket")
+    if parsed.scheme == "ws":
+        try:
+            if not ipaddress.ip_address(parsed.hostname).is_loopback:
+                raise ValueError("Remote native audio requires encrypted wss://")
+        except ValueError as exc:
+            if parsed.hostname not in ("localhost",):
+                raise ValueError("Use localhost or TLS for native voice") from exc
+    return url
+
+
+def read_wav(path: Path) -> bytes:
+    with wave.open(str(path), "rb") as wav:
+        if (wav.getnchannels() != 1 or wav.getsampwidth() != 2
+                or wav.getframerate() != 16000
+                or not 0 < wav.getnframes() <= 16000 * 60):
+            raise ValueError("Input must be <=60s mono 16kHz PCM16 WAV")
+        return wav.readframes(wav.getnframes())
+
+
+def read_jpeg(path: Path | None) -> bytes | None:
+    if path is None:
+        return None
+    jpeg = path.read_bytes()
+    if not 10 <= len(jpeg) <= 1_000_000 or not jpeg.startswith(b"\xff\xd8"):
+        raise ValueError("A <=1MB actual JPEG image is required")
+    return jpeg
+
+
+async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
+                *, deadline: float) -> tuple[bytes, dict]:
+    if not 5 <= deadline <= 180:
+        raise ValueError("Probe deadline must be between 5 and 180 seconds")
+    wire = OmniDuplexWire(model=model)
+    output = bytearray()
+    transcript = []
+    results = {
+        "native_backend_protocol_only": True,
+        "head_speaker_connected": False,
+        "audible_stop_verified": False,
+        "actual_playback_acknowledged": False,
+        "motion_authorized": False,
+    }
+    first_audio_at = None
+    started_at = time.monotonic()
+    response_complete = asyncio.Event()
+
+    async with aiohttp.ClientSession() as client:
+        async with client.ws_connect(
+            server_url(url), heartbeat=20, max_msg_size=2_000_000,
+        ) as socket:
+            await socket.send_json(wire.session_update())
+            greeting = await socket.receive_json(timeout=10)
+            if greeting.get("type") != "session.created":
+                raise RuntimeError("Native duplex server refused session handshake")
+            wire.handle_event(greeting)
+
+            async def reader():
+                nonlocal first_audio_at
+                async for msg in socket:
+                    if msg.type != aiohttp.WSMsgType.TEXT:
+                        raise RuntimeError("Non-JSON response from native backend")
+                    event = json.loads(msg.data)
+                    if event.get("type") in (
+                        "response.output_text.delta",
+                        "response.output_audio_transcript.delta",
+                    ):
+                        transcript.append(str(event.get("delta", ""))[:512])
+                    packet = wire.handle_event(event)
+                    if packet is not None:
+                        if first_audio_at is None:
+                            first_audio_at = time.monotonic()
+                        if len(output) + len(packet.pcm24k) > 24000 * 2 * 30:
+                            raise RuntimeError("Native audio output exceeds 30s bound")
+                        output.extend(packet.pcm24k)
+                    if event.get("type") == "response.done":
+                        response_complete.set()
+                        break
+
+            listener = asyncio.create_task(reader())
+            try:
+                # Same single audio timeline as vLLM-Omni's official demo.
+                # Pacing is deliberate. This is not a device microphone.
+                padded = pcm + b"\0" * (-len(pcm) % 32)
+                for index in range(0, len(padded), 3200):
+                    chunk = padded[index:index + 3200]
+                    packet = wire.append_audio(
+                        chunk, speech=True,
+                        jpeg=jpeg,
+                        camera_age_ms=0 if jpeg is not None else None,
+                    )
+                    await socket.send_json(packet)
+                    await asyncio.sleep(packet["duration_ms"] / 1000)
+                await socket.send_json(wire.commit())
+                await asyncio.wait_for(response_complete.wait(), timeout=deadline)
+                await listener
+            finally:
+                if not listener.done():
+                    listener.cancel()
+                    await asyncio.gather(listener, return_exceptions=True)
+                try:
+                    await socket.send_json({"type": "session.close"})
+                except Exception:
+                    pass
+
+    results.update({
+        "input_duration_ms": len(pcm) // 32,
+        "video_frames_sent": wire.frames_sent,
+        "generated_audio_ms": len(output) * 1000 // (24000 * 2),
+        "first_audio_ms_since_connect": (
+            round((first_audio_at - started_at) * 1000)
+            if first_audio_at is not None else None
+        ),
+        "transcript_excerpt": "".join(transcript)[:300],
+    })
+    return bytes(output), results
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--url", default="ws://127.0.0.1:8099/v1/realtime?duplex=1")
+    parser.add_argument("--model", default="openbmb/MiniCPM-o-4_5")
+    parser.add_argument("--input-wav", required=True, type=Path)
+    parser.add_argument("--frame-jpeg", type=Path)
+    parser.add_argument("--output-wav", required=True, type=Path)
+    parser.add_argument("--deadline-s", type=float, default=90.0)
+    args = parser.parse_args()
+    pcm = read_wav(args.input_wav)
+    jpeg = read_jpeg(args.frame_jpeg)
+    output, stats = asyncio.run(probe(
+        args.url, args.model, pcm, jpeg, deadline=args.deadline_s,
+    ))
+    if output:
+        args.output_wav.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(args.output_wav), "wb") as dst:
+            dst.setnchannels(1)
+            dst.setsampwidth(2)
+            dst.setframerate(24000)
+            dst.writeframes(output)
+    print(json.dumps(stats, indent=2))
+    if not output:
+        raise SystemExit("Model did not produce test audio; no physical playback claimed")
+
+
+if __name__ == "__main__":
+    main()
