@@ -24,6 +24,7 @@ def native(monkeypatch):
         connections={},
         robot_for_device=lambda dev: "robot-01" if dev == "mac-01" else None,
         lease_stopping=False, lease_ids=frozenset(), lease_until=0.0,
+        human_speech_active=lambda: False,
     )
     monkeypatch.setitem(sys.modules, "desk_robot_bridge", fake_bridge)
     spec = importlib.util.spec_from_file_location(
@@ -385,3 +386,52 @@ async def test_human_voice_flushes_physical_head_before_slow_remote_cancel(nativ
         await task
     assert any(x["type"] == "output_audio_buffer.clear" for x in remote_events)
     assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
+
+
+async def test_native_audio_cannot_start_during_other_robots_authenticated_human_vad(
+    native,
+):
+    module, bridge = native
+    first, sent = connection()
+    bridge.connections["mac-01"] = first
+    service = module.NativeOmniSession(
+        first, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = service
+    bridge.human_speech_active = lambda: True
+    await service._send_device_state("start", service._generation)
+    assert first.client_is_speaking is False
+    assert service._generation == 1  # stale generated Opus invalidated
+    assert service.wire.accept_output is False
+    assert sent == []
+    assert module._output_owner is None
+    assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
+
+
+async def test_native_audio_racing_with_new_human_vad_refuses_tts_start(native):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = service
+    # First speaker-floor read is clear. The second read, while awaiting
+    # physical device send, detects speech from a newly registered peer.
+    check_count = 0
+
+    def human_active():
+        nonlocal check_count
+        check_count += 1
+        return check_count >= 2
+
+    bridge.human_speech_active = human_active
+    await service._send_device_state("start", service._generation)
+    assert check_count >= 2
+    assert conn.client_is_speaking is False
+    assert service.wire.response_id is None
+    assert service._generation == 1
+    assert sent == []
+    assert module._output_owner is None
