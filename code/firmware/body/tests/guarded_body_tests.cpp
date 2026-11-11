@@ -552,6 +552,34 @@ static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
   CHECK(send(body, "disarm", 6) == "OK disarm");
 }
 
+static void dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  desk_robot::AccessoryReadings read{};
+  read.dock.present = true;
+  read.dock.valid = true;
+  read.dock.left_seated = true;
+  read.dock.right_seated = true;
+  read.dock.input_good = true;
+  read.dock.charge_indicated = true;
+  read.dock.sample_seq = 123;
+  read.dock.at_ms = 150;
+  body.set_accessories(read);
+  const std::string aux = send(body, "aux", 200);
+  CHECK(!aux.empty() && aux.front() == '{' && aux.back() == '}');
+  CHECK(aux.size() < desk_robot::kReplyCapacity - 1);
+  CHECK(aux.find("\\\"dock\\\":{\\\"present\\\":true,\\\"valid\\\":true")
+        != std::string::npos);
+  CHECK(aux.find("\\\"seq\\\":123,\\\"age_ms\\\":50,\\\"charging_verified\\\":false")
+        != std::string::npos);
+  CHECK(send(body, "arm", 201) == "ERR arm dock_power_connected");
+  CHECK(!body.state().armed);
+  // A now-old sample cannot be passed off as current.
+  const std::string old = send(body, "aux", 800);
+  CHECK(old.find("\\\"valid\\\":false") != std::string::npos);
+  CHECK(old.find("\\\"seq\\\":123,\\\"age_ms\\\":650")
+        != std::string::npos);
+}
+
 static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   using desk_robot::BodyControl;
   BodyControl body(desk_robot::BodyProfile::DcPwm);
@@ -592,6 +620,7 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
+    dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
