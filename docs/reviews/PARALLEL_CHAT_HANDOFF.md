@@ -17,6 +17,16 @@ The current canonical branch adds four small source/test/documentation iteration
 
 This is a small compatible reuse of the existing Xiaozhi VAD, LiveKit-inspired frame hub and PetController state owners, not a second media stack. The real XIAO microphone/speaker, live model speed, final printer assembly, grasp calibration, docking and protected charger remain unqualified.
 
+## November 11 continuation: live monitor availability and distinct VAD event kinds
+
+Second small reuse loop on the same PR #17 source owners, no new audio stack or branch:
+
+* `VoiceEventListener` now reports authenticated voice transport readiness at bootstrap, valid ordered polling, reset, stream loss and ring-buffer gap. `Runtime` wires it to `PetController.voice_monitor_ready`, initially false in hardware mode; both the cheap initiative gate and the post-LLM speaker handoff refuse spontaneous speech when the monitor is offline. Live fleet audio is stopped on a global event transport fault. Test files `test_live_voice_events.py`, `test_pet.py` and `test_runtime_voice_priority.py` now cover loss, suppression and recovered connectivity.
+* Exact event contract review revealed `normal` and `group` AEC interrupts have no guaranteed paired `speech_end`, unlike a debounced idle `speech_start`. `Runtime` now routes AEC to a bounded seven-second `voice_interrupted` priority window while explicit VAD holds until actual end. The same `CameraFrameHub`, unified voice floor and camera task are reused; new tests cover overlap.
+* A healthy authenticated event feed is not proof of silence during an earlier missed VAD start. For complete recovery safety, the pinned server must expose a fresh, authenticated current speaker-state snapshot or an intentional rearm handshake; do not assert that a newly connected empty event poll proves nobody is talking. Real head AEC and listener timing remain unmeasured. CI still fails without recorded steps, so tests remain committed rather than verified running.
+
+Detailed integration and uncertainty are in `docs/guides/xiaozhi-voice-event-integration.md` and `docs/guides/multimodal-voice-video-orchestration.md`.
+
 ## The user's cross-chat constraints, all retained
 
 1. **One complete robot, then four identical functional copies.** Five different personalities and removable costumes, not five different incomplete hardware architectures. Day zero design includes the entire desired core; physical bringup may still be staged for safe testing.
