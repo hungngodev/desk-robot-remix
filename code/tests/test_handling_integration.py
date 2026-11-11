@@ -45,6 +45,9 @@ async def test_qualified_real_wroom_imu_tilt_reaches_only_own_memory(tmp_path):
         def notify(self, robot_id, kind, at):
             seen.append((robot_id, kind))
 
+        def clear(self, robot_id):
+            assert robot_id in {r.id for r in settings.robots}
+
     pet.multimodal = SimpleNamespace(hub=Events())
     state = pet.states["robot-01"]
     state.enabled = True
