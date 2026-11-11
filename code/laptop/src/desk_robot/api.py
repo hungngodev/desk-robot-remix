@@ -248,6 +248,50 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             ],
         }
 
+    @app.get("/v1/pet/{robot_id}/omni-context", dependencies=[Depends(authorize)])
+    async def omni_context(robot_id: str):
+        """Native audio model's personal style, with opt-in text memory only.
+
+        Images, microphones, position, charging or actuator permissions are
+        not in this prompt. This is spoken personality, not physical authority.
+        """
+        robot = coordinator().robot(robot_id)
+        if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
+            raise HTTPException(403, "Native voice and camera need explicit opt in")
+        prefix = (
+            robot.persona[:950]
+            + " You are speaking live through your own small desk robot. "
+            + "Use natural brief conversational phrases. Listen while you "
+            + "speak, and stop responding if the human changes the question. "
+            + "Only make a visual claim from real current camera images. "
+            + "Never claim physical movement, docking, charging or grasping "
+            + "unless an independently measured operation confirms it. "
+            + "You cannot grant motor, battery or user authorization."
+        )
+        if settings.voice_memory_tools_enabled:
+            records = await asyncio.to_thread(
+                app.state.runtime.memory.recent, robot_id, limit=4
+            )
+            # Label remote or replayed facts honestly; never confuse text
+            # memory with current optical evidence or operational commands.
+            for item in reversed(records):
+                source = (
+                    "I observed" if item.witnessed else
+                    f"Other robot {item.source_robot} reported"
+                )
+                line = " Past untrusted memory (" + source + "): " + item.summary[:130]
+                if len(prefix) + len(line) > 1900:
+                    break
+                prefix += line
+        return {
+            "robot_id": robot_id,
+            "instructions": prefix[:2000],
+            "memory_enabled": settings.voice_memory_tools_enabled,
+            "untrusted_historical_text": True,
+            "model_can_arm_motors": False,
+            "camera_exposure_sync_verified": False,
+        }
+
     @app.get("/v1/pet/{robot_id}/omni-frame", dependencies=[Depends(authorize)])
     async def omni_frame(robot_id: str):
         """One real authenticated JPEG for an opt-in native speech/video model.
