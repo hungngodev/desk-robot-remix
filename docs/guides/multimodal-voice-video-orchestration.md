@@ -90,3 +90,16 @@ If `voice_vision_tools_enabled = false` or no model is installed, spoken camera 
 * `code/tests/test_multimodal.py`: offline source, sampling, identity, consent, temporal selection, VLM and no-motion assertions.
 
 All changes above are source implementation and mock tests. No actual XIAO board, Mac GPU inference trace or microphone/speaker was accessible during the coding pass; CI may still fail and must be checked separately.
+
+
+## November 11 continuation: actual event-loop latency, speech end, and diagnostics
+
+New source changes preserve the same Xiaozhi and Mac owners:
+
+1. **Real VAD end**: the pinned server's existing `receiveAudioHandle` VAD callback now emits an authenticated `speech_end` only after **two consecutive VAD negative frames** following an actual `speech_start`. A brief silence inside a phrase is not treated as the end. The Mac listener validates the source and ordered event; the runtime stops voice-priority camera sampling without cancelling the current human reply or deleting its recent JPEG evidence. `normal` and `group` double talk remain separate events for urgent physical speaker flush.
+2. **No Pillow blocking the audio loop**: live authenticated camera captures remain serialized per head, while bounding JPEG downscale/encode work is delegated to `asyncio.to_thread` under a two-worker preprocessing semaphore. Only the Python event-loop owner may publish results to the camera frame hub. A generation token discards a frame if operator pause, reconnect or shutdown occurred while it was being processed.
+3. **No obsolete 45-second live scene**: direct image questions now bound actual local VLM inference to 15 seconds, reject a camera answer older than 16 seconds after receipt, and fence a previous question after a new Xiaozhi spoken turn or newer visual query. Failures return explicit no-answer errors rather than a confident old scene description.
+4. **Operator timings**: `GET /v1/pet/{robot_id}/vision-status` now includes per-robot read-only `software_timings` with actual camera requests, successful captures, errors, visual questions, model completions, failed answers, last JPEG/capture-processing time and last local VLM inference time in milliseconds. These are measured Mac software timings only; they are NOT synchronized physical camera exposure, network-to-ear, acoustic AEC or audible playback metrics.
+5. **Offline regression additions** cover nonblocking Pillow worker, late frame rejection after pause, speaker continuity at VAD end, authenticated speech-start/speech-end order, stale model timeout and per-robot counters.
+
+**Unqualified requirements remain:** actual head PWM and dock hardware, calibrated grasp, complete integrated STL/Fusion model, protected battery charging currents and thermal tests, measured end-to-end voice acoustics, measured real camera/sensor throughput and realtime speech-to-speech backend. The PR remains draft until live hardware trials and CI pass.
