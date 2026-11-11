@@ -118,6 +118,19 @@ def test_aec_barge_has_finite_lease_but_never_shortens_explicit_vad():
     assert not hub.user_active("robot-01", 301.0)
 
 
+def test_authenticated_snapshot_reconciles_missed_vad_without_losing_aec_hold():
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-01", "human_voice", 100.0)
+    hub.barge_in("robot-02", 101.0)
+    hub.reconcile_speech_snapshot(frozenset({"robot-01"}), 103.0)
+    assert hub.user_active("robot-01", 300.0)
+    assert hub.user_active("robot-02", 107.0)
+    hub.reconcile_speech_snapshot(frozenset(), 104.0)
+    assert not hub.user_active("robot-01", 105.0)
+    assert hub.user_active("robot-02", 107.0)
+    assert not hub.user_active("robot-02", 108.0)
+
+
 def test_temporal_question_selects_older_and_latest_in_same_robot():
     hub = CameraFrameHub(["robot-01", "robot-02"])
     hub.offer("robot-01", image(), 10.0, source="proactive")
