@@ -77,6 +77,9 @@ struct DockPinRaw {
   bool left_seated = false, right_seated = false;
   bool input_good = false, charge_indicated = false;
   std::uint32_t at_ms = 0;
+  // Increment ONLY after a newly completed MCP23017 GPIOA read.
+  // A repeated HTTP/UART cache response cannot fake independent samples.
+  std::uint32_t sample_seq = 0;
 };
 struct AccessoryReadings {
   AngleRaw angle[3]{}; // index 0 nose, 1 left track, 2 right track
