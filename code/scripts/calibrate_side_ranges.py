@@ -62,7 +62,6 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
             (capture_id, mm[channel])
         )
 
-    near_all, far_all = [], []
     summary = {}
     for side in SIDE:
         near = [mm for _, mm in samples[side, "near"]]
@@ -75,19 +74,17 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
             "near_trials": len(near), "far_trials": len(far),
             "near_p95_mm": q95_near, "far_p05_mm": q05_far,
         }
-        near_all += near
-        far_all += far
 
     # Conservative shared threshold across all three independently labeled
     # lens geometries, with 20 mm of reserve on both sides. If the near and
     # far clouds overlap, the fitter refuses to produce a fake calibration.
-    low = max(percentile(
+    low = max(35, max(percentile(
         [mm for _, mm in samples[side, "near"]], .95
-    ) for side in SIDE) + 20
-    high = min(percentile(
+    ) for side in SIDE) + 20)
+    high = min(1000, min(percentile(
         [mm for _, mm in samples[side, "far"]], .05
-    ) for side in SIDE) - 20
-    if low > high or low < 35 or high > 1000:
+    ) for side in SIDE) - 20)
+    if low > high:
         raise ValueError("Near/far distributions overlap or exceed policy limits")
     proposed = (low + high) // 2
     # A strict 95% measured classification check for each independent side.
