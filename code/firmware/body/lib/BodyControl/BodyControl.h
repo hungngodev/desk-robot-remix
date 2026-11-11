@@ -125,6 +125,7 @@ class BodyControl {
   bool cap_initialized_ = false;
   bool extras_initialized_ = false;
   bool dock_power_lockout_ = false;  // stays latched across missing I2C samples
+  bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};
   std::uint8_t extra_streaks_[3]{};
   void stop_motion();
