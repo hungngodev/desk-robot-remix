@@ -444,10 +444,11 @@ class NativeOmniSession:
                     self._socket = ws
                     await self._send(self.wire.session_update())
                     greeting = await ws.receive_json(timeout=8)
-                    if greeting.get("type") != "session.created":
-                        raise RuntimeError("Native backend rejected model session")
+                    verify_native_server(greeting, self.wire.model)
                     self.wire.handle_event(greeting)
                     self.connected = True
+                    _terminal_errors.pop(self.device, None)
+                    _retry_after.pop(self.device, None)
                     self._tasks = [
                         asyncio.create_task(self._send_mic()),
                         asyncio.create_task(self._receive_model()),
@@ -485,6 +486,10 @@ class NativeOmniSession:
                 pass
             if _sessions.get(self.device) is self:
                 _sessions.pop(self.device, None)
+                _terminal_errors[self.device] = (
+                    self.last_error or "Native model session ended without clean shutdown"
+                )[:140]
+                _retry_after[self.device] = time.monotonic() + 15.0
             global _output_owner
             async with _output_owner_lock:
                 if _output_owner == self.device:
@@ -534,6 +539,8 @@ def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
     if (bridge.lease_stopping
             or (bridge.lease_ids and time.monotonic() < bridge.lease_until)):
         return True
+    if time.monotonic() < _retry_after.get(device, 0.0):
+        return True  # fail closed during reconnect cooldown, no flood
     session = _sessions.get(device)
     if session is None:
         try:
@@ -548,9 +555,11 @@ def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
             )
             _sessions[device] = session
             session.started = asyncio.create_task(session.run())
-        except ValueError:
+        except ValueError as exc:
             # Explicit opt-in means fail closed; never send the same voice
             # unexpectedly to another provider or synthesize old responses.
+            _terminal_errors[device] = str(exc)[:140]
+            _retry_after[device] = time.monotonic() + 15.0
             return True
     if session.conn is not conn or session.closed:
         return True
