@@ -161,3 +161,32 @@ async def test_event_transport_failure_preempts_once_until_recovered():
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_idle_speech_start_uses_current_xiaozhi_vad_not_fake_aec():
+    delivered = []
+
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 2, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(200, json={
+            "cursor": 3, "reset": False, "lost": False,
+            "events": [{
+                "seq": 3, "robot_id": "robot-01",
+                "kind": "speech_start", "source": "xiaozhi_server_vad",
+            }],
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def on_voice(robot_id, kind):
+            delivered.append((robot_id, kind))
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=on_voice,
+        )
+        assert await listener.poll() == 0
+        assert await listener.poll() == 1
+        assert delivered == [("robot-01", "speech_start")]
+        assert listener.cursor == 3
