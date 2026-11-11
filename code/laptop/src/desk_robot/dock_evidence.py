@@ -30,24 +30,30 @@ def classify_dock(dock: dict) -> str:
 async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> dict:
     """Read three independently timed body updates, require stable dock pins.
 
-    A 600ms observation span exceeds the WROOM 500ms fresh-sample window;
-    unchanged cached messages cannot qualify unless the WROOM actually samples.
+    Require three different *hardware* MCP23017 GPIO acquisition sequence
+    values. HTTP polling delay alone cannot distinguish cached/replayed data.
     There is still no electrical ammeter or charger controller authorization.
     """
     if not isinstance(robot_id, str) or not robot_id or not 0.25 <= gap <= 1.0:
         raise ValueError("Invalid dock evidence request")
     snapshots = []
+    sample_sequences = []
     for index in range(3):
         sample = validate_aux(await asyncio.wait_for(head.aux_status(), timeout=2), robot_id)
         dock = sample.get("dock")
-        if dock is None:
+        if dock is None or not dock["valid"] or not dock["present"]:
             return _result(robot_id, "dock_telemetry_unavailable", False)
+        # Validity and freshness are checked in validate_aux. A new HTTP
+        # response by itself does NOT mean a new physical GPIO conversion.
+        sample_sequences.append(dock["seq"])
         snapshots.append((
             dock["present"], dock["valid"], dock["left_seated"],
             dock["right_seated"], dock["input_good"], dock["charge_indicated"],
         ))
         if index != 2:
             await asyncio.sleep(gap)
+    if not (0 < sample_sequences[0] < sample_sequences[1] < sample_sequences[2]):
+        return _result(robot_id, "dock_sample_replayed_or_reset", False)
     if snapshots[0] != snapshots[1] or snapshots[1] != snapshots[2]:
         return _result(robot_id, "dock_evidence_changed", False)
     present, valid, left, right, input_good, charge_indicated = snapshots[2]
