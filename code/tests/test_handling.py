@@ -1,0 +1,130 @@
+"""Source-grounded MPU6050 handling behavior, not physical calibration proof."""
+import math
+
+import pytest
+
+from desk_robot.handling import HandlingGate, raw_mpu6050
+
+
+def sample(
+    acc=(0, 0, 16384), gyro=(0, 0, 0), *,
+    family=4, valid=True, age=20, left=0, right=0, drive_ms=0,
+):
+    return {
+        "left": left, "right": right, "drive_ms": drive_ms,
+        "imu": {
+            "family": family, "gyro_id": 0x68,
+            "aux_id": 0, "valid": valid,
+            "acc": list(acc), "gyro": list(gyro), "age_ms": age,
+        }
+    }
+
+
+def qualified(gate, body, now):
+    return gate.observe(
+        body, now, qualified=True,
+        tilt_threshold_deg=38, shake_delta_mg=550,
+    )
+
+
+def calibrated(gate, start=100.0):
+    for index in range(8):
+        assert qualified(gate, sample(), start + .15 * index) == ()
+    assert gate.reference is not None
+
+
+def test_real_mpu_scaled_only_if_wroom_source_fresh_stationary_and_valid():
+    a, dps = raw_mpu6050(sample(acc=(0, 0, 16384), gyro=(0, 131, 0)))
+    assert a == (0, 0, 1)
+    assert dps == 1
+    for body in (
+        sample(family=3), sample(age=201), sample(valid=False),
+        sample(left=1), sample(right=1), sample(drive_ms=250),
+        sample(acc=(True, 0, 100)), sample(gyro=(0, 0)),
+        sample(acc=(40000, 0, 0)),
+    ):
+        assert raw_mpu6050(body) is None
+
+
+def test_imu_disabled_by_default_never_creates_unqualified_event():
+    gate = HandlingGate()
+    for i in range(15):
+        assert gate.observe(sample(acc=(16000, 0, 0)), 100 + i * .15,
+                            qualified=False) == ()
+    assert gate.reference is None
+
+
+def test_imu_requires_eight_still_upright_baseline_reads():
+    gate = HandlingGate()
+    for i in range(7):
+        assert qualified(gate, sample(), 100 + .15 * i) == ()
+    assert gate.reference is None
+    assert qualified(gate, sample(gyro=(2000, 0, 0)), 101.10) == ()
+    assert gate.startup_samples == []  # rotating robot cannot set a baseline
+    calibrated(gate, 102)
+    assert gate.reference == (0, 0, 1)
+
+
+def test_mpu_tilt_is_relative_to_actual_stationary_mount_not_body_axis():
+    gate = HandlingGate()
+    calibrated(gate)
+    # A stationary 50-degree tilt relative to baseline, approximate 1g.
+    tilted = sample(acc=(12551, 0, 10531))
+    assert qualified(gate, tilted, 102.0) == ()
+    assert qualified(gate, tilted, 102.2) == ("handling_tilt",)
+    assert qualified(gate, tilted, 102.4) == ()
+    # Return to upright for hysteresis and report a later distinct tilt.
+    assert qualified(gate, sample(), 102.6) == ()
+    assert qualified(gate, tilted, 102.8) == ()
+    assert qualified(gate, tilted, 103.0) == ("handling_tilt",)
+
+
+def test_mpu_shake_needs_synchronized_accel_and_rotation_with_cooldown():
+    gate = HandlingGate()
+    calibrated(gate)
+    shaking = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, shaking, 102.0) == ()
+    assert qualified(gate, shaking, 102.15) == ("handling_shake",)
+    assert qualified(gate, shaking, 102.30) == ()
+    assert qualified(gate, shaking, 102.45) == ()
+    assert qualified(gate, sample(), 102.60) == ()
+    assert qualified(gate, shaking, 105.20) == ()
+    assert qualified(gate, shaking, 105.40) == ("handling_shake",)
+
+
+def test_imu_motion_during_drive_cannot_trigger_handling_or_retain_calibration():
+    gate = HandlingGate()
+    calibrated(gate)
+    assert qualified(gate, sample(acc=(13000, 0, 9000), left=40), 102.0) == ()
+    assert gate.reference is None
+    assert qualified(gate, sample(acc=(13000, 0, 9000)), 102.15) == ()
+    assert gate.reference is None
+
+
+def test_stale_generation_freshness_reset_and_no_unsupported_berryimu_scale():
+    gate = HandlingGate()
+    calibrated(gate)
+    assert qualified(gate, sample(family=2), 102.0) == ()
+    assert gate.reference is None
+    calibrated(gate, 103)
+    assert qualified(gate, sample(age=500), 105) == ()
+    assert gate.reference is None
+    calibrated(gate, 106)
+    assert qualified(gate, sample(), 111) == ()
+    assert gate.reference is None  # long gap resets before new source
+
+
+@pytest.mark.parametrize("bad", [
+    (False, 24, 550), (True, 0, 550), (True, 39, 1900),
+])
+def test_invalid_qualification_parameters_refuse_events(bad):
+    # Each caller must supply a coherent boolean and bounded measured knobs.
+    gate = HandlingGate()
+    qualified, angle, delta = bad
+    if type(qualified) is bool and angle == 24 or delta == 1900:
+        with pytest.raises(ValueError):
+            gate.observe(sample(), 1, qualified=qualified,
+                         tilt_threshold_deg=angle, shake_delta_mg=delta)
+    else:
+        assert gate.observe(sample(), 1, qualified=False,
+                            tilt_threshold_deg=angle, shake_delta_mg=delta) == ()
