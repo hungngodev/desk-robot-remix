@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .config import Settings, secret
 from .controller import OperationError
 from .conversation import conversation_turns
+from .dock_evidence import observe_dock_evidence
 from .dock_runtime import observe_actual_dock
 from .runtime import Runtime
 from .transport import HeadError
@@ -141,6 +142,22 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         """Passive marker detection only, no motor or charger authority."""
         robot = coordinator().robot(robot_id)
         return await observe_actual_dock(coordinator().heads[robot_id], robot)
+
+    @app.get("/v1/robots/{robot_id}/dock/evidence",
+             dependencies=[Depends(authorize)])
+    async def dock_evidence(robot_id: str):
+        """Three physical dock pin samples, never a battery charging verdict."""
+        coordinator().robot(robot_id)
+        if settings.mode != "hardware":
+            return {
+                "robot_id": robot_id, "state": "no_physical_hardware",
+                "charging_verified": False, "motor_authorized": False,
+                "charging_authorized": False,
+            }
+        head = coordinator().heads[robot_id]
+        if not callable(getattr(head, "aux_status", None)):
+            raise OperationError("This head has no dock auxiliary telemetry")
+        return await observe_dock_evidence(head, robot_id)
 
     @app.get("/v1/robots/{robot_id}/camera.jpg", dependencies=[Depends(authorize)])
     async def camera(robot_id: str):
