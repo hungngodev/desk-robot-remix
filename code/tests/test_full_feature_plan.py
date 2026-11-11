@@ -81,3 +81,30 @@ def test_status_uart_and_usb_bounds_are_consistent_after_petting_telemetry():
     assert "kMaxReply = 1152" in bridge
     assert "port.readline(1152)" in usb
 
+
+
+def test_canonical_driver_statuses_match_current_source_without_claiming_hardware():
+    """Keep parallel chats from resurrecting old unimplemented driver labels."""
+    p = load()
+    bus = p["bus"]
+    for channel in bus["mux_ranges"]["channels"][5:]:
+        assert "implemented_read_only" in channel["firmware"]
+        assert "not_physically_qualified" in channel["firmware"]
+    for channel in bus["mux_extras"]["channels"]:
+        assert channel["firmware"].startswith("implemented_")
+    assert "pn532_not_yet_integrated" in bus["mux_extras"]["channels"][5]["firmware"]
+    assert bus["implementation_evidence"]["sensor_hardware_qualified"] is False
+    assert bus["implementation_evidence"]["charging_current_electrically_verified"] is False
+    root = Path(__file__).resolve().parents[1]
+    extra = (root / "firmware/body/lib/AccessorySensors/AccessorySensors.cpp").read_text()
+    body = (root / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    full = (root / "firmware/body/platformio.ini").read_text()
+    main = (root / "firmware/body/src/main.cpp").read_text()
+    assert "dock_status(now_ms)" in extra
+    assert "++dock.sample_seq" in extra
+    assert "dock_telemetry_bad(now_ms)" in body
+    assert "dock.input_good || dock.left_seated || dock.right_seated" in body
+    assert "-DDESK_ROBOT_REQUIRE_DOCK_MONITOR=1" in full
+    assert "control.require_dock_monitor(true)" in main
+    # No claim of safe automatic charger enable or measured battery current.
+    assert p["physical_trial_count"] == 0
