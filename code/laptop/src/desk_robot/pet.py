@@ -54,6 +54,7 @@ def _initiative_evidence(change: SceneChange) -> bool:
     if (not isinstance(change.kind, str)
             or not isinstance(change.description, str)
             or not change.description.strip()
+            or type(change.confidence) not in (int, float)
             or not math.isfinite(change.confidence)
             or not 0.0 <= change.confidence <= 1.0):
         return False
