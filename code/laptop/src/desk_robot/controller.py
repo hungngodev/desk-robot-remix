@@ -459,7 +459,9 @@ class Coordinator:
         return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
 
     async def _observe(self, robot_id: str, target: str, c: Calibration) -> Detection:
-        jpeg = await self.heads[robot_id].snapshot()
+        jpeg = await asyncio.wait_for(
+            self.heads[robot_id].snapshot(), timeout=3.0
+        )
         if image_size(jpeg) != (c.image_width, c.image_height):
             raise OperationError("Camera resolution differs from measured calibration")
         objects = [
@@ -499,6 +501,9 @@ class Coordinator:
             else:
                 direction = (1 if dy > 0 else -1) * c.forward_sign
                 command = f"drive {direction * 20} {direction * 20} 100"
+            # Vision and geometry may have taken seconds. Never re-use the
+            # pre-camera WROOM fault/IMU/cliff/bumper verdict for a drive.
+            await self._assert_armed_health(job.robot_id)
             await head.command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
             await head.command("stop")
@@ -551,6 +556,7 @@ class Coordinator:
         # not open the jaws unless the object is visibly back over the
         # calibrated ground area. No blind wheel movement or drop command.
         job.events.append("lift and hold visually verified; begin supervised placement")
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
         lowered = await self._observe(job.robot_id, target, c)
@@ -567,6 +573,7 @@ class Coordinator:
         # the empty jaws to distinguish a placed object from one stuck in them.
         await head.command(f"grip {c.grip_open}")
         await asyncio.sleep(c.servo_settle_seconds)
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
         placed_positions = []
