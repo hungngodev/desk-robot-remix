@@ -1,0 +1,85 @@
+# ONE FULL FIVE PET FLEET, never a reduced demo. Copy to local.toml.
+# Replace LAN addresses, private env tokens and real Xiaozhi device_id for each.
+# Hardware motors and dock must remain disabled until real physical calibration.
+mode = "hardware"
+ollama_url = "http://127.0.0.1:11434"
+ollama_model = "qwen3:8b"
+kokoro_url = "http://127.0.0.1:8880"
+speech_bridge_url = "http://127.0.0.1:8766"
+vision_model = ""
+voice_vision_tools_enabled = false
+voice_memory_tools_enabled = false
+fleet_text_sharing_enabled = false
+memory_dir = "../data/private/memory"
+trials_file = "../data/physical-trials.jsonl"
+
+[[robots]]
+id = "robot-01"
+name = "Pip"
+head_url = "http://192.168.1.101:8081" # REPLACE with verified actual head address
+token_env = "DESK_ROBOT_HEAD_01_TOKEN"
+device_id = "" # REPLACE with real unique Xiaozhi device identity
+voice = "af_heart"
+persona = "I am Pip, a curious and playful full desk pet. Observe my own real camera and sensors, remember real interactions and speak naturally without interrupting a human."
+motion_enabled = false
+exploration_qualified = false
+dock_motion_qualified = false
+gesture_interactions_qualified = false
+battery_low_percent = 20
+
+[[robots]]
+id = "robot-02"
+name = "Dot"
+head_url = "http://192.168.1.102:8081" # REPLACE with verified actual head address
+token_env = "DESK_ROBOT_HEAD_02_TOKEN"
+device_id = "" # REPLACE with real unique Xiaozhi device identity
+voice = "am_adam"
+persona = "I am Dot, a thoughtful and patient full desk pet. Observe my own real camera and sensors, remember real interactions and speak naturally without interrupting a human."
+motion_enabled = false
+exploration_qualified = false
+dock_motion_qualified = false
+gesture_interactions_qualified = false
+battery_low_percent = 20
+
+[[robots]]
+id = "robot-03"
+name = "Chip"
+head_url = "http://192.168.1.103:8081" # REPLACE with verified actual head address
+token_env = "DESK_ROBOT_HEAD_03_TOKEN"
+device_id = "" # REPLACE with real unique Xiaozhi device identity
+voice = "af_bella"
+persona = "I am Chip, a inventive and mischievous full desk pet. Observe my own real camera and sensors, remember real interactions and speak naturally without interrupting a human."
+motion_enabled = false
+exploration_qualified = false
+dock_motion_qualified = false
+gesture_interactions_qualified = false
+battery_low_percent = 20
+
+[[robots]]
+id = "robot-04"
+name = "Byte"
+head_url = "http://192.168.1.104:8081" # REPLACE with verified actual head address
+token_env = "DESK_ROBOT_HEAD_04_TOKEN"
+device_id = "" # REPLACE with real unique Xiaozhi device identity
+voice = "am_michael"
+persona = "I am Byte, a calm and analytical full desk pet. Observe my own real camera and sensors, remember real interactions and speak naturally without interrupting a human."
+motion_enabled = false
+exploration_qualified = false
+dock_motion_qualified = false
+gesture_interactions_qualified = false
+battery_low_percent = 20
+
+[[robots]]
+id = "robot-05"
+name = "Bob"
+head_url = "http://192.168.1.105:8081" # REPLACE with verified actual head address
+token_env = "DESK_ROBOT_HEAD_05_TOKEN"
+device_id = "" # REPLACE with real unique Xiaozhi device identity
+voice = "af_nicole"
+persona = "I am Bob, a warm and adventurous full desk pet. Observe my own real camera and sensors, remember real interactions and speak naturally without interrupting a human."
+motion_enabled = false
+exploration_qualified = false
+dock_motion_qualified = false
+gesture_interactions_qualified = false
+battery_low_percent = 20
+
