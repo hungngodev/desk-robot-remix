@@ -60,8 +60,13 @@ class Runtime:
         self._voice_task = asyncio.create_task(self.voice_events.run())
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
-        await self.pet.interrupt(robot_id)
-        # The same human speech also preempts any ongoing peer discussion.
+        # A human has priority over the shared five-pet speech floor. The
+        # original listener validated which live Sense produced this event;
+        # do not leave a DIFFERENT pet narrating while the human speaks.
+        # Pet.interrupt() only owns proactive audio and never a motor permit.
+        for robot in self.settings.robots:
+            await self.pet.interrupt(robot.id)
+        # Also stop any robot-to-robot scripted conversation.
         await self.conversation.stop()
 
     async def close(self):
