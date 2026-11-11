@@ -61,6 +61,33 @@ def test_device_registry_and_expiring_mute(bridge):
     assert not bridge.connections
 
 
+
+async def test_authenticated_realtime_voice_readiness_is_live_not_invented(bridge):
+    connection = conn("mac-01")
+    connection.client_listen_mode = "auto"
+    bridge.register(connection)
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        path = "/voice-readiness?device_id=mac-01"
+        assert (await client.get(path)).status == 401
+        response = await client.get(path, headers=headers)
+        assert response.status == 200
+        state = await response.json()
+        assert state["connected"] and state["reported_listen_mode"] == "auto"
+        assert not state["realtime_audio_path_available"]
+        assert not state["natural_barge_in_certified"]
+        connection.client_listen_mode = "realtime"
+        voice = await (await client.get(path, headers=headers)).json()
+        assert voice["realtime_audio_path_available"]
+        assert voice["reported_listen_mode"] == "realtime"
+        assert not voice["device_aec_measured"]
+        assert not voice["audible_flush_measured"]
+        assert (await client.get("/voice-readiness?device_id=unknown", headers=headers)).status == 400
+        bridge.unregister(connection)
+        missing = await (await client.get(path, headers=headers)).json()
+        assert not missing["connected"]
+        assert not missing["realtime_audio_path_available"]
+
 def test_wav_bounded_and_real_pcm(bridge):
     with pytest.raises(ValueError):
         bridge.wav_audio("!notbase64")

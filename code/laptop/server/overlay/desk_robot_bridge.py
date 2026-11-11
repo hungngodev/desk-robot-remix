@@ -397,9 +397,36 @@ def create_app():
             "audible_stop_verified": False,
         })
 
+    async def voice_readiness(request):
+        """Read the actual connected Xiaozhi session, not a stored configuration.
+
+        The server cannot verify analog acoustic AEC performance or audible
+        cancellation. Preserve these false flags until measured WAV trials.
+        """
+        device = request.query.get("device_id")
+        if device not in device_map().values():
+            raise ValueError("Known device_id required")
+        conn = connections.get(device)
+        connected = conn is not None
+        mode = getattr(conn, "client_listen_mode", None) if connected else None
+        if mode not in ("auto", "manual", "realtime"):
+            mode = None
+        return web.json_response({
+            "device_id": device,
+            "connected": connected,
+            "reported_listen_mode": mode,
+            "realtime_audio_path_available": connected and mode == "realtime",
+            "speaking": bool(getattr(conn, "client_is_speaking", False)) if connected else False,
+            "device_aec_measured": False,
+            "microphone_double_talk_measured": False,
+            "audible_flush_measured": False,
+            "natural_barge_in_certified": False,
+        })
+
     app.router.add_post("/session", session)
     app.router.add_post("/speak", speak)
     app.router.add_post("/interrupt", interrupt)
+    app.router.add_get("/voice-readiness", voice_readiness)
     return app
 
 
