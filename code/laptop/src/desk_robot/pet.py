@@ -19,6 +19,7 @@ from typing import Awaitable, Callable, Protocol
 from .config import Settings
 from .conversation import Conversation
 from .memory import MemoryStore
+from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
 from .vision import SceneChange, VisualChangeGate
 
@@ -46,6 +47,7 @@ class PetState:
     last_extra_events: dict[str, int] | None = None
     last_cap_events: int | None = None
     last_cap_mask: int | None = None
+    side_events: SideRangeEvents = field(default_factory=SideRangeEvents, repr=False)
     aux_task: asyncio.Task | None = field(default=None, repr=False)
     aux_reads: int = 0
     last_battery_low: bool | None = None
@@ -155,6 +157,7 @@ class PetController:
         state.last_touch_events = None
         state.last_cap_events = None
         state.last_cap_mask = None
+        state.side_events = SideRangeEvents()  # new physical head generation
         state.last_extra_events = None
         state.last_extra_mask = None
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
@@ -638,6 +641,39 @@ class PetController:
             if key != "bumps" and state.enabled and state.generation == generation:
                 self._consider_speech(robot_id, change, generation)
 
+    async def _observe_side_ranges(
+        self, robot_id: str, generation: int, body: dict
+    ) -> None:
+        """Read real WROOM channels 5..7 with no new drive authority."""
+        state = self.states[robot_id]
+        robot = self.settings.robot(robot_id)
+        if (self.settings.mode != "hardware" or not state.enabled
+                or state.generation != generation
+                or not robot.side_interactions_qualified
+                or robot.side_near_threshold_mm is None):
+            return
+        detected = state.side_events.observe(
+            body, now=time.monotonic(), near_mm=robot.side_near_threshold_mm
+        )
+        for direction, mm in detected:
+            if not state.enabled or state.generation != generation:
+                return
+            change = SceneChange(
+                "side_object",
+                f"My physical {direction} distance sensor noticed an object "
+                f"about {mm} mm away; this is not a mapped obstacle",
+                1.0,
+            )
+            state.events += 1
+            state.last_event = change.description
+            state.last_aux_kind = change.kind
+            if self.multimodal is not None:
+                self.multimodal.hub.notify(
+                    robot_id, "side_object", time.monotonic()
+                )
+            await self._store_observation(robot_id, change)
+            self._consider_speech(robot_id, change, generation)
+
     async def _touch_from_body(self, robot_id: str, generation: int) -> None:
         """Consume firmware edge and gesture counters, never manufacture touch frames.
 
@@ -652,6 +688,7 @@ class PetController:
         if isinstance(body, dict):
             await self._observe_body_safety(robot_id, generation, body)
             await self._observe_optional(robot_id, generation, body)
+            await self._observe_side_ranges(robot_id, generation, body)
         touch = body.get("touch") if isinstance(body, dict) else None
         if not isinstance(touch, dict):
             return
