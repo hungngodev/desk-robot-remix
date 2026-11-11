@@ -363,3 +363,23 @@ async def test_preprocessing_finishing_after_pause_cannot_republish_frame(monkey
     finally:
         release.set()
         await service.close()
+
+
+async def test_never_speak_delayed_live_scene_after_vlm_timeout():
+    class HangingModel:
+        async def answer(self, question, frames):
+            await asyncio.Event().wait()
+            return "An old scene falsely described as current."
+
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        HangingModel(), asyncio.Lock(),
+    )
+    service._vision_timeout_s = 0.02
+    try:
+        with pytest.raises(RuntimeError, match="timed out"):
+            await service.look("robot-01", "What do you see right now?")
+        assert not service._look_tasks
+        assert service.hub.frames["robot-01"]  # no fake model answer added
+    finally:
+        await service.close()
