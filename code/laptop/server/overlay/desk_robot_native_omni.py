@@ -132,6 +132,7 @@ class NativeOmniSession:
         self._tasks: list[asyncio.Task] = []
         self._socket = None
         self._socket_lock = asyncio.Lock()
+        self._device_send_lock = asyncio.Lock()
         self._generation = 0
         self._user_was_talking = False
         self._silent_frames = 0
@@ -323,9 +324,12 @@ class NativeOmniSession:
         if state == "start":
             self.conn.client_abort = False
             self.conn.client_is_speaking = True
-        await self.conn.websocket.send(json.dumps({
-            "type": "tts", "state": state, "session_id": self.conn.session_id,
-        }))
+        async with self._device_send_lock:
+            if self.closed or generation != self._generation:
+                return
+            await self.conn.websocket.send(json.dumps({
+                "type": "tts", "state": state, "session_id": self.conn.session_id,
+            }))
         if state == "stop":
             self.conn.client_is_speaking = False
             global _output_owner
@@ -339,8 +343,13 @@ class NativeOmniSession:
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed")
-        await self.conn.websocket.send(packet)
-        self.head_packets += 1
+        async with self._device_send_lock:
+            # A barge-in may have invalidated this packet WHILE waiting to
+            # acquire the send lock. The last head frame must be a flush.
+            if self.closed or generation != self._generation:
+                return
+            await self.conn.websocket.send(packet)
+            self.head_packets += 1
         # 60ms Opus audio pacing, not an acoustic playback confirmation.
         await asyncio.sleep(0.060)
 
@@ -430,11 +439,12 @@ async def claim_speaker(session: NativeOmniSession) -> None:
 async def flush_head(session: NativeOmniSession) -> None:
     """Urgent decoder reset request, NOT an acoustic DMA completion ACK."""
     if session.conn.client_is_speaking:
-        await session.conn.websocket.send(json.dumps({
-            "type": "tts", "state": "stop", "flush": True,
-            "session_id": session.conn.session_id,
-        }))
-        session.conn.client_is_speaking = False
+        async with session._device_send_lock:
+            await session.conn.websocket.send(json.dumps({
+                "type": "tts", "state": "stop", "flush": True,
+                "session_id": session.conn.session_id,
+            }))
+            session.conn.client_is_speaking = False
 
 
 async def preempt_others_for_human(source_device: str) -> None:
