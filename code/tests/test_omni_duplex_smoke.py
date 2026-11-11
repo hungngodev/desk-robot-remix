@@ -1,6 +1,5 @@
 """Offline native video/audio probe checks; no service or robot required."""
 import importlib.util
-import io
 import wave
 from pathlib import Path
 
