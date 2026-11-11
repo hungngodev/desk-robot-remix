@@ -1,6 +1,7 @@
 """Presence of two switches and BQ charger status never certifies charging."""
 from pathlib import Path
 
+
 def test_optional_dock_pin_input_validator_rejects_any_charge_permission():
     root = Path(__file__).resolve().parents[1]
     firmware = (
