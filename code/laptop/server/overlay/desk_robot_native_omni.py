@@ -453,7 +453,8 @@ def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
     device = conn.device_id
     # Never make a second audio owner while group/peer speech has the
     # exclusive existing Xiaozhi lease. The real VAD still interrupts it.
-    if bridge.muted(device) or bridge.lease_stopping:
+    if (bridge.lease_stopping
+            or (bridge.lease_ids and time.monotonic() < bridge.lease_until)):
         return True
     session = _sessions.get(device)
     if session is None:
