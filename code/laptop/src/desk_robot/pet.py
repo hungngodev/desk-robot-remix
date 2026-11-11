@@ -197,6 +197,10 @@ class PetController:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self._cancel_speech(robot_id)
+        if self.multimodal is not None:
+            # Pausing autonomous observation also drops this pet's RAM-only
+            # camera context; nothing persists after the operator stops it.
+            self.multimodal.hub.clear(robot_id)
         return self.status(robot_id)
 
     async def set_quiet(self, robot_id: str, quiet: bool) -> dict:
@@ -521,6 +525,10 @@ class PetController:
         state.safety_fault_events += 1
         state.events += 1
         state.last_event = description
+        if self.multimodal is not None:
+            self.multimodal.hub.notify(
+                robot_id, "safety_fault", time.monotonic()
+            )
         # The WROOM already stopped locally. Also cancel the Mac operation and
         # invalidate any pending operator permit, so an in-flight pickup or
         # exploratory action cannot continue once this transition was observed.
