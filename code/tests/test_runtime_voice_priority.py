@@ -55,3 +55,34 @@ async def test_unknown_voice_source_cannot_interrupt_the_fleet():
     with pytest.raises(KeyError):
         await runtime._on_voice_interrupt("forged-robot", "normal")
     assert events == []
+
+
+async def test_initial_human_speech_primes_video_only_after_urgent_audio_stop():
+    events = []
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            events.append(("stop_pet", robot_id))
+
+    class Conversation:
+        async def stop(self):
+            events.append(("stop_audio", None))
+
+    class Visual:
+        def voice_started(self, robot_id):
+            events.append(("start_camera", robot_id))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[
+        SimpleNamespace(id="robot-01"), SimpleNamespace(id="robot-02")
+    ])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+    await runtime._on_voice_interrupt("robot-02", "speech_start")
+    assert events == [
+        ("stop_pet", "robot-01"),
+        ("stop_pet", "robot-02"),
+        ("stop_audio", None),
+        ("start_camera", "robot-02"),
+    ]
