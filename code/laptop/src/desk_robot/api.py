@@ -268,7 +268,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None:
             raise OperationError("No physically connected multimodal vision runtime")
-        return await visual.look(robot_id, request.question)
+        try:
+            return await visual.look(robot_id, request.question)
+        except RuntimeError as exc:
+            # A newer human utterance can cancel a slow previous visual
+            # answer. Return an explicit conflict, never old model text.
+            raise OperationError(str(exc)) from exc
 
     @app.get("/v1/pet/{robot_id}/voice-context", dependencies=[Depends(authorize)])
     async def pet_voice_context(robot_id: str):
