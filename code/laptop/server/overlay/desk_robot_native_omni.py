@@ -22,9 +22,13 @@ from urllib.parse import urlsplit
 import ipaddress
 
 import aiohttp
-import opuslib_next
 
-from desk_robot_omni_wire import OmniDuplexWire
+# The host test environment installs the Mac package; the isolated pinned
+# Xiaozhi server instead receives desk_robot_omni_wire.py from install_overlay.
+try:
+    from desk_robot.realtime_omni_protocol import OmniDuplexWire
+except ModuleNotFoundError:
+    from desk_robot_omni_wire import OmniDuplexWire
 
 _sessions: dict[str, "NativeOmniSession"] = {}
 
@@ -237,6 +241,7 @@ class NativeOmniSession:
         No fabricated playback. A queued/sent packet does not mean the
         transducer has finished playing it, so playback.ack is NEVER sent.
         """
+        import opuslib_next  # available in pinned Xiaozhi, not needed for host-only tests
         encoder = opuslib_next.Encoder(
             16000, 1, opuslib_next.APPLICATION_AUDIO
         )
