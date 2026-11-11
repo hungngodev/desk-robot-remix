@@ -41,12 +41,13 @@ voice_event_history: deque[dict] = deque(maxlen=128)
 idle_voice_count: dict[str, int] = {}
 idle_voice_last_at: dict[str, float] = {}
 idle_voice_emitted: set[str] = set()
+idle_voice_quiet_frames: dict[str, int] = {}
 
 
 def record_human_voice(conn, kind: str) -> bool:
     """Only a CURRENT authenticated Xiaozhi websocket can publish human VAD."""
     global voice_event_cursor
-    if kind not in ("normal", "group", "speech_start"):
+    if kind not in ("normal", "group", "speech_start", "speech_end"):
         raise ValueError("Unknown interruption class")
     device = getattr(conn, "device_id", None)
     if connections.get(device) is not conn:
@@ -58,7 +59,7 @@ def record_human_voice(conn, kind: str) -> bool:
     voice_event_history.append({
         "seq": voice_event_cursor, "robot_id": robot_id,
         "kind": kind,
-        "source": "xiaozhi_server_vad" if kind == "speech_start"
+        "source": "xiaozhi_server_vad" if kind in ("speech_start", "speech_end")
                   else "xiaozhi_aec_vad",
     })
     return True
@@ -93,6 +94,7 @@ def unregister(conn):
         idle_voice_count.pop(conn.device_id, None)
         idle_voice_last_at.pop(conn.device_id, None)
         idle_voice_emitted.discard(conn.device_id)
+        idle_voice_quiet_frames.pop(conn.device_id, None)
         # A queued request may outlive this socket and a replacement register.
         interrupt_generation[conn.device_id] = (
             interrupt_generation.get(conn.device_id, 0) + 1
@@ -124,7 +126,17 @@ def observe_idle_human_voice(conn, have_voice: bool) -> bool:
     if not have_voice:
         idle_voice_count.pop(device, None)
         idle_voice_last_at.pop(device, None)
-        idle_voice_emitted.discard(device)
+        if device in idle_voice_emitted:
+            quiet = idle_voice_quiet_frames.get(device, 0) + 1
+            idle_voice_quiet_frames[device] = quiet
+            if quiet >= 2:
+                # Two genuine VAD-negative calls end the user turn. A brief
+                # pause inside a word/phrase does not terminate video early.
+                # The original Xiaozhi ASR/speaker state stays untouched.
+                if connections.get(device) is conn:
+                    record_human_voice(conn, "speech_end")
+                idle_voice_emitted.discard(device)
+                idle_voice_quiet_frames.pop(device, None)
         return False
     if (connections.get(device) is not conn
             or muted(device) or lease_stopping
@@ -134,6 +146,7 @@ def observe_idle_human_voice(conn, have_voice: bool) -> bool:
         idle_voice_count.pop(device, None)
         idle_voice_last_at.pop(device, None)
         return False
+    idle_voice_quiet_frames.pop(device, None)
     if device in idle_voice_emitted:
         return False
     now = time.monotonic()
