@@ -108,6 +108,16 @@ and their mounting standoff, speaker/mic openings, two FSR sizes, and printed
 parts tolerances on your chosen filament/printer. Do not replace these with
 invented numbers just to output an impressive but unprintable final STL.
 
+## Passive dock test geometry included
+
+The original editable passive alignment gauge is now in
+[remixes/dock/dock_passive_fit.scad](remixes/dock/dock_passive_fit.scad).
+It intentionally has no electrical contacts and is only a dimensioned
+mechanical test piece. Regenerate it with the real track width and
+clearance after the track assembly is printed. The example 96 mm model
+was checked locally as one watertight mesh, but that example width is
+not a measurement of the user's robot.
+
 ## Explicit print readiness
 
 * **Raw source print meshes:** present and downloadable, as listed above.
