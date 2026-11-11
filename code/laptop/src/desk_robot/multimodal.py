@@ -271,9 +271,9 @@ class MultimodalOrchestrator:
             self.heads[robot_id].snapshot(), timeout=4
         )
         now = time.monotonic()
-        return await asyncio.to_thread(
-            self.hub.offer, robot_id, jpeg, now, source=source
-        )
+        # Keep all frame-hub mutations on the event-loop owner. Compression
+        # is bounded to a single 768px JPEG and three in-memory frames.
+        return self.hub.offer(robot_id, jpeg, now, source=source)
 
     def offer_proactive(self, robot_id: str, jpeg: bytes, now: float) -> None:
         # Must be called from the one event loop owner to preserve ordering.
