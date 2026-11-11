@@ -248,6 +248,35 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             ],
         }
 
+    @app.get("/v1/pet/{robot_id}/omni-frame", dependencies=[Depends(authorize)])
+    async def omni_frame(robot_id: str):
+        """One real authenticated JPEG for an opt-in native speech/video model.
+
+        No cached simulation data, inferred camera identity, robot motion,
+        charging control or user-visible scene description is produced here.
+        The Xiaozhi server must fetch this over its existing local tool token.
+        """
+        coordinator().robot(robot_id)
+        if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
+            raise HTTPException(403, "Physical live camera requires explicit opt in")
+        visual = getattr(app.state.runtime, "multimodal", None)
+        if visual is None:
+            raise OperationError("No hardware camera adapter")
+        evidence = await visual.capture(robot_id, source="speech")
+        import time
+        age_ms = round(1000 * (time.monotonic() - evidence.received_at))
+        if not 0 <= age_ms <= 1000:
+            raise OperationError("Stale video frame cannot be streamed to an audio model")
+        return Response(
+            content=evidence.jpeg,
+            media_type="image/jpeg",
+            headers={
+                "X-Desk-Robot-Id": robot_id,
+                "X-Desk-Camera-Age-Ms": str(age_ms),
+                "Cache-Control": "no-store",
+            },
+        )
+
     @app.get("/v1/pet/{robot_id}/vision-status", dependencies=[Depends(authorize)])
     async def vision_status(robot_id: str):
         coordinator().robot(robot_id)
