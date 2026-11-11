@@ -1150,3 +1150,31 @@ async def test_uncertain_visual_event_is_not_spoken_and_does_not_consume_cooldow
     finally:
         state.enabled = False
         await pet.close()
+
+
+async def test_proactive_model_rejects_long_uninvited_monologue_without_tts(
+    fleet, tmp_path,
+):
+    class UnboundedChat:
+        async def reply(self, history):
+            return "A" * 500  # A real slow model ignored the concise prompt.
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, UnboundedChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 12
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A brass key appeared", 0.98), 12
+        )
+        await wait_for(lambda: pet._speech_task is None)
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        assert state.suppressed == 1
+        assert state.last_initiative_suppression == "model_reply_not_concise"
+        assert pet._group_last_spoken == float("-inf")
+    finally:
+        state.enabled = False
+        await pet.close()
