@@ -723,6 +723,15 @@ class PetController:
                 previous = await asyncio.to_thread(state.gate.observe, jpeg)
                 if previous is not None:
                     async with self._vision_lock:
+                        # A background VLM task may have queued BEFORE a human
+                        # started speaking. Recheck inside the shared lock so
+                        # it cannot run ahead of a direct vision question.
+                        if (self.multimodal is not None and any(
+                            self.multimodal.hub.user_active(
+                                robot.id, time.monotonic()
+                            ) for robot in self.settings.robots
+                        )):
+                            continue
                         inference = asyncio.create_task(
                             self.scene.compare(previous, jpeg)
                         )
