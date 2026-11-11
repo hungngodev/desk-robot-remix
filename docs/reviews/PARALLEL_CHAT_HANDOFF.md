@@ -27,6 +27,17 @@ Second small reuse loop on the same PR #17 source owners, no new audio stack or 
 
 Detailed integration and uncertainty are in `docs/guides/xiaozhi-voice-event-integration.md` and `docs/guides/multimodal-voice-video-orchestration.md`.
 
+## November 11 third loop: current authenticated Xiaozhi VAD snapshot across lost events
+
+The existing pinned xinnan bridge already knew whether a registered head had an outstanding real idle speech-start edge, but it did not share this state with the Mac after cursor loss or late bootstrap. An empty replay response must never be treated as proof of silence.
+
+* Existing `GET /events` now adds `active_human_robots` from the live `idle_voice_emitted` set plus current `connections`, mapping device IDs to configured robot IDs. No raw media, fabricated model transcript or extra endpoint. The AEC barge events remain finite separately because no matching idle speech-end is promised.
+* `VoiceEventListener` validates snapshot robot identities and forwards observed state to `Runtime._on_voice_snapshot` on bootstrap, gap and ordered polling. On an authenticated newly discovered active human, the current five-pet audio owner is preempted. `CameraFrameHub.reconcile_speech_snapshot` restores real idle VAD holds or releases a missed explicit end while preserving unrelated finite AEC leases. This is continuity of the existing code path, not a parallel agent.
+* New server, Mac listener, multimodal and runtime regression tests cover a missed speech-start at bootstrap, an omitted speech-end, forged device identity, overlapping AEC lease, actual ring-gap recovery, and idempotent snapshots.
+* Physical AEC, actual WiFi event timing, device teardown behavior and the correctness of the upstream VAD remain unmeasured. Older servers without the new response field lack authoritative reconciliation. The GitHub Actions provider still reports failed jobs without usable execution logs. Tests are committed, not claimed passing.
+
+See `docs/guides/xiaozhi-voice-event-integration.md` for the exact transport contract.
+
 ## The user's cross-chat constraints, all retained
 
 1. **One complete robot, then four identical functional copies.** Five different personalities and removable costumes, not five different incomplete hardware architectures. Day zero design includes the entire desired core; physical bringup may still be staged for safe testing.
