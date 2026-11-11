@@ -31,6 +31,8 @@ except ModuleNotFoundError:
     from desk_robot_omni_wire import OmniDuplexWire
 
 _sessions: dict[str, "NativeOmniSession"] = {}
+_output_owner: str | None = None
+_output_owner_lock = asyncio.Lock()
 
 
 def approved_backend_url(url: str) -> str:
@@ -311,6 +313,10 @@ class NativeOmniSession:
     async def _send_device_state(self, state: str, generation: int) -> None:
         if self.closed or generation != self._generation:
             return
+        if state == "start":
+            await claim_speaker(self)
+            if self.closed or generation != self._generation:
+                return
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
@@ -322,6 +328,10 @@ class NativeOmniSession:
         }))
         if state == "stop":
             self.conn.client_is_speaking = False
+            global _output_owner
+            async with _output_owner_lock:
+                if _output_owner == self.device:
+                    _output_owner = None
 
     async def _send_device_opus(self, packet: bytes, generation: int) -> None:
         if self.closed or generation != self._generation:
@@ -398,6 +408,41 @@ class NativeOmniSession:
                 pass
             if _sessions.get(self.device) is self:
                 _sessions.pop(self.device, None)
+            global _output_owner
+            async with _output_owner_lock:
+                if _output_owner == self.device:
+                    _output_owner = None
+
+
+async def claim_speaker(session: NativeOmniSession) -> None:
+    """At most one native-model pet may own the fleet's spontaneous floor."""
+    global _output_owner
+    async with _output_owner_lock:
+        other_id = _output_owner
+        if other_id is not None and other_id != session.device:
+            previous = _sessions.get(other_id)
+            if previous is not None and not previous.closed:
+                await previous.barge()
+                await flush_head(previous)
+        _output_owner = session.device
+
+
+async def flush_head(session: NativeOmniSession) -> None:
+    """Urgent decoder reset request, NOT an acoustic DMA completion ACK."""
+    if session.conn.client_is_speaking:
+        await session.conn.websocket.send(json.dumps({
+            "type": "tts", "state": "stop", "flush": True,
+            "session_id": session.conn.session_id,
+        }))
+        session.conn.client_is_speaking = False
+
+
+async def preempt_others_for_human(source_device: str) -> None:
+    """Human conversation takes priority over every native-model pet."""
+    for device, session in list(_sessions.items()):
+        if device != source_device and session.conn.client_is_speaking:
+            await session.barge()
+            await flush_head(session)
 
 
 def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
