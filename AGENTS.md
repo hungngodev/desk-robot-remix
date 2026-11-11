@@ -1,87 +1,65 @@
-# Desk robot remix project instructions
+# Desk Robot Remix: instructions for every coding agent and parallel chat
 
-**Read [docs/README.md](docs/README.md#full-final-project-contract-and-scope) before planning or implementing anything new.** The user requires a final-capability plan from day zero, preserving all 200 registered behavior/sensor/game/experimental ideas and the 131 unique HTML research links, rather than a throwaway simple robot rebuilt for proactive conversation later. Source-first remix and a no-avoidable-rework integration path take priority. The hard end experience includes independent pushed-camera conversation, contextual memory, normal speech interruption in robot one, social five-peer sessions, safe physical behavior and measured key/candy pickup. Do not mark optional sensors as physically selected, delete historical research, weaken safety, or invent power/current/price/physical test evidence. [Linear stages](docs/PLAN.md#complete-linear-build-and-permanent-verification-stages) and [stage-zero blockers](docs/decision-log.md#open-conflicts-requiring-decisions-before-construction) apply before final print or purchase.
+Last reconciled 2026-11-11. This document is **repository-local shared memory**, not a claim of feature completion. Every future reviewer, including ChatGPT Work, Codespaces, CLI agents and separate conversations, should use it as a starting point. Do not make external Cognee, Mem0, Obsidian or Notion availability a prerequisite. Keep actual decisions and implementation evidence in GitHub.
 
-- Start at `docs/README.md`. Keep the build order in `docs/PLAN.md`, requirements in
-  `docs/product-definition.md` and purchasing details in `docs/hardware/parts.md`.
-  Link to the canonical page when a decision already has a home.
-- Follow the recording rule in `docs/decision-log.md`. Recall durable project
-  decisions from the `desk-robot-remix` Cognee dataset, update canonical project
-  files when decisions change and verify durable memory writes by retrieval.
-- Latest accepted decisions are canonical in `docs/product-definition.md`:
-  local Mac first, proactive camera events without a spoken prompt, first-build
-  ordinary-speech interruption, exploration enabled until paused/stopped, and
-  Fetch/Cozmo/Vector styling. Touch and six-axis handling awareness are now
-  required; RGB is optional. Do not reopen these as missing feature choices.
-  Read `docs/source-map.md` and `docs/hardware/interaction-sensors.md` for source reuse
-  and proposed pin/library boundaries; those are not implemented firmware.
-- Current design reuses owned WROOM, SSD1306, 28BYJ-48/ULN2003 and MG90S parts.
-  Latest18 photos are grouped in docs/hardware/photo-inventory-2026-11-04.md/json:
-  ten module types, minimumone each, exact stock/condition unknown. Owned
-  BerryIMU (likely V1) supersedes a new prototype IMU purchase pending identity,
-  voltage/pin/readout/fit checks. Do not use V3/LSM6 wiring on it. MAX9814 is
-  analog mic input, not MAX98357A speaker output. Separate CMY-1118 camera is
-  interface-unknown; keep Sense camera. Other photo parts are optional spares.
-  User reports purchasing XIAO ESP32S3 Sense, listing display $18.87; exact order
-  quantity, receipt charges, arrival and revision are unconfirmed. KEEP SENSE as
-  the active head. It includes camera/PDM mic. MAX98357A is the direct I²S
-  speaker baseline. IMG_3902 identifies the HiLetgo HW-104 PAM8403. The bag says
-  five pieces and one board is visible. Analog reuse requires a suitable DAC.
-  Use one speaker path. The owned Adafruit AT42QT1010 #1374 is the prototype
-  head-touch choice, superseding the TTP223 purchase. Verify the physical pad.
-  No separate
-  INMP441/Uno/Pico/Pi. First-build voice interruption remains required. Reuse RIO's
-  exact-Sense software AEC/cancellation and Google/Pipecat live patterns before
-  considering replacement. Waveshare is optional fallback only, not a shopping requirement.
-  MG90S count is about10 by user estimate; bank model/current are unknown and
-  user reports no readable rating label. Do not assume rated2A/3A or exact stock.
-- Compiled body profiles: default esp32_stepper and explicit legacy esp32dev DC.
-  Sense8MB/PDM/SSD1306 now compiles alongside Freenove/CoreS3 references. Portable
-  stepper/cliff policy exists, but sensor I/O and calibration are absent: guarded
-  profile cannot arm. Pet mode/animation/memory remain planned. Never equate
-  compilation/host tests with physical qualification. Read docs/guides/firmware-foundation.md.
-- Keep pinned upstream clones and original CAD untouched. Small mounts, bezel,
-  spacers, clearance corrections, jaw tips and removable costumes only. Keys
-  and wrapped candy remain targets; new chassis/arm/PCB is outside scope.
-- Four downward ToFs + separate front ToF + mux are candidates. WROOM must own
-  local fault-latched stop; ordinary arm cannot clear faults, local USB-only
-  rearm clears only fresh healthy data and leaves motion disarmed. No blind
-  retreat, automatic rearm or dependence on
-  network/LLM latency. Final geometry/surface/stopping qualification is required.
-- Keep hardware motion off by default. Preserve 500ms watchdog, 250ms drive,
-  one-use operator permits and separate model/operator credentials. Planned
-  pet session is operator-only, enabled until paused/stopped and preemptible;
-  not a current command. Reconnect/restart/fault recovery cannot enable motion.
-- Amazon is preferred where possible; checked alternatives are in docs/hardware/archive/supplier-comparison.md.
-  The earlier Amazon basket exceeded the cap. Check the current delivered
-  total against the $50 cap before ordering.
-- First prototype delivered cap $50 includes already-spent money. The
-  old conditional total $40.33 used the earlier owned-bank/L0X mix and is historical. The
-  current compact sensors and rechargeable 1S kit need a new delivered quote.
-  One-time listing price
-  is not a five-unit quote. See docs/hardware/bom.json and purchase record.
-- No purchases, flashing or external publishing without device/order-specific
-  authorization. User instructions take precedence; local reversible work can continue.
-- Use live Fusion only after inspecting active design; preserve unrelated work.
-  No manufacturing geometry edits/physical successes are currently recorded.
-  Compare Cozmars packaging first. Sparky v0.1.0 is the unprinted fallback.
-  See `docs/product-definition.md` for the current case choices and fit status.
-- Ordinary-speech barge-in is a physical acceptance gate; a config bit/build is
-  not a pass. Current compiled Sense lacks reference; RIO is a reviewed MIT
-  software-reference source, not yet integrated or physically qualified. Its
-  echo gate can lose barge-in, so do not count muting as success. RIO pins differ
-  from our Sense map. Never copy guide
-  pin tables, fixed 65 mm cliff thresholds, blind retreat or RSSI localization.
-- Sensors: VL53L1X is not required. The current compact candidate is four VL6180X
-  downward plus one forward L0X and mux, with concealed boards/open optical
-  windows. The concept's 14 mm markers are unqualified; measure coverage/stops. Read
-  docs/hardware/sensor-choice.md. Do not order 25 fleet sensors before prototype tests.
-- Source/license audits are in `docs/research/`. RoboEyes/TechTalkies face and
-  chillibasket are GPL3 candidates, not MIT copied code. Resolve source-chain
-  terms for the stepper remix and retain all CAD/software notices.
-- Keep private credentials, models, captures and character memory in ignored paths.
-- Run development commands from `code/`. Keep automated tests with the code
-  and human-readable evidence in `docs/records/`.
-- After relevant runtime changes, run affected Python/body/head tests and builds.
-  Record exact commands, versions, hashes and gaps. Documentation-only updates
-  need source/BOM/link/whitespace verification, not a claim of hardware validation.
+## Source order and one active integration branch
+
+1. `docs/product-definition.md`: accepted product scope and physical criteria.
+2. `docs/PLAN.md`: full linear build; no replace-the-robot MVP.
+3. `docs/source-map.md`: **200** original feature/idea entries and **131** distinct reference URLs, with source and history classification.
+4. `docs/decision-log.md`: accepted and superseded choices; verify date before trusting an older proposal.
+5. `docs/hardware/full-feature-plan.json`, `docs/hardware/wiring.md`, and `docs/hardware/full-feature-wiring-and-shopping.md`: selected electrical allocation and source status.
+6. `docs/hardware/one-robot-inventory-and-shopping.md`, `docs/hardware/complete-shopping-checklist.md`: reported ownership vs purchase roles; no bought, arrived or calibrated claims without evidence.
+7. `docs/cad/FUSION_ONE_ROBOT_ASSEMBLY.md` and `docs/cad/FUSION_MEASUREMENT_SHEET.md`: original licensed geometry, fit gauges and still unqualified final assembly.
+8. `docs/guides/multimodal-voice-video-orchestration.md` and `docs/guides/minicpm-native-realtime-backend.md`: current Xiaozhi, speech, camera, sensor trigger and live model connections.
+9. `docs/reviews/PARALLEL_CHAT_HANDOFF.md`: cross-chat constraints, source-to-implementation matrix, unresolved gates and repeatable review protocol.
+10. Actual current source and tests in `code/` take precedence over any documentation's unsupported "implemented" claim. A successful compile is not a real battery, claw, robot or acoustic test.
+
+**Repository**: `hungngodev/desk-robot-remix`. **Only active consolidation PR**: [#17](https://github.com/hungngodev/desk-robot-remix/pull/17), branch `impl/mac-hardware-safety-preflight-2026-11-10`, against `codex/initial-remix`. Old PRs #1 through #16 and #18 are closed/superseded, not separate merge instructions. Confirm the current head, changes, comments, and CI before coding. Any missing useful closed-PR behavior must be compared and carried into #17 without duplicating conflicting source. Never assert every closed PR was merged solely from its closed state.
+
+The archived HTML from the user's original research has **active design decisions in sections 1 to 16** and **historical reference material in sections 17 to 23**. Preserve all history and links but do not reactivate historical pin assignments or parts automatically. Read a real upstream library, algorithm, licensing terms and revision before adapting it. When a mature upstream implementation exists, reuse or remix; write custom code only when the compatibility gap is explicit and record the exception.
+
+## Accepted full robot, not a throwaway prototype
+
+One **full-feature** robot is physically qualified first, then four functionally identical siblings, each with its own name, persona, memories, camera, face and cosmetic removable costume. The ultimate five-pet experience includes independent and shared spontaneous activities, meaningful camera-grounded speech, continuous opt-in exploration, quiet/pause, selective peer stories with first-hand provenance, touch, handling, gestures, games, real key and wrapped-candy manipulation, and safe docking/recharging.
+
+Three compute owners are fixed: **Mac** for AI, five-pet arbitration, private memory and visual reasoning; **XIAO ESP32S3 Sense** for microphone, camera, OLED, speaker, software echo reference and local head expression; **ESP32 WROOM32** for motors, lift/grip, local IMU and local emergency/safety I/O. Keep the Sense, existing 28BYJ48 + ULN2003 tracked SMARS base, two MG90S positional servos for lift + jaw, fixed rounded head and existing original CAD sources. No extra head servo, substitute Pi, invented custom chassis or fresh PCB without a documented incompatibility and user's changed instruction.
+
+The full requirement does **not** mean every historical brainstorm is mandatory hardware: distinguish accepted core functions, selected expansion modules, optional external room stations and reference-only ideas in the source map. Do not silently remove requested core interactions to reach a simpler build. Proactive vision is real change / event observation, contextual memory, bounded initiation and ordinary human interruption, not a random "hello" timer.
+
+## Hardware truth and superseded instructions
+
+* Current main floor and obstacle sensing is **eight VL53L4CD sensors**, TCA9548A `0x70` channels 0 to 7. Four floor and one forward readings feed independent local fail-closed safety; left, right and rear are additional **read-only** reactive/perception directions in the full `esp32_full` profile. Five-channel profile remains the earlier physically unqualified foundation. **Do not buy VL53L0X/VL6180X or use old fixed 65 mm threshold tables as the current requirement.**
+* Additional I2C modules share a separately controlled TCA9548A `0x71` expansion bus. Current WROOM firmware and source include bounded accessory/IMU code, touch, pressure and read-only telemetry; check exact drivers before claiming each proposed module is live. The prototype preferred IMU is **MPU6050**, not an assumed BerryIMU revision. Preserve the photographed BerryIMU as optional spare until its exact chip IDs and voltage are verified.
+* CAP1188 (eight touch zones), AT42QT1010 owned head touch, APDS9960, FSR + ADS1115, AS5600, MAX30102, MAX17048, INA226, SHT41, BMP280, PN532, MCP23017, optional PIR, reed and vibration motor all have distinct selected / reserved / connected / physically unverified states. Read `docs/hardware/interaction-sensors.md`, `full-feature-plan.json` and WROOM source rather than inferring firmware from the BOM.
+* XIAO Sense stock PDM microphone pins **GPIO41/42** and its camera pinout cannot be repurposed for MAX30102 or obsolete RIO pin tables. Speaker baseline is MAX98357A digital I2S and a rated speaker, **not** the owned PAM8403 analog amplifier. Do not recommend rebuying the owned MPU6050/AT42/WROOM/servos without an actual recount or broken-component finding.
+* The **$50 delivered first prototype cap**, including prior purchases, is a user constraint, not a demonstrated feasible quote for all selected high-end modules. Do not fabricate current prices, availability or make a budget exception silently. Honor the user's preference for commonly used generic components and avoid new Adafruit-specific shopping suggestions.
+* No selected battery + protection + peak-rated boost + safe load sharing + independently qualified docking contacts has passed a live test. BQ24074 is **not** evidence that motor peak loads or a free-exposed dock are safe. WROOM status and repeated dock PGOOD/CHG pins do **not** measure true battery charging current.
+* Preserve original STL licenses and attribution (including noncommercial/share-alike sources). The repo has original SMARS/forklift/gripper and head meshes plus adapter coupons, passive dock fit gauges and Fusion scaffold. It does **not** have one measured final printable fully assembled robot. Never call fit-test STLs or an illustrated CAD concept the final print package.
+
+## Nonnegotiable safety and AI behavior
+
+* WROOM local sensing owns motor stop independent of Mac, WiFi and vision inference. Four cliff floor readings, obstacle status, any installed bumper continuity, physical touch interlock, 500 ms watchdog and 250 ms drive permit stay fail closed. No automatic rearm, blind retreat, speculative safe reverse, and no language-model motor authorization.
+* Camera, remembered text, ASR, peer claims and sensor hints are evidence with explicit timestamps and provenance, **not** trusted instructions or verified physical actions. Do not let an image or voice hallucination approve grip force, terminal dock contact, current, battery state or motion.
+* Normal human speech must interrupt unsolicited or requested robot speech. Existing Xiaozhi/ESP-SR AEC and RIO reference timing remain physical acceptance requirements. Speech termination must preempt old image/model/TTS responses; five robots must not speak over the human. The newer opt-in native MiniCPM protocol and Xiaozhi head PCM/Opus bridge are software, **not** verified Gemini Live behavior; never emit synthetic I2S playback ACKs.
+* A failed grasp, charger, camera or VLM request is an honest failed observation. Preserve operator-only permits, distinct tool and operator tokens, disabled motor defaults, per-robot identities, private memory and no persistent raw mic/video data.
+
+## Mandatory small-step review and execution loop
+
+For each specific gap, **repeat** this cycle in the same canonical PR:
+
+1. **Recover** the original requirement, recent chat correction, accepted decision, relevant code path, physical pin/signal and any existing tests. Check closed-PR patches only for functionality missing from #17.
+2. **Compare** at least the strongest compatible upstream implementation or authoritative datasheet, exact version, source license and interface. Prefer adapting existing repository code and proven upstream algorithms. Record why any new helper is necessary.
+3. **Trace one real physical or software event end to end**, not just one new function: WROOM/XIAO input → source and validation → serial/HTTP/audio transport → Mac state/memory → action and failure boundary. For actuator tasks also trace energy flow, ground, fuse and interlock.
+4. **Implement one coherent, minimal change** in existing owner files. Avoid duplicate state machines, parallel audio providers, new conflicting chassis, unrelated PRs or a design-only feature called "complete".
+5. **Test** happy and bad paths, timestamps, identity swaps, reconnect, stale/out-of-order messages, concurrency, cancellation, failure to charge, and model refusal as relevant. Run host tests and actual firmware compile when the environment supports it. Never claim a test ran just because a test file was committed.
+6. **Document** upstream provenance, specific files, evidence type, known physical measurements, changed shopping/CAD interfaces and what is still missing; commit to #17 and verify the new head.
+7. **Repeat** on the next highest risk requirement until all *software and theoretical* gaps reasonably possible without physical hardware are addressed. Do not stop because a polished summary or a mere checklist exists.
+
+Use evidence labels precisely: `REQUIRED` (accepted user behavior), `SOURCE_REVIEWED` (upstream/datasheet examined), `IMPLEMENTED` (source exists), `HOST_TESTED` (actual recorded passing test), `FIRMWARE_COMPILED`, `BENCH_VERIFIED`, `ROBOT_VERIFIED`. A red GitHub Actions status or missing job steps is **not** a passing test. Check run/job logs, environment and reproducible local commands; record any blocker.
+
+## End deliverable, without relaxing the product
+
+The final package needs actual licensed editable source and printable parts for one complete fitted robot and dock, full wire by wire harness drawings and connector pinout, battery/charger/load sharing safety evidence, compiled firmware for both MCUs, Mac and Xiaozhi config, all required driver connections, reproducible test logs, actual calibration procedure for grasp and sensors, measured physical performance, and one straightforward assembly path. The user's goal is **buy, print, assemble and only perform small physical calibration at the end**; that goal does not grant permission to invent missing mechanical dimensions, currents, physical bench results or successful charging.
+
+The final shopping response must have only two lists: **already owned/reported or ordered** and **still to buy**, with per-item photos when requested; mark uncertain counts and unresolved power choices clearly. No extra alternatives disguised as mandatory buys. Keep the detailed record in GitHub instead of scattering revisions across chats or dependency on external memory plugins.
