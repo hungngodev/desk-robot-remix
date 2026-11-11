@@ -109,8 +109,13 @@ class Runtime:
         # VAD event is a signal, never a blocking image request. Schedule
         # camera sampling AFTER the urgent audio cancellation path.
         visual = getattr(self, "multimodal", None)
-        if kind in ("normal", "group", "speech_start") and visual is not None:
-            visual.voice_started(robot_id)
+        if visual is not None:
+            if kind == "speech_start":
+                visual.voice_started(robot_id)
+            elif kind in ("normal", "group"):
+                # AEC barge-in can be real without an idle speech_end event;
+                # never leave an indefinite speech-start visual lease for it.
+                visual.voice_interrupted(robot_id)
 
     async def close(self):
         if self.settings.mode == "hardware":
