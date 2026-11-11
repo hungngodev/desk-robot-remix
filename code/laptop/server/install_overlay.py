@@ -44,6 +44,9 @@ def files(root):
     source = (root / path).read_text()
     source = once(
         source,
+        "    import desk_robot_native_omni\\n"
+        "    if desk_robot_native_omni.route_audio(conn, pcm_frame, have_voice):\\n"
+        "        return\\n"
         "    # 服务端AEC功能需要实时触发打断",
         "    import desk_robot_bridge\n"
         "    await desk_robot_bridge.interrupt_for_user_voice(conn, have_voice)\n"
@@ -75,6 +78,13 @@ def files(root):
     )
     changes[path] = source
     changes["desk_robot_bridge.py"] = (HERE / "overlay/desk_robot_bridge.py").read_text()
+    changes["desk_robot_native_omni.py"] = (
+        HERE / "overlay/desk_robot_native_omni.py"
+    ).read_text()
+    # Reuse the same vLLM Omni protocol from the Mac package.
+    changes["desk_robot_omni_wire.py"] = (
+        HERE.parent / "src/desk_robot/realtime_omni_protocol.py"
+    ).read_text()
     changes["plugins_func/functions/desk_robot_tools.py"] = (
         HERE / "overlay/desk_robot_tools.py"
     ).read_text()
