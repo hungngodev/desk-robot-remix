@@ -421,15 +421,23 @@ class NativeOmniSession:
         await asyncio.sleep(0.060)
 
     async def barge(self) -> None:
-        """Existing Xiaozhi AEC has already requested physical speaker flush."""
+        """Stop real head audio FIRST, then cancel remote model work.
+
+        Native cancellation may take seconds under remote inference/backpressure.
+        Local generation invalidation and XIAO decoder flush must never wait
+        on the model socket. This is a request for immediate speaker silence,
+        not an I2S playback completion acknowledgement.
+        """
         self._generation += 1
         while not self.outgoing.empty():
             try:
                 self.outgoing.get_nowait()
             except asyncio.QueueEmpty:
                 break
+        events = self.wire.interrupt()  # even when model transport is offline
+        await flush_head(self)
         if self.connected and not self.closed:
-            for message in self.wire.interrupt():
+            for message in events:
                 await self._send(message)
 
     async def run(self) -> None:
