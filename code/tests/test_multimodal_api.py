@@ -45,3 +45,45 @@ def test_tool_token_can_request_visual_evidence_but_not_enable_motors(settings, 
                            json={"question": "x" * 300}).status_code == 422
         assert client.post("/v1/pet/not-a-robot/look", headers=tool,
                            json={"question": "What is there?"}).status_code == 409
+
+
+def test_native_omni_frame_requires_consent_real_hardware_and_tool_token(settings, tokens):
+    import time
+    from types import SimpleNamespace
+
+    jpeg = b"\\xff\\xd8" + b"actualjpeg" + b"\\xff\\xd9"
+
+    class FakeCamera:
+        async def capture(self, robot_id, *, source):
+            assert robot_id == "robot-01" and source == "speech"
+            return SimpleNamespace(jpeg=jpeg, received_at=time.monotonic())
+
+    class FakeRuntime:
+        coordinator = SimpleNamespace(robot=lambda robot_id: (
+            SimpleNamespace(id=robot_id) if robot_id == "robot-01"
+            else (_ for _ in ()).throw(KeyError(robot_id))
+        ))
+        multimodal = FakeCamera()
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    app = create_app(settings, runtime=FakeRuntime())
+    url = "/v1/pet/robot-01/omni-frame"
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(app) as client:
+        assert client.get(url).status_code == 401
+        result = client.get(url, headers=tool)
+        assert result.status_code == 200
+        assert result.content == jpeg
+        assert result.headers["content-type"].startswith("image/jpeg")
+        assert result.headers["x-desk-robot-id"] == "robot-01"
+        assert result.headers["cache-control"] == "no-store"
+    settings.voice_vision_tools_enabled = False
+    with TestClient(create_app(settings, runtime=FakeRuntime())) as client:
+        assert client.get(url, headers=tool).status_code == 403
