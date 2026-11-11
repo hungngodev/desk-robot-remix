@@ -16,6 +16,7 @@ class VoiceEventListener:
         self, client: httpx.AsyncClient, *, url: str, token: str,
         robot_ids: set[str], on_interrupt: Callable[[str, str], Awaitable[None]],
         on_global_interrupt: Callable[[str], Awaitable[None]] | None = None,
+        on_monitor_ready: Callable[[bool], Awaitable[None]] | None = None,
     ):
         if not robot_ids or len(token) < 24:
             raise ValueError("Known robot IDs and private speech token required")
@@ -23,10 +24,21 @@ class VoiceEventListener:
         self.robot_ids = frozenset(robot_ids)
         self.on_interrupt = on_interrupt
         self.on_global_interrupt = on_global_interrupt
+        self.on_monitor_ready = on_monitor_ready
+        self.monitor_ready = False
         self.cursor: int | None = None
         self.handled = 0
         self.last_error: str | None = None
         self._stream_failed = False
+
+    async def _set_monitor_ready(self, ready: bool) -> None:
+        if self.monitor_ready == ready:
+            return
+        # Record failure before notifying the Mac. A callback cannot make
+        # a lost monitor falsely healthy.
+        self.monitor_ready = ready
+        if self.on_monitor_ready is not None:
+            await self.on_monitor_ready(ready)
 
     async def _preempt_all(self, reason: str) -> None:
         # Loss of the voice event stream means a human interruption could have
@@ -67,9 +79,11 @@ class VoiceEventListener:
                 raise ValueError("Bootstrapping must not replay stale audio events")
             self.cursor = data["cursor"]
             self._stream_failed = False
+            await self._set_monitor_ready(True)
             return 0
         data = await self._fetch()
         if data["reset"]:
+            await self._set_monitor_ready(False)
             # Server restart invalidates the old speech generation. No stale
             # events replay, but old Mac audio must not survive a lost VAD.
             await self._preempt_all("reset")
@@ -79,6 +93,7 @@ class VoiceEventListener:
         if data["cursor"] < self.cursor:
             raise ValueError("Voice event cursor rolled backward without a restart")
         if data["lost"]:
+            await self._set_monitor_ready(False)
             # Any missed interruption could have left obsolete Mac TTS running.
             await self._preempt_all("gap")
             self.cursor = data["cursor"]
@@ -109,6 +124,7 @@ class VoiceEventListener:
             raise ValueError("Voice server skipped sequence without marking a gap")
         self.last_error = None
         self._stream_failed = False
+        await self._set_monitor_ready(True)
         return len(data["events"])
 
     async def run(self) -> None:
@@ -120,6 +136,7 @@ class VoiceEventListener:
                 raise
             except (httpx.HTTPError, RuntimeError, ValueError, KeyError) as exc:
                 self.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+                await self._set_monitor_ready(False)
                 # A broken, delayed or malformed event stream is NOT proof
                 # that the user is silent. Cancel audio once per outage;
                 # a successful authenticated poll rearms event monitoring.
