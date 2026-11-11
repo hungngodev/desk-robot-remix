@@ -36,6 +36,28 @@ def native(monkeypatch):
     return module, fake_bridge
 
 
+def healthy_session(model="openbmb/MiniCPM-o-4_5"):
+    # Match the published vLLM-Omni session.created capability contract,
+    # not an artificially permissive fake backend.
+    return {
+        "type": "session.created",
+        "session": {
+            "model": model, "input_audio_format": "pcm16",
+            "output_audio_format": "pcm16",
+            "audio": {
+                "input": {"sample_rate_hz": 16000},
+                "output": {"format": {"type": "audio/pcm", "rate": 24000}},
+            },
+            "capabilities": {
+                "implementation_level": "model_native_duplex",
+                "supports_input_append": True,
+                "supports_barge_in": True,
+                "chunk_period_ms": 1000,
+            },
+        },
+    }
+
+
 def connection():
     sent = []
 
@@ -108,7 +130,7 @@ async def test_native_ws_routes_actual_mic_pcm_to_model_and_24k_audio_back_to_he
             event = json.loads(message.data)
             observed.append(event)
             if event["type"] == "session.update":
-                await ws.send_json({"type": "session.created"})
+                await ws.send_json(healthy_session())
             if event["type"] == "input_audio_buffer.commit":
                 await ws.send_json({
                     "type": "response.created", "response_id": "actual-r1",
@@ -259,3 +281,59 @@ async def test_native_cutover_flushes_pending_xiaozhi_legacy_speech_first(native
     # No second stop packet or legacy queue replay on repeated checks.
     await service._retire_legacy_audio()
     assert len(sent) == 1
+
+
+@pytest.mark.parametrize("mutation", [
+    ("session", "model", "wrong-model"),
+    ("session", "input_audio_format", "g711_ulaw"),
+    ("session", "output_audio_format", "mp3"),
+    ("capabilities", "supports_input_append", False),
+    ("capabilities", "supports_barge_in", False),
+    ("capabilities", "chunk_period_ms", 80),
+    ("capabilities", "implementation_level", "turn_based"),
+])
+def test_native_adapter_rejects_incompatible_realtime_server_before_mic_transfer(
+    native, mutation,
+):
+    module, _ = native
+    greeting = healthy_session()
+    block, key, value = mutation
+    if block == "session":
+        greeting["session"][key] = value
+    else:
+        greeting["session"]["capabilities"][key] = value
+    with pytest.raises(RuntimeError):
+        module.verify_native_server(greeting, "openbmb/MiniCPM-o-4_5")
+
+
+@pytest.mark.parametrize("input_rate,output_rate", [
+    (8000, 24000), (16000, 16000), (48000, 24000),
+])
+def test_native_adapter_refuses_unexpected_model_pcm_rates(native, input_rate, output_rate):
+    module, _ = native
+    greeting = healthy_session()
+    greeting["session"]["audio"]["input"]["sample_rate_hz"] = input_rate
+    greeting["session"]["audio"]["output"]["format"]["rate"] = output_rate
+    with pytest.raises(RuntimeError):
+        module.verify_native_server(greeting, "openbmb/MiniCPM-o-4_5")
+
+
+def test_native_adapter_accepts_published_upstream_duplex_capabilities(native):
+    module, _ = native
+    assert module.verify_native_server(healthy_session(), "openbmb/MiniCPM-o-4_5") is None
+
+
+def test_native_configuration_error_preserved_and_retries_throttled(native, monkeypatch):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    monkeypatch.setenv("DESK_ROBOT_OMNI_ROBOTS", "robot-01")
+    monkeypatch.delenv("DESK_ROBOT_OMNI_URL", raising=False)
+    monkeypatch.delenv("DESK_ROBOT_TOOL_TOKEN", raising=False)
+    for _ in range(25):
+        assert module.route_audio(conn, b"\\0" * 3200, True)
+    assert module._sessions == {}
+    assert module.status("mac-01")["native_backend_connected"] is False
+    assert module.status("mac-01")["retry_delay_seconds"] > 0
+    assert module.status("mac-01")["last_error"] is not None
+    assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
