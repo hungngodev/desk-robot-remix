@@ -128,7 +128,10 @@ def test_overlay_targets_pinned_server_and_compiles():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     changes = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
-    assert len(changes) == 6
+    assert len(changes) == 8
+    assert "desk_robot_native_omni.py" in changes
+    assert "desk_robot_omni_wire.py" in changes
+    assert "desk_robot_native_omni.route_audio" in changes["core/handle/receiveAudioHandle.py"]
     assert "desk_robot_bridge.register(self)" in changes["core/connection.py"]
     assert "desk_robot_bridge.unregister(handler)" in changes["core/websocket_server.py"]
     for path, source in changes.items():
