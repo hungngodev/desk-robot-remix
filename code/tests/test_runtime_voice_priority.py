@@ -135,3 +135,35 @@ async def test_lost_voice_transport_blocks_proactive_before_audio_cancel():
     ]
     await runtime._on_voice_monitor_ready(True)
     assert events[-1] == ("monitor", True)
+
+
+async def test_aec_barge_uses_bounded_video_lease_not_unended_speech_start():
+    events = []
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            events.append(("pet", robot_id))
+
+    class Conversation:
+        async def stop(self):
+            events.append(("audio", "stopped"))
+
+    class Visual:
+        def voice_started(self, robot_id):
+            raise AssertionError("AEC interruption is not an idle VAD start")
+
+        def voice_interrupted(self, robot_id):
+            events.append(("aec_video", robot_id))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")],
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+    await runtime._on_voice_interrupt("robot-01", "normal")
+    assert events == [
+        ("pet", "robot-01"), ("audio", "stopped"),
+        ("aec_video", "robot-01"),
+    ]
