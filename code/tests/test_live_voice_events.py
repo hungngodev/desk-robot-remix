@@ -268,6 +268,54 @@ async def test_monitor_health_is_lost_on_gap_until_authenticated_resumption():
         assert health == [True, False, True]
 
 
+async def test_current_vad_snapshot_survives_missed_start_at_bootstrap():
+    snapshots = []
+    requests = 0
+
+    def mock(request):
+        nonlocal requests
+        requests += 1
+        active = ["robot-02"] if requests == 1 else []
+        return httpx.Response(200, json={
+            "cursor": 12, "events": [], "reset": False, "lost": False,
+            "active_human_robots": active,
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def on_event(robot_id, kind):
+            raise AssertionError("No synthetic speech event allowed")
+
+        async def snapshot(active):
+            snapshots.append(active)
+
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=on_event,
+            on_speech_snapshot=snapshot,
+        )
+        assert await listener.poll() == 0
+        assert snapshots == [frozenset({"robot-02"})]
+        assert await listener.poll() == 0
+        assert snapshots[-1] == frozenset()
+
+
+async def test_rejects_unrecognized_robot_in_live_vad_snapshot():
+    def mock(request):
+        return httpx.Response(200, json={
+            "cursor": 5, "events": [], "reset": False, "lost": False,
+            "active_human_robots": ["robot-forged"],
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def on_event(robot_id, kind):
+            raise AssertionError("Untrusted snapshot must not generate callbacks")
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=on_event,
+        )
+        with pytest.raises(ValueError, match="snapshot"):
+            await listener.poll()
+
+
 async def test_idle_speech_end_event_is_authenticated_and_ordered():
     delivered = []
     def mock(request):
