@@ -697,3 +697,34 @@ async def test_real_voice_event_ring_overflow_detected(bridge):
         assert data["events"][0]["seq"] == 8
 
 
+
+async def test_physical_normal_barge_in_emits_only_from_live_registered_connection(bridge):
+    sent = []
+
+    class Socket:
+        async def send(self, frame):
+            sent.append(json.loads(frame))
+
+    one = conn("mac-01")
+    one.client_listen_mode = "realtime"
+    one.client_is_speaking = True
+    one.session_id = "live-device"
+    one.websocket = Socket()
+    one.clear_queues = lambda: None
+    one.clearSpeakStatus = lambda: setattr(one, "client_is_speaking", False)
+    bridge.register(one)
+    assert not await bridge.interrupt_for_normal_voice(one, True)
+    assert bridge.voice_event_cursor == 0
+    assert await bridge.interrupt_for_normal_voice(one, True)
+    assert bridge.voice_event_cursor == 1
+    assert list(bridge.voice_event_history) == [{
+        "seq": 1, "robot_id": "robot-01",
+        "kind": "normal", "source": "xiaozhi_aec_vad",
+    }]
+    assert sent == [{
+        "type": "tts", "state": "stop", "session_id": "live-device", "flush": True,
+    }]
+    assert not await bridge.interrupt_for_normal_voice(one, True)
+    assert bridge.voice_event_cursor == 1
+    bridge.unregister(one)
+    assert not bridge.record_human_voice(one, "normal")
