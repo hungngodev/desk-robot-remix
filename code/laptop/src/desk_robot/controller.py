@@ -466,7 +466,9 @@ class Coordinator:
             raise OperationError("Camera resolution differs from measured calibration")
         objects = [
             d
-            for d in await self.vision.detect(jpeg, target)
+            for d in await asyncio.wait_for(
+                self.vision.detect(jpeg, target), timeout=15.0
+            )
             if d.label == target
             and d.confidence >= c.min_confidence
             and 0 <= d.box[0] < d.box[2] <= c.image_width
