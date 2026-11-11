@@ -161,6 +161,21 @@ class CameraFrameHub:
             raise ValueError("Invalid VAD end timestamp")
         self.voice_until[robot_id] = min(self.voice_until[robot_id], now)
 
+    def reconcile_speech_snapshot(self, active: frozenset[str], now: float) -> None:
+        """Reconcile missed idle VAD edges using the authenticated server state.
+
+        Never touch finite AEC double-talk leases: the server cannot promise
+        their matching speech_end. Only a real authenticated snapshot is a
+        permissible source for restoring/releasing explicit idle VAD turns.
+        """
+        if not isinstance(active, frozenset) or not active <= self.robots or not _finite(now):
+            raise ValueError("Untrusted VAD snapshot or invalid time")
+        for robot_id in self.robots:
+            if robot_id in active:
+                self.voice_until[robot_id] = math.inf
+            elif self.voice_until[robot_id] == math.inf:
+                self.voice_until[robot_id] = now
+
     def user_active(self, robot_id: str, now: float) -> bool:
         self._check(robot_id)
         return _finite(now) and now < self.voice_until[robot_id]
