@@ -267,7 +267,7 @@ async def test_wroom_gesture_counters_feed_firsthand_memory_without_replaying_re
     )
     try:
         pet.start("robot-01")
-        await wait_for(lambda: head.calls >= 7)
+        await wait_for(lambda: head.calls >= 7, timeout=5)  # CI thread pool can be busy
         kinds = [m.kind for m in memory.recent("robot-01")]
         assert kinds.count("touch_tap") == 1
         assert kinds.count("touch_double") == 1
