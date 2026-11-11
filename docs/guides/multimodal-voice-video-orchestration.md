@@ -19,7 +19,7 @@ Status: November 10 2026. **Code committed, real XIAO mic/camera and physical au
 ### An actual human asks to see something
 
 1. XIAO Sense PDM microphone feeds the existing Xiaozhi AEC/VAD/Opus server.
-2. The server detects human double-talk. Its existing urgent speaker flush stops stale audible TTS, and authenticated `/events` informs the Mac. Audio handling is independent of and always higher priority than JPEG.
+2. Pinned Xiaozhi `receiveAudioHandle` now emits a debounced authenticated `speech_start` event from two actual VAD-positive frames while the robot is idle, **not only when the robot is already talking**. If the robot is speaking, the existing AEC double-talk handler emits `normal` or `group` and urgently flushes stale TTS. Both use authenticated `/events`; the idle event never invents AEC or aborts silent speakers. Audio priority is independent of JPEG.
 3. The Mac `Runtime._on_voice_interrupt` cancels obsolete peer/pet speech and background Ollama scene inference, **then** synchronously signals the camera hub to schedule nonblocking near-1 FPS user-speech JPEG samples for about five seconds.
 4. Xiaozhi's current ASR/LLM conversation calls `desk_robot_look(question)` for a visual question. The tool uses the authenticated robot identity from the **current** Xiaozhi websocket and the existing loopback Mac API. It cannot claim another robot's camera.
 5. `MultimodalOrchestrator.look` requires opt-in and a named local vision model, chooses an image received within 600ms or captures a fresh XIAO JPEG, and picks one or two chronological views from the bounded six-second window.
@@ -31,8 +31,8 @@ Status: November 10 2026. **Code committed, real XIAO mic/camera and physical au
 
 * The pet's operator-enabled observation loop uses the existing 2-confirmation `VisualChangeGate` and expensive 2-photo VLM scene comparison. Only actual semantic change may become memory or a short spontaneous comment.
 * When the hub is attached to hardware, camera sample cadence defaults to about 0.3 FPS idle and speeds up after actual movement/sensor events. A valid CAP1188 pad, touch press, nearby object, APDS9960 wave, magnetic dial or WROOM safety event can request an immediate new frame.
-* Only one `_vision_lock` exists across all five robots. Human speech cancels old background inference and gets priority over a queued unsolicited comment. The Mac's existing cooldown and single speaker lease prevent five overlapping unsolicited audio sessions.
-* The hub keeps at most three compressed JPEGs **per robot**, in RAM only. Source identity, receive time and event provenance are separate. A frame from one robot never gets labeled as another robot's eyewitness memory.
+* Only one `_vision_lock` exists across all five robots. Human speech cancels old background inference and gets priority over a queued unsolicited comment. Per-robot voice turn and visual query epochs reject a late image model answer after another human utterance or visual question supersedes it. The Mac's existing cooldown and single speaker lease prevent five overlapping unsolicited audio sessions.
+* The hub keeps at most three compressed JPEGs **per robot**, in RAM only. Operator pause and runtime shutdown clear the stored visual context. Source identity, receive time and event provenance are separate. A frame from one robot never gets labeled as another robot's eyewitness memory.
 * Sensor and vision comparisons cannot arm motors. WROOM's 500ms watchdog and local physical safety remain independent.
 
 ## Enable on the actual Mac
