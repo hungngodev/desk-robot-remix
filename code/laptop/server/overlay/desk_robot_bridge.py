@@ -90,6 +90,8 @@ def register(conn):
 
 def unregister(conn):
     if connections.get(conn.device_id) is conn:
+        import desk_robot_native_omni
+        desk_robot_native_omni.unregister(conn)
         connections.pop(conn.device_id, None)
         idle_voice_count.pop(conn.device_id, None)
         idle_voice_last_at.pop(conn.device_id, None)
@@ -252,6 +254,10 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
         conn.clearSpeakStatus()
         voice_frames.pop(device, None)
         voice_last_frame_at.pop(device, None)
+    # Physical speaker flush above has highest priority; also invalidate
+    # the native model audio generator so late PCM cannot restart that turn.
+    import desk_robot_native_omni
+    await desk_robot_native_omni.on_barge(conn)
     record_human_voice(conn, "normal")
     return True
 
@@ -397,6 +403,9 @@ def create_app():
         if len(selected) != len(ids) or not selected.issubset(set(device_map().values())):
             raise ValueError("Unknown or duplicate device identity")
         if body.get("enabled") is True:
+            import desk_robot_native_omni
+            if any(desk_robot_native_omni.active(device) for device in selected):
+                raise RuntimeError("Native realtime model owns this device speaker")
             if lease_stopping or time.monotonic() < lease_until:
                 raise RuntimeError("A coordinated session is already active")
             for device in selected:
@@ -506,6 +515,7 @@ def create_app():
             "microphone_double_talk_measured": False,
             "audible_flush_measured": False,
             "natural_barge_in_certified": False,
+            "native_omni": __import__("desk_robot_native_omni").status(device),
         })
 
     async def voice_events(request):
