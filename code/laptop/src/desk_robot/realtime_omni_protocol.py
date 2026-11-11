@@ -165,8 +165,16 @@ class OmniDuplexWire:
             if not isinstance(response_id, str) or not 1 <= len(response_id) <= 128:
                 raise ValueError("Missing realtime response identity")
             metadata = response.get("metadata") if isinstance(response, dict) else None
+            # Official vLLM-Omni OpenAI-compatible envelope nests the raw
+            # duplex event under response.metadata.duplex_event, not directly
+            # in response.metadata. Without this our first barge-in would
+            # permanently suppress otherwise valid subsequent responses.
+            native = (
+                metadata.get("duplex_event")
+                if isinstance(metadata, dict) else None
+            )
             server_epoch = (
-                metadata.get("epoch") if isinstance(metadata, dict)
+                native.get("epoch") if isinstance(native, dict)
                 else event.get("epoch")
             )
             if server_epoch is not None and type(server_epoch) is not int:
