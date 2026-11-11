@@ -114,6 +114,9 @@ class CameraFrameHub:
         self.last_capture = {robot: -math.inf for robot in robot_ids}
         self.voice_until = {robot: -math.inf for robot in robot_ids}
         self.urgent = {robot: False for robot in robot_ids}
+        # A captured JPEG may be resizing on a worker while a newer frame,
+        # pause, or reconnect supersedes it. Only its owner can publish it.
+        self._generation = {robot: 0 for robot in robot_ids}
         self.previous_gray: dict[str, bytes] = {}
         self.changed_streak = {robot: 0 for robot in robot_ids}
         # Provenance-tagged VAD/touch/gesture hints travel alongside visual
@@ -156,14 +159,32 @@ class CameraFrameHub:
 
     def offer(self, robot_id: str, jpeg: bytes, received_at: float,
               *, source: str) -> CameraEvidence:
+        return self.offer_prepared(
+            robot_id, _prepare(jpeg), received_at, source=source
+        )
+
+    def offer_prepared(self, robot_id: str, prepared: tuple[bytes, bytes, float],
+                       received_at: float, *, source: str,
+                       generation: int | None = None) -> CameraEvidence:
+        """Commit preprocessed media on its single event-loop owner.
+
+        Image decoding may run in a worker, but no worker can mutate this hub.
+        Old captures after pause/reconnect or new capture commit are rejected.
+        """
         self._check(robot_id)
+        if generation is not None and generation != self._generation[robot_id]:
+            raise RuntimeError("Old camera generation discarded")
         if not _finite(received_at) or source not in {
             "proactive", "speech", "voice_question", "sensor"
         }:
             raise ValueError("Unknown image source or invalid time")
         if received_at <= self.last_capture[robot_id]:
             raise ValueError("Out of order camera reception timestamp")
-        reduced, gray, _ = _prepare(jpeg)
+        reduced, gray, _ = prepared
+        if (not isinstance(reduced, bytes) or not reduced.startswith(b"\\xff\\xd8")
+                or len(reduced) > 1_000_000 or not isinstance(gray, bytes)
+                or len(gray) != 64 * 48):
+            raise ValueError("Invalid preprocessed camera evidence")
         prev = self.previous_gray.get(robot_id)
         motion = change_fraction(prev, gray) if prev is not None else 0.0
         self.previous_gray[robot_id] = gray
@@ -221,6 +242,7 @@ class CameraFrameHub:
 
     def clear(self, robot_id: str) -> None:
         self._check(robot_id)
+        self._generation[robot_id] += 1
         self.frames[robot_id].clear()
         self.event_history[robot_id].clear()
         self.previous_gray.pop(robot_id, None)
@@ -246,6 +268,11 @@ class MultimodalOrchestrator:
         self.hub = CameraFrameHub([r.id for r in settings.robots])
         self._capture_tasks: dict[str, asyncio.Task] = {}
         self._look_tasks: dict[str, asyncio.Task] = {}
+        self._camera_locks = {
+            robot.id: asyncio.Lock() for robot in settings.robots
+        }
+        # Prevent five large JPEG decoders/encoders from running at once.
+        self._preprocess_budget = asyncio.Semaphore(2)
         self._turn_epoch = {r.id: 0 for r in settings.robots}
         self._question_epoch = {r.id: 0 for r in settings.robots}
         self._closed = False
@@ -310,17 +337,32 @@ class MultimodalOrchestrator:
             raise RuntimeError("Multimodal orchestrator closed")
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
-        jpeg = await asyncio.wait_for(
-            self.heads[robot_id].snapshot(), timeout=4
-        )
-        now = time.monotonic()
-        # Keep all frame-hub mutations on the event-loop owner. Compression
-        # is bounded to a single 768px JPEG and three in-memory frames.
-        return self.hub.offer(robot_id, jpeg, now, source=source)
+        async with self._camera_locks[robot_id]:
+            generation = self.hub._generation[robot_id]
+            # Camera latency is measured before CPU postprocessing. A new
+            # human voice can still preempt the event loop during decoding.
+            jpeg = await asyncio.wait_for(
+                self.heads[robot_id].snapshot(), timeout=4
+            )
+            received = time.monotonic()
+            async with self._preprocess_budget:
+                prepared = await asyncio.to_thread(_prepare, jpeg)
+            return self.hub.offer_prepared(
+                robot_id, prepared, received, source=source,
+                generation=generation,
+            )
 
-    def offer_proactive(self, robot_id: str, jpeg: bytes, now: float) -> None:
-        # Must be called from the one event loop owner to preserve ordering.
-        self.hub.offer(robot_id, jpeg, now, source="proactive")
+    async def offer_proactive(self, robot_id: str, jpeg: bytes, now: float) -> None:
+        # Pet snapshots share the same authenticated head.capture_lock. Only
+        # CPU preprocessing runs off-thread. Never publish late paused frames.
+        self.hub._check(robot_id)
+        generation = self.hub._generation[robot_id]
+        async with self._preprocess_budget:
+            prepared = await asyncio.to_thread(_prepare, jpeg)
+        self.hub.offer_prepared(
+            robot_id, prepared, now, source="proactive",
+            generation=generation,
+        )
 
     async def look(self, robot_id: str, question: str) -> dict:
         self.hub._check(robot_id)
