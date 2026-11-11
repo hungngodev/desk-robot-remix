@@ -103,6 +103,11 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                     "input_good", "charge_indicated",
                 ))
                 or dock.get("charging_verified") is not False
+                or not _uint(dock.get("seq"), 0xffffffff)
+                or not _uint(dock.get("age_ms"), 0xffffffff)
+                or (dock["valid"] and (
+                    not dock["present"] or dock["seq"] == 0
+                    or dock["age_ms"] >= 500))
                 or (dock["charge_indicated"] and not dock["input_good"])
                 or (not dock["valid"] and any(dock[key] for key in (
                     "left_seated", "right_seated", "input_good",
