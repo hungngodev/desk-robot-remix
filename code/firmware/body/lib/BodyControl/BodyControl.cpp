@@ -440,6 +440,8 @@ void BodyControl::execute(const char* line, std::size_t length,
                              now_ms - a.force.at_ms < 500U;
     const bool climate_fresh = a.climate.valid &&
                                now_ms - a.climate.at_ms < 1000U;
+    const bool bmp_fresh = a.barometer.present && a.barometer.valid &&
+                           now_ms - a.barometer.at_ms < 2000U;
     const bool fuel_fresh = a.gauge.fuel_valid &&
                             now_ms - a.gauge.at_ms < 500U;
     const bool monitor_fresh = a.gauge.monitor_valid &&
@@ -458,6 +460,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"valid_mask\":%u,\"magnet\":[%u,%u,%u]},"
         "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"valid\":%s,\"calibrated\":false},"
         "\"climate\":{\"temp_centi\":%d,\"rh_centi\":%d,\"valid\":%s},"
+        "\"bmp280\":{\"present\":%s,\"valid\":%s,\"chip_id\":%u,"
+        "\"temp_centi\":%d,\"pressure_pa\":%u,\"physically_verified\":false},"
         "\"power\":{\"cell_mv\":%u,\"soc_centi\":%u,\"bus_mv\":%u,"
         "\"shunt_uv\":%d,\"fuel_valid\":%s,\"monitor_valid\":%s,"
         "\"current_calibrated\":false},"
@@ -483,6 +487,11 @@ void BodyControl::execute(const char* line, std::size_t length,
         force_fresh ? "true" : "false",
         a.climate.temp_centi, a.climate.humidity_centi,
         climate_fresh ? "true" : "false",
+        a.barometer.present ? "true" : "false",
+        bmp_fresh ? "true" : "false",
+        static_cast<unsigned>(a.barometer.chip_id),
+        bmp_fresh ? a.barometer.temp_centi : 0,
+        bmp_fresh ? a.barometer.pressure_pa : 0U,
         a.gauge.cell_mv, a.gauge.soc_centi, a.gauge.bus_mv,
         a.gauge.shunt_uv, fuel_fresh ? "true" : "false",
         monitor_fresh ? "true" : "false",
