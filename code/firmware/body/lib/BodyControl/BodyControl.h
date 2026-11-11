@@ -83,9 +83,9 @@ class BodyControl {
   void set_cap(bool valid, std::uint8_t zones);
   // Raw optical paw telemetry; never infer BPM or heartbeat from one FIFO read.
   void set_paw_pulse(const OpticalRaw& sample) { state_.paw_pulse = sample; }
-  void set_accessories(const AccessoryReadings& readings) {
-    state_.accessories = readings;
-  }
+  // Fresh physical dock switch + charger PGOOD is an independent local
+  // DISARM interlock. It never enables charging, nor grants movement.
+  void set_accessories(const AccessoryReadings& readings);
   // Left/right/rear read-only ToF samples never grant motor permission.
   void sample_side_range(std::uint8_t index, std::uint16_t mm,
                          bool valid, std::uint32_t now_ms);

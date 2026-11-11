@@ -523,6 +523,32 @@ static void touch_gesture_counters_survive_slow_status_polling() {
   CHECK(status.find("\"hold_count\":1") != std::string::npos);
 }
 
+static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  CHECK(send(body, "arm", 1) == "OK arm");
+  CHECK(body.state().armed);
+  desk_robot::AccessoryReadings read{};
+  read.dock.present = true;
+  read.dock.valid = true;
+  read.dock.left_seated = true;
+  read.dock.right_seated = true;
+  read.dock.input_good = true; // actual MCP23017 and BQ PGOOD source
+  read.dock.charge_indicated = false;
+  body.set_accessories(read);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 2) == "ERR arm dock_power_connected");
+  read.dock.left_seated = false;
+  body.set_accessories(read);
+  CHECK(send(body, "arm", 3) == "OK arm");
+  // Charger PGOOD alone with mechanical contact not established is not proof
+  // of docking. Normal guard, bumper and operator authorization still apply.
+  read.dock.input_good = false;
+  read.dock.left_seated = true;
+  body.set_accessories(read);
+  CHECK(body.state().armed);
+  CHECK(send(body, "disarm", 4) == "OK disarm");
+}
+
 static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   using desk_robot::BodyControl;
   BodyControl body(desk_robot::BodyProfile::DcPwm);
@@ -562,6 +588,7 @@ int main() {
     CHECK(status.size() < desk_robot::kReplyCapacity - 1);
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
+    real_dock_power_good_and_two_seat_switches_force_body_disarm();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
