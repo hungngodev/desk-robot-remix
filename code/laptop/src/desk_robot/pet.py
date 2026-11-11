@@ -63,10 +63,10 @@ def _initiative_evidence(change: SceneChange) -> bool:
     # Only known firmware edge categories may bypass visual model confidence
     # thresholds. We do not infer a person's identity or a physical action.
     return change.kind in {
-        "touch", "touch_tap", "touch_double", "touch_hold", "petting",
+        "touch", "touch_tap", "touch_double", "touch_hold", "petting_zone",
         "squeeze", "hand_wave", "nose_twist", "nearby_object",
         "battery_low", "magnet", "pir", "bumper",
-        "handling_tilt", "handling_shake", "side_near",
+        "handling_tilt", "handling_shake", "side_object",
     } and change.confidence >= 0.95
 
 
