@@ -458,4 +458,5 @@ async def test_native_opus_packet_checks_live_human_floor_even_after_reply_start
     assert service._generation == 1
     assert service.wire.accept_output is False
     assert service.head_packets == 0
+    assert module._output_owner is None
     assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
