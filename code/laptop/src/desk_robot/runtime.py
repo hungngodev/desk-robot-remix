@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 
@@ -67,6 +68,7 @@ class Runtime:
             on_interrupt=self._on_voice_interrupt,
             on_global_interrupt=self._on_voice_global,
             on_monitor_ready=self._on_voice_monitor_ready,
+            on_speech_snapshot=self._on_voice_snapshot,
         )
         self._voice_task = asyncio.create_task(self.voice_events.run())
 
@@ -81,6 +83,22 @@ class Runtime:
         failures = [result for result in results if isinstance(result, BaseException)]
         if failures:
             raise RuntimeError("Unable to preempt one or more pet speakers") from failures[0]
+
+    async def _on_voice_snapshot(self, active: frozenset[str]) -> None:
+        visual = getattr(self, "multimodal", None)
+        if visual is None:
+            return
+        now = time.monotonic()
+        # A start may be missing from the replay ring after reconnect.
+        # Active VAD from the authenticated server is enough to stop any
+        # currently playing unsolicited or group speech before reconciliation.
+        missing_starts = [
+            robot_id for robot_id in active
+            if not visual.hub.user_active(robot_id, now)
+        ]
+        if missing_starts:
+            await self._preempt_audio_floor()
+        visual.hub.reconcile_speech_snapshot(active, time.monotonic())
 
     async def _on_voice_monitor_ready(self, ready: bool) -> None:
         # Re-enable spontaneous voice only after a successful authenticated
