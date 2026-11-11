@@ -429,13 +429,22 @@ class NativeOmniSession:
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed")
+        blocked_by_human = False
         async with self._device_send_lock:
-            # A barge-in may have invalidated this packet WHILE waiting to
-            # acquire the send lock. The last head frame must be a flush.
+            # Human VAD can begin AFTER a reply already started, before the
+            # queued cross-pet preemption task runs. Check real floor state
+            # before every 60 ms packet, not just the TTS START frame.
             if self.closed or generation != self._generation:
                 return
-            await self.conn.websocket.send(packet)
-            self.head_packets += 1
+            if bridge.human_speech_active():
+                blocked_by_human = True
+            else:
+                await self.conn.websocket.send(packet)
+                self.head_packets += 1
+        if blocked_by_human:
+            events = await self._invalidate_head_first()
+            self._schedule_remote_cancel(events)
+            return
         # 60ms Opus audio pacing, not an acoustic playback confirmation.
         await asyncio.sleep(0.060)
 
