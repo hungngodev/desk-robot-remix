@@ -131,6 +131,21 @@ def test_stale_or_fake_images_never_get_sent_to_native_model():
         wire.append_audio(b"\0" * 3200, speech=True,
                           jpeg=b"\xff\xd8" + b"x" * 99,
                           camera_age_ms=1100)
+    # A correctly aged source image must still have a genuine JPEG EOI.
+    with pytest.raises(ValueError, match="JPEG"):
+        wire.append_audio(
+            b"\0" * 3200, speech=True,
+            jpeg=b"\xff\xd8" + b"x" * 99,
+            camera_age_ms=100, frame_receipt_us=43,
+        )
+    # A complete JPEG at a valid source receipt is accepted for buffering.
+    complete = wire.append_audio(
+        b"\0" * 3200, speech=True,
+        jpeg=b"\xff\xd8" + b"x" * 99 + b"\xff\xd9",
+        camera_age_ms=100, frame_receipt_us=44,
+    )
+    assert complete["audio_end_ms"] > 0
+
     with pytest.raises(ValueError):
         wire.append_audio(b"\0" * 123, speech=True)
     with pytest.raises(ValueError):
