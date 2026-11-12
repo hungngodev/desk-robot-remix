@@ -34,7 +34,7 @@ TRIGGERS = frozenset({
     "petting_zone", "hand_wave", "nearby_object", "nose_twist",
     "squeeze", "bumper", "magnet", "pir", "battery_low", "safety_fault",
     "handling_tilt", "handling_shake",
-    "side_object",
+    "side_object", "paw_contact", "ambient_shift", "nfc_tag",
 })
 
 
