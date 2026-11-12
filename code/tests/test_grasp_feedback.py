@@ -161,3 +161,46 @@ async def test_uncertain_transport_failure_does_not_override_local_disarm(monkey
     with pytest.raises(OSError, match="ADC bus timed out"):
         await guarded_grasp(head, Settings(), health=status)
     assert head.commands == ["grip 65"]
+
+
+async def test_cancelled_close_attempts_relief_only_with_live_safety(monkeypatch):
+    """A cancelled task must not leave a commanded MG90S jaw squeezing."""
+    import asyncio
+
+    head = FakeHead([100, 101])
+    sleeps = 0
+
+    async def cancel_after_close(_seconds):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 2:  # First closing pulse has already been sent.
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", cancel_after_close)
+    with pytest.raises(asyncio.CancelledError):
+        await guarded_grasp(head, Settings(), health=healthy)
+    assert head.commands == ["grip 65", "grip 60"]
+
+
+async def test_cancelled_close_does_not_bypass_body_disarm(monkeypatch):
+    """Cancellation relief remains subordinate to the WROOM motor interlock."""
+    import asyncio
+
+    head = FakeHead([100, 101])
+    sleeps = 0
+
+    async def cancel_after_close(_seconds):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 2:
+            raise asyncio.CancelledError()
+
+    async def disarmed_after_first_close():
+        if head.commands:
+            raise OperationError("WROOM no longer armed")
+        return {"armed": True}
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", cancel_after_close)
+    with pytest.raises(asyncio.CancelledError):
+        await guarded_grasp(head, Settings(), health=disarmed_after_first_close)
+    assert head.commands == ["grip 65"]
