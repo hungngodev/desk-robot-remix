@@ -40,6 +40,7 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
     [
         ("pulse", "ir", -1), ("pulse", "medical", True),
         ("pulse", "bpm", 75), ("pulse", "red", 262144),
+        ("pulse", "seq", True), ("pulse", "seq", -1),
         ("angles", "valid_mask", 7), ("angles", "raw", [100, 200]),
         ("angles", "magnet", [0, 0, 0]), ("angles", "present_mask", True),
         ("force", "adc", [0, 99999]), ("force", "valid", 1),
