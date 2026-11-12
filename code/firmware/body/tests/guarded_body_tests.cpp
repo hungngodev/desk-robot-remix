@@ -649,7 +649,10 @@ static void inconsistent_dock_acquisition_requires_new_sample_to_recover() {
   CHECK(send(body, "arm", 42) == "OK arm");
   r.dock.charge_indicated = true;  // altered pin without GPIO read
   body.set_accessories(r, 43);
+  // A forged identity must stop motors in the acquisition callback itself,
+  // not only when a later command happens to call tick().
   CHECK(!body.state().armed);
+  CHECK(body.state().left == 0 && body.state().right == 0);
   CHECK(send(body, "arm", 44) == "ERR arm dock_gpio_missing_or_stale");
   r.dock.charge_indicated = false; // replay of prior legitimate cache
   body.set_accessories(r, 45);
