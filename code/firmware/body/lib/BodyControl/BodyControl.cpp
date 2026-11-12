@@ -180,17 +180,32 @@ bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
           now_ms - dock.at_ms >= 500U);
 }
 
-void BodyControl::set_accessories(const AccessoryReadings& readings) {
+void BodyControl::set_accessories(const AccessoryReadings& readings,
+                                  std::uint32_t now_ms) {
   state_.accessories = readings;
   const auto& dock = readings.dock;
-  if (dock.present && dock.valid && dock.sample_seq != 0U) {
-    if (dock.input_good || dock.left_seated || dock.right_seated) {
-      // Even ONE seat switch indicates possible mechanical contact.
-      // Waiting for both seat switches plus power risks driving into pins.
-      dock_power_lockout_ = true;
-    } else {
-      // Clear only on a new valid physically observed full removal.
-      // No automatic rearm or speculative charger enable.
+  const bool contact = dock.input_good || dock.left_seated || dock.right_seated;
+  // An unchanged cached MCP23017 reading is NOT a new removal observation.
+  // Half-range comparisons permit uint32_t sequence and millis() rollover
+  // while rejecting old, reordered, and inconsistent source evidence.
+  const bool current = dock.present && dock.valid && dock.sample_seq != 0U &&
+                       now_ms - dock.at_ms < 500U;
+  const std::uint32_t seq_delta = dock.sample_seq - dock_last_seq_;
+  const std::uint32_t time_delta = dock.at_ms - dock_last_at_ms_;
+  const bool new_sample = current &&
+      (!dock_sample_seen_ || (seq_delta != 0U && seq_delta < 0x80000000U &&
+                             time_delta != 0U && time_delta < 0x80000000U));
+  if (dock.present && dock.valid && dock.sample_seq != 0U && contact) {
+    // Even an old asserted seat / PGOOD stops movement, never enables it.
+    dock_power_lockout_ = true;
+  }
+  if (new_sample) {
+    dock_last_seq_ = dock.sample_seq;
+    dock_last_at_ms_ = dock.at_ms;
+    dock_sample_seen_ = true;
+    if (!contact) {
+      // Only a truly new, fresh, fully unseated read clears the latch.
+      // Clearing the latch does NOT automatically rearm or enable charging.
       dock_power_lockout_ = false;
     }
   }
