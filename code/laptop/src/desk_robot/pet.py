@@ -1117,6 +1117,10 @@ class PetController:
     def _consider_speech(self, robot_id: str, change: SceneChange, generation: int) -> None:
         state = self.states[robot_id]
         now = time.monotonic()
+        if self._closed or not state.enabled or state.generation != generation:
+            state.suppressed += 1
+            state.last_initiative_suppression = "pet_disabled_or_generation_changed"
+            return
         if not _initiative_evidence(change):
             state.suppressed += 1
             state.low_value_speech_candidates += 1
@@ -1150,6 +1154,9 @@ class PetController:
             return
         state.last_initiative_suppression = None
         peer_id = self._social_peer(robot_id, change.kind, now)
+        peer_generation = (
+            self.states[peer_id].generation if peer_id is not None else None
+        )
         if peer_id is not None:
             self._social_round += 1
             self._social_last_started = now
@@ -1159,12 +1166,14 @@ class PetController:
         )
         self._speech_task = asyncio.create_task(
             self._speak(robot_id, change, generation,
-                        offered_at=now, social_peer_id=peer_id)
+                        offered_at=now, social_peer_id=peer_id,
+                        social_peer_generation=peer_generation)
         )
 
     async def _speak(
         self, robot_id: str, change: SceneChange, generation: int,
         *, offered_at: float, social_peer_id: str | None = None,
+        social_peer_generation: int | None = None,
     ) -> None:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
@@ -1189,7 +1198,11 @@ class PetController:
             # The other pet only *hears* this firsthand source event.
             if social_peer_id is not None:
                 peer = self.states[social_peer_id]
-                if (not peer.enabled or peer.quiet or not self.voice_monitor_ready
+                if (not state.enabled or state.quiet
+                        or state.generation != generation or self._closed
+                        or not peer.enabled or peer.quiet
+                        or peer.generation != social_peer_generation
+                        or not self.voice_monitor_ready
                         or self._human_active_in_fleet(time.monotonic())
                         or time.monotonic() - offered_at > self.max_observation_age):
                     state.suppressed += 1
