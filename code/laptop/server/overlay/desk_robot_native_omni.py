@@ -414,7 +414,7 @@ class NativeOmniSession:
                     receipt = self._latest_frame_receipt_us
             event = self.wire.append_audio(
                 packet.pcm16k, speech=packet.speech, jpeg=jpeg,
-                camera_age_ms=age,
+                camera_age_ms=age, frame_receipt_us=receipt,
             )
             await self._send(event)
             # The pinned duplex wire selects at most one JPEG on each
