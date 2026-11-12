@@ -379,17 +379,13 @@ class MultimodalOrchestrator:
         """
         try:
             for index in range(2):
-                if (self._closed or self.hub.user_active(
-                    robot_id, time.monotonic()
-                ) or (task := self._look_tasks.get(robot_id)) is not None
-                      and not task.done()):
-                    return
                 if index:
                     await asyncio.sleep(0.45)
-                    if (self._closed or self.hub.user_active(
-                        robot_id, time.monotonic()
-                    )):
-                        return
+                question = self._look_tasks.get(robot_id)
+                if (self._closed or self.hub.user_active(
+                    robot_id, time.monotonic()
+                ) or (question is not None and not question.done())):
+                    return
                 await self.capture(robot_id, source="sensor")
         except asyncio.CancelledError:
             raise
