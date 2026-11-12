@@ -184,7 +184,11 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
                                   std::uint32_t now_ms) {
   state_.accessories = readings;
   const auto& dock = readings.dock;
-  const bool contact = dock.input_good || dock.left_seated || dock.right_seated;
+  // CHG alone is not proof of net cell charging, but if it asserts while
+  // both seat switches and PGOOD appear clear, treating the pins as a safe
+  // undock could resume wheels on inconsistent charger telemetry. Hold.
+  const bool contact = dock.input_good || dock.left_seated ||
+                       dock.right_seated || dock.charge_indicated;
   // An unchanged cached MCP23017 reading is NOT a new removal observation.
   // Half-range comparisons permit uint32_t sequence and millis() rollover
   // while rejecting old, reordered, and inconsistent source evidence.
