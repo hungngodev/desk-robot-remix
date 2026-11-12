@@ -59,7 +59,7 @@ The `esp32_full` PlatformIO environment now compiles `DESK_ROBOT_REQUIRE_DOCK_MO
 
 ## Reuse original OOMWOO dock design rather than inventing a final approach
 
-The user's original 23-section `ESP32 Deskpet Ideas` research (active project sections 1–16, section titled **Docking — the OOMWOO pattern**) includes a **two receiver 38 kHz NEC-burst beacon** for final alignment, a normally unpowered dock contact, a short verification window and at most three attempts. This idea **has not been implemented** in PR #17. The present AprilTag/OpenCV observation and guarded predock approach are **not** a substitute for the close-range homing evidence or an electrically qualified contact state machine.
+The user's original 23-section `ESP32 Deskpet Ideas` research (active project sections 1–16, section titled **Docking — the OOMWOO pattern**) includes a **two receiver 38 kHz NEC-burst beacon** for final alignment, a normally unpowered dock contact, a short verification window and at most three attempts. The **read-only sensor acquisition and full NEC frame decoding** portion is now implemented in PR #17. Real signed bearing measurement, final approach motion, the beacon transmitter and independently qualified isolated contact/charger circuits remain absent. AprilTag/OpenCV predock still cannot authorize the final centimeter.
 
 **Verified source reuse candidates:**
 
@@ -67,7 +67,7 @@ The user's original 23-section `ESP32 Deskpet Ideas` research (active project se
 * [wennycooper/Auto-Docking-Design](https://github.com/wennycooper/Auto-Docking-Design) is cited by OOMWOO as the modulated emitter and baffled receiver reference. The published docking RFC calls for two forward facing differential receivers for final homing, with wider-field receivers an optional independent search tier.
 * [Vishay TSOP38238 datasheet](https://www.vishay.com/docs/82491/tsop382.pdf): this receiver rejects continuous 38 kHz light under automatic gain control. It must see compatible **bursts** (such as NEC), not an always-on LED. That is an electrical and decoder contract, not proof that the user's current boards have two spare timer-capable pins.
 
-**Do not fabricate hardware pin assignments.** The chosen WROOM already has both steppers, two MG90S, physical touch/bumper/reed/PIR, UART, and I2C allocated. Decoding ~560-microsecond IR edges by occasional MCP23017 polling at 12 ms intervals is not technically sound. Before adding two TSOP receivers to the mandatory shopping list, identify and verify two physically usable interrupt/RMT inputs on the *actual board* or an existing physically capable head interface, and retain the local cliff and rear sensor fail-closed priority. No new head servo, chassis replacement, separate ROS2 computer or from-scratch driver is justified by this reference.
+**Pin and driver source now reconcile:** GPIO36 and GPIO39 on the WROOM have independent read-only legacy ESP-IDF 4.4 RMT receiver channels. The slow reed/PIR inputs moved to MCP23017 GPIOB and no 12ms mux poll is used for ~560 microsecond NEC edges. The portable decoder requires a real 34-symbol full frame, correct active-low mark polarity, inverse address/command bytes and independently fresh same-code sightings. A local mirrored C++11 sanitizer smoke test passed 100 valid codes and 400 corrupted frames; the actual repository CI has NOT executed any of its four jobs. Real WROOM board pin accessibility, simultaneous RMT under actual WiFi/ADC behavior, transmitter, optical baffles, input bias and rate still need bench measurements. The driver cannot grant motion or charge.
 
 **Proposed remaining software acceptance contract, not completed implementation:**
 
@@ -77,7 +77,7 @@ The user's original 23-section `ESP32 Deskpet Ideas` research (active project se
 4. Verify bidirectional pack current and NTC/charger state under the complete load. A mere voltage rise within the originally suggested 10 seconds is not sufficient to prove net charging; BQ24074 PGOOD/CHG status alone also cannot prove it. A false or changed status cannot authorize power.
 5. Limit attempts, never reverse blindly near an edge, and only retry following a fresh complete floor, front, rear, bumper and power check. The original three-retry concept is a maximum **after** physical clearance measurement, not permission to back out automatically today.
 
-The complete robot remains **NOT DOCKING OR CHARGING VERIFIED** until the IR receiver pin budget, beacon, dock-side isolated charger/contact circuit, actual printed fit and a repeated hardware approach/charge bench record all exist. This note is intentionally a gap and source reconciliation, not a completed software feature or an unapproved new purchase.
+The source IR pin budget and read-only decoder are now implemented, but the complete robot remains **NOT DOCKING OR CHARGING VERIFIED** until the actual 38kHz beacon/transmitter, dual receiver physical measurements, terminal steering calibration, independently isolated contact/charger circuit, printed fit and repeated hardware approach/charge bench record all exist. This note is intentionally a gap and source reconciliation, not a completed software feature or an unapproved new purchase.
 
 ## Last centimeter of autonomous docking
 
