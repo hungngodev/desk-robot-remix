@@ -165,6 +165,8 @@ class Conversation:
         # Preserve the difference between an actual sensor eyewitness record
         # and a spoken social turn. The speaker did not "see" its own words.
         def origin(entry):
+            if entry.kind == "heard_human":
+                return "I may have heard (uncertain machine transcription)"
             if entry.kind == "own_utterance" and entry.witnessed:
                 return "I said"
             if entry.kind == "peer_utterance" and not entry.witnessed:
