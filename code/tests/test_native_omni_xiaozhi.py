@@ -716,3 +716,50 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         service.closed = True
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_first_human_camera_wake_does_not_double_fetch_on_esp32(native):
+    """The initial VAD event is consumed before the first Mac camera HTTP."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    service._user_was_talking = True
+    service._video_turn = 1
+    service._camera_wakeup.set()
+    calls = []
+    seen = asyncio.Event()
+
+    class CameraReply:
+        status = 503
+        headers = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class CameraHTTP:
+        def get(self, *_args, **_kwargs):
+            calls.append(1)
+            seen.set()
+            return CameraReply()
+
+    worker = asyncio.create_task(service._camera(CameraHTTP()))
+    try:
+        await asyncio.wait_for(seen.wait(), timeout=1)
+        await asyncio.sleep(.04)  # much shorter than the 800ms idle cadence
+        assert len(calls) == 1
+        service._camera_wakeup.set()  # new independent VAD/motion wake
+        async with asyncio.timeout(1):
+            while len(calls) < 2:
+                await asyncio.sleep(.001)
+        assert len(calls) == 2
+    finally:
+        service.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
