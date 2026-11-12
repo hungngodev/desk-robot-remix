@@ -628,7 +628,12 @@ void BodyControl::execute(const char* line, std::size_t length,
     unsigned side_present_mask = 0, side_valid_mask = 0;
     for (int i = 0; i < 3; ++i) {
       if (state_.side_present[i]) side_present_mask |= 1U << i;
-      if (state_.side_valid[i]) side_valid_mask |= 1U << i;
+      // Validity is an observation age, not a sticky historical success.
+      // Keep the present mask and raw distance for diagnostics, but do not
+      // publish stale side/rear readings as current physical evidence.
+      if (state_.side_valid[i] &&
+          now_ms - state_.side_at_ms[i] <= 350U)
+        side_valid_mask |= 1U << i;
     }
     const bool imu_valid = imu_fresh(now_ms);
     const int written = std::snprintf(
