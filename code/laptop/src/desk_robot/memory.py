@@ -23,6 +23,26 @@ _EVENT_ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 _EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
 
 
+_WORDS = re.compile(r"[a-z0-9]{2,}")
+_QUERY_FILLER = frozenset({
+    "a", "an", "and", "are", "at", "be", "can", "did", "do", "for", "from",
+    "have", "i", "in", "is", "it", "me", "my", "of", "on", "our", "that",
+    "the", "there", "this", "to", "was", "we", "were", "what", "when",
+    "where", "which", "who", "with", "you", "your",
+})
+
+
+def _terms(text: str) -> frozenset[str]:
+    """Small local lexical recall, no external embedding service or new agent."""
+    words = _WORDS.findall(text.casefold())[:96]
+    return frozenset(
+        word[:-3] + "y" if len(word) > 4 and word.endswith("ies")
+        else word[:-1] if len(word) > 3 and word.endswith("s")
+        else word
+        for word in words if word not in _QUERY_FILLER
+    )
+
+
 @dataclass(frozen=True)
 class Memory:
     robot_id: str
@@ -149,6 +169,51 @@ class MemoryStore:
             Memory(robot_id, event_id, source, bool(witnessed), kind, summary, at, score)
             for event_id, source, witnessed, kind, summary, at, score in rows
         ]
+
+    def search(self, robot_id: str, query: str, *, limit: int = 6) -> list[Memory]:
+        """Recall relevant events from THIS pet's local episodic SQLite store.
+
+        Mirrors LangGraph's separation of short lived turn state from durable
+        memories without introducing another agent. The store has at most 250
+        records per robot, so this bounded fallback needs no embedding server.
+        Empty matches produce no invented recollections.
+        """
+        if robot_id not in self.robot_ids:
+            raise ValueError("Unknown robot memory identity")
+        if (not isinstance(query, str) or not 1 <= len(query.strip()) <= 240
+                or "\x00" in query or type(limit) is not int
+                or not 1 <= limit <= 12):
+            raise ValueError("Bounded memory question and limit required")
+        wanted = _terms(query)
+        if not wanted:
+            return []
+        with self._connect(robot_id) as db:
+            rows = db.execute(
+                """SELECT event_id,source_robot,witnessed,kind,summary,observed_at,confidence
+                   FROM memories ORDER BY observed_at DESC,event_id DESC LIMIT 250"""
+            ).fetchall()
+        now = time.time()
+        ranked = []
+        for event_id, source, witnessed, kind, summary, at, score in rows:
+            common = len(wanted & _terms(summary + " " + kind))
+            if not common:
+                continue
+            # Topic match wins; confidence, firsthand source and recent age
+            # break ties. None upgrades secondhand memory to eyewitness fact.
+            age_days = max(0.0, now - at) / 86400
+            rank = (
+                5 * common / len(wanted) + 2 * common + float(score)
+                + (0.25 if witnessed else 0)
+                + 0.25 / (1 + age_days / 14),
+                at,
+                event_id,
+            )
+            ranked.append((
+                rank, Memory(robot_id, event_id, source, bool(witnessed),
+                             kind, summary, at, score),
+            ))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [entry for _, entry in ranked[:limit]]
 
     def count(self, robot_id: str) -> int:
         with self._connect(robot_id) as db:
