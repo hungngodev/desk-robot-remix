@@ -14,7 +14,9 @@ static void make_frame(desk_robot::IrMarkSpace (&items)[34],
       (std::uint32_t(command) << 16) |
       (std::uint32_t(static_cast<std::uint8_t>(~command)) << 24);
   for (unsigned bit = 0; bit != 32; ++bit)
-    items[bit + 1] = {560, (raw & (std::uint32_t(1) << bit)) ? 1690U : 560U};
+    items[bit + 1] = desk_robot::IrMarkSpace(
+        560, static_cast<std::uint16_t>(
+            (raw & (std::uint32_t(1) << bit)) ? 1690 : 560));
   items[33] = {560, 0};
 }
 
