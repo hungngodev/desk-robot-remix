@@ -401,3 +401,69 @@ async def test_autonomous_observation_starts_without_voice_or_motor_authority(
         if runtime._voice_task is not None:
             runtime._voice_task.cancel()
             await asyncio.gather(runtime._voice_task, return_exceptions=True)
+
+
+async def test_authenticated_vad_recovery_restarts_existing_live_camera_only_when_ready():
+    from desk_robot.multimodal import CameraFrameHub
+
+    hub = CameraFrameHub(["robot-01"])
+    hub.notify("robot-01", "human_voice", time.monotonic())
+    starts = []
+
+    class Visual:
+        _reconnect_needs_sampler = {"robot-01"}
+
+        def voice_started(self, robot_id):
+            starts.append(robot_id)
+
+        def voice_ended(self, robot_id):
+            raise AssertionError("Active human VAD may not be released")
+
+    visual = Visual()
+    visual.hub = hub
+    pet = SimpleNamespace(voice_monitor_ready=False)
+    runtime = Runtime.__new__(Runtime)
+    runtime.multimodal = visual
+    runtime.pet = pet
+    await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+    assert starts == []
+    assert visual._reconnect_needs_sampler == {"robot-01"}
+    pet.voice_monitor_ready = True
+    await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+    assert starts == ["robot-01"]
+    assert not visual._reconnect_needs_sampler
+    assert hub.user_active("robot-01", time.monotonic())
+
+
+async def test_voice_outage_invalidates_camera_before_concurrent_audio_abort():
+    events = []
+
+    class Pet:
+        def set_voice_monitor_ready(self, ready):
+            events.append(("monitor", ready))
+
+        async def interrupt(self, robot_id):
+            events.append(("audio", robot_id))
+
+    class Talk:
+        async def stop(self):
+            events.append(("audio", "group"))
+
+    class Visual:
+        def voice_transport_unavailable(self):
+            events.append(("camera", "invalidated"))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[
+        SimpleNamespace(id="robot-01"),
+    ])
+    runtime.pet = Pet()
+    runtime.conversation = Talk()
+    runtime.multimodal = Visual()
+    await runtime._on_voice_global("stream_unavailable")
+    assert events == [
+        ("monitor", False),
+        ("camera", "invalidated"),
+        ("audio", "robot-01"),
+        ("audio", "group"),
+    ]
