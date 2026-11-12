@@ -149,6 +149,7 @@ def test_backend_audio_fails_closed_on_wrong_format_and_bad_base64():
     ("output_audio_format", "opus"),
     ("input_rate", 24000),
     ("output_rate", 16000),
+    ("output_format_type", "audio/mulaw"),
 ])
 def test_shared_native_model_handshake_rejects_fake_duplex_claims(mutation):
     """Smoke probe and live Xiaozhi route must reject identical fake backends."""
@@ -183,6 +184,8 @@ def test_shared_native_model_handshake_rejects_fake_duplex_claims(mutation):
         valid["session"]["audio"]["input"]["sample_rate_hz"] = value
     elif name == "output_rate":
         valid["session"]["audio"]["output"]["format"]["rate"] = value
+    elif name == "output_format_type":
+        valid["session"]["audio"]["output"]["format"]["type"] = value
     elif name in ("input_audio_format", "output_audio_format"):
         valid["session"][name] = value
     else:
