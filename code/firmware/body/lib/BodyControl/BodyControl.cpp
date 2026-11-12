@@ -325,6 +325,7 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool rearm = std::strcmp(command, "rearm") == 0;
   const bool disarm = std::strcmp(command, "disarm") == 0;
   const bool stop = std::strcmp(command, "stop") == 0;
+  const bool halt = std::strcmp(command, "halt") == 0;
   const bool keepalive = std::strcmp(command, "keepalive") == 0;
   const bool ping = std::strcmp(command, "ping") == 0;
   const bool status = std::strcmp(command, "status") == 0;
@@ -336,7 +337,7 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool calcommit = std::strcmp(command, "calcommit") == 0;
   const bool calabort = std::strcmp(command, "calabort") == 0;
   const bool calibration = calfloor || calfront || calfresh || calcommit || calabort;
-  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || ir || calibration)) {
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || ir || halt || calibration)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
@@ -701,6 +702,13 @@ void BodyControl::execute(const char* line, std::size_t length,
   } else if (disarm) {
     force_disarm();
     std::snprintf(reply, capacity, "OK disarm");
+  } else if (halt) {
+    // Terminal operator/user cancellation: unlike the short-pulse STOP,
+    // a late abandoned job must NOT drive on the same armed session.
+    // Preserve servo PWM only to avoid deliberately dropping a held key.
+    stop_motion();
+    state_.armed = false;
+    std::snprintf(reply, capacity, "OK halt");
   } else if (stop) {
     stop_motion();
     if (state_.armed) last_control_ms_ = now_ms;
