@@ -102,6 +102,29 @@ def test_current_body_and_sense_firmware_gpio_match_machine_readable_harness():
     assert "GPIO_NUM_9" not in sense
 
 
+
+def test_slow_reed_pir_are_on_expander_not_the_ir_direct_input_pins():
+    # Static contracts for the physical pin budget. No manufactured IR
+    # receiver, valid NEC decoder or charger is implied by this source test.
+    accessory = (ROOT / "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp").read_text()
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    body = (ROOT / "code/firmware/body/include/BodyPins.h").read_text()
+    bus = PLAN["bus"]
+    assert bus["body_gpio"]["terminal_ir_left_reserved"] == 36
+    assert bus["body_gpio"]["terminal_ir_right_reserved"] == 39
+    assert "kTerminalIrLeftInput = 36;" in body
+    assert "kTerminalIrRightInput = 39;" in body
+    assert "kReedInput" not in body and "kPirInput" not in body
+    assert "write8(0x20, 0x01, 0xFF)" in accessory
+    assert "write8(0x20, 0x0D, 0x01)" in accessory
+    assert "read(0x20, 0x13, &bits, 1)" in accessory
+    assert "data_.optional_inputs.valid = false;" in accessory
+    assert "const auto& extension = accessories.readings().optional_inputs;" in main
+    assert "now_ms - extension.at_ms <= 250U" in main
+    assert "digitalRead(body_pins::kTerminalIrLeftInput)" not in main
+    assert "digitalRead(body_pins::kTerminalIrRightInput)" not in main
+    assert bus["mcp23017_optional_inputs"]["physical_qualified"] is False
+
 def test_all_eight_tof_lanes_and_every_aux_lane_have_unique_i2c_addresses():
     ranges = PLAN["bus"]["mux_ranges"]
     extras = PLAN["bus"]["mux_extras"]
