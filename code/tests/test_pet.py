@@ -1025,6 +1025,9 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
     pet = PetController(fleet, {}, chat, memory, KeyScene())
+    hub = CameraFrameHub([r.id for r in fleet.robots])
+    hub.offer("robot-01", WHITE, time.monotonic(), source="proactive")
+    pet.multimodal = SimpleNamespace(hub=hub)
     state = pet.states["robot-01"]
     state.enabled, state.generation = True, 14
 
@@ -1063,6 +1066,12 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
         await pet._observe_aux("robot-01", 14, report(2, 0xFEDCBA98, seq=2))
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 2
         assert memory.count("robot-02") == 0
+        kinds = [event["kind"] for event in hub.recent_events(
+            "robot-01", time.monotonic()
+        )]
+        assert "nfc_tag" in kinds
+        assert hub.due("robot-01", time.monotonic())
+        assert not hub.event_history["robot-02"]
     finally:
         state.enabled = False
         await pet.close()
@@ -1400,6 +1409,72 @@ async def test_uncertain_visual_event_is_not_spoken_and_does_not_consume_cooldow
         await wait_for(lambda: state.spoken == 1)
         assert len(speaker.spoken) == 1
     finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_proactive_source_prompt_does_not_claim_sensor_is_camera(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = GroundedChat()
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, chat, speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(), speech_cooldown=0)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 24
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange(
+                "paw_contact", "A finger pressed my optical paw sensor", 1.0
+            ), 24
+        )
+        await wait_for(lambda: state.spoken == 1)
+        assert "Local physical sensor event" in chat.prompts[0][1]["content"]
+        assert "New visual change" not in chat.prompts[0][1]["content"]
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A possible key appeared", .96), 24
+        )
+        await wait_for(lambda: state.spoken == 2)
+        assert "Camera model assessment (uncertain)" in chat.prompts[1][1]["content"]
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_spontaneous_model_response_expires_before_old_event_is_spoken(
+    fleet, tmp_path,
+):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class DelayedChat:
+        async def reply(self, history):
+            entered.set()
+            await release.wait()
+            return "Looks like something interesting happened!"
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, DelayedChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        max_observation_age=0.02, speech_cooldown=0,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 25
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("hand_wave", "Real hand wave detected", 1.0),
+            25,
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        await asyncio.sleep(0.04)
+        release.set()
+        await wait_for(lambda: pet._speech_task is None)
+        assert state.spoken == 0
+        assert speaker.spoken == []
+        assert state.last_initiative_suppression == "event_expired_during_reasoning"
+        assert pet._group_last_spoken == float("-inf")
+    finally:
+        release.set()
         state.enabled = False
         await pet.close()
 
