@@ -518,3 +518,53 @@ async def test_failed_global_abort_is_retried_while_voice_stream_is_unavailable(
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_slow_voice_head_cannot_block_other_fleet_interrupts():
+    import asyncio
+
+    attempted = []
+    fast_done = asyncio.Event()
+    never_finishes = asyncio.Event()
+
+    async def interrupt(robot_id, reason):
+        attempted.append(robot_id)
+        if robot_id == "robot-01":
+            await never_finishes.wait()
+        else:
+            fast_done.set()
+
+    async with httpx.AsyncClient() as client:
+        watcher = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=interrupt,
+        )
+        with pytest.raises(TimeoutError, match="Fleet interruption incomplete"):
+            await asyncio.wait_for(
+                watcher._preempt_all("stream_unavailable"), timeout=1
+            )
+        assert fast_done.is_set()  # second pet interrupted without waiting
+        assert sorted(attempted) == ["robot-01", "robot-02"]
+        # A timed-out device does not count as a successful physical flush.
+
+
+async def test_explicit_listener_task_cancellation_propagates_with_hung_head():
+    import asyncio
+
+    started = asyncio.Event()
+    blocked = asyncio.Event()
+
+    async def interrupt(robot_id, reason):
+        started.set()
+        await blocked.wait()
+
+    async with httpx.AsyncClient() as client:
+        watcher = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=interrupt,
+        )
+        task = asyncio.create_task(watcher._preempt_all("reset"))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
