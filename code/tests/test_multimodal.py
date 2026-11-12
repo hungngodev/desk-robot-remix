@@ -983,3 +983,40 @@ async def test_preprocess_submission_failure_releases_native_budget(monkeypatch)
         visual._preprocess_slots.release()
     finally:
         await visual.close()
+
+
+async def test_optional_jpeg_worker_cannot_starve_live_human_visual_preprocess(monkeypatch):
+    """A blocked low priority decode cannot occupy both native worker slots."""
+    import threading
+    import desk_robot.multimodal as media
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def decode(jpeg):
+        if jpeg == b"background":
+            started.set()
+            if not release.wait(2):
+                raise RuntimeError("background fixture stalled")
+        return jpeg, b"fingerprint", 100.0
+
+    monkeypatch.setattr(media, "_prepare", decode)
+    visual = MultimodalOrchestrator(config(), {}, Vision(), asyncio.Lock())
+    pending = asyncio.create_task(visual._prepare_bounded(b"background"))
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        with pytest.raises(RuntimeError, match="Background JPEG preprocessing busy"):
+            await visual._prepare_bounded(b"another background")
+        # The genuine speech/request owner keeps a native slot even when an
+        # optional five-pet camera worker is stuck in decoder I/O.
+        assert (await visual._prepare_bounded(
+            b"voice", priority=True
+        ))[0] == b"voice"
+        release.set()
+        assert (await pending)[0] == b"background"
+    finally:
+        release.set()
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await visual.close()
