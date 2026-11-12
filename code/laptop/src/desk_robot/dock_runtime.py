@@ -25,6 +25,16 @@ def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
     return calibration, float(target)
 
 
+def _hold(robot_id: str, *, reason: str, source: str) -> dict:
+    """Return a non-authorizing diagnostic for failed dock observation."""
+    return {
+        "robot_id": robot_id, "phase": "hold", "reason": reason,
+        "source": source, "pose": None,
+        "motor_authorized": False, "charging_authorized": False,
+        "physical_acceptance_pass": False,
+    }
+
+
 async def observe_actual_dock(head, robot) -> dict:
     """Real head JPEG in, real marker pose out. No movement is possible here.
 
@@ -34,22 +44,11 @@ async def observe_actual_dock(head, robot) -> dict:
     try:
         calib, target = load_real_dock_calibration(robot.dock_calibration)
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        return {
-            "robot_id": robot.id, "phase": "hold",
-            "reason": f"Dock calibration required: {exc}",
-            "source": "not_calibrated", "motor_authorized": False,
-            "charging_authorized": False, "physical_acceptance_pass": False,
-        }
+        return _hold(robot.id, reason=f"Dock calibration required: {exc}", source="not_calibrated")
     try:
         jpeg = await asyncio.wait_for(head.snapshot(), timeout=3.0)
     except (OSError, ConnectionError, TimeoutError) as exc:
-        return {
-            "robot_id": robot.id, "phase": "hold",
-            "reason": f"Dock camera unavailable: {type(exc).__name__}",
-            "source": "head_snapshot_failed", "pose": None,
-            "motor_authorized": False, "charging_authorized": False,
-            "physical_acceptance_pass": False,
-        }
+        return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
     received_at = time.monotonic()
     try:
         pose = await asyncio.wait_for(
@@ -57,13 +56,7 @@ async def observe_actual_dock(head, robot) -> dict:
             timeout=2.0,
         )
     except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
-        return {
-            "robot_id": robot.id, "phase": "hold",
-            "reason": f"Dock marker detection unavailable: {type(exc).__name__}",
-            "source": "apriltag_detection_failed", "pose": None,
-            "motor_authorized": False, "charging_authorized": False,
-            "physical_acceptance_pass": False,
-        }
+        return _hold(robot.id, reason=f"Dock marker detection unavailable: {type(exc).__name__}", source="apriltag_detection_failed")
     # Receipt timestamp is not the end of OpenCV computation. A slow or
     # stalled detector cannot authorize a now-stale dock observation.
     assessment = assess_dock(pose, now=time.monotonic(), target_distance_mm=target)
