@@ -39,13 +39,13 @@ def test_power_sizing_rejects_absent_and_bad_loads(peak, average):
 
 
 def test_candidate_never_approved_by_rounding_down_current_requirement():
-    # Actual input need is 1.529411... A, though the report prints 1.529.
-    # An exactly 1.529 A rated component must therefore NOT pass on paper.
+    # Actual input need is 1.529411... A, so the displayed minimum is
+    # conservatively rounded UP to 1.530 rather than a misleading 1.529.
     low = tool(
         0.6, 0.4, boost_max_input_a=1.529,
         boost_continuous_output_a=1, protected_cell_continuous_a=2,
     )
-    assert low["minimum_rated_cell_and_boost_input_a"] == 1.529
+    assert low["minimum_rated_cell_and_boost_input_a"] == 1.53
     assert low["candidate_electrically_sufficient_on_paper"] is False
     enough = tool(
         0.6, 0.4, boost_max_input_a=1.53,
@@ -53,3 +53,13 @@ def test_candidate_never_approved_by_rounding_down_current_requirement():
     )
     assert enough["candidate_electrically_sufficient_on_paper"] is True
     assert enough["candidate_physically_qualified"] is False
+
+
+def test_exact_decimal_sizing_boundary_is_accepted_without_float_error():
+    # 3 * 1.3 == 3.9 A exactly in stated decimal measurements.
+    result = tool(
+        3, 1.8, boost_max_input_a=8,
+        boost_continuous_output_a=3.9, protected_cell_continuous_a=8,
+    )
+    assert result["minimum_rated_5v_output_a"] == 3.9
+    assert result["candidate_electrically_sufficient_on_paper"] is True
