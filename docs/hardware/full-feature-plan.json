@@ -83,7 +83,7 @@
       "name": "VL53L4CD time of flight carrier",
       "per_robot": 8,
       "reported_owned_total": 0,
-      "notes": "Four downward, one front, one left, one right, one rear; 5 channel firmware presently, three further channels not yet implemented",
+      "notes": "Four downward, one front, one left, one right, one rear; esp32_full source implements all eight, with only five channels in local drive guard and three read-only. None physically qualified.",
       "group": "pet"
     },
     {
