@@ -58,8 +58,8 @@ def test_timeout_preserves_bounded_partial_compiler_logs(monkeypatch, tmp_path):
     def timed_out(*args, **kwargs):
         raise verify.subprocess.TimeoutExpired(
             cmd=["cmake", "--build", str(tmp_path)], timeout=2,
-            output=b"compiler: validating pins...\\n" + b"a" * 20000,
-            stderr=b"fatal: module failed\\n\\xff",
+            output=b"compiler: validating pins..." + bytes([10]) + b"a" * 20000,
+            stderr=b"fatal: module failed" + bytes([10, 255]),
         )
 
     monkeypatch.setattr(verify.subprocess, "run", timed_out)
@@ -69,4 +69,4 @@ def test_timeout_preserves_bounded_partial_compiler_logs(monkeypatch, tmp_path):
     assert result["error"].startswith("TimeoutExpired")
     assert "fatal: module failed" in result["output_tail"]
     assert len(result["output_tail"]) <= 12000
-    assert "\\ufffd" in result["output_tail"]  # bad bytes never crash receipt
+    assert chr(0xFFFD) in result["output_tail"]  # invalid UTF8 decoded safely
