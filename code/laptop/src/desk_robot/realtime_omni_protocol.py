@@ -85,6 +85,10 @@ class OmniDuplexWire:
         self.played_ms = 0
         self.accept_output = True
         self.frames_sent = 0
+        # Real Mac reception identity, not the position in an audio byte
+        # counter. The same JPEG cannot be forwarded twice as fresh video.
+        self._last_video_receipt_us = 0
+        self._last_video_audio_ms = -1000
         self._needs_new_input = False
         self._input_after_interrupt = False
         self._server_response_epoch: int | None = None
@@ -110,7 +114,8 @@ class OmniDuplexWire:
 
     def append_audio(self, pcm16: bytes, *, speech: bool,
                      jpeg: bytes | None = None,
-                     camera_age_ms: int | None = None) -> dict:
+                     camera_age_ms: int | None = None,
+                     frame_receipt_us: int | None = None) -> dict:
         """One 1..1000 ms mono 16 kHz chunk, with at most one timely camera JPEG.
 
         vLLM Omni packs a visual frame onto the append closing a 1 s model
@@ -130,9 +135,10 @@ class OmniDuplexWire:
             or not jpeg.startswith(b"\xff\xd8")
             or type(camera_age_ms) is not int
             or not 0 <= camera_age_ms <= 1000
+            or type(frame_receipt_us) is not int
+            or frame_receipt_us <= 0
         ):
             raise ValueError("Only fresh bounded JPEG from current head allowed")
-        previous_ms = self.input_ms
         self.input_ms += duration
         event = {
             "type": "input_audio_buffer.append",
@@ -145,10 +151,18 @@ class OmniDuplexWire:
         }
         if self._needs_new_input:
             self._input_after_interrupt = True
-        if jpeg is not None:
-            if self.input_ms // 1000 > previous_ms // 1000:
-                event["video_frames"] = [base64.b64encode(jpeg).decode("ascii")]
-                self.frames_sent += 1
+        # Voice frame selection follows the received camera identity rather
+        # than a one-second audio counter boundary. The FIRST authenticated
+        # JPEG can join a 200ms spoken question; later unique images are
+        # limited to 1 FPS. No duplicate frame or video-only hallucination.
+        if (jpeg is not None and speech
+                and frame_receipt_us > self._last_video_receipt_us
+                and self.input_ms - self._last_video_audio_ms >= 1000):
+            event["video_frames"] = [base64.b64encode(jpeg).decode("ascii")]
+            event["video_receipt_us"] = frame_receipt_us
+            self._last_video_receipt_us = frame_receipt_us
+            self._last_video_audio_ms = self.input_ms
+            self.frames_sent += 1
         return event
 
     def commit(self, *, final: bool = True) -> dict:
