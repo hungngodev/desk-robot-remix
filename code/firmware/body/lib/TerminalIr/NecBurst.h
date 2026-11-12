@@ -1,0 +1,94 @@
+#pragma once
+#include <cstddef>
+#include <cstdint>
+
+namespace desk_robot {
+// Portable and bounded decoder for one complete 38 kHz demodulated NEC burst.
+// Timing/reference: Espressif esp-idf v4.4 RMT IR protocols and Vishay TSOP382.
+// Input is MARK LOW, SPACE HIGH (TSOP active low), in microseconds.
+// A repeat-only NEC frame, a truncated frame, or a non-inverted checksum
+// is NOT a fresh sighting. The result NEVER authorizes a motor or charger.
+struct IrMarkSpace {
+  std::uint16_t mark_us = 0;
+  std::uint16_t space_us = 0;
+};
+inline bool ir_between(std::uint16_t v, unsigned lo, unsigned hi) {
+  return v >= lo && v <= hi;
+}
+inline bool decode_nec(const IrMarkSpace* items, std::size_t count,
+                       std::uint32_t& code) {
+  code = 0;
+  if (!items || count != 33 ||
+      !ir_between(items[0].mark_us, 7200, 10800) ||
+      !ir_between(items[0].space_us, 3600, 5400)) return false;
+  std::uint32_t bits = 0;
+  for (unsigned i = 0; i < 32; ++i) {
+    const IrMarkSpace p = items[i + 1];
+    if (!ir_between(p.mark_us, 350, 850)) return false;
+    const bool zero = ir_between(p.space_us, 350, 850);
+    const bool one = ir_between(p.space_us, 1300, 2100);
+    if (zero == one) return false;
+    if (one) bits |= (std::uint32_t(1) << i);
+  }
+  const std::uint8_t address = static_cast<std::uint8_t>(bits);
+  const std::uint8_t address_inverse = static_cast<std::uint8_t>(bits >> 8);
+  const std::uint8_t command = static_cast<std::uint8_t>(bits >> 16);
+  const std::uint8_t command_inverse = static_cast<std::uint8_t>(bits >> 24);
+  // Strict classic NEC. Extended NEC and arbitrary remotes are rejected
+  // until an actual, verified dock beacon protocol has been selected.
+  if (static_cast<std::uint8_t>(address ^ address_inverse) != 0xff ||
+      static_cast<std::uint8_t>(command ^ command_inverse) != 0xff)
+    return false;
+  code = bits;
+  return true;
+}
+
+struct IrSideEvidence {
+  std::uint32_t code = 0;
+  std::uint32_t seq = 0;       // accepted complete frames, not HTTP queries
+  std::uint32_t at_ms = 0;     // WROOM receive/poll time, NOT exposure time
+};
+struct IrPairEvidence {
+  bool left_fresh = false, right_fresh = false, same_code = false;
+  std::uint32_t left_seq = 0, right_seq = 0;
+  std::uint32_t left_age_ms = 0, right_age_ms = 0;
+  std::uint32_t code = 0;
+  bool motor_authorized = false;
+  bool charging_authorized = false;
+};
+
+class DualIrEvidence {
+ public:
+  // Called only after an actual valid independent RMT frame for that side.
+  void accept(unsigned side, std::uint32_t code, std::uint32_t now_ms) {
+    if (side > 1) return;
+    IrSideEvidence& s = sides_[side];
+    s.code = code;
+    s.at_ms = now_ms;
+    ++s.seq;
+    if (s.seq == 0) ++s.seq;
+  }
+  IrPairEvidence assess(std::uint32_t now_ms) const {
+    IrPairEvidence out{};
+    const auto& left = sides_[0];
+    const auto& right = sides_[1];
+    out.left_seq = left.seq;
+    out.right_seq = right.seq;
+    out.left_age_ms = left.seq ? now_ms - left.at_ms : 0xffffffffU;
+    out.right_age_ms = right.seq ? now_ms - right.at_ms : 0xffffffffU;
+    out.left_fresh = left.seq != 0 && out.left_age_ms <= 200U;
+    out.right_fresh = right.seq != 0 && out.right_age_ms <= 200U;
+    // A 200 ms time window does not itself prove a bearing. Different
+    // receivers must actually observe the SAME checksum-valid beacon.
+    const std::uint32_t separation =
+        left.at_ms >= right.at_ms ? left.at_ms - right.at_ms
+                                 : right.at_ms - left.at_ms;
+    out.same_code = out.left_fresh && out.right_fresh &&
+                    separation <= 120U && left.code == right.code;
+    if (out.same_code) out.code = left.code;
+    return out;
+  }
+ private:
+  IrSideEvidence sides_[2]{};
+};
+} // namespace desk_robot
