@@ -38,9 +38,13 @@ def size_5v_supply(
         if rating is not None and (type(rating) not in (int, float)
                                    or not math.isfinite(rating) or rating <= 0):
             raise ValueError("Rated board current must be positive and finite")
-    boosted_peak = round(measured_peak_5v_a * margin, 3)
-    cell_peak = round(5.0 * measured_peak_5v_a * margin
-                      / (cell_low_v * measured_boost_efficiency), 3)
+    # Values displayed to 3 decimal places are informational. Never use
+    # rounded-down display currents to approve a marginal component rating.
+    required_5v_peak = measured_peak_5v_a * margin
+    required_cell_peak = (5.0 * measured_peak_5v_a * margin
+                          / (cell_low_v * measured_boost_efficiency))
+    boosted_peak = round(required_5v_peak, 3)
+    cell_peak = round(required_cell_peak, 3)
     boosted_cont = round(measured_continuous_5v_a * margin, 3)
     requirements = {
         "measured_peak_5v_a": measured_peak_5v_a,
@@ -54,9 +58,9 @@ def size_5v_supply(
     }
     if all(rating is not None for rating in ratings):
         requirements["candidate_electrically_sufficient_on_paper"] = (
-            boost_max_input_a >= cell_peak
-            and boost_continuous_output_a >= boosted_peak
-            and protected_cell_continuous_a >= cell_peak
+            boost_max_input_a >= required_cell_peak
+            and boost_continuous_output_a >= required_5v_peak
+            and protected_cell_continuous_a >= required_cell_peak
         )
         requirements["candidate_physically_qualified"] = False
     else:
