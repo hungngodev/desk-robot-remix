@@ -1,6 +1,34 @@
 # Verification and physical trials
 
 
+## November 12 executed targeted native speech and printable prototype checks
+
+**This record is for canonical PR #17 source only.** Executed in an isolated local mirror of exact GitHub blobs, not a full repository checkout. Git object SHA matching was confirmed before running:
+
+| File | Verified Git blob SHA |
+| --- | --- |
+| `code/laptop/src/desk_robot/realtime_omni_protocol.py` | `393401be31ffeed0ff9bcb7059e8efe236196cf2` |
+| `code/tests/test_realtime_omni_protocol.py` | `34587ab3a9101d13aa72941e4481370720fb44a4` |
+| `code/scripts/export_fit_kit.py` | `ff943e69178a9b44a7870c995136cf9592ccebdd` |
+| `code/tests/test_export_fit_kit.py` | `b72441efeda059200a91e38ef72ca9c5a81c6a3f` |
+| `docs/cad/remixes/one_robot_adapter_kit.scad` | `c0e792f64724731ade6b54e293c37662f1a56b3b` |
+| `docs/cad/remixes/remaining_fit_gauges.scad` | `540201b724adc2d68dd6ca69ba308d79d7474a81` |
+
+**Actually executed**, local Python 3.13.5 and OpenSCAD 2021.01:
+
+```sh
+PYTHONPATH=/tmp/desk-robot-verified/code/laptop/src python3 -m pytest -q /tmp/desk-robot-verified/code/tests/test_realtime_omni_protocol.py
+# 24 passed in 0.07s
+python3 -m pytest -q /tmp/desk-robot-verified/code/tests/test_export_fit_kit.py
+# 4 passed in 3.85s
+```
+
+This validates native audio/video *protocol* JPEG boundaries, complete one-second model units, receipt identity, stale response cancellation, rapid double barge-in epochs and no fabricated playback ACK; and validates the CAD exporter's batch behavior, failure handling and real OpenSCAD rendering. Exact source OpenSCAD render and geometry checks separately produced all **10/10** provisional STL files as one watertight component each with no invalid topology edges, **13,236** checked closed manifold edges. Output prototype ZIP (outside GitHub repository) SHA256 `1a4828cebd763c5c919b2ef2b39880e69a7f9c14845723b0d5770749b8a43ae9`.
+
+**Not established:** no full pinned Python 3.11 lockfile suite, WROOM PlatformIO, native CMake sanitizer suite, Sense ESP-IDF build, physical AEC or speaker timing, measured GPIO/charging, fitted Fusion assembly, real 3D printer tolerances, docking, grasping, or five actual connected robots. The repo's four GitHub-hosted Actions jobs still fail before usable execution steps, so their source tests remain unknown. OpenSCAD output is **only prototype adapters and fit gauges** using provisional sizes, not a complete printable robot. The CI workflow now installs OpenSCAD so this real-source test runs when the provider starts jobs. Never use this targeted 28-test pass as grounds to mark physical acceptance, charger enable or batch approval.
+
+
+
 ## November 12 live camera, native voice and five pet source audit
 
 **Sole target** draft PR #17; head identity to be retrieved before any future run. **No physical measurements or full repo test execution occurred during these changes.** The existing four GitHub Actions jobs continued failing before any recorded job steps; that is not evidence of a Python assertion, C++ compiler or ESP-IDF error.
