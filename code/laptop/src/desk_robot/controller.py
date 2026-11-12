@@ -442,6 +442,17 @@ class Coordinator:
                         "charging_authorized": False, "physical_acceptance_pass": False,
                     }
                 command = f"drive {20 * forward_sign} {20 * forward_sign} 100"
+            # The second fresh WROOM status request itself may take seconds.
+            # It verifies sensor safety, not that the old AprilTag image is
+            # still useful. Reject a marker that expired while polling safety.
+            latest = assess_dock(
+                pose, now=time.monotonic(), target_distance_mm=target_mm
+            )
+            if latest.phase != decision.phase:
+                return {
+                    "phase": "hold", "reason": latest.reason,
+                    "charging_authorized": False, "physical_acceptance_pass": False,
+                }
             await head.command(command)
             await asyncio.sleep(0.12)
             await head.command("stop")
