@@ -28,19 +28,19 @@ def test_native_open_session_uses_pcm_and_truthful_playback_policy():
 
 def test_distinct_real_camera_receipts_only_on_complete_one_second_model_units():
     wire = OmniDuplexWire()
-    jpeg = b"\\xff\\xd8" + b"x" * 120 + b"\\xff\\xd9"
+    jpeg = b"\xff\xd8" + b"x" * 120 + b"\xff\xd9"
     for index in range(20):
         # Unlike Gemini Live's independent video messages, this pinned
         # model only accepts a camera image on an append closing 1s of audio.
         # A new receipt can be offered again until that exact boundary.
         receipt = 101 if index < 10 else 102
         chunk = wire.append_audio(
-            b"\\0" * 3200, speech=index < 10,
+            b"\0" * 3200, speech=index < 10,
             jpeg=jpeg, camera_age_ms=100, frame_receipt_us=receipt,
         )
         assert chunk["duration_ms"] == 100
         assert chunk["audio_end_ms"] == (index + 1) * 100
-        assert base64.b64decode(chunk["audio"]) == b"\\0" * 3200
+        assert base64.b64decode(chunk["audio"]) == b"\0" * 3200
         assert ("video_frames" in chunk) == (index in (9, 19))
     assert wire.frames_sent == 2
     assert wire.commit()["response_create"] is False
@@ -48,16 +48,16 @@ def test_distinct_real_camera_receipts_only_on_complete_one_second_model_units()
 
 def test_partial_unit_never_falsely_claims_that_the_native_model_saw_a_frame():
     wire = OmniDuplexWire()
-    jpeg = b"\\xff\\xd8" + b"frame" * 12 + b"\\xff\\xd9"
-    first = wire.append_audio(b"\\0" * 3200, speech=True)
+    jpeg = b"\xff\xd8" + b"frame" * 12 + b"\xff\xd9"
+    first = wire.append_audio(b"\0" * 3200, speech=True)
     assert "video_frames" not in first
     short = wire.append_audio(
-        b"\\0" * 3200, speech=True,
+        b"\0" * 3200, speech=True,
         jpeg=jpeg, camera_age_ms=20, frame_receipt_us=3001,
     )
     assert "video_frames" not in short
     repeated = wire.append_audio(
-        b"\\0" * 3200, speech=False,
+        b"\0" * 3200, speech=False,
         jpeg=jpeg, camera_age_ms=40, frame_receipt_us=3001,
     )
     assert "video_frames" not in repeated
@@ -66,13 +66,13 @@ def test_partial_unit_never_falsely_claims_that_the_native_model_saw_a_frame():
 
 def test_never_send_native_video_without_a_real_mac_receipt_or_recent_human_speech():
     wire = OmniDuplexWire()
-    jpeg = b"\\xff\\xd8" + b"frame" * 12 + b"\\xff\\xd9"
+    jpeg = b"\xff\xd8" + b"frame" * 12 + b"\xff\xd9"
     with pytest.raises(ValueError):
         wire.append_audio(
-            b"\\0" * 3200, speech=True, jpeg=jpeg, camera_age_ms=1,
+            b"\0" * 3200, speech=True, jpeg=jpeg, camera_age_ms=1,
         )
     idle = wire.append_audio(
-        b"\\0" * 3200, speech=False,
+        b"\0" * 3200, speech=False,
         jpeg=jpeg, camera_age_ms=1, frame_receipt_us=5001,
     )
     assert "video_frames" not in idle
@@ -83,16 +83,16 @@ def test_never_send_native_video_without_a_real_mac_receipt_or_recent_human_spee
 
 def test_recent_speech_tail_can_pair_actual_frame_with_completed_native_model_unit():
     wire = OmniDuplexWire()
-    jpeg = b"\\xff\\xd8" + b"frame" * 12 + b"\\xff\\xd9"
+    jpeg = b"\xff\xd8" + b"frame" * 12 + b"\xff\xd9"
     # Speech ends at 700ms, but the model's first one-second audio unit
     # closes during a real trailing silent audio chunk. The XIAO frame is
     # included only there and never repeated on a later unit.
     for _ in range(7):
-        packet = wire.append_audio(b"\\0" * 3200, speech=True)
+        packet = wire.append_audio(b"\0" * 3200, speech=True)
         assert "video_frames" not in packet
     for index in range(13):
         packet = wire.append_audio(
-            b"\\0" * 3200, speech=False, jpeg=jpeg,
+            b"\0" * 3200, speech=False, jpeg=jpeg,
             camera_age_ms=100, frame_receipt_us=43001,
         )
         assert ("video_frames" in packet) == (index == 2)
@@ -101,21 +101,21 @@ def test_recent_speech_tail_can_pair_actual_frame_with_completed_native_model_un
 
 def test_barge_in_drops_obsolete_visual_tail_until_new_authentic_speech():
     wire = OmniDuplexWire()
-    jpeg = b"\\xff\\xd8" + b"x" * 20 + b"\\xff\\xd9"
+    jpeg = b"\xff\xd8" + b"x" * 20 + b"\xff\xd9"
     for _ in range(9):
-        wire.append_audio(b"\\0" * 3200, speech=True)
+        wire.append_audio(b"\0" * 3200, speech=True)
     wire.interrupt()
     # The next packet closes the abandoned previous 1s unit, but it is
     # silence after an interruption, NOT a new visual question.
     dropped = wire.append_audio(
-        b"\\0" * 3200, speech=False, jpeg=jpeg,
+        b"\0" * 3200, speech=False, jpeg=jpeg,
         camera_age_ms=0, frame_receipt_us=10,
     )
     assert "video_frames" not in dropped
     for _ in range(9):
-        wire.append_audio(b"\\0" * 3200, speech=True)
+        wire.append_audio(b"\0" * 3200, speech=True)
     fresh = wire.append_audio(
-        b"\\0" * 3200, speech=True, jpeg=jpeg,
+        b"\0" * 3200, speech=True, jpeg=jpeg,
         camera_age_ms=20, frame_receipt_us=11,
     )
     assert base64.b64decode(fresh["video_frames"][0]) == jpeg
