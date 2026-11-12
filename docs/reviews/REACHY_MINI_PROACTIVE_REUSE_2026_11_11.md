@@ -50,6 +50,9 @@ Official build instructions explicitly distinguish real-time `set_target` (singl
 7. **Proactive Conversational AI: a comprehensive survey**, Deng et al., ACM TOIS 2025, [paper](https://doi.org/10.1145/3715097): evidence for the divide between context understanding, conversation initiative and actual user benefit. Reuse design principles, **not** an untested end-to-end pretrained policy.
 8. **EMOTION**, Apple ML Research, January 2025, [paper](https://machinelearning.apple.com/research/emotion-expressive-motion): models semantic expressive gestures from context. Use a semantic expression dictionary and timing, not the original joint trajectories.
 
+9. **General turn-taking models for human-robot interaction**, Skantze and Irfan, HRI 2025, [paper](https://arxiv.org/abs/2501.08946): TurnGPT and Voice Activity Projection (VAP) can predict whether a pause means turn completion or continuation. A 39-participant evaluation reported fewer unnatural delays and interruptions than a silence-only baseline. **Potential smallest integration:** test end-of-turn prediction as an optional Mac-side advisory signal alongside existing authenticated Xiaozhi VAD; never substitute model inference for urgent device playback abort or for the live speech owner. Do not introduce an extra microphone capture or grant it motor authority.
+10. **ProVox**, Grannen et al., 2025, [paper](https://arxiv.org/abs/2506.12248): personalized intent prompts guide proactive assistance during situated physical collaboration. **Potential reuse:** enrich the already existing per-pet, consented initiative scoring with a small user preference and recent refusal context, then evaluate unsolicited speech frequency and perceived helpfulness. Its manipulation planner and quoted user study effects are not evidence of working autonomous grasping on our gripper. Do not add a second agent stack or unsupervised movements.
+
 ## One architecture, not competing agents
 
 ```text
