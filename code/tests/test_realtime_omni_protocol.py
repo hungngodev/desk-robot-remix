@@ -136,3 +136,56 @@ def test_backend_audio_fails_closed_on_wrong_format_and_bad_base64():
         wire.handle_event(bad)
     with pytest.raises(RuntimeError):
         wire.handle_event({"type": "error", "error": {"code": "backend_failed"}})
+
+
+@pytest.mark.parametrize("mutation", [
+    ("type", "session.error"),
+    ("model", "other/model"),
+    ("implementation_level", "turn_based"),
+    ("supports_barge_in", False),
+    ("supports_input_append", False),
+    ("chunk_period_ms", 100),
+    ("input_audio_format", "opus"),
+    ("output_audio_format", "opus"),
+    ("input_rate", 24000),
+    ("output_rate", 16000),
+])
+def test_shared_native_model_handshake_rejects_fake_duplex_claims(mutation):
+    """Smoke probe and live Xiaozhi route must reject identical fake backends."""
+    from desk_robot.realtime_omni_protocol import verify_native_server
+
+    selected = "openbmb/MiniCPM-o-4_5"
+    valid = {
+        "type": "session.created",
+        "session": {
+            "model": selected,
+            "input_audio_format": "pcm16",
+            "output_audio_format": "pcm16",
+            "capabilities": {
+                "implementation_level": "model_native_duplex",
+                "supports_input_append": True,
+                "supports_barge_in": True,
+                "chunk_period_ms": 1000,
+            },
+            "audio": {
+                "input": {"sample_rate_hz": 16000},
+                "output": {"format": {"type": "audio/pcm", "rate": 24000}},
+            },
+        },
+    }
+    assert verify_native_server(valid, selected) is None
+    name, value = mutation
+    if name == "type":
+        valid["type"] = value
+    elif name == "model":
+        valid["session"]["model"] = value
+    elif name == "input_rate":
+        valid["session"]["audio"]["input"]["sample_rate_hz"] = value
+    elif name == "output_rate":
+        valid["session"]["audio"]["output"]["format"]["rate"] = value
+    elif name in ("input_audio_format", "output_audio_format"):
+        valid["session"][name] = value
+    else:
+        valid["session"]["capabilities"][name] = value
+    with pytest.raises(RuntimeError):
+        verify_native_server(valid, selected)
