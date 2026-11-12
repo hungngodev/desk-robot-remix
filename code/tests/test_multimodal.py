@@ -155,6 +155,7 @@ async def test_one_human_vad_preempts_all_five_pet_optional_camera_captures():
         visual.sensor_event("robot-02", "petting_zone")
         await asyncio.sleep(.02)
         assert second.captures == 1
+        assert visual.status("robot-02")["software_timings"]["sensor_deferred_human"] == 1
         assert not visual.hub.frames["robot-02"]
         assert visual.hub.user_active("robot-01", time.monotonic())
         visual.voice_ended("robot-01")
@@ -254,6 +255,7 @@ async def test_direct_visual_question_preempts_background_camera_request():
         with pytest.raises(asyncio.CancelledError):
             await pending
         assert head.cancelled
+        assert visual.status("robot-01")["software_timings"]["proactive_camera_preemptions"] == 1
         assert response["source"] == "authenticated_xiao_camera_and_local_vlm"
         assert response["frames_used"] == 1
         assert head.captures == 2
@@ -278,6 +280,12 @@ async def test_sensor_two_frame_burst_is_bounded_and_camera_serial():
         assert frames[0].received_at < frames[1].received_at
         assert head.captures == 2
         assert visual._metrics["robot-01"]["camera_successes"] == 2
+        stats = visual.status("robot-01")["software_timings"]
+        assert stats["sensor_triggers"] == 1
+        assert stats["sensor_bursts"] == 1
+        assert stats["sensor_followup_frames"] == 1
+        assert isinstance(stats["sensor_trigger_to_first_jpeg_last_ms"], int)
+        assert stats["sensor_trigger_to_first_jpeg_last_ms"] >= 0
         assert head.captures <= 2
     finally:
         await visual.close()
