@@ -393,3 +393,42 @@ async def test_cancel_asyncio_future_while_native_detector_runs_still_holds_slot
     assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
     assert len(calls) == 2
     assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
+
+
+async def test_detector_executor_submission_failure_releases_slot(tmp_path, monkeypatch):
+    """A rejected native job must not permanently block subsequent observations."""
+    import asyncio
+
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
+    original_submit = dock_runtime._DETECTOR_POOL.submit
+
+    def rejected_submit(*args, **kwargs):
+        raise RuntimeError("Executor unavailable")
+
+    monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", rejected_submit)
+    first_head = Head()
+    failed = await dock_runtime.observe_actual_dock(first_head, robot)
+    assert failed["phase"] == "hold"
+    assert failed["source"] == "apriltag_detection_failed"
+    assert failed["pose"] is None
+    assert not failed["motor_authorized"] and not failed["charging_authorized"]
+    assert failed["physical_acceptance_pass"] is False
+    assert first_head.commands == []
+
+    monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", original_submit)
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda image, calibration, *, captured_at:
+            DockPose(0, 0, 450, 0.5, captured_at),
+    )
+    recovered = await asyncio.wait_for(
+        dock_runtime.observe_actual_dock(Head(), robot), timeout=3
+    )
+    assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
+    assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
+    assert recovered["physical_acceptance_pass"] is False
