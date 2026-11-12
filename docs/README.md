@@ -23,6 +23,8 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | Check reported stock and historical prototype quote | [Owned inventory](hardware/fleet-inventory.json) and [historical prototype BOM](hardware/bom.json) |
 | Start the first physical check | [Gripper fit and bench guide](guides/first-gripper-test.md) |
 
+**Reproducible wiring export:** Run `python3 code/scripts/emit_wiring_manifest.py` from the repo root for the current WROOM, XIAO, motor phase and all sixteen sensor mux-lane connections, verified against the source GPIO symbols. The generated output intentionally refuses to act as a final battery/charger schematic. Its source and tests are [the harness generator](../code/scripts/emit_wiring_manifest.py) and [contract tests](../code/tests/test_assembly_harness.py). Real electrical and mechanical acceptance remains open.
+
 **Next step.** First settle the day-zero architecture, part variant, final fit and full delivered cost gates, then check one MG90S servo in the saved gripper before printing the whole robot. Keep robot motion disabled during fit work.
 
 **Current status, 2026-11-12.** All integrated sensor, five-pet audio,
