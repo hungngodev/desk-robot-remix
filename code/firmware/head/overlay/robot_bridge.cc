@@ -53,6 +53,38 @@ bool StatusValid(cJSON* json) {
            watchdog->valueint >= 0 && watchdog->valueint <= 500;
 }
 
+bool IrValid(cJSON* json) {
+    // Explicit read-only RMT evidence; a matching carrier is not enough to
+    // infer a bearing, permit a motor, or certify net cell charging.
+    if (!cJSON_IsObject(json)) return false;
+    const auto get = [json](const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(json, key);
+    };
+    const auto uint32 = [](cJSON* n) {
+        return cJSON_IsNumber(n) && std::isfinite(n->valuedouble) &&
+               n->valuedouble == std::floor(n->valuedouble) &&
+               n->valuedouble >= 0 && n->valuedouble <= 4294967295.0;
+    };
+    const auto left = get("left_valid");
+    const auto right = get("right_valid");
+    const auto matched = get("match");
+    const auto ls = get("left_seq"), rs = get("right_seq");
+    const auto la = get("left_age_ms"), ra = get("right_age_ms");
+    const auto code = get("code");
+    if (!cJSON_IsBool(left) || !cJSON_IsBool(right) ||
+        !cJSON_IsBool(matched) || !uint32(ls) || !uint32(rs) ||
+        !uint32(la) || !uint32(ra) || !uint32(code) ||
+        !cJSON_IsFalse(get("motor_authorized")) ||
+        !cJSON_IsFalse(get("charging_authorized")) ||
+        !cJSON_IsFalse(get("physical_qualified"))) return false;
+    if ((cJSON_IsTrue(left) && (ls->valuedouble == 0 || la->valuedouble > 200)) ||
+        (cJSON_IsTrue(right) && (rs->valuedouble == 0 || ra->valuedouble > 200)))
+        return false;
+    return !cJSON_IsTrue(matched) ||
+           (cJSON_IsTrue(left) && cJSON_IsTrue(right) &&
+            code->valuedouble > 0);
+}
+
 bool AuxValid(cJSON* json) {
     if (!cJSON_IsObject(json)) return false;
     auto group = [json](const char* key) {
@@ -181,7 +213,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 4;
+    config.max_uri_handlers = 5;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -190,6 +222,7 @@ void Bridge::Start() {
     }
     for (const auto& entry : std::vector<std::pair<const char*, httpd_method_t>>{
              {"/api/status", HTTP_GET}, {"/api/aux", HTTP_GET},
+             {"/api/ir", HTTP_GET},
              {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET}}) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
@@ -225,10 +258,11 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         if (c == '\r') continue;
         if (c == '\n') {
             if (MatchingError(line, command)) return {400, false, line};
-            if (command.verb == "status" || command.verb == "aux") {
+            if (command.verb == "status" || command.verb == "aux" || command.verb == "ir") {
                 auto json = Parse(line);
                 if (json && (command.verb == "status" ?
-                             StatusValid(json.get()) : AuxValid(json.get())))
+                             StatusValid(json.get()) : command.verb == "aux" ?
+                             AuxValid(json.get()) : IrValid(json.get())))
                     return {200, true, line};
             } else if (line == ExpectedAck(command)) return {200, true, line};
             line.clear();  // EVT, startup output, and unrelated ACKs are never success.
@@ -373,9 +407,11 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         return ESP_OK;
     }
     if (strcmp(req->uri, "/api/status") == 0 ||
-        strcmp(req->uri, "/api/aux") == 0) {
+        strcmp(req->uri, "/api/aux") == 0 ||
+        strcmp(req->uri, "/api/ir") == 0) {
         const bool aux = strcmp(req->uri, "/api/aux") == 0;
-        auto reply = Transact(aux ? "aux" : "status", false);
+        const bool ir = strcmp(req->uri, "/api/ir") == 0;
+        auto reply = Transact(ir ? "ir" : aux ? "aux" : "status", false);
         if (!reply.ok) return Json(req, reply.status, Envelope(false, reply.text));
         auto json = Parse(reply.text);
         cJSON_AddStringToObject(json.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
