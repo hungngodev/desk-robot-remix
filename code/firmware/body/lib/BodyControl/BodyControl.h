@@ -7,6 +7,7 @@
 #include "BerryImu.h"
 #include "OpticalRaw.h"
 #include "AccessoryReadings.h"
+#include "NecBurst.h"
 
 namespace desk_robot {
 
@@ -40,6 +41,7 @@ struct State {
   bool side_valid[3]{};
   OpticalRaw paw_pulse{};
   AccessoryReadings accessories{};
+  IrPairEvidence terminal_ir{}; // direct two RMT sources, never motion permission
   std::uint8_t extra_mask = 0; // bumper bit0, reed bit1, PIR bit2
   bool bumper_raw = false;
   bool bumper_active = false;
@@ -86,6 +88,9 @@ class BodyControl {
   // Fresh physical dock switch + charger PGOOD is an independent local
   // DISARM interlock. It never enables charging, nor grants movement.
   void set_accessories(const AccessoryReadings& readings);
+  void set_terminal_ir(const IrPairEvidence& evidence) {
+    state_.terminal_ir = evidence; // entirely read-only; no arm or charge
+  }
   // Full-feature build requires the dock input even if it failed at boot.
   // Cannot be activated or relaxed by UART, AI, or a peer message.
   void require_dock_monitor(bool required) { dock_monitor_required_ = required; }
