@@ -1,5 +1,80 @@
 # Native Xiaozhi + adaptive live video: full desk pet orchestration
 
+
+## November 12: actual fused microphone, selected camera and context ownership
+
+**One head, not parallel cameras:** XIAO Sense now selects native VGA `PIXFORMAT_JPEG`
+using the pinned Xiaozhi `Esp32Camera`; `fb_count=1` and PSRAM allocation are
+deliberately conservative for simultaneous AEC and Opus. The existing
+`modular_snapshot.inc` validates real JPEG start/end markers and copies the
+sensor JPEG under the upstream shared camera lock. Its HTTP bridge runs each
+camera request on a separate bounded FreeRTOS task rather than blocking audio
+or urgent motor/STOP transport. No ESP32 camera stack was replaced.
+
+**One Mac image owner:** `HttpHead.snapshot()` authenticates camera boot,
+sequence and completion, rejecting old capture identities. The
+`MultimodalOrchestrator` keeps only three processed JPEGs per robot in RAM,
+performs grayscale motion scoring using its existing Pillow worker limits,
+and admits one physical camera capture at a time **per head**. Live idle
+sampling is about 0.3 FPS; authenticated human speech requests about 1 FPS;
+touch/NFC/gesture requests may trigger bounded two-frame confirmations.
+`native_frame()` reuses a current VAD JPEG under the same camera lock so
+the Mac proactive sampler and native duplex worker do not double-request the
+XIAO. A source reception timestamp is not a sensor exposure timestamp.
+
+**One synchronized native duplex owner:** For heads explicitly enabled in
+`DESK_ROBOT_OMNI_ROBOTS`, Xiaozhi keeps the existing microphone/Opus/WebSocket
+session and forwards actual decoded 16 kHz PCM to the selected locally
+configured model-native realtime service. The existing native worker starts
+camera selection immediately when authentic VAD becomes positive, obtains a
+fresh Mac JPEG over authenticated loopback, and checks identity, age,
+JPEG bounds, monotonic receipt and change fraction. It chooses an initial
+keyframe, motion of at least 1.5 percent, or a static refresh after 2.5 seconds
+and attaches **at most one JPEG per distinct receipt**, only on the model's
+one-second audio append boundary. No 30 FPS network stream or fake video
+source is claimed. Model audio returns as 24 kHz PCM and is converted to the
+**same physical Xiaozhi 16 kHz Opus speaker**, with a single fleet output
+lease. Generated/transmitted Opus does not prove audio actually played.
+
+**Exactly one human turn:** The authenticated server's `speech_start`,
+`speech_end`, `normal` AEC interruption and `group` AEC interruption
+preempt obsolete output before visual work. The native worker advances both
+audio and video generations on barge, discards in-flight old JPEGs, and never
+replays a selected receipt in a later audio window. The old XIAO socket and
+older human speech generation cannot apply a late Mac `desk_robot_look`
+tool result. If the authenticated voice event stream fails, the Mac cancels
+old visual questions and background images without assuming a silent human;
+camera sampling resumes only after an authenticated VAD snapshot and
+monitor readiness recover. Failures do not grant any WROOM motion permit.
+
+**Honest tool/model split:** The legacy Xiaozhi ASR/LLM/registered-tool route
+has `desk_robot_look`, read-only context, status and guarded pickup job
+requests. The published MiniCPM-o model-native duplex route can accept
+paired PCM and JPEGs, but **its current upstream duplex model does not
+provide native function calling**. The bridge therefore does NOT invent
+`response.tool_call` packets, silently duplicate model providers, or claim
+the native video model can operate the full tool suite. A future compatible
+multimodal tool-capable backend needs an actual published protocol and
+recorded end-to-end tool tests. Do not combine both competing audio routes.
+
+**Continuity with separate consent:** Set `pet_autostart_enabled=true`
+only with hardware, camera opt-in, a local VLM and real Xiaozhi identities
+to begin sensor/idle observation at Mac start. For optional human speech
+memory, **both** `voice_memory_tools_enabled` and
+`voice_transcript_memory_enabled` must be true. Completed native ASR
+transcripts, if the actual backend emits them, use a bounded asynchronous
+text-only worker and idempotent per-robot SQLite events labeled
+*uncertain machine hearing*. Raw microphone PCM/video is not saved.
+Operator quiet and all existing physical permits remain independent.
+
+**Current proof boundary:** Code and new host tests exist, but CI jobs on
+the branch still fail before any step is recorded. Actual AEC interruption,
+native model integration, speaker acoustics, FPS, PSRAM under load,
+five-camera fairness, camera revision and charging remain **unqualified**.
+See `docs/records/verification.md` for real evidence rather than assuming
+successful source review equals physical acceptance.
+
+
 Status: November 10 2026. **Code committed, real XIAO mic/camera and physical audiovisual latency NOT QUALIFIED.** This keeps all five full-feature pets, independent episodic memories, WROOM local cliff safety, calibrated grasp plans, RGB/OLED expressions and docking. It does not replace them with a webcam demo or a second robot framework.
 
 ## Source comparison and engineering choice
