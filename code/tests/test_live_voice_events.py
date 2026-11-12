@@ -863,3 +863,91 @@ async def test_voice_stream_outage_preempts_while_health_callback_is_stalled():
             blocking_health.set()
             runner.cancel()
             await asyncio.gather(runner, return_exceptions=True)
+
+
+async def test_one_stalled_xiaozhi_event_never_duplicates_its_interrupt():
+    """The server can replay an event while the first callback ignores cancel."""
+    import asyncio
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    dispatched = []
+
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 9, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(200, json={
+            "cursor": 10, "reset": False, "lost": False,
+            "events": [{
+                "seq": 10, "robot_id": "robot-01",
+                "kind": "normal", "source": "xiaozhi_aec_vad",
+            }],
+        })
+
+    async def stubborn_interrupt(robot_id, kind):
+        dispatched.append((robot_id, kind))
+        entered.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        watcher = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=stubborn_interrupt,
+        )
+        await watcher.poll()
+        try:
+            with pytest.raises(TimeoutError, match="Voice interruption incomplete"):
+                await watcher.poll()
+            assert entered.is_set() and watcher.cursor == 9
+            with pytest.raises(TimeoutError, match="Voice interruption incomplete"):
+                await watcher.poll()
+            assert dispatched == [("robot-01", "normal")]
+            release.set()
+            assert await watcher.poll() == 1
+            assert watcher.cursor == 10 and watcher.handled == 1
+            assert dispatched == [("robot-01", "normal")]
+        finally:
+            release.set()
+            if watcher._event_task is not None:
+                await asyncio.wait_for(watcher._event_task, timeout=1)
+
+
+async def test_failed_xiaozhi_event_interrupt_is_retryable_without_cursor_loss():
+    calls = 0
+
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 5, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(200, json={
+            "cursor": 6, "reset": False, "lost": False,
+            "events": [{
+                "seq": 6, "robot_id": "robot-01",
+                "kind": "speech_start", "source": "xiaozhi_server_vad",
+            }],
+        })
+
+    async def unreliable(_robot_id, _kind):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("head temporarily unreachable")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        watcher = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=unreliable,
+        )
+        await watcher.poll()
+        with pytest.raises(OSError, match="temporarily unreachable"):
+            await watcher.poll()
+        assert watcher.cursor == 5
+        assert await watcher.poll() == 1
+        assert calls == 2 and watcher.cursor == 6
