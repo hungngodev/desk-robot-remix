@@ -40,6 +40,10 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or not _uint(pulse.get("red"), 262143)
             or not _uint(pulse.get("ir"), 262143)
             or not _uint(pulse.get("age_ms"), 0xffffffff)
+            or (pulse.get("seq") is not None and (
+                not _uint(pulse["seq"], 0xffffffff)
+                or (pulse["valid"] and pulse["seq"] == 0)
+            ))
             or pulse.get("bpm", "missing") is not None
             or pulse.get("medical") is not False
             or (pulse["valid"] and not pulse["present"])):
