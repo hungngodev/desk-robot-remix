@@ -444,7 +444,7 @@ class PetController:
         if not state.enabled or state.generation != generation:
             return
         change = SceneChange(kind, description, 1.0)
-        if kind in ("touch_tap", "touch_double", "touch_hold"):
+        if kind in ("touch", "touch_tap", "touch_double", "touch_hold"):
             self._notify_sensor(robot_id, kind)
         state.events += 1
         state.last_event = description
