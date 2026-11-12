@@ -676,3 +676,93 @@ async def test_failed_bootstrap_health_notification_retries_bootstrap():
         assert listener.cursor == 7 and ready_calls == [True, True]
         assert len(requests) == 2
         assert all(request.get("bootstrap") == "1" for request in requests)
+
+
+async def test_cancellation_resistant_shared_abort_is_single_flight():
+    """Repeated outage polls cannot overlap two shared audio owner callbacks."""
+    import asyncio
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    attempts = []
+
+    async def shared_abort(reason):
+        attempts.append(reason)
+        entered.set()
+        # A real transport may ignore cancellation during socket teardown.
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+
+    async def per_robot_abort(robot_id, reason):
+        raise AssertionError("Shared owner is the only audio abort path")
+
+    async with httpx.AsyncClient() as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"},
+            on_interrupt=per_robot_abort,
+            on_global_interrupt=shared_abort,
+        )
+        try:
+            first = asyncio.create_task(listener._preempt_all("stream_unavailable"))
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            with pytest.raises(TimeoutError, match="Shared fleet interruption incomplete"):
+                await asyncio.wait_for(first, timeout=1)
+            assert len(attempts) == 1
+            with pytest.raises(TimeoutError, match="Shared fleet interruption incomplete"):
+                await asyncio.wait_for(
+                    listener._preempt_all("stream_unavailable"), timeout=1
+                )
+            assert attempts == ["stream_unavailable"]
+            release.set()
+            await asyncio.wait_for(listener._global_abort_task, timeout=1)
+            # Completed callback no longer retains the fleet audio slot.
+            await listener._preempt_all("stream_unavailable")
+            assert attempts == ["stream_unavailable", "stream_unavailable"]
+        finally:
+            release.set()
+            if listener._global_abort_task is not None:
+                await asyncio.wait_for(listener._global_abort_task, timeout=1)
+
+
+async def test_global_audio_abort_owning_task_cancellation_is_not_a_flush():
+    """Cancellation of the poller does not free an unresponsive audio owner."""
+    import asyncio
+
+    entered = asyncio.Event()
+    released = asyncio.Event()
+    attempts = 0
+
+    async def resistant(_reason):
+        nonlocal attempts
+        attempts += 1
+        entered.set()
+        while not released.is_set():
+            try:
+                await released.wait()
+            except asyncio.CancelledError:
+                continue
+
+    async with httpx.AsyncClient() as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"},
+            on_interrupt=lambda robot_id, reason: None,
+            on_global_interrupt=resistant,
+        )
+        first = asyncio.create_task(listener._preempt_all("reset"))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            with pytest.raises(TimeoutError, match="Shared fleet interruption incomplete"):
+                await listener._preempt_all("gap")
+            assert attempts == 1
+        finally:
+            released.set()
+            if listener._global_abort_task is not None:
+                await asyncio.wait_for(listener._global_abort_task, timeout=1)
