@@ -9,7 +9,7 @@ def test_optional_dock_pin_input_validator_rejects_any_charge_permission():
     ).read_text()
     body = (root / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
     assert "void AccessorySensors::dock_status" in firmware
-    assert "case 5:\\n      dock_status(now_ms);" in firmware
+    assert "case 5:\n      dock_status(now_ms);" in firmware
     assert "write8(0x20, 0x00, 0xFF)" in firmware
     assert "write8(0x20, 0x0C, 0x0F)" in firmware
     assert "charging_verified" in body
