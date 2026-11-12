@@ -123,6 +123,9 @@ class PetState:
     last_ambient_seq: int | None = None
     ambient_baseline: tuple[int, int] | None = None
     ambient_streak: int = 0
+    last_bmp_seq: int | None = None
+    bmp_baseline_pa: int | None = None
+    bmp_streak: int = 0
     last_nfc_events: int | None = None
     last_nfc_scan_seq: int | None = None
     last_aux_kind: str | None = None
@@ -266,6 +269,9 @@ class PetController:
         state.last_ambient_seq = None
         state.ambient_baseline = None
         state.ambient_streak = 0
+        state.last_bmp_seq = None
+        state.bmp_baseline_pa = None
+        state.bmp_streak = 0
         state.last_nfc_events = None
         state.last_nfc_scan_seq = None
         state.last_aux_kind = None
@@ -497,6 +503,9 @@ class PetController:
                 state.last_ambient_seq = None
                 state.ambient_baseline = None
                 state.ambient_streak = 0
+                state.last_bmp_seq = None
+                state.bmp_baseline_pa = None
+                state.bmp_streak = 0
                 state.last_nfc_events = None
                 state.last_nfc_scan_seq = None
             await asyncio.sleep(1.0)
@@ -607,6 +616,46 @@ class PetController:
             state.last_ambient_seq = None
             state.ambient_baseline = None
             state.ambient_streak = 0
+
+        # BMP280 changes describe this robot's immediate pressure probe,
+        # not real weather prediction or an externally calibrated altitude.
+        # Its firmware waits across the normal-mode conversion interval;
+        # only independent successful sensor acquisitions may confirm change.
+        bmp = data.get("bmp280")
+        bmp_seq = bmp.get("seq") if isinstance(bmp, dict) else None
+        if (robot.bmp280_interactions_qualified
+                and robot.bmp280_pressure_change_pa is not None
+                and isinstance(bmp, dict) and bmp.get("present")
+                and bmp.get("valid") and bmp.get("chip_id") == 0x58
+                and type(bmp_seq) is int and 0 < bmp_seq <= 0xffffffff
+                and type(bmp.get("age_ms")) is int
+                and 0 <= bmp["age_ms"] < 2000):
+            pressure = bmp["pressure_pa"]
+            prior = state.last_bmp_seq
+            if prior is not None and bmp_seq == prior:
+                pass  # identical HTTP replay cannot produce a second event
+            elif (prior is None or bmp_seq < prior or bmp_seq - prior > 1000
+                  or state.bmp_baseline_pa is None):
+                state.bmp_baseline_pa = pressure
+                state.bmp_streak = 0
+            else:
+                changed = abs(pressure - state.bmp_baseline_pa) >= (
+                    robot.bmp280_pressure_change_pa
+                )
+                state.bmp_streak = state.bmp_streak + 1 if changed else 0
+                if state.bmp_streak >= 2:
+                    changes.append(SceneChange(
+                        "ambient_shift",
+                        "My BMP280 probe detected a local air pressure change",
+                        1.0,
+                    ))
+                    state.bmp_baseline_pa = pressure
+                    state.bmp_streak = 0
+            state.last_bmp_seq = bmp_seq
+        else:
+            state.last_bmp_seq = None
+            state.bmp_baseline_pa = None
+            state.bmp_streak = 0
 
         # PN532 toy UID tokens are nonsecret, cloneable labels. Never use
         # them for device identity, unlock, pairing trust or motor authority.
