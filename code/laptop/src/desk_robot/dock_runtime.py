@@ -5,6 +5,10 @@ import asyncio
 import json
 import math
 import time
+import threading
+
+# A timed-out native detector may continue running. Never queue a second one.
+_DETECTOR_SLOT = threading.BoundedSemaphore(1)
 
 from .dock_vision import DockCameraCalibration, assess_dock, detect_apriltag
 
@@ -50,11 +54,20 @@ async def observe_actual_dock(head, robot) -> dict:
     except (OSError, ConnectionError, TimeoutError) as exc:
         return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
     received_at = time.monotonic()
+    if not _DETECTOR_SLOT.acquire(blocking=False):
+        return _hold(robot.id, reason="Dock marker detector still busy", source="apriltag_detector_busy")
+
+    def detect_once():
+        try:
+            return detect_apriltag(jpeg, calib, captured_at=received_at)
+        finally:
+            _DETECTOR_SLOT.release()
+
+    # Shield the worker: wait_for cancellation must not hide its continued
+    # execution. The worker owns the slot until native detection actually ends.
+    task = asyncio.create_task(asyncio.to_thread(detect_once))
     try:
-        pose = await asyncio.wait_for(
-            asyncio.to_thread(detect_apriltag, jpeg, calib, captured_at=received_at),
-            timeout=2.0,
-        )
+        pose = await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
     except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
         return _hold(robot.id, reason=f"Dock marker detection unavailable: {type(exc).__name__}", source="apriltag_detection_failed")
     # Receipt timestamp is not the end of OpenCV computation. A slow or
