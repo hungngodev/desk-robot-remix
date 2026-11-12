@@ -125,6 +125,77 @@ async def test_local_ollama_scene_is_two_frame_and_refuses_uncertain_claims():
     assert len(requests) == 3
 
 
+@pytest.mark.parametrize("local_object", [False, True])
+async def test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner(
+    fleet, tmp_path, local_object
+):
+    """A hardware sensor event must reach the scene gate, not just RAM JPEGs."""
+    from PIL import ImageDraw
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    before = jpeg("gray")
+    if local_object:
+        picture = Image.new("RGB", (128, 96), "gray")
+        ImageDraw.Draw(picture).rectangle((36, 27, 76, 67), fill="black")
+        output = BytesIO()
+        picture.save(output, "JPEG", quality=92)
+        after = output.getvalue()
+    else:
+        after = jpeg((175, 175, 175))  # lighting alone is not a new object
+
+    class Device:
+        def __init__(self):
+            self.calls = 0
+
+        async def snapshot(self):
+            self.calls += 1
+            return before if self.calls == 1 else after
+
+    class ObservedScene:
+        def __init__(self):
+            self.calls = 0
+
+        async def compare(self, earlier, newer):
+            self.calls += 1
+            assert earlier != newer
+            return SceneChange("object", "A new small object appeared", .96)
+
+    device, scene = Device(), ObservedScene()
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(
+        fleet, {"robot-01": device}, chat, memory, scene, interval=.025
+    )
+    visual = MultimodalOrchestrator(
+        fleet, {"robot-01": device}, scene, asyncio.Lock()
+    )
+    pet.multimodal = visual
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 42, True
+    work = asyncio.create_task(pet._observe("robot-01", 42))
+    try:
+        await wait_for(lambda: state.last_scene_frame_at is not None)
+        assert device.calls == 1
+        visual.sensor_event("robot-01", "petting_zone")
+        await wait_for(lambda: device.calls >= 3, timeout=4)
+        if local_object:
+            await wait_for(lambda: scene.calls == 1, timeout=4)
+            assert sum(m.kind == "object" for m in memory.recent("robot-01")) == 1
+        else:
+            await asyncio.sleep(.1)
+            assert scene.calls == 0
+            assert memory.count("robot-01") == 0
+        assert device.calls == 3
+        assert memory.count("robot-02") == 0
+        assert state.last_error is None
+    finally:
+        state.enabled = False
+        work.cancel()
+        await asyncio.gather(work, return_exceptions=True)
+        await visual.close()
+        await pet.close()
+
+
 async def test_one_real_change_initiates_one_grounded_speech_and_memory(fleet, tmp_path):
     camera, chat, speaker, scene = ChangingCamera(), GroundedChat(), SimulatedSpeaker(), KeyScene()
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
