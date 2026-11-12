@@ -77,9 +77,9 @@ def test_status_uart_and_usb_bounds_are_consistent_after_petting_telemetry():
     body = (root / "firmware/body/lib/BodyControl/BodyControl.h").read_text()
     bridge = (root / "firmware/head/overlay/robot_bridge.cc").read_text()
     usb = (root / "scripts/serial_bench.py").read_text()
-    assert "kReplyCapacity = 1100" in body
-    assert "kMaxReply = 1152" in bridge
-    assert "port.readline(1152)" in usb
+    assert "kReplyCapacity = 1536" in body
+    assert "kMaxReply = 1664" in bridge
+    assert "port.readline(1664)" in usb
 
 
 
@@ -92,7 +92,8 @@ def test_canonical_driver_statuses_match_current_source_without_claiming_hardwar
         assert "not_physically_qualified" in channel["firmware"]
     for channel in bus["mux_extras"]["channels"]:
         assert channel["firmware"].startswith("implemented_")
-    assert "pn532_not_yet_integrated" in bus["mux_extras"]["channels"][5]["firmware"]
+    assert "pn532_read_only_unverified" in bus["mux_extras"]["channels"][5]["firmware"]
+    assert "PN532" in next(x["name"] for x in p["parts"] if x["id"] == "pn532")
     assert bus["implementation_evidence"]["sensor_hardware_qualified"] is False
     assert bus["implementation_evidence"]["charging_current_electrically_verified"] is False
     root = Path(__file__).resolve().parents[1]
@@ -103,7 +104,8 @@ def test_canonical_driver_statuses_match_current_source_without_claiming_hardwar
     assert "dock_status(now_ms)" in extra
     assert "++dock.sample_seq" in extra
     assert "dock_telemetry_bad(now_ms)" in body
-    assert "dock.input_good || dock.left_seated || dock.right_seated" in body
+    assert "const bool contact = dock.input_good || dock.left_seated ||" in body
+    assert "dock.right_seated || dock.charge_indicated" in body
     assert "-DDESK_ROBOT_REQUIRE_DOCK_MONITOR=1" in full
     assert "control.require_dock_monitor(true)" in main
     # No claim of safe automatic charger enable or measured battery current.
