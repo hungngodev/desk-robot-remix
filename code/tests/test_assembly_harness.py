@@ -47,6 +47,8 @@ def test_full_wroom_xiao_signal_harness_matches_real_firmware():
     assert "VL53L4CD (0x29)" in page
     assert "Assembly readiness: NO" in page
     assert "Do NOT wire yet" in page
+    # The checked-in assembly sheet is generated, never a second manual map.
+    assert (ROOT / "docs/hardware/one-robot-signal-harness.generated.md").read_text() == page
 
 
 def test_actual_pin_reassignment_fails_before_releasing_harness():
