@@ -253,6 +253,70 @@ class NativeOmniSession:
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             return
 
+    def _accept_heard_transcript(self, event: dict) -> None:
+        """Queue optional completed ASR without ever blocking mic or Opus."""
+        if not self._transcript_memory_enabled:
+            return
+        item_id, transcript = event.get("item_id"), event.get("transcript")
+        if (not isinstance(item_id, str) or not 1 <= len(item_id) <= 128
+                or not item_id.isascii() or not isinstance(transcript, str)
+                or "\x00" in transcript or not 1 <= len(transcript) <= 2400):
+            return
+        # Store all bounded parts of a real audio item, not a silently
+        # truncated first sentence. The per-pet SQLite schema caps text at 300.
+        words = " ".join(transcript.split())
+        if not words:
+            return
+        chunks: list[str] = []
+        while words:
+            cut = min(240, len(words))
+            if cut < len(words):
+                boundary = words.rfind(" ", max(0, cut - 60), cut + 1)
+                if boundary > 0:
+                    cut = boundary
+            chunks.append(words[:cut].strip())
+            words = words[cut:].strip()
+        for index, part in enumerate(chunks):
+            key = f"{item_id}:{index}"
+            digest = hashlib.sha256(key.encode()).hexdigest()[:20]
+            event_id = f"omni_{self._heard_session}_{digest}"
+            if event_id in self._heard_seen:
+                continue
+            if len(self._heard_seen) >= 128:
+                self._heard_seen.clear()  # Mac SQLite still dedupes event IDs.
+            self._heard_seen.add(event_id)
+            try:
+                self._heard_queue.put_nowait((event_id, part))
+            except asyncio.QueueFull:
+                self.heard_memories_dropped += 1
+
+    async def _persist_heard(self, http: aiohttp.ClientSession) -> None:
+        """Only current robot's explicit memory opt-in authorizes text write."""
+        url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-heard"
+        while not self.closed:
+            event_id, transcript = await self._heard_queue.get()
+            try:
+                async with http.post(
+                    url,
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    json={"event_id": event_id, "transcript": transcript},
+                    timeout=aiohttp.ClientTimeout(total=2),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if (data.get("robot_id") == self.robot
+                                and data.get("source")
+                                == "model_estimated_xiaozhi_audio_transcription"
+                                and data.get("stored") in (True, False)):
+                            if data["stored"]:
+                                self.heard_memories_stored += 1
+                            continue
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                pass
+            # No retry of uncertain memory HTTP writes; SQLite is idempotent
+            # if a later retransmission of this exact backend item occurs.
+            self.heard_memories_dropped += 1
+
     async def _camera(self, http: aiohttp.ClientSession) -> None:
         """Select real JPEG receipts independently from realtime microphone I/O.
 
