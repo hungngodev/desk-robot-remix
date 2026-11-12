@@ -29,6 +29,7 @@ void TerminalIr::reset() {
   ready_ = false;
   // Receiver teardown must never preserve evidence from the prior session.
   readings_.invalidate();
+  queue_.reset();
   for (unsigned side = 0; side != 2; ++side) {
     if (installed_[side]) {
       rmt_rx_stop(channel_[side]);
@@ -52,15 +53,30 @@ bool TerminalIr::begin(int left_gpio, int right_gpio) {
 
 void TerminalIr::poll(std::uint32_t now_ms) {
   if (!ready_) return;
-  // Bounded two packets per side, no sleeps, no blocking FreeRTOS wait.
-  // WROOM has already sampled its mandatory cliff and dock sensors.
+  // Legacy ESP-IDF 4.4 RMT supplies no per-packet receive timestamp.
+  // A late poll or queued backlog must discard both receivers' prior
+  // directional evidence, not stamp an old queued NEC burst as new.
+  bool window_ok = queue_.on_poll(now_ms);
+  std::uint32_t candidate_code[2] = {};
+  bool candidate_valid[2] = {};
+  // A fixed CPU budget bounds processing of repeated ambient IR noise.
+  constexpr unsigned kMaxPacketsPerSide = 8;
   for (unsigned side = 0; side != 2; ++side) {
-    for (unsigned packet = 0; packet != 2; ++packet) {
+    const bool discard_queued = !window_ok || queue_.draining(side);
+    unsigned packets = 0;
+    bool emptied = false;
+    for (; packets < kMaxPacketsPerSide; ++packets) {
       size_t size = 0;
       auto* item = static_cast<rmt_item32_t*>(
           xRingbufferReceive(ring_[side], &size, 0));
-      if (!item) break;
-      if (size == 34 * sizeof(rmt_item32_t)) {
+      if (!item) {
+        emptied = true;
+        break;
+      }
+      // A poll may see at most two full packets before treating the entire
+      // batch as ambiguous. Defer accepting either side until both drained.
+      if (!discard_queued && packets < 2 &&
+          size == 34 * sizeof(rmt_item32_t)) {
         IrMarkSpace samples[34]{};
         bool polarity_ok = true;
         for (unsigned n = 0; n != 34; ++n) {
@@ -74,11 +90,24 @@ void TerminalIr::poll(std::uint32_t now_ms) {
           samples[n].space_us = item[n].duration1;
         }
         std::uint32_t code = 0;
-        if (polarity_ok && decode_nec(samples, 34, code))
-          readings_.accept(side, code, now_ms);
+        if (polarity_ok && decode_nec(samples, 34, code)) {
+          candidate_code[side] = code;
+          candidate_valid[side] = true;
+        }
       }
       vRingbufferReturnItem(ring_[side], item);
     }
+    if (!queue_.finish(side, packets, emptied)) window_ok = false;
+  }
+  if (!window_ok) {
+    // Also discard a candidate from the opposite receiver on any stall.
+    // Quarantine lasts through a complete queue drain on both receivers.
+    readings_.invalidate();
+    return;
+  }
+  for (unsigned side = 0; side != 2; ++side) {
+    if (candidate_valid[side])
+      readings_.accept(side, candidate_code[side], now_ms);
   }
 }
 } // namespace desk_robot
