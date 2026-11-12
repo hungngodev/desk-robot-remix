@@ -393,9 +393,16 @@ class Coordinator:
             # Local WROOM cliff stop remains mandatory for every short pulse.
             jpeg = await asyncio.wait_for(head.snapshot(), timeout=2.0)
             received_at = time.monotonic()
-            pose = detect_apriltag(jpeg, camera, captured_at=received_at)
+            # OpenCV PnP is CPU-heavy. Keep it off the Mac event loop so
+            # human VAD and urgent speaker abort are not delayed by geometry.
+            pose = await asyncio.wait_for(
+                asyncio.to_thread(
+                    detect_apriltag, jpeg, camera, captured_at=received_at
+                ),
+                timeout=2.0,
+            )
             decision = assess_dock(
-                pose, now=received_at, target_distance_mm=target_mm
+                pose, now=time.monotonic(), target_distance_mm=target_mm
             )
             job.events.append(f"dock observation {attempt}: {decision.phase}")
             if decision.phase == "hold":
