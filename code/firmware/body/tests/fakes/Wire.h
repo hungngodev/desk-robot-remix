@@ -27,6 +27,16 @@ class TwoWire {
   unsigned nfc_scans = 0;
   unsigned dock_gpio_reads = 0;
   std::uint8_t dock_gpioA = 0x0F; // switches closed, no input or charger
+  bool range_mux_stuck = false;
+  bool optional_mux_stuck = false;
+  bool range_mux_write_nack = false;
+  bool range_mux_read_nack = false;
+  bool range_mux_bad_readback = false;
+  std::uint16_t tof_register = 0;
+  unsigned tof_samples = 0;
+
+  void begin(int, int, int) {}
+  void setTimeOut(unsigned) {}
 
   void beginTransmission(std::uint8_t addr) {
     current_address = addr;
@@ -38,6 +48,8 @@ class TwoWire {
   }
   bool connected(std::uint8_t addr) const {
     if (addr == 0x70 || addr == 0x71) return true;
+    if (addr == 0x29)
+      return ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0;
     if (ranges != 0 || extras == 0) return false;
     switch (extras) {
       case 1: return addr == 0x28 || addr == 0x57;
@@ -58,12 +70,17 @@ class TwoWire {
     if (current_address == 0x70) {
       if (outbound.empty()) return 0; // address-only I2C ACK probe
       if (outbound.size() != 1) return 4;
-      ranges = outbound[0];
+      if (range_mux_write_nack) return 4;
+      if (!range_mux_stuck) ranges = outbound[0];
     } else if (current_address == 0x71) {
       if (outbound.empty()) return 0; // address-only TCA9548A probe
       if (outbound.size() != 1) return 4;
-      extras = outbound[0];
+      if (!optional_mux_stuck) extras = outbound[0];
       if (extras && ranges) unsafe_parallel_mux = true;
+    } else if (current_address == 0x29 && !outbound.empty()) {
+      if (outbound.size() < 2 || outbound.size() > 3) return 4;
+      tof_register = static_cast<std::uint16_t>(
+          (static_cast<unsigned>(outbound[0]) << 8) | outbound[1]);
     } else if (current_address == 0x24 && !outbound.empty()) {
       if (outbound.size() < 9 || outbound[0] != 0 || outbound[1] != 0 ||
           outbound[2] != 0xff) return 4;
@@ -84,7 +101,25 @@ class TwoWire {
     inbound.clear();
     pos = 0;
     if (!connected(addr)) return 0;
-    if (addr == 0x24 && nfc_connected) {
+    if (addr == 0x70) {
+      if (range_mux_read_nack) return 0;
+      inbound = {range_mux_bad_readback
+          ? static_cast<std::uint8_t>(0xff) : ranges};
+    } else if (addr == 0x71) {
+      inbound = {extras};
+    } else if (addr == 0x29) {
+      if (tof_register == 0x0031 && count == 1) {
+        inbound = {0}; // fresh result ready
+      } else if (tof_register == 0x0089 && count == 15) {
+        inbound.assign(15, 0);
+        inbound[0] = 9; // ST status 9, valid
+        inbound[3] = 2; // nonzero SPAD count
+        const unsigned mm = ranges == 16 ? 300 : 45;
+        inbound[13] = static_cast<std::uint8_t>(mm >> 8);
+        inbound[14] = static_cast<std::uint8_t>(mm);
+        ++tof_samples;
+      }
+    } else if (addr == 0x24 && nfc_connected) {
       if (nfc_phase == 1 && count == 7) {
         inbound = {1, 0, 0, 0xff, 0, 0xff, 0};
         nfc_phase = 2;
