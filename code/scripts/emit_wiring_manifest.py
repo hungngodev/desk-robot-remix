@@ -86,8 +86,13 @@ def verify(plan: dict, body: str, head: str) -> None:
             if len(ids) != len(set(ids)):
                 raise ValueError(f"Duplicate {group} I2C address on one lane")
     ranges = bus["mux_ranges"]["channels"]
-    if ranges[0]["position"] != "floor_front_left" or ranges[4]["position"] != "front_obstacle":
-        raise ValueError("Critical cliff/forward sensor order drift")
+    expected_roles = (
+        "floor_front_left", "floor_front_right", "floor_rear_left",
+        "floor_rear_right", "front_obstacle", "left_obstacle",
+        "right_obstacle", "rear_obstacle",
+    )
+    if tuple(lane["position"] for lane in ranges) != expected_roles:
+        raise ValueError("Critical cliff/obstacle sensor order drift")
 
 
 def render(plan: dict, body: str, head: str) -> str:
