@@ -12,25 +12,43 @@ async def call(conn, route, payload=None):
     token = os.environ.get("DESK_ROBOT_TOOL_TOKEN", "")
     if robot is None or len(token) < 24:
         return {"error": "Robot mapping or local tool credential is missing"}
-    async with httpx.AsyncClient(
-        base_url="http://127.0.0.1:8765", timeout=5, headers={"Authorization": f"Bearer {token}"}
-    ) as client:
-        if route == "status":
-            response = await client.get(f"/v1/robots/{robot}/status")
-        elif route == "job":
-            response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
-        elif route == "voice-context":
-            response = await client.get(f"/v1/pet/{robot}/voice-context")
-        elif route == "look":
-            response = await client.post(
-                f"/v1/pet/{robot}/look", json=payload or {},
-                timeout=50,
-            )
-        else:
-            response = await client.post(f"/v1/robots/{robot}/{route}", json=payload or {})
-        if response.status_code >= 400:
-            return {"error": response.text, "note": "No action is retried"}
-        return response.json()
+    try:
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:8765", timeout=5,
+            headers={"Authorization": f"Bearer {token}"}
+        ) as client:
+            if route == "status":
+                response = await client.get(f"/v1/robots/{robot}/status")
+            elif route == "job":
+                response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
+            elif route == "voice-context":
+                response = await client.get(f"/v1/pet/{robot}/voice-context")
+            elif route == "look":
+                response = await client.post(
+                    f"/v1/pet/{robot}/look", json=payload or {},
+                    timeout=50,
+                )
+            else:
+                response = await client.post(
+                    f"/v1/robots/{robot}/{route}", json=payload or {}
+                )
+    except (httpx.TransportError, httpx.TimeoutException):
+        # The Mac may be offline while a real human is still speaking to
+        # Xiaozhi. No retry, no stale substitute response, no raw LAN/token
+        # diagnostics in the text returned to the language model.
+        return {"error": "Robot Mac connection unavailable", "retried": False}
+    if response.status_code >= 400:
+        return {
+            "error": f"Robot Mac rejected request ({response.status_code})",
+            "retried": False,
+        }
+    try:
+        result = response.json()
+    except ValueError:
+        return {"error": "Malformed robot Mac tool response", "retried": False}
+    if not isinstance(result, dict):
+        return {"error": "Unexpected robot Mac tool response", "retried": False}
+    return result
 
 
 def description(name, text, properties=None, required=None):
