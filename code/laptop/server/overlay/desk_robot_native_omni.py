@@ -304,10 +304,11 @@ class NativeOmniSession:
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
-                        if (data.get("robot_id") == self.robot
+                        if (isinstance(data, dict)
+                                and data.get("robot_id") == self.robot
                                 and data.get("source")
                                 == "model_estimated_xiaozhi_audio_transcription"
-                                and data.get("stored") in (True, False)):
+                                and type(data.get("stored")) is bool):
                             if data["stored"]:
                                 self.heard_memories_stored += 1
                             continue
