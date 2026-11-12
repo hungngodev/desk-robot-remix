@@ -272,8 +272,13 @@ async def test_sensor_two_frame_burst_is_bounded_and_camera_serial():
     )
     try:
         visual.sensor_event("robot-01", "paw_contact")
+        assert visual.sensor_burst_pending("robot-01")
+        assert not visual.sensor_burst_pending("robot-02")
         async with asyncio.timeout(3):
             while len(visual.hub.frames["robot-01"]) != 2:
+                await asyncio.sleep(.01)
+        async with asyncio.timeout(1):
+            while visual.sensor_burst_pending("robot-01"):
                 await asyncio.sleep(.01)
         frames = list(visual.hub.frames["robot-01"])
         assert frames[0].source == frames[1].source == "sensor"
