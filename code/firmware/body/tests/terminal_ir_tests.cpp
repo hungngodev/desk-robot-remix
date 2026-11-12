@@ -64,6 +64,19 @@ int main() {
     pair.accept(9, code, 420);  // invalid source is not registered
     result = pair.assess(420);
     CHECK(result.left_seq == 1 && result.right_seq == 2);
+    // Invalidation must reject old sightings without erasing diagnostic counts.
+    desk_robot::DualIrEvidence invalidated;
+    invalidated.accept(0, code, 100);
+    invalidated.accept(1, code, 110);
+    CHECK(invalidated.assess(120).same_code);
+    invalidated.invalidate();
+    result = invalidated.assess(120);
+    CHECK(!result.left_fresh && !result.right_fresh && !result.same_code);
+    CHECK(result.left_seq == 1 && result.right_seq == 1);
+    invalidated.accept(0, code, 130);
+    CHECK(!invalidated.assess(130).same_code);
+    invalidated.accept(1, code, 140);
+    CHECK(invalidated.assess(140).same_code);
     // Clock wrapping after both receivers captured real, independent bursts.
     desk_robot::DualIrEvidence wrapped;
     wrapped.accept(0, code, 0xfffffff0U);
