@@ -9,11 +9,13 @@
 #include "esp32_camera.h"
 #include "robot_bridge.h"
 #include "stackchan_behavior.hpp"
+#include "led/single_led.h"
 #include "sdkconfig.h"
 
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <mutex>
 #include <string_view>
 #include <driver/i2c_master.h>
 #include <esp_lcd_panel_io.h>
@@ -223,6 +225,18 @@ public:
         return &audio_codec;
     }
     Display* GetDisplay() override { return display_; }
+    Led* GetLed() override {
+#ifdef CONFIG_DESK_ROBOT_RGB_HEART_ENABLED
+        // Reuse Xiaozhi's existing low-brightness, audio-state-aware
+        // Espressif led_strip driver. This GPIO is NEVER enabled by default:
+        // shipped Sense SD J3 isolation and the external 3.3V to 5V
+        // WS2812 logic buffer/power path must be qualified separately.
+        static SingleLed heart(GPIO_NUM_9);
+        return &heart;
+#else
+        return WifiBoard::GetLed();
+#endif
+    }
     Camera* GetCamera() override { return camera_; }
 };
 
