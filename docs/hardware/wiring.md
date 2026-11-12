@@ -25,7 +25,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/
 | No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not ESP32 strapping GPIO4 |
 | GND | Head, body, sensors and actuator-supply common logic reference |
 |34 | Owned Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Firmware has debounced tap, double tap, hold and local motion stop; actual connection, shell timing and noise testing remain open |
-| 35 / 36 / 39 | GPIO35 is the direct normally closed bumper. GPIO36/39 are now reserved **only** for left/right 38 kHz terminal IR demodulated inputs, still without an IR decoder or validated RMT timing. Slow reed/PIR move to MCP23017 GPIOB0/B1 on mux 0x71 lane 5. See [terminal IR verification](charging-design-and-validation.md#terminal-homing-pin-budget-real-blocker-not-a-fake-finished-dock) before wiring. |
+| 35 / 36 / 39 | GPIO35 is the direct normally closed bumper. GPIO36/39 are now reserved **only** for left/right 38 kHz terminal IR demodulated inputs, with bounded read-only RMT decoder source but no measured receiver timing or approved final docking. Slow reed/PIR move to MCP23017 GPIOB0/B1 on mux 0x71 lane 5. See [terminal IR verification](charging-design-and-validation.md#terminal-homing-pin-budget-real-blocker-not-a-fake-finished-dock) before wiring. |
 
 The conservative output set has 15 pins. Steppers8 + servos2 + UART2 + I²C2
 consume 14, so there are not five spare outputs for sensor XSHUT lines. The mux
@@ -327,7 +327,7 @@ InvenSense MPU6050 RM-MPU-6000A and Adafruit AT42QT1010 breakout:
 | GPIO35, build flag DESK_ROBOT_ENABLE_BUMPER | Optional normally-closed mechanical bumper, raw local trip | External 3.3 V pullup, active LOW; must be physically fitted and tested before enable |
 | MCP23017 GPIOB0, build flag DESK_ROBOT_ENABLE_REED | Slow read-only magnetic costume accessory reed closure | Source polls BANK=0 GPIOB 0x13, active LOW, 3.3 V pullup, actual dwell and magnet interference need measurement |
 | MCP23017 GPIOB1, build flag DESK_ROBOT_ENABLE_PIR | Slow read-only PIR motion output | Source polls same expander byte, active HIGH; measured 3.3 V output, pulse dwell and external bias needed; not person recognition |
-| WROOM GPIO36 and GPIO39 reserved | Two independent demodulated left/right terminal beacon inputs | **NO NEC decoder or physical qualifications.** External bias, ESP32 RTC/ADC glitch erratum, actual interrupts/RMT version and optical baffles must be checked |
+| WROOM GPIO36 and GPIO39 reserved | Two independent demodulated left/right terminal beacon inputs | **Source NEC/RMT decoder implemented, but NO physical receiver qualification or movement authority.** External bias, ESP32 RTC/ADC glitch erratum, actual interrupts/RMT version and optical baffles must be checked |
 
 The optional reed/PIR event reports remain disabled by compile flags until
 each actual MCP23017 input is wired and qualified. The bumper remains direct,
