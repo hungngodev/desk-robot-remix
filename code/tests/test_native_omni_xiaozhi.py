@@ -763,3 +763,88 @@ async def test_first_human_camera_wake_does_not_double_fetch_on_esp32(native):
         service.closed = True
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_human_fleet_preemption_cancels_idle_queued_audio_while_peer_head_hangs(
+    native,
+):
+    """A slow physical head must not hold up other independent STOPs."""
+    module, _bridge = native
+    slow_entered, slow_release, fast_stopped = (
+        asyncio.Event(), asyncio.Event(), asyncio.Event()
+    )
+    stopped = []
+
+    class Peer:
+        def __init__(self, device, slow=False, speaking=False):
+            self.device = device
+            self.closed = False
+            self.conn = SimpleNamespace(client_is_speaking=speaking)
+            self.slow = slow
+
+        async def _invalidate_head_first(self):
+            stopped.append(self.device)
+            if self.slow:
+                slow_entered.set()
+                await slow_release.wait()
+            else:
+                fast_stopped.set()
+            return ({"type": "response.cancel"},)
+
+        def _schedule_remote_cancel(self, events):
+            assert events[0]["type"] == "response.cancel"
+
+    module._sessions = {
+        "mac-01": Peer("mac-01"),
+        "mac-02": Peer("mac-02", slow=True, speaking=True),
+        # This model has queued sound but has not issued TTS START yet.
+        "mac-03": Peer("mac-03", slow=False, speaking=False),
+    }
+    module._output_owner = "mac-02"
+    task = asyncio.create_task(module.preempt_others_for_human("mac-01"))
+    try:
+        await asyncio.wait_for(slow_entered.wait(), timeout=1)
+        await asyncio.wait_for(fast_stopped.wait(), timeout=1)
+        assert "mac-03" in stopped  # queued silent response invalidated
+        assert "mac-02" in stopped
+        assert module._output_owner == "mac-02"  # no false physical flush ACK
+        assert not task.done()
+    finally:
+        slow_release.set()
+        await asyncio.wait_for(task, timeout=1)
+    assert module._output_owner is None
+    assert "mac-01" not in stopped
+
+
+async def test_human_fleet_failed_head_flush_keeps_audio_owner_blocked(native):
+    module, _bridge = native
+    invalidated = []
+
+    class Broken:
+        closed = False
+        conn = SimpleNamespace(client_is_speaking=True)
+
+        async def _invalidate_head_first(self):
+            raise OSError("head send did not complete")
+
+        def _schedule_remote_cancel(self, events):
+            raise AssertionError("Failed head cannot report physical flush")
+
+    class Healthy:
+        closed = False
+        conn = SimpleNamespace(client_is_speaking=False)
+
+        async def _invalidate_head_first(self):
+            invalidated.append("queued model cancelled")
+            return ({"type": "response.cancel"},)
+
+        def _schedule_remote_cancel(self, events):
+            assert events[0]["type"] == "response.cancel"
+
+    module._sessions = {
+        "mac-01": Healthy(), "mac-02": Broken(), "mac-03": Healthy()
+    }
+    module._output_owner = "mac-02"
+    await module.preempt_others_for_human("mac-01")
+    assert invalidated == ["queued model cancelled"]
+    assert module._output_owner == "mac-02"
