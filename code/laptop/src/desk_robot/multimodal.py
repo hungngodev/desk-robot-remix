@@ -317,9 +317,6 @@ class MultimodalOrchestrator:
         self._camera_locks = {
             robot.id: asyncio.Lock() for robot in settings.robots
         }
-        self._native_frame_locks = {
-            robot.id: asyncio.Lock() for robot in settings.robots
-        }
         # Prevent five large JPEG decoders/encoders from running at once.
         # Own actual native JPEG lifetime, not a cancellable asyncio wrapper.
         self._preprocess_slots = threading.BoundedSemaphore(2)
@@ -658,35 +655,6 @@ class MultimodalOrchestrator:
         return await self.capture(
             robot_id, source="speech", reuse_if_recent_s=0.65
         )
-
-    async def native_frame(self, robot_id: str) -> CameraEvidence:
-        """Share the authenticated VAD sampler with native audio/video.
-
-        Never borrow a pre-utterance image or start a second independent
-        camera stream. One lock per head coalesces concurrent native requests;
-        normal captures still use the existing camera transport owner.
-        """
-        self.hub._check(robot_id)
-        if self._closed:
-            raise RuntimeError("Multimodal orchestrator closed")
-        async with self._native_frame_locks[robot_id]:
-            now = time.monotonic()
-            turn_started = self._voice_turn_at[robot_id]
-            if turn_started == -math.inf:
-                raise RuntimeError("No authenticated human voice camera turn")
-            recent = [
-                frame for frame in self.hub.frames[robot_id]
-                if frame.source == "speech"
-                and frame.received_at >= turn_started
-                and 0 <= now - frame.received_at <= 0.8
-            ]
-            if recent:
-                return recent[-1]
-            if not self.hub.user_active(robot_id, now):
-                raise RuntimeError("Human voice has ended; no fresh native frame")
-            # Only the authenticated head provides the JPEG. A concurrent VAD
-            # sampler can also acquire this same existing capture lock.
-            return await self.capture(robot_id, source="speech")
 
     async def offer_proactive(self, robot_id: str, jpeg: bytes, now: float) -> None:
         # Pet snapshots share the same authenticated head.capture_lock. Only
