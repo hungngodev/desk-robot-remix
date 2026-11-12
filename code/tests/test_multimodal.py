@@ -121,6 +121,67 @@ async def test_sensor_two_frame_burst_never_blocks_human_speech_priority():
         await visual.close()
 
 
+async def test_one_human_vad_preempts_all_five_pet_optional_camera_captures():
+    class SlowHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def snapshot(self):
+            self.captures += 1
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    first, second = SlowHead(), SlowHead()
+    visual = MultimodalOrchestrator(
+        config(enabled=False),
+        {"robot-01": first, "robot-02": second},
+        Vision(), asyncio.Lock(),
+    )
+    task = asyncio.create_task(
+        visual.capture("robot-02", source="proactive")
+    )
+    try:
+        await asyncio.wait_for(second.started.wait(), timeout=1)
+        visual.voice_started("robot-01")
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert second.cancelled
+        visual.sensor_event("robot-02", "petting_zone")
+        await asyncio.sleep(.02)
+        assert second.captures == 1
+        assert not visual.hub.frames["robot-02"]
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        visual.voice_ended("robot-01")
+    finally:
+        await visual.close()
+
+
+async def test_other_pets_sensor_bursts_yield_to_one_fleet_human_turn():
+    heads = {"robot-01": Head(), "robot-02": Head()}
+    visual = MultimodalOrchestrator(
+        config(enabled=False), heads, Vision(), asyncio.Lock()
+    )
+    try:
+        visual.sensor_event("robot-02", "nfc_tag")
+        async with asyncio.timeout(2):
+            while heads["robot-02"].captures < 1:
+                await asyncio.sleep(.01)
+        visual.voice_started("robot-01")
+        await asyncio.sleep(.55)
+        assert heads["robot-02"].captures == 1
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        assert not visual.hub.user_active("robot-02", time.monotonic())
+        visual.voice_ended("robot-01")
+    finally:
+        await visual.close()
+
+
 async def test_human_voice_preempts_only_the_background_snapshot():
     class SlowHead(Head):
         def __init__(self):
