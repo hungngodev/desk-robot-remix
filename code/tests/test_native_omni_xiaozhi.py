@@ -646,3 +646,73 @@ async def test_native_camera_rejects_late_jpeg_from_previous_vad_turn(native):
         service.closed = True
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memory(
+    native,
+):
+    """Only completed model ASR is stored, in chunks, never PCM or video."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    transcript = " ".join(["I noticed a red key on the desk"] * 21)
+    event = {
+        "type": "conversation.item.input_audio_transcription.completed",
+        "item_id": "item_from_model_7",
+        "transcript": transcript,
+    }
+    service._accept_heard_transcript(event)
+    assert service._heard_queue.empty()  # separate consent defaults OFF
+    service._transcript_memory_enabled = True
+    service._accept_heard_transcript(event)
+    count = service._heard_queue.qsize()
+    assert 2 <= count <= 10
+    service._accept_heard_transcript(event)  # backend event replay
+    assert service._heard_queue.qsize() == count
+    stored = []
+
+    class Reply:
+        status = 200
+
+        def __init__(self, request):
+            self.request = request
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "stored": True,
+                "source": "model_estimated_xiaozhi_audio_transcription",
+            }
+
+    class FakeMac:
+        def post(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/omni-heard")
+            assert kwargs["headers"]["Authorization"] == "Bearer " + "p" * 32
+            request = kwargs["json"]
+            assert 1 <= len(request["transcript"]) <= 240
+            assert request["event_id"].startswith("omni_")
+            stored.append(request)
+            return Reply(request)
+
+    worker = asyncio.create_task(service._persist_heard(FakeMac()))
+    try:
+        async with asyncio.timeout(2):
+            while service.heard_memories_stored < count:
+                await asyncio.sleep(.001)
+        assert len(stored) == count
+        assert len({x["event_id"] for x in stored}) == count
+        assert " ".join(x["transcript"] for x in stored) == transcript
+        assert service.heard_memories_dropped == 0
+    finally:
+        service.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
