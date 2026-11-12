@@ -662,6 +662,33 @@ static void dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof() {
         != std::string::npos);
 }
 
+static void dual_ir_evidence_never_authorizes_body_motion_or_charging() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  desk_robot::IrPairEvidence sample{};
+  sample.left_fresh = sample.right_fresh = sample.same_code = true;
+  sample.left_seq = 9;
+  sample.right_seq = 12;
+  sample.left_age_ms = 15;
+  sample.right_age_ms = 21;
+  sample.code = 0xcb34ed12U;
+  body.set_terminal_ir(sample);
+  const std::string data = send(body, "ir", 100);
+  CHECK(data.find("\\"match\\":true") != std::string::npos);
+  CHECK(data.find("\\"left_seq\\":9") != std::string::npos);
+  CHECK(data.find("\\"right_seq\\":12") != std::string::npos);
+  CHECK(data.find("\\"motor_authorized\\":false") != std::string::npos);
+  CHECK(data.find("\\"charging_authorized\\":false") != std::string::npos);
+  CHECK(!body.state().armed);
+  CHECK(body.state().left == 0 && body.state().right == 0);
+  CHECK(send(body, "ir 1", 101) == "ERR ir bad_arguments");
+  // Even a matched NEC code is never a local calibration or arm permit.
+  CHECK(send(body, "drive 20 20 100", 102) != "OK drive left=20 right=20 ms=100");
+  sample.left_fresh = sample.same_code = false;
+  sample.code = 0;
+  body.set_terminal_ir(sample);
+  CHECK(send(body, "ir", 103).find("\\"match\\":false") != std::string::npos);
+}
+
 static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   desk_robot::AccessoryReadings readings{};
@@ -746,6 +773,7 @@ int main() {
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
+    dual_ir_evidence_never_authorizes_body_motion_or_charging();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
