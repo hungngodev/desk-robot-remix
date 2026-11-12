@@ -302,17 +302,17 @@ static void side_range_validity_clears_on_shared_bus_fault_without_fake_samples(
   body.sample_side_range(0, 125, true, 10);
   body.sample_side_range(2, 300, true, 11);
   const auto observed = send(body, "status", 12);
-  CHECK(observed.find("\\"side_ranges\\":{") != std::string::npos);
-  CHECK(observed.find("\\"present_mask\\":5,\\"valid_mask\\":5") != std::string::npos);
+  CHECK(observed.find("\"side_ranges\":{") != std::string::npos);
+  CHECK(observed.find("\"present_mask\":5,\"valid_mask\":5") != std::string::npos);
   body.invalidate_side_ranges(); // called by WROOM only on new TofBus error
   const auto invalid = send(body, "status", 13);
-  CHECK(invalid.find("\\"mm\\":[125,0,300]") != std::string::npos);
-  CHECK(invalid.find("\\"present_mask\\":5,\\"valid_mask\\":0") != std::string::npos);
+  CHECK(invalid.find("\"mm\":[125,0,300]") != std::string::npos);
+  CHECK(invalid.find("\"present_mask\":5,\"valid_mask\":0") != std::string::npos);
   CHECK(!body.state().armed);
   // Only a newly acquired independent side range can restore its validity.
   body.sample_side_range(0, 126, true, 14);
   const auto restored = send(body, "status", 15);
-  CHECK(restored.find("\\"present_mask\\":5,\\"valid_mask\\":1") != std::string::npos);
+  CHECK(restored.find("\"present_mask\":5,\"valid_mask\":1") != std::string::npos);
   CHECK(!body.state().armed); // diagnostic input has no motor authority
 }
 
