@@ -96,6 +96,21 @@ int main() {
     }
     {
       Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      bus.poll(guard, 60); // first optional left range, lane 5
+      const auto fresh = bus.extra_diagnostic(0, 60);
+      CHECK(fresh.present && fresh.valid);
+      CHECK(fresh.distance_mm == 45 && fresh.age_ms == 0);
+      CHECK(bus.extra_diagnostic(0, 410).valid); // exactly 350ms
+      const auto stale = bus.extra_diagnostic(0, 411);
+      CHECK(stale.present && !stale.valid);
+      CHECK(stale.distance_mm == 45 && stale.age_ms == 351);
+      CHECK(!bus.extra_diagnostic(3, 411).present);
+    }
+    {
+      Wire = TwoWire{};
       Wire.optional_mux_installed = false; // five sensor bench profile
       desk_robot::TofBus bus;
       desk_robot::CliffGuard guard;
