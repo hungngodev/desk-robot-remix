@@ -183,3 +183,19 @@ def test_missing_or_malformed_imu_source_identity_fails_quiet():
         frame = sample()
         del frame["imu"][missing]
         assert raw_mpu6050(frame) is None
+
+
+@pytest.mark.parametrize("field,value", [
+    ("now", None), ("now", "100"), ("now", True),
+    ("now", float("nan")), ("now", float("inf")),
+    ("tilt_threshold_deg", None), ("tilt_threshold_deg", "38"),
+    ("tilt_threshold_deg", True), ("tilt_threshold_deg", float("nan")),
+])
+def test_malformed_handling_parameters_raise_value_error_without_state_change(field, value):
+    gate = HandlingGate()
+    arguments = {"now": 100.0, "qualified": True, "tilt_threshold_deg": 38.0}
+    arguments[field] = value
+    with pytest.raises(ValueError, match="Physically qualified"):
+        gate.observe(sample(), **arguments)
+    assert gate.reference is None
+    assert gate.startup_samples == []
