@@ -118,6 +118,10 @@ def main() -> int:
         "charging_verified": False,
         "print_fit_verified": False,
         "five_robot_acoustics_verified": False,
+        # Model weights, firmware and source-level CAD reuse do not grant
+        # commercial rights to SMARS CC BY-NC-SA chassis/forklift derivatives.
+        "commercial_cad_rights_verified": False,
+        "commercial_batch_release_ready": False,
         "assembly_ready": False,
     }
     args.report.parent.mkdir(parents=True, exist_ok=True)
