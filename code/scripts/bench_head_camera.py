@@ -52,6 +52,7 @@ async def measure(
     deadline = started + seconds
 
     async def poll_camera():
+        nonlocal camera_error_count
         due = started
         while time.monotonic() < deadline:
             begin = time.monotonic()
@@ -83,6 +84,7 @@ async def measure(
             await asyncio.sleep(max(0, min(deadline, due) - time.monotonic()))
 
     async def poll_status():
+        nonlocal status_error_count
         due = started
         while time.monotonic() < deadline:
             begin = time.monotonic()
