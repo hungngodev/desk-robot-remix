@@ -24,7 +24,7 @@ Status November 10, 2026: **source-verified electrical design references, NOT an
     -> independent left/right normally closed seat-switch inputs
 ```
 
-**Engineering conflict to resolve:** The maximum 1.5A charger/input-path budget might not supply the boost input current drawn by the full rover. The battery may supplement load during docking, so a CHG-active indication does **not** prove net battery charging. Qualified dock behavior must keep motors disarmed and measure *all remaining WiFi, camera, display and audio peaks*. If those exceed the actual source/charger output rating, choose a higher-rated power-path controller or separate safe power modes; do not parallel unqualified modules or trust the BQ status pin.
+**Engineering conflict to resolve:** The BQ24074 maximum *programmed input current* and *charging current* are 1.5 A, while TI separately lists up to 4.5 A recommended OUT current under the specified operating conditions. These are different limits: 4.5 A at OUT is **not** a guarantee of 4.5 A of sustained dock-adapter power or successful net battery charging. Dynamic power-path management can reduce charging current, and the battery can supplement the system load. Board copper, temperature, cell discharge rating and charger thermal regulation must also be qualified. A CHG-active indication does **not** prove net battery charging. Qualified dock behavior must keep motors disarmed and measure *all remaining WiFi, camera, display and audio peaks*, boost input current and signed battery current. If the real load cannot remain within the source, device, board, battery and thermal limits simultaneously, choose a qualified higher-capacity power-path design or a validated dock power mode; do not parallel unqualified modules or trust the BQ status pin. Reference: TI BQ24074 electrical specifications, https://www.ti.com/lit/ds/symlink/bq24074.pdf .
 
 ## Required physical acceptance before purchasing five sets or energizing contacts
 
@@ -131,3 +131,19 @@ An additional time-of-check versus time-of-use race remained after moving PnP of
 A concrete cross-robot priority bug was identified in the existing docking path. `Coordinator._dock_approach` called CPU heavy OpenCV AprilTag and PnP synchronously on the Mac asyncio event loop, potentially blocking the authenticated human speech and urgent cancellation tasks. Worse, it passed the **JPEG receipt time** as both the pose timestamp and the time to `assess_dock`. A detector taking longer than the existing 200 ms validity window could still produce an allegedly fresh marker and allow a drive based on old geometry.
 
 The current canonical PR now delegates AprilTag inference to the existing `asyncio.to_thread` pattern with a two second deadline, and passes actual post inference `time.monotonic()` into the existing `assess_dock` stale pose policy. `dock_runtime.observe_actual_dock` uses the same correction for the read only diagnostic API. `test_dock_motion.py` exercises a delayed fake AprilTag detector and asserts that the event loop stays responsive while the resulting stale pose issues no motor command; `test_dock_runtime.py` checks a stale diagnostic never grants motion or charging authority. These tests were committed but are **not recorded passing** while GitHub Actions fails without worker steps. Actual capture exposure timing, motion latency and charged hardware remain physically unverified.
+
+
+### Required measured power budget before charger selection
+
+Record these *real measured values* at the lowest intended protected-cell voltage and separately while docked, rather than projecting a charger from the advertised motor or amplifier rating. Do not mark unmeasured fields as zero.
+
+| Mode | 5 V continuous A | 5 V transient peak A | charger IN A | boost input A | signed battery A (+ discharge) | minimum 5 V rail V | charger/boost temperature C | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Idle with WiFi and all sensors | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | |
+| Camera capture, reasoning and OLED | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | |
+| Full speaker peak and simultaneous radio | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | |
+| Both wheels and servo motion on safe fixture | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | |
+| Seated, motors disarmed, speech/camera active | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | |
+| Seated, motors disarmed, intended quiet charge mode | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | |
+
+**Candidate, not selection:** TI BQ24190 has a switch-mode NVDC power-path topology and selectable nominal input current limit steps up to 3 A, subject to the actual ILIM, adapter, board thermals, and datasheet. Its charger registers and watchdog require different integration from the current BQ24074 read-only status plan; it is not a pin-compatible swap. Compare only after measurement. Primary datasheet: https://www.ti.com/lit/ds/symlink/bq24190.pdf . If reusing status semantics, Zephyr's Apache 2.0 charger driver is the candidate reference: https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/charger/charger_bq24190.c . No charger IC, electrical schematic, board, battery or power path is hereby approved or verified.
