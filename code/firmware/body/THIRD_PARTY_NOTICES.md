@@ -29,5 +29,5 @@ NOT linked into the local WROOM cliff safety loop. The new bounded frame
 adapter under `lib/AccessorySensors/Pn532Frames.h` retains explicit source
 attribution and parses only ISO14443A UID game tokens. It cannot authenticate
 a person or operate the charger or motors. Check the retained upstream
-license at https://github.com/Seeed-Studio/PN532/blob/arduino/LICENSE .
+license at https://github.com/Seeed-Studio/PN532/blob/e61296876c1c3e66ef67156562c71324b389f5fa/LICENSE.md .
 No real PN532 module, antenna, voltage or timing trial has passed.
