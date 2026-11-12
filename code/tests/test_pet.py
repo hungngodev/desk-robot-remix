@@ -584,6 +584,46 @@ async def test_old_camera_inference_is_dropped_before_memory_or_spontaneous_spee
         await pet.close()
 
 
+async def test_expired_vlm_request_is_actually_cancelled_before_more_camera_work(
+    fleet, tmp_path
+):
+    """Mac does not keep a dead speculative VLM request alive for 45 seconds."""
+    class HungScene:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.cancelled = asyncio.Event()
+
+        async def compare(self, before, after):
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                raise
+
+    scene = HungScene()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+    )
+    pet = PetController(
+        fleet, {"robot-01": ChangingCamera()}, conversation,
+        memory, scene, interval=.01, max_observation_age=.3,
+    )
+    try:
+        pet.start("robot-01")
+        await asyncio.wait_for(scene.started.wait(), timeout=2)
+        await asyncio.wait_for(scene.cancelled.wait(), timeout=2)
+        await wait_for(lambda:
+            pet.status("robot-01")["stale_camera_events_dropped"] >= 1)
+        assert memory.count("robot-01") == 0
+        assert pet.states["robot-01"].enabled
+        assert pet._vision_inflight is None
+        assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
+    finally:
+        await pet.close()
+
+
 async def test_different_observations_of_same_kind_are_not_falsely_coalesced(
     fleet, tmp_path
 ):
