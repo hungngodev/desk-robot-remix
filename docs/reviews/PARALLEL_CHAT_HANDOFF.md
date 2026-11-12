@@ -1,4 +1,15 @@
 # Desk Robot Remix: parallel chat engineering handoff
+## November 12 consolidation reconciliation at PR head 1620c103
+
+Read all 18 PR #17 discussion entries, the separate issue comments, submitted reviews (none), and review threads (none). GitHub lists 18 PRs total: #17 is the only open draft; #1 through #16 and #18 are closed without separate merges. The historical feature mapping remains in `CLOSED_PR_RECONCILIATION.md`; the two discontinued `TofArray` files from #9 are intentionally replaced by `TofBus`, not a feature to cherry pick. This is a source and discussion reconciliation, not executed verification or physical qualification.
+
+* [AprilTag native worker cancellation](https://github.com/hungngodev/desk-robot-remix/pull/17#issuecomment-6822424469): **already covered in current source**, `dock_runtime.py` now owns the bounded slot through a native concurrent future and executor rather than a cancellable asyncio wrapper. Owner: dock runtime. Next action: execute actual cancellation and executor submission regressions; do not claim physical docking.
+* [Terminal IR stale queued frames](https://github.com/hungngodev/desk-robot-remix/pull/17#issuecomment-6822539469): **source mitigation present**, `TerminalIr::poll` now calls `IrFrameQueueGate` for initial drain, poll-gap and backlog invalidation; `reset` invalidates prior evidence. Owner: WROOM terminal IR. Next action: instrument fake RMT lifecycle and queue arrival timing, run native tests and actual hardware trials. No motor or charger permission follows from IR evidence alone.
+* [Dock GPIO cached removal](https://github.com/hungngodev/desk-robot-remix/pull/17#issuecomment-6831006176): **already covered in current source**, `BodyControl::set_accessories` checks fresh sample identity, timestamp progression and changed pin values before clearing the power lockout; bad provenance disarms or stops. Owner: WROOM body. Next action: execute guarded native tests and verify output ordering on hardware.
+* Battery load-sharing and net signed cell current remain **blocked by electrical measurements**; final protected charger, contact isolation, dimensional CAD and five real robot acceptance are not qualified. Owner: power/mechanics hardware verification. Next action: measure worst-case simultaneous load and charging current before selecting or energizing a charging path.
+
+No historical PR was merged or closed in this reconciliation. No new code was added, no tests were executed and no physical pass is claimed. Preserve PR #17 as draft and avoid duplicate worker edits.
+
 
 **Consolidated on 2026-11-11.** This is the shared context for independent GitHub reviewers working from different chats. It describes **requested complete behavior, source ownership, implementation evidence, unresolved blockers and the next verification cycles**. Do not treat a requirement, a proposed integration or a checked-in test as a physically working robot.
 
