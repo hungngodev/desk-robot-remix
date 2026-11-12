@@ -7,6 +7,7 @@ from desk_robot.handling import HandlingGate, raw_mpu6050
 def sample(
     acc=(0, 0, 16384), gyro=(0, 0, 0), *,
     family=4, valid=True, age=20, left=0, right=0, drive_ms=0,
+    boot_id=1, sample_ms=1,
 ):
     return {
         "left": left, "right": right, "drive_ms": drive_ms,
@@ -14,11 +15,14 @@ def sample(
             "family": family, "gyro_id": 0x68,
             "aux_id": 0, "valid": valid,
             "acc": list(acc), "gyro": list(gyro), "age_ms": age,
+            "boot_id": boot_id, "sample_ms": sample_ms,
         }
     }
 
 
-def qualified(gate, body, now):
+def qualified(gate, body, now, *, new_sample=True):
+    if new_sample:
+        body["imu"]["sample_ms"] = int(round(now * 1000)) & 0xffffffff
     return gate.observe(
         body, now, qualified=True,
         tilt_threshold_deg=38, shake_delta_mg=550,
@@ -126,3 +130,56 @@ def test_invalid_qualification_parameters_refuse_events(bad):
     with pytest.raises(ValueError):
         gate.observe(sample(), 1, qualified=qualified,
                      tilt_threshold_deg=angle, shake_delta_mg=delta)
+
+
+def test_same_acquisition_never_counts_twice_for_calibration_or_tilt():
+    gate = HandlingGate()
+    frame = sample(sample_ms=10)
+    for i in range(8):
+        assert qualified(gate, frame, 100 + i * .1, new_sample=False) == ()
+    assert gate.reference is None
+    assert len(gate.startup_samples) == 1
+
+    for i in range(7):
+        assert qualified(gate, sample(sample_ms=11 + i), 100.8 + i * .1,
+                         new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
+    tilt = sample(acc=(12551, 0, 10531), sample_ms=18)
+    assert qualified(gate, tilt, 101.5, new_sample=False) == ()
+    assert qualified(gate, tilt, 101.6, new_sample=False) == ()
+    assert gate.tilt_hits == 1
+    assert qualified(gate, sample(acc=(12551, 0, 10531), sample_ms=19),
+                     101.7, new_sample=False) == ("handling_tilt",)
+
+
+def test_boot_change_and_source_clock_rollover_reestablish_baseline():
+    gate = HandlingGate()
+    calibrated(gate)
+    assert qualified(gate, sample(boot_id=2, sample_ms=5),
+                     102.0, new_sample=False) == ()
+    assert gate.reference is None
+    assert len(gate.startup_samples) == 1
+    # Reestablish only from independent source conversions.
+    for i in range(7):
+        assert qualified(gate, sample(boot_id=2, sample_ms=6 + i),
+                         102.15 + .15 * i, new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
+    assert qualified(gate, sample(boot_id=2, sample_ms=0xfffffffe),
+                     103.4, new_sample=False) == ()
+    assert qualified(gate, sample(boot_id=2, sample_ms=2),
+                     103.55, new_sample=False) == ()
+    assert gate.reference is None
+
+
+def test_missing_or_malformed_imu_source_identity_fails_quiet():
+    for identity in (
+        {"boot_id": 0}, {"boot_id": True}, {"sample_ms": -1},
+        {"sample_ms": 0x100000000}, {"sample_ms": "12"},
+    ):
+        frame = sample()
+        frame["imu"].update(identity)
+        assert raw_mpu6050(frame) is None
+    for missing in ("boot_id", "sample_ms"):
+        frame = sample()
+        del frame["imu"][missing]
+        assert raw_mpu6050(frame) is None
