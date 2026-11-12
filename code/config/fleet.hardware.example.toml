@@ -29,6 +29,9 @@ battery_low_percent = 20
 # Measure raw IR against the actual paw shell before enabling optical contact.
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
+ambient_interactions_qualified = false
+# ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
+# ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
 # paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
 [[robots]]
@@ -47,6 +50,9 @@ battery_low_percent = 20
 # Measure raw IR against the actual paw shell before enabling optical contact.
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
+ambient_interactions_qualified = false
+# ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
+# ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
 # paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
 [[robots]]
@@ -65,6 +71,9 @@ battery_low_percent = 20
 # Measure raw IR against the actual paw shell before enabling optical contact.
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
+ambient_interactions_qualified = false
+# ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
+# ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
 # paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
 [[robots]]
@@ -83,6 +92,9 @@ battery_low_percent = 20
 # Measure raw IR against the actual paw shell before enabling optical contact.
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
+ambient_interactions_qualified = false
+# ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
+# ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
 # paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
 [[robots]]
@@ -101,5 +113,8 @@ battery_low_percent = 20
 # Measure raw IR against the actual paw shell before enabling optical contact.
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
+ambient_interactions_qualified = false
+# ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
+# ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
 # paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
