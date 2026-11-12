@@ -1,7 +1,6 @@
 """Verification runner must never turn failed CI into a fake accepted robot."""
 import importlib.util
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 
 import pytest
