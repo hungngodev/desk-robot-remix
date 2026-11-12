@@ -207,16 +207,24 @@ class Conversation:
             raise RuntimeError("A conversation is already active")
         robots = [self.settings.robot(i) for i in robot_ids]
         self.active = asyncio.current_task()
-        self.histories = {
-            r.id: [
-                {"role": "system", "content": self._persona_with_memory(r)},
-                {"role": "user", "content": f"Discuss this with your robot peers: {topic}"},
-            ]
-            for r in robots
-        }
         transcript = []
         current_robot = None
         try:
+            # Each physical pet owns a separate SQLite connection. Disk
+            # contention cannot block urgent Xiaozhi VAD and speaker abort on
+            # the Mac event loop. The active lease is already held so another
+            # social request cannot overtake this pending conversation.
+            personas = await asyncio.gather(*(
+                asyncio.to_thread(self._persona_with_memory, robot)
+                for robot in robots
+            ))
+            self.histories = {
+                robot.id: [
+                    {"role": "system", "content": persona},
+                    {"role": "user", "content": f"Discuss this with your robot peers: {topic}"},
+                ]
+                for robot, persona in zip(robots, personas)
+            }
             async with asyncio.timeout(300):
                 async with self.session_lock, self.speaker.session(robots):
                     for index in range(turns):
