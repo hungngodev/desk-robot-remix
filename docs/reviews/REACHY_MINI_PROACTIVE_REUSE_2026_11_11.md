@@ -80,3 +80,17 @@ Official build instructions explicitly distinguish real-time `set_target` (singl
 ## Acceptance and reproducibility
 
 Run host tests for `test_pet.py`, `test_multimodal.py`, `test_server_bridge.py`, and `test_native_omni_xiaozhi.py`; then run full lint/C++ sanitizer/PlatformIO/Sense overlay compile at the exact current PR commit. Current GitHub Actions runs report failed jobs with unavailable steps/logs: **they do not establish a passing test or a diagnosed failure**. Complete actual temporal trials with WROOM and XIAO on a desk for visual false triggers, chosen thresholds, and 5-pet turn ownership. Nothing about reading a paper proves hardware proactivity or reliable natural conversation.
+
+
+## November 12 cognitive-load-aware proactivity review
+
+Primary source: Carsenti et al., *Designing a Robot's Proactivity: Adjusting the Robot's Communication Modality to the Participant's Cognitive Load*, HRI Companion 2026, March 16, DOI https://doi.org/10.1145/3776734.3794456. An 87-person study with ElliQ found participants favored verbal initiative under lower cognitive load and nonverbal initiative under higher load. This is a human-subject design result, **not a validated classifier of our user's concentration and not permission for covert monitoring**.
+
+**Reuse the existing PetController speech gate, authenticated voice floor, camera event coalescing, and single face/speaker ownership.** No extra inference service, robot framework, new recording stream or motion owner is justified. Extend future policy only after inspecting actual preference flags and OLED capabilities:
+
+1. User quiet mode, active VAD, disconnected VAD monitor, hardware fault or an unconsented observation keeps spontaneous audio silent. Local WROOM safety has absolute priority.
+2. When an event is worthwhile but the user appears busy from *explicitly consented, low-confidence interaction signals* (for example an active user turn), prefer a tiny permitted nonverbal OLED cue or no action; never infer mental state as fact. No face recognition requirement.
+3. When permitted, speech still requires source provenance, freshness, the existing shared speaker lease and a second check after slow language generation. Do not convert a gesture or camera event into new motor permissions.
+4. Test that high-priority human speech silences all five pets, that quiet mode cannot be bypassed by nonverbal-to-verbal escalation, and that busy/uncertain contexts cause fewer unsolicited utterances without hiding urgent fault indications. Record false interventions and missed genuine moments per robot.
+
+**Acceptance status:** research reviewed only; no source behavior changed in this note, no repository test or live user study executed, and no claim of cognitive-load sensing or measurable improvement. The immediate implementation target is one narrow regression against the current policy, not a second proactive agent.
