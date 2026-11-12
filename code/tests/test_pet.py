@@ -83,6 +83,24 @@ def test_visual_change_gate_requires_persistent_difference():
         VisualChangeGate(min_changed_fraction=2)
 
 
+def test_proactive_frame_gate_reuses_motion_filter_to_ignore_global_exposure():
+    from PIL import ImageDraw
+    gate = VisualChangeGate(min_changed_fraction=0.008, confirmations=2)
+    initial = jpeg("gray")
+    exposed = jpeg((175, 175, 175))
+    photo = Image.new("RGB", (128, 96), (175, 175, 175))
+    ImageDraw.Draw(photo).rectangle((40, 30, 78, 68), fill=(0, 0, 0))
+    out = BytesIO()
+    photo.save(out, "JPEG", quality=92)
+    changed = out.getvalue()
+    assert gate.observe(initial) is None
+    assert gate.observe(exposed) is None
+    assert gate.observe(exposed) is None
+    assert gate.observe(changed) is None
+    assert gate.observe(changed) == initial
+    assert gate.observe(changed) is None
+
+
 async def test_local_ollama_scene_is_two_frame_and_refuses_uncertain_claims():
     requests = []
     replies = iter([
