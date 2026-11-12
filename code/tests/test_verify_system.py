@@ -52,3 +52,21 @@ def test_missing_tool_returns_incomplete_not_success(monkeypatch, tmp_path):
     assert result["pass"] is False
     assert result["exit_code"] is None
     assert "FileNotFoundError" in result["error"]
+
+
+def test_timeout_preserves_bounded_partial_compiler_logs(monkeypatch, tmp_path):
+    def timed_out(*args, **kwargs):
+        raise verify.subprocess.TimeoutExpired(
+            cmd=["cmake", "--build", str(tmp_path)], timeout=2,
+            output=b"compiler: validating pins...\\n" + b"a" * 20000,
+            stderr=b"fatal: module failed\\n\\xff",
+        )
+
+    monkeypatch.setattr(verify.subprocess, "run", timed_out)
+    result = verify.run("body-compile", ["cmake", "--build", str(tmp_path)],
+                        tmp_path, 2)
+    assert result["pass"] is False and result["exit_code"] is None
+    assert result["error"].startswith("TimeoutExpired")
+    assert "fatal: module failed" in result["output_tail"]
+    assert len(result["output_tail"]) <= 12000
+    assert "\\ufffd" in result["output_tail"]  # bad bytes never crash receipt
