@@ -615,6 +615,48 @@ async def test_local_wroom_fault_transition_cancels_mac_motion_authority(fleet, 
         await pet.close()
 
 
+async def test_wroom_stop_callback_runs_before_any_safety_camera_request(
+    fleet, tmp_path,
+):
+    observed = []
+
+    async def stop(robot_id):
+        observed.append(("stop", robot_id))
+
+    class CameraHook:
+        hub = SimpleNamespace(discard_video=lambda robot_id: None)
+
+        def sensor_event(self, robot_id, kind):
+            observed.append(("camera", robot_id, kind))
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(),
+                                memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), on_local_fault=stop,
+    )
+    pet.multimodal = CameraHook()
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 19
+    try:
+        await pet._observe_body_safety("robot-01", 19, {
+            "safety": {"required": True, "ready": True, "fault": "none"},
+        })
+        await pet._observe_body_safety("robot-01", 19, {
+            "safety": {"required": True, "ready": False,
+                       "fault": "floor_out_of_range", "sensor": 0},
+        })
+        assert observed == [
+            ("stop", "robot-01"),
+            ("camera", "robot-01", "safety_fault"),
+        ]
+        assert any(record.kind == "safety_fault"
+                   for record in memory.recent("robot-01"))
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_local_wroom_safety_transitions_are_firsthand_not_replayed(fleet, tmp_path):
     class GuardedHead:
         def __init__(self):
