@@ -325,7 +325,11 @@ class PetController:
         task = self._speech_task
         if (task is not None and not task.done()
                 and robot_id in self._speech_participants):
-            task.cancel()
+            # Human VAD preempts the whole fleet concurrently. Repeated
+            # cancellation of one shared social task can interrupt its
+            # urgent Xiaozhi STOP cleanup before the head is flushed.
+            if not task.cancelling():
+                task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
     async def _store_observation(
