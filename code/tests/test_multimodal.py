@@ -79,6 +79,67 @@ def test_brightness_shift_not_mistaken_for_localized_motion():
     assert change_fraction(a, bytes(c)) > 0.01
 
 
+async def test_sensor_burst_uses_existing_camera_owner_and_coalesces_requests():
+    heads = {"robot-01": Head(), "robot-02": Head()}
+    visual = MultimodalOrchestrator(config(), heads, Vision(), asyncio.Lock())
+    try:
+        for kind in ("paw_contact", "ambient_shift", "nfc_tag", "petting_zone"):
+            visual.sensor_event("robot-01", kind)
+        async with asyncio.timeout(2):
+            while not visual.hub.frames["robot-01"]:
+                await asyncio.sleep(0.01)
+        assert heads["robot-01"].captures == 1
+        assert heads["robot-02"].captures == 0
+        assert visual.hub.frames["robot-01"][-1].source == "sensor"
+        assert visual._metrics["robot-01"]["camera_successes"] == 1
+        assert len(visual.hub.recent_events("robot-01", time.monotonic())) == 4
+        # A second burst during the 800ms budget cannot allocate more JPEGs.
+        visual.sensor_event("robot-01", "nfc_tag")
+        await asyncio.sleep(0.02)
+        assert heads["robot-01"].captures == 1
+    finally:
+        await visual.close()
+
+
+async def test_human_vad_cancels_pending_sensor_camera_before_speech_frames():
+    class BlockedFirstCamera(Head):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+            self.sensor_cancelled = False
+
+        async def snapshot(self):
+            self.captures += 1
+            if self.captures == 1:
+                self.entered.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.sensor_cancelled = True
+                    raise
+            return image(square=True)
+
+    first = BlockedFirstCamera()
+    visual = MultimodalOrchestrator(
+        config(enabled=True), {"robot-01": first, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        visual.sensor_event("robot-01", "paw_contact")
+        await asyncio.wait_for(first.entered.wait(), timeout=1)
+        visual.voice_started("robot-01")
+        async with asyncio.timeout(2):
+            while (first.captures < 2
+                   or not visual.hub.frames["robot-01"]):
+                await asyncio.sleep(0.01)
+        assert first.sensor_cancelled
+        assert visual.hub.frames["robot-01"][-1].source == "speech"
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        visual.voice_ended("robot-01")
+    finally:
+        await visual.close()
+
+
 def test_frame_hub_speech_adaptive_priority_and_identity():
     hub = CameraFrameHub(["robot-01"], idle_fps=0.3, speaking_fps=1)
     now = 100.0
