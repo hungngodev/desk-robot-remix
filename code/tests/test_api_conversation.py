@@ -69,6 +69,49 @@ async def test_unknown_robot_does_not_poison_future_conversation(settings):
     assert len(await c.run(["robot-01", "robot-02"], "hello", 1)) == 1
 
 
+async def test_five_pet_memory_context_does_not_block_live_voice_loop(settings):
+    import threading
+
+    speaker = SimulatedSpeaker()
+    c = Conversation(settings, SimulatedChat(), speaker)
+    entered = threading.Event()
+    release = threading.Event()
+    original = c._persona_with_memory
+
+    def slow_sqlite_context(robot):
+        entered.set()
+        release.wait(timeout=1.0)
+        return original(robot)
+
+    c._persona_with_memory = slow_sqlite_context
+    task = asyncio.create_task(c.run(["robot-01", "robot-02"], "hello", 2))
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(entered.wait, 0.5), 0.7)
+        # A blocking SQLite read would stall this direct real time callback.
+        await asyncio.wait_for(asyncio.sleep(0.005), timeout=0.07)
+        await asyncio.wait_for(c.stop(), timeout=0.3)
+        assert task.cancelled()
+        assert c.active is None
+        assert speaker.spoken == []
+    finally:
+        release.set()
+
+
+async def test_memory_context_error_releases_fleet_owner(settings):
+    c = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    original = c._persona_with_memory
+
+    def failed_sqlite_context(_robot):
+        raise OSError("failed to read local SQLite memory")
+
+    c._persona_with_memory = failed_sqlite_context
+    with pytest.raises(OSError, match="SQLite"):
+        await c.run(["robot-01", "robot-02"], "hello", 2)
+    assert c.active is None
+    c._persona_with_memory = original
+    assert len(await c.run(["robot-01", "robot-02"], "recovered", 2)) == 2
+
+
 async def test_conversation_cancellation_releases_session(settings):
     class SlowSpeaker(SimulatedSpeaker):
         async def say(self, robot, text):
