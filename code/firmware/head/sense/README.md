@@ -14,6 +14,24 @@ unmeasured on the user's hardware. Ordinary-speech interruption must still pass 
 without supplying actual synchronized mic/reference data. RIO's speaker pins
 differ from the table below; do not mix the two wiring maps.
 
+## Guarded RGB heart using upstream Xiaozhi state LED
+
+The Sense board now exposes the **existing pinned Xiaozhi `SingleLed` / Espressif
+`led_strip` WS2812 implementation** as its audio/conversation heart on GPIO9,
+but only when `CONFIG_DESK_ROBOT_RGB_HEART_ENABLED=y` in the **Sense-only**
+Kconfig. The default is `n`. The upstream application calls `GetLed()`
+on device state changes; its existing implementation displays low-brightness
+listening, speaking, WiFi and error/idle states. No additional LED driver,
+camera worker, VAD process or motor output is created.
+
+**DO NOT ENABLE OR WIRE THIS YET.** GPIO9 shares the shipped Sense expansion
+microSD J3 routing; confirm Seeed's documented physical J3 isolation on the
+actual board revision, verify the logic buffer that translates XIAO 3.3V data
+for the chosen 5V WS2812, common-ground wiring, regulator loading and signal
+integrity with an instrument. The opt-in flag is deliberately insufficient as
+electrical authorization. This is a source implementation, not a passed
+hardware trial. Sense audio, native JPEG and OLED still own their own pins.
+
 ## Native JPEG for natural live video
 
 The selected Sense firmware now asks the pinned `Esp32Camera` for
