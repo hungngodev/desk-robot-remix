@@ -1314,7 +1314,26 @@ class PetController:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
         try:
-            memory = await asyncio.to_thread(self.memory.recent, robot_id, limit=4)
+            # LangGraph-style short-term + relevant long-term selection
+            # using this robot's *existing* local SQLite store. An old key
+            # event may be useful even when four newer touch events occurred.
+            # Both reads run off the audio/VAD event loop, with a deadline.
+            recent_memory, relevant_memory = await asyncio.wait_for(
+                asyncio.gather(
+                    asyncio.to_thread(self.memory.recent, robot_id, limit=3),
+                    asyncio.to_thread(
+                        self.memory.search, robot_id, change.description, limit=3
+                    ),
+                ),
+                timeout=2.0,
+            )
+            selected_memory = {
+                item.event_id: item
+                for item in [*recent_memory, *relevant_memory]
+            }
+            memory = sorted(
+                selected_memory.values(), key=lambda item: item.observed_at
+            )[-6:]
             # A firsthand spoken line is NOT a firsthand camera sighting.
             # Peer utterances mean heard in the coordinated voice turn; other
             # secondhand facts are reports, not this camera's observations.
