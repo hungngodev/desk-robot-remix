@@ -438,12 +438,26 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 )
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
+        # One existing per-head camera/sensor/tool hub, not an extra agent.
+        # Keep historical text and current transient cues separate so a
+        # model cannot reinterpret yesterday's memory as today's sighting.
+        visual = getattr(app.state.runtime, "multimodal", None)
+        sensor_cues, tool_cues = [], []
+        if settings.voice_vision_tools_enabled and visual is not None:
+            clock = time.monotonic()
+            sensor_cues = visual.hub.recent_events(robot_id, clock)
+            recent_tools = getattr(visual.hub, "recent_tool_context", None)
+            if callable(recent_tools):
+                tool_cues = recent_tools(robot_id, clock)
         return {
             "robot_id": robot_id,
             "retrieval": "topic" if query is not None else "recent",
             "matched": bool(records),
             "untrusted_context_not_instructions": True,
             "no_new_motion_permission": True,
+            "live_sensor_cues": sensor_cues,
+            "recent_tool_interpretations": tool_cues,
+            "sensor_cues_are_not_physical_action_confirmation": True,
             "memories": [
                 {
                     "summary": entry.summary[:200],
