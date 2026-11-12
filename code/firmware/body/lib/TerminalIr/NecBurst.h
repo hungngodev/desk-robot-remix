@@ -53,6 +53,7 @@ struct IrSideEvidence {
   std::uint32_t code = 0;
   std::uint32_t seq = 0;       // accepted complete frames, not HTTP queries
   std::uint32_t at_ms = 0;     // WROOM receive/poll time, NOT exposure time
+  bool valid = false;
 };
 struct IrPairEvidence {
   bool left_fresh = false, right_fresh = false, same_code = false;
@@ -65,12 +66,22 @@ struct IrPairEvidence {
 
 class DualIrEvidence {
  public:
+  // Drop all previously accepted sightings after a receive backlog or poll stall.
+  // Sequence counters intentionally remain monotonic for observability.
+  void invalidate() {
+    for (auto& side : sides_) {
+      side.code = 0;
+      side.at_ms = 0;
+      side.valid = false;
+    }
+  }
   // Called only after an actual valid independent RMT frame for that side.
   void accept(unsigned side, std::uint32_t code, std::uint32_t now_ms) {
     if (side > 1) return;
     IrSideEvidence& s = sides_[side];
     s.code = code;
     s.at_ms = now_ms;
+    s.valid = true;
     ++s.seq;
     if (s.seq == 0) ++s.seq;
   }
@@ -80,10 +91,10 @@ class DualIrEvidence {
     const auto& right = sides_[1];
     out.left_seq = left.seq;
     out.right_seq = right.seq;
-    out.left_age_ms = left.seq ? now_ms - left.at_ms : 0xffffffffU;
-    out.right_age_ms = right.seq ? now_ms - right.at_ms : 0xffffffffU;
-    out.left_fresh = left.seq != 0 && out.left_age_ms <= 200U;
-    out.right_fresh = right.seq != 0 && out.right_age_ms <= 200U;
+    out.left_age_ms = left.valid ? now_ms - left.at_ms : 0xffffffffU;
+    out.right_age_ms = right.valid ? now_ms - right.at_ms : 0xffffffffU;
+    out.left_fresh = left.valid && out.left_age_ms <= 200U;
+    out.right_fresh = right.valid && out.right_age_ms <= 200U;
     // A 200 ms time window does not itself prove a bearing. Different
     // receivers must actually observe the SAME checksum-valid beacon.
     // Ages are both relative to the SAME clock, so this difference is
