@@ -27,6 +27,13 @@ class AccessorySensors {
   std::uint8_t ads_channel_ = 0;
   std::uint32_t ads_started_ = 0;
   AccessoryReadings data_{};
+  enum class NfcStage : std::uint8_t {
+    Disabled, StartSam, SamAck, SamResponse,
+    StartRetry, RetryAck, RetryResponse, Idle, ScanAck, ScanResponse
+  };
+  NfcStage nfc_stage_ = NfcStage::Disabled;
+  std::uint32_t nfc_phase_at_ms_ = 0;
+  std::uint32_t nfc_last_scan_at_ms_ = 0;
   Bmp280Trim bmp_trim_{};
   GestureDecoder gesture_{};
   std::uint32_t gesture_started_ms_ = 0;
