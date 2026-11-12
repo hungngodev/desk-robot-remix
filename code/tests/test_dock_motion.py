@@ -417,3 +417,51 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
         assert head.commands == []
     finally:
         await controller.close()
+
+
+async def test_dock_approach_refuses_parallel_native_detector_ownership(settings):
+    """A diagnostic AprilTag worker and physical dock motion share one slot."""
+    from desk_robot import dock_runtime
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration
+
+    settings.mode = "hardware"
+
+    class HealthyHead:
+        def __init__(self):
+            self.commands = []
+            self.captures = 0
+
+        async def status(self):
+            return {
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [50, 50, 50, 50, 600],
+                           "age_ms": [5, 5, 5, 5, 5]},
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+            }
+
+        async def snapshot(self):
+            self.captures += 1
+            return b"real-head-fixture-not-decoded-when-busy"
+
+        async def command(self, command):
+            self.commands.append(command)
+
+    head = HealthyHead()
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    camera = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    assert dock_runtime._DETECTOR_SLOT.acquire(blocking=False)
+    try:
+        with pytest.raises(dock_runtime.DockDetectorBusy):
+            await controller._dock_approach(
+                Job("busy-detector", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
+            )
+        assert head.captures == 1
+        assert head.commands == []  # no speculative movement or charge
+    finally:
+        dock_runtime._DETECTOR_SLOT.release()
+        await controller.close()
