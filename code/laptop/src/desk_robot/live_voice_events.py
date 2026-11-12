@@ -37,6 +37,9 @@ class VoiceEventListener:
         self.handled = 0
         self.last_error: str | None = None
         self._stream_failed = False
+        # A callback can suppress CancelledError; keep its real task as the
+        # ownership token until it finishes instead of launching duplicates.
+        self._global_abort_task: asyncio.Task | None = None
 
     async def _set_monitor_ready(self, ready: bool) -> None:
         if self.monitor_ready == ready and self._monitor_delivered == ready:
@@ -54,9 +57,20 @@ class VoiceEventListener:
         # The Mac runtime owns a single shared speech floor. Abort it ONCE,
         # rather than executing the same five-pet cancellation five times.
         if self.on_global_interrupt is not None:
-            # The shared audio owner can also hang during a head disconnect.
-            # Bound the observation, not the physical flush; retry on failure.
-            task = asyncio.create_task(self.on_global_interrupt(reason))
+            # A coroutine that suppresses cancellation can still be flushing
+            # a physical audio owner after the listener times out. Keep one
+            # shared operation in flight and never launch a second competing
+            # abort until the previous task has actually exited.
+            task = self._global_abort_task
+            if task is None or task.done():
+                task = asyncio.create_task(self.on_global_interrupt(reason))
+                self._global_abort_task = task
+
+                def observe_result(completed: asyncio.Task) -> None:
+                    if not completed.cancelled():
+                        completed.exception()  # consume a late callback failure
+
+                task.add_done_callback(observe_result)
             try:
                 done, pending = await asyncio.wait({task}, timeout=0.5)
                 if pending:
@@ -64,7 +78,7 @@ class VoiceEventListener:
                 task.result()
             finally:
                 if not task.done():
-                    task.cancel()
+                    task.cancel()  # request cancellation, not physical ACK
             return
         # Existing independent consumers preserve their per-device callback.
         # Launch every independent fallback at once. Serial awaits would
