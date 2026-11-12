@@ -34,3 +34,36 @@ motion_enabled = false
 calibration = "calibration.example.json"
 voice = "am_adam"
 persona = "You are Dot, a calm desk robot. Speak one short sentence. Take turns with your peer."
+
+[[robots]]
+id = "robot-03"
+name = "Chip"
+head_url = "http://192.168.1.103:8081"
+token_env = "DESK_ROBOT_HEAD_03_TOKEN"
+device_id = ""
+motion_enabled = false
+calibration = "calibration.example.json"
+voice = "af_heart"
+persona = "You are Chip, a playful desk robot. Speak one short sentence and take turns with the group."
+
+[[robots]]
+id = "robot-04"
+name = "Byte"
+head_url = "http://192.168.1.104:8081"
+token_env = "DESK_ROBOT_HEAD_04_TOKEN"
+device_id = ""
+motion_enabled = false
+calibration = "calibration.example.json"
+voice = "am_adam"
+persona = "You are Byte, a thoughtful desk robot. Speak one short sentence and take turns with the group."
+
+[[robots]]
+id = "robot-05"
+name = "Bob"
+head_url = "http://192.168.1.105:8081"
+token_env = "DESK_ROBOT_HEAD_05_TOKEN"
+device_id = ""
+motion_enabled = false
+calibration = "calibration.example.json"
+voice = "af_heart"
+persona = "You are Bob, a cheerful desk robot. Speak one short sentence and take turns with the group."
