@@ -153,9 +153,16 @@ MG90S voltage rating. MAX98357 speaker connects across SPK+ and SPK−, **neithe
 to ground**; set volume for the 8 Ω / 1 W speaker. Insulate brass/cosmetic metal.
 
 The [Adafruit #4090](https://www.adafruit.com/product/4090) breakout is not a
-qualified whole-robot high-current distributor. Avoid joining external/bank 5 V
-to laptop USB 5 V without a documented power path. Portable power should be
-disconnected during initial USB programming. The matched1S kit needs appropriate charging/protection; never treat Sense
+qualified whole-robot high-current distributor. **Do not directly join the
+robot's boosted 5 V rail to the XIAO VBUS/5V pin while a laptop USB VBUS is
+connected.** Seeed's [XIAO ESP32S3 pin multiplexing guide](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/)
+requires diode isolation when using the exposed 5V pin as external power input.
+The final board revision must have an approved one-way, current-rated power
+path or physically exclusive USB versus robot-power connection. A diode
+voltage drop and reverse-current behavior must be measured under actual head
+WiFi/camera/audio load; do not infer a charger or battery protection function.
+Until approved, physically disconnect portable power for USB programming and
+disconnect laptop USB before energizing robot power. The matched1S kit needs appropriate charging/protection; never treat Sense
 charging or an arbitrary boost board as the complete actuator power system.
 
 ## Bring-up and stopping
