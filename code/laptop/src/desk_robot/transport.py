@@ -7,6 +7,7 @@ from typing import Protocol
 import httpx
 
 from .aux import validate_aux
+from .dock_ir import validate_ir
 from .config import RobotConfig, secret
 
 
@@ -18,6 +19,7 @@ class Head(Protocol):
     async def command(self, command: str) -> dict: ...
     async def status(self) -> dict: ...
     async def aux_status(self) -> dict: ...
+    async def ir_status(self) -> dict: ...
     async def snapshot(self) -> bytes: ...
 
 
@@ -107,6 +109,15 @@ class HttpHead:
             data = (await self._request("GET", "/api/aux")).json()
             try:
                 return validate_aux(data, self.config.id)
+            except ValueError as exc:
+                raise HeadError(str(exc)) from exc
+
+    async def ir_status(self) -> dict:
+        """Independent read-only terminal IR evidence from actual WROOM RMT."""
+        async with self.lock:
+            data = (await self._request("GET", "/api/ir")).json()
+            try:
+                return validate_ir(data, self.config.id)
             except ValueError as exc:
                 raise HeadError(str(exc)) from exc
 
