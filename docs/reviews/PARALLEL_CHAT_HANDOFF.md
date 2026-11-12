@@ -6,6 +6,14 @@
 
 **One current repository and PR:** [hungngodev/desk-robot-remix](https://github.com/hungngodev/desk-robot-remix), [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17), `impl/mac-hardware-safety-preflight-2026-11-10`. The PR head changes as reviewers commit. Compare to actual current head, not a historical ChatGPT response.
 
+## November 12 cross-chat lookup and native detector lifecycle
+
+The user explicitly pointed reviewers at recent `Look Up GitHub Repo`, `Review GitHub Chat`, and an oddly named `Bluetooth keyboard` conversation that discusses the same robot. Conversation titles are **discovery hints, not technical sources**: recover concrete user requirements and preserve this handoff, then verify every claim against the current source and hardware plan. The binding constraints remain one complete full-featured robot followed by four independent peers, reuse of the existing upstream/hardware first, tiny scoped loops, all work in this draft PR and no unverified assembly-ready claim. Do not require new memory/MCP infrastructure.
+
+The AprilTag native detector task-ownership issue identified in independent review has a source fix and regression definitions on this PR. `dock_runtime.py` now releases its one detector slot from the *concurrent.futures native future* when the actual worker finishes, not from a cancellable asyncio wrapper; both pre-dispatch cancellation and shutdown cancellation of a live native detector are represented in `code/tests/test_dock_runtime.py`. See [precise lifecycle review](2026-11-12-apriltag-task-slot-ownership.md). An isolated local Python future harness exercised both cancellation primitives, **not** the repository pytest suite or hardware. No safe docking/charging/fit/CI certification follows.
+
+The [updated Reachy source review](REACHY_MINI_PROACTIVE_REUSE_2026_11_11.md#november-12-upstream-release-and-media-source-verification) captures the official v1.2.0 release context and Pollen's measured streaming design. Keep the existing per-pet camera event and human voice priority owners instead of building a second unqualified media pipeline.
+
 ## November 11 followup: preserve human VAD through long speech and camera failures
 
 The current canonical branch adds four small source/test/documentation iterations after the Reachy Mini initiative gate. The risk was in the real Mac media coordinator, not a missing AI framework:
