@@ -42,6 +42,7 @@ class VoiceEventListener:
         self._global_abort_task: asyncio.Task | None = None
         self._event_task: asyncio.Task | None = None
         self._event_sequence: int | None = None
+        self._fallback_abort_tasks: dict[str, asyncio.Task] = {}
 
     async def _set_monitor_ready(self, ready: bool) -> None:
         if self.monitor_ready == ready and self._monitor_delivered == ready:
@@ -86,10 +87,19 @@ class VoiceEventListener:
         # Launch every independent fallback at once. Serial awaits would
         # delay other pets behind one unavailable or cancellation-resistant
         # head. The production single shared audio owner remains preferred.
-        tasks = [
-            asyncio.create_task(self.on_interrupt(robot_id, reason))
-            for robot_id in sorted(self.robot_ids)
-        ]
+        tasks = []
+        for robot_id in sorted(self.robot_ids):
+            task = self._fallback_abort_tasks.get(robot_id)
+            if task is None or task.done():
+                task = asyncio.create_task(self.on_interrupt(robot_id, reason))
+                self._fallback_abort_tasks[robot_id] = task
+
+                def observe_fallback(completed: asyncio.Task) -> None:
+                    if not completed.cancelled():
+                        completed.exception()
+
+                task.add_done_callback(observe_fallback)
+            tasks.append(task)
         try:
             done, pending = await asyncio.wait(tasks, timeout=0.5)
         finally:
