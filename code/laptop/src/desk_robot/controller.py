@@ -146,13 +146,31 @@ class Coordinator:
         ]
         for task in running:
             task.cancel()
-        if running:
-            await asyncio.gather(*running, return_exceptions=True)
+        # Stop physical wheels FIRST. A canceled job can be stuck in camera,
+        # network or model cleanup; waiting for it would delay the real WROOM
+        # stop command despite an urgent operator or human request.
+        try:
+            acknowledgement = await self.heads[robot_id].command("stop")
+        finally:
+            if running:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*running, return_exceptions=True),
+                        timeout=2.0,
+                    )
+                except TimeoutError:
+                    # Never claim cancellation is complete. Local WROOM pulse
+                    # expiry/watchdog remain required as final barriers.
+                    for jid, task in self.tasks.items():
+                        if (self.jobs[jid].robot_id == robot_id
+                                and not task.done()):
+                            self.jobs[jid].state = "failed"
+                            self.jobs[jid].error = "Cancelled job ignored timeout; WROOM stop dispatched"
         for jid, task in self.tasks.items():
             if self.jobs[jid].robot_id == robot_id and task.cancelled():
                 self.jobs[jid].state = "cancelled"
                 self.jobs[jid].error = "Operator cancelled before job started"
-        return await self.heads[robot_id].command("stop")
+        return acknowledgement
 
     async def close(self):
         self.closed = True
@@ -240,7 +258,8 @@ class Coordinator:
                 for task in (operation, keeper):
                     if task is not None and not task.done():
                         task.cancel()
-                await asyncio.gather(*(t for t in (operation, keeper) if t), return_exceptions=True)
+                # Dispatch WROOM stop before potentially slow canceled camera
+                # or model cleanup. No second actor may treat this as charging.
                 try:
                     await self.heads[job.robot_id].command("stop")
                     job.events.append(
@@ -249,6 +268,18 @@ class Coordinator:
                 except Exception as exc:
                     job.error = f"{job.error or ''}; STOP failed: {exc}; rely on body watchdog"
                     job.state = "failed"
+                pending = [t for t in (operation, keeper) if t is not None]
+                if pending:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*pending, return_exceptions=True),
+                            timeout=2.0,
+                        )
+                    except TimeoutError:
+                        job.error = (
+                            f"{job.error or ''}; cancellation cleanup timed out"
+                        )
+                        job.state = "failed"
 
     def manual(self, robot_id: str, command: str) -> Job:
         robot = self.robot(robot_id)
