@@ -192,16 +192,25 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
                        now_ms - dock.at_ms < 500U;
   const std::uint32_t seq_delta = dock.sample_seq - dock_last_seq_;
   const std::uint32_t time_delta = dock.at_ms - dock_last_at_ms_;
+  const std::uint8_t pins =
+      static_cast<std::uint8_t>((dock.left_seated ? 1U : 0U) |
+                                (dock.right_seated ? 2U : 0U) |
+                                (dock.input_good ? 4U : 0U) |
+                                (dock.charge_indicated ? 8U : 0U));
+  const bool repeated = current && dock_sample_seen_ &&
+      dock.sample_seq == dock_last_seq_ && dock.at_ms == dock_last_at_ms_ &&
+      pins == dock_last_pins_;
   const bool new_sample = current &&
       (!dock_sample_seen_ || (seq_delta != 0U && seq_delta < 0x80000000U &&
                              time_delta != 0U && time_delta < 0x80000000U));
   if (dock.present && dock.valid && dock.sample_seq != 0U && contact) {
-    // Even an old asserted seat / PGOOD stops movement, never enables it.
+    // Any observed seat or PGOOD is a stop, including inconsistent records.
     dock_power_lockout_ = true;
   }
   if (new_sample) {
     dock_last_seq_ = dock.sample_seq;
     dock_last_at_ms_ = dock.at_ms;
+    dock_last_pins_ = pins;
     dock_sample_seen_ = true;
     if (!contact) {
       // Only a truly new, fresh, fully unseated read clears the latch.
@@ -209,6 +218,10 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
       dock_power_lockout_ = false;
     }
   }
+  // A changed GPIO value under the same sample identity, an older sample,
+  // or an expired timestamp cannot substantiate a local safety interlock.
+  // Preserve the last latch and fail closed until a fresh acquisition.
+  state_.accessories.dock.valid = new_sample || repeated;
   if (dock_power_lockout_) {
     force_disarm();
   } else if ((dock.present || dock_monitor_required_) &&
