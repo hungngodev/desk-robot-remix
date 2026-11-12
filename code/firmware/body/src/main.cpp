@@ -44,13 +44,24 @@ void poll_optional(std::uint32_t now_ms) {
   mask |= 1U;
   bumper = digitalRead(body_pins::kBumperInput) == HIGH; // NC series to GND; open or unplugged -> HIGH trip
 #endif
+  // Slow magnetic/PIR inputs arrive from MCP23017 GPIOB on the existing
+  // accessory mux. The required dock seat/PGOOD remains independent GPIOA.
+  // Never interpret an old optional bus value as a new local event.
+  const auto& extension = accessories.readings().optional_inputs;
+  const bool extension_fresh = extension.present && extension.valid &&
+      extension.sample_seq != 0 &&
+      now_ms - extension.at_ms <= 250U;
 #if defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED
-  mask |= 2U;
-  reed = digitalRead(body_pins::kReedInput) == LOW; // closes to ground, external pullup
+  if (extension_fresh) {
+    mask |= 2U;
+    reed = extension.reed_closed;
+  }
 #endif
 #if defined(DESK_ROBOT_ENABLE_PIR) && DESK_ROBOT_ENABLE_PIR
-  mask |= 4U;
-  pir = digitalRead(body_pins::kPirInput) == HIGH; // validated 3.3V output only
+  if (extension_fresh) {
+    mask |= 4U;
+    pir = extension.pir_active;
+  }
 #endif
   control.sample_optional_inputs(mask, bumper, reed, pir);
 }
@@ -296,12 +307,9 @@ void setup() {
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
   pinMode(body_pins::kBumperInput, INPUT); // external pullup mandatory
 #endif
-#if defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED
-  pinMode(body_pins::kReedInput, INPUT); // external pullup mandatory
-#endif
-#if defined(DESK_ROBOT_ENABLE_PIR) && DESK_ROBOT_ENABLE_PIR
-  pinMode(body_pins::kPirInput, INPUT); // measured 3.3V output and pull-down
-#endif
+// GPIO36/39 are reserved for separate terminal dock IR receivers.
+// Reed and PIR are optional read-only MCP23017 GPIOB, not MCU pinMode.
+// No IR decoder or terminal movement is enabled in this firmware revision.
 #endif
   for (int pin : body_pins::kServoPins) {
     pinMode(pin, OUTPUT);
