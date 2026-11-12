@@ -295,3 +295,65 @@ async def test_dock_refuses_new_side_obstacle_after_camera_frame(
         assert head.commands == []
     finally:
         await controller.close()
+
+
+
+async def test_dock_slow_marker_inference_never_drives_from_expired_image(
+    settings, monkeypatch,
+):
+    import asyncio
+    import threading
+    import time
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration, DockPose
+
+    settings.mode = "hardware"
+
+    class CameraHead:
+        def __init__(self):
+            self.commands = []
+
+        async def status(self):
+            return {
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [50, 50, 50, 50, 650],
+                           "age_ms": [5, 5, 5, 5, 5]},
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+            }
+
+        async def snapshot(self):
+            return b"head-camera-jpeg-placeholder"
+
+        async def command(self, line):
+            self.commands.append(line)
+
+    entered = threading.Event()
+
+    def slow_detector(jpeg, camera, *, captured_at):
+        entered.set()
+        time.sleep(0.26)
+        return DockPose(0, 0, 500, 0.5, captured_at)
+
+    monkeypatch.setattr("desk_robot.controller.detect_apriltag", slow_detector)
+    head = CameraHead()
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    camera = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    try:
+        task = asyncio.create_task(controller._dock_approach(
+            Job("stale-tag", "robot-01", "dock_approach"),
+            camera, 200, 1, 1,
+        ))
+        assert await asyncio.to_thread(entered.wait, 1)
+        # The Mac event loop remains responsive while OpenCV-like work runs.
+        await asyncio.wait_for(asyncio.sleep(0.01), timeout=0.08)
+        assert not task.done()
+        result = await asyncio.wait_for(task, timeout=2)
+        assert result["phase"] == "hold"
+        assert "stale" in result["reason"].lower()
+        assert result["charging_authorized"] is False
+        assert head.commands == []
+    finally:
+        await controller.close()
