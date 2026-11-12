@@ -441,6 +441,21 @@ static void imu_identity_is_diagnostic_only() {
   CHECK(!body.state().armed);
 }
 
+static void imu_status_preserves_physical_conversion_and_boot_identity() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.set_boot_epoch(123456789U);
+  desk_robot::BerryReading reading{};
+  reading.model = desk_robot::BerryModel::Mpu6050;
+  reading.valid = true;
+  reading.at_ms = 70;
+  body.set_imu(reading);
+  const auto result = send(body, "status", 80);
+  CHECK(result.find("\\"age_ms\\":10,\\"sample_ms\\":70,\\"boot_id\\":123456789") !=
+        std::string::npos);
+  CHECK(result.size() < desk_robot::kReplyCapacity - 1);
+  CHECK(!body.state().armed); // identity is diagnostic and never authorizes motion
+}
+
 static void required_imu_is_a_local_freshness_interlock() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -899,6 +914,7 @@ int main() {
     five_range_status_reports_real_samples_not_a_permission();
     imu_identity_is_diagnostic_only();
     required_imu_is_a_local_freshness_interlock();
+    imu_status_preserves_physical_conversion_and_boot_identity();
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
