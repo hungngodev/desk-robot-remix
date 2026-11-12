@@ -4,7 +4,7 @@
 
 namespace desk_robot {
 // Bounded protocol adapter for Seeed Studio PN532's BSD-3-Clause I2C framing.
-// Reference: https://github.com/Seeed-Studio/PN532/tree/arduino/src
+// Reference: https://github.com/Seeed-Studio/PN532/tree/e61296876c1c3e66ef67156562c71324b389f5fa/src
 // The upstream code waits in readAckFrame()/readResponse(). This portable
 // subset NEVER sleeps, polls, drives a GPIO, writes tags, or changes motors.
 // In production the WROOM adapter executes one transaction on each low-
