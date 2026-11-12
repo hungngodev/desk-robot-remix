@@ -65,6 +65,8 @@ bool AccessorySensors::begin(TwoWire& wire) {
   sht_pending_ = ads_pending_ = false;
   gesture_.reset();
   gesture_collecting_ = false;
+  nfc_stage_ = NfcStage::Disabled;
+  nfc_phase_at_ms_ = nfc_last_scan_at_ms_ = 0;
   if (!mux_present_) return false;
   // Validate APDS9960 manufacturer ID before enabling low-level proximity.
   if (select(1)) {
@@ -129,6 +131,9 @@ bool AccessorySensors::begin(TwoWire& wire) {
     data_.dock.present = probe(0x20) &&
         write8(0x20, 0x00, 0xFF) &&  // all GPIOA inputs
         write8(0x20, 0x0C, 0x0F);    // 3.3V pullups GPA0..3
+    // PN532 is truly optional and cannot replace MCP23017 dock interlock.
+    // An address ACK only starts a nonblocking SAM protocol verification.
+    if (probe(kPn532Address)) nfc_stage_ = NfcStage::StartSam;
   }
   if (!close()) return false;
   for (std::uint8_t i = 0; i < 3; ++i) {
@@ -319,6 +324,141 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
   ++dock.sample_seq;  // only a completed independent physical GPIOA read
 }
 
+
+bool AccessorySensors::nfc_write(
+    std::uint8_t command, const std::uint8_t* body, std::size_t size) {
+  std::uint8_t frame[32]{};
+  const std::size_t n = pn532_encode(command, body, size, frame, sizeof(frame));
+  if (!n) return false;
+  wire_->beginTransmission(kPn532Address);
+  for (std::size_t i = 0; i < n; ++i)
+    if (wire_->write(frame[i]) != 1) return false;
+  return wire_->endTransmission(true) == 0;
+}
+
+int AccessorySensors::nfc_read(std::uint8_t* frame, std::uint8_t count) {
+  // One bounded Wire transaction. Never use Seeed's blocking wait loops.
+  if (!frame || count == 0 || count > kPn532MaxWire ||
+      wire_->requestFrom(kPn532Address, static_cast<std::size_t>(count), true) != count)
+    return -1;
+  for (std::uint8_t i = 0; i < count; ++i) {
+    if (wire_->available() < 1) return -1;
+    const int byte = wire_->read();
+    if (byte < 0) return -1;
+    frame[i] = static_cast<std::uint8_t>(byte);
+  }
+  if (frame[0] == 0) return 0; // chip busy: continue at a later mux slot
+  return frame[0] == 1 ? 1 : -1;
+}
+
+void AccessorySensors::nfc_poll(std::uint32_t now_ms) {
+  if (nfc_stage_ == NfcStage::Disabled) return;
+  auto& tag = data_.nfc;
+  const auto fail = [&]() {
+    tag.present = tag.valid = tag.tag_visible = false;
+    tag.tag_token = 0;
+    tag.uid_length = 0;
+    nfc_stage_ = NfcStage::StartSam;
+    nfc_last_scan_at_ms_ = now_ms; // bounded retry, no I2C flood
+  };
+  if (nfc_stage_ != NfcStage::Idle &&
+      nfc_stage_ != NfcStage::StartSam &&
+      nfc_stage_ != NfcStage::StartRetry &&
+      now_ms - nfc_phase_at_ms_ > 1500U) {
+    fail();
+    return;
+  }
+  const std::uint8_t sam[] = {0x01, 0x14, 0x01};
+  const std::uint8_t retries[] = {0x05, 0xff, 0x01, 0x01};
+  const std::uint8_t scan[] = {0x01, 0x00};
+  std::uint8_t frame[kPn532MaxWire]{};
+  const std::uint8_t* payload = nullptr;
+  std::size_t payload_len = 0;
+  int ready = 0;
+  switch (nfc_stage_) {
+    case NfcStage::StartSam:
+      if (now_ms - nfc_last_scan_at_ms_ < 500U) return;
+      if (!nfc_write(0x14, sam, sizeof(sam))) { fail(); return; }
+      nfc_stage_ = NfcStage::SamAck;
+      nfc_phase_at_ms_ = now_ms;
+      return;
+    case NfcStage::SamAck:
+    case NfcStage::RetryAck:
+    case NfcStage::ScanAck:
+      ready = nfc_read(frame, 7);
+      if (ready == 0) return;
+      if (ready != 1 || !pn532_ack(frame, 7)) { fail(); return; }
+      nfc_stage_ = nfc_stage_ == NfcStage::SamAck ? NfcStage::SamResponse :
+                   nfc_stage_ == NfcStage::RetryAck ? NfcStage::RetryResponse :
+                                                      NfcStage::ScanResponse;
+      return;
+    case NfcStage::SamResponse:
+    case NfcStage::RetryResponse: {
+      const bool sam_response = nfc_stage_ == NfcStage::SamResponse;
+      ready = nfc_read(frame, 10);
+      if (ready == 0) return;
+      if (ready != 1 ||
+          !pn532_response(frame, 10, sam_response ? 0x14 : 0x32,
+                          payload, payload_len) ||
+          payload_len > 1 || (payload_len == 1 && payload[0] != 0)) {
+        fail(); return;
+      }
+      nfc_stage_ = sam_response ? NfcStage::StartRetry : NfcStage::Idle;
+      if (!sam_response) {
+        tag.present = true; // verified chip response, not just I2C ACK
+        nfc_last_scan_at_ms_ = now_ms;
+      }
+      return;
+    }
+    case NfcStage::StartRetry:
+      // Seeed setPassiveActivationRetries(1) instead of infinite polling.
+      if (!nfc_write(0x32, retries, sizeof(retries))) { fail(); return; }
+      nfc_stage_ = NfcStage::RetryAck;
+      nfc_phase_at_ms_ = now_ms;
+      return;
+    case NfcStage::Idle:
+      if (now_ms - nfc_last_scan_at_ms_ < 350U) return;
+      if (!nfc_write(0x4a, scan, sizeof(scan))) { fail(); return; }
+      nfc_stage_ = NfcStage::ScanAck;
+      nfc_phase_at_ms_ = now_ms;
+      return;
+    case NfcStage::ScanResponse: {
+      ready = nfc_read(frame, static_cast<std::uint8_t>(kPn532MaxWire));
+      if (ready == 0) return;
+      if (ready != 1 ||
+          !pn532_response(frame, kPn532MaxWire, 0x4a, payload, payload_len)) {
+        fail(); return;
+      }
+      std::uint32_t token = 0;
+      std::uint8_t uid_length = 0;
+      const auto result = pn532_tag(payload, payload_len, token, uid_length);
+      if (result == Pn532TagResult::Invalid) { fail(); return; }
+      tag.present = tag.valid = true;
+      tag.at_ms = now_ms;
+      ++tag.scan_seq;
+      if (tag.scan_seq == 0U) ++tag.scan_seq;
+      if (result == Pn532TagResult::Present) {
+        if (!tag.tag_visible || tag.tag_token != token) {
+          ++tag.tag_events;
+          if (tag.tag_events == 0U) ++tag.tag_events;
+        }
+        tag.tag_visible = true;
+        tag.tag_token = token;
+        tag.uid_length = uid_length;
+      } else {
+        tag.tag_visible = false;
+        tag.tag_token = 0;
+        tag.uid_length = 0;
+      }
+      nfc_stage_ = NfcStage::Idle;
+      nfc_last_scan_at_ms_ = now_ms;
+      return;
+    }
+    case NfcStage::Disabled:
+      return;
+  }
+}
+
 void AccessorySensors::poll(std::uint32_t now_ms) {
   if (!mux_present_ || (started_ && now_ms - last_ms_ < 12U)) return;
   started_ = true;
@@ -331,7 +471,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
     case 2: force(now_ms); break;
     case 3: climate(now_ms); barometer(now_ms); break;
     case 4: power(now_ms); break;
-    case 5: dock_status(now_ms); break;
+    case 5: dock_status(now_ms); nfc_poll(now_ms); break;
     case 6: angle(1, now_ms); break;
     case 7: angle(2, now_ms); break;
     default: break;
@@ -341,7 +481,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
     data_.barometer.valid = false;
     data_.climate.valid = data_.force.valid =
       data_.proximity.valid = data_.gauge.fuel_valid =
-      data_.gauge.monitor_valid = data_.dock.valid = false;
+      data_.gauge.monitor_valid = data_.dock.valid = data_.nfc.valid = false;
     for (auto& sample : data_.angle) sample.valid = false;
   }
 }
