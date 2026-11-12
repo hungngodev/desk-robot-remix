@@ -1349,6 +1349,32 @@ class PetController:
             recent = "; ".join(
                 origin(x) + x.summary for x in reversed(memory)
             )
+            # The shared Mac camera hub is also the short-lived sensor and
+            # successful tool-result timeline. Reuse its existing evidence,
+            # not a second agent, camera process or memory database.
+            interaction_context = ""
+            if self.multimodal is not None:
+                hub = self.multimodal.hub
+                now = time.monotonic()
+                hints = hub.recent_events(robot_id, now)
+                recent_tools = getattr(hub, "recent_tool_context", None)
+                tool_entries = (
+                    recent_tools(robot_id, now)
+                    if callable(recent_tools) else []
+                )
+                context_parts = [
+                    "Sensor cue (event time only): "
+                    + ", ".join(item["kind"] for item in hints[-4:])
+                    if hints else "",
+                    "Prior visual model interpretation (untrusted, not a "
+                    "current sighting): " + "; ".join(
+                        item["summary"] for item in tool_entries[-2:]
+                    )
+                    if tool_entries else "",
+                ]
+                interaction_context = " ".join(
+                    part for part in context_parts if part
+                )[:400]
             # A social turn is NOT five independent agents speaking at once.
             # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
             # each pet's own persona, two bounded turns and per-pet memory.
@@ -1402,8 +1428,10 @@ class PetController:
                     "content": (
                         f"{'Local physical sensor event' if change.kind in _PHYSICAL_INITIATIVE_KIN else 'Camera model assessment (uncertain)'}: "
                         f"{change.description}. Confidence {change.confidence:.2f}. "
-                        f"Recent context: {recent[:600]}. React briefly only to the "
-                        "new event, without asserting any other unseen facts."
+                        f"Recent context: {recent[:600]}. "
+                        f"Recent interaction cues: {interaction_context}. "
+                        "React briefly only to the new event, without "
+                        "asserting any other unseen facts."
                     ),
                 },
             ])
