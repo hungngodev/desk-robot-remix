@@ -1,5 +1,25 @@
 # Printable one-robot adapter kit
 
+## Reproducible prototype STL export
+
+From the repository root, with OpenSCAD installed:
+
+```sh
+python3 code/scripts/export_fit_kit.py
+```
+
+This renders the seven existing adapter candidates to
+`docs/cad/remixes/adapter_stls/` for the Fusion scaffold and the
+three existing power, docking and jaw fit gauges to
+`docs/cad/remixes/fit_stls/`. Each STL is exported in deterministic binary
+format, checked for nonzero triangles and exact file length, and listed in
+`docs/cad/remixes/fit_kit_manifest.json`. A render error publishes no
+partial candidates. The manifest explicitly says physical fit, final assembly,
+electrical docking and commercial manufacturing remain unqualified. Source
+dimensions are still **provisional** until real components are measured.
+This is not a printable, integrated production robot.
+
+
 Source [one_robot_adapter_kit.scad](one_robot_adapter_kit.scad) is original CC0 parametric geometry. It can produce **seven** separate provisional parts:
 
 | Part | One robot qty | Use |
