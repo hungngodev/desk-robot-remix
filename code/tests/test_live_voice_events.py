@@ -766,3 +766,51 @@ async def test_global_audio_abort_owning_task_cancellation_is_not_a_flush():
             released.set()
             if listener._global_abort_task is not None:
                 await asyncio.wait_for(listener._global_abort_task, timeout=1)
+
+
+@pytest.mark.parametrize("event_name", ["reset", "gap"])
+async def test_gap_audio_preempts_before_failed_monitor_notification(event_name):
+    """An unhealthy VAD bridge must abort audio despite a dead health sink."""
+    calls = []
+    requests = 0
+
+    def mock(request):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return httpx.Response(200, json={
+                "cursor": 5, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(200, json={
+            "cursor": 6, "events": [],
+            "reset": event_name == "reset",
+            "lost": event_name == "gap",
+        })
+
+    async def individual(_robot, _kind):
+        raise AssertionError("Shared floor owns interruption")
+
+    async def abort(reason):
+        calls.append(("abort", reason))
+
+    async def health(ready):
+        calls.append(("health", ready))
+        if not ready:
+            raise OSError("Monitor health transport unavailable")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"},
+            on_interrupt=individual,
+            on_global_interrupt=abort,
+            on_monitor_ready=health,
+        )
+        await listener.poll()
+        with pytest.raises(OSError, match="Monitor health"):
+            await listener.poll()
+        assert calls == [
+            ("health", True), ("abort", event_name), ("health", False),
+        ]
+        assert listener.monitor_ready is False
+        assert listener.cursor == 5  # never accept reset/gap without health
