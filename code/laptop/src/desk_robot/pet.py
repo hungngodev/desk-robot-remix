@@ -419,6 +419,20 @@ class PetController:
             "text_only": True,
         }
 
+    def _notify_sensor(self, robot_id: str, kind: str) -> None:
+        """One physical event path into the existing adaptive camera owner.
+
+        Sensor polling never awaits a JPEG or VLM. A test shim that exposes
+        only the old hub continues to receive the pure priority hint.
+        """
+        if self.multimodal is None:
+            return
+        schedule = getattr(self.multimodal, "sensor_event", None)
+        if callable(schedule):
+            schedule(robot_id, kind)
+        else:
+            self.multimodal.hub.notify(robot_id, kind, time.monotonic())
+
     async def _remember_touch(
         self, robot_id: str, generation: int, kind: str, description: str
     ) -> None:
@@ -426,8 +440,8 @@ class PetController:
         if not state.enabled or state.generation != generation:
             return
         change = SceneChange(kind, description, 1.0)
-        if self.multimodal is not None and kind in ("touch_tap", "touch_double", "touch_hold"):
-            self.multimodal.hub.notify(robot_id, kind, time.monotonic())
+        if kind in ("touch_tap", "touch_double", "touch_hold"):
+            self._notify_sensor(robot_id, kind)
         state.events += 1
         state.last_event = description
         if kind == "touch_hold":
@@ -677,8 +691,7 @@ class PetController:
         for change in changes:
             if not state.enabled or state.generation != generation:
                 return
-            if self.multimodal is not None:
-                self.multimodal.hub.notify(robot_id, change.kind, time.monotonic())
+            self._notify_sensor(robot_id, change.kind)
             state.events += 1
             state.last_event = change.description
             state.last_aux_kind = change.kind
@@ -740,8 +753,7 @@ class PetController:
                 "My qualified MPU6050 sensed a short acceleration and rotation event"
             )
             change = SceneChange(kind, description, 1.0)
-            if self.multimodal is not None:
-                self.multimodal.hub.notify(robot_id, kind, time.monotonic())
+            self._notify_sensor(robot_id, kind)
             state.events += 1
             state.handling_events += 1
             state.last_event = description
@@ -790,10 +802,7 @@ class PetController:
         state.safety_fault_events += 1
         state.events += 1
         state.last_event = description
-        if self.multimodal is not None:
-            self.multimodal.hub.notify(
-                robot_id, "safety_fault", time.monotonic()
-            )
+        self._notify_sensor(robot_id, "safety_fault")
         # The WROOM already stopped locally. Also cancel the Mac operation and
         # invalidate any pending operator permit, so an in-flight pickup or
         # exploratory action cannot continue once this transition was observed.
@@ -849,8 +858,7 @@ class PetController:
         state.events += 1
         state.last_event = description
         change = SceneChange("petting_zone", description, 1.0)
-        if self.multimodal is not None:
-            self.multimodal.hub.notify(robot_id, "petting_zone", time.monotonic())
+        self._notify_sensor(robot_id, "petting_zone")
         await self._store_observation(robot_id, change)
         self._consider_speech(robot_id, change, generation)
 
@@ -897,8 +905,7 @@ class PetController:
             state.events += 1
             state.last_event = description
             change = SceneChange(kind, description, 1.0)
-            if self.multimodal is not None:
-                self.multimodal.hub.notify(robot_id, kind, time.monotonic())
+            self._notify_sensor(robot_id, kind)
             await self._store_observation(robot_id, change)
             if key != "bumps" and state.enabled and state.generation == generation:
                 self._consider_speech(robot_id, change, generation)
@@ -929,10 +936,7 @@ class PetController:
             state.events += 1
             state.last_event = change.description
             state.last_aux_kind = change.kind
-            if self.multimodal is not None:
-                self.multimodal.hub.notify(
-                    robot_id, "side_object", time.monotonic()
-                )
+            self._notify_sensor(robot_id, "side_object")
             await self._store_observation(robot_id, change)
             self._consider_speech(robot_id, change, generation)
 
