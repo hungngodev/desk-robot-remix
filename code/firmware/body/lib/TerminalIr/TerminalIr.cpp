@@ -27,6 +27,8 @@ bool TerminalIr::begin_one(unsigned side, int gpio) {
 
 void TerminalIr::reset() {
   ready_ = false;
+  // Receiver teardown must never preserve evidence from the prior session.
+  readings_.invalidate();
   for (unsigned side = 0; side != 2; ++side) {
     if (installed_[side]) {
       rmt_rx_stop(channel_[side]);
