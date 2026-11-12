@@ -25,7 +25,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/
 | No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not ESP32 strapping GPIO4 |
 | GND | Head, body, sensors and actuator-supply common logic reference |
 |34 | Owned Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Firmware has debounced tap, double tap, hold and local motion stop; actual connection, shell timing and noise testing remain open |
-| Optional35/36/39 | Input-only bumper/interrupt signals with **external** pullups as needed; not implemented |
+| 35 / 36 / 39 | Full source supports 35 normally closed bumper, 36 optional reed and 39 optional PIR, all 3.3V logic input only with separately chosen external bias. Original dual IR terminal dock wants two capture inputs here too, so final hardware allocation is **not** frozen. Read [the terminal IR pin conflict](charging-design-and-validation.md#terminal-homing-pin-budget-real-blocker-not-a-fake-finished-dock) before wiring. |
 
 The conservative output set has 15 pins. Steppers8 + servos2 + UART2 + I²C2
 consume 14, so there are not five spare outputs for sensor XSHUT lines. The mux
