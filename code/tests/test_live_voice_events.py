@@ -368,3 +368,147 @@ async def test_idle_speech_end_event_is_authenticated_and_ordered():
     assert delivered == [
         ("robot-01", "speech_start"), ("robot-01", "speech_end")
     ]
+
+
+async def test_fleet_fallback_interrupts_all_robots_despite_one_offline_head():
+    attempted = []
+
+    async def interrupt(robot_id, reason):
+        attempted.append((robot_id, reason))
+        if robot_id == "robot-01":
+            raise OSError("One head disconnected")
+
+    async with httpx.AsyncClient() as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-02", "robot-01"}, on_interrupt=interrupt,
+        )
+        with pytest.raises(OSError, match="disconnected"):
+            await listener._preempt_all("stream_unavailable")
+    assert attempted == [
+        ("robot-01", "stream_unavailable"),
+        ("robot-02", "stream_unavailable"),
+    ]
+
+
+async def test_failed_monitor_false_callback_retries_even_after_local_flag_clears():
+    health = []
+    first_failure = True
+
+    async def report(ready):
+        nonlocal first_failure
+        health.append(ready)
+        if not ready and first_failure:
+            first_failure = False
+            raise OSError("Failed to notify pet owner")
+
+    async def interrupted(robot_id, reason):
+        raise AssertionError("No audio event expected")
+
+    async with httpx.AsyncClient() as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=interrupted,
+            on_monitor_ready=report,
+        )
+        await listener._set_monitor_ready(True)
+        with pytest.raises(OSError, match="notify"):
+            await listener._set_monitor_ready(False)
+        assert listener.monitor_ready is False
+        await listener._set_monitor_ready(False)
+        assert listener._monitor_delivered is False
+        assert health == [True, False, False]
+
+
+async def test_voice_callback_failure_silences_fleet_without_terminating_watcher():
+    import asyncio
+
+    received = []
+    health = []
+    preempted = asyncio.Event()
+
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 1, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(200, json={
+            "cursor": 2, "reset": False, "lost": False,
+            "events": [{
+                "seq": 2, "robot_id": "robot-01", "kind": "normal",
+                "source": "xiaozhi_aec_vad",
+            }],
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def broken_head(robot_id, kind):
+            received.append((robot_id, kind))
+            raise OSError("Head interrupt transport disconnected")
+
+        async def global_abort(reason):
+            assert reason == "stream_unavailable"
+            preempted.set()
+
+        async def monitor(ready):
+            health.append(ready)
+
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=broken_head,
+            on_global_interrupt=global_abort, on_monitor_ready=monitor,
+        )
+        await listener.poll()
+        watcher = asyncio.create_task(listener.run())
+        try:
+            await asyncio.wait_for(preempted.wait(), timeout=2)
+            assert not watcher.done()
+            assert listener.monitor_ready is False
+            assert listener.cursor == 1  # failed callback never consumed seq 2
+            assert received == [("robot-01", "normal")]
+            assert health == [True, False]
+        finally:
+            watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
+
+
+async def test_failed_global_abort_is_retried_while_voice_stream_is_unavailable():
+    import asyncio
+
+    abort_attempts = []
+    eventually_aborted = asyncio.Event()
+
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 1, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(503, json={"error": "offline"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        async def on_event(robot_id, reason):
+            raise AssertionError("No event on failed transport")
+
+        async def global_abort(reason):
+            abort_attempts.append(reason)
+            if len(abort_attempts) == 1:
+                raise OSError("Transient audio bridge error")
+            eventually_aborted.set()
+
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=on_event,
+            on_global_interrupt=global_abort,
+        )
+        await listener.poll()
+        task = asyncio.create_task(listener.run())
+        try:
+            await asyncio.wait_for(eventually_aborted.wait(), timeout=3)
+            assert not task.done()
+            assert abort_attempts == [
+                "stream_unavailable", "stream_unavailable",
+            ]
+            assert listener.monitor_ready is False
+            assert listener._stream_failed is True
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
