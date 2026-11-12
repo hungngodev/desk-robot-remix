@@ -344,6 +344,9 @@ class MultimodalOrchestrator:
         self._turn_epoch = {r.id: 0 for r in settings.robots}
         self._voice_turn_at = {r.id: -math.inf for r in settings.robots}
         self._question_epoch = {r.id: 0 for r in settings.robots}
+        # Only a fresh authenticated VAD snapshot may restart a sampler
+        # cancelled during a server event gap, never an arbitrary timer.
+        self._reconnect_needs_sampler: set[str] = set()
         self._closed = False
 
     def status(self, robot_id: str) -> dict:
@@ -440,6 +443,27 @@ class MultimodalOrchestrator:
         if pending is not None and not pending.done():
             self._metrics[robot_id]["proactive_camera_preemptions"] += 1
             pending.cancel()  # Never cancel the permanent PetController task.
+
+    def voice_transport_unavailable(self) -> None:
+        """Invalidate ALL old visual/tool turns without clearing human VAD.
+
+        A lost Xiaozhi voice event stream makes an existing visual question
+        unsafe even if its HTTP model worker eventually returns. Clear old
+        evidence and request a new sampler only after authenticated recovery.
+        This is synchronous: never put camera I/O before urgent audio abort.
+        """
+        self._reconnect_needs_sampler.update(self.hub.robots)
+        for robot_id in self.hub.robots:
+            self._turn_epoch[robot_id] += 1
+            self._question_epoch[robot_id] += 1
+            self._cancel_proactive_snapshot(robot_id)
+            for tasks in (
+                self._sensor_tasks, self._look_tasks, self._capture_tasks
+            ):
+                task = tasks.get(robot_id)
+                if task is not None and not task.done():
+                    task.cancel()
+            self.hub.discard_video(robot_id)  # not voice_until
 
     def voice_started(self, robot_id: str) -> None:
         self._voice_activity(robot_id, end_expected=True)
