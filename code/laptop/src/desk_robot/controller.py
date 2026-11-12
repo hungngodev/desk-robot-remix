@@ -352,7 +352,7 @@ class Coordinator:
             if len(job.events) >= 96:
                 job.events.pop(0)
             job.events.append(f"bounded exploration pulse {steps}, stopped for reobservation")
-            await head.snapshot()
+            await asyncio.wait_for(head.snapshot(), timeout=2.0)
             # No blind reverse/turn when only one forward beam exists. Swept
             # turns need real footprint and obstacle qualification.
             await asyncio.sleep(0.35)
