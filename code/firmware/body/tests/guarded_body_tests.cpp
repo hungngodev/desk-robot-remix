@@ -662,6 +662,46 @@ static void dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof() {
         != std::string::npos);
 }
 
+static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  desk_robot::AccessoryReadings readings{};
+  readings.nfc.present = readings.nfc.valid = readings.nfc.tag_visible = true;
+  readings.nfc.uid_length = 4;
+  readings.nfc.tag_token = 0x12345678U;
+  readings.nfc.tag_events = 3;
+  readings.nfc.scan_seq = 17;
+  readings.nfc.at_ms = 100;
+  readings.climate.present = readings.climate.valid = true;
+  readings.climate.temp_centi = 2200;
+  readings.climate.humidity_centi = 4850;
+  readings.climate.sample_seq = 10;
+  readings.climate.at_ms = 95;
+  body.set_accessories(readings);
+  desk_robot::OpticalRaw paw{};
+  paw.present = paw.valid = true;
+  paw.part_id = 0x15;
+  paw.red = 24000;
+  paw.ir = 33000;
+  paw.at_ms = 100;
+  paw.sample_seq = 8;
+  body.set_paw_pulse(paw);
+  const auto aux = send(body, "aux", 120);
+  CHECK(!aux.empty() && aux.front() == '{' && aux.back() == '}');
+  CHECK(aux.size() < desk_robot::kReplyCapacity - 1);
+  CHECK(aux.find("\\"seq\\":8,\\"bpm\\":null") != std::string::npos);
+  CHECK(aux.find("\\"valid\\":true,\\"seq\\":10,\\"age_ms\\":25")
+        != std::string::npos);
+  CHECK(aux.find("\\"nfc\\":{\\"v\\":true,\\"t\\":305419896,\\"e\\":3,\\"s\\":17}")
+        != std::string::npos);
+  // Only optional NFC status changed. It cannot arm a physical guard.
+  CHECK(send(body, "disarm", 121) == "OK disarm");
+  readings.nfc.valid = false;
+  body.set_accessories(readings);
+  const auto stale = send(body, "aux", 125);
+  CHECK(stale.find("\\"nfc\\":{\\"v\\":false,\\"t\\":0,\\"e\\":3,\\"s\\":17}")
+        != std::string::npos);
+}
+
 static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   using desk_robot::BodyControl;
   BodyControl body(desk_robot::BodyProfile::DcPwm);
@@ -705,6 +745,7 @@ int main() {
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
+    optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
