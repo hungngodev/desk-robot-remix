@@ -34,6 +34,62 @@ async def test_one_human_interrupt_preempts_other_pet_audio_too():
     ]
 
 
+async def test_slow_pet_abort_does_not_delay_group_audio_stop():
+    import asyncio
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    group_stopped = asyncio.Event()
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            if robot_id == "robot-01":
+                started.set()
+                await release.wait()
+
+    class Conversation:
+        async def stop(self):
+            group_stopped.set()
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[
+        SimpleNamespace(id="robot-01"), SimpleNamespace(id="robot-02"),
+    ])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    task = asyncio.create_task(runtime._preempt_audio_floor())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=0.2)
+        # The other Xiaozhi social head gets its stop request immediately
+        # even though one pet's HTTP cleanup is still blocked.
+        await asyncio.wait_for(group_stopped.wait(), timeout=0.2)
+        assert not task.done()
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+
+
+async def test_failed_group_stop_is_not_silently_accepted_as_preemption():
+    import pytest
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            return None
+
+    class Conversation:
+        async def stop(self):
+            raise RuntimeError("Xiaozhi group audio abort failed")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[
+        SimpleNamespace(id="robot-01"),
+    ])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    with pytest.raises(RuntimeError, match="Unable to preempt"):
+        await runtime._preempt_audio_floor()
+
+
 async def test_unknown_voice_source_cannot_interrupt_the_fleet():
     import pytest
 
