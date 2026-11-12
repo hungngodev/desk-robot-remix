@@ -125,6 +125,24 @@ def test_slow_reed_pir_are_on_expander_not_the_ir_direct_input_pins():
     assert "digitalRead(body_pins::kTerminalIrRightInput)" not in main
     assert bus["mcp23017_optional_inputs"]["physical_qualified"] is False
 
+def test_parts_inventory_does_not_conflict_with_reserved_ir_and_required_dock_io():
+    """Even prose inventory hints must agree with actual WROOM and MCP pins."""
+    by_id = {part["id"]: part for part in PLAN["parts"]}
+    reed = by_id["reed"]["notes"]
+    pir = by_id["pir"]["notes"]
+    expander = by_id["mcp23017"]["notes"]
+    assert "MCP23017 GPIOB0" in reed
+    assert "MCP23017 GPIOB1" in pir
+    assert "GPIO36 is reserved" in reed
+    assert "GPIO39 is reserved" in pir
+    assert "GPIOA dock" in expander
+    assert "fail-closed WROOM motion interlock" in expander
+    bus = PLAN["bus"]
+    assert bus["mcp23017_optional_inputs"]["required_dock_gpioa_is_separate"]
+    assert bus["body_gpio"]["terminal_ir_left_reserved"] == 36
+    assert bus["body_gpio"]["terminal_ir_right_reserved"] == 39
+
+
 def test_nec_telemetry_uses_exact_existing_wroom_xiao_mac_owners():
     body = (ROOT / "code/firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
     main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
