@@ -72,6 +72,14 @@ class Runtime:
             require_snapshot=True,
         )
         self._voice_task = asyncio.create_task(self.voice_events.run())
+        if self.settings.pet_autostart_enabled:
+            # Boot into autonomous observation only after explicit local
+            # operator consent. Current voice monitor is NOT ready yet, so
+            # any camera/sensor events remain silent until Xiaozhi's live
+            # authenticated VAD snapshot has been established.
+            for robot in self.settings.robots:
+                if robot.device_id:
+                    self.pet.start(robot.id)
 
     async def _preempt_audio_floor(self) -> None:
         """Human and VAD transport failures share one five-pet audio owner."""
