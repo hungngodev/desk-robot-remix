@@ -387,10 +387,12 @@ void setup() {
                                  "INFO optional_accessory_bus_unavailable");
   // Both demodulated IR receiver inputs are optional observed evidence.
   // The main WROOM motor guard never consumes this signal to arm itself.
+#if defined(DESK_ROBOT_ENABLE_TERMINAL_IR) && DESK_ROBOT_ENABLE_TERMINAL_IR
   const bool ir_ready = terminal_ir.begin(
       body_pins::kTerminalIrLeftInput, body_pins::kTerminalIrRightInput);
   Serial.println(ir_ready ? "INFO dual_nec_rmt_rx_ready_read_only" :
                             "WARN dual_nec_rmt_rx_unavailable_motion_unchanged");
+#endif
 #if defined(DESK_ROBOT_REQUIRE_DOCK_MONITOR) && DESK_ROBOT_REQUIRE_DOCK_MONITOR
   control.require_dock_monitor(true);
   Serial.println(accessories.readings().dock.present ?
