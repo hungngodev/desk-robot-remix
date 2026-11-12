@@ -9,8 +9,10 @@ namespace desk_robot {
 // A repeat-only NEC frame, a truncated frame, or a non-inverted checksum
 // is NOT a fresh sighting. The result NEVER authorizes a motor or charger.
 struct IrMarkSpace {
-  std::uint16_t mark_us = 0;
-  std::uint16_t space_us = 0;
+  std::uint16_t mark_us;
+  std::uint16_t space_us;
+  IrMarkSpace(std::uint16_t mark = 0, std::uint16_t space = 0)
+      : mark_us(mark), space_us(space) {}
 };
 inline bool ir_between(std::uint16_t v, unsigned lo, unsigned hi) {
   return v >= lo && v <= hi;
