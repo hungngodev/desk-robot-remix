@@ -256,9 +256,11 @@ class Conversation:
                                 )
                         transcript.append({"robot_id": robot.id, "text": text})
             return transcript
-        except asyncio.CancelledError:
-            # Cancelling an HTTP request is not the same as draining the
-            # physical head's queued Opus decoder and I2S DMA.
+        except BaseException:
+            # Cancellation AND midstream Ollama/bridge failures can leave
+            # queued Opus inside the physical XIAO. A Python failure alone
+            # never proves the decoder is silent. Abort the active head
+            # through the existing Xiaozhi owner before releasing the lease.
             interrupt = getattr(self.speaker, "interrupt", None)
             if current_robot is not None and callable(interrupt):
                 try:
@@ -285,10 +287,10 @@ class Conversation:
                 async with self.speaker_lock:
                     try:
                         await self.speaker.say(robot, text)
-                    except asyncio.CancelledError:
-                        # Cancelling an HTTP request does not silence an ESP32.
-                        # The Sense firmware must receive the explicit abort
-                        # frame before we release this audio session.
+                    except BaseException:
+                        # A failed WAV/Opus transfer, not just cancellation,
+                        # can leave already queued audio in the XIAO decoder.
+                        # Fail closed using the existing speech abort route.
                         interrupt = getattr(self.speaker, "interrupt", None)
                         if interrupt is not None:
                             try:
