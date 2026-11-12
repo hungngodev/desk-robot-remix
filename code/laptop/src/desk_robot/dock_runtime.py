@@ -42,6 +42,43 @@ def _hold(robot_id: str, *, reason: str, source: str) -> dict:
     }
 
 
+class DockDetectorBusy(RuntimeError):
+    """The shared native AprilTag worker is still busy."""
+
+
+async def detect_bounded(jpeg: bytes, calibration: DockCameraCalibration, *,
+                         captured_at: float):
+    """The sole AprilTag worker for read-only vision AND permitted approach.
+
+    Cancellation of an asyncio awaiter cannot stop an active native C call.
+    Its concurrent future, not a coroutine, retains the single global slot.
+    No camera observation itself ever authorizes motors or charging.
+    """
+    if not _DETECTOR_SLOT.acquire(blocking=False):
+        raise DockDetectorBusy("Dock marker detector still busy")
+    try:
+        work = _DETECTOR_POOL.submit(
+            detect_apriltag, jpeg, calibration, captured_at=captured_at
+        )
+    except (RuntimeError, OSError):
+        _DETECTOR_SLOT.release()
+        raise
+
+    def finish_detection(done) -> None:
+        try:
+            if not done.cancelled():
+                done.exception()  # Retrieve late native detector failures.
+        finally:
+            _DETECTOR_SLOT.release()
+
+    work.add_done_callback(finish_detection)
+    # Shield only the asyncio awaiter. On timeout the native detector is
+    # allowed to finish, and holds the slot until its real completion.
+    return await asyncio.wait_for(
+        asyncio.shield(asyncio.wrap_future(work)), timeout=2.0
+    )
+
+
 async def observe_actual_dock(head, robot) -> dict:
     """Real head JPEG in, real marker pose out. No movement is possible here.
 
@@ -57,41 +94,19 @@ async def observe_actual_dock(head, robot) -> dict:
     except (OSError, ConnectionError, TimeoutError) as exc:
         return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
     received_at = time.monotonic()
-    if not _DETECTOR_SLOT.acquire(blocking=False):
-        return _hold(robot.id, reason="Dock marker detector still busy", source="apriltag_detector_busy")
-
-    # ThreadPoolExecutor.submit returns the *native* concurrent future.
-    # Its completion cannot precede the worker's actual exit, unlike the
-    # cancellable asyncio task returned by asyncio.to_thread.
     try:
-        work = _DETECTOR_POOL.submit(
-            detect_apriltag, jpeg, calib, captured_at=received_at
-        )
-    except (RuntimeError, OSError) as exc:
-        _DETECTOR_SLOT.release()  # Dispatch failed: no native worker exists.
+        pose = await detect_bounded(jpeg, calib, captured_at=received_at)
+    except DockDetectorBusy:
         return _hold(
-            robot.id,
-            reason=f"Dock marker dispatch unavailable: {type(exc).__name__}",
-            source="apriltag_detection_failed",
-        )
-
-    def finish_detection(done) -> None:
-        try:
-            if not done.cancelled():
-                done.exception()  # Retrieve late native detector failures.
-        finally:
-            _DETECTOR_SLOT.release()
-
-    work.add_done_callback(finish_detection)
-    try:
-        # A timeout or observer cancellation only abandons the *await*.
-        # Even if event-loop shutdown cancels this wrapper, the semaphore is
-        # held until the concurrent future completes or cancels pre-dispatch.
-        pose = await asyncio.wait_for(
-            asyncio.shield(asyncio.wrap_future(work)), timeout=2.0
+            robot.id, reason="Dock marker detector still busy",
+            source="apriltag_detector_busy",
         )
     except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
-        return _hold(robot.id, reason=f"Dock marker detection unavailable: {type(exc).__name__}", source="apriltag_detection_failed")
+        return _hold(
+            robot.id,
+            reason=f"Dock marker detection unavailable: {type(exc).__name__}",
+            source="apriltag_detection_failed",
+        )
     # Receipt timestamp is not the end of OpenCV computation. A slow or
     # stalled detector cannot authorize a now-stale dock observation.
     assessment = assess_dock(pose, now=time.monotonic(), target_distance_mm=target)
