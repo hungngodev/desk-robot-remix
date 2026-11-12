@@ -32,7 +32,7 @@
 | Power bank | Have | 1, output rating unverified |
 | DuPont jumper ribbons | Have | 10 signal-wire ribbons |
 | 3D printer filament | Have | reported, amount to check |
-| VL53L4CD time of flight carrier | Buy | 8 units; 8 total, but body firmware currently implements only 5 (four floor, one front). Extra 3 are reserved. Exact compatible breakout and fit untested. |
+| VL53L4CD time of flight carrier | Buy | 8 units; the current full WROOM firmware contains eight VL53L4CD channels: four floor, one front and three side/rear read-only. No physical breakout, I2C timing or placement has been qualified. |
 | TCA9548A 8 channel 3.3V compatible I2C multiplexer | Buy | 2 units; Two per pet. 0x70 for range, 0x71 for extra sensors. |
 | MAX98357A I2S mono amplifier | Buy | 1  |
 | 8 ohm 1 watt approximately 20 mm speaker | Buy | 1  |
@@ -72,4 +72,4 @@
 
 **Important for the XIAO you ordered:** The planned speaker uses GPIO7/8 and RGB GPIO9. The Sense's microSD expansion link J3 occupies those pins by default, so a physical revision-checked J3 disable/isolation is required before wiring. [Seeed official J3 instructions](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/). No electronics claimed tested.
 
-**Cannot call this hardware-complete:** no final current-rated protected battery charger and power path is chosen, only five critical ToF lanes are actually handled by the current firmware, advanced modules need adapters, body fit/stop latency and speech barge-in have no physical acceptance. Avoid bulk purchasing unqualified breakouts. Original $50 budget cap is not achievable with the selected rich sensor layout at known reference prices. Generic modules can be purchased from non-Adafruit vendors, but breakout voltage and pin ordering still require actual checking.
+**Cannot call this hardware-complete:** no final current-rated protected battery charger and power path is chosen, the five critical ToF lanes have no physical fault/stop trial, the three added read-only lanes have no physical range qualification, PN532 NFC still needs an actual driver, body fit/stop latency and speech barge-in have no physical acceptance. Avoid bulk purchasing unqualified breakouts. Original $50 budget cap is not achievable with the selected rich sensor layout at known reference prices. Generic modules can be purchased from non-Adafruit vendors, but breakout voltage and pin ordering still require actual checking.
