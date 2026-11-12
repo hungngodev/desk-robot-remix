@@ -1060,3 +1060,41 @@ async def test_native_duplex_does_not_borrow_background_idle_camera_frame():
         assert frame.source == "speech"
     finally:
         await visual.close()
+
+
+async def test_native_camera_racing_with_voice_sampler_has_one_real_xiao_capture():
+    """Recheck frame freshness after both tasks contend for one camera lock."""
+    started, release = asyncio.Event(), asyncio.Event()
+
+    class SlowHead(Head):
+        async def snapshot(self):
+            started.set()
+            await release.wait()
+            return await super().snapshot()
+
+    head = SlowHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()}, Vision(),
+        asyncio.Lock(),
+    )
+    try:
+        visual._voice_turn_at["robot-01"] = time.monotonic()
+        sampler = asyncio.create_task(
+            visual.capture("robot-01", source="speech",
+                           reuse_if_recent_s=0.65)
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        native = asyncio.create_task(visual.native_frame("robot-01"))
+        await asyncio.sleep(0.005)
+        release.set()
+        first, second = await asyncio.wait_for(
+            asyncio.gather(sampler, native), timeout=3
+        )
+        assert first is second
+        assert head.captures == 1
+        assert visual.status("robot-01")["software_timings"][
+            "native_speech_camera_reuses"
+        ] == 1
+    finally:
+        release.set()
+        await visual.close()
