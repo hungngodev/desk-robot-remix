@@ -46,6 +46,12 @@ _SOCIAL_EVENT_KINDS = frozenset({
     "key", "candy", "object", "hand_wave", "petting_zone", "nfc_tag",
 })
 
+_DIRECT_INTERACTION_KINDS = frozenset({
+    "touch", "touch_tap", "touch_double", "petting_zone",
+    "squeeze", "hand_wave", "nose_twist", "paw_contact",
+    "nfc_tag", "magnet",
+})
+
 _PHYSICAL_INITIATIVE_KINDS = frozenset({
     "touch", "touch_tap", "touch_double", "touch_hold", "petting_zone",
     "squeeze", "hand_wave", "nose_twist", "nearby_object",
@@ -143,6 +149,7 @@ class PetController:
         *,
         interval: float = 1.2,
         speech_cooldown: float = 120.0,
+        interaction_cooldown: float = 12.0,
         group_window: float = 3.0,
         max_observation_age: float = 10.0,
         touch_interval: float = 0.15,
@@ -151,6 +158,7 @@ class PetController:
         if (
             not 0 < interval <= 60
             or not 0 <= speech_cooldown <= 3600
+            or not 0 <= interaction_cooldown <= 120
             or not 0 < group_window <= 60
             or not 0 < max_observation_age <= 60
             or not 0.01 <= touch_interval <= 5
@@ -162,6 +170,9 @@ class PetController:
             interval, speech_cooldown, group_window
         )
         self.max_observation_age = max_observation_age
+        # Direct voluntary contact deserves a faster reply than a passive
+        # camera remark, but still shares the one fleet audio budget.
+        self.interaction_cooldown = interaction_cooldown
         self.touch_interval = touch_interval
         self.on_local_fault = on_local_fault  # existing Coordinator.stop, not a new motion authority
         self.states = {robot.id: PetState() for robot in settings.robots}
@@ -1174,11 +1185,16 @@ class PetController:
                 if now - seen < self.group_window
             }
         self._event_kinds[event_key] = now
+        relevant_cooldown = (
+            min(self.speech_cooldown, self.interaction_cooldown)
+            if change.kind in _DIRECT_INTERACTION_KINDS
+            else self.speech_cooldown
+        )
         if (
             state.quiet
             or self._human_active_in_fleet(now)
             or now - previous < self.group_window
-            or now - self._group_last_spoken < self.speech_cooldown
+            or now - self._group_last_spoken < relevant_cooldown
             or self.conversation.active is not None
             or (self._speech_task is not None and not self._speech_task.done())
         ):
