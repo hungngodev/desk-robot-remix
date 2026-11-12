@@ -86,6 +86,12 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def unique_ids(self):
+        if self.voice_transcript_memory_enabled and (
+            self.mode != "hardware" or not self.voice_memory_tools_enabled
+        ):
+            raise ValueError(
+                "Spoken transcript retention needs hardware and separate voice memory consent"
+            )
         if self.pet_autostart_enabled and (
             self.mode != "hardware"
             or not self.voice_vision_tools_enabled
