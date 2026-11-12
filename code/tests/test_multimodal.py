@@ -121,6 +121,85 @@ async def test_sensor_two_frame_burst_never_blocks_human_speech_priority():
         await visual.close()
 
 
+async def test_human_voice_preempts_only_the_background_snapshot():
+    class SlowHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def snapshot(self):
+            self.captures += 1
+            if self.captures == 1:
+                self.started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+            return image(square=True)
+
+    head = SlowHead()
+    visual = MultimodalOrchestrator(
+        config(enabled=False), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    pending = asyncio.create_task(visual.capture("robot-01", source="proactive"))
+    try:
+        await asyncio.wait_for(head.started.wait(), timeout=1)
+        visual.voice_started("robot-01")
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(pending, timeout=1)
+        assert head.cancelled
+        assert not visual.hub.frames["robot-01"]
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        visual.voice_ended("robot-01")
+        evidence = await visual.capture("robot-01", source="voice_question")
+        assert evidence.source == "voice_question"
+        assert head.captures == 2
+    finally:
+        await visual.close()
+
+
+async def test_direct_visual_question_preempts_background_camera_request():
+    class SlowHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def snapshot(self):
+            self.captures += 1
+            if self.captures == 1:
+                self.started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+            return image(square=True)
+
+    head = SlowHead()
+    visual = MultimodalOrchestrator(
+        config(enabled=True), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    pending = asyncio.create_task(visual.capture("robot-01", source="proactive"))
+    try:
+        await asyncio.wait_for(head.started.wait(), timeout=1)
+        response = await asyncio.wait_for(
+            visual.look("robot-01", "What object is now visible?"), timeout=3
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        assert head.cancelled
+        assert response["source"] == "authenticated_xiao_camera_and_local_vlm"
+        assert response["frames_used"] == 1
+        assert head.captures == 2
+    finally:
+        await visual.close()
+
+
 async def test_sensor_two_frame_burst_is_bounded_and_camera_serial():
     head = Head()
     visual = MultimodalOrchestrator(
