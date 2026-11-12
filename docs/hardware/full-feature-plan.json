@@ -480,7 +480,7 @@
               "address": 87
             }
           ],
-          "firmware": "implemented_cap1188_and_max30102_raw_not_physically_qualified",
+          "firmware": "implemented_cap1188_and_max30102_raw_plus_seq_confirmed_opt_in_paw_contact_not_physically_qualified",
           "note": "CAP1188 strap address 0x28 to avoid 0x29 cliff sensor collision even under mux fault"
         },
         {
@@ -522,7 +522,7 @@
               "address": 118
             }
           ],
-          "firmware": "implemented_sht41_and_bmp280_raw_not_physically_qualified",
+          "firmware": "implemented_sht41_raw_seq_plus_opt_in_ambient_events_and_bmp280_raw_not_physically_qualified",
           "note": "BMP280 chip address may be 0x76 or 0x77; inspect actual breakout"
         },
         {
@@ -553,8 +553,8 @@
               "address": 32
             }
           ],
-          "firmware": "implemented_mcp23017_dock_gpio_only_pn532_not_yet_integrated",
-          "note": "Verify PN532 7-bit address and 3.3V I2C module, connect its IRQ and reset only through expander after driver review"
+          "firmware": "implemented_mcp23017_dock_gpio_and_pn532_read_only_unverified",
+          "note": "PN532 7-bit 0x24 read only bounded status polling now sourced in WROOM. Confirm 3.3V breakout, actual I2C timing and whether reset or IRQ pins need wiring before declaring function qualified"
         },
         {
           "channel": 6,
@@ -580,7 +580,7 @@
         }
       ]
     },
-    "critical_policy": "Firmware in code/firmware/body/TofBus and AccessorySensors already implements eight VL53L4CD in esp32_full and bounded raw reads for the listed 0x71 channels except PN532 NFC, which is reserved but NOT implemented. 0x71 mux is quiesced ahead of critical 0x70 ToF reads; failed quiesce faults the local guard. The complete esp32_full profile additionally REQUIRES an installed fresh MCP23017 dock monitor; missing/invalid/stale GPIOA data or either seat contact locally blocks or stops motion. All source drivers require real breakout-specific voltage, lens, time, and behavior measurements and camera, remembered text, peer messages and AI must never arm the local motor guard or certify charging.",
+    "critical_policy": "Firmware in code/firmware/body/TofBus and AccessorySensors already implements eight VL53L4CD in esp32_full and bounded raw reads for the listed 0x71 channels including bounded PN532 toy NFC scans and a read only UID game token, but all remain unqualified on actual breakouts. 0x71 mux is quiesced ahead of critical 0x70 ToF reads; failed quiesce faults the local guard. The complete esp32_full profile additionally REQUIRES an installed fresh MCP23017 dock monitor; missing/invalid/stale GPIOA data or either seat contact locally blocks or stops motion. All source drivers require real breakout-specific voltage, lens, time, and behavior measurements and camera, remembered text, peer messages and AI must never arm the local motor guard or certify charging.",
     "head_policy": "Sense camera/mic are fixed; GPIO9 can be RGB only after confirming SD disabled and actual shipped board routing. Face bus 5/6 never connected to body Wire.",
     "power_policy": "One protected 1S cell/pack and charger with load sharing, 5V regulator sized to measured concurrent head/WROOM/steppers/servo/audio current, independent 3.3V sensor regulator. No bare cell charger contacts or 5V MCU GPIO.",
     "voltage_policy": "Only 3.3V I2C/GPIO at WROOM. Check every generic carrier VCC rail, pullups and level shifting. GPIO34 to 39 have no internal pulls. Bumper is two NC contacts in series to ground with external 3.3V pullup; normal LOW, collision or disconnected cable HIGH, local raw trip immediately. GPIO35 is input only and has no internal pullup.",
