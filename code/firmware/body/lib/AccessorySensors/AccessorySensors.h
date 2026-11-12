@@ -5,6 +5,7 @@
 #include "AccessoryReadings.h"
 #include "Bmp280Math.h"
 #include "GestureDecoder.h"
+#include "Pn532Frames.h"
 namespace desk_robot {
 // One optional mux operation per 12ms after the critical ranging pass.
 // Reuses manufacturer register maps and Sensirion CRC, never Arduino libraries
