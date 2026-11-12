@@ -142,7 +142,8 @@ class VoiceEventListener:
                     or type(event.get("seq")) is not int
                     or event["seq"] != current + 1
                     or event["seq"] > data["cursor"]
-                    or event.get("robot_id") not in self.robot_ids
+                    or type(event.get("robot_id")) is not str
+                    or event["robot_id"] not in self.robot_ids
                     or event.get("kind") not in (
                         "normal", "group", "speech_start", "speech_end"
                     )
