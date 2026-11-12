@@ -126,4 +126,13 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                     "charge_indicated",
                 )))):
             raise ValueError("Invalid optional read only dock pin status")
+    nfc = data.get("nfc")
+    if nfc is not None:
+        if (not isinstance(nfc, dict) or type(nfc.get("v")) is not bool
+                or not _uint(nfc.get("t"), 0xffffffff)
+                or not _uint(nfc.get("e"), 0xffffffff)
+                or not _uint(nfc.get("s"), 0xffffffff)
+                or (nfc["v"] and nfc["s"] == 0)
+                or (nfc["t"] != 0 and not nfc["v"])):
+            raise ValueError("Invalid read only PN532 toy tag evidence")
     return data
