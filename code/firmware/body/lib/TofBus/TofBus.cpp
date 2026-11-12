@@ -12,7 +12,8 @@ bool TofBus::quiesce_optional_mux() {
   // ACK: a stuck mux could expose a different sensor at the shared 0x29.
   wire_.beginTransmission(kOptionalMuxAddress);
   const bool wrote = wire_.write(static_cast<std::uint8_t>(0)) == 1;
-  if (!wrote || wire_.endTransmission(true) != 0) return false;
+  const bool acknowledged = wire_.endTransmission(true) == 0;
+  if (!wrote || !acknowledged) return false;
   if (wire_.requestFrom(kOptionalMuxAddress, static_cast<size_t>(1), true) != 1 ||
       wire_.available() < 1) return false;
   return wire_.read() == 0;
@@ -22,8 +23,9 @@ bool TofBus::select(std::uint8_t channel) {
   if (channel >= kRangeCount || !quiesce_optional_mux()) return false;
   const auto expected = static_cast<std::uint8_t>(1U << channel);
   wire_.beginTransmission(kMuxAddress);
-  if (wire_.write(expected) != 1 || wire_.endTransmission(true) != 0)
-    return false;
+  const bool wrote = wire_.write(expected) == 1;
+  const bool acknowledged = wire_.endTransmission(true) == 0;
+  if (!wrote || !acknowledged) return false;
   // TCA9548A SCPS207H, section 7.5.4: one-byte control register readback.
   // The explicit STOP above activates the selected channel before reading.
   // A wrong/multiple channel must never be accepted as a cliff measurement.
@@ -115,9 +117,12 @@ ImuIdentity TofBus::probe_imu() {
   // the upstream IMU read, without changing the active ToF measurement plan.
   if (!quiesce_optional_mux()) return ImuIdentity{};
   wire_.beginTransmission(kMuxAddress);
-  if (wire_.write(static_cast<std::uint8_t>(0)) == 1) {
-    wire_.endTransmission(true);
-  }
+  const bool disconnected = wire_.write(static_cast<std::uint8_t>(0)) == 1;
+  const bool acknowledged = wire_.endTransmission(true) == 0;
+  if (!disconnected || !acknowledged ||
+      wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) != 1 ||
+      wire_.available() < 1 || wire_.read() != 0)
+    return ImuIdentity{}; // Never probe a potentially selected 0x70 lane.
 
   auto identity = [this](std::uint8_t address, std::uint8_t& value) {
     wire_.beginTransmission(address);
