@@ -1,7 +1,7 @@
 > Updated 2026-11-10. The current stepper firmware integrates five VL53L4CD
 > channels through the TCA9548A, local fault latching, USB-only measured
 > calibration, touch interruption and read-only range diagnostics. This is
-> compiled software, not a flashed, fitted or physically qualified assembly.
+> source files and target build profiles, not a verified compile at the current PR head, flashed, fitted or physically qualified assembly. GitHub Actions currently fails before job steps execute.
 > `rearm` is local WROOM USB only, never the head, Mac or model; ordinary arm
 > cannot clear a fault. See firmware-foundation.md and the verification record.
 
