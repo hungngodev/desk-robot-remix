@@ -287,3 +287,80 @@ def test_shared_native_model_handshake_rejects_fake_duplex_claims(mutation):
         valid["session"]["capabilities"][name] = value
     with pytest.raises(RuntimeError):
         verify_native_server(valid, selected)
+
+
+def test_double_cancel_epoch_floor_rejects_older_model_audio_even_after_recovery():
+    """Upstream response.cancel and output clear EACH advance epoch once."""
+    wire = OmniDuplexWire()
+    wire.handle_event({
+        "type": "response.created", "response_id": "before",
+        "response": {"id": "before", "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    wire.interrupt()
+    assert wire._min_server_epoch == 2
+    wire.append_audio(bytes(3200), speech=True)
+    wire.commit()
+    wire.handle_event({
+        "type": "response.created", "response_id": "stale-plus-one",
+        "response": {"id": "stale-plus-one",
+                     "metadata": {"duplex_event": {"epoch": 1}}},
+    })
+    assert wire.response_id is None
+    wire.handle_event({
+        "type": "response.created", "response_id": "current",
+        "response": {"id": "current", "metadata": {"duplex_event": {"epoch": 2}}},
+    })
+    assert wire.handle_event(delta("current", epoch=2)) is not None
+    # This used to become active after _interrupted was reset by "current".
+    wire.handle_event({
+        "type": "response.created", "response_id": "reordered-old",
+        "response": {"id": "reordered-old",
+                     "metadata": {"duplex_event": {"epoch": 1}}},
+    })
+    assert wire.response_id == "current"
+    assert wire.handle_event(delta("current", epoch=2)) is not None
+
+
+def test_two_rapid_native_barges_fence_four_server_epoch_advances():
+    wire = OmniDuplexWire()
+    wire.handle_event({
+        "type": "response.created", "response_id": "old",
+        "response": {"id": "old", "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    wire.interrupt()
+    wire.interrupt()
+    assert wire._min_server_epoch == 4
+    wire.append_audio(bytes(3200), speech=True)
+    wire.commit()
+    wire.handle_event({
+        "type": "response.created", "response_id": "too-early",
+        "response": {"id": "too-early",
+                     "metadata": {"duplex_event": {"epoch": 3}}},
+    })
+    assert wire.response_id is None
+    wire.handle_event({
+        "type": "response.created", "response_id": "new",
+        "response": {"id": "new", "metadata": {"duplex_event": {"epoch": 4}}},
+    })
+    assert wire.handle_event(delta("new", epoch=4)) is not None
+
+
+def test_native_handshake_can_reset_local_preconnect_interrupt_but_not_repeat():
+    wire = OmniDuplexWire()
+    wire.interrupt()
+    assert wire._min_server_epoch == 2
+    greeting = {"type": "session.created", "session": {"epoch": 40}}
+    wire.handle_event(greeting)
+    assert wire._min_server_epoch is None
+    assert wire._server_epoch_seen == 40
+    wire.handle_event({
+        "type": "response.created", "response_id": "fresh",
+        "response": {"id": "fresh", "metadata": {"duplex_event": {"epoch": 40}}},
+    })
+    assert wire.handle_event(delta("fresh", epoch=40)) is not None
+    with pytest.raises(ValueError, match="Duplicate"):
+        wire.handle_event(greeting)
+    with pytest.raises(ValueError, match="epoch"):
+        OmniDuplexWire().handle_event({
+            "type": "session.created", "session": {"epoch": -1},
+        })
