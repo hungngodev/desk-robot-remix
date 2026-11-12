@@ -96,6 +96,18 @@ int main() {
     }
     {
       Wire = TwoWire{};
+      Wire.optional_mux_installed = false; // five sensor bench profile
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      CHECK(Wire.tof_samples == 5);
+      CHECK(Wire.extras == 0);
+      Wire.range_mux_stuck = true;
+      bus.poll(guard, 60);
+      faulted(guard); // critical mux validation is still required
+    }
+    {
+      Wire = TwoWire{};
       Wire.range_mux_stuck = true; // init must reject unverified lane
       desk_robot::TofBus bus;
       CHECK(!bus.begin(21, 22, -1));
