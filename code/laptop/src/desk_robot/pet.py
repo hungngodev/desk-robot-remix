@@ -90,6 +90,7 @@ class PetState:
     last_initiative_suppression: str | None = None
     stale_camera_events: int = 0
     last_event: str | None = None
+    last_scene_frame_at: float | None = None  # latest processed Mac receipt, this robot only
     last_error: str | None = None
     last_touch_count: int | None = None
     last_touch_events: dict[str, int] | None = None
@@ -229,6 +230,7 @@ class PetController:
             raise RuntimeError("Previous pet task still shutting down")
         state.generation += 1
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
+        state.last_scene_frame_at = None
         if self.multimodal is not None:
             self.multimodal.hub.discard_video(robot_id)
         state.last_touch_count = None
@@ -1009,46 +1011,78 @@ class PetController:
             )
 
     async def _observe(self, robot_id: str, generation: int) -> None:
+        """The one semantic camera owner also consumes sensor burst frames.
+
+        An existing sensor-triggered XIAO snapshot is already in the bounded
+        camera hub. Reusing it avoids a duplicate device request, and unlike
+        the older code this path actually evaluates sensor-triggered frames
+        for a visible change. The cheap VisualChangeGate, not the LLM,
+        decides whether two genuinely new frames merit expensive inference.
+        """
         state = self.states[robot_id]
         while state.enabled and state.generation == generation and not self._closed:
             try:
-                # Touch has its own authenticated status polling task, so a
-                # long VLM/HTTP camera request cannot delay a physical hold.
-                # Camera and language inference still respect the exclusive
-                # conversation and speech owners.
                 if self.conversation.active is not None or (
                     self._speech_task is not None and not self._speech_task.done()
                 ):
                     await asyncio.sleep(self.interval)
                     continue
-                if (self.multimodal is not None
-                        and not self.multimodal.hub.due(robot_id, time.monotonic())):
-                    await asyncio.sleep(self.interval)
-                    continue
-                started = time.monotonic()
-                jpeg = await self.heads[robot_id].snapshot()
-                received = time.monotonic()
-                if received - started > 2.0 or state.generation != generation:
-                    await asyncio.sleep(self.interval)
-                    continue
+
+                candidates: list[tuple[bytes, float]] = []
                 if self.multimodal is not None:
-                    await self.multimodal.offer_proactive(robot_id, jpeg, received)
-                    # Camera frames can be sampled during a human's utterance
-                    # without launching a competing unsolicited VLM/TTS turn.
-                    if self.multimodal.hub.user_active(robot_id, received):
-                        await asyncio.sleep(self.interval)
+                    hub = self.multimodal.hub
+                    # Camera captures have exactly one per-robot source owner,
+                    # already identity checked and chronologically ordered.
+                    candidates = [
+                        (frame.jpeg, frame.received_at)
+                        for frame in tuple(hub.frames[robot_id])
+                        if frame.source in ("sensor", "proactive")
+                        and (state.last_scene_frame_at is None
+                             or frame.received_at > state.last_scene_frame_at)
+                    ]
+                    if not candidates and hub.due(robot_id, time.monotonic()):
+                        capture = getattr(self.multimodal, "capture", None)
+                        if callable(capture):
+                            evidence = await capture(robot_id, source="proactive")
+                            candidates = [(evidence.jpeg, evidence.received_at)]
+                        else:
+                            # Lightweight test adaptors without a real
+                            # orchestrator retain the original head path.
+                            started = time.monotonic()
+                            jpeg = await self.heads[robot_id].snapshot()
+                            received = time.monotonic()
+                            if received - started <= 2.0:
+                                offer = getattr(self.multimodal, "offer_proactive", None)
+                                if callable(offer):
+                                    await offer(robot_id, jpeg, received)
+                                candidates = [(jpeg, received)]
+                else:
+                    started = time.monotonic()
+                    jpeg = await self.heads[robot_id].snapshot()
+                    received = time.monotonic()
+                    if received - started <= 2.0:
+                        candidates = [(jpeg, received)]
+
+                for jpeg, received in candidates:
+                    if (not state.enabled or state.generation != generation
+                            or self._closed):
+                        break
+                    if (state.last_scene_frame_at is not None
+                            and received <= state.last_scene_frame_at):
                         continue
-                previous = await asyncio.to_thread(state.gate.observe, jpeg)
-                if previous is not None:
+                    state.last_scene_frame_at = received
+                    if time.monotonic() - received > self.max_observation_age:
+                        state.stale_camera_events += 1
+                        continue
+                    # Never analyze a proactive photo while a real person
+                    # is speaking; Xiaozhi controls that private camera turn.
+                    if self._human_active_in_fleet(time.monotonic()):
+                        continue
+                    previous = await asyncio.to_thread(state.gate.observe, jpeg)
+                    if previous is None:
+                        continue
                     async with self._vision_lock:
-                        # A background VLM task may have queued BEFORE a human
-                        # started speaking. Recheck inside the shared lock so
-                        # it cannot run ahead of a direct vision question.
-                        if (self.multimodal is not None and any(
-                            self.multimodal.hub.user_active(
-                                robot.id, time.monotonic()
-                            ) for robot in self.settings.robots
-                        )):
+                        if self._human_active_in_fleet(time.monotonic()):
                             continue
                         inference = asyncio.create_task(
                             self.scene.compare(previous, jpeg)
@@ -1057,22 +1091,20 @@ class PetController:
                         try:
                             change = await inference
                         except asyncio.CancelledError:
-                            # The human's voice cancelled background inference,
-                            # not the enclosing pet observation loop.
+                            # User speech cancelled the speculative VLM,
+                            # not the permanent sensor/camera observation loop.
                             if asyncio.current_task().cancelling():
                                 raise
                             continue
                         finally:
                             if self._vision_inflight is inference:
                                 self._vision_inflight = None
-                    # Restore the stale-inference gate preserved in the old
-                    # PR #4 prototype. A local VLM may finish long after the
-                    # scene changed. Monotonic time here is Mac receive time,
-                    # NOT a device exposure timestamp or sensor certification.
                     if time.monotonic() - received > self.max_observation_age:
                         state.stale_camera_events += 1
                         continue
-                    if change is not None and state.enabled and state.generation == generation:
+                    if (change is not None and state.enabled
+                            and state.generation == generation
+                            and not self._human_active_in_fleet(time.monotonic())):
                         state.events += 1
                         state.last_event = change.description
                         await self._store_observation(robot_id, change)
@@ -1081,9 +1113,8 @@ class PetController:
                 raise
             except Exception as exc:
                 state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
-                # A lost physical head requires explicit re-enabling after it
-                # reconnects. An inference error, however, only drops that event.
                 if "head" in type(exc).__name__.lower():
+                    # A failed authenticated device requires explicit re-enable.
                     state.enabled = False
                     break
             await asyncio.sleep(self.interval)
