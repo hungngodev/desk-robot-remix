@@ -1428,6 +1428,66 @@ async def test_unverified_voice_monitor_cannot_launch_spontaneous_speech(
         await pet.close()
 
 
+async def test_deliberate_touch_can_reply_after_passive_speech_cooldown(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+    )
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        speech_cooldown=120, interaction_cooldown=12,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 9
+    pet._group_last_spoken = time.monotonic() - 20
+    try:
+        # A passive humidity change should not make the fleet keep chatting.
+        pet._consider_speech(
+            "robot-01", SceneChange(
+                "ambient_shift", "Local humidity changed", 1.0
+            ), 9
+        )
+        assert pet._speech_task is None
+        assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+        # An intentional touch is a different, more responsive interaction.
+        pet._consider_speech(
+            "robot-01", SceneChange(
+                "touch_tap", "Someone deliberately tapped my head", 1.0
+            ), 9
+        )
+        assert pet._speech_task is not None
+        assert pet._speech_participants == frozenset({"robot-01"})
+        assert memory.count("robot-02") == 0
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_touch_can_never_override_authenticated_human_vad(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(),
+                        speech_cooldown=120, interaction_cooldown=0)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 10
+    hub = CameraFrameHub([r.id for r in fleet.robots])
+    hub.notify("robot-02", "human_voice", time.monotonic())
+    pet.multimodal = SimpleNamespace(hub=hub)
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange(
+                "touch_double", "Someone tapped my head twice", 1.0
+            ), 10
+        )
+        assert pet._speech_task is None
+        assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 def test_reachy_style_initiative_gate_prunes_uncertain_chatter_not_sensor_memory():
     # A high-confidence first-hand CAP1188 event is different from a guessed
     # camera person's identity. Pure policy has no hardware/motor side effect.
