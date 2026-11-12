@@ -67,7 +67,7 @@ def _initiative_evidence(change: SceneChange) -> bool:
         "touch", "touch_tap", "touch_double", "touch_hold", "petting_zone",
         "squeeze", "hand_wave", "nose_twist", "nearby_object",
         "battery_low", "magnet", "pir", "bumper",
-        "handling_tilt", "handling_shake", "side_object",
+        "handling_tilt", "handling_shake", "side_object", "paw_contact",
     } and change.confidence >= 0.95
 
 
@@ -102,6 +102,10 @@ class PetState:
     last_force_squeeze: bool | None = None
     last_near_hand: bool | None = None
     last_gesture_events: int | None = None
+    last_paw_seq: int | None = None
+    last_paw_contact: bool | None = None
+    paw_contact_streak: int = 0
+    paw_release_streak: int = 0
     last_aux_kind: str | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
@@ -228,6 +232,9 @@ class PetController:
         state.last_force_squeeze = None
         state.last_near_hand = None
         state.last_gesture_events = None
+        state.last_paw_seq = None
+        state.last_paw_contact = None
+        state.paw_contact_streak = state.paw_release_streak = 0
         state.last_aux_kind = None
         state.enabled = True
         state.last_error = None
@@ -432,6 +439,9 @@ class PetController:
                 state.last_force_squeeze = None
                 state.last_near_hand = None
                 state.last_gesture_events = None
+                state.last_paw_seq = None
+                state.last_paw_contact = None
+                state.paw_contact_streak = state.paw_release_streak = 0
             await asyncio.sleep(1.0)
 
     async def _observe_aux(self, robot_id: str, generation: int, data: dict) -> None:
@@ -447,6 +457,47 @@ class PetController:
         state.aux_reads += 1
         robot = self.settings.robot(robot_id)
         changes: list[SceneChange] = []
+
+        # The MAX30102 is an optical *paw contact* source only. Never
+        # manufacture a BPM, identity or health claim from raw LED values.
+        # A new hardware FIFO acquisition counter is compulsory; HTTP
+        # replay of an old response cannot supply a second confirmation.
+        paw = data["pulse"]
+        threshold = robot.paw_contact_ir_raw_threshold
+        seq = paw.get("seq")
+        if (robot.paw_contact_interactions_qualified and threshold is not None
+                and paw["present"] and paw["valid"]
+                and paw["part_id"] == 0x15 and paw["age_ms"] <= 250
+                and type(seq) is int and seq > 0):
+            previous = state.last_paw_seq
+            if previous is None or seq <= previous or seq - previous > 1000:
+                # First valid sample after reconnect is only a baseline.
+                state.last_paw_contact = paw["ir"] >= threshold
+                state.paw_contact_streak = state.paw_release_streak = 0
+            elif not state.last_paw_contact:
+                state.paw_contact_streak = (
+                    state.paw_contact_streak + 1 if paw["ir"] >= threshold else 0
+                )
+                if state.paw_contact_streak >= 2:
+                    state.last_paw_contact = True
+                    state.paw_contact_streak = 0
+                    changes.append(SceneChange(
+                        "paw_contact", "Someone placed a finger on my optical paw pad", 1.0
+                    ))
+            else:
+                # 25 percent release hysteresis avoids LED contact chatter.
+                state.paw_release_streak = (
+                    state.paw_release_streak + 1
+                    if paw["ir"] < threshold * 3 // 4 else 0
+                )
+                if state.paw_release_streak >= 2:
+                    state.last_paw_contact = False
+                    state.paw_release_streak = 0
+            state.last_paw_seq = seq
+        else:
+            state.last_paw_seq = None
+            state.last_paw_contact = None
+            state.paw_contact_streak = state.paw_release_streak = 0
 
         power = data["power"]
         if power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500:
