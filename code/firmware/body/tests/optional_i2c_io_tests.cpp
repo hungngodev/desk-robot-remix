@@ -118,7 +118,35 @@ int main() {
     CHECK(!nfc_accessories.readings().dock.valid);
     CHECK(!nfc_accessories.readings().nfc.valid);
     CHECK(nfc_wire.nfc_scans == previous_scans);
-    std::cout << "PASS optional sensor register IO, NFC framing and isolated mux slots\n";
+    // A separate GPIOB read can host slow reed/PIR while GPIOA continues
+    // owning the compulsory independent dock stop/PGOOD evidence.
+    TwoWire optional_wire;
+    desk_robot::AccessorySensors optional_accessories;
+    CHECK(optional_accessories.begin(optional_wire));
+    for (std::uint32_t ms = 0; ms < 2800; ms += 12) {
+      optional_accessories.poll(ms);
+      CHECK(!optional_wire.unsafe_parallel_mux);
+    }
+    const auto& slow = optional_accessories.readings().optional_inputs;
+    CHECK(slow.present && slow.valid && slow.sample_seq >= 2U);
+    CHECK(optional_wire.optional_gpio_reads == slow.sample_seq);
+    CHECK(!slow.reed_closed && !slow.pir_active);
+    const auto base = slow.sample_seq;
+    optional_wire.optional_gpioB = 0x02; // reed closed LOW, PIR active HIGH
+    for (std::uint32_t ms = 2808; ms < 4300; ms += 12) {
+      optional_accessories.poll(ms);
+    }
+    CHECK(slow.valid && slow.reed_closed && slow.pir_active);
+    CHECK(slow.sample_seq > base);
+    optional_wire.fail_optional_gpio = true;
+    const auto last = slow.sample_seq;
+    for (std::uint32_t ms = 4308; ms < 5300; ms += 12) {
+      optional_accessories.poll(ms);
+    }
+    CHECK(!slow.valid && slow.sample_seq == last);
+    CHECK(optional_accessories.readings().dock.valid);
+    CHECK(optional_accessories.readings().dock.sample_seq > 0U);
+    std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
     return 1;
