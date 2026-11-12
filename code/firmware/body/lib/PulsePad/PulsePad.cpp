@@ -88,6 +88,8 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   sample_.ir = optical18(latest + 3);
   sample_.valid = true;
   sample_.at_ms = now_ms;
+  ++sample_.sample_seq;
+  if (sample_.sample_seq == 0U) ++sample_.sample_seq;
   return true;
 }
 } // namespace desk_robot
