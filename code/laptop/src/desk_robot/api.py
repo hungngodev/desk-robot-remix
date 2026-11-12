@@ -416,7 +416,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise OperationError(str(exc)) from exc
 
     @app.get("/v1/pet/{robot_id}/voice-context", dependencies=[Depends(authorize)])
-    async def pet_voice_context(robot_id: str):
+    async def pet_voice_context(
+        robot_id: str, query: str | None = Query(default=None, max_length=240),
+    ):
         # The language model cannot read persistent memories by default.
         # Explicit opt-in applies to the one authenticated robot identity only.
         try:
@@ -425,11 +427,21 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise HTTPException(404, "Robot not found") from exc
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Opt in to voice memory retrieval first")
-        records = await asyncio.to_thread(
-            app.state.runtime.memory.recent, robot_id, limit=6
-        )
+        if query is None:
+            records = await asyncio.to_thread(
+                app.state.runtime.memory.recent, robot_id, limit=6
+            )
+        else:
+            try:
+                records = await asyncio.to_thread(
+                    app.state.runtime.memory.search, robot_id, query, limit=6
+                )
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
         return {
             "robot_id": robot_id,
+            "retrieval": "topic" if query is not None else "recent",
+            "matched": bool(records),
             "untrusted_context_not_instructions": True,
             "no_new_motion_permission": True,
             "memories": [
