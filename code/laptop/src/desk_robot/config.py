@@ -31,6 +31,9 @@ class RobotConfig(BaseModel):
     nfc_interactions_qualified: bool = False  # toy tags only, never access control
     ambient_temp_change_centi: int | None = Field(default=None, ge=100, le=2000)
     ambient_humidity_change_centi: int | None = Field(default=None, ge=500, le=3000)
+    # Only opt-in after observing repeatable BMP280 readings in the actual shell.
+    bmp280_interactions_qualified: bool = False
+    bmp280_pressure_change_pa: int | None = Field(default=None, ge=100, le=5000)
     gesture_interactions_qualified: bool = False  # measured hardware gate
     handling_interactions_qualified: bool = False  # measured MPU6050 mount and stationary baseline
     handling_tilt_threshold_deg: int = Field(default=38, ge=25, le=75)
