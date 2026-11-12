@@ -297,6 +297,25 @@ static void extra_three_ranging_channels_are_diagnostics_only() {
   CHECK(send(body, "arm", 30) == "ERR arm safety_interlock");
 }
 
+static void side_range_validity_clears_on_shared_bus_fault_without_fake_samples() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.sample_side_range(0, 125, true, 10);
+  body.sample_side_range(2, 300, true, 11);
+  const auto observed = send(body, "status", 12);
+  CHECK(observed.find("\\"side_ranges\\":{") != std::string::npos);
+  CHECK(observed.find("\\"present_mask\\":5,\\"valid_mask\\":5") != std::string::npos);
+  body.invalidate_side_ranges(); // called by WROOM only on new TofBus error
+  const auto invalid = send(body, "status", 13);
+  CHECK(invalid.find("\\"mm\\":[125,0,300]") != std::string::npos);
+  CHECK(invalid.find("\\"present_mask\\":5,\\"valid_mask\\":0") != std::string::npos);
+  CHECK(!body.state().armed);
+  // Only a newly acquired independent side range can restore its validity.
+  body.sample_side_range(0, 126, true, 14);
+  const auto restored = send(body, "status", 15);
+  CHECK(restored.find("\\"present_mask\\":5,\\"valid_mask\\":1") != std::string::npos);
+  CHECK(!body.state().armed); // diagnostic input has no motor authority
+}
+
 static void cap_petting_zones_are_optional_and_never_arm() {
   desk_robot::CliffGuard guard;
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
@@ -952,6 +971,7 @@ int main() {
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
     extra_three_ranging_channels_are_diagnostics_only();
+    side_range_validity_clears_on_shared_bus_fault_without_fake_samples();
     cap_petting_zones_are_optional_and_never_arm();
     touch_telemetry_never_grants_motion();
     raw_touch_trip_preempts_debounce_without_forging_a_tap();
