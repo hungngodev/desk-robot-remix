@@ -551,7 +551,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"valid\":%s,\"calibrated\":false},"
         "\"climate\":{\"temp_centi\":%d,\"rh_centi\":%d,\"valid\":%s,\"seq\":%lu,\"age_ms\":%lu},"
         "\"bmp280\":{\"present\":%s,\"valid\":%s,\"chip_id\":%u,"
-        "\"temp_centi\":%d,\"pressure_pa\":%u,\"physically_verified\":false},"
+        "\"temp_centi\":%d,\"pressure_pa\":%u,\"seq\":%lu,\"age_ms\":%lu,"
+        "\"physically_verified\":false},"
         "\"power\":{\"cell_mv\":%u,\"soc_centi\":%u,\"bus_mv\":%u,"
         "\"shunt_uv\":%d,\"fuel_valid\":%s,\"monitor_valid\":%s,"
         "\"current_calibrated\":false},"
@@ -586,6 +587,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned>(a.barometer.chip_id),
         bmp_fresh ? a.barometer.temp_centi : 0,
         bmp_fresh ? a.barometer.pressure_pa : 0U,
+        static_cast<unsigned long>(a.barometer.sample_seq),
+        static_cast<unsigned long>(a.barometer.present ?
+            now_ms - a.barometer.at_ms : 0U),
         a.gauge.cell_mv, a.gauge.soc_centi, a.gauge.bus_mv,
         a.gauge.shunt_uv, fuel_fresh ? "true" : "false",
         monitor_fresh ? "true" : "false",
