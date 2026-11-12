@@ -1052,9 +1052,24 @@ class PetController:
                              or frame.received_at > state.last_scene_frame_at)
                     ]
                     if not candidates and hub.due(robot_id, time.monotonic()):
+                        # A pending VAD utterance is never a license to
+                        # launch another low-priority background HTTP capture.
+                        if self._human_active_in_fleet(time.monotonic()):
+                            await asyncio.sleep(self.interval)
+                            continue
                         capture = getattr(self.multimodal, "capture", None)
                         if callable(capture):
-                            evidence = await capture(robot_id, source="proactive")
+                            try:
+                                evidence = await capture(
+                                    robot_id, source="proactive"
+                                )
+                            except asyncio.CancelledError:
+                                if asyncio.current_task().cancelling():
+                                    raise
+                                # Xiaozhi/explicit question cancelled only
+                                # the transient JPEG, not this observer.
+                                await asyncio.sleep(self.interval)
+                                continue
                             candidates = [(evidence.jpeg, evidence.received_at)]
                         else:
                             # Lightweight test adaptors without a real
