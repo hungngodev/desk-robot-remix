@@ -924,3 +924,62 @@ async def test_never_speak_delayed_live_scene_after_vlm_timeout():
         assert service.hub.frames["robot-01"]  # no fake model answer added
     finally:
         await service.close()
+
+
+async def test_cancelled_preprocess_retains_native_worker_slot_until_it_exits(monkeypatch):
+    """The Pillow thread must own admission until its actual completion."""
+    import threading
+    import desk_robot.multimodal as media
+
+    started = threading.Event()
+    release = threading.Event()
+    original = media._prepare
+
+    def stalled_decode(jpeg):
+        started.set()
+        if not release.wait(2):
+            raise RuntimeError("stalled native decoder fixture timed out")
+        return original(jpeg)
+
+    monkeypatch.setattr(media, "_prepare", stalled_decode)
+    visual = MultimodalOrchestrator(config(), {}, Vision(), asyncio.Lock())
+    visual._preprocess_slots = threading.BoundedSemaphore(1)
+    pending = asyncio.create_task(visual._prepare_bounded(image()))
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        with pytest.raises(RuntimeError, match="JPEG preprocessing busy"):
+            await visual._prepare_bounded(image())
+        release.set()
+        for _ in range(100):
+            if visual._preprocess_slots.acquire(blocking=False):
+                visual._preprocess_slots.release()
+                break
+            await asyncio.sleep(.01)
+        else:
+            pytest.fail("native decoder exit did not release preprocess budget")
+        result = await visual._prepare_bounded(image())
+        assert result[0].startswith(b"\\xff\\xd8")
+    finally:
+        release.set()
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await visual.close()
+
+
+async def test_preprocess_submission_failure_releases_native_budget(monkeypatch):
+    """A stopped executor cannot consume all future image capacity."""
+    import threading
+    visual = MultimodalOrchestrator(config(), {}, Vision(), asyncio.Lock())
+    visual._preprocess_slots = threading.BoundedSemaphore(1)
+    visual._preprocess_pool.shutdown(wait=False, cancel_futures=True)
+    try:
+        with pytest.raises(RuntimeError):
+            await visual._prepare_bounded(image())
+        assert visual._preprocess_slots.acquire(blocking=False)
+        visual._preprocess_slots.release()
+    finally:
+        await visual.close()
