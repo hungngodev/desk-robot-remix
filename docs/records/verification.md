@@ -9,6 +9,22 @@ old `firmware/head/build/` prefix and `body-platformio/` replaces
 `firmware/body/.pio/`.
 
 
+## 2026-11-12 live source cross-layer checks, not passing hardware evidence
+
+**Canonical PR:** [#17](https://github.com/hungngodev/desk-robot-remix/pull/17). Four GitHub Actions jobs (Python and head, WROOM PlatformIO, Sense ESP-IDF and body C++ sanitizers) still fail before their first recorded step. The connector cannot retrieve the job logs. No new host, firmware or physical trial result is PASS. See the exact [runner diagnosis](../reviews/CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md) before treating a red status as a compiler error.
+
+| Gate | Added source or regression | Current evidence |
+| --- | --- | --- |
+| Physical sensor event reaches video | All real initiative event kinds match `TRIGGERS`; `sensor_event` schedules a bounded real JPEG task from existing head, with per-head coalescing and source identity | Source committed, deterministic tests added, **NOT RUN** |
+| Live human priority | Genuine VAD preempts a queued sensor camera and already queued model reply; rapid end/start replaces a cancelling speech worker | Source committed, mocked regression added, **NOT RUN** |
+| Natural grounded one-pet remarks | Physical sensor and camera model prompts explicitly distinguished; expired local LLM replies cannot speak old event | Source committed, mocked regression added, **NOT RUN** |
+| Optional two-pet social play | Explicit local privacy consent, two turns, rotating enabled peer, shared Xiaozhi owner, secondhand peer provenance and concurrent stop cleanup | Source committed, mocked regression added, **NOT RUN** |
+| WROOM stop priority | A new actual WROOM fault first attempts to cancel Mac motion permit before optional camera sampling | Source committed, mocked regression added, **NOT RUN** |
+| Wiring/source registry | `code/tests/test_integration_contracts.py` checks eight ToF lanes, unique GPIO pins, mux 0x70/0x71 and PN532/MCP23017 lane 5, owner source paths and consent | Source committed, **NOT RUN**, **NOT electrical acceptance** |
+| Real optical/audio/power/cad | Five physical pets, real camera/VAD interruption, charge current, final fitted robot/dock and calibrated pickup | **NOT VERIFIED**, still required for assembly-only |
+
+Earlier successfully logged checks remain *historical checks on older commits*, not a certification of this new source. To verify, capture a concrete runner or local terminal command, commit SHA, environment, output, exit code, hardware model, and measured pass/fail before updating this section. Never mark 100 loops or hardware trials done based on source inspections.
+
 ## 2026-11-09 independent GitHub Actions host and WROOM evidence
 
 [Host verification run #8](https://github.com/hungngodev/desk-robot-remix/actions/runs/42675991038)
