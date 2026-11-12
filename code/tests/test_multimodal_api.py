@@ -83,6 +83,8 @@ def test_native_omni_frame_requires_consent_real_hardware_and_tool_token(setting
         assert result.content == jpeg
         assert result.headers["content-type"].startswith("image/jpeg")
         assert result.headers["x-desk-robot-id"] == "robot-01"
+        assert int(result.headers["x-desk-camera-receipt-us"]) > 0
+        assert result.headers["x-desk-frame-motion-ppm"] == "0"
         assert result.headers["cache-control"] == "no-store"
     settings.voice_vision_tools_enabled = False
     with TestClient(create_app(settings, runtime=FakeRuntime())) as client:
