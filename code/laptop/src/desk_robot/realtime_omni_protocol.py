@@ -47,7 +47,10 @@ def verify_native_server(greeting: dict, requested_model: str) -> None:
     output_hz = (
         output_codec.get("rate") if isinstance(output_codec, dict) else None
     )
-    if input_hz != 16000 or output_hz != 24000:
+    if (type(input_hz) is not int or input_hz != 16000
+            or not isinstance(output_codec, dict)
+            or output_codec.get("type") != "audio/pcm"
+            or type(output_hz) is not int or output_hz != 24000):
         raise RuntimeError("Native model PCM rates incompatible with XIAO Opus bridge")
 
 
