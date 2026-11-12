@@ -70,3 +70,29 @@ def test_timeout_preserves_bounded_partial_compiler_logs(monkeypatch, tmp_path):
     assert "fatal: module failed" in result["output_tail"]
     assert len(result["output_tail"]) <= 12000
     assert chr(0xFFFD) in result["output_tail"]  # invalid UTF8 decoded safely
+
+
+def test_passing_source_checks_never_clear_commercial_or_physical_batch_gates(
+    monkeypatch, tmp_path,
+):
+    import json
+
+    stages = [("standalone", ["true"], tmp_path, 1)]
+    monkeypatch.setattr(verify, "steps", lambda suite, build: stages)
+    monkeypatch.setattr(verify, "run", lambda *args: {
+        "name": "standalone", "pass": True, "exit_code": 0,
+        "elapsed_s": 0.1, "output_tail": "", "error": None,
+    })
+    report = tmp_path / "release-receipt.json"
+    monkeypatch.setattr(verify.sys, "argv", [
+        "verify_system.py", "--suite", "all", "--report", str(report),
+    ])
+    assert verify.main() == 0  # source program succeeded, NOT a product release
+    receipt = json.loads(report.read_text())
+    assert receipt["source_suite_pass"] is True
+    assert receipt["commercial_cad_rights_verified"] is False
+    assert receipt["commercial_batch_release_ready"] is False
+    assert receipt["assembly_ready"] is False
+    assert receipt["charging_verified"] is False
+    assert receipt["print_fit_verified"] is False
+    assert receipt["five_robot_acoustics_verified"] is False
