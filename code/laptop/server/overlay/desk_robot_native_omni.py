@@ -724,16 +724,30 @@ async def flush_head(session: NativeOmniSession) -> None:
 
 
 async def preempt_others_for_human(source_device: str) -> None:
-    """Human conversation takes priority over every native-model pet."""
+    """Silence every other native model concurrently when any human speaks.
+
+    An idle model may already have queued audio before its TTS START event.
+    Stop all peers, not just heads already marked as audible. One wedged
+    WebSocket must not delay other pets' independent local flush requests.
+    The shared speaker claim clears only after its own abort succeeds.
+    """
     global _output_owner
-    for device, session in list(_sessions.items()):
-        if device != source_device and session.conn.client_is_speaking:
-            events = await session._invalidate_head_first()
-            session._schedule_remote_cancel(events)
+    peers = [
+        (device, session) for device, session in list(_sessions.items())
+        if device != source_device and not session.closed
+    ]
+    results = await asyncio.gather(
+        *(session._invalidate_head_first() for _, session in peers),
+        return_exceptions=True,
+    )
+    safely_invalidated: set[str] = set()
+    for (device, session), result in zip(peers, results):
+        if isinstance(result, BaseException):
+            continue  # Unacknowledged STOP cannot free another audio owner.
+        safely_invalidated.add(device)
+        session._schedule_remote_cancel(result)
     async with _output_owner_lock:
-        # A previous model speaker must not remain recorded as the owner
-        # after its audio was stopped for a new human voice.
-        if _output_owner is not None and _output_owner != source_device:
+        if _output_owner in safely_invalidated:
             _output_owner = None
 
 
