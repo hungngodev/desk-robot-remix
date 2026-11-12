@@ -101,6 +101,14 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                 or not _sint(bmp.get("temp_centi"), -4000, 8500)
                 or not _uint(bmp.get("pressure_pa"), 120000)
                 or bmp.get("physically_verified") is not False
+                or (bmp.get("seq") is not None and (
+                    not _uint(bmp["seq"], 0xffffffff)
+                    or (bmp["valid"] and bmp["seq"] == 0)
+                ))
+                or (bmp.get("age_ms") is not None and (
+                    not _uint(bmp["age_ms"], 0xffffffff)
+                    or (bmp["valid"] and bmp["age_ms"] >= 2000)
+                ))
                 or (bmp["valid"] and (not bmp["present"]
                     or bmp["chip_id"] != 0x58
                     or not 30000 <= bmp["pressure_pa"] <= 120000))
