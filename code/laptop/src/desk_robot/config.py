@@ -26,6 +26,10 @@ class RobotConfig(BaseModel):
     # An actual measured optical contact threshold, NOT a heart-rate model.
     paw_contact_ir_raw_threshold: int | None = Field(default=None, ge=1000, le=250000)
     paw_contact_interactions_qualified: bool = False
+    # Ambient change thresholds use actual SHT41 readings, never guessed room conditions.
+    ambient_interactions_qualified: bool = False
+    ambient_temp_change_centi: int | None = Field(default=None, ge=100, le=2000)
+    ambient_humidity_change_centi: int | None = Field(default=None, ge=500, le=3000)
     gesture_interactions_qualified: bool = False  # measured hardware gate
     handling_interactions_qualified: bool = False  # measured MPU6050 mount and stationary baseline
     handling_tilt_threshold_deg: int = Field(default=38, ge=25, le=75)
