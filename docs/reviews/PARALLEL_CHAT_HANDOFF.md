@@ -126,6 +126,12 @@ A current source review found WROOM GPIO36 and GPIO39 already held slow reed/PIR
 
 `code/firmware/body/tests/optional_i2c_io_tests.cpp` contains deterministic virtual GPIOB reads, transitions and loss while GPIOA still succeeds. `code/tests/test_assembly_harness.py` and `test_integration_contracts.py` track the renamed MCU pins and full lane map. An independent cross-file source audit in the GitHub connector confirmed the driver and plan invariants, but **no current ESP32 compile or hardware trial ran**; all four Actions jobs still fail before steps. Next hard work is a proven two-channel NEC burst capture decoder on the pinned ESP32 version, input filtering and actual baffle geometry, plus isolated contact/power hardware acceptance. The candidate pin reservation is NOT a safe, final docking schematic.
 
+## November 12 hard critique of cross robot human speech and VLM priority
+
+Independent live source inspection of `MultimodalOrchestrator._voice_activity` found a real five robot failure: a Xiaozhi human VAD start on robot A cancelled A's visual tool but **did not** invalidate a different robot B's in-flight or queued `look`. An expensive B VLM answer might complete after A's voice took the shared fleet floor. The correction now increments each robot's visual turn epoch and cancels all peer visual tool tasks on *any* authenticated human voice start, as well as existing optional sensor/proactive JPEG captures. `look` rejects new visual tool requests on B while another robot's human voice owns the fleet. The actively speaking robot A may still request its own authenticated visual question. The existing single camera/VLM owner, Xiaozhi audio priority and motor privilege boundaries remain intact.
+
+Regression tests in `code/tests/test_multimodal.py` cover a blocked B VLM interrupted by A VAD, and a B request rejected during A VAD then succeeding after a true A speech end. Code and tests committed to existing draft PR #17. These tests are **NOT green or executed through CI**; four GitHub jobs historically fail before any step. No second voice server or extra PR added. This change does not prove actual microphone timing, five physical speakers or battery safety.
+
 ## The user's cross-chat constraints, all retained
 
 1. **One complete robot, then four identical functional copies.** Five different personalities and removable costumes, not five different incomplete hardware architectures. Day zero design includes the entire desired core; physical bringup may still be staged for safe testing.
