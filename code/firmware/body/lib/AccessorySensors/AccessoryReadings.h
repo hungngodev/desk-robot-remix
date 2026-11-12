@@ -82,6 +82,16 @@ struct DockPinRaw {
   // A repeated HTTP/UART cache response cannot fake independent samples.
   std::uint32_t sample_seq = 0;
 };
+struct NfcRaw {
+  bool present = false; // only after genuine SAM + retry configuration
+  bool valid = false;   // last full PN532 frame decoded with correct checksum
+  bool tag_visible = false;
+  std::uint8_t uid_length = 0; // only 4/7/10 ISO14443A UIDs
+  std::uint32_t tag_token = 0; // FNV game token, never authentication
+  std::uint32_t tag_events = 0; // increments on newly presented real tag
+  std::uint32_t scan_seq = 0;   // completed independent PN532 scans
+  std::uint32_t at_ms = 0;
+};
 struct AccessoryReadings {
   AngleRaw angle[3]{}; // index 0 nose, 1 left track, 2 right track
   ClimateRaw climate{};
