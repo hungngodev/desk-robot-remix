@@ -165,3 +165,37 @@ async def test_proactive_reasoning_reuses_relevant_old_experience_not_only_last_
         assert any(m.kind == "key" for m in store.search("robot-01", "keys"))
     finally:
         await pet.close()
+
+
+async def test_group_conversation_reuses_each_pets_own_relevant_context(
+    settings, tmp_path
+):
+    from desk_robot.conversation import Conversation
+    from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+
+    ids = [r.id for r in settings.robots]
+    store = MemoryStore(tmp_path, ids)
+    store.remember(
+        "robot-01", "key_yesterday",
+        "I noticed the silver key beside the notebook yesterday",
+        kind="key", source_robot="robot-01", witnessed=True,
+        observed_at=time.time() - 86400,
+    )
+    for index in range(8):
+        store.remember(
+            "robot-01", f"newer_event_{index}",
+            f"A pencil rolled on the desk event {index}",
+            kind="pencil", source_robot="robot-01", witnessed=True,
+            observed_at=time.time() - 60 + index,
+        )
+    speaker = SimulatedSpeaker()
+    agent = Conversation(settings, SimulatedChat(), speaker, memory=store)
+    result = await agent.run(ids, "What do we remember about the keys?", 2)
+    assert len(result) == 2
+    own = agent.histories["robot-01"][1]["content"]
+    peer = agent.histories["robot-02"][1]["content"]
+    assert "Topic-related historical memory" in own
+    assert "silver key beside the notebook yesterday" in own
+    assert "silver key beside the notebook yesterday" not in peer
+    assert "not current visual evidence or permission to move" in own
+    assert [robot_id for robot_id, _ in speaker.spoken] == ids
