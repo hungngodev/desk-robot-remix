@@ -207,8 +207,15 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
         "type": "response.created", "response_id": "old",
         "response": {"id": "old", "metadata": {"duplex_event": {"epoch": 0}}},
     })
+    service._user_was_talking = True
+    service._video_turn = 3
+    service.latest_jpeg = b"old-frame"
+    service._latest_frame_receipt_us = 123
     await service.barge()
     assert service._generation == 1
+    assert service._video_turn == 4
+    assert service.latest_jpeg is None
+    assert service._latest_frame_receipt_us is None
     assert service.wire.response_id is None
     assert service.wire.accept_output is False
     assert service.wire.played_ms == 0
