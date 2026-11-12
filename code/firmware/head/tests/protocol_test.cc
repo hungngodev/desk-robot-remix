@@ -27,6 +27,9 @@ int main() {
     assert(ExpectedAck(c) == "OK drive left=0 right=0 ms=250");
     assert(ParseCommand("aux", false, c));
     assert(c.verb == "aux");
+    assert(ParseCommand("ir", false, c));
+    assert(c.verb == "ir");
+    assert(!ParseCommand("ir 1", false, c));
     assert(!ParseCommand("aux 1", false, c));
     assert(!ParseCommand("aux urgent", true, c));
     assert(ParseCommand("grip 60", false, c));
