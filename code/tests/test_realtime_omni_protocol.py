@@ -99,6 +99,29 @@ def test_recent_speech_tail_can_pair_actual_frame_with_completed_native_model_un
     assert wire.frames_sent == 1
 
 
+def test_barge_in_drops_obsolete_visual_tail_until_new_authentic_speech():
+    wire = OmniDuplexWire()
+    jpeg = b"\\xff\\xd8" + b"x" * 20 + b"\\xff\\xd9"
+    for _ in range(9):
+        wire.append_audio(b"\\0" * 3200, speech=True)
+    wire.interrupt()
+    # The next packet closes the abandoned previous 1s unit, but it is
+    # silence after an interruption, NOT a new visual question.
+    dropped = wire.append_audio(
+        b"\\0" * 3200, speech=False, jpeg=jpeg,
+        camera_age_ms=0, frame_receipt_us=10,
+    )
+    assert "video_frames" not in dropped
+    for _ in range(9):
+        wire.append_audio(b"\\0" * 3200, speech=True)
+    fresh = wire.append_audio(
+        b"\\0" * 3200, speech=True, jpeg=jpeg,
+        camera_age_ms=20, frame_receipt_us=11,
+    )
+    assert base64.b64decode(fresh["video_frames"][0]) == jpeg
+    assert wire.frames_sent == 1
+
+
 def test_stale_or_fake_images_never_get_sent_to_native_model():
     wire = OmniDuplexWire()
     with pytest.raises(ValueError):
