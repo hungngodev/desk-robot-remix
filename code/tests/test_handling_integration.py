@@ -1,6 +1,9 @@
 """One real WROOM MPU6050 frame path through Mac pet and private memory."""
+from itertools import count
 from pathlib import Path
 from types import SimpleNamespace
+
+_IMU_FRAMES = count(1)
 
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
@@ -15,6 +18,7 @@ def status(acc=(0, 0, 16384), gyro=(0, 0, 0)):
         "imu": {
             "family": 4, "gyro_id": 0x68, "aux_id": 0,
             "valid": True, "age_ms": 30,
+            "boot_id": 1, "sample_ms": next(_IMU_FRAMES) * 50,
             "acc": list(acc), "gyro": list(gyro),
         },
     }
