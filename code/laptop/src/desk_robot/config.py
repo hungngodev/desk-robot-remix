@@ -74,6 +74,7 @@ class Settings(BaseModel):
     vision_model: str = ""  # Explicit local Ollama VLM; never silently use a cloud model.
     voice_memory_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi to read own episodic text.
     voice_vision_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi camera questions/voice frame selection.
+    pet_autostart_enabled: bool = False  # Explicit hardware opt-in for idle camera and sensor observation.
     fleet_text_sharing_enabled: bool = False  # Opt-in local, provenance-tagged text only.
     fleet_social_autonomy_enabled: bool = False  # Bounded pet-to-pet talk, explicit opt-in.
     fleet_social_min_interval_seconds: int = Field(default=300, ge=30, le=3600)
@@ -84,6 +85,14 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def unique_ids(self):
+        if self.pet_autostart_enabled and (
+            self.mode != "hardware"
+            or not self.voice_vision_tools_enabled
+            or not self.vision_model
+        ):
+            raise ValueError(
+                "Proactive camera autostart requires hardware, explicit camera consent and a local VLM"
+            )
         if self.fleet_social_autonomy_enabled and not self.fleet_text_sharing_enabled:
             raise ValueError("Automatic peer dialogue requires explicit local text sharing consent")
         ids = [r.id for r in self.robots]
