@@ -197,11 +197,14 @@ class VoiceEventListener:
             self.cursor = data["cursor"]
             self._stream_failed = False
             return 0
-        current = self.cursor
+        # Validate the entire authenticated batch before invoking any physical
+        # interruption callback. A malformed later event must not cause an
+        # earlier event to execute and then replay on the next poll.
+        expected = self.cursor
         for event in data["events"]:
             if (not isinstance(event, dict)
                     or type(event.get("seq")) is not int
-                    or event["seq"] != current + 1
+                    or event["seq"] != expected + 1
                     or event["seq"] > data["cursor"]
                     or type(event.get("robot_id")) is not str
                     or event["robot_id"] not in self.robot_ids
@@ -214,6 +217,11 @@ class VoiceEventListener:
                         else "xiaozhi_aec_vad"
                     )):
                 raise ValueError("Invalid real voice source, identity or sequence")
+            expected = event["seq"]
+        if expected != data["cursor"]:
+            raise ValueError("Voice server skipped sequence without marking a gap")
+        current = self.cursor
+        for event in data["events"]:
             # A head may hang after receiving its interrupt command. Keep
             # the exact sequence's task alive across transport retries and
             # refuse a duplicate callback while the first is still running.
