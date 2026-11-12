@@ -66,6 +66,8 @@ async def observe_actual_dock(head, robot) -> dict:
     # Shield the worker: wait_for cancellation must not hide its continued
     # execution. The worker owns the slot until native detection actually ends.
     task = asyncio.create_task(asyncio.to_thread(detect_once))
+    # Consume late native failures after the caller's deadline has elapsed.
+    task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
     try:
         pose = await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
     except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
