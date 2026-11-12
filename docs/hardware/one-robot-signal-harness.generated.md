@@ -25,8 +25,8 @@ Signal-only list. Never infer a power source from a logic voltage.
 | WROOM GPIO35 | NC bumper series OUT | 3.3V input; external bias required on GPIO34 through GPIO39 | Source allocated |
 | MCP23017 GPB0 | optional reed switch | 3.3V input; closes LOW to GND | Source polled; physically unqualified |
 | MCP23017 GPB1 | optional PIR output | 3.3V input; active HIGH | Source polled; physically unqualified |
-| WROOM GPIO36 reserved | left 38kHz IR demodulator | Demodulated NEC burst input, external bias; ESP32 erratum | No decoder or physical acceptance; do NOT wire yet |
-| WROOM GPIO39 reserved | right 38kHz IR demodulator | Demodulated NEC burst input, external bias; ESP32 erratum | No decoder or physical acceptance; do NOT wire yet |
+| WROOM GPIO36 reserved | left 38kHz IR demodulator | Demodulated NEC burst input, external bias; ESP32 erratum | Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet |
+| WROOM GPIO39 reserved | right 38kHz IR demodulator | Demodulated NEC burst input, external bias; ESP32 erratum | Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet |
 | XIAO GPIO5 | SSD1306 SDA | 3.3V head signal | Source allocated |
 | XIAO GPIO6 | SSD1306 SCL | 3.3V head signal | Source allocated |
 | XIAO GPIO4 | MAX98357A BCLK | 3.3V head signal | Source allocated |
@@ -59,7 +59,7 @@ Signal-only list. Never infer a power source from a logic voltage.
 * Qualified power and ground distribution to motors, servos, XIAO,
   WROOM, speaker and 3.3V sensors. Never power actuators through MCU GPIO.
 * Reed/PIR now have slow MCP23017 GPIOB input source, freeing
-  GPIO36/39 for dual IR. The real NEC decoder, RTC/ADC erratum
+  GPIO36/39 for dual IR. Real timing, optical baffles, RTC/ADC erratum
   filtering and final homing remain entirely unqualified.
 * Breakout VCC and I2C pullups, connector pin order and cable gauge.
 * Printed fit, local cliff geometry, audio and charger bench trials.
