@@ -148,7 +148,7 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 
 **CAP1188 rather than MPR121:** Microchip marks CAP1188 in production, whereas NXP archives MPR121. Use a CAP1188 I2C breakout configured to **0x28**, not its common breakout default 0x29, so it cannot share the same address as the optical modules even if a mux lane is left selected. Its 8 electrodes cover head, back and belly; retain the existing dedicated AT42QT1010 as the **local physical stop touch**, never routed through an optional mux. Check actual breakout address-selection circuitry before ordering.
 
-**MCP23017:** controls only noncritical PN532 IRQ/reset and haptic switch, plus dock detection. All outputs must have hardware-safe default pull resistors. Never put motor phases, servo lift/grip outputs, emergency stops, required head touch or optical cliff timing through the expander.
+**MCP23017:** the implemented source reads physical dock seat and charger status pins only. PN532 now uses bounded nonblocking I2C ready-byte and frame reads on the same mux lane without driving optional expander IRQ/reset pins; an actual carrier may require a reset and must be measured before the final wiring is frozen. Haptic switching and the expander output pin assignments are **not implemented** and must not be described as working. All future outputs need hardware-safe default pull resistors. Never put motor phases, servo lift/grip outputs, emergency stops, required head touch or optical cliff timing through the expander.
 
 **Bus ownership:** existing WROOM ToF driver must run first; optional reads have lower priority and strict timeout. The existing WROOM ToF driver now probes a fitted 0x71 mux and disables all its lanes before each critical 0x70 range read; a failed reset of those optional lanes faults the local safety guard. No new sensor driver is claimed working until implemented and tested. No optional sensor is allowed to rearm a body, clear a fault, grant a permit, or monopolize the bus.
 
@@ -223,3 +223,29 @@ The preexisting USB `serial_bench.py --inspect` output now parses the **actual**
 
 
 **Eight lane scheduling correction:** The full firmware no longer cycles 0 through 7 equally. It samples mandatory floor and front lanes 0,1,2,3,4, then **one** of optional left/right/rear lanes 5,6,7 before returning to critical sensors. Each optional direction rotates once per six polling calls. This preserves a five sensor safety sample window while keeping all eight channels alive and honestly diagnostic. The scheduler has a new portable C++ unit test (100 cycles); no actual I2C timing or loaded floor-stop measurement has been claimed.
+
+### Current sensor source and behavior closure matrix
+
+This table describes the **single canonical PR #17**. It separates real source code from hardware validation, and from unimplemented device outputs. Optional sensors share the selected source architecture; none of them can silently grant drive, charger or medical decisions.
+
+| Sensor or accessory | Actual source behavior | Next qualification or missing source |
+| --- | --- | --- |
+| VL53L4CD x8 through mux 0x70 | Four corner cliff plus front WROOM guard; left, right and rear raw readings plus calibrated Mac proximity events | Verify all eight carrier voltages, optical geometry, short-range performance and local stop margin |
+| MPU6050, optional BerryIMU | Real I2C six-axis identity and bounded raw telemetry; opt-in handling and shake memories | Calibrate mounting, gravity vector, held state and physical motion |
+| AT42QT1010 and CAP1188 | Local direct head-touch stop, taps, doubles and hold-to-quiet; eight read-only petting electrodes | Shell thickness, false touches, debounce and physical stop times |
+| MAX30102 paw optical | SparkFun-derived bounded red/IR FIFO, fresh acquisition counter, two-sample optical touch events, per-robot memory | Verify actual module, current, finger contact threshold; **no BPM or medical output** |
+| APDS9960 | Proximity and gesture FIFO edge decoder, opt-in Mac reactions | Actual gesture range, lighting and source freshness |
+| ADS1115 with two FSR pads | Raw belly/jaw force, optional squeeze event, bounded guarded jaw approach | Mechanical placement, real baseline, force limit and calibrated key/candy trials |
+| AS5600 x3 | Three raw measured magnetic angles, optional nose-twist interaction | Magnet placement, left/right wheel direction, speed/odometry integration and trials |
+| SHT41 | CRC checked temperature/humidity readings with new acquisition counter; opt-in confirmed local ambient change memory | Check actual vent placement, self-heating, humidity and threshold calibration |
+| BMP280 | Manufacturer ID and compensated raw pressure/temperature telemetry | Weather/ambient reaction still unimplemented, sensor enclosure reference trial |
+| INA226 and MAX17048 | Raw bus/shunt and cell/SOC diagnostics, low-battery interaction | Calibrate actual shunt and pack, measure current and validate charging; no invented amps |
+| NC bumpers, PIR and reed | Optional local bumper stop, PIR/magnet event counters with typed Mac memory | Verify actual 3.3V inputs and enable compile flags after wiring |
+| PN532 NFC toy reader | **New** bounded Seeed protocol adaptation on 0x71 lane 5: SAM init, finite RF activation retries, ISO14443A UID checksum, read-only nonsecret game token and new-presented counter; existing Mac private toy event consumer | Real board mode/voltage, 400 kHz I2C ready-byte behavior, RF latency, antenna, current and fixture trial; no authentication |
+| MCP23017 dock monitor | Required fresh dock seat and PGOOD/CHG input snapshots in full WROOM profile | Hardware-qualified 1S charger, protected pack, hot removal, verified current |
+| WS2812B RGB heart and haptic coin motor | Parts and pin/driver allocation, but **no confirmed final on-device effect driver** | After XIAO SD J3 isolation and GPIO ownership checks, implement and bench-qualify guarded LEDs and MOSFET PWM |
+| Dual IR terminal dock receivers | Research and two-input allocation candidate only | Separate real NEC burst decoder, measured physical homing, safe contacts and charging circuit |
+| SCD40 CO2, BME688 VOC, LD2410C presence, AMG8833 thermal, soil probe | Preserved as optional external room/plant station extensions, not quietly omitted from research | Separate powered and electrically qualified room station protocol and opt-in integration |
+
+**Physical acceptance remains open.** The source level PN532 adapter has portable parser tests plus deterministic I2C slot tests, but was not compiled on GitHub Actions or exercised with the real PN532 carrier. Its vendor BSD protocol framing is adapted to avoid the upstream blocking poll that would delay WROOM cliff sensing. The UID game token uses FNV and is cloneable; never use it for access control or identity.
+
