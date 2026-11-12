@@ -2009,3 +2009,65 @@ def test_disabled_pet_generation_cannot_schedule_spontaneous_model_work(
     assert pet.states["robot-01"].last_initiative_suppression == (
         "pet_disabled_or_generation_changed"
     )
+
+
+async def test_bmp280_air_pressure_events_require_distinct_measurements_and_opt_in(
+    fleet, tmp_path,
+):
+    """Raw local pressure only, never inferred weather or replayed events."""
+    fleet.mode = "hardware"
+    robot = fleet.robots[0]
+    robot.bmp280_pressure_change_pa = 300
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 19, True
+
+    def report(seq, pressure, *, valid=True, age=50):
+        return {
+            "robot_id": "robot-01",
+            "pulse": {"present": False, "valid": False, "part_id": 0,
+                      "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
+            "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                       "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [0, 0], "jaw_seq": 0, "valid": False,
+                      "calibrated": False},
+            "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
+            "bmp280": {"present": True, "valid": valid, "chip_id": 0x58,
+                       "temp_centi": 2350 if valid else 0,
+                       "pressure_pa": pressure if valid else 0,
+                       "seq": seq, "age_ms": age, "physically_verified": False},
+            "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                      "shunt_uv": 0, "fuel_valid": False,
+                      "monitor_valid": False, "current_calibrated": False},
+            "proximity": {"raw": 0, "valid": False, "gesture": 0,
+                          "gesture_events": 0, "physically_qualified": False},
+        }
+
+    try:
+        # Even real sensor changes must remain silent without user calibration.
+        for seq, pa in ((1, 100000), (2, 100700), (3, 100800)):
+            await pet._observe_aux("robot-01", 19, report(seq, pa))
+        assert memory.count("robot-01") == 0
+        robot.bmp280_interactions_qualified = True
+        await pet._observe_aux("robot-01", 19, report(4, 100000))
+        await pet._observe_aux("robot-01", 19, report(5, 100500))
+        await pet._observe_aux("robot-01", 19, report(5, 100500))
+        assert memory.count("robot-01") == 0
+        await pet._observe_aux("robot-01", 19, report(6, 100600))
+        records = memory.recent("robot-01")
+        assert [r.kind for r in records] == ["ambient_shift"]
+        assert "pressure" in records[0].summary.lower()
+        assert records[0].source_robot == "robot-01"
+        assert records[0].witnessed is True
+        assert memory.count("robot-02") == 0
+        await pet._observe_aux("robot-01", 19, report(7, 0, valid=False))
+        await pet._observe_aux("robot-01", 19, report(1, 101100))
+        await pet._observe_aux("robot-01", 19, report(1, 101100))
+        assert memory.count("robot-01") == 1
+        await pet._observe_aux("robot-01", 19, report(2, 101600, age=2000))
+        assert memory.count("robot-01") == 1
+    finally:
+        state.enabled = False
+        await pet.close()
