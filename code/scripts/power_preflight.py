@@ -6,6 +6,7 @@ Use measured simultaneous motor, servo, camera, WiFi and audio load readings.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, ROUND_CEILING
 import json
 import math
 
@@ -38,14 +39,17 @@ def size_5v_supply(
         if rating is not None and (type(rating) not in (int, float)
                                    or not math.isfinite(rating) or rating <= 0):
             raise ValueError("Rated board current must be positive and finite")
-    # Values displayed to 3 decimal places are informational. Never use
-    # rounded-down display currents to approve a marginal component rating.
-    required_5v_peak = measured_peak_5v_a * margin
-    required_cell_peak = (5.0 * measured_peak_5v_a * margin
-                          / (cell_low_v * measured_boost_efficiency))
-    boosted_peak = round(required_5v_peak, 3)
-    cell_peak = round(required_cell_peak, 3)
-    boosted_cont = round(measured_continuous_5v_a * margin, 3)
+    # Decimal input values avoid floating point false equality at a rating
+    # boundary. Report required amperes rounded UP, never below actual need.
+    required_5v_peak = Decimal(str(measured_peak_5v_a)) * Decimal(str(margin))
+    required_cell_peak = (Decimal(5) * required_5v_peak
+                          / (Decimal(str(cell_low_v))
+                             * Decimal(str(measured_boost_efficiency))))
+    required_5v_cont = Decimal(str(measured_continuous_5v_a)) * Decimal(str(margin))
+    milliamp = Decimal("0.001")
+    boosted_peak = float(required_5v_peak.quantize(milliamp, rounding=ROUND_CEILING))
+    cell_peak = float(required_cell_peak.quantize(milliamp, rounding=ROUND_CEILING))
+    boosted_cont = float(required_5v_cont.quantize(milliamp, rounding=ROUND_CEILING))
     requirements = {
         "measured_peak_5v_a": measured_peak_5v_a,
         "minimum_rated_5v_output_a": boosted_peak,
@@ -58,9 +62,9 @@ def size_5v_supply(
     }
     if all(rating is not None for rating in ratings):
         requirements["candidate_electrically_sufficient_on_paper"] = (
-            boost_max_input_a >= required_cell_peak
-            and boost_continuous_output_a >= required_5v_peak
-            and protected_cell_continuous_a >= required_cell_peak
+            Decimal(str(boost_max_input_a)) >= required_cell_peak
+            and Decimal(str(boost_continuous_output_a)) >= required_5v_peak
+            and Decimal(str(protected_cell_continuous_a)) >= required_cell_peak
         )
         requirements["candidate_physically_qualified"] = False
     else:
