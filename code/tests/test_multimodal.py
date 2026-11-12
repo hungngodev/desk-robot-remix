@@ -587,6 +587,61 @@ async def test_new_real_human_utterance_cancels_old_vlm_image_answer():
         await service.close()
 
 
+async def test_visual_question_uses_current_spoken_turn_not_recent_idle_photo():
+    head = Head()
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def paused_automatic_speech_camera(_robot_id):
+        await asyncio.Event().wait()
+
+    # Prevent the background VAD sampler from being the source of this frame;
+    # only the user's explicit visual tool may request a new one here.
+    service._speech_frames = paused_automatic_speech_camera
+    try:
+        previous_idle_at = time.monotonic()
+        service.hub.offer(
+            "robot-01", image(), previous_idle_at, source="proactive"
+        )
+        service.voice_started("robot-01")
+        assert previous_idle_at < service._voice_turn_at["robot-01"]
+        response = await service.look("robot-01", "What can you see now?")
+        assert head.captures == 1
+        assert response["robot_id"] == "robot-01"
+        assert service.hub.frames["robot-01"][-1].received_at >= (
+            service._voice_turn_at["robot-01"]
+        )
+        service.voice_ended("robot-01")
+    finally:
+        await service.close()
+
+
+async def test_fresh_frame_from_current_spoken_turn_is_reused_without_duplication():
+    head = Head()
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def paused_automatic_speech_camera(_robot_id):
+        await asyncio.Event().wait()
+
+    service._speech_frames = paused_automatic_speech_camera
+    try:
+        service.voice_started("robot-01")
+        service.hub.offer(
+            "robot-01", image(), time.monotonic(), source="speech"
+        )
+        response = await service.look("robot-01", "What is on the table?")
+        assert head.captures == 0
+        assert response["frames_used"] == 1
+        service.voice_ended("robot-01")
+    finally:
+        await service.close()
+
+
 async def test_real_vad_during_jpeg_cpu_prepare_suppresses_late_idle_frame(monkeypatch):
     import threading
     import desk_robot.multimodal as media
