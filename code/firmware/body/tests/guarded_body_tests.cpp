@@ -229,7 +229,7 @@ static void accessory_sensors_never_infer_grip_or_current_or_grant_arm() {
   readings.proximity.valid = true;
   readings.proximity.raw = 90;
   readings.proximity.at_ms = 5;
-  body.set_accessories(readings);
+  body.set_accessories(readings, 10);
   const std::string reply = send(body, "aux", 10);
   CHECK(reply.find("\"angles\":{\"raw\":[2000,0,0]") != std::string::npos);
   CHECK(reply.find("\"present_mask\":1,\"valid_mask\":1") != std::string::npos);
@@ -538,22 +538,76 @@ static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
   read.dock.charge_indicated = false;
   read.dock.sample_seq = 1; // genuine completed GPIOA conversion
   read.dock.at_ms = 1;
-  body.set_accessories(read);
+  body.set_accessories(read, 1);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 2) == "ERR arm dock_power_connected");
   read.dock.valid = false; // lost expander must not clear the contact latch
-  body.set_accessories(read);
+  body.set_accessories(read, 3);
   CHECK(send(body, "arm", 3) == "ERR arm dock_power_connected");
   read.dock.valid = true;
   read.dock.left_seated = false; // one switch not enough to clear
-  body.set_accessories(read);
+  body.set_accessories(read, 4);
   CHECK(send(body, "arm", 4) == "ERR arm dock_power_connected");
   read.dock.right_seated = false;
   read.dock.input_good = false;
-  body.set_accessories(read);
-  CHECK(send(body, "arm", 5) == "OK arm");
+  body.set_accessories(read, 5); // same cached acquisition, cannot clear
+  CHECK(send(body, "arm", 5) == "ERR arm dock_power_connected");
+  read.dock.sample_seq = 2; // independent completed GPIOA read
+  read.dock.at_ms = 6;
+  body.set_accessories(read, 6);
+  CHECK(send(body, "arm", 7) == "OK arm");
   CHECK(body.state().armed);
-  CHECK(send(body, "disarm", 6) == "OK disarm");
+  CHECK(send(body, "disarm", 8) == "OK disarm");
+}
+
+
+static void dock_removal_needs_new_fresh_real_gpio_sample() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_dock_monitor(true);
+  desk_robot::AccessoryReadings r{};
+  r.dock.present = r.dock.valid = true;
+  r.dock.left_seated = true;
+  r.dock.sample_seq = 7;
+  r.dock.at_ms = 100;
+  body.set_accessories(r, 101);
+  CHECK(send(body, "arm", 102) == "ERR arm dock_power_connected");
+  r.dock.left_seated = false;
+  body.set_accessories(r, 103); // unchanged seq and timestamp
+  CHECK(send(body, "arm", 104) == "ERR arm dock_power_connected");
+  r.dock.sample_seq = 6;
+  r.dock.at_ms = 105;  // reversed counter even with fresh time
+  body.set_accessories(r, 106);
+  CHECK(send(body, "arm", 107) == "ERR arm dock_power_connected");
+  r.dock.sample_seq = 8;
+  r.dock.at_ms = 100; // sequence advanced but timestamp did not
+  body.set_accessories(r, 108);
+  CHECK(send(body, "arm", 109) == "ERR arm dock_power_connected");
+  r.dock.at_ms = 110;
+  body.set_accessories(r, 610); // older than the 500ms safety window
+  CHECK(send(body, "arm", 610) == "ERR arm dock_power_connected");
+  r.dock.at_ms = 611;
+  body.set_accessories(r, 612); // authentic newer complete read
+  CHECK(!body.state().armed); // no automatic restart
+  CHECK(send(body, "arm", 613) == "OK arm");
+  CHECK(send(body, "disarm", 614) == "OK disarm");
+}
+
+static void dock_removal_accepts_genuine_uint32_wrap() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_dock_monitor(true);
+  desk_robot::AccessoryReadings r{};
+  r.dock.present = r.dock.valid = true;
+  r.dock.right_seated = true;
+  r.dock.sample_seq = 0xfffffffeU;
+  r.dock.at_ms = 0xfffffff0U;
+  body.set_accessories(r, 0xfffffff1U);
+  CHECK(send(body, "arm", 0xfffffff2U) == "ERR arm dock_power_connected");
+  r.dock.right_seated = false;
+  r.dock.sample_seq = 1; // skip reserved 0 after wrap
+  r.dock.at_ms = 4;
+  body.set_accessories(r, 5);
+  CHECK(send(body, "arm", 6) == "OK arm");
+  CHECK(send(body, "disarm", 7) == "OK disarm");
 }
 
 static void complete_robot_requires_boot_installed_and_fresh_dock_expander() {
@@ -564,16 +618,16 @@ static void complete_robot_requires_boot_installed_and_fresh_dock_expander() {
   desk_robot::AccessoryReadings read{};
   read.dock.present = true;
   read.dock.valid = false;
-  body.set_accessories(read);
+  body.set_accessories(read, 2);
   CHECK(send(body, "arm", 2) == "ERR arm dock_gpio_missing_or_stale");
   read.dock.valid = true;
   read.dock.sample_seq = 1;
   read.dock.at_ms = 3;
-  body.set_accessories(read);
+  body.set_accessories(read, 3);
   CHECK(send(body, "arm", 4) == "OK arm");
   CHECK(send(body, "drive 20 20 200", 5).find("OK drive") == 0);
   read.dock.present = false; // module disappeared, not an optional absence
-  body.set_accessories(read);
+  body.set_accessories(read, 5);
   CHECK(!body.state().armed);
   CHECK(body.state().left == 0 && body.state().right == 0);
   CHECK(send(body, "arm", 6) == "ERR arm dock_gpio_missing_or_stale");
@@ -581,7 +635,7 @@ static void complete_robot_requires_boot_installed_and_fresh_dock_expander() {
   read.dock.valid = true;
   read.dock.sample_seq = 2;
   read.dock.at_ms = 7;
-  body.set_accessories(read);
+  body.set_accessories(read, 7);
   CHECK(send(body, "arm", 8) == "OK arm");
   CHECK(send(body, "disarm", 9) == "OK disarm");
 }
@@ -591,18 +645,18 @@ static void installed_dock_i2c_loss_or_single_seat_stops_local_motors() {
   desk_robot::AccessoryReadings read{};
   read.dock.present = true;
   read.dock.valid = false; // installed but no successful GPIO conversion yet
-  body.set_accessories(read);
+  body.set_accessories(read, 1);
   CHECK(send(body, "arm", 1) == "ERR arm dock_gpio_missing_or_stale");
   read.dock.valid = true;
   read.dock.sample_seq = 1;
   read.dock.at_ms = 2;
-  body.set_accessories(read);
+  body.set_accessories(read, 2);
   CHECK(send(body, "arm", 3) == "OK arm");
   CHECK(body.state().servos_attached);
   CHECK(send(body, "drive 20 20 100", 4).find("OK drive") == 0);
   CHECK(body.state().left == 20 && body.state().right == 20);
   read.dock.valid = false; // missing I2C read during physical motion
-  body.set_accessories(read);
+  body.set_accessories(read, 5);
   CHECK(!body.state().armed);
   CHECK(body.state().left == 0 && body.state().right == 0);
   CHECK(body.state().servos_attached); // keep jaw PWM on sensor dropout
@@ -610,25 +664,25 @@ static void installed_dock_i2c_loss_or_single_seat_stops_local_motors() {
   read.dock.valid = true;
   read.dock.sample_seq = 2;
   read.dock.at_ms = 6;
-  body.set_accessories(read);
+  body.set_accessories(read, 6);
   CHECK(send(body, "arm", 7) == "OK arm"); // manual explicit rearm
   body.tick(507); // 501ms since last physical expander read
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 508) == "ERR arm dock_gpio_missing_or_stale");
   read.dock.sample_seq = 3;
   read.dock.at_ms = 509;
-  body.set_accessories(read);
+  body.set_accessories(read, 509);
   CHECK(send(body, "arm", 510) == "OK arm");
   read.dock.left_seated = true; // even one seat without powered PGOOD
   read.dock.sample_seq = 4;
   read.dock.at_ms = 511;
-  body.set_accessories(read);
+  body.set_accessories(read, 511);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 512) == "ERR arm dock_power_connected");
   read.dock.left_seated = false;
   read.dock.sample_seq = 5;
   read.dock.at_ms = 513;
-  body.set_accessories(read); // both open + no PGOOD is an observed removal
+  body.set_accessories(read, 513); // both open + no PGOOD is an observed removal
   CHECK(!body.state().armed); // no resume merely because contacts cleared
   CHECK(send(body, "arm", 514) == "OK arm");
   CHECK(send(body, "disarm", 515) == "OK disarm");
@@ -645,7 +699,7 @@ static void dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof() {
   read.dock.charge_indicated = true;
   read.dock.sample_seq = 123;
   read.dock.at_ms = 150;
-  body.set_accessories(read);
+  body.set_accessories(read, 150);
   const std::string aux = send(body, "aux", 200);
   CHECK(!aux.empty() && aux.front() == '{' && aux.back() == '}');
   CHECK(aux.size() < desk_robot::kReplyCapacity - 1);
@@ -703,7 +757,7 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   readings.climate.humidity_centi = 4850;
   readings.climate.sample_seq = 10;
   readings.climate.at_ms = 95;
-  body.set_accessories(readings);
+  body.set_accessories(readings, 120);
   desk_robot::OpticalRaw paw{};
   paw.present = paw.valid = true;
   paw.part_id = 0x15;
@@ -723,7 +777,7 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   // Only optional NFC status changed. It cannot arm a physical guard.
   CHECK(send(body, "disarm", 121) == "OK disarm");
   readings.nfc.valid = false;
-  body.set_accessories(readings);
+  body.set_accessories(readings, 125);
   const auto stale = send(body, "aux", 125);
   CHECK(stale.find("\\"nfc\\":{\\"v\\":false,\\"t\\":0,\\"e\\":3,\\"s\\":17}")
         != std::string::npos);
@@ -769,6 +823,8 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
+    dock_removal_needs_new_fresh_real_gpio_sample();
+    dock_removal_accepts_genuine_uint32_wrap();
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
