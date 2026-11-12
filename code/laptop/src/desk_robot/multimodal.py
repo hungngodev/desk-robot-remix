@@ -444,19 +444,19 @@ class MultimodalOrchestrator:
             self.hub.notify(robot_id, "human_voice", now)
         else:
             self.hub.barge_in(robot_id, now)
-        self._turn_epoch[robot_id] += 1
-        # One genuine user talking to any head owns the shared fleet floor.
-        # Do not allow four other pets to fill the two-worker JPEG budget.
+        # A real human on any head owns the fleet speech floor. A visual
+        # answer that began on ANOTHER pet before this voice edge must also
+        # become invalid; cancelling only the speaking robot let a peer's
+        # expensive VLM answer survive this global preemption.
         for peer in self.hub.robots:
+            self._turn_epoch[peer] += 1
             self._cancel_proactive_snapshot(peer)
             pending_sensor = self._sensor_tasks.get(peer)
             if pending_sensor is not None and not pending_sensor.done():
                 pending_sensor.cancel()
-        # A second spoken utterance supersedes an in-flight camera answer;
-        # never let an old VLM response join the new Xiaozhi speech turn.
-        prior = self._look_tasks.get(robot_id)
-        if prior is not None and not prior.done():
-            prior.cancel()
+            prior = self._look_tasks.get(peer)
+            if prior is not None and not prior.done():
+                prior.cancel()
         if self._closed or not self.settings.voice_vision_tools_enabled:
             return
         task = self._capture_tasks.get(robot_id)
@@ -565,6 +565,15 @@ class MultimodalOrchestrator:
             raise ValueError("A short real visual question is required")
         if self._closed:
             raise RuntimeError("Visual conversation already shut down")
+        # A question initiated by a different head while another human is
+        # talking cannot borrow the shared VLM/speech floor. The speaking
+        # robot may still use its own authenticated visual tool.
+        now = time.monotonic()
+        if any(
+            peer != robot_id and self.hub.user_active(peer, now)
+            for peer in self.hub.robots
+        ):
+            raise RuntimeError("Another human turn owns the fleet visual floor")
         metrics = self._metrics[robot_id]
         metrics["visual_questions"] += 1
         turn = self._turn_epoch[robot_id]
