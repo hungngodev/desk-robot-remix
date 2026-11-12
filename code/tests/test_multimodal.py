@@ -1020,3 +1020,43 @@ async def test_optional_jpeg_worker_cannot_starve_live_human_visual_preprocess(m
             pending.cancel()
             await asyncio.gather(pending, return_exceptions=True)
         await visual.close()
+
+
+async def test_native_duplex_reuses_current_speech_jpeg_instead_of_second_xiao_capture():
+    """Native PCM and the Mac VAD JPEG sampler share one physical camera."""
+    head = Head()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()}, Vision(),
+        asyncio.Lock(),
+    )
+    try:
+        visual._voice_turn_at["robot-01"] = time.monotonic() - 0.1
+        first = await visual.capture("robot-01", source="speech")
+        assert head.captures == 1
+        assert await visual.native_frame("robot-01") is first
+        assert head.captures == 1
+        # A prior-turn speech JPEG must never be reclassified as live video.
+        visual._voice_turn_at["robot-01"] = time.monotonic()
+        second = await visual.native_frame("robot-01")
+        assert second is not first
+        assert head.captures == 2
+        assert second.received_at > first.received_at
+    finally:
+        await visual.close()
+
+
+async def test_native_duplex_does_not_borrow_background_idle_camera_frame():
+    head = Head()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()}, Vision(),
+        asyncio.Lock(),
+    )
+    try:
+        idle = await visual.capture("robot-01", source="proactive")
+        assert head.captures == 1
+        frame = await visual.native_frame("robot-01")
+        assert head.captures == 2
+        assert frame is not idle
+        assert frame.source == "speech"
+    finally:
+        await visual.close()
