@@ -119,10 +119,10 @@ def render(plan: dict, body: str, head: str) -> str:
         "3.3V input; active HIGH", "Source polled; physically unqualified")
     row("WROOM GPIO36 reserved", "left 38kHz IR demodulator",
         "Demodulated NEC burst input, external bias; ESP32 erratum",
-        "No decoder or physical acceptance; do NOT wire yet")
+        "Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet")
     row("WROOM GPIO39 reserved", "right 38kHz IR demodulator",
         "Demodulated NEC burst input, external bias; ESP32 erratum",
-        "No decoder or physical acceptance; do NOT wire yet")
+        "Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet")
     for signal, target in (("oled_sda", "SSD1306 SDA"), ("oled_scl", "SSD1306 SCL"),
                            ("amp_bclk", "MAX98357A BCLK"), ("amp_lrclk", "MAX98357A LRC"),
                            ("amp_din", "MAX98357A DIN")):
@@ -156,7 +156,7 @@ def render(plan: dict, body: str, head: str) -> str:
         "* Qualified power and ground distribution to motors, servos, XIAO,",
         "  WROOM, speaker and 3.3V sensors. Never power actuators through MCU GPIO.",
         "* Reed/PIR now have slow MCP23017 GPIOB input source, freeing",
-        "  GPIO36/39 for dual IR. The real NEC decoder, RTC/ADC erratum",
+        "  GPIO36/39 for dual IR. Real timing, optical baffles, RTC/ADC erratum",
         "  filtering and final homing remain entirely unqualified.",
         "* Breakout VCC and I2C pullups, connector pin order and cable gauge.",
         "* Printed fit, local cliff geometry, audio and charger bench trials.",
