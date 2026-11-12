@@ -157,19 +157,23 @@ class VoiceEventListener:
             return 0
         data = await self._fetch()
         if data["reset"]:
-            await self._set_monitor_ready(False)
-            # Server restart invalidates the old speech generation. No stale
-            # events replay, but old Mac audio must not survive a lost VAD.
+            # Safety first: a slow/failing monitoring callback must not delay
+            # stopping obsolete speech after the authenticated bridge resets.
+            self.monitor_ready = False
             await self._preempt_all("reset")
+            await self._set_monitor_ready(False)
+            # Server restart invalidates the old speech generation.
             self.cursor = None
             self._stream_failed = False
             return 0
         if data["cursor"] < self.cursor:
             raise ValueError("Voice event cursor rolled backward without a restart")
         if data["lost"]:
-            await self._set_monitor_ready(False)
-            # Any missed interruption could have left obsolete Mac TTS running.
+            # The audio abort is time critical even when UI/health callbacks
+            # are blocked or unavailable. Fail monitor ready immediately.
+            self.monitor_ready = False
             await self._preempt_all("gap")
+            await self._set_monitor_ready(False)
             await self._reconcile_snapshot(data)
             self.cursor = data["cursor"]
             self._stream_failed = False
