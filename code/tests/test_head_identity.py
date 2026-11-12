@@ -120,3 +120,22 @@ def test_aec_port_preserves_existing_sense_pin_map_and_offline_scope():
     assert "AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_8" in config
     assert "ROBOT_UART_TX GPIO_NUM_2" in config
     assert "ROBOT_UART_RX GPIO_NUM_1" in config
+
+
+def test_optional_sense_rgb_heart_reuses_pinned_xiaozhi_state_led_and_stays_off_by_default():
+    """Software opt in is not electrical approval to wire SD-shared GPIO9."""
+    root = Path(__file__).resolve().parents[1]
+    board = (root / "firmware/head/sense/desk_robot_sense.cc").read_text()
+    installer = (root / "firmware/head/install_overlay.py").read_text()
+    plan = (root.parent / "docs/hardware/one-robot-signal-harness.generated.md").read_text()
+    assert '#include "led/single_led.h"' in board
+    assert "#ifdef CONFIG_DESK_ROBOT_RGB_HEART_ENABLED" in board
+    assert "static SingleLed heart(GPIO_NUM_9)" in board
+    assert "return WifiBoard::GetLed();" in board
+    assert "config DESK_ROBOT_RGB_HEART_ENABLED" in installer
+    # Source Kconfig must include an actual default-off flag in the Sense
+    # overlay, not merely a dangling C++ preprocessor name.
+    tail = installer.split("config DESK_ROBOT_RGB_HEART_ENABLED", 1)[1]
+    assert "default n" in tail.split("endmenu", 1)[0]
+    assert "Do NOT wire yet" in plan
+    assert "5V level buffer still unqualified" in plan
