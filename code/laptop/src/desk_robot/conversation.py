@@ -214,10 +214,13 @@ class Conversation:
             # contention cannot block urgent Xiaozhi VAD and speaker abort on
             # the Mac event loop. The active lease is already held so another
             # social request cannot overtake this pending conversation.
-            personas = await asyncio.gather(*(
-                asyncio.to_thread(self._persona_with_memory, robot)
-                for robot in robots
-            ))
+            personas = await asyncio.wait_for(
+                asyncio.gather(*(
+                    asyncio.to_thread(self._persona_with_memory, robot)
+                    for robot in robots
+                )),
+                timeout=5.0,
+            )
             self.histories = {
                 robot.id: [
                     {"role": "system", "content": persona},
