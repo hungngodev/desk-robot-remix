@@ -18,6 +18,10 @@ class TwoWire {
   std::size_t pos = 0;
   bool pending_sht = false;
   bool fail_dock_gpio = false;
+  bool nfc_connected = false;
+  bool nfc_tag_present = false;
+  std::uint8_t nfc_command = 0, nfc_phase = 0;
+  unsigned nfc_scans = 0;
   unsigned dock_gpio_reads = 0;
   std::uint8_t dock_gpioA = 0x0F; // switches closed, no input or charger
 
@@ -38,7 +42,7 @@ class TwoWire {
       case 4: return addr == 0x48;
       case 8: return addr == 0x44;
       case 16: return addr == 0x36 || addr == 0x40;
-      case 32: return addr == 0x20; // optional MCP23017 dock GPIOA
+      case 32: return addr == 0x20 || (nfc_connected && addr == 0x24);
       case 64: return addr == 0x36;
       case 128: return addr == 0x36;
       default: return false;
@@ -57,6 +61,11 @@ class TwoWire {
       if (outbound.size() != 1) return 4;
       extras = outbound[0];
       if (extras && ranges) unsafe_parallel_mux = true;
+    } else if (current_address == 0x24 && !outbound.empty()) {
+      if (outbound.size() < 9 || outbound[0] != 0 || outbound[1] != 0 ||
+          outbound[2] != 0xff) return 4;
+      nfc_command = outbound[6];
+      nfc_phase = 1; // deterministic ACK, then response on separate mux slots
     } else if (!outbound.empty()) {
       register_address = outbound[0];
       if (current_address == 0x44 && outbound[0] == 0xFD)
@@ -72,7 +81,32 @@ class TwoWire {
     inbound.clear();
     pos = 0;
     if (!connected(addr)) return 0;
-    if (addr == 0x20 && register_address == 0x12) {
+    if (addr == 0x24 && nfc_connected) {
+      if (nfc_phase == 1 && count == 7) {
+        inbound = {1, 0, 0, 0xff, 0, 0xff, 0};
+        nfc_phase = 2;
+      } else if (nfc_phase == 2 && count >= 10) {
+        const std::vector<std::uint8_t> payload = nfc_command != 0x4a
+            ? std::vector<std::uint8_t>{}
+            : (nfc_tag_present
+               ? std::vector<std::uint8_t>{1, 1, 4, 0, 8, 4,
+                   0x12, 0x34, 0x56, 0x78}
+               : std::vector<std::uint8_t>{0});
+        const auto len = static_cast<std::uint8_t>(2 + payload.size());
+        inbound = {1, 0, 0, 0xff, len, static_cast<std::uint8_t>(-len),
+                   0xd5, static_cast<std::uint8_t>(nfc_command + 1)};
+        std::uint8_t sum = static_cast<std::uint8_t>(0xd5U + nfc_command + 1);
+        for (std::uint8_t b : payload) {
+          inbound.push_back(b);
+          sum = static_cast<std::uint8_t>(sum + b);
+        }
+        inbound.push_back(static_cast<std::uint8_t>(-sum));
+        inbound.push_back(0);
+        inbound.resize(count, 0);
+        if (nfc_command == 0x4a) ++nfc_scans;
+        nfc_phase = 0;
+      }
+    } else if (addr == 0x20 && register_address == 0x12) {
       if (fail_dock_gpio) return 0;
       ++dock_gpio_reads;
       inbound = {dock_gpioA};
