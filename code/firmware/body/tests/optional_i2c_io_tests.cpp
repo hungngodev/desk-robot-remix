@@ -37,6 +37,7 @@ int main() {
     CHECK(pulse.sample().valid);
     CHECK(pulse.sample().red == 1003);
     CHECK(pulse.sample().ir == 5003);
+    CHECK(pulse.sample().sample_seq > 0U);
     const auto& read = accessories.readings();
     for (unsigned i = 0; i < 3; ++i) {
       CHECK(read.angle[i].present);
