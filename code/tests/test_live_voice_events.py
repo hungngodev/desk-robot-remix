@@ -1153,7 +1153,10 @@ async def test_failed_speech_snapshot_retries_without_replaying_acked_interrupt(
         snapshots += 1
         if snapshots == 2:
             raise OSError("snapshot consumer temporarily offline")
-        assert active == frozenset({"robot-01"}) if snapshots > 1 else not active
+        if snapshots == 1:
+            assert active == frozenset()
+        else:
+            assert active == frozenset({"robot-01"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
         listener = VoiceEventListener(
