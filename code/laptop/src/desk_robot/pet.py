@@ -68,7 +68,7 @@ def _initiative_evidence(change: SceneChange) -> bool:
         "squeeze", "hand_wave", "nose_twist", "nearby_object",
         "battery_low", "magnet", "pir", "bumper",
         "handling_tilt", "handling_shake", "side_object", "paw_contact",
-        "ambient_shift",
+        "ambient_shift", "nfc_tag",
     } and change.confidence >= 0.95
 
 
@@ -110,6 +110,7 @@ class PetState:
     last_ambient_seq: int | None = None
     ambient_baseline: tuple[int, int] | None = None
     ambient_streak: int = 0
+    last_nfc_events: int | None = None
     last_aux_kind: str | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
@@ -242,6 +243,7 @@ class PetController:
         state.last_ambient_seq = None
         state.ambient_baseline = None
         state.ambient_streak = 0
+        state.last_nfc_events = None
         state.last_aux_kind = None
         state.enabled = True
         state.last_error = None
@@ -452,6 +454,7 @@ class PetController:
                 state.last_ambient_seq = None
                 state.ambient_baseline = None
                 state.ambient_streak = 0
+                state.last_nfc_events = None
             await asyncio.sleep(1.0)
 
     async def _observe_aux(self, robot_id: str, generation: int, data: dict) -> None:
@@ -560,6 +563,25 @@ class PetController:
             state.last_ambient_seq = None
             state.ambient_baseline = None
             state.ambient_streak = 0
+
+        # PN532 toy UID tokens are nonsecret, cloneable labels. Never use
+        # them for device identity, unlock, pairing trust or motor authority.
+        nfc = data.get("nfc")
+        if (robot.nfc_interactions_qualified and isinstance(nfc, dict)
+                and nfc["v"] and nfc["s"] > 0):
+            prior_events = state.last_nfc_events
+            current_events = nfc["e"]
+            if (prior_events is not None
+                    and 0 < current_events - prior_events <= 3
+                    and nfc["t"] != 0):
+                changes.append(SceneChange(
+                    "nfc_tag",
+                    f"My NFC toy accessory with game token {nfc['t']:08x} was presented",
+                    1.0,
+                ))
+            state.last_nfc_events = current_events
+        else:
+            state.last_nfc_events = None
 
         power = data["power"]
         if power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500:
