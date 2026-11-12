@@ -110,6 +110,29 @@ int main() {
       CHECK(!bus.extra_diagnostic(3, 411).present);
     }
     {
+      // A mux fault after a valid optional range must invalidate its source,
+      // even before the 350ms freshness window expires.
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      bus.poll(guard, 60);  // first optional lane 5
+      CHECK(bus.extra_diagnostic(0, 60).valid);
+      Wire.range_mux_bad_readback = true;
+      bus.poll(guard, 61); // next selected lane cannot be trusted
+      faulted(guard);
+      const auto invalid = bus.extra_diagnostic(0, 62);
+      CHECK(invalid.present && !invalid.valid);
+      CHECK(invalid.distance_mm == 45);
+      Wire.range_mux_bad_readback = false;
+      // Old optional sample cannot recover merely because critical lanes do.
+      for (std::uint32_t n = 0; n < 5; ++n)
+        bus.poll(guard, 70 + n);
+      CHECK(!bus.extra_diagnostic(0, 75).valid);
+      bus.poll(guard, 76);  // first genuinely new side lane conversion
+      CHECK(bus.extra_diagnostic(0, 76).valid);
+    }
+    {
       Wire = TwoWire{};
       Wire.optional_mux_installed = false; // five sensor bench profile
       desk_robot::TofBus bus;
