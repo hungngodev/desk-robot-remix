@@ -18,9 +18,13 @@ inline bool ir_between(std::uint16_t v, unsigned lo, unsigned hi) {
 inline bool decode_nec(const IrMarkSpace* items, std::size_t count,
                        std::uint32_t& code) {
   code = 0;
-  if (!items || count != 33 ||
+  // Real NEC contains a final 560us mark after 32 data bits.
+  // Espressif's reference decoder receives 34 RMT symbols, not 33.
+  if (!items || count != 34 ||
       !ir_between(items[0].mark_us, 7200, 10800) ||
-      !ir_between(items[0].space_us, 3600, 5400)) return false;
+      !ir_between(items[0].space_us, 3600, 5400) ||
+      !ir_between(items[33].mark_us, 350, 850) ||
+      items[33].space_us != 0) return false;
   std::uint32_t bits = 0;
   for (unsigned i = 0; i < 32; ++i) {
     const IrMarkSpace p = items[i + 1];
