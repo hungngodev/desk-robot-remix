@@ -40,6 +40,8 @@ class VoiceEventListener:
         # A callback can suppress CancelledError; keep its real task as the
         # ownership token until it finishes instead of launching duplicates.
         self._global_abort_task: asyncio.Task | None = None
+        self._event_task: asyncio.Task | None = None
+        self._event_sequence: int | None = None
 
     async def _set_monitor_ready(self, ready: bool) -> None:
         if self.monitor_ready == ready and self._monitor_delivered == ready:
@@ -195,8 +197,39 @@ class VoiceEventListener:
                         else "xiaozhi_aec_vad"
                     )):
                 raise ValueError("Invalid real voice source, identity or sequence")
-            await self.on_interrupt(event["robot_id"], event["kind"])
-            current = event["seq"]
+            # A head may hang after receiving its interrupt command. Keep
+            # the exact sequence's task alive across transport retries and
+            # refuse a duplicate callback while the first is still running.
+            seq = event["seq"]
+            task = self._event_task
+            if task is None:
+                task = asyncio.create_task(
+                    self.on_interrupt(event["robot_id"], event["kind"])
+                )
+                self._event_task = task
+                self._event_sequence = seq
+
+                def observe_event_result(completed: asyncio.Task) -> None:
+                    if not completed.cancelled():
+                        completed.exception()
+
+                task.add_done_callback(observe_event_result)
+            elif self._event_sequence != seq:
+                raise TimeoutError("Previous voice interruption still unresolved")
+            try:
+                done, pending = await asyncio.wait({task}, timeout=0.5)
+                if pending:
+                    raise TimeoutError("Voice interruption incomplete; no ACK")
+                if task.cancelled():
+                    raise TimeoutError("Voice interruption cancelled without ACK")
+                task.result()
+            finally:
+                if task.done():
+                    self._event_task = None
+                    self._event_sequence = None
+                else:
+                    task.cancel()  # best effort; an uncooperative task stays owned
+            current = seq
             # Commit only after successful cancellation; failed callbacks replay.
             self.cursor = current
             self.handled += 1
