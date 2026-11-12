@@ -5,6 +5,7 @@ These are source assertions, never electrical, acoustic or safety acceptance.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,54 @@ def test_real_robot_pin_allocations_do_not_double_book_same_gpio():
     assert bus["sense_gpio"]["amp_bclk"] == 4
     # The XIAO Sense SD J3 wire isolation is a physical task, not a pin test.
     assert not PLAN["qualified_assumptions"]
+
+
+def test_current_body_and_sense_firmware_gpio_match_machine_readable_harness():
+    # Source-level regression only. It cannot measure the actual board rev,
+    # isolation of the XIAO Sense SD J3, polarity, or safe electrical loads.
+    body = (ROOT / "code/firmware/body/include/BodyPins.h").read_text()
+    sense = (ROOT / "code/firmware/head/sense/config.h").read_text()
+    planned_body = PLAN["bus"]["body_gpio"]
+    body_names = {
+        "lift_servo": "kLiftServo", "grip_servo": "kGripServo",
+        "head_uart_rx": "kUartRx", "head_uart_tx": "kUartTx",
+        "sda": "kSensorSda", "scl": "kSensorScl",
+        "head_touch": "kTouchOutput",
+        "bumper_nc_series": "kBumperInput",
+        "reed": "kReedInput", "pir": "kPirInput",
+    }
+    for key, symbol in body_names.items():
+        match = re.search(rf"constexpr int {symbol} = (\\d+);", body)
+        assert match is not None, f"Missing exact firmware pin {symbol}"
+        assert int(match.group(1)) == planned_body[key], key
+
+    for key, symbol in (
+        ("left_stepper", "kLeftStepperPins"),
+        ("right_stepper", "kRightStepperPins"),
+    ):
+        match = re.search(
+            rf"constexpr int {symbol}\\[\\] = \\{{([0-9, ]+)\\}};", body
+        )
+        assert match is not None
+        assert [int(pin.strip()) for pin in match.group(1).split(",")] == planned_body[key]
+    assert "constexpr int kMuxReset = -1;" in body  # avoid boot strap GPIO4
+
+    sense_names = {
+        "oled_sda": "DISPLAY_SDA_PIN", "oled_scl": "DISPLAY_SCL_PIN",
+        "amp_bclk": "AUDIO_I2S_SPK_GPIO_BCLK",
+        "amp_lrclk": "AUDIO_I2S_SPK_GPIO_LRCK",
+        "amp_din": "AUDIO_I2S_SPK_GPIO_DOUT",
+        "head_uart_tx": "ROBOT_UART_TX", "head_uart_rx": "ROBOT_UART_RX",
+    }
+    for key, symbol in sense_names.items():
+        match = re.search(rf"#define {symbol} GPIO_NUM_(\\d+)\\b", sense)
+        assert match is not None, f"Missing Sense firmware pin {symbol}"
+        assert int(match.group(1)) == PLAN["bus"]["sense_gpio"][key], key
+    assert "#define AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42" in sense
+    assert "#define AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41" in sense
+    assert PLAN["bus"]["sense_gpio"]["rgb_data"] == 9
+    # RGB is allocated, not automatically wired or implemented on hardware.
+    assert "GPIO_NUM_9" not in sense
 
 
 def test_all_eight_tof_lanes_and_every_aux_lane_have_unique_i2c_addresses():
