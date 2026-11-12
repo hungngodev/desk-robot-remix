@@ -26,6 +26,9 @@ async def test_absent_calibration_holds_without_camera_or_motors():
         head, SimpleNamespace(id="robot-01", dock_calibration=None)
     )
     assert result["phase"] == "hold"
+    assert result["source"] == "not_calibrated"
+    assert result["pose"] is None
+    assert result["physical_acceptance_pass"] is False
     assert not result["motor_authorized"] and not result["charging_authorized"]
     assert not head.captures and not head.commands
 
