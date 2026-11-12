@@ -592,6 +592,37 @@ static void dock_removal_needs_new_fresh_real_gpio_sample() {
   CHECK(send(body, "disarm", 614) == "OK disarm");
 }
 
+static void dock_replayed_gpio_bits_do_not_preserve_arm_permission() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_dock_monitor(true);
+  desk_robot::AccessoryReadings r{};
+  r.dock.present = r.dock.valid = true;
+  r.dock.sample_seq = 30;
+  r.dock.at_ms = 50;
+  body.set_accessories(r, 51);
+  CHECK(send(body, "arm", 52) == "OK arm");
+  CHECK(send(body, "drive 20 20 100", 53).find("OK drive") == 0);
+  r.dock.left_seated = true; // same identity but changed bits is not a new read
+  body.set_accessories(r, 54);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 55) == "ERR arm dock_power_connected");
+  r.dock.left_seated = false;
+  body.set_accessories(r, 56);
+  CHECK(send(body, "arm", 57) == "ERR arm dock_power_connected");
+  r.dock.sample_seq = 31; // real new GPIOA conversion
+  r.dock.at_ms = 58;
+  body.set_accessories(r, 59);
+  CHECK(!body.state().armed); // contact loss never automatically resumes
+  CHECK(send(body, "arm", 60) == "OK arm");
+  CHECK(send(body, "disarm", 61) == "OK disarm");
+
+  // A forged changed record under the same acquisition cannot keep motors armed.
+  r.dock.right_seated = true;
+  body.set_accessories(r, 62);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 63) == "ERR arm dock_power_connected");
+}
+
 static void dock_removal_accepts_genuine_uint32_wrap() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_dock_monitor(true);
@@ -825,6 +856,7 @@ int main() {
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
     dock_removal_needs_new_fresh_real_gpio_sample();
     dock_removal_accepts_genuine_uint32_wrap();
+    dock_replayed_gpio_bits_do_not_preserve_arm_permission();
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
