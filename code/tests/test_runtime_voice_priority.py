@@ -1,6 +1,6 @@
 """A human speaking to one Sense preempts the shared fleet speech floor."""
-from types import SimpleNamespace
 import time
+from types import SimpleNamespace
 
 from desk_robot.runtime import Runtime
 
