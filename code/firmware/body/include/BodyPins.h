@@ -24,8 +24,14 @@ constexpr int kTouchOutput = 34;
 // NC switches wired in series to ground, external 3.3V pullup.
 // Normal continuity drives LOW; collision or broken wire opens -> HIGH trip.
 constexpr int kBumperInput = 35;
-constexpr int kReedInput = 36;
-constexpr int kPirInput = 39;
+// Proposed two demodulated 38kHz terminal dock IR receiver inputs.
+// Input-only, external pullups/active receiver output; no internal bias.
+// Reserved only: no NEC decoder, final homing or charge authorizer exists.
+// ESP32 GPIO36/39 RTC/ADC glitch erratum needs RMT filtering and bench tests.
+constexpr int kTerminalIrLeftInput = 36;
+constexpr int kTerminalIrRightInput = 39;
+// Slow magnetic hat/reed and PIR inputs move to MCP23017 GPIOB0 and GPIOB1.
+// They are not WROOM GPIOs and cannot capture 560us IR pulses.
 
 #else
 // DRV8833: xIN1 positive PWM / xIN2 low, reversed for negative; both low = coast.
