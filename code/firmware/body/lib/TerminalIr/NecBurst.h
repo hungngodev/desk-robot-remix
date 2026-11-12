@@ -80,9 +80,12 @@ class DualIrEvidence {
     out.right_fresh = right.seq != 0 && out.right_age_ms <= 200U;
     // A 200 ms time window does not itself prove a bearing. Different
     // receivers must actually observe the SAME checksum-valid beacon.
+    // Ages are both relative to the SAME clock, so this difference is
+    // correct even when the 32-bit millis counter rolls over.
     const std::uint32_t separation =
-        left.at_ms >= right.at_ms ? left.at_ms - right.at_ms
-                                 : right.at_ms - left.at_ms;
+        out.left_age_ms >= out.right_age_ms
+            ? out.left_age_ms - out.right_age_ms
+            : out.right_age_ms - out.left_age_ms;
     out.same_code = out.left_fresh && out.right_fresh &&
                     separation <= 120U && left.code == right.code;
     if (out.same_code) out.code = left.code;
