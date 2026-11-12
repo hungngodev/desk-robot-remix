@@ -6,6 +6,18 @@
 
 **One current repository and PR:** [hungngodev/desk-robot-remix](https://github.com/hungngodev/desk-robot-remix), [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17), `impl/mac-hardware-safety-preflight-2026-11-10`. The PR head changes as reviewers commit. Compare to actual current head, not a historical ChatGPT response.
 
+
+## November 12 continuation: cancelled gripper cleanup and exact power sizing
+
+One narrow continuation on the canonical PR, without new PRs, external MCP, local installs, hardware claims or duplicate agent frameworks:
+
+* `e7158b0` catches an actual `asyncio.CancelledError` during partial `guarded_grasp` so the existing best-effort relief path can try the measured jaw-open angle **only after a fresh WROOM health check**. Neither cancel nor failed ACK is proof that the jaw did not move. The WROOM local interlock remains authoritative; this is not a claim of independently safe force or guaranteed release.
+* `a175ccc` adds source tests for cancellation permitting relief and cancellation refusing relief after body disarm. `e2cb204` adds real task cancellation while the first servo command is unacknowledged. These tests were committed and are **not reported passing**.
+* `ccd4072` and `cc92676` change the existing `power_preflight.py` candidate comparison to use unrounded required currents and add an under-rating regression. `a4dd9df` and `6133eb2` use Decimal input arithmetic, round displayed requirements **up** to the nearest milliamp, and test both an insufficient 1.529 A candidate and an exact 3.9 A stated decimal rating. This remains sizing arithmetic, not a battery or charger choice or a verified electrical load.
+* Latest observed `Host verification` workflow [43268579674](https://github.com/hungngodev/desk-robot-remix/actions/runs/43268579674) failed at all four jobs with **zero recorded steps** (Python/head and body C++ steps checked directly). The source tests above have no CI pass evidence; a direct GitHub checkout in this execution environment failed at DNS resolution. Never infer source pass/failure from the runner's before-step failure.
+
+**Next independent verification:** run `PYTHONPATH=code/laptop/src python -m pytest code/tests/test_grasp_feedback.py code/tests/test_power_preflight.py -q` in a working checked-out environment, then test real XIAO/WROOM cancellation and live force safeguards under a monitored bench setup. Preserve unchanged dock and charging permissions and do not represent code-only evidence as hardware acceptance.
+
 ## November 12 terminal IR queue-age guard source followup
 
 The independent QA backlog finding now has a narrow source correction on the canonical PR: `NecBurst.h` adds a portable bounded poll/queue gate, `TerminalIr.cpp` discards on a poll gap above 100 ms or either side's ambiguous backlog and drains up to eight packets per receiver without accepting an old dequeue as fresh. Receiver reinitialization resets the baseline. `terminal_ir_tests.cpp` adds deterministic interval, overflow, drain and rollover cases. A separate local standalone C++ harness for exactly the small gate compiled with `g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined` and passed its 18 asserted cases; the repository C++ test target and actual WROOM firmware have **not** run here. See [source rationale and remaining RMT integration tests](../research/2026-11-12-terminal-ir-backlog-freshness-design.md#november-12-source-implementation-after-independent-review). This does not confer dock motor/charging permission or solve real sensor electrical timing.
