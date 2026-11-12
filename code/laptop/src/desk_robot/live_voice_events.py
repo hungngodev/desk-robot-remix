@@ -54,7 +54,17 @@ class VoiceEventListener:
         # The Mac runtime owns a single shared speech floor. Abort it ONCE,
         # rather than executing the same five-pet cancellation five times.
         if self.on_global_interrupt is not None:
-            await self.on_global_interrupt(reason)
+            # The shared audio owner can also hang during a head disconnect.
+            # Bound the observation, not the physical flush; retry on failure.
+            task = asyncio.create_task(self.on_global_interrupt(reason))
+            try:
+                done, pending = await asyncio.wait({task}, timeout=0.5)
+                if pending:
+                    raise TimeoutError("Shared fleet interruption incomplete")
+                task.result()
+            finally:
+                if not task.done():
+                    task.cancel()
             return
         # Existing independent consumers preserve their per-device callback.
         # Launch every independent fallback at once. Serial awaits would
