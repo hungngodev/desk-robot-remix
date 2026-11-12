@@ -182,7 +182,7 @@ The room accessory station may reuse the existing Feather nRF52840 over USB if i
 | --- | --- |
 | One Sense + WROOM, 2 ULN2003 motors, 2 MG90S, OLED, basic touch | Existing project firmware and documented wiring; real assembled verification pending |
 | MPU6050 at upstream 0x68/0x69, five VL53L4CD on mux A | Existing source support; physical mounting, voltage and safety tests pending |
-| Additional 3 optical directions, second mux and 8 zone CAP1188 | Logical address and pin allocation finalized; new firmware driver/poll scheduler required |
+| Additional 3 optical directions, second mux and 8 zone CAP1188 | Eight lanes and read-only side polling source implemented; eight physical sensor trials and measured safety margins still required |
 | APDS9960, FSR/ADS1115, two wheel encoders, AS5600 nose, PN532, battery gauges, humidity | Exact low-priority mux lanes finalized; boards, mounting and code **not** yet qualified |
 | Local safety stopping, battery charging, gripper lift, natural audio interrupt, autonomy, docking | No physical acceptance; must pass full published trials before declaring done |
 | Room station, heartbeat, VOC/CO2, presence, thermal, plant and toys | Named external accessory architecture; opt-in source and driver integration required |
