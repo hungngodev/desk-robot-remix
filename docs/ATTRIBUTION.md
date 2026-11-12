@@ -89,3 +89,22 @@ assets are copied here. [Research and archive audit](research/2026-11-03-fetch-a
   audio/video integration alternatives, not installed or redistributed here.
 - [LiveKit ESP32 client](https://github.com/livekit/client-sdk-esp32), Apache-2.0:
   inspected alternative only. Preserve actual dependency notices if adopted.
+
+
+## What is actually reused, versus locally implemented (November 12 audit)
+
+**PR creation mechanism:** GitHub connector edits files on branch `impl/mac-hardware-safety-preflight-2026-11-10`, creating commits within the same draft [PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17). This does not automatically run, import or remix every linked GitHub project. An inspected paper, README, or repository is **not** a vendored implementation.
+
+| Reference or dependency | Actual incorporation | Integration and audit boundary |
+| --- | --- | --- |
+| [Xiaozhi ESP32](https://github.com/78/xiaozhi-esp32) and [xinnan server](https://github.com/xinnan-tech/xiaozhi-esp32-server) | **Pinned external upstream with source overlays** for physical microphone, camera, LCD/OLED and Opus plus group speaker bridge | The shipped Sense and local server revisions must compile together; the Mac does not run a second microphone or fake human VAD source |
+| [Pololu VL53L4CD](https://github.com/pololu/vl53l4cd-arduino) and ST ULD | **Pinned dependency and adapted bounded sensor protocol** | Five critical physical guard lanes plus three optional lanes, with real sensor safety only after desk optical trials |
+| [Stackchan-agent](https://github.com/botamochi6277/stackchan-agent) | **Vendored pinned MIT HSM header** `code/firmware/head/overlay/stackchan_behavior.hpp` with license in source | Owns OLED idle/expression decisions, not motors, voice transport or new runtime |
+| [Reachy Mini conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) | **Design reference only**, not Reachy code, SDK, daemon or joints | Inspired one owner, cheap initiative gate and expressive idles; do not claim the Reachy software was imported |
+| [LiveKit Agents](https://github.com/livekit/agents) and [Frigate](https://github.com/blakeblackshear/frigate) | **Algorithmic reference only**, not vendored libraries | Adaptive VAD video cadence, cheap motion gate, priority capture and bounded per-robot RAM buffers are original Mac glue |
+| [LlamaPIE paper](https://aclanthology.org/2025.findings-acl.710/), [ProAct](https://arxiv.org/abs/2602.14048) and [ProactiveBench](https://github.com/yellow-binary-tree/ProactiveBench) | **Research references only** | No trained initiative model or benchmark score has been claimed. Current policy uses explicit event evidence, freshness, silence and cooldown |
+| [Seeed Studio PN532](https://github.com/Seeed-Studio/PN532/tree/arduino/src) | **Protocol adaptation**, not a linked synchronous driver | `code/firmware/body/lib/AccessorySensors/Pn532Frames.h` and `AccessorySensors.cpp` encode validated frames, asynchronously poll a real separate I2C device and expose cloneable toy tokens only. The direct Seeed blocking wait loops were not copied into WROOM's cliff loop. Preserve upstream BSD-3-Clause attribution |
+| Local `Conversation.run`, `PetController`, `MultimodalOrchestrator` | **Custom glue using already selected components** | Event-triggered two-pet conversation, peer provenance, shared speaker arbitration, priority JPEG, stale answer suppression and cancellation tests are original source in this project, not assertions of vendor integration |
+| SMARS, gripper and third-party STL ancestors | **Retained mechanical reference assets under their own licenses** | CC noncommercial or share-alike restrictions remain. Never reinterpret license compatibility or dimensionally fitted assembly from filenames alone |
+
+**Truth rule:** whenever the documentation says *reused*, specify **copied unchanged**, **pinned dependency**, **adapted protocol**, or **design reference**. A GitHub link, an API sketch, a committed mock test or a source-level C++ driver is not proof that the electrical carrier, body shell, voice acoustics, Pogo charger or printed assembly works. Current CI jobs fail before executing, so the latest integration tests are not verified passing.
