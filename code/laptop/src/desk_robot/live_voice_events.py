@@ -57,16 +57,27 @@ class VoiceEventListener:
             await self.on_global_interrupt(reason)
             return
         # Existing independent consumers preserve their per-device callback.
-        first_error = None
-        for robot_id in sorted(self.robot_ids):
-            try:
-                await self.on_interrupt(robot_id, reason)
-            except Exception as exc:
-                # One failed head must not leave the other four speaking.
-                if first_error is None:
-                    first_error = exc
-        if first_error is not None:
-            raise first_error
+        # Launch every independent fallback at once. Serial awaits would
+        # delay other pets behind one unavailable or cancellation-resistant
+        # head. The production single shared audio owner remains preferred.
+        tasks = [
+            asyncio.create_task(self.on_interrupt(robot_id, reason))
+            for robot_id in sorted(self.robot_ids)
+        ]
+        try:
+            done, pending = await asyncio.wait(tasks, timeout=0.5)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+        errors = [task.exception() for task in tasks
+                  if task in done and not task.cancelled()
+                  and task.exception() is not None]
+        if pending:
+            # Child tasks are cancelled but never presumed physically flushed.
+            raise TimeoutError("Fleet interruption incomplete; head unresponsive")
+        if errors:
+            raise errors[0]
 
     async def _fetch(self, bootstrap: bool = False) -> dict:
         query = {"after": str(self.cursor if self.cursor is not None else 0)}
