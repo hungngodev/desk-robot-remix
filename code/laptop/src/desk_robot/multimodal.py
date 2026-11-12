@@ -603,6 +603,27 @@ class MultimodalOrchestrator:
                 metrics["camera_errors"] += 1
                 raise
 
+    async def native_frame(self, robot_id: str) -> CameraEvidence:
+        """Reuse a real fresh speech JPEG before asking XIAO for another.
+
+        The idle voice sampler and native duplex server share the exact same
+        per-head camera transport and ring. Reuse only a frame received after
+        this head's current human VAD edge: an idle/background photograph must
+        not masquerade as live visual evidence from the present conversation.
+        """
+        self.hub._check(robot_id)
+        if self._closed:
+            raise RuntimeError("Multimodal orchestrator closed")
+        recent = self.hub.frames[robot_id]
+        now = time.monotonic()
+        if recent:
+            frame = recent[-1]
+            if (frame.source in ("speech", "voice_question")
+                    and 0 <= now - frame.received_at <= 0.65
+                    and frame.received_at >= self._voice_turn_at[robot_id]):
+                return frame
+        return await self.capture(robot_id, source="speech")
+
     async def offer_proactive(self, robot_id: str, jpeg: bytes, now: float) -> None:
         # Pet snapshots share the same authenticated head.capture_lock. Only
         # CPU preprocessing runs off-thread. Never publish late paused frames.
