@@ -65,7 +65,8 @@ def test_current_body_and_sense_firmware_gpio_match_machine_readable_harness():
         "sda": "kSensorSda", "scl": "kSensorScl",
         "head_touch": "kTouchOutput",
         "bumper_nc_series": "kBumperInput",
-        "reed": "kReedInput", "pir": "kPirInput",
+        "terminal_ir_left_reserved": "kTerminalIrLeftInput",
+        "terminal_ir_right_reserved": "kTerminalIrRightInput",
     }
     for key, symbol in body_names.items():
         match = re.search(rf"constexpr int {symbol} = (\\d+);", body)
