@@ -135,6 +135,27 @@ Human interruption remains absolute priority. Separately, an **intentional physi
 
 **New source tests committed, not yet executed:** `test_proactive_frame_gate_reuses_motion_filter_to_ignore_global_exposure`, `test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner` (both actual changed object and uniform lighting cases), `test_sensor_two_frame_burst_never_blocks_human_speech_priority`, `test_sensor_two_frame_burst_is_bounded_and_camera_serial`, `test_deliberate_touch_can_reply_after_passive_speech_cooldown`, and `test_touch_can_never_override_authenticated_human_vad`. These tests use deterministic mocks, **not real camera, latency, VAD acoustics, or a deployed ESP32**.
 
+### Five head camera priority and measured software diagnostics
+
+**A concrete cross-pet bug was removed.** Previously `sensor_event` and background camera capture checked only whether the **same** head had active VAD, even though any live human turn should own the fleet's compute and voice priority. `MultimodalOrchestrator._any_human_active` now checks all registered heads. An authenticated Xiaozhi VAD start cancels outstanding sensor camera tasks and active low-priority snapshot requests across all five pets. Its own high-priority speech JPEG sampler and direct visual questions still work; it does **not** stop other heads' local WROOM safety guards or touch polling.
+
+The background camera is a **child HTTP snapshot task** managed by the existing orchestrator. Cancelling it for human speech, a more urgent sensor burst or a direct question releases the existing per-camera capture lock and leaves the permanent `PetController._observe` loop alive. A cancelled snapshot is never promoted to current camera evidence. A later valid turn may resume ordinary observation. All burst requests use the same authenticated head transport; no new global media server is deployed.
+
+For every source ID, `MultimodalOrchestrator.status(robot_id).software_timings` now includes:
+
+| Field | Meaning |
+| --- | --- |
+| `sensor_triggers` | Real Mac source event notifications, including suppressed observations |
+| `sensor_bursts` | Distinct bounded confirmation tasks admitted after coalescing |
+| `sensor_coalesced` | Additional events within a pending burst or 800 ms coalescing window |
+| `sensor_deferred_human` | Events that did not start camera work while any fleet human spoke |
+| `sensor_trigger_to_first_jpeg_last_ms` | Last recorded **Mac event time to Mac JPEG receipt**; no device exposure or network clock synchronization claimed |
+| `sensor_followup_frames` | Successfully captured second frames for visual confirmation |
+| `proactive_camera_preemptions` | Background HTTP snapshots cancelled before the human question or higher-priority event |
+| `camera_latency_last_ms`, `model_latency_last_ms` | Existing Mac software durations, not acoustic latency guarantees |
+
+Regression source now covers simultaneous peer camera cancellation, explicit user look priority, survival of permanent observation after a cancelled JPEG, one genuine two-frame burst, normal exposure drift, and real source-to-visual-memory connection. GitHub runner failure means these **must still be executed** with actual Python and then the five physical heads. Reference mechanisms were inspected in [LiveKit's VoiceActivityVideoSampler](https://github.com/livekit/agents/blob/main/livekit-agents/livekit/agents/voice/agent_session.py), [Frigate's motion-first gating](https://docs.frigate.video/configuration/motion_detection/) and [Xiaozhi's actual bidirectional Opus/JSON transport](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md). They are **design adaptations**, not imported Frigate, LiveKit, or a substitute Xiaozhi server.
+
 ### Integration and build knobs
 
 Copy `code/config/fleet.hardware.example.toml` to a local untracked configuration with actual device addresses and private token environment variables. In production, leave `motion_enabled=false`, `dock_motion_qualified=false`, all new sensor `*_qualified=false` and `fleet_social_autonomy_enabled=false` until the real voice, sensing and source privacy tests pass. Enabling social while local source text sharing is disabled is a configuration error. Turning on social is not motor autonomy, changing head firmware or authorizing charging.
