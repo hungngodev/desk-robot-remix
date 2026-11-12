@@ -1319,6 +1319,8 @@ class PetController:
             # Peer utterances mean heard in the coordinated voice turn; other
             # secondhand facts are reports, not this camera's observations.
             def origin(entry):
+                if entry.kind == "heard_human":
+                    return "I may have heard (uncertain machine transcription): "
                 if entry.kind == "own_utterance" and entry.witnessed:
                     return "I said: "
                 if entry.kind == "peer_utterance" and not entry.witnessed:
