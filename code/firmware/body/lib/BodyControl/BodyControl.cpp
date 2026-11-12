@@ -77,6 +77,10 @@ void BodyControl::sample_side_range(std::uint8_t index, std::uint16_t mm,
   state_.side_at_ms[index] = now_ms;
 }
 
+void BodyControl::invalidate_side_ranges() {
+  for (auto& valid : state_.side_valid) valid = false;
+}
+
 void BodyControl::set_cap(bool valid, std::uint8_t zones) {
   if (!valid) {
     state_.cap_valid = false;
