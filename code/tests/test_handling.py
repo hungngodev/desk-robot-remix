@@ -199,3 +199,18 @@ def test_malformed_handling_parameters_raise_value_error_without_state_change(fi
         gate.observe(sample(), **arguments)
     assert gate.reference is None
     assert gate.startup_samples == []
+
+
+def test_repeated_shake_sample_does_not_reconfirm_gesture():
+    gate = HandlingGate()
+    calibrated(gate)
+    shake = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0),
+                   sample_ms=200000)
+    assert qualified(gate, shake, 102.0, new_sample=False) == ()
+    for i in range(6):
+        assert qualified(gate, shake, 102.05 + .05 * i,
+                         new_sample=False) == ()
+    assert gate.shake_hits == 1
+    assert qualified(gate, sample(acc=(0, 0, 26000), gyro=(16500, 0, 0),
+                                  sample_ms=200001),
+                     102.5, new_sample=False) == ("handling_shake",)
