@@ -205,3 +205,51 @@ async def test_detector_timeout_does_not_queue_another_native_worker(tmp_path, m
     assert recovered["motor_authorized"] is False
     assert recovered["charging_authorized"] is False
     assert len(calls) == 2
+
+
+async def test_cancel_before_detector_dispatch_releases_slot(tmp_path, monkeypatch):
+    import asyncio
+
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
+    dispatched = asyncio.Event()
+    allow_dispatch = asyncio.Event()
+    original_to_thread = asyncio.to_thread
+
+    async def delayed_dispatch(func, *args, **kwargs):
+        dispatched.set()
+        await allow_dispatch.wait()
+        return await original_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(dock_runtime.asyncio, "to_thread", delayed_dispatch)
+    observer = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
+    try:
+        await asyncio.wait_for(dispatched.wait(), timeout=1)
+        observer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await observer
+        busy = await dock_runtime.observe_actual_dock(Head(), robot)
+        assert busy["source"] == "apriltag_detector_busy"
+        assert not busy["motor_authorized"] and not busy["charging_authorized"]
+    finally:
+        allow_dispatch.set()
+
+    for _ in range(100):
+        if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
+            dock_runtime._DETECTOR_SLOT.release()
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("Cancelled observer leaked the detector slot")
+
+    def detector(image, calibration, *, captured_at):
+        return DockPose(0, 0, 450, 0.5, captured_at)
+
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", detector)
+    recovered = await dock_runtime.observe_actual_dock(Head(), robot)
+    assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
+    assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
