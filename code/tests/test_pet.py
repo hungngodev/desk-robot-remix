@@ -1669,3 +1669,55 @@ async def test_simultaneous_human_interrupts_cancel_one_social_head_flush_once(
         for state in pet.states.values():
             state.enabled = False
         await pet.close()
+
+
+
+async def test_stale_social_peer_generation_never_enters_audio_session(
+    fleet, tmp_path,
+):
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    chat = GroundedChat()
+    conversation = Conversation(fleet, chat, speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    for rid in ("robot-01", "robot-02"):
+        pet.states[rid].enabled, pet.states[rid].generation = True, 9
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A key appeared", .98), 9
+        )
+        # A pause/restart replaces the invited pet's real connection generation
+        # before the asynchronous Mac memory lookup and speech request.
+        pet.states["robot-02"].generation = 10
+        await wait_for(lambda: pet._speech_task is None)
+        assert speaker.spoken == []
+        assert chat.prompts == []
+        assert pet.states["robot-01"].spoken == 0
+        assert pet.states["robot-01"].last_initiative_suppression == (
+            "social_peer_or_event_unavailable"
+        )
+        assert conversation.active is None
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
+def test_disabled_pet_generation_cannot_schedule_spontaneous_model_work(
+    fleet, tmp_path,
+):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    pet.states["robot-01"].generation = 2
+    pet._consider_speech(
+        "robot-01", SceneChange("hand_wave", "A real gesture was detected", 1.0),
+        2,
+    )
+    assert pet._speech_task is None
+    assert pet.states["robot-01"].last_initiative_suppression == (
+        "pet_disabled_or_generation_changed"
+    )
