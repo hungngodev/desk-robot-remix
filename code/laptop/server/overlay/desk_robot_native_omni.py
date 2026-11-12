@@ -332,6 +332,11 @@ class NativeOmniSession:
                 await self._camera_wakeup.wait()
                 self._camera_wakeup.clear()
                 continue
+            # A first VAD wakeup may already be set before the worker
+            # reaches this loop. Consume it BEFORE the first HTTP request;
+            # otherwise it forces an unnecessary immediate second JPEG.
+            # A newer wake arriving during HTTP remains set and retries.
+            self._camera_wakeup.clear()
             turn = self._video_turn
             try:
                 async with http.get(
