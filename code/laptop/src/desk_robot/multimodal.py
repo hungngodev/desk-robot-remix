@@ -320,6 +320,9 @@ class MultimodalOrchestrator:
         # Prevent five large JPEG decoders/encoders from running at once.
         # Own actual native JPEG lifetime, not a cancellable asyncio wrapper.
         self._preprocess_slots = threading.BoundedSemaphore(2)
+        # Allow at most one optional background decode: reserve capacity for
+        # a genuine authenticated human speech or direct visual question.
+        self._optional_preprocess_slot = threading.BoundedSemaphore(1)
         self._preprocess_pool = ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="desk-jpeg"
         )
@@ -506,7 +509,9 @@ class MultimodalOrchestrator:
         except asyncio.CancelledError:
             raise
 
-    async def _prepare_bounded(self, jpeg: bytes) -> tuple[bytes, bytes, float]:
+    async def _prepare_bounded(
+        self, jpeg: bytes, *, priority: bool = False
+    ) -> tuple[bytes, bytes, float]:
         """Limit native Pillow workers even if their awaiter is cancelled.
 
         asyncio.to_thread can continue decoding after an asyncio cancellation.
@@ -514,12 +519,19 @@ class MultimodalOrchestrator:
         Under overload, drop optional camera work instead of starting extra
         native workers and interfering with live human audio.
         """
+        optional = not priority
+        if optional and not self._optional_preprocess_slot.acquire(blocking=False):
+            raise RuntimeError("Background JPEG preprocessing busy")
         if not self._preprocess_slots.acquire(blocking=False):
+            if optional:
+                self._optional_preprocess_slot.release()
             raise RuntimeError("JPEG preprocessing busy; do not queue stale frames")
         try:
             future = self._preprocess_pool.submit(_prepare, jpeg)
         except (RuntimeError, OSError):
             self._preprocess_slots.release()
+            if optional:
+                self._optional_preprocess_slot.release()
             raise
 
         def finished(done) -> None:
@@ -528,6 +540,8 @@ class MultimodalOrchestrator:
                     done.exception()  # retrieve late native worker exceptions
             finally:
                 self._preprocess_slots.release()
+                if optional:
+                    self._optional_preprocess_slot.release()
 
         future.add_done_callback(finished)
         return await asyncio.wrap_future(future)
@@ -563,7 +577,9 @@ class MultimodalOrchestrator:
                         self.heads[robot_id].snapshot(), timeout=4
                     )
                 received = time.monotonic()
-                prepared = await self._prepare_bounded(jpeg)
+                prepared = await self._prepare_bounded(
+                    jpeg, priority=source in ("speech", "voice_question")
+                )
                 # Source JPEG reception is not the last priority boundary.
                 # A human can begin speaking while the CPU worker is
                 # decoding/resizing this JPEG, after the proactive network
