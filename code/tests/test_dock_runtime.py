@@ -33,7 +33,22 @@ async def test_absent_calibration_holds_without_camera_or_motors():
     assert not head.captures and not head.commands
 
 
-@pytest.mark.parametrize("payload", [b"\xff\xfe", b"\xef\xbb\xbf{}"])\nasync def test_non_utf8_dock_calibration_fails_closed(tmp_path, payload):\n    path = tmp_path / "dock.json"\n    path.write_bytes(payload)\n    head = Head()\n    result = await dock_runtime.observe_actual_dock(\n        head, SimpleNamespace(id="robot-01", dock_calibration=path)\n    )\n    assert result["phase"] == "hold"\n    assert result["source"] == "not_calibrated"\n    assert not result["motor_authorized"] and not result["charging_authorized"]\n    assert result["physical_acceptance_pass"] is False\n    assert not head.captures and not head.commands\n\n\nasync def test_measured_marker_pose_does_not_energize_contact_or_drive(tmp_path, monkeypatch):
+@pytest.mark.parametrize("payload", [b"\xff\xfe", b"\xef\xbb\xbf{}"])
+async def test_non_utf8_dock_calibration_fails_closed(tmp_path, payload):
+    path = tmp_path / "dock.json"
+    path.write_bytes(payload)
+    head = Head()
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=path)
+    )
+    assert result["phase"] == "hold"
+    assert result["source"] == "not_calibrated"
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert result["physical_acceptance_pass"] is False
+    assert not head.captures and not head.commands
+
+
+async def test_measured_marker_pose_does_not_energize_contact_or_drive(tmp_path, monkeypatch):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
         "measured": True, "fx": 410, "fy": 408, "cx": 320, "cy": 240,
