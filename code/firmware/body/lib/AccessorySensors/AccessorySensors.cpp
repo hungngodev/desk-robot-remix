@@ -480,6 +480,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
       // Optional NFC work is subordinate to the required dock monitor.
       // Never spend a second bus transaction if mandatory GPIO failed.
       if (data_.dock.present && data_.dock.valid) nfc_poll(now_ms);
+      else data_.nfc.valid = false; // never trust optional tag on dock bus failure
       break;
     case 6: angle(1, now_ms); break;
     case 7: angle(2, now_ms); break;
