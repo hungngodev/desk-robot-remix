@@ -46,6 +46,13 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
         source.binary_stl_triangles(output)
     output.write_bytes(bytes(80) + (1).to_bytes(4, "little") + bytes(50))
     assert source.binary_stl_triangles(output) == 1
+    with pytest.raises(ValueError, match="Degenerate"):
+        source.closed_mesh_edges(output)
+    # One geometrically valid triangle still has open boundary edges.
+    triangle = bytes(80) + (1).to_bytes(4, "little") + pack(
+        "<12fH", 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0,
+    )
+    output.write_bytes(triangle)
     with pytest.raises(ValueError, match="Open"):
         source.closed_mesh_edges(output)
     output.write_bytes(tetra_stl())
