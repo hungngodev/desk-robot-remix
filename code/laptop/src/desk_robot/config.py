@@ -28,6 +28,7 @@ class RobotConfig(BaseModel):
     paw_contact_interactions_qualified: bool = False
     # Ambient change thresholds use actual SHT41 readings, never guessed room conditions.
     ambient_interactions_qualified: bool = False
+    nfc_interactions_qualified: bool = False  # toy tags only, never access control
     ambient_temp_change_centi: int | None = Field(default=None, ge=100, le=2000)
     ambient_humidity_change_centi: int | None = Field(default=None, ge=500, le=3000)
     gesture_interactions_qualified: bool = False  # measured hardware gate
