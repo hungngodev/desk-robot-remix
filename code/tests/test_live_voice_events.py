@@ -568,3 +568,36 @@ async def test_explicit_listener_task_cancellation_propagates_with_hung_head():
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+async def test_hung_shared_audio_owner_times_out_without_claiming_flush():
+    import asyncio
+
+    entered = asyncio.Event()
+    blocked = asyncio.Event()
+    attempts = []
+
+    async def shared_abort(reason):
+        attempts.append(reason)
+        entered.set()
+        await blocked.wait()
+
+    async def per_robot_abort(robot_id, reason):
+        raise AssertionError("Shared owner must be the only abort path")
+
+    async with httpx.AsyncClient() as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"},
+            on_interrupt=per_robot_abort,
+            on_global_interrupt=shared_abort,
+        )
+        with pytest.raises(TimeoutError, match="Shared fleet interruption incomplete"):
+            await asyncio.wait_for(listener._preempt_all("stream_unavailable"), 1)
+        assert entered.is_set()
+        assert attempts == ["stream_unavailable"]
+        assert listener._stream_failed is False
+        # An abort timeout must remain retryable, never an acoustic ACK.
+        with pytest.raises(TimeoutError, match="Shared fleet interruption incomplete"):
+            await asyncio.wait_for(listener._preempt_all("stream_unavailable"), 1)
+        assert attempts == ["stream_unavailable", "stream_unavailable"]
