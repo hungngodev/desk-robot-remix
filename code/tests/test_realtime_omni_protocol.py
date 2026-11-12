@@ -26,13 +26,13 @@ def test_native_open_session_uses_pcm_and_truthful_playback_policy():
     assert session["session"]["input_audio_format"] == "pcm16"
 
 
-def test_distinct_real_camera_receipts_stream_at_one_fps_even_during_short_speech():
+def test_distinct_real_camera_receipts_only_on_complete_one_second_model_units():
     wire = OmniDuplexWire()
     jpeg = b"\\xff\\xd8" + b"x" * 120 + b"\\xff\\xd9"
     for index in range(20):
-        # A real 200ms utterance may acquire its first frame on the next
-        # audio packet. A newer frame after the first full second is allowed
-        # only once, even when the same HTTP JPEG is reread repeatedly.
+        # Unlike Gemini Live's independent video messages, this pinned
+        # model only accepts a camera image on an append closing 1s of audio.
+        # A new receipt can be offered again until that exact boundary.
         receipt = 101 if index < 10 else 102
         chunk = wire.append_audio(
             b"\\0" * 3200, speech=index < 10,
@@ -41,12 +41,12 @@ def test_distinct_real_camera_receipts_stream_at_one_fps_even_during_short_speec
         assert chunk["duration_ms"] == 100
         assert chunk["audio_end_ms"] == (index + 1) * 100
         assert base64.b64decode(chunk["audio"]) == b"\\0" * 3200
-        assert ("video_frames" in chunk) == (index in (0, 10))
+        assert ("video_frames" in chunk) == (index in (9, 19))
     assert wire.frames_sent == 2
     assert wire.commit()["response_create"] is False
 
 
-def test_first_current_turn_image_is_not_delayed_until_one_second_audio_boundary():
+def test_partial_unit_never_falsely_claims_that_the_native_model_saw_a_frame():
     wire = OmniDuplexWire()
     jpeg = b"\\xff\\xd8" + b"frame" * 12 + b"\\xff\\xd9"
     first = wire.append_audio(b"\\0" * 3200, speech=True)
@@ -55,13 +55,13 @@ def test_first_current_turn_image_is_not_delayed_until_one_second_audio_boundary
         b"\\0" * 3200, speech=True,
         jpeg=jpeg, camera_age_ms=20, frame_receipt_us=3001,
     )
-    assert base64.b64decode(short["video_frames"][0]) == jpeg
+    assert "video_frames" not in short
     repeated = wire.append_audio(
         b"\\0" * 3200, speech=False,
         jpeg=jpeg, camera_age_ms=40, frame_receipt_us=3001,
     )
     assert "video_frames" not in repeated
-    assert wire.frames_sent == 1
+    assert wire.frames_sent == 0
 
 
 def test_never_send_native_video_without_a_real_mac_receipt_or_recent_human_speech():
@@ -77,6 +77,26 @@ def test_never_send_native_video_without_a_real_mac_receipt_or_recent_human_spee
     )
     assert "video_frames" not in idle
     assert wire.frames_sent == 0
+
+
+
+
+def test_recent_speech_tail_can_pair_actual_frame_with_completed_native_model_unit():
+    wire = OmniDuplexWire()
+    jpeg = b"\\xff\\xd8" + b"frame" * 12 + b"\\xff\\xd9"
+    # Speech ends at 700ms, but the model's first one-second audio unit
+    # closes during a real trailing silent audio chunk. The XIAO frame is
+    # included only there and never repeated on a later unit.
+    for _ in range(7):
+        packet = wire.append_audio(b"\\0" * 3200, speech=True)
+        assert "video_frames" not in packet
+    for index in range(13):
+        packet = wire.append_audio(
+            b"\\0" * 3200, speech=False, jpeg=jpeg,
+            camera_age_ms=100, frame_receipt_us=43001,
+        )
+        assert ("video_frames" in packet) == (index == 2)
+    assert wire.frames_sent == 1
 
 
 def test_stale_or_fake_images_never_get_sent_to_native_model():
