@@ -92,8 +92,8 @@ The selected full `esp32_full` profile already contains source code to read **ei
 | 22 | scl |
 | 34 | head touch |
 | 35 | bumper nc series |
-| 36 | reed |
-| 39 | pir |
+| 36 | reserved left 38 kHz terminal dock IR demodulated input, no decoder enabled |
+| 39 | reserved right 38 kHz terminal dock IR demodulated input, no decoder enabled |
 
 | Head XIAO ESP32S3 Sense GPIO | Function |
 | --- | --- |
@@ -105,6 +105,8 @@ The selected full `esp32_full` profile already contains source code to read **ei
 | 2 | head uart tx |
 | 1 | head uart rx |
 | 9 | rgb data |
+
+**Extra input relocation without deleting the user's features:** The existing MCP23017 on TCA9548A 0x71 channel 5 now reads GPIOB0 (active low magnetic reed switch) and GPIOB1 (active high PIR output) as independent **slow**, read-only inputs. WROOM GPIO36 and GPIO39 are only **reserved** for separate timestamped terminal IR receivers. The current firmware does not decode NEC bursts, verify receiver polarity/timing, approve last-centimeter docking or energize contacts. Datasheet MCP23017 BANK=0: IODIRB 0x01, GPPUB 0x0D, GPIOB 0x13. Optional reed/PIR events still require compile-time opt-in and actual electrical qualification. This source arrangement fixes the signal allocation conflict, **not** the dock's real timing, physical fit or charger.
 
 **NC bumper safety polarity:** Wire two normally-closed switches in **series** from WROOM GPIO35 to ground, with external pullup to 3.3V. Both unpressed contacts closed means normal LOW. Either collision, unplugged plug or broken lead opens circuit and reads HIGH. The enabled WROOM GPIO reader now treats HIGH as immediate motor stop. Actual circuit must be qualified before enabling this optional sensor.
 
@@ -255,7 +257,7 @@ This table describes the **single canonical PR #17**. It separates real source c
 | PN532 NFC toy reader | **New** bounded Seeed protocol adaptation on 0x71 lane 5: SAM init, finite RF activation retries, ISO14443A UID checksum, read-only nonsecret game token and new-presented counter; existing Mac private toy event consumer | Real board mode/voltage, 400 kHz I2C ready-byte behavior, RF latency, antenna, current and fixture trial; no authentication |
 | MCP23017 dock monitor | Required fresh dock seat and PGOOD/CHG input snapshots in full WROOM profile | Hardware-qualified 1S charger, protected pack, hot removal, verified current |
 | WS2812B RGB heart and haptic coin motor | Parts and pin/driver allocation, but **no confirmed final on-device effect driver** | After XIAO SD J3 isolation and GPIO ownership checks, implement and bench-qualify guarded LEDs and MOSFET PWM |
-| Dual IR terminal dock receivers | Research and two-input allocation candidate only | Separate real NEC burst decoder, measured physical homing, safe contacts and charging circuit |
+| Dual IR terminal dock receivers | Two reserved direct WROOM inputs 36/39, slow reed/PIR now MCP GPIOB; no NEC decoder or actuator integration | Verify actual board pins and GPIO36/39 erratum, simultaneous RMT captures, measured optical homing, safe contacts and charging circuit |
 | SCD40 CO2, BME688 VOC, LD2410C presence, AMG8833 thermal, soil probe | Preserved as optional external room/plant station extensions, not quietly omitted from research | Separate powered and electrically qualified room station protocol and opt-in integration |
 
 **Physical acceptance remains open.** The source level PN532 adapter has portable parser tests plus deterministic I2C slot tests, but was not compiled on GitHub Actions or exercised with the real PN532 carrier. Its vendor BSD protocol framing is adapted to avoid the upstream blocking poll that would delay WROOM cliff sensing. The UID game token uses FNV and is cloneable; never use it for access control or identity.
