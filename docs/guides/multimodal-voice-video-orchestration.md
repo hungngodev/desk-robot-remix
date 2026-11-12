@@ -1,6 +1,47 @@
 # Native Xiaozhi + adaptive live video: full desk pet orchestration
 
 
+## November 12 Qwen Live Harness source comparison, no cloud default
+
+Verified actual official upstream
+[QwenLM/Qwen-Live-Harness](https://github.com/QwenLM/Qwen-Live-Harness),
+whose v1.0.0 was released September 21, 2026. It is an Apache 2.0
+**orchestration** source using the paid Qwen Omni Realtime API, not an
+on-device Qwen model to silently deploy onto our XIAO or Mac.
+[Proactive media cadence](https://github.com/QwenLM/Qwen-Live-Harness/blob/main/packages/qwen-live-harness/src/proactive/media-cadence.ts)
+fixes two video frames in two seconds at one FPS per model monitor chunk;
+our separately source-verified sensor trigger burst remains capped at two
+frames and a 450 ms interval, while native live PCM attaches up to one
+chosen JPEG per one-second audio unit. Do not confuse these cadence policies
+or claim 30 FPS raw streaming.
+
+The source
+[`orchestrator/injector.ts`](https://github.com/QwenLM/Qwen-Live-Harness/blob/main/packages/qwen-live-harness/src/orchestrator/injector.ts)
+is especially instructive: it distinguishes *silent context delivery* from
+*spoken notification*, defers injection during user VAD, in-flight model
+responses, or incomplete Host playback, then observes an 800 ms quiet
+window. It preserves stable task receipts and does not narrate pending
+work as success.
+Our Mac pet and Xiaozhi tool paths now have authenticated VAD, current socket
+and turn generations, background cancellation, a single speaker lock and
+successful Mac job receipts. We **do not** yet have physical XIAO playback
+progress ACK, so we cannot assert an equivalent Host playback barrier or
+automatically speak every result just because bytes were transmitted.
+Future improvement must reuse measured firmware playback state and actual
+upstream model capabilities, not fabricate playback timestamps.
+
+The official
+[`orchestrator/live-session.ts`](https://github.com/QwenLM/Qwen-Live-Harness/blob/main/packages/qwen-live-harness/src/orchestrator/live-session.ts)
+also shows generation-fenced turn state, permission brokerage,
+proactive monitor and background result routing. Our existing
+Mac `Conversation`, `PetController`, `VoiceEventListener` and Xiaozhi
+bridge remain the owners. Moving that entire Electron/Node daemon onto
+the ESP32 would create a second, unsupported capture and audio pipeline.
+The existing local MiniCPM-o vLLM-Omni duplex supports native paired
+audio/video but **not** native function calls; the Qwen API's cloud tool
+calls are a separate opt-in provider choice, not a feature claim for our
+current local model.
+
 ## November 12: actual fused microphone, selected camera and context ownership
 
 **One head, not parallel cameras:** XIAO Sense now selects native VGA `PIXFORMAT_JPEG`
