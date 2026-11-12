@@ -96,6 +96,9 @@ def status(device: str) -> dict:
         "audio_video_latency_physically_measured": False,
         "mic_frames_forwarded": s.audio_frames,
         "jpeg_frames_forwarded": s.wire.frames_sent,
+        "camera_frames_selected": s.video_frames_selected,
+        "camera_frames_skipped_static": s.video_frames_skipped_static,
+        "camera_frames_skipped_duplicate": s.video_frames_skipped_duplicate,
         "model_pcm_chunks_received": s.model_chunks,
         "model_opus_packets_sent_to_head": s.head_packets,
         "last_error": s.last_error,
@@ -144,6 +147,16 @@ class NativeOmniSession:
         self._user_was_talking = False
         self._silent_frames = 0
         self._playback_generation = -1
+        # One selected frame per real camera receipt, not one copy per
+        # outgoing audio unit. A new VAD turn invalidates old JPEGs.
+        self._video_turn = 0
+        self._camera_wakeup = asyncio.Event()
+        self._latest_frame_receipt_us: int | None = None
+        self._last_video_sent_receipt_us: int | None = None
+        self._last_video_selected_at = float("-inf")
+        self.video_frames_selected = 0
+        self.video_frames_skipped_static = 0
+        self.video_frames_skipped_duplicate = 0
 
     def queue_mic(self, pcm: bytes, speech: bool) -> None:
         """Return immediately to the upstream VAD/audio callback."""
