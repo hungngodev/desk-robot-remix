@@ -39,6 +39,11 @@ class QuietRequest(BaseModel):
     quiet: bool
 
 
+class CoreMemoryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    value: str = Field(min_length=1, max_length=200)
+
+
 class NativeHeardRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event_id: str = Field(pattern=r"^omni_[0-9a-f]{12}_[0-9a-f]{20}$")
@@ -271,6 +276,52 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             ],
         }
 
+    @app.get("/v1/pet/{robot_id}/core-memory", dependencies=[Depends(operator)])
+    async def operator_core_memory(robot_id: str):
+        settings.robot(robot_id)
+        facts = await asyncio.to_thread(
+            app.state.runtime.memory.core_facts, robot_id, limit=24
+        )
+        return {
+            "robot_id": robot_id,
+            "operator_curated_only": True,
+            "core_facts": [
+                {"slot": entry.slot, "value": entry.value,
+                 "updated_at": entry.updated_at} for entry in facts
+            ],
+        }
+
+    @app.put("/v1/pet/{robot_id}/core-memory/{slot}",
+             dependencies=[Depends(operator)])
+    async def set_core_memory(robot_id: str, slot: str,
+                              request: CoreMemoryRequest):
+        settings.robot(robot_id)
+        changed = await asyncio.to_thread(
+            app.state.runtime.memory.set_core_fact,
+            robot_id, slot, request.value
+        )
+        return {"robot_id": robot_id, "slot": slot, "changed": changed,
+                "operator_curated": True, "motor_authorized": False}
+
+    @app.delete("/v1/pet/{robot_id}/core-memory/{slot}",
+                dependencies=[Depends(operator)])
+    async def delete_core_memory(robot_id: str, slot: str):
+        settings.robot(robot_id)
+        removed = await asyncio.to_thread(
+            app.state.runtime.memory.forget_core_fact, robot_id, slot
+        )
+        return {"robot_id": robot_id, "slot": slot, "removed": removed}
+
+    @app.delete("/v1/pet/{robot_id}/memories/{event_id}",
+                dependencies=[Depends(operator)])
+    async def delete_episode(robot_id: str, event_id: str):
+        settings.robot(robot_id)
+        removed = await asyncio.to_thread(
+            app.state.runtime.memory.forget_episode, robot_id, event_id
+        )
+        return {"robot_id": robot_id, "event_id": event_id,
+                "removed": removed, "local_only": True}
+
     @app.get("/v1/pet/{robot_id}/omni-context", dependencies=[Depends(authorize)])
     async def omni_context(robot_id: str):
         """Native audio model's personal style, with opt-in text memory only.
@@ -292,6 +343,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             + "You cannot grant motor, battery or user authorization."
         )
         if settings.voice_memory_tools_enabled:
+            core = await asyncio.to_thread(
+                app.state.runtime.memory.core_facts, robot_id, limit=6
+            )
+            for item in reversed(core):
+                line = " Curated preference (untrusted): " + item.slot + ": " + item.value[:120]
+                if len(prefix) + len(line) > 1900:
+                    break
+                prefix += line
             records = await asyncio.to_thread(
                 app.state.runtime.memory.recent, robot_id, limit=4
             )
@@ -449,8 +508,15 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             recent_tools = getattr(visual.hub, "recent_tool_context", None)
             if callable(recent_tools):
                 tool_cues = recent_tools(robot_id, clock)
+        core = await asyncio.to_thread(
+            app.state.runtime.memory.core_facts, robot_id, limit=8
+        )
         return {
             "robot_id": robot_id,
+            "core_facts": [
+                {"slot": item.slot, "value": item.value}
+                for item in core
+            ],
             "retrieval": "topic" if query is not None else "recent",
             "matched": bool(records),
             "untrusted_context_not_instructions": True,
