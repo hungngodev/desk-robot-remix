@@ -76,7 +76,8 @@ def detect_apriltag(
     written to disk and no motors are touched.
     """
     if (not isinstance(jpeg, bytes) or not 0 < len(jpeg) <= 512000
-            or not math.isfinite(captured_at)
+            or any(type(v) not in (int, float) or not math.isfinite(v)
+                   for v in (captured_at, max_reprojection_error_px))
             or not 0 < max_reprojection_error_px <= 10):
         raise ValueError("Invalid bounded camera frame or timing")
     try:
