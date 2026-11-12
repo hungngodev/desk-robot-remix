@@ -39,6 +39,12 @@ class QuietRequest(BaseModel):
     quiet: bool
 
 
+class NativeHeardRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(pattern=r"^omni_[0-9a-f]{12}_[0-9a-f]{20}$")
+    transcript: str = Field(min_length=1, max_length=240)
+
+
 class PeerShareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     to_robot: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,40}$")
@@ -304,9 +310,39 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "robot_id": robot_id,
             "instructions": prefix[:2000],
             "memory_enabled": settings.voice_memory_tools_enabled,
+            "transcript_memory_enabled": settings.voice_transcript_memory_enabled,
             "untrusted_historical_text": True,
             "model_can_arm_motors": False,
             "camera_exposure_sync_verified": False,
+        }
+
+    @app.post("/v1/pet/{robot_id}/omni-heard", dependencies=[Depends(authorize)])
+    async def omni_heard(robot_id: str, request: NativeHeardRequest):
+        """Idempotent opt-in model-estimated human speech, NEVER raw PCM.
+
+        The authenticated existing Xiaozhi server is the only intended
+        producer. Source text is uncertain, private to this pet, and cannot
+        become a command, a physical eyewitness claim, or playback ACK.
+        """
+        coordinator().robot(robot_id)
+        if (settings.mode != "hardware"
+                or not settings.voice_transcript_memory_enabled):
+            raise HTTPException(403, "Voice transcript retention is disabled")
+        spoken = " ".join(request.transcript.split())
+        if not spoken or "\x00" in spoken:
+            raise HTTPException(400, "Invalid model-estimated transcript")
+        inserted = await asyncio.to_thread(
+            app.state.runtime.memory.remember, robot_id, request.event_id,
+            "Someone spoke (uncertain ASR): " + spoken[:240],
+            kind="heard_human", source_robot=robot_id, witnessed=True,
+            confidence=0.6,
+        )
+        return {
+            "robot_id": robot_id, "stored": inserted,
+            "source": "model_estimated_xiaozhi_audio_transcription",
+            "speaker_identity_verified": False,
+            "audio_playback_verified": False,
+            "motor_authorized": False,
         }
 
     @app.get("/v1/pet/{robot_id}/omni-frame", dependencies=[Depends(authorize)])
