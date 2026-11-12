@@ -107,6 +107,21 @@ Before approving physical wiring or shopping: verify (1) selected IR demodulator
 Two independent legacy ESP-IDF 4.4 RMT receivers and a strict 34-symbol classic NEC parser are now implemented in WROOM firmware, with read-only UART, XIAO HTTP and Mac API evidence. Physical receiver board, beacon transmitter, optical geometry, measured bearing, actual completed dock, charging controller and qualified last-centimeter movement are NOT verified. The new source never arms motors or charges batteries. This prevents an unsafe unsupported implementation shortcut while preserving the complete required product.
 
 
+## Read-only terminal NEC calibration, after the actual receiver hardware exists
+
+The WROOM now includes two independent legacy RMT receiver channels only in the `esp32_full` profile. The simple five-range `esp32_stepper` staging build does not initialize these channels. Its `ir` UART command, the XIAO `/api/ir` route and the authenticated Mac `/v1/robots/{robot_id}/dock/ir` endpoint all remain **read-only**. The strict 34-symbol classic NEC checksum decoder accepts only complete non-repeat frames, and the Mac rejects claimed charger or motor permission. Source protocol tests and a separate C++ mirror smoke exist; actual WROOM flash and real 38kHz optical receiver tests are not recorded.
+
+Once the receiver **signal lines only** are powered from a bench-qualified 3.3V rail and the dock's charge contacts are physically isolated from any source, a human can hold the assembled but **motor-disconnected** robot left, centered and right of a test beacon and record optical evidence with existing authorized Mac API. Run these commands from the `code` directory with your private `DESK_ROBOT_OPERATOR_TOKEN` environment variable set on the local machine:
+
+```sh
+uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --label left --samples 30 --out /tmp/robot-01-ir.jsonl
+uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --label center --samples 30 --out /tmp/robot-01-ir.jsonl
+uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --label right --samples 30 --out /tmp/robot-01-ir.jsonl
+uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --input /tmp/robot-01-ir.jsonl
+```
+
+The tool requires an actual advancing left/right RMT acquisition sequence, increasing local receive timestamps, at least 20 real observations per position and authentic per-robot token. It estimates optical left/right fresh-hit fractions and center same-beacon fraction. Three identical reception patterns cannot pass the differential signal candidate. **It cannot assign bearing angles, calibrate wheel turn sign, prove final clearance, allow powered contact, or claim electrical acceptance.** Never interpret its `candidate_differential_signal` as a motion permit. `code/tests/test_calibrate_terminal_ir.py` verifies good synthetic sample structure, stale/replayed/forged signals and no authority, without pretending the robot is assembled.
+
 ## November 11: final marker age check after health polling
 
 An additional time-of-check versus time-of-use race remained after moving PnP off the event loop: a valid new AprilTag pose could become stale **during** the subsequent authenticated WROOM sensor status HTTP request. The existing local guard protects cliff and touch state, but that does not make the previously captured marker position current. `Coordinator._dock_approach` now invokes `assess_dock` again immediately before the command, using the actual monotonic clock. Any changed phase, in practice an expired marker, results in a `hold` response with no drive and no charging permission. `test_dock_motion.py` now includes a second WROOM status request delayed beyond the existing 200 ms marker validity window to enforce this rule. This is a source-level race fix with unverified CI and not a physical terminal docking acceptance.
