@@ -46,6 +46,12 @@ The hardware voice event listener now requires an authenticated current VAD snap
 
 [Read the measured GitHub Actions pre-step runner failure triage](CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md). The latest failing jobs lack even the first execution step, so diagnose check-run annotations and billing/runner policy before rewriting tests. Full Python, host C++ and both firmware compilers remain unverified.
 
+## November 11 dock vision and safety continuation
+
+Another direct source and test review found both `Coordinator._dock_approach` and `dock_runtime.observe_actual_dock` passed their original JPEG receipt timestamp as the assessment's current clock AFTER potentially expensive synchronous OpenCV AprilTag detection. That could treat an already stale marker as actionable and block real Xiaozhi VAD cancellation on the same Mac event loop. Both paths now use bounded `asyncio.to_thread(detect_apriltag, ...)` and call the existing `assess_dock` with actual post-inference monotonic time. Existing 200 ms freshness and WROOM recheck rules remain unchanged. New regressions in `test_dock_motion.py` and `test_dock_runtime.py` inject deliberately slow detectors, verifying an expired marker cannot issue a drive or charging permission and image processing does not block the event loop. Tests are committed, not confirmed passing.
+
+Dock and battery acceptance remain **not achieved**: no two independently decoded final IR bearings, safe live contacts, complete physical fit, qualified protected battery/charger/current, actual instrumented docking sequence or verified charging current. [The charging and terminal IR pin budget audit](../hardware/charging-design-and-validation.md) documents the unresolved wiring conflict without pretending MCP23017 I2C reads can decode NEC IR bursts.
+
 ## The user's cross-chat constraints, all retained
 
 1. **One complete robot, then four identical functional copies.** Five different personalities and removable costumes, not five different incomplete hardware architectures. Day zero design includes the entire desired core; physical bringup may still be staged for safe testing.
