@@ -125,6 +125,43 @@ def test_slow_reed_pir_are_on_expander_not_the_ir_direct_input_pins():
     assert "digitalRead(body_pins::kTerminalIrRightInput)" not in main
     assert bus["mcp23017_optional_inputs"]["physical_qualified"] is False
 
+def test_nec_telemetry_uses_exact_existing_wroom_xiao_mac_owners():
+    body = (ROOT / "code/firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    rmt = (ROOT / "code/firmware/body/lib/TerminalIr/TerminalIr.cpp").read_text()
+    protocol = (ROOT / "code/firmware/head/overlay/robot_protocol.h").read_text()
+    bridge = (ROOT / "code/firmware/head/overlay/robot_bridge.cc").read_text()
+    transport = (ROOT / "code/laptop/src/desk_robot/transport.py").read_text()
+    api = (ROOT / "code/laptop/src/desk_robot/api.py").read_text()
+    profile = (ROOT / "code/firmware/body/platformio.ini").read_text()
+
+    assert 'const bool ir = std::strcmp(command, "ir") == 0;' in body
+    assert 'e.same_code ? "true" : "false"' in body
+    assert 'set_terminal_ir(terminal_ir.evidence(millis()))' in main
+    assert 'DESK_ROBOT_ENABLE_TERMINAL_IR' in main
+    full = profile.split("[env:esp32_full]", 1)[1].split("[env:esp32_stepper]", 1)[0]
+    stage = profile.split("[env:esp32_stepper]", 1)[1]
+    assert "-DDESK_ROBOT_ENABLE_TERMINAL_IR=1" in full
+    assert "-DDESK_ROBOT_ENABLE_TERMINAL_IR=1" not in stage
+    assert "RMT_CHANNEL_0" in (
+        ROOT / "code/firmware/body/lib/TerminalIr/TerminalIr.h"
+    ).read_text()
+    assert "RMT_CHANNEL_1" in (
+        ROOT / "code/firmware/body/lib/TerminalIr/TerminalIr.h"
+    ).read_text()
+    assert "rmt_rx_start" in rmt
+    assert 'v == "ir"' in protocol
+    assert 'IrValid(json.get())' in bridge
+    assert '{"/api/ir", HTTP_GET}' in bridge
+    assert 'async def ir_status(self)' in transport
+    assert '"/api/ir"' in transport
+    assert '"/v1/robots/{robot_id}/dock/ir"' in api
+    assert "charging_authorized" in (
+        ROOT / "code/laptop/src/desk_robot/dock_ir.py"
+    ).read_text()
+    assert PLAN["bus"]["implementation_evidence"]["dual_ir_physical_qualified"] is False
+
+
 def test_all_eight_tof_lanes_and_every_aux_lane_have_unique_i2c_addresses():
     ranges = PLAN["bus"]["mux_ranges"]
     extras = PLAN["bus"]["mux_extras"]
