@@ -48,7 +48,7 @@ class SimulatedHead:
             raise HeadError("Simulated uncertain ACK")
         if op == "arm":
             self.armed = True
-        elif op == "disarm":
+        elif op in {"disarm", "halt"}:
             self.armed = False
         elif op in {"drive", "lift", "grip", "keepalive"} and not self.armed:
             raise HeadError("Body disarmed")
