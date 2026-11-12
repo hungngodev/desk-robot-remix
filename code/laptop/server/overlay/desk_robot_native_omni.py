@@ -438,6 +438,8 @@ class NativeOmniSession:
             # A model response may be interrupted at any time. Use a bounded
             # FIFO and response identity, never detached unbounded audio tasks.
             pcm = self.wire.handle_event(event)
+            if kind == "conversation.item.input_audio_transcription.completed":
+                self._accept_heard_transcript(event)
             if kind == "response.output_audio.delta" and pcm is not None:
                 self.model_chunks += 1
                 try:
@@ -637,6 +639,10 @@ class NativeOmniSession:
                         asyncio.create_task(self._play()),
                         asyncio.create_task(self._camera(http)),
                     ]
+                    if self._transcript_memory_enabled:
+                        self._tasks.append(asyncio.create_task(
+                            self._persist_heard(http)
+                        ))
                     done, _pending = await asyncio.wait(
                         self._tasks, return_when=asyncio.FIRST_COMPLETED
                     )
