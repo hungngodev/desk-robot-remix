@@ -35,6 +35,8 @@ battery_low_percent = 20
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
 ambient_interactions_qualified = false
+bmp280_interactions_qualified = false  # a measured pressure threshold is required
+# bmp280_pressure_change_pa = 300  # EXAMPLE, physical housing study required
 nfc_interactions_qualified = false  # toy tag IDs are not authentication or permissions
 # ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
 # ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
@@ -57,6 +59,8 @@ battery_low_percent = 20
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
 ambient_interactions_qualified = false
+bmp280_interactions_qualified = false  # a measured pressure threshold is required
+# bmp280_pressure_change_pa = 300  # EXAMPLE, physical housing study required
 nfc_interactions_qualified = false  # toy tag IDs are not authentication or permissions
 # ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
 # ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
@@ -79,6 +83,8 @@ battery_low_percent = 20
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
 ambient_interactions_qualified = false
+bmp280_interactions_qualified = false  # a measured pressure threshold is required
+# bmp280_pressure_change_pa = 300  # EXAMPLE, physical housing study required
 nfc_interactions_qualified = false  # toy tag IDs are not authentication or permissions
 # ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
 # ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
@@ -101,6 +107,8 @@ battery_low_percent = 20
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
 ambient_interactions_qualified = false
+bmp280_interactions_qualified = false  # a measured pressure threshold is required
+# bmp280_pressure_change_pa = 300  # EXAMPLE, physical housing study required
 nfc_interactions_qualified = false  # toy tag IDs are not authentication or permissions
 # ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
 # ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
@@ -123,6 +131,8 @@ battery_low_percent = 20
 # Never infer a human pulse or medical measurement from this value.
 paw_contact_interactions_qualified = false
 ambient_interactions_qualified = false
+bmp280_interactions_qualified = false  # a measured pressure threshold is required
+# bmp280_pressure_change_pa = 300  # EXAMPLE, physical housing study required
 nfc_interactions_qualified = false  # toy tag IDs are not authentication or permissions
 # ambient_temp_change_centi = 300  # EXAMPLE ONLY; actual SHT41 thermal drift must be measured
 # ambient_humidity_change_centi = 1000  # EXAMPLE ONLY
