@@ -997,3 +997,88 @@ async def test_repeated_fleet_fallback_does_not_duplicate_unresponsive_head():
                 *watcher._fallback_abort_tasks.values(),
                 return_exceptions=True,
             )
+
+
+@pytest.mark.parametrize("rebase_kind", ["reset", "gap"])
+async def test_reset_or_gap_cannot_reuse_old_vad_callback_ack(rebase_kind):
+    """Same numerical seq from a new server epoch must run a NEW callback.
+
+    Also forbid a second physical callback while an old cancelled transport
+    still executes, even if it ignores CancelledError.
+    """
+    import asyncio
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    deliveries = []
+    ordinary_polls = 0
+    aborted = []
+
+    def mock(request):
+        nonlocal ordinary_polls
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 0, "events": [], "reset": False, "lost": False,
+            })
+        ordinary_polls += 1
+        if ordinary_polls == 2:
+            return httpx.Response(200, json={
+                "cursor": 0, "events": [],
+                "reset": rebase_kind == "reset",
+                "lost": rebase_kind == "gap",
+            })
+        return httpx.Response(200, json={
+            "cursor": 1, "reset": False, "lost": False,
+            "events": [{
+                "seq": 1, "robot_id": "robot-01",
+                "kind": "normal", "source": "xiaozhi_aec_vad",
+            }],
+        })
+
+    async def on_interrupt(robot, kind):
+        deliveries.append((robot, kind))
+        if len(deliveries) == 1:
+            entered.set()
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+    async def on_global(reason):
+        aborted.append(reason)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        watcher = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=on_interrupt,
+            on_global_interrupt=on_global,
+        )
+        await watcher.poll()
+        try:
+            with pytest.raises(TimeoutError, match="Voice interruption incomplete"):
+                await watcher.poll()
+            assert entered.is_set() and watcher.cursor == 0
+            assert await watcher.poll() == 0
+            assert aborted == [rebase_kind]
+            if rebase_kind == "reset":
+                assert watcher.cursor is None
+                assert await watcher.poll() == 0
+                assert watcher.cursor == 0
+
+            with pytest.raises(TimeoutError, match="Old VAD generation"):
+                await watcher.poll()
+            assert len(deliveries) == 1
+            assert watcher.cursor == 0
+
+            release.set()
+            await asyncio.wait_for(watcher._event_task, timeout=1)
+            assert await watcher.poll() == 1
+            assert deliveries == [
+                ("robot-01", "normal"), ("robot-01", "normal"),
+            ]
+            assert watcher.cursor == 1 and watcher.handled == 1
+        finally:
+            release.set()
+            if watcher._event_task is not None:
+                await asyncio.wait_for(watcher._event_task, timeout=1)
