@@ -141,14 +141,16 @@ async def test_pinned_plugin_executor_keeps_live_loop_responsive_under_sync_tool
     base.ToolType = SimpleNamespace(SERVER_PLUGIN=1)
     monkeypatch.setitem(sys.modules, base.__name__, base)
 
-    ready, release = threading.Event(), threading.Event()
+    ready, release, all_started = (threading.Event() for _ in range(3))
     main_thread = threading.get_ident()
     observed = []
 
     def blocking(conn, amount):
         observed.append(("sync", threading.get_ident(), conn.device_id))
         ready.set()
-        if not release.wait(2):
+        if sum(item[0] == "sync" for item in observed) == 8:
+            all_started.set()
+        if not release.wait(5):
             raise TimeoutError("Fixture worker still blocked")
         return amount * 2
 
@@ -181,6 +183,7 @@ async def test_pinned_plugin_executor_keeps_live_loop_responsive_under_sync_tool
     )
     conn = SimpleNamespace(config={}, device_id="mac-head-01")
     task = asyncio.create_task(owner.execute(conn, "blocking", {"amount": 7}))
+    extras = []
     try:
         loop = asyncio.get_running_loop()
         started_at = loop.time()
@@ -190,9 +193,25 @@ async def test_pinned_plugin_executor_keeps_live_loop_responsive_under_sync_tool
         assert observed[0][1] != main_thread
         assert await owner.execute(conn, "async", {"amount": 5}) == 15
         assert observed[-1] == ("async", main_thread, "mac-head-01")
+        extras = [asyncio.create_task(owner.execute(
+            conn, "blocking", {"amount": number}
+        )) for number in range(7)]
+        assert await asyncio.to_thread(all_started.wait, 2)
+        # Cancelling the asyncio owner does not terminate its native thread.
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        refused = await owner.execute(conn, "blocking", {"amount": 99})
+        assert refused.action == registry.Action.ERROR
+        assert "capacity exhausted" in refused.response
+        assert len([row for row in observed if row[0] == "sync"]) == 8
+        # An async tool remains callable even with all sync worker slots held.
+        assert await owner.execute(conn, "async", {"amount": 2}) == 6
         release.set()
-        assert await asyncio.wait_for(task, timeout=1) == 14
+        assert await asyncio.wait_for(asyncio.gather(*extras), timeout=2) == [
+            n * 2 for n in range(7)
+        ]
+        assert await owner.execute(conn, "blocking", {"amount": 11}) == 22
     finally:
         release.set()
-        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(task, *extras, return_exceptions=True)
         ns["_PLUGIN_POOL"].shutdown(wait=True, cancel_futures=True)
