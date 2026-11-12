@@ -30,19 +30,23 @@ class VoiceEventListener:
         self.on_speech_snapshot = on_speech_snapshot
         self.require_snapshot = require_snapshot
         self.monitor_ready = False
+        # Retry failed health notifications even if local state already fell
+        # silent; a failed callback must not permanently retain ready=True.
+        self._monitor_delivered: bool | None = None
         self.cursor: int | None = None
         self.handled = 0
         self.last_error: str | None = None
         self._stream_failed = False
 
     async def _set_monitor_ready(self, ready: bool) -> None:
-        if self.monitor_ready == ready:
+        if self.monitor_ready == ready and self._monitor_delivered == ready:
             return
-        # Record failure before notifying the Mac. A callback cannot make
-        # a lost monitor falsely healthy.
+        # Record failure before notifying the Mac. Only record delivery after
+        # the dependent pet owner accepts it; retry failed FALSE notifications.
         self.monitor_ready = ready
         if self.on_monitor_ready is not None:
             await self.on_monitor_ready(ready)
+        self._monitor_delivered = ready
 
     async def _preempt_all(self, reason: str) -> None:
         # Loss of the voice event stream means a human interruption could have
@@ -53,8 +57,16 @@ class VoiceEventListener:
             await self.on_global_interrupt(reason)
             return
         # Existing independent consumers preserve their per-device callback.
+        first_error = None
         for robot_id in sorted(self.robot_ids):
-            await self.on_interrupt(robot_id, reason)
+            try:
+                await self.on_interrupt(robot_id, reason)
+            except Exception as exc:
+                # One failed head must not leave the other four speaking.
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
     async def _fetch(self, bootstrap: bool = False) -> dict:
         query = {"after": str(self.cursor if self.cursor is not None else 0)}
@@ -160,16 +172,22 @@ class VoiceEventListener:
                 await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 raise
-            except (httpx.HTTPError, RuntimeError, ValueError, KeyError) as exc:
+            except Exception as exc:
+                # Callback, parser and transport exceptions are equally
+                # unsafe: the realtime human speech monitor cannot stay ready.
                 self.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
-                await self._set_monitor_ready(False)
-                # A broken, delayed or malformed event stream is NOT proof
-                # that the user is silent. Cancel audio once per outage;
-                # a successful authenticated poll rearms event monitoring.
+                try:
+                    await self._set_monitor_ready(False)
+                except Exception as health_exc:
+                    self.last_error += (
+                        f"; monitor callback failed: {type(health_exc).__name__}"
+                    )
+                # A failed abort must be retried on the next outage tick;
+                # do not mark it delivered before the real owner accepts it.
                 if not self._stream_failed:
-                    self._stream_failed = True
                     try:
                         await self._preempt_all("stream_unavailable")
+                        self._stream_failed = True
                     except Exception as cancel_exc:
                         self.last_error += f"; preempt failed: {type(cancel_exc).__name__}"
                 await asyncio.sleep(1)
