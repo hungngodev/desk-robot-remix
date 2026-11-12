@@ -1052,8 +1052,12 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
         await pet._observe_aux("robot-01", 14, report(9, 0x12345678, seq=41))
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
         await pet._observe_aux("robot-01", 14, report(9, 0x12345678, seq=41))
+        await pet._observe_aux("robot-01", 14, report(10, 0x12345678, seq=41))
+        # The same completed hardware scan cannot authorize a second arrival.
+        await pet._observe_aux("robot-01", 14, report(11, 0x12345678, seq=42))
+        # Advancing by one hardware scan cannot account for two new tag events.
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
-        await pet._observe_aux("robot-01", 14, report(9, 0, valid=False, seq=41))
+        await pet._observe_aux("robot-01", 14, report(11, 0, valid=False, seq=42))
         await pet._observe_aux("robot-01", 14, report(1, 0xFEDCBA98, seq=1))
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
         await pet._observe_aux("robot-01", 14, report(2, 0xFEDCBA98, seq=2))
