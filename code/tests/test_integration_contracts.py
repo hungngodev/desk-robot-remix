@@ -212,3 +212,29 @@ def test_auto_social_peer_requires_explicit_local_provenance_consent():
     configured = Settings.model_validate(data)
     assert configured.fleet_social_autonomy_enabled
     assert configured.fleet_social_min_interval_seconds >= 30
+
+
+def test_body_status_uart_capacity_covers_full_width_sensor_counters():
+    # Source contract: status must still fit when 32-bit counters/age fields
+    # reach their widest values. Default-zero examples miss this failure.
+    import re
+
+    body = (ROOT / "code/firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    header = (ROOT / "code/firmware/body/lib/BodyControl/BodyControl.h").read_text()
+    bridge = (ROOT / "code/firmware/head/overlay/robot_bridge.cc").read_text()
+    status = body.split("} else if (status) {", 1)[1]
+    status = status.split('state_.armed ? "true"', 1)[0]
+    status = status.split("const int written = std::snprintf(", 1)[1]
+    parts = re.findall(r'"(?:\\.|[^"\\])*"', status)
+    wire_format = "".join(json.loads(part) for part in parts)
+    formats = re.findall(r"%(?:lu|u|d|s)", wire_format)
+    assert len(formats) >= 55  # actual full sensor status, not a stub
+    static_bytes = len(re.sub(r"%(?:lu|u|d|s)", "", wire_format))
+    worst_case = static_bytes + sum(
+        {"%lu": 10, "%u": 10, "%d": 11, "%s": 24}[field]
+        for field in formats
+    )
+    body_capacity = int(re.search(r"kReplyCapacity\s*=\s*(\d+)", header).group(1))
+    head_capacity = int(re.search(r"kMaxReply\s*=\s*(\d+)", bridge).group(1))
+    rx_capacity = int(re.search(r"uart_driver_install\(kUart,\s*(\d+)", bridge).group(1))
+    assert worst_case < body_capacity < head_capacity < rx_capacity
