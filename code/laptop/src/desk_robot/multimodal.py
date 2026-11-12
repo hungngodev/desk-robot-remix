@@ -370,10 +370,26 @@ class MultimodalOrchestrator:
         )
 
     async def _sensor_frame(self, robot_id: str) -> None:
+        """Confirm a triggered scene using at most two fresh device frames.
+
+        A single capture populates context but cannot confirm that an object
+        actually appeared. One short follow-up gives the existing
+        VisualChangeGate two independent image acquisitions without launching
+        another camera driver, VLM worker or inference while the user speaks.
+        """
         try:
-            if not self._closed and not self.hub.user_active(
-                robot_id, time.monotonic()
-            ):
+            for index in range(2):
+                if (self._closed or self.hub.user_active(
+                    robot_id, time.monotonic()
+                ) or (task := self._look_tasks.get(robot_id)) is not None
+                      and not task.done()):
+                    return
+                if index:
+                    await asyncio.sleep(0.45)
+                    if (self._closed or self.hub.user_active(
+                        robot_id, time.monotonic()
+                    )):
+                        return
                 await self.capture(robot_id, source="sensor")
         except asyncio.CancelledError:
             raise
