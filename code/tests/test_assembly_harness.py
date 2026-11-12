@@ -44,6 +44,10 @@ def test_full_wroom_xiao_signal_harness_matches_real_firmware():
     assert page.count("Accessory TCA9548A 0x71 CH") == 8
     assert "PN532 I2C (0x24)" in page
     assert "MCP23017 (0x20)" in page
+    assert "| MCP23017 GPB0 | optional reed switch |" in page
+    assert "| MCP23017 GPB1 | optional PIR output |" in page
+    assert "| WROOM GPIO36 reserved | left 38kHz IR demodulator |" in page
+    assert "| WROOM GPIO39 reserved | right 38kHz IR demodulator |" in page
     assert "VL53L4CD (0x29)" in page
     assert "Assembly readiness: NO" in page
     assert "Do NOT wire yet" in page
@@ -80,6 +84,8 @@ def test_unqualified_bus_edits_cannot_silently_change_critical_floor():
     with pytest.raises(ValueError, match="Duplicate mux_extras"):
         harness.verify(bad, body, sense)
     bad = copy.deepcopy(plan)
-    bad["bus"]["body_gpio"]["pir"] = bad["bus"]["body_gpio"]["reed"]
+    bad["bus"]["body_gpio"]["terminal_ir_right_reserved"] = (
+        bad["bus"]["body_gpio"]["terminal_ir_left_reserved"]
+    )
     with pytest.raises(ValueError, match="Double-booked"):
         harness.verify(bad, body, sense)
