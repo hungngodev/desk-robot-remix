@@ -856,6 +856,12 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   readings.climate.humidity_centi = 4850;
   readings.climate.sample_seq = 10;
   readings.climate.at_ms = 95;
+  readings.barometer.present = readings.barometer.valid = true;
+  readings.barometer.chip_id = 0x58;
+  readings.barometer.temp_centi = 2400;
+  readings.barometer.pressure_pa = 100653;
+  readings.barometer.sample_seq = 5;  // real successful compensated acquisition
+  readings.barometer.at_ms = 95;
   body.set_accessories(readings, 120);
   desk_robot::OpticalRaw paw{};
   paw.present = paw.valid = true;
@@ -873,7 +879,8 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
         != std::string::npos);
   CHECK(aux.find("\\"nfc\\":{\\"v\\":true,\\"t\\":305419896,\\"e\\":3,\\"s\\":17}")
         != std::string::npos);
-  // Only optional NFC status changed. It cannot arm a physical guard.
+  CHECK(aux.find("\"pressure_pa\":100653,\"seq\":5,\"age_ms\":25") != std::string::npos);
+  // Optional pressure is read-only; it cannot approve movement or charge. It cannot arm a physical guard.
   CHECK(send(body, "disarm", 121) == "OK disarm");
   readings.nfc.valid = false;
   body.set_accessories(readings, 125);
