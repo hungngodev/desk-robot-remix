@@ -72,7 +72,31 @@ int main() {
     CHECK(result.same_code);
     CHECK(result.left_age_ms == 50 && result.right_age_ms == 16);
     CHECK(!result.motor_authorized && !result.charging_authorized);
-    std::cout << "PASS independent full NEC frames, errors, freshness and rollover\n";
+    // 100 independent classic NEC beacons, and 400 deterministic fault
+    // mutations. This is protocol stress, NOT 100 physical robot iterations.
+    for (unsigned seed = 0; seed != 100; ++seed) {
+      const auto addr = static_cast<std::uint8_t>(seed);
+      const auto command = static_cast<std::uint8_t>(seed * 37U);
+      make_frame(frame, addr, command);
+      const std::uint32_t expected =
+          std::uint32_t(addr) |
+          (std::uint32_t(static_cast<std::uint8_t>(~addr)) << 8) |
+          (std::uint32_t(command) << 16) |
+          (std::uint32_t(static_cast<std::uint8_t>(~command)) << 24);
+      CHECK(desk_robot::decode_nec(frame, 34, code) && code == expected);
+      frame[1 + seed % 32].mark_us = 40; // rejected glitch
+      CHECK(!desk_robot::decode_nec(frame, 34, code));
+      make_frame(frame, addr, command);
+      frame[1 + seed % 32].space_us = 1100; // ambiguous one/zero
+      CHECK(!desk_robot::decode_nec(frame, 34, code));
+      make_frame(frame, addr, command);
+      frame[0].mark_us = 250; // header never accepted by chance
+      CHECK(!desk_robot::decode_nec(frame, 34, code));
+      make_frame(frame, addr, command);
+      frame[33].space_us = 560; // missing mandatory frame end idle
+      CHECK(!desk_robot::decode_nec(frame, 34, code));
+    }
+    std::cout << "PASS 100 NEC codes, 400 corruptions, dual freshness and rollover\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << "\n";
     return 1;
