@@ -23,6 +23,9 @@ class RobotConfig(BaseModel):
     squeeze_raw_threshold: int | None = Field(default=None, ge=100, le=30000)
     proximity_near_raw_threshold: int | None = Field(default=None, ge=25, le=245)
     battery_low_percent: int = Field(default=20, ge=5, le=40)
+    # An actual measured optical contact threshold, NOT a heart-rate model.
+    paw_contact_ir_raw_threshold: int | None = Field(default=None, ge=1000, le=250000)
+    paw_contact_interactions_qualified: bool = False
     gesture_interactions_qualified: bool = False  # measured hardware gate
     handling_interactions_qualified: bool = False  # measured MPU6050 mount and stationary baseline
     handling_tilt_threshold_deg: int = Field(default=38, ge=25, le=75)
