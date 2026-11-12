@@ -29,6 +29,10 @@ def raw_mpu6050(body: dict) -> tuple[tuple[float, ...], float] | None:
             or imu.get("valid") is not True
             or type(imu.get("age_ms")) is not int
             or not 0 <= imu["age_ms"] <= 200
+            or type(imu.get("sample_ms")) is not int
+            or not 0 <= imu["sample_ms"] <= 0xffffffff
+            or type(imu.get("boot_id")) is not int
+            or not 1 <= imu["boot_id"] <= 0xffffffff
             or type(body.get("left")) is not int
             or type(body.get("right")) is not int
             or body["left"] != 0 or body["right"] != 0
@@ -60,6 +64,8 @@ class HandlingGate:
     tilt_active: bool = False
     last_shake: float = -math.inf
     last_at: float | None = None
+    last_boot_id: int | None = None
+    last_sample_ms: int | None = None
 
     def reset(self) -> None:
         self.startup_samples.clear()
@@ -69,6 +75,8 @@ class HandlingGate:
         self.tilt_active = False
         self.last_shake = -math.inf
         self.last_at = None
+        self.last_boot_id = None
+        self.last_sample_ms = None
 
     def observe(
         self, body: dict, now: float, *, qualified: bool,
@@ -86,12 +94,21 @@ class HandlingGate:
             self.reset()
             return ()
         if self.last_at is not None and (now <= self.last_at or now - self.last_at > 1.0):
-            self.reset()  # stale/duplicate or reconnect -> new upright baseline
-        self.last_at = now
+            self.reset()  # stale host stream or reconnect -> new upright baseline
         sample = raw_mpu6050(body)
         if sample is None:
             self.reset()
             return ()
+        boot_id = body["imu"]["boot_id"]
+        sample_ms = body["imu"]["sample_ms"]
+        if self.last_boot_id is not None:
+            if boot_id != self.last_boot_id or sample_ms < self.last_sample_ms:
+                self.reset()  # real WROOM reboot, timestamp rollover, or regression
+            elif sample_ms == self.last_sample_ms:
+                return ()  # same physical conversion; do not update last_at
+        self.last_boot_id = boot_id
+        self.last_sample_ms = sample_ms
+        self.last_at = now
         acceleration, rotation_dps = sample
         g = math.hypot(*acceleration)
         if not 0.05 <= g <= 3.5:
