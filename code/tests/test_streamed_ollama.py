@@ -131,3 +131,65 @@ async def test_cancelled_streamed_voice_sends_urgent_real_head_abort(settings):
     assert task.cancelled()
     assert interrupts == ["robot-01"]
     assert c.active is None
+
+
+
+async def test_failed_stream_flushes_physical_head_before_group_lease_releases(settings):
+    events = []
+
+    class Chat:
+        async def stream_reply(self, _history):
+            yield "I started saying something."
+            raise RuntimeError("Ollama streaming connection lost")
+
+    class Speaker:
+        @asynccontextmanager
+        async def session(self, robots):
+            events.append(("session", "begin"))
+            try:
+                yield
+            finally:
+                events.append(("session", "end"))
+
+        async def say(self, robot, text):
+            events.append(("spoken", robot.id, text))
+
+        async def interrupt(self, robot):
+            events.append(("head_abort", robot.id))
+
+    c = Conversation(settings, Chat(), Speaker())
+    with pytest.raises(RuntimeError, match="Ollama streaming connection"):
+        await c.run(["robot-01", "robot-02"], "respond", 1)
+    assert events == [
+        ("session", "begin"),
+        ("spoken", "robot-01", "I started saying something."),
+        ("session", "end"),
+        ("head_abort", "robot-01"),
+    ]
+    assert c.active is None
+
+
+async def test_proactive_speaker_partial_transport_failure_sends_real_abort(settings):
+    events = []
+
+    class Speaker:
+        @asynccontextmanager
+        async def session(self, robots):
+            events.append("session_begin")
+            try:
+                yield
+            finally:
+                events.append("session_end")
+
+        async def say(self, robot, text):
+            events.append("partially_queued")
+            raise RuntimeError("Bridge disconnected after audio queued")
+
+        async def interrupt(self, robot):
+            events.append("head_abort")
+
+    c = Conversation(settings, None, Speaker())
+    with pytest.raises(RuntimeError, match="Bridge disconnected"):
+        await c.say_proactive(settings.robots[0], "Hello there")
+    assert events == ["session_begin", "partially_queued", "head_abort", "session_end"]
+    assert c.active is None
