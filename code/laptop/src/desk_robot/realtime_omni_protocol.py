@@ -117,11 +117,12 @@ class OmniDuplexWire:
                      jpeg: bytes | None = None,
                      camera_age_ms: int | None = None,
                      frame_receipt_us: int | None = None) -> dict:
-        """One 1..1000 ms mono 16 kHz chunk, with at most one timely camera JPEG.
+        """One 1..1000 ms mono 16 kHz chunk with provenance-tagged JPEG.
 
-        vLLM Omni packs a visual frame onto the append closing a 1 s model
-        unit. Keeping one image per unit avoids the long-video queue growth
-        reported upstream for stacked frames.
+        vLLM-Omni duplex consumes video with the append that CLOSES each
+        complete one-second model unit. Unlike Gemini Live's independent
+        video input, a short unfinished audio unit cannot truthfully carry
+        a processed video frame. Pick a fresh distinct frame at that boundary.
         """
         if type(speech) is not bool or not isinstance(pcm16, bytes):
             raise ValueError("Speech must be real PCM16 and VAD must be boolean")
@@ -140,6 +141,7 @@ class OmniDuplexWire:
             or frame_receipt_us <= 0
         ):
             raise ValueError("Only fresh bounded JPEG from current head allowed")
+        previous_ms = self.input_ms
         self.input_ms += duration
         if speech:
             self._last_speech_audio_ms = self.input_ms
@@ -154,14 +156,14 @@ class OmniDuplexWire:
         }
         if self._needs_new_input:
             self._input_after_interrupt = True
-        # Voice frame selection follows the received camera identity rather
-        # than a one-second audio counter boundary. The FIRST authenticated
-        # JPEG can join a 200ms spoken question; later unique images are
-        # limited to 1 FPS. No duplicate frame or video-only hallucination.
+        # The upstream MiniCPM-o duplex prefill groups one FULL second of
+        # audio with the chosen frame. Never strand a JPEG on a partial unit.
+        # Within that constraint, dedupe real Mac receipt identities and
+        # allow the brief post-speech audio tail to complete the same unit.
         if (jpeg is not None
-                and self.input_ms - self._last_speech_audio_ms <= 500
-                and frame_receipt_us > self._last_video_receipt_us
-                and self.input_ms - self._last_video_audio_ms >= 1000):
+                and self.input_ms // 1000 > previous_ms // 1000
+                and self.input_ms - self._last_speech_audio_ms <= 1000
+                and frame_receipt_us > self._last_video_receipt_us):
             event["video_frames"] = [base64.b64encode(jpeg).decode("ascii")]
             self._last_video_receipt_us = frame_receipt_us
             self._last_video_audio_ms = self.input_ms
