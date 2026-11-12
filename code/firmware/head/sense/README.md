@@ -26,6 +26,25 @@ under the camera mutex and now checks both JPEG boundary markers and a 512 KiB
 size cap. The OLED is used for emotional expressions, not the upstream LVGL
 camera preview, which the pinned upstream explicitly skips for JPEG.
 
+A physical non-motion camera/status stress probe is in
+`code/scripts/bench_head_camera.py`. With a real camera-connected XIAO,
+a real Xiaozhi device identity, and private hardware TOML configured:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_camera.py \
+  --config config/local.toml --robot robot-01 --seconds 60 \
+  --camera-period 1.0 --status-period 0.2 \
+  --report ../docs/records/reports/sense-camera-bench-local.json
+```
+
+It makes authenticated GET requests only, records JPEG and body status
+timing without writing any pictures or voice, and rejects stale/replayed
+source metadata through the existing `HttpHead` transport. Its report
+always leaves actual acoustic interruption, sensor exposure synchronization,
+charging and assembly acceptance FALSE. Run an independent sound recording
+and real interrupt trials for those separate release gates.
+
 The Mac still owns the only camera transport, frame motion scoring, small
 RAM-only frame ring, user VAD priority and selective forwarding to the
 native duplex model. This is **selected JPEG video over repeated snapshots**
