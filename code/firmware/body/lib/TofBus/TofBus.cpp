@@ -64,6 +64,11 @@ bool TofBus::write_byte(std::uint16_t reg, std::uint8_t value) {
 
 void TofBus::failed(CliffGuard& guard) {
   ++bus_errors_;
+  // Every range lane shares this mux and I2C controller. A bus fault
+  // invalidates optional side/rear evidence too, not only the five critical
+  // floor/front samples. Retain presence and last measured millimeters for
+  // diagnostics, but do not publish these values as currently valid.
+  for (auto& sample : extra_) sample.valid = false;
   guard.bus_fault();
 }
 
