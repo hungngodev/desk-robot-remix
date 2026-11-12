@@ -323,7 +323,13 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None:
             raise OperationError("No hardware camera adapter")
-        evidence = await visual.capture(robot_id, source="speech")
+        # Prefer the real Mac 1 FPS VAD sampler's latest current-turn JPEG;
+        # a second native video consumer must not duplicate camera HTTP I/O.
+        reuse = getattr(visual, "native_frame", None)
+        evidence = (
+            await reuse(robot_id) if callable(reuse)
+            else await visual.capture(robot_id, source="speech")
+        )
         import time
         age_ms = round(1000 * (time.monotonic() - evidence.received_at))
         if not 0 <= age_ms <= 1000:
@@ -334,6 +340,13 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             headers={
                 "X-Desk-Robot-Id": robot_id,
                 "X-Desk-Camera-Age-Ms": str(age_ms),
+                # Stable across rereads of ONE acquired frame. Monotonic
+                # reception identity, never a fabricated camera exposure.
+                "X-Desk-Camera-Receipt-Us": str(round(evidence.received_at * 1_000_000)),
+                "X-Desk-Frame-Motion-Ppm": str(round(
+                    max(0.0, min(1.0, getattr(evidence, "motion_fraction", 0.0)))
+                    * 1_000_000
+                )),
                 "Cache-Control": "no-store",
             },
         )
