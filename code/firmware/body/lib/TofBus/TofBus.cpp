@@ -203,9 +203,11 @@ RangeDiagnostic TofBus::extra_diagnostic(std::uint8_t index,
   if (index >= 3 || !extra_[index].present) return result;
   const auto& sample = extra_[index];
   result.present = true;
-  result.valid = sample.valid;
-  result.distance_mm = sample.mm;
   result.age_ms = now_ms - sample.at_ms;
+  // Optional side/rear readings are diagnostics, not indefinitely valid
+  // evidence. Mirror the Mac 350 ms freshness acceptance, retaining raw mm.
+  result.valid = sample.valid && result.age_ms <= 350U;
+  result.distance_mm = sample.mm;
   return result;
 }
 
