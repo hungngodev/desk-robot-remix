@@ -219,12 +219,10 @@ class VoiceEventListener:
                 # Callback, parser and transport exceptions are equally
                 # unsafe: the realtime human speech monitor cannot stay ready.
                 self.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
-                try:
-                    await self._set_monitor_ready(False)
-                except Exception as health_exc:
-                    self.last_error += (
-                        f"; monitor callback failed: {type(health_exc).__name__}"
-                    )
+                # Stop obsolete audio first. Monitor callbacks may themselves
+                # block during a head disconnect, and must never gate the
+                # emergency shared audio interruption attempt.
+                self.monitor_ready = False
                 # A failed abort must be retried on the next outage tick;
                 # do not mark it delivered before the real owner accepts it.
                 if not self._stream_failed:
@@ -233,4 +231,10 @@ class VoiceEventListener:
                         self._stream_failed = True
                     except Exception as cancel_exc:
                         self.last_error += f"; preempt failed: {type(cancel_exc).__name__}"
+                try:
+                    await self._set_monitor_ready(False)
+                except Exception as health_exc:
+                    self.last_error += (
+                        f"; monitor callback failed: {type(health_exc).__name__}"
+                    )
                 await asyncio.sleep(1)
