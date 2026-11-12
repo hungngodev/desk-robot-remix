@@ -136,6 +136,7 @@ class BodyControl {
   bool dock_sample_seen_ = false;
   std::uint32_t dock_last_seq_ = 0, dock_last_at_ms_ = 0;
   std::uint8_t dock_last_pins_ = 0;
+  bool dock_provenance_fault_ = false;  // requires a new GPIOA acquisition
   bool dock_monitor_required_ = false; // full robot build, set at boot only
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};
