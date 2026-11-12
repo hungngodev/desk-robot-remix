@@ -20,7 +20,8 @@ BODY_SINGLE = {
     "head_uart_rx": "kUartRx", "head_uart_tx": "kUartTx",
     "sda": "kSensorSda", "scl": "kSensorScl",
     "head_touch": "kTouchOutput", "bumper_nc_series": "kBumperInput",
-    "reed": "kReedInput", "pir": "kPirInput",
+    "terminal_ir_left_reserved": "kTerminalIrLeftInput",
+    "terminal_ir_right_reserved": "kTerminalIrRightInput",
 }
 HEAD_SINGLE = {
     "oled_sda": "DISPLAY_SDA_PIN", "oled_scl": "DISPLAY_SCL_PIN",
@@ -109,10 +110,19 @@ def render(plan: dict, body: str, head: str) -> str:
     row("WROOM GPIO21 SDA + GPIO22 SCL", "MPU6050 + 0x70 + 0x71 mux inputs",
         "3.3V I2C; actual breakout pullups need checking")
     for signal, target in (("head_touch", "AT42QT1010 OUT"),
-                           ("bumper_nc_series", "NC bumper series OUT"),
-                           ("reed", "optional reed input"), ("pir", "optional PIR input")):
+                           ("bumper_nc_series", "NC bumper series OUT")):
         row(f"WROOM GPIO{bus['body_gpio'][signal]}", target,
             "3.3V input; external bias required on GPIO34 through GPIO39")
+    row("MCP23017 GPB0", "optional reed switch",
+        "3.3V input; closes LOW to GND", "Source polled; physically unqualified")
+    row("MCP23017 GPB1", "optional PIR output",
+        "3.3V input; active HIGH", "Source polled; physically unqualified")
+    row("WROOM GPIO36 reserved", "left 38kHz IR demodulator",
+        "Demodulated NEC burst input, external bias; ESP32 erratum",
+        "No decoder or physical acceptance; do NOT wire yet")
+    row("WROOM GPIO39 reserved", "right 38kHz IR demodulator",
+        "Demodulated NEC burst input, external bias; ESP32 erratum",
+        "No decoder or physical acceptance; do NOT wire yet")
     for signal, target in (("oled_sda", "SSD1306 SDA"), ("oled_scl", "SSD1306 SCL"),
                            ("amp_bclk", "MAX98357A BCLK"), ("amp_lrclk", "MAX98357A LRC"),
                            ("amp_din", "MAX98357A DIN")):
@@ -145,7 +155,9 @@ def render(plan: dict, body: str, head: str) -> str:
         "  true pack charging current and regulator peak current rating.",
         "* Qualified power and ground distribution to motors, servos, XIAO,",
         "  WROOM, speaker and 3.3V sensors. Never power actuators through MCU GPIO.",
-        "* Two terminal 38 kHz IR receivers conflict with reed/PIR inputs.",
+        "* Reed/PIR now have slow MCP23017 GPIOB input source, freeing",
+        "  GPIO36/39 for dual IR. The real NEC decoder, RTC/ADC erratum",
+        "  filtering and final homing remain entirely unqualified.",
         "* Breakout VCC and I2C pullups, connector pin order and cable gauge.",
         "* Printed fit, local cliff geometry, audio and charger bench trials.",
         "",
