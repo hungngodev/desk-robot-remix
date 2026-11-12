@@ -1,5 +1,15 @@
 # Verification and physical trials
 
+
+## November 12 XIAO power and J3 boundary audit, independently checked source
+
+**Target:** canonical draft PR #17, not the default branch. A current head GitHub Actions run [43310129522](https://github.com/hungngodev/desk-robot-remix/actions/runs/43310129522) had four failed jobs and **no recorded steps or artifacts**; job logs returned `BlobNotFound`; the connected GitHub fetch does not allow check-run annotations. This is NOT a compiler verdict. A local private Git clone from this execution environment failed DNS resolution, so **no full pytest, native CMake, PlatformIO or Sense IDF** was executed for these additions.
+
+**Actual independent readback:** GitHub branch files `code/scripts/emit_wiring_manifest.py`, `docs/hardware/one-robot-signal-harness.generated.md`, `code/tests/test_assembly_harness.py`, `docs/hardware/wiring.md` and `docs/hardware/full-feature-wiring-and-shopping.md` were read after commit. Six source assertions passed: the exact six-line XIAO warnings appear in the generator and checked-in harness, mandatory regression assertions name both boundaries, both wiring documents reference the official Seeed pin mux source, and the generated harness still ends with an explicit NO assembly gate. These are **static code/contract checks**, not executed Python tests or electrical evidence.
+
+**New machine gates:** `code/scripts/verify_system.py` emits `sense_sd_j3_isolation_verified=false` and `sense_vbus_power_path_verified=false` even if all source stages pass. `test_verify_system.py` expects these flags to remain false. The motor supply, charger and dock contacts remain disabled/unqualified. See the [bench procedure](../hardware/wiring.md#xiao-external-power-and-sense-sd-j3-acceptance). Before product release, physically inspect the shipped Sense board, measure J3 isolation continuity, evaluate diode/reverse current and rail sag under head load with a current-limited bench supply, log actual instrument readings, then execute all repository tests. Neither readback nor a hypothetical wiring diagram qualifies a cell.
+
+
 ## November 12 authenticated VAD snapshot recovery: commit evidence
 
 PR #17 commits `8e4ad80`, `b8dfd1a`, `75c7d76`, and `f8067e8` fix and test missed speech start/end reconciliation. The Mac now invokes the existing live `MultimodalOrchestrator` voice owner for recovered starts after urgently cancelling the fleet speech floor, preempting peer optional camera requests and updating visual-turn epochs. Recovered ends cancel the head's speech camera sampler. A real orchestrator regression and a small callback regression are checked in. **No repository pytest, Ruff, firmware compile, hardware camera or acoustic measurement executed for these changes in this session.** The most recently inspected completed Actions run, `43309538180`, failed all four jobs with `steps: null`; the new commit's subsequent runner state must be checked again. This is not evidence of a code failure or a green check. Physical VAD-to-silence and image exposure timing still need instrumented measurements.
