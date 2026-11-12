@@ -204,3 +204,35 @@ async def test_cancelled_close_does_not_bypass_body_disarm(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await guarded_grasp(head, Settings(), health=disarmed_after_first_close)
     assert head.commands == ["grip 65"]
+
+
+async def test_real_task_cancellation_during_unacknowledged_jaw_command(monkeypatch):
+    """A timed-out servo ACK cannot be assumed to mean no jaw movement."""
+    import asyncio
+
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101])
+    command_sent = asyncio.Event()
+    never_acknowledged = asyncio.Event()
+
+    async def interrupted_command(command):
+        head.commands.append(command)
+        if command == "grip 65":
+            command_sent.set()
+            await never_acknowledged.wait()
+
+    head.command = interrupted_command
+    task = asyncio.create_task(guarded_grasp(head, Settings(), health=healthy))
+    try:
+        await asyncio.wait_for(command_sent.wait(), timeout=1)
+        task.cancel()  # Real task cancellation, not manually raising the exception.
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert head.commands == ["grip 65", "grip 60"]
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
