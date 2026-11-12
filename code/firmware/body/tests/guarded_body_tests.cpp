@@ -623,6 +623,30 @@ static void dock_replayed_gpio_bits_do_not_preserve_arm_permission() {
   CHECK(send(body, "arm", 63) == "ERR arm dock_power_connected");
 }
 
+static void inconsistent_dock_acquisition_requires_new_sample_to_recover() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_dock_monitor(true);
+  desk_robot::AccessoryReadings r{};
+  r.dock.present = r.dock.valid = true;
+  r.dock.sample_seq = 12;
+  r.dock.at_ms = 40;
+  body.set_accessories(r, 41);
+  CHECK(send(body, "arm", 42) == "OK arm");
+  r.dock.charge_indicated = true;  // altered pin without GPIO read
+  body.set_accessories(r, 43);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 44) == "ERR arm dock_gpio_missing_or_stale");
+  r.dock.charge_indicated = false; // replay of prior legitimate cache
+  body.set_accessories(r, 45);
+  CHECK(send(body, "arm", 46) == "ERR arm dock_gpio_missing_or_stale");
+  r.dock.sample_seq = 13;
+  r.dock.at_ms = 47; // next true completed GPIOA acquisition
+  body.set_accessories(r, 48);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 49) == "OK arm");
+  CHECK(send(body, "disarm", 50) == "OK disarm");
+}
+
 static void dock_removal_accepts_genuine_uint32_wrap() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_dock_monitor(true);
@@ -857,6 +881,7 @@ int main() {
     dock_removal_needs_new_fresh_real_gpio_sample();
     dock_removal_accepts_genuine_uint32_wrap();
     dock_replayed_gpio_bits_do_not_preserve_arm_permission();
+    inconsistent_dock_acquisition_requires_new_sample_to_recover();
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
