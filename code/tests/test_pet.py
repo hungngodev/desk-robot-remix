@@ -125,6 +125,63 @@ async def test_local_ollama_scene_is_two_frame_and_refuses_uncertain_claims():
     assert len(requests) == 3
 
 
+async def test_background_camera_cancel_for_user_speech_does_not_kill_pet_loop(
+    fleet, tmp_path
+):
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    class SlowFirstDevice:
+        def __init__(self):
+            self.calls = 0
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def snapshot(self):
+            self.calls += 1
+            if self.calls == 1:
+                self.started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+            return jpeg("gray")
+
+    device = SlowFirstDevice()
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+    )
+    pet = PetController(
+        fleet, {"robot-01": device}, conversation, memory,
+        KeyScene(), interval=.025
+    )
+    visual = MultimodalOrchestrator(
+        fleet, {"robot-01": device}, KeyScene(), asyncio.Lock()
+    )
+    pet.multimodal = visual
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 12, True
+    worker = asyncio.create_task(pet._observe("robot-01", 12))
+    try:
+        await asyncio.wait_for(device.started.wait(), timeout=1)
+        visual.voice_started("robot-01")
+        await wait_for(lambda: device.cancelled)
+        assert not worker.done()
+        assert state.enabled
+        visual.voice_ended("robot-01")
+        await wait_for(lambda: device.calls >= 2, timeout=2)
+        await wait_for(lambda: state.last_scene_frame_at is not None, timeout=2)
+        assert state.last_error is None
+        assert memory.count("robot-02") == 0
+    finally:
+        state.enabled = False
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        await visual.close()
+        await pet.close()
+
+
 @pytest.mark.parametrize("local_object", [False, True])
 async def test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner(
     fleet, tmp_path, local_object
