@@ -25,6 +25,24 @@ def sample(robot="robot-01"):
     }
 
 
+def test_pn532_tag_telemetry_rejects_forged_evidence():
+    good = sample()
+    good["nfc"] = {"v": True, "t": 0x12345678, "e": 8, "s": 44}
+    assert validate_aux(good, "robot-01")["nfc"]["e"] == 8
+    for key, value in (
+        ("v", 1), ("t", -1), ("e", True), ("s", -1),
+        ("s", 0),
+    ):
+        bad = copy.deepcopy(good)
+        bad["nfc"][key] = value
+        with pytest.raises(ValueError, match="PN532"):
+            validate_aux(bad, "robot-01")
+    bad = copy.deepcopy(good)
+    bad["nfc"]["v"] = False
+    with pytest.raises(ValueError, match="PN532"):
+        validate_aux(bad, "robot-01")
+
+
 def test_aux_sensors_are_finite_typed_raw_and_unqualified():
     result = validate_aux(sample(), "robot-01")
     assert result["pulse"]["bpm"] is None
