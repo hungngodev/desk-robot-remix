@@ -66,7 +66,15 @@ def validate_aux(data: dict, robot_id: str) -> dict:
 
     if (not _sint(climate.get("temp_centi"), -4500, 13000)
             or not _uint(climate.get("rh_centi"), 10000)
-            or not _bool(climate.get("valid"))):
+            or not _bool(climate.get("valid"))
+            or (climate.get("seq") is not None and (
+                not _uint(climate["seq"], 0xffffffff)
+                or (climate["valid"] and climate["seq"] == 0)
+            ))
+            or (climate.get("age_ms") is not None and (
+                not _uint(climate["age_ms"], 0xffffffff)
+                or (climate["valid"] and climate["age_ms"] >= 1000)
+            ))):
         raise ValueError("Invalid SHT41 climate sample")
 
     if (not _uint(power.get("cell_mv"), 4500)
