@@ -9,6 +9,18 @@ old `firmware/head/build/` prefix and `body-platformio/` replaces
 `firmware/body/.pio/`.
 
 
+
+## November 12 latest exact-host and product release checkpoint
+
+**Host source tests actually rerun against current GitHub file blobs:** Five standalone C++ programs (`range_scan`, `terminal_ir`, `pn532_frames`, `pulse_raw`, `accessory_math`) compile and execute with GNU C++11, `-Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined`; all five printed PASS. Their header/test `git hash-object` identities exactly match the current PR #17 source as retrieved November 12. The **current** `code/scripts/verify_system.py` blob `18507e21884369d6f16613746706a58c78a002e2` and `code/tests/test_verify_system.py` blob `eda1127391ad568738568abdfbbc486f28d6da3b` passed **5 real pytest cases** (Python 3.13.5, pytest 9.0.2); the fifth proves that a source suite PASS never certifies legal manufacturing rights or physical product acceptance.
+
+**Native synchronous plugin pattern isolated harness:** eight concurrent `concurrent.futures.ThreadPoolExecutor` tasks occupied a `threading.BoundedSemaphore(8)`; cancelling the first asyncio wrapper did not permit a ninth task; after releasing native workers all capacity returned. Two checks PASS. This tests the concurrency primitive and mirrors the patched server overlay, but **is not the actual pinned Xiaozhi server integration pytest**, which remains unexecuted. Existing `code/tests/test_xiaozhi_tool_resilience.py` now includes the same production source regression; `code/tests/test_server_bridge.py` contract was reconciled to native future ownership after the older inline `run_in_executor` assertion became stale.
+
+**Actions runner attempted again:** re-ran the four failed jobs on run [43306241566](https://github.com/hungngodev/desk-robot-remix/actions/runs/43306241566). The rerun was accepted, but all four jobs again finished FAILURE with **zero recorded steps**. Treat as inaccessible runner/provisioning/permissions or account environment blocker until the actual GitHub Actions UI provides diagnostic detail. Do not claim code failure or test pass from that run. A direct HTTPS checkout from the isolated host is blocked by DNS/egress as well.
+
+**Separate batch release gate:** `docs/ATTRIBUTION.md` now records the original SMARS noncommercial mechanical license and its author's advertised commercial manufacture offer. Software/MIT releases are not evidence of commercial rights to chassis, tracks or forklift prints. `verify_system.py` emits `commercial_cad_rights_verified=false` and `commercial_batch_release_ready=false` alongside the already false charging, fitted CAD, five robot acoustics and assembly fields. Real commercial rights need applicable permission or replacement geometry; real electrical, acoustic, mechanism and printed fit tests still must pass. **Do not mark PR #17 assembly-ready.**
+
+
 ## 2026-11-12 live source cross-layer checks, not passing hardware evidence
 
 **Canonical PR:** [#17](https://github.com/hungngodev/desk-robot-remix/pull/17). Four GitHub Actions jobs (Python and head, WROOM PlatformIO, Sense ESP-IDF and body C++ sanitizers) still fail before their first recorded step. The connector cannot retrieve the job logs. No new host, firmware or physical trial result is PASS. See the exact [runner diagnosis](../reviews/CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md) before treating a red status as a compiler error.
