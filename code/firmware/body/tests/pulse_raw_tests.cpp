@@ -12,6 +12,7 @@ int main() {
     CHECK(desk_robot::optical18(example) == 0x12345U);
     const desk_robot::OpticalRaw unknown{};
     CHECK(!unknown.present && !unknown.valid && unknown.ir == 0);
+    CHECK(unknown.sample_seq == 0U); // boot cannot mimic a fresh touch
     std::cout << "PASS bounded MAX30102 red/IR raw decoder\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << "\n";
