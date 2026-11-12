@@ -100,8 +100,23 @@ class Runtime:
             robot_id for robot_id in active
             if not visual.hub.user_active(robot_id, now)
         ]
+        # A reconnect snapshot can contain speech edges missed by the
+        # ordered event stream. Merely setting hub.voice_until did not cancel
+        # other pets' optional JPEGs or prime the speaking head's camera.
+        # Reuse the exact live VAD owner after the urgent audio abort.
+        missing_ends = [
+            robot_id for robot_id in visual.hub.robots
+            if robot_id not in active
+            and visual.hub.voice_until[robot_id] == float("inf")
+        ]
         if missing_starts:
             await self._preempt_audio_floor()
+            for robot_id in sorted(missing_starts):
+                visual.voice_started(robot_id)
+        # A lost speech_end must stop that head's optional 1 FPS sampler,
+        # not just clear the speaker lease in the hub.
+        for robot_id in sorted(missing_ends):
+            visual.voice_ended(robot_id)
         visual.hub.reconcile_speech_snapshot(active, time.monotonic())
 
     async def _on_voice_monitor_ready(self, ready: bool) -> None:
