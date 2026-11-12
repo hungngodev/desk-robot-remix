@@ -1,6 +1,22 @@
 # Verification and physical trials
 
 
+## November 12 live camera, native voice and five pet source audit
+
+**Sole target** draft PR #17; head identity to be retrieved before any future run. **No physical measurements or full repo test execution occurred during these changes.** The existing four GitHub Actions jobs continued failing before any recorded job steps; that is not evidence of a Python assertion, C++ compiler or ESP-IDF error.
+
+**Pinned real upstream source checked:** `78/xiaozhi-esp32@c435f99a88066029ec2dbd2d758c8cc9d051565b`, file `main/boards/common/esp32_camera.cc`. Its `Capture()` handles `PIXFORMAT_JPEG` and `Explain()` handles `V4L2_PIX_FMT_JPEG`; its JPEG preview is intentionally not rendered. On that basis, Sense `desk_robot_sense.cc` now requests VGA native sensor JPEG, one PSRAM frame buffer, and WHEN_EMPTY capture (`1040831`). The existing overlaid `Esp32Camera::SnapshotJpeg()` validates SOI/EOI and 512 KiB before copying its framebuffer bytes (`11fcca2`), with new head source regression (`8027a09`). This is not a proven real OV3660/OV5640 capture, capture rate or AEC throughput.
+
+**Actual source integration checks:** Mac `MultimodalOrchestrator.native_frame()` and lock coalescing, live JPEG receipt and grayscale motion headers, native `_camera` keyframe/motion/static refreshing, per VAD generation, deduplicated one-frame-per-receipt audio attachment, and initial VAD wake de-duplication are committed. A new `bench_head_camera.py` read-only stress tool measures actual GET camera/status HTTP latencies and source capture IDs when the board exists, without storing image data or sending any motor command. The tool is not yet run on real hardware. No microphone playback or human interruption latency can be inferred from it.
+
+**Natural dialogue and security:** Authenticated legacy `desk_robot_look` tool results are fenced by current socket and human voice generation; older tool completions are rejected. Mac voice monitor gap invalidates queued VLM frames without releasing a still speaking person. Optional human native ASR text storage requires *separate* `voice_memory_tools_enabled` and `voice_transcript_memory_enabled`; text goes to the correct pet's SQLite as uncertain heard speech. Default flags remain false. In native model duplex, other pets' queued and speaking responses now get independent concurrent local flush requests on a new human VAD; failed flush does not falsely clear audio ownership. Existing backend MiniCPM realtime cannot claim native function calling without a compatible upstream protocol.
+
+**New regression definitions, NOT RUN:** `code/tests/test_multimodal.py`, `code/tests/test_multimodal_api.py`, `code/tests/test_native_omni_xiaozhi.py`, `code/tests/test_runtime_voice_priority.py`, `code/tests/test_xiaozhi_tool_resilience.py`, `code/tests/test_head_camera_bench.py`, `code/firmware/head/tests/test_sense.py`. No new test pass count is claimed for these changes.
+
+**Next measured checks:** on the finished XIAO Sense board run `cd code && uv run --no-sync python scripts/bench_head_camera.py --config config/local.toml --robot robot-01 --seconds 60 --camera-period 1 --status-period 0.2 --report ../docs/records/reports/sense-camera-real.json`, then collect true audio AEC barge latency under simultaneous camera and tool work and five real head speaker trials. Document firmware SHA, PCB/camera revision, 5V load, PSRAM available, camera FPS, p95/p99 device/voice latency, and acoustic silence. Keep `physical_aec_latency_measured=false`, `charging_verified=false`, `assembly_ready=false` until independent signed observations establish them.
+
+
+
 ## November 12 executable-contract drift discovered during static source review
 
 A real latent USB status regression was present despite earlier assertions: current WROOM `kReplyCapacity=1536` and Sense `kMaxReply=1664`, but `code/scripts/serial_bench.py` still used `port.readline(1152)`. Commit `616cf84` changes the **existing** USB inspection path to a 1664 byte receive bound, retaining the no-retry safety behavior. Commit `3d9697c` repairs stale test contracts that expected old UART sizes, claimed PN532 was not integrated, and searched an obsolete one-line dock contact expression. Commits `fb18778` and `c23cad6` synchronize the actual PN532 nonblocking read-only driver status and status size documentation. The separate `test_dock_charge_pins.py` expected a single-line `case 5: dock_status(now_ms)` but real source uses two lines; `fb18c4b` corrects its exact escaped newline assertion.
