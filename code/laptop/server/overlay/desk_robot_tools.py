@@ -3,15 +3,18 @@
 import os
 
 import httpx
-from desk_robot_bridge import robot_for_device
+from desk_robot_bridge import connections, robot_for_device
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
 
 
 async def call(conn, route, payload=None):
     robot = robot_for_device(conn.device_id)
     token = os.environ.get("DESK_ROBOT_TOOL_TOKEN", "")
-    if robot is None or len(token) < 24:
-        return {"error": "Robot mapping or local tool credential is missing"}
+    if (robot is None or connections.get(conn.device_id) is not conn
+            or len(token) < 24):
+        # A detached old WebSocket must not issue a Mac action after a
+        # replacement head reconnects under the same configured device ID.
+        return {"error": "Current registered head or local tool credential missing"}
     try:
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:8765", timeout=5,
