@@ -280,6 +280,10 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
 void AccessorySensors::barometer(std::uint32_t now_ms) {
   auto& b = data_.barometer;
   if (!b.present) return;
+  // BMP280 is configured for ~1s normal-mode standby. Reading the bus
+  // more often can return the SAME internal conversion with a new HTTP
+  // timestamp. Keep accepted acquisition identity at least 1250ms apart.
+  if (b.sample_seq != 0U && now_ms - b.at_ms < 1250U) return;
   // Two raw 20-bit ADC words from a single bounded burst. No reusing an
   // old pressure conversion if I2C fails or the NVM trim is implausible.
   std::uint8_t frame[6]{};
@@ -288,7 +292,11 @@ void AccessorySensors::barometer(std::uint32_t now_ms) {
   const auto temp_adc = bmp280_raw20(frame + 3);
   b.valid = bmp280_compensate(bmp_trim_, temp_adc, press_adc,
                               b.temp_centi, b.pressure_pa);
-  if (b.valid) b.at_ms = now_ms;
+  if (b.valid) {
+    b.at_ms = now_ms;
+    ++b.sample_seq;
+    if (b.sample_seq == 0U) ++b.sample_seq; // reserve 0 as unobserved
+  }
 }
 
 void AccessorySensors::power(std::uint32_t now_ms) {
