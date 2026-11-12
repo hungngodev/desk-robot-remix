@@ -8,8 +8,8 @@ from typing import Awaitable, Callable
 
 from .calibration import Calibration
 from .config import Settings
-from .dock_runtime import load_real_dock_calibration
-from .dock_vision import assess_dock, detect_apriltag
+from .dock_runtime import detect_bounded, load_real_dock_calibration
+from .dock_vision import assess_dock
 from .grasp_feedback import guarded_grasp
 from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
@@ -425,13 +425,11 @@ class Coordinator:
             # Local WROOM cliff stop remains mandatory for every short pulse.
             jpeg = await asyncio.wait_for(head.snapshot(), timeout=2.0)
             received_at = time.monotonic()
-            # OpenCV PnP is CPU-heavy. Keep it off the Mac event loop so
-            # human VAD and urgent speaker abort are not delayed by geometry.
-            pose = await asyncio.wait_for(
-                asyncio.to_thread(
-                    detect_apriltag, jpeg, camera, captured_at=received_at
-                ),
-                timeout=2.0,
+            # The shared bounded native detector also owns all read-only
+            # AprilTag observations. A cancelled/expired C detector cannot
+            # escape the single-worker budget or overlap another robot.
+            pose = await detect_bounded(
+                jpeg, camera, captured_at=received_at
             )
             decision = assess_dock(
                 pose, now=time.monotonic(), target_distance_mm=target_mm
