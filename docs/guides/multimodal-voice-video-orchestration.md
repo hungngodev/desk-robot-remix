@@ -172,6 +172,10 @@ Software acceptance (unexecuted while CI runners fail before any job step):
 **Measured physical acceptance is still mandatory:** gather actual time-stamped camera capture latency, live VAD edge-to-audible-silence latency, false visual motion and false speech interruption rates, sustained five camera memory usage, one speaker exclusivity across 30+ minutes, real sensor exposure versus Mac receipt timestamps, and grounded peer provenance. Run both ESP firmware builds, Linux host C++ sanitizer and full Python suite before enabling. All changes above are committed source and pending regression tests, **not executed CI or a completed autonomous social robot**.
 
 
+## Fleet wide human voice supersedes old peer visual questions
+
+A real source review on November 12 found that the earlier global priority implementation stopped unsolicited JPEG on all five pets, but left already running explicit `look` tools on other heads alive. Since Ollama can spend many seconds inferring, such a stale answer can be handed back after another robot's user has started speaking. `MultimodalOrchestrator._voice_activity` now cancels and increments a provenance epoch for every peer `look` on authenticated VAD or AEC; an actual visual request cannot start while another head's human turn is active. The speaking head retains its own voice vision tool so camera questions can still be answered naturally. No camera frame, VLM answer or peer message grants motor or charger authority. `test_multimodal.py` now contains deterministic peer cancellation and cross head priority tests. No physical five head microphone/loudspeaker pass is claimed.
+
 ## November 12: voice failure, peer memory scheduling and vendor plugin resilience
 
 A targeted upstream and current branch review found the following integration facts and repairs. These changes refine the **existing** Xiaozhi and Mac owners; no second audio stack, new tool daemon, motion owner or independent PR was created.
