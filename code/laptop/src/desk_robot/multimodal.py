@@ -30,7 +30,7 @@ TEMPORAL_WORDS = re.compile(
 )
 
 TRIGGERS = frozenset({
-    "human_voice", "touch_tap", "touch_double", "touch_hold",
+    "human_voice", "touch", "touch_tap", "touch_double", "touch_hold",
     "petting_zone", "hand_wave", "nearby_object", "nose_twist",
     "squeeze", "bumper", "magnet", "pir", "battery_low", "safety_fault",
     "handling_tilt", "handling_shake",
