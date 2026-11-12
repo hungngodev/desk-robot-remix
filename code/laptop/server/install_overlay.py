@@ -17,6 +17,61 @@ def once(source, old, new):
     return source.replace(old, new, 1)
 
 
+def patch_plugin_executor(source: str) -> str:
+    """Backport upstream's dedicated worker pool without upgrading custom hooks.
+
+    Sync Xiaozhi plugin functions must not monopolize the live audio/VAD
+    event loop. Async plugins still run as coroutines on that loop.
+    Derived from upstream xinnan-tech/xiaozhi-esp32-server (MIT).
+    """
+    source = once(
+        source, "import asyncio\\n",
+        "import asyncio\\nimport functools\\n"
+        "from concurrent.futures import ThreadPoolExecutor\\n",
+    )
+    source = once(
+        source, "\\n\\nclass ServerPluginExecutor(ToolExecutor):",
+        '\\n\\n_PLUGIN_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="plugin")'
+        "\\n\\nclass ServerPluginExecutor(ToolExecutor):",
+    )
+    old = (
+        "            # 根据工具类型决定如何调用\\n"
+        '            if hasattr(func_item, "type"):\\n'
+        "                func_type = func_item.type\\n"
+        "                if func_type.code in [4, 5]:  # SYSTEM_CTL, IOT_CTL (需要conn参数)\\n"
+        "                    result = func_item.func(conn, **arguments)\\n"
+        "                elif func_type.code == 2:  # WAIT\\n"
+        "                    result = func_item.func(**arguments)\\n"
+        "                elif func_type.code == 3:  # CHANGE_SYS_PROMPT\\n"
+        "                    result = func_item.func(conn, **arguments)\\n"
+        "                else:\\n"
+        "                    result = func_item.func(**arguments)\\n"
+        "            else:\\n"
+        "                # 默认不传conn参数\\n"
+        "                result = func_item.func(**arguments)\\n"
+        "\\n"
+        "            # 兼容 async def 工具函数\\n"
+        "            if asyncio.iscoroutine(result):\\n"
+        "                result = await result"
+    )
+    new = (
+        '            func_type = getattr(func_item, "type", None)\\n'
+        "            if func_type is not None and func_type.code in [3, 4, 5]:\\n"
+        "                call = functools.partial(func_item.func, conn, **arguments)\\n"
+        "            else:\\n"
+        "                call = functools.partial(func_item.func, **arguments)\\n"
+        "\\n"
+        "            if asyncio.iscoroutinefunction(func_item.func):\\n"
+        "                result = await call()\\n"
+        "            else:\\n"
+        "                # Dedicated pool: a slow synchronous plugin cannot block VAD/DNS.\\n"
+        "                result = await asyncio.get_running_loop().run_in_executor(_PLUGIN_POOL, call)\\n"
+        "                if asyncio.iscoroutine(result):\\n"
+        "                    result = await result"
+    )
+    return once(source, old, new)
+
+
 def files(root):
     changes = {}
     path = "core/connection.py"
@@ -88,6 +143,8 @@ def files(root):
     changes["plugins_func/functions/desk_robot_tools.py"] = (
         HERE / "overlay/desk_robot_tools.py"
     ).read_text()
+    path = "core/providers/tools/server_plugins/plugin_executor.py"
+    changes[path] = patch_plugin_executor((root / path).read_text())
     # Verify syntax before modifying any build source.
     for name, source in changes.items():
         compile(source, name, "exec")
