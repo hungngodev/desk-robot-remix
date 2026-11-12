@@ -32,7 +32,7 @@ def validate_command(command: str) -> str:
         raise ValueError("Invalid command")
     tokens = command.split(" ")
     op = tokens[0]
-    if op in {"ping", "status", "arm", "disarm", "stop", "keepalive"} and len(tokens) == 1:
+    if op in {"ping", "status", "arm", "disarm", "stop", "halt", "keepalive"} and len(tokens) == 1:
         return op
     if op == "drive" and len(tokens) in (3, 4):
         values = tokens[1:]
