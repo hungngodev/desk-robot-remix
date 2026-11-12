@@ -50,7 +50,7 @@ async def observe_actual_dock(head, robot) -> dict:
     """
     try:
         calib, target = load_real_dock_calibration(robot.dock_calibration)
-    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock calibration required: {exc}", source="not_calibrated")
     try:
         jpeg = await asyncio.wait_for(head.snapshot(), timeout=3.0)
