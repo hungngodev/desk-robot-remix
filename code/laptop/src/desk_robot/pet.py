@@ -68,6 +68,7 @@ def _initiative_evidence(change: SceneChange) -> bool:
         "squeeze", "hand_wave", "nose_twist", "nearby_object",
         "battery_low", "magnet", "pir", "bumper",
         "handling_tilt", "handling_shake", "side_object", "paw_contact",
+        "ambient_shift",
     } and change.confidence >= 0.95
 
 
@@ -106,6 +107,9 @@ class PetState:
     last_paw_contact: bool | None = None
     paw_contact_streak: int = 0
     paw_release_streak: int = 0
+    last_ambient_seq: int | None = None
+    ambient_baseline: tuple[int, int] | None = None
+    ambient_streak: int = 0
     last_aux_kind: str | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
@@ -235,6 +239,9 @@ class PetController:
         state.last_paw_seq = None
         state.last_paw_contact = None
         state.paw_contact_streak = state.paw_release_streak = 0
+        state.last_ambient_seq = None
+        state.ambient_baseline = None
+        state.ambient_streak = 0
         state.last_aux_kind = None
         state.enabled = True
         state.last_error = None
@@ -442,6 +449,9 @@ class PetController:
                 state.last_paw_seq = None
                 state.last_paw_contact = None
                 state.paw_contact_streak = state.paw_release_streak = 0
+                state.last_ambient_seq = None
+                state.ambient_baseline = None
+                state.ambient_streak = 0
             await asyncio.sleep(1.0)
 
     async def _observe_aux(self, robot_id: str, generation: int, data: dict) -> None:
@@ -498,6 +508,54 @@ class PetController:
             state.last_paw_seq = None
             state.last_paw_contact = None
             state.paw_contact_streak = state.paw_release_streak = 0
+
+        # SHT41 is a local ambient probe, not evidence of whole-room climate.
+        # Two genuinely NEW CRC-valid conversions must agree before reporting
+        # a calibrated temperature or humidity change. Replays and restarts
+        # only reset the baseline; no motor permission follows from a sensor.
+        ambient = data["climate"]
+        ambient_seq = ambient.get("seq")
+        measured_change = (
+            robot.ambient_temp_change_centi is not None
+            or robot.ambient_humidity_change_centi is not None
+        )
+        if (robot.ambient_interactions_qualified and measured_change
+                and ambient["valid"] and type(ambient_seq) is int
+                and ambient_seq > 0
+                and type(ambient.get("age_ms")) is int
+                and 0 <= ambient["age_ms"] < 1000):
+            current_ambient = (ambient["temp_centi"], ambient["rh_centi"])
+            previous_seq = state.last_ambient_seq
+            if (previous_seq is None or ambient_seq <= previous_seq
+                    or ambient_seq - previous_seq > 1000
+                    or state.ambient_baseline is None):
+                state.ambient_baseline = current_ambient
+                state.ambient_streak = 0
+            else:
+                baseline_temp, baseline_rh = state.ambient_baseline
+                delta_t = abs(current_ambient[0] - baseline_temp)
+                delta_rh = abs(current_ambient[1] - baseline_rh)
+                changed_temp = (robot.ambient_temp_change_centi is not None
+                                and delta_t >= robot.ambient_temp_change_centi)
+                changed_rh = (robot.ambient_humidity_change_centi is not None
+                              and delta_rh >= robot.ambient_humidity_change_centi)
+                state.ambient_streak = (
+                    state.ambient_streak + 1 if changed_temp or changed_rh else 0
+                )
+                if state.ambient_streak >= 2:
+                    description = (
+                        "My SHT41 sensor detected a local temperature change"
+                        if changed_temp else
+                        "My SHT41 sensor detected a local humidity change"
+                    )
+                    changes.append(SceneChange("ambient_shift", description, 1.0))
+                    state.ambient_baseline = current_ambient
+                    state.ambient_streak = 0
+            state.last_ambient_seq = ambient_seq
+        else:
+            state.last_ambient_seq = None
+            state.ambient_baseline = None
+            state.ambient_streak = 0
 
         power = data["power"]
         if power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500:
