@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import audioop
+import hashlib
 import ipaddress
 import json
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -99,6 +101,9 @@ def status(device: str) -> dict:
         "camera_frames_selected": s.video_frames_selected,
         "camera_frames_skipped_static": s.video_frames_skipped_static,
         "camera_frames_skipped_duplicate": s.video_frames_skipped_duplicate,
+        "heard_memories_stored": s.heard_memories_stored,
+        "heard_memories_dropped": s.heard_memories_dropped,
+        "transcript_memory_enabled": s._transcript_memory_enabled,
         "model_pcm_chunks_received": s.model_chunks,
         "model_opus_packets_sent_to_head": s.head_packets,
         "last_error": s.last_error,
@@ -147,6 +152,14 @@ class NativeOmniSession:
         self._user_was_talking = False
         self._silent_frames = 0
         self._playback_generation = -1
+        # Consent comes from THIS pet's authenticated Mac context. Never
+        # persist a microphone transcript unless separately enabled there.
+        self._transcript_memory_enabled = False
+        self._heard_session = uuid.uuid4().hex[:12]
+        self._heard_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=12)
+        self._heard_seen: set[str] = set()
+        self.heard_memories_stored = 0
+        self.heard_memories_dropped = 0
         # One selected frame per real camera receipt, not one copy per
         # outgoing audio unit. A new VAD turn invalidates old JPEGs.
         self._video_turn = 0
@@ -234,6 +247,9 @@ class NativeOmniSession:
                         and 1 <= len(instructions) <= 2000
                         and data.get("model_can_arm_motors") is False):
                     self.wire.instructions = instructions
+                    self._transcript_memory_enabled = (
+                        data.get("transcript_memory_enabled") is True
+                    )
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             return
 
