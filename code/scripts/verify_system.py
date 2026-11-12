@@ -72,7 +72,17 @@ def run(name: str, argv: list[str], cwd: Path, timeout: int) -> dict:
         result["exit_code"] = response.returncode
         result["pass"] = response.returncode == 0
         result["output_tail"] = (response.stdout + "\n" + response.stderr)[-12000:]
-    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        # subprocess may supply partial output as BYTES even with text=True.
+        # Keep bounded compiler/test context so timeouts are diagnosable.
+        stdout, stderr = exc.stdout or b"", exc.stderr or b""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        result["output_tail"] = (stdout + "\n" + stderr)[-12000:]
+        result["error"] = type(exc).__name__ + ": " + str(exc)[:300]
+    except (FileNotFoundError, PermissionError) as exc:
         result["error"] = type(exc).__name__ + ": " + str(exc)[:300]
     result["elapsed_s"] = round(time.monotonic() - started, 2)
     return result
