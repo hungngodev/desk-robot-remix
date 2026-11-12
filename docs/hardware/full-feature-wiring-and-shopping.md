@@ -224,6 +224,17 @@ The preexisting USB `serial_bench.py --inspect` output now parses the **actual**
 
 **Eight lane scheduling correction:** The full firmware no longer cycles 0 through 7 equally. It samples mandatory floor and front lanes 0,1,2,3,4, then **one** of optional left/right/rear lanes 5,6,7 before returning to critical sensors. Each optional direction rotates once per six polling calls. This preserves a five sensor safety sample window while keeping all eight channels alive and honestly diagnostic. The scheduler has a new portable C++ unit test (100 cycles); no actual I2C timing or loaded floor-stop measurement has been claimed.
 
+
+### Regenerating the body and head signal harness from live firmware
+
+The one-robot signal list is now generated directly from the machine-readable pin allocation and the actual WROOM `BodyPins.h` and XIAO `sense/config.h`. This avoids manual discrepancies in motor phases, UART crossing, OLED/I2S, PDM and both TCA9548A channel sets. From the repository root:
+
+```sh
+python3 code/scripts/emit_wiring_manifest.py --out docs/hardware/one-robot-signal-harness.generated.md
+```
+
+The generator rejects conflicting pins, firmware map changes, duplicate addresses on one mux lane, missing 0x70/0x71 lanes and critical cliff order drift. Review `code/tests/test_assembly_harness.py` for executable source-contract tests. **This is a signal harness, not a completed electrical schematic.** No physical power supply, boost charger, protected battery, terminal IR decoder, RGB SD J3 solder change or untested carrier VCC is inferred or enabled by the generator. Do not connect power just because a generated line exists.
+
 ### Current sensor source and behavior closure matrix
 
 This table describes the **single canonical PR #17**. It separates real source code from hardware validation, and from unimplemented device outputs. Optional sensors share the selected source architecture; none of them can silently grant drive, charger or medical decisions.
