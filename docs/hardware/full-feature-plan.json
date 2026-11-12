@@ -341,8 +341,16 @@
       "scl": 22,
       "head_touch": 34,
       "bumper_nc_series": 35,
-      "reed": 36,
-      "pir": 39
+      "terminal_ir_left_reserved": 36,
+      "terminal_ir_right_reserved": 39
+    },
+    "mcp23017_optional_inputs": {
+      "reed_input": "GPB0 active low",
+      "pir_input": "GPB1 active high",
+      "required_dock_gpioa_is_separate": true,
+      "source_implemented": true,
+      "physical_qualified": false,
+      "note": "Read only GPIOB 0x13 for slow reed and PIR after a fresh required GPIOA 0x12 dock read. Reserved WROOM GPIO36 and 39 are for two direct terminal IR receivers, but no NEC decoder or final movement/charging authorizer exists; actual board and RTC ADC glitch erratum must be tested."
     },
     "sense_gpio": {
       "oled_sda": 5,
