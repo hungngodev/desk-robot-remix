@@ -64,6 +64,40 @@ struct IrPairEvidence {
   bool charging_authorized = false;
 };
 
+// IDF 4.4 RMT ringbuffers have no source-time timestamp. An observation
+// may be marked fresh only if the previous poll drained the queue completely,
+// this poll was on time, and this poll did not encounter an excessive backlog.
+// Discard an entire ambiguous batch, then require a later independent burst.
+class IrFrameQueueGate {
+ public:
+  void reset() {
+    started_ = false;
+    last_ms_ = 0;
+    draining_[0] = draining_[1] = false;
+  }
+  bool on_poll(std::uint32_t now_ms) {
+    // Unsigned subtraction handles the normal millis 32-bit wraparound.
+    const bool timely = started_ && (now_ms - last_ms_) <= 100U;
+    started_ = true;
+    last_ms_ = now_ms;
+    return timely;
+  }
+  bool draining(unsigned side) const {
+    return side < 2 && draining_[side];
+  }
+  bool finish(unsigned side, unsigned packets, bool queue_emptied) {
+    if (side > 1) return false;
+    const bool acceptable = !draining_[side] && queue_emptied && packets <= 2;
+    // An exhausted packet budget is never silently considered an empty queue.
+    draining_[side] = !queue_emptied;
+    return acceptable;
+  }
+ private:
+  bool started_ = false;
+  std::uint32_t last_ms_ = 0;
+  bool draining_[2] = {false, false};
+};
+
 class DualIrEvidence {
  public:
   // Drop all previously accepted sightings after a receive backlog or poll stall.
