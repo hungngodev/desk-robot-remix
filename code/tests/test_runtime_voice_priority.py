@@ -331,3 +331,73 @@ async def test_missing_vad_start_reuses_real_multimodal_camera_preemption():
         assert not visual.hub.user_active("robot-01", time.monotonic())
     finally:
         await visual.close()
+
+
+def test_hardware_pet_autostart_needs_real_local_vision_and_camera_consent(settings):
+    import pytest
+    from desk_robot.config import Settings
+
+    fields = settings.model_dump()
+    fields["mode"] = "hardware"
+    fields["pet_autostart_enabled"] = True
+    with pytest.raises(ValueError, match="Proactive camera autostart"):
+        Settings.model_validate(fields)
+    fields["voice_vision_tools_enabled"] = True
+    with pytest.raises(ValueError, match="Proactive camera autostart"):
+        Settings.model_validate(fields)
+    fields["vision_model"] = "local-vision-model"
+    accepted = Settings.model_validate(fields)
+    assert accepted.pet_autostart_enabled is True
+    assert accepted.mode == "hardware"
+    assert accepted.voice_vision_tools_enabled is True
+
+
+async def test_autonomous_observation_starts_without_voice_or_motor_authority(
+    monkeypatch,
+):
+    import asyncio
+
+    events = []
+    hold = asyncio.Event()
+
+    class VoiceListener:
+        def __init__(self, *args, **kwargs):
+            events.append("voice monitor registered")
+
+        async def run(self):
+            await hold.wait()
+
+    class Pet:
+        def start(self, robot_id):
+            events.append(("pet observed", robot_id))
+            return {"enabled": True}
+
+    monkeypatch.setattr("desk_robot.runtime.VoiceEventListener", VoiceListener)
+    monkeypatch.setattr("desk_robot.runtime.secret", lambda name: "s" * 32)
+    runtime = Runtime.__new__(Runtime)
+    runtime.client = object()
+    runtime.settings = SimpleNamespace(
+        mode="hardware",
+        speech_bridge_url="http://127.0.0.1:8766",
+        speech_bridge_token_env="DESK_ROBOT_SPEECH_TOKEN",
+        pet_autostart_enabled=True,
+        robots=[
+            SimpleNamespace(id="robot-01", device_id="live-01"),
+            SimpleNamespace(id="robot-02", device_id=""),
+        ],
+    )
+    runtime._voice_task = None
+    runtime.voice_events = None
+    runtime.pet = Pet()
+    try:
+        await runtime.start()
+        assert events == [
+            "voice monitor registered",
+            ("pet observed", "robot-01"),
+        ]
+        assert runtime._voice_task is not None
+    finally:
+        hold.set()
+        if runtime._voice_task is not None:
+            runtime._voice_task.cancel()
+            await asyncio.gather(runtime._voice_task, return_exceptions=True)
