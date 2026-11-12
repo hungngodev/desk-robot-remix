@@ -82,6 +82,14 @@ struct DockPinRaw {
   // A repeated HTTP/UART cache response cannot fake independent samples.
   std::uint32_t sample_seq = 0;
 };
+// Slow optional accessory inputs do not need microsecond timing. The
+// compulsory MCP23017 GPIOA dock interlock remains a separate fresh sample.
+// GPIOB0: reed closed LOW, GPIOB1: PIR active HIGH. BANK=0 register map.
+struct McpOptionalRaw {
+  bool present = false, valid = false;
+  bool reed_closed = false, pir_active = false;
+  std::uint32_t at_ms = 0, sample_seq = 0;
+};
 struct NfcRaw {
   bool present = false; // only after genuine SAM + retry configuration
   bool valid = false;   // last full PN532 frame decoded with correct checksum
@@ -99,6 +107,7 @@ struct AccessoryReadings {
   ForceRaw force{};
   GaugeRaw gauge{};
   DockPinRaw dock{};
+  McpOptionalRaw optional_inputs{}; // read-only expander, not a dock safety input
   NfcRaw nfc{}; // optional toy tag reading, never arm/dock authority
   ProximityRaw proximity{};
 };
