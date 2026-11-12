@@ -89,6 +89,7 @@ class OmniDuplexWire:
         # counter. The same JPEG cannot be forwarded twice as fresh video.
         self._last_video_receipt_us = 0
         self._last_video_audio_ms = -1000
+        self._last_speech_audio_ms = -1000
         self._needs_new_input = False
         self._input_after_interrupt = False
         self._server_response_epoch: int | None = None
@@ -140,6 +141,8 @@ class OmniDuplexWire:
         ):
             raise ValueError("Only fresh bounded JPEG from current head allowed")
         self.input_ms += duration
+        if speech:
+            self._last_speech_audio_ms = self.input_ms
         event = {
             "type": "input_audio_buffer.append",
             "audio": base64.b64encode(pcm16).decode("ascii"),
@@ -155,7 +158,8 @@ class OmniDuplexWire:
         # than a one-second audio counter boundary. The FIRST authenticated
         # JPEG can join a 200ms spoken question; later unique images are
         # limited to 1 FPS. No duplicate frame or video-only hallucination.
-        if (jpeg is not None and speech
+        if (jpeg is not None
+                and self.input_ms - self._last_speech_audio_ms <= 500
                 and frame_receipt_us > self._last_video_receipt_us
                 and self.input_ms - self._last_video_audio_ms >= 1000):
             event["video_frames"] = [base64.b64encode(jpeg).decode("ascii")]
