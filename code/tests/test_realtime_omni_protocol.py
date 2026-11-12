@@ -26,20 +26,57 @@ def test_native_open_session_uses_pcm_and_truthful_playback_policy():
     assert session["session"]["input_audio_format"] == "pcm16"
 
 
-def test_one_real_jpeg_is_attached_per_complete_audio_unit():
+def test_distinct_real_camera_receipts_stream_at_one_fps_even_during_short_speech():
     wire = OmniDuplexWire()
-    jpeg = b"\xff\xd8" + b"x" * 120 + b"\xff\xd9"
+    jpeg = b"\\xff\\xd8" + b"x" * 120 + b"\\xff\\xd9"
     for index in range(20):
+        # A real 200ms utterance may acquire its first frame on the next
+        # audio packet. A newer frame after the first full second is allowed
+        # only once, even when the same HTTP JPEG is reread repeatedly.
+        receipt = 101 if index < 10 else 102
         chunk = wire.append_audio(
-            b"\0" * 3200, speech=index < 10,
-            jpeg=jpeg, camera_age_ms=100,
+            b"\\0" * 3200, speech=index < 10,
+            jpeg=jpeg, camera_age_ms=100, frame_receipt_us=receipt,
         )
         assert chunk["duration_ms"] == 100
         assert chunk["audio_end_ms"] == (index + 1) * 100
-        assert base64.b64decode(chunk["audio"]) == b"\0" * 3200
-        assert "video_frames" in chunk if index % 10 == 9 else "video_frames" not in chunk
+        assert base64.b64decode(chunk["audio"]) == b"\\0" * 3200
+        assert ("video_frames" in chunk) == (index in (0, 10))
     assert wire.frames_sent == 2
     assert wire.commit()["response_create"] is False
+
+
+def test_first_current_turn_image_is_not_delayed_until_one_second_audio_boundary():
+    wire = OmniDuplexWire()
+    jpeg = b"\\xff\\xd8" + b"frame" * 12 + b"\\xff\\xd9"
+    first = wire.append_audio(b"\\0" * 3200, speech=True)
+    assert "video_frames" not in first
+    short = wire.append_audio(
+        b"\\0" * 3200, speech=True,
+        jpeg=jpeg, camera_age_ms=20, frame_receipt_us=3001,
+    )
+    assert base64.b64decode(short["video_frames"][0]) == jpeg
+    repeated = wire.append_audio(
+        b"\\0" * 3200, speech=False,
+        jpeg=jpeg, camera_age_ms=40, frame_receipt_us=3001,
+    )
+    assert "video_frames" not in repeated
+    assert wire.frames_sent == 1
+
+
+def test_never_send_native_video_without_a_real_mac_receipt_or_recent_human_speech():
+    wire = OmniDuplexWire()
+    jpeg = b"\\xff\\xd8" + b"frame" * 12 + b"\\xff\\xd9"
+    with pytest.raises(ValueError):
+        wire.append_audio(
+            b"\\0" * 3200, speech=True, jpeg=jpeg, camera_age_ms=1,
+        )
+    idle = wire.append_audio(
+        b"\\0" * 3200, speech=False,
+        jpeg=jpeg, camera_age_ms=1, frame_receipt_us=5001,
+    )
+    assert "video_frames" not in idle
+    assert wire.frames_sent == 0
 
 
 def test_stale_or_fake_images_never_get_sent_to_native_model():
