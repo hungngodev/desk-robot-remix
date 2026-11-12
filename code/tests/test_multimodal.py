@@ -1098,3 +1098,26 @@ async def test_native_camera_racing_with_voice_sampler_has_one_real_xiao_capture
     finally:
         release.set()
         await visual.close()
+
+
+async def test_lost_xiaozhi_voice_transport_cancels_old_visual_turns_without_unmuting():
+    visual = MultimodalOrchestrator(
+        config(enabled=False),
+        {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    now = time.monotonic()
+    visual.hub.notify("robot-01", "human_voice", now)
+    visual.hub.offer("robot-01", image(), now, source="speech")
+    pending = asyncio.Event()
+    task = asyncio.create_task(pending.wait())
+    visual._look_tasks["robot-01"] = task
+    try:
+        visual.voice_transport_unavailable()
+        await asyncio.gather(task, return_exceptions=True)
+        assert task.cancelled()
+        assert not visual.hub.frames["robot-01"]
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        assert visual._reconnect_needs_sampler == {"robot-01", "robot-02"}
+    finally:
+        await visual.close()
