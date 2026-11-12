@@ -230,47 +230,49 @@ class Conversation:
             }
             async with asyncio.timeout(300):
                 async with self.session_lock, self.speaker.session(robots):
-                    for index in range(turns):
-                        robot = robots[index % len(robots)]
-                        current_robot = robot
-                        async with self.speaker_lock:
-                            stream_reply = getattr(self.chat, "stream_reply", None)
-                            if callable(stream_reply):
-                                # Speech and generation share the same Xiaozhi
-                                # session. No detached TTS tasks outlive it.
-                                segments: list[str] = []
-                                async for segment in stream_reply(
-                                    list(self.histories[robot.id])
-                                ):
-                                    await self.speaker.say(robot, segment)
-                                    segments.append(segment)
-                                text = " ".join(segments)
-                            else:
-                                text = await self.chat.reply(
-                                    list(self.histories[robot.id])
+                    try:
+                        for index in range(turns):
+                            robot = robots[index % len(robots)]
+                            current_robot = robot
+                            async with self.speaker_lock:
+                                stream_reply = getattr(self.chat, "stream_reply", None)
+                                if callable(stream_reply):
+                                    # Speech and generation share the same Xiaozhi
+                                    # session. No detached TTS tasks outlive it.
+                                    segments: list[str] = []
+                                    async for segment in stream_reply(
+                                        list(self.histories[robot.id])
+                                    ):
+                                        await self.speaker.say(robot, segment)
+                                        segments.append(segment)
+                                    text = " ".join(segments)
+                                else:
+                                    text = await self.chat.reply(
+                                        list(self.histories[robot.id])
+                                    )
+                                    await self.speaker.say(robot, text)
+                            await self._persist_spoken_turn(robot, text, robots)
+                            self.histories[robot.id].append({"role": "assistant", "content": text})
+                            for peer in robots:
+                                if peer.id != robot.id:
+                                    self.histories[peer.id].append(
+                                        {"role": "user", "content": f"{robot.name} said: {text}"}
+                                    )
+                            transcript.append({"robot_id": robot.id, "text": text})
+                    except BaseException:
+                        # Fail fast while the Xiaozhi group session still owns
+                        # this head. Releasing its lease first can delay a
+                        # physical decoder flush behind session teardown.
+                        interrupt = getattr(self.speaker, "interrupt", None)
+                        if current_robot is not None and callable(interrupt):
+                            try:
+                                await asyncio.wait_for(
+                                    interrupt(current_robot), timeout=2.0
                                 )
-                                await self.speaker.say(robot, text)
-                        await self._persist_spoken_turn(robot, text, robots)
-                        self.histories[robot.id].append({"role": "assistant", "content": text})
-                        for peer in robots:
-                            if peer.id != robot.id:
-                                self.histories[peer.id].append(
-                                    {"role": "user", "content": f"{robot.name} said: {text}"}
-                                )
-                        transcript.append({"robot_id": robot.id, "text": text})
+                            except Exception:
+                                pass  # Preserve the original model/transport failure.
+                        raise
             return transcript
-        except BaseException:
-            # Cancellation AND midstream Ollama/bridge failures can leave
-            # queued Opus inside the physical XIAO. A Python failure alone
-            # never proves the decoder is silent. Abort the active head
-            # through the existing Xiaozhi owner before releasing the lease.
-            interrupt = getattr(self.speaker, "interrupt", None)
-            if current_robot is not None and callable(interrupt):
-                try:
-                    await asyncio.wait_for(interrupt(current_robot), timeout=2.0)
-                except Exception:
-                    pass  # Cancellation still propagates; hardware unverified.
-            raise
         finally:
             self.active = None
 
