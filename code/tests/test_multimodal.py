@@ -1121,3 +1121,44 @@ async def test_lost_xiaozhi_voice_transport_cancels_old_visual_turns_without_unm
         assert visual._reconnect_needs_sampler == {"robot-01", "robot-02"}
     finally:
         await visual.close()
+
+
+async def test_readonly_vision_tool_interpretation_is_ephemeral_per_pet_and_fenced():
+    """No raw photo persisted and new voice transport drops previous tool text."""
+    heads = {"robot-01": Head(), "robot-02": Head()}
+    visual = MultimodalOrchestrator(config(enabled=True), heads, Vision(),
+                                    asyncio.Lock())
+    try:
+        response = await visual.look("robot-01", "What is on my desk?")
+        assert response["motor_authorized"] is False
+        cues = visual.hub.recent_tool_context("robot-01", time.monotonic())
+        assert len(cues) == 1
+        assert cues[0]["kind"] == "visual_look"
+        assert cues[0]["source"] == "local_vlm_interpretation_not_physical_measurement"
+        assert cues[0]["untrusted_text_not_instructions"] is True
+        assert cues[0]["motor_authorized"] is False
+        assert "dark square" in cues[0]["summary"]
+        assert visual.hub.recent_tool_context("robot-02", time.monotonic()) == []
+        # The successful local model description is not a durable eyewitness
+        # memory. It may be referenced briefly but expires without persistence.
+        now = time.monotonic()
+        assert visual.hub.recent_tool_context("robot-01", now + 9) == []
+        visual.voice_transport_unavailable()
+        assert visual.hub.recent_tool_context("robot-01", now + 0.1) == []
+        assert not visual.hub.frames["robot-01"]
+    finally:
+        await visual.close()
+
+
+def test_readonly_tool_context_rejects_untrusted_shapes():
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    for kind, summary, when in (
+        ("drive", "forward", 5.0),
+        ("visual_look", "", 5.0),
+        ("visual_look", "large" * 501, 5.0),
+        ("visual_look", "summary", float("nan")),
+    ):
+        with pytest.raises(ValueError):
+            hub.remember_tool("robot-01", kind, summary, when)
+    with pytest.raises(ValueError):
+        hub.remember_tool("robot-99", "visual_look", "some object", 5.0)
