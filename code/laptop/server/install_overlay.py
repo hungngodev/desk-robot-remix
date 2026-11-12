@@ -26,12 +26,13 @@ def patch_plugin_executor(source: str) -> str:
     """
     source = once(
         source, "import asyncio\n",
-        "import asyncio\nimport functools\n"
+        "import asyncio\nimport functools\nimport threading\n"
         "from concurrent.futures import ThreadPoolExecutor\n",
     )
     source = once(
         source, "\n\nclass ServerPluginExecutor(ToolExecutor):",
         '\n\n_PLUGIN_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="plugin")'
+        '\n_PLUGIN_SLOTS = threading.BoundedSemaphore(8)'
         "\n\nclass ServerPluginExecutor(ToolExecutor):",
     )
     old = (
@@ -64,8 +65,22 @@ def patch_plugin_executor(source: str) -> str:
         "            if asyncio.iscoroutinefunction(func_item.func):\n"
         "                result = await call()\n"
         "            else:\n"
-        "                # Dedicated pool: a slow synchronous plugin cannot block VAD/DNS.\n"
-        "                result = await asyncio.get_running_loop().run_in_executor(_PLUGIN_POOL, call)\n"
+        "                # Strictly bound native work, even if asyncio cancels the awaiter.\n"
+        "                if not _PLUGIN_SLOTS.acquire(blocking=False):\n"
+        '                    raise RuntimeError("Synchronous plugin capacity exhausted")\n'
+        "                try:\n"
+        "                    native = _PLUGIN_POOL.submit(call)\n"
+        "                except (RuntimeError, OSError):\n"
+        "                    _PLUGIN_SLOTS.release()\n"
+        "                    raise\n"
+        "                def finished(completed):\n"
+        "                    try:\n"
+        "                        if not completed.cancelled():\n"
+        "                            completed.exception()\n"
+        "                    finally:\n"
+        "                        _PLUGIN_SLOTS.release()\n"
+        "                native.add_done_callback(finished)\n"
+        "                result = await asyncio.wrap_future(native)\n"
         "                if asyncio.iscoroutine(result):\n"
         "                    result = await result"
     )
