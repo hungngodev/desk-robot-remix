@@ -15,5 +15,7 @@ struct OpticalRaw {
   std::uint32_t red = 0;
   std::uint32_t ir = 0;
   std::uint32_t at_ms = 0;
+  // Increment only when a genuinely new, bounded FIFO read succeeds.
+  std::uint32_t sample_seq = 0;
 };
 } // namespace desk_robot
