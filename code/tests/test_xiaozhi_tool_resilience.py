@@ -106,3 +106,93 @@ async def test_reconnected_head_rejects_stale_socket_with_valid_device_id(
     assert old_connection is not bridge_tools.registered_head
     result = await bridge_tools.call(old_connection, "stop", {})
     assert "error" in result
+
+
+async def test_pinned_plugin_executor_keeps_live_loop_responsive_under_sync_tool(
+    monkeypatch,
+):
+    """Use the actual locked upstream executor and our overlay backport."""
+    import asyncio
+    import threading
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "robot_server_installer", root / "laptop/server/install_overlay.py"
+    )
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    upstream = (
+        root / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+        / "core/providers/tools/server_plugins/plugin_executor.py"
+    )
+    patched = installer.patch_plugin_executor(upstream.read_text())
+    compile(patched, str(upstream), "exec")
+
+    for name in (
+        "core", "core.providers", "core.providers.tools",
+        "core.providers.tools.server_plugins",
+    ):
+        package = ModuleType(name)
+        package.__path__ = []
+        monkeypatch.setitem(sys.modules, name, package)
+    base = ModuleType("core.providers.tools.base")
+    base.ToolExecutor = object
+    base.ToolDefinition = SimpleNamespace
+    base.ToolType = SimpleNamespace(SERVER_PLUGIN=1)
+    monkeypatch.setitem(sys.modules, base.__name__, base)
+
+    ready, release = threading.Event(), threading.Event()
+    main_thread = threading.get_ident()
+    observed = []
+
+    def blocking(conn, amount):
+        observed.append(("sync", threading.get_ident(), conn.device_id))
+        ready.set()
+        if not release.wait(2):
+            raise TimeoutError("Fixture worker still blocked")
+        return amount * 2
+
+    async def native_async(conn, amount):
+        observed.append(("async", threading.get_ident(), conn.device_id))
+        return amount * 3
+
+    registry = ModuleType("plugins_func.register")
+    registry.all_function_registry = {
+        "blocking": SimpleNamespace(
+            func=blocking, type=SimpleNamespace(code=5)
+        ),
+        "async": SimpleNamespace(
+            func=native_async, type=SimpleNamespace(code=5)
+        ),
+    }
+    registry.module_func_map = {}
+    registry.Action = SimpleNamespace(ERROR=2, NOTFOUND=3)
+    registry.ActionResponse = lambda **kwargs: SimpleNamespace(**kwargs)
+    monkeypatch.setitem(sys.modules, "plugins_func", ModuleType("plugins_func"))
+    monkeypatch.setitem(sys.modules, registry.__name__, registry)
+
+    ns = {
+        "__name__": "core.providers.tools.server_plugins.plugin_executor",
+        "__package__": "core.providers.tools.server_plugins",
+    }
+    exec(compile(patched, str(upstream), "exec"), ns)
+    owner = ns["ServerPluginExecutor"](
+        SimpleNamespace(config={}, device_id="mac-head-01")
+    )
+    conn = SimpleNamespace(config={}, device_id="mac-head-01")
+    task = asyncio.create_task(owner.execute(conn, "blocking", {"amount": 7}))
+    try:
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        assert await asyncio.to_thread(ready.wait, 0.7)
+        assert loop.time() - started_at < 0.7  # no inline event loop stall
+        assert observed == [("sync", observed[0][1], "mac-head-01")]
+        assert observed[0][1] != main_thread
+        assert await owner.execute(conn, "async", {"amount": 5}) == 15
+        assert observed[-1] == ("async", main_thread, "mac-head-01")
+        release.set()
+        assert await asyncio.wait_for(task, timeout=1) == 14
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        ns["_PLUGIN_POOL"].shutdown(wait=True, cancel_futures=True)
