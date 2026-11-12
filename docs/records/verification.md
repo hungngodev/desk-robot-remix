@@ -1,6 +1,14 @@
 # Verification and physical trials
 
 
+## November 12 executable-contract drift discovered during static source review
+
+A real latent USB status regression was present despite earlier assertions: current WROOM `kReplyCapacity=1536` and Sense `kMaxReply=1664`, but `code/scripts/serial_bench.py` still used `port.readline(1152)`. Commit `616cf84` changes the **existing** USB inspection path to a 1664 byte receive bound, retaining the no-retry safety behavior. Commit `3d9697c` repairs stale test contracts that expected old UART sizes, claimed PN532 was not integrated, and searched an obsolete one-line dock contact expression. Commits `fb18778` and `c23cad6` synchronize the actual PN532 nonblocking read-only driver status and status size documentation. The separate `test_dock_charge_pins.py` expected a single-line `case 5: dock_status(now_ms)` but real source uses two lines; `fb18c4b` corrects its exact escaped newline assertion.
+
+**Real independent source computations:** fetched current `BodyControl.cpp`, `BodyControl.h`, `robot_bridge.cc`, USB reader and tests from GitHub. The status format contains 63 printf conversions, 688 literal bytes, estimated conservative worst-case **1498 bytes** using the repository test's documented conversion budgets, inside the **1536 byte** WROOM buffer with 38 bytes of margin; `1536 < 1664 < 2048` for body, bridge and UART ring. Seven exact source assertion checks passed for updated size, PN532 and dock literal alignment; the corrected `case 5:\\n` assertion was read back against the literal firmware newline and matched. **This is a static contract calculation, NOT a compile, serial trace, compiler sanitizer, or full pytest run.** An unpredictable longer dynamic string would still need runtime testing. Reverify on any modified status response and do not call product acceptance.
+
+
+
 ## November 12 XIAO power and J3 boundary audit, independently checked source
 
 **Target:** canonical draft PR #17, not the default branch. A current head GitHub Actions run [43310129522](https://github.com/hungngodev/desk-robot-remix/actions/runs/43310129522) had four failed jobs and **no recorded steps or artifacts**; job logs returned `BlobNotFound`; the connected GitHub fetch does not allow check-run annotations. This is NOT a compiler verdict. A local private Git clone from this execution environment failed DNS resolution, so **no full pytest, native CMake, PlatformIO or Sense IDF** was executed for these additions.
