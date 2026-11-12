@@ -20,6 +20,8 @@ def bridge_tools(monkeypatch):
     bridge.robot_for_device = (
         lambda device: "robot-01" if device == "mac-head-01" else None
     )
+    registered = SimpleNamespace(device_id="mac-head-01")
+    bridge.connections = {"mac-head-01": registered}
     registry = ModuleType("plugins_func.register")
     registry.Action = SimpleNamespace(REQLLM=3)
     registry.ToolType = SimpleNamespace(IOT_CTL=5)
@@ -38,6 +40,7 @@ def bridge_tools(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setenv("DESK_ROBOT_TOOL_TOKEN", "s" * 40)
+    module.registered_head = registered
     return module
 
 
@@ -68,8 +71,7 @@ async def test_real_xiaozhi_tool_failure_returns_bounded_no_retry_error(
 
     monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
     result = await bridge_tools.call(
-        SimpleNamespace(device_id="mac-head-01"), "look",
-        {"question": "What moved?"},
+        bridge_tools.registered_head, "look", {"question": "What moved?"},
     )
     assert len(calls) == 1  # no retries or competing tool owner
     assert calls[0].url.path == "/v1/pet/robot-01/look"
@@ -90,3 +92,17 @@ async def test_unknown_xiaozhi_head_cannot_borrow_another_robots_mac_tool(
         SimpleNamespace(device_id="forged-head"), "pickup", {"target": "key"}
     )
     assert "error" in data
+
+
+async def test_reconnected_head_rejects_stale_socket_with_valid_device_id(
+    bridge_tools, monkeypatch,
+):
+    class NoHttp:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Stale head cannot reach Mac tools")
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", NoHttp)
+    old_connection = SimpleNamespace(device_id="mac-head-01")
+    assert old_connection is not bridge_tools.registered_head
+    result = await bridge_tools.call(old_connection, "stop", {})
+    assert "error" in result
