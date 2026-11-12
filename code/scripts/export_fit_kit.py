@@ -12,7 +12,10 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections import Counter
+from math import isfinite
 from pathlib import Path
+from struct import unpack_from
 
 ROOT = Path(__file__).resolve().parents[2]
 ADAPTERS = (
@@ -34,6 +37,38 @@ def binary_stl_triangles(path: Path) -> int:
     if triangles < 1 or len(blob) != 84 + 50 * triangles:
         raise ValueError(f"Invalid binary STL triangles: {path.name}")
     return triangles
+
+
+def closed_mesh_edges(path: Path) -> int:
+    """Reject open, inverted-edge, nonfinite and degenerate STL geometry.
+
+    Float32 coordinates are compared exactly as exported by OpenSCAD;
+    this is a topological source check, not measured component fit.
+    """
+    blob = path.read_bytes()
+    triangles = binary_stl_triangles(path)
+    incidence: Counter = Counter()
+    winding: Counter = Counter()
+    for index in range(triangles):
+        offset = 84 + 50 * index + 12  # skip the STL facet normal
+        points = tuple(
+            unpack_from("<fff", blob, offset + 12 * corner)
+            for corner in range(3)
+        )
+        if len(set(points)) != 3 or not all(
+            isfinite(value) for point in points for value in point
+        ):
+            raise ValueError(f"Degenerate or nonfinite STL triangle: {path.name}")
+        for corner in range(3):
+            a, b = points[corner], points[(corner + 1) % 3]
+            edge = (a, b) if a < b else (b, a)
+            incidence[edge] += 1
+            winding[edge] += 1 if a < b else -1
+    if (not incidence
+            or any(count != 2 for count in incidence.values())
+            or any(direction != 0 for direction in winding.values())):
+        raise ValueError(f"Open or inconsistent STL mesh: {path.name}")
+    return len(incidence)
 
 
 def export_kit(
@@ -68,9 +103,10 @@ def export_kit(
                     check=True, capture_output=True, text=True, timeout=180,
                 )
                 triangles = binary_stl_triangles(target)
+                edges = closed_mesh_edges(target)
                 rendered.append({
                     "part": name, "location": f"{kind}/{name}.stl",
-                    "triangles": triangles,
+                    "triangles": triangles, "manifold_edges": edges,
                     "quantity_per_robot": 8 if name == "tof_adjustable" else 1,
                 })
         for entry in rendered:
