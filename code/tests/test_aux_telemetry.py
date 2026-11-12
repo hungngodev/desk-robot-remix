@@ -47,6 +47,7 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
         ("force", "jaw_seq", -1), ("force", "jaw_seq", True),
         ("force", "calibrated", True), ("climate", "rh_centi", 11000),
         ("climate", "temp_centi", float("nan")),
+        ("climate", "seq", True), ("climate", "age_ms", -1),
         ("power", "cell_mv", 99000), ("power", "current_calibrated", True),
         ("power", "fuel_valid", 1), ("proximity", "raw", 256),
         ("proximity", "gesture", "left"),
