@@ -115,6 +115,13 @@ def main() -> int:
         "source_suite_pass": bool(records) and len(records) == len(steps(
             args.suite, args.build_dir)) and all(r["pass"] for r in records),
         "physical_hardware_verified": False,
+        # Seeed XIAO ESP32S3 Sense SD connector shares GPIO7/8/9 with
+        # selected speaker and optional RGB. A firmware build cannot prove
+        # J3 has been physically isolated and verified by continuity meter.
+        "sense_sd_j3_isolation_verified": False,
+        # Seeed requires an isolated external source at XIAO 5V/VBUS.
+        # A USB flash test cannot certify safe simultaneous laptop/boost power.
+        "sense_vbus_power_path_verified": False,
         "charging_verified": False,
         "print_fit_verified": False,
         "five_robot_acoustics_verified": False,
