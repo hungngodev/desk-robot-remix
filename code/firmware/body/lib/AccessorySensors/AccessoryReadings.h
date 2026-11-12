@@ -49,6 +49,7 @@ struct BarometerRaw {
   int temp_centi = 0;
   unsigned pressure_pa = 0;
   std::uint32_t at_ms = 0;
+  std::uint32_t sample_seq = 0; // successive independently spaced BMP280 conversions
 };
 struct ForceRaw {
   bool present = false, valid = false;
