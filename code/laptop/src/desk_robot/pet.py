@@ -111,6 +111,7 @@ class PetState:
     ambient_baseline: tuple[int, int] | None = None
     ambient_streak: int = 0
     last_nfc_events: int | None = None
+    last_nfc_scan_seq: int | None = None
     last_aux_kind: str | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
@@ -244,6 +245,7 @@ class PetController:
         state.ambient_baseline = None
         state.ambient_streak = 0
         state.last_nfc_events = None
+        state.last_nfc_scan_seq = None
         state.last_aux_kind = None
         state.enabled = True
         state.last_error = None
@@ -455,6 +457,7 @@ class PetController:
                 state.ambient_baseline = None
                 state.ambient_streak = 0
                 state.last_nfc_events = None
+                state.last_nfc_scan_seq = None
             await asyncio.sleep(1.0)
 
     async def _observe_aux(self, robot_id: str, generation: int, data: dict) -> None:
@@ -570,18 +573,32 @@ class PetController:
         if (robot.nfc_interactions_qualified and isinstance(nfc, dict)
                 and nfc["v"] and nfc["s"] > 0):
             prior_events = state.last_nfc_events
+            prior_scan = state.last_nfc_scan_seq
             current_events = nfc["e"]
-            if (prior_events is not None
-                    and 0 < current_events - prior_events <= 3
-                    and nfc["t"] != 0):
+            current_scan = nfc["s"]
+            # The hardware increments scan_seq only after a complete CRC
+            # checked RF result. An event count cannot advance without an
+            # independently new actual PN532 scan, including after reconnect.
+            if prior_scan is not None and current_scan == prior_scan:
+                pass  # a replay never awards or erases a tag transition
+            elif (prior_scan is not None and current_scan > prior_scan
+                  and prior_events is not None
+                  and 0 < current_events - prior_events
+                  <= min(3, current_scan - prior_scan)
+                  and nfc["t"] != 0):
                 changes.append(SceneChange(
                     "nfc_tag",
                     f"My NFC toy accessory with game token {nfc['t']:08x} was presented",
                     1.0,
                 ))
-            state.last_nfc_events = current_events
+            if prior_scan is None or current_scan != prior_scan:
+                # Restart, backward counter or skipped scans become a new
+                # baseline. Only one genuine event per confirmed scan.
+                state.last_nfc_events = current_events
+                state.last_nfc_scan_seq = current_scan
         else:
             state.last_nfc_events = None
+            state.last_nfc_scan_seq = None
 
         power = data["power"]
         if power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500:
