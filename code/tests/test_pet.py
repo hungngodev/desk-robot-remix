@@ -1019,6 +1019,51 @@ async def test_sht41_ambient_change_requires_fresh_distinct_samples(fleet, tmp_p
         await pet.close()
 
 
+async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_path):
+    fleet.mode = "hardware"
+    fleet.robots[0].nfc_interactions_qualified = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 14
+
+    def report(events, token, *, valid=True, seq=40):
+        return {
+            "robot_id": "robot-01",
+            "pulse": {"present": False, "valid": False, "part_id": 0,
+                      "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
+            "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                       "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [0, 0], "jaw_seq": 0,
+                      "valid": False, "calibrated": False},
+            "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
+            "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                      "shunt_uv": 0, "fuel_valid": False,
+                      "monitor_valid": False, "current_calibrated": False},
+            "proximity": {"raw": 0, "valid": False, "gesture": 0,
+                          "gesture_events": 0, "physically_qualified": False},
+            "nfc": {"v": valid, "t": token if valid else 0,
+                    "e": events, "s": seq},
+        }
+
+    try:
+        await pet._observe_aux("robot-01", 14, report(8, 0))
+        await pet._observe_aux("robot-01", 14, report(9, 0x12345678, seq=41))
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
+        await pet._observe_aux("robot-01", 14, report(9, 0x12345678, seq=41))
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
+        await pet._observe_aux("robot-01", 14, report(9, 0, valid=False, seq=41))
+        await pet._observe_aux("robot-01", 14, report(1, 0xFEDCBA98, seq=1))
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
+        await pet._observe_aux("robot-01", 14, report(2, 0xFEDCBA98, seq=2))
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 2
+        assert memory.count("robot-02") == 0
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_sensor_interactions_disabled_until_measured_thresholds(fleet, tmp_path):
     fleet.mode = "hardware"
     memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
