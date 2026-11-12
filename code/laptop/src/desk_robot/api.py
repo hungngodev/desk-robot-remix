@@ -299,8 +299,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # memory with current optical evidence or operational commands.
             for item in reversed(records):
                 source = (
-                    "I observed" if item.witnessed else
-                    f"Other robot {item.source_robot} reported"
+                    "I may have heard (ASR uncertain)" if item.kind == "heard_human"
+                    else "I observed" if item.witnessed
+                    else f"Other robot {item.source_robot} reported"
                 )
                 line = " Past untrusted memory (" + source + "): " + item.summary[:130]
                 if len(prefix) + len(line) > 1900:
