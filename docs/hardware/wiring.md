@@ -59,8 +59,13 @@ WROOM GPIO21/22 -> user's reported MPU6050 0x68 (AD0 low) or 0x69 (AD0 high), up
 Sense -> separate head-owned OLED bus
 ```
 
-The proposed ST VL6180X downrange part is obsolete. A compatible short-range part must be selected after a one-sample physical desk-height test and the corresponding driver/mount must be reviewed; the four corner roles do not change. The 7-bit **0x29** address applies to the currently named ST ToF family and must be checked for the finally selected sensor. Select only one corresponding
-channel for reads/configuration. Confirm channel numbering in firmware, module
+The earlier ST VL6180X proposal has been superseded by the selected
+**VL53L4CD**. The current `esp32_full` source scans **eight 0x29
+VL53L4CD channels** on TCA9548A 0x70: four floor, one forward and
+three left/right/rear read-only directions. The five-channel table above
+describes the local safety subset, **not** the complete hardware. Actual
+optical short-range calibration and the mounting geometry are still pending.
+Select only one multiplexer lane at a time for reads and configuration. Confirm channel numbering in firmware, module
 supply, reset behavior, default mux address and **3.3 V signal pullups**. Generic
 boards vary; an IC voltage range does not establish breakout level shifting.
 No 5 V signal may enter a WROOM pin. Check total I²C pullup loading and use short
@@ -72,22 +77,27 @@ patch, including pivot sweep, at the final mounting height. One forward beam
 covers only a limited obstacle region; it is not side/rear collision protection
 or gripper-distance feedback. Use [sensor requirements](../research/2026-11-03-cliff-sensors.md).
 
-IMU and touch are new planned additions, not compiled/qualified interfaces.
-The photographed BerryIMU is likely an older V1; verify its actual power/header
-and chip identity before wiring. Do not apply a V3 or LSM6 pin/register map.
-The maker's V1 example suggests0x1E accel/mag and0x6A gyro, not measured addresses.
-An optional extra BMP280 may conflict with its pressure sensor at0x77; omit it
-unless the collision is resolved. [Photo identification and checks](photo-inventory-2026-11-04.md).
+The current WROOM source includes MPU6050 and revision-aware optional
+BerryIMU raw six-axis drivers, immediate AT42QT1010 touch disarming,
+CAP1188 petting and optional sensor telemetry. **None** has passed
+physical breakout, mounting or timing tests. MPU6050 is the preferred
+first build; do not power a second IMU on the shared bus until its exact
+revision and chip IDs are confirmed. BMP280 is assigned to a separate
+0x71 multiplexer lane from the optional BerryIMU and requires a real
+chip-ID and breakout-address check. [Photo identification and checks](photo-inventory-2026-11-04.md).
 Keep body I2C reads bounded and serialized so floor sensing retains priority.
 [Interaction wiring and acceptance](interaction-sensors.md) also covers optional
 SenseGPIO9 RGB data with a level buffer; bodyGPIO4 is not spare.
 
 ## Head boundary
 
-The [Sense head](../guides/modular-head.md) now has a separate compiled board map:
+The [Sense head](../guides/modular-head.md) has a source-level pinned board map
+whose latest GitHub Actions compile remains unverified:
 OLED5/6, amplifier4/7/8, UARTTX2/RX1, PDM42/41 and stock camera. Old Freenove GPIO1/2 assignments or
 video GPIO1/2 I²C instructions are not a Sense allocation. Preserve native USB,
-internal camera/mic pins and flash/PSRAM; disable SD use where necessary. See [exact compiled Sense allocation](../../code/firmware/head/sense/README.md); physical
+internal camera/mic pins and flash/PSRAM; physically isolate the expansion board's
+SD J3 connection as specified for the actual shipped revision before using
+overlapping I2S pins. See [firmware source allocation](../../code/firmware/head/sense/README.md); physical
 qualification is still pending, and its SD slot must stay empty/disabled.
 
 [RIO's reference](../research/2026-11-03-sense-realtime-reuse.md) uses speaker
