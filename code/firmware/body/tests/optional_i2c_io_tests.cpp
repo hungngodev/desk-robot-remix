@@ -109,6 +109,15 @@ int main() {
     }
     CHECK(nfc.valid && nfc.tag_visible && nfc.tag_events == 2U);
     CHECK(nfc_wire.dock_gpio_reads > 0);
+    const unsigned previous_scans = nfc_wire.nfc_scans;
+    nfc_wire.fail_dock_gpio = true;
+    for (std::uint32_t ms = 6108; ms < 6800; ms += 12) {
+      nfc_accessories.poll(ms);
+      CHECK(!nfc_wire.unsafe_parallel_mux);
+    }
+    CHECK(!nfc_accessories.readings().dock.valid);
+    CHECK(!nfc_accessories.readings().nfc.valid);
+    CHECK(nfc_wire.nfc_scans == previous_scans);
     std::cout << "PASS optional sensor register IO, NFC framing and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
