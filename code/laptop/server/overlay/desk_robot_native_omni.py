@@ -238,31 +238,67 @@ class NativeOmniSession:
             return
 
     async def _camera(self, http: aiohttp.ClientSession) -> None:
-        """Private authenticated Mac JPEG fetch, off the microphone hot path."""
+        """Select real JPEG receipts independently from realtime microphone I/O.
+
+        Mac owns camera capture, grayscale motion and the shared VAD sampler.
+        This worker forwards an initial keyframe, meaningful scene changes,
+        or a periodic static refresh while this head's user is speaking.
+        Optional camera HTTP never blocks a microphone or cancellation packet.
+        """
         address = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-frame"
         while not self.closed:
+            if not self._user_was_talking:
+                await self._camera_wakeup.wait()
+                self._camera_wakeup.clear()
+                continue
+            turn = self._video_turn
             try:
-                if self._user_was_talking:
-                    async with http.get(
-                        address,
-                        headers={"Authorization": f"Bearer {self.token}"},
-                        timeout=aiohttp.ClientTimeout(total=1.8),
-                    ) as response:
-                        if (response.status == 200
-                                and response.headers.get("X-Desk-Robot-Id") == self.robot
-                                and response.headers.get("Content-Type", "").startswith("image/jpeg")):
-                            raw = await response.read()
-                            age = response.headers.get("X-Desk-Camera-Age-Ms", "")
-                            if (age.isascii() and age.isdecimal()
-                                    and int(age) <= 1000 and
-                                    10 <= len(raw) <= 1_000_000
-                                    and raw.startswith(b"\xff\xd8")):
+                async with http.get(
+                    address,
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    timeout=aiohttp.ClientTimeout(total=1.8),
+                ) as response:
+                    if (response.status == 200
+                            and response.headers.get("X-Desk-Robot-Id") == self.robot
+                            and response.headers.get("Content-Type", "").startswith("image/jpeg")):
+                        raw = await response.read()
+                        age = response.headers.get("X-Desk-Camera-Age-Ms", "")
+                        receipt = response.headers.get("X-Desk-Camera-Receipt-Us", "")
+                        motion = response.headers.get("X-Desk-Frame-Motion-Ppm", "")
+                        if (age.isascii() and age.isdecimal()
+                                and receipt.isascii() and receipt.isdecimal()
+                                and motion.isascii() and motion.isdecimal()
+                                and 0 <= int(age) <= 1000
+                                and 0 < int(receipt) < 0x7fffffffffffffff
+                                and 0 <= int(motion) <= 1_000_000
+                                and 10 <= len(raw) <= 1_000_000
+                                and raw.startswith(b"\xff\xd8")
+                                and raw.endswith(b"\xff\xd9")
+                                and self._user_was_talking
+                                and self._video_turn == turn):
+                            now = time.monotonic()
+                            ident = int(receipt)
+                            if ident == self._latest_frame_receipt_us:
+                                self.video_frames_skipped_duplicate += 1
+                            elif (self._latest_frame_receipt_us is None
+                                  or int(motion) >= 15_000
+                                  or now - self._last_video_selected_at >= 2.5):
                                 self.latest_jpeg = raw
-                                self.latest_frame_time = time.monotonic() - int(age) / 1000
+                                self.latest_frame_time = now - int(age) / 1000
+                                self._latest_frame_receipt_us = ident
+                                self._last_video_selected_at = now
+                                self.video_frames_selected += 1
+                            else:
+                                self.video_frames_skipped_static += 1
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-                # Video is OPTIONAL: audio must never wait for a camera.
+                # A failed optional camera NEVER blocks actual human speech.
                 self.latest_jpeg = None
-            await asyncio.sleep(0.8)
+                self._latest_frame_receipt_us = None
+            try:
+                await asyncio.wait_for(self._camera_wakeup.wait(), timeout=0.8)
+            except TimeoutError:
+                pass
+            self._camera_wakeup.clear()
 
     async def _send_mic(self) -> None:
         while not self.closed:
@@ -271,17 +307,34 @@ class NativeOmniSession:
             was_talking = self._user_was_talking
             if packet.speech:
                 self._user_was_talking = True
-            jpeg = None
-            age = None
-            if self.latest_jpeg is not None:
+                if not was_talking:
+                    # No image from the preceding spoken turn may be sent
+                    # with this voice. Wake the camera without HTTP in VAD.
+                    self._video_turn += 1
+                    self.latest_jpeg = None
+                    self._latest_frame_receipt_us = None
+                    self._last_video_sent_receipt_us = None
+                    self._last_video_selected_at = float("-inf")
+                    self._camera_wakeup.set()
+            jpeg, age, receipt = None, None, None
+            if (self._user_was_talking and self.latest_jpeg is not None
+                    and self._latest_frame_receipt_us
+                    != self._last_video_sent_receipt_us):
                 candidate_age = round(
                     (time.monotonic() - self.latest_frame_time) * 1000
                 )
                 if 0 <= candidate_age <= 1000:
                     jpeg, age = self.latest_jpeg, candidate_age
-            await self._send(self.wire.append_audio(
-                packet.pcm16k, speech=packet.speech, jpeg=jpeg, camera_age_ms=age
-            ))
+                    receipt = self._latest_frame_receipt_us
+            event = self.wire.append_audio(
+                packet.pcm16k, speech=packet.speech, jpeg=jpeg,
+                camera_age_ms=age,
+            )
+            await self._send(event)
+            # The pinned duplex wire selects at most one JPEG on each
+            # one-second audio unit; do not offer the same receipt again.
+            if event.get("video_frames"):
+                self._last_video_sent_receipt_us = receipt
             if packet.speech:
                 self._silent_frames = 0
             elif was_talking:
@@ -290,6 +343,9 @@ class NativeOmniSession:
                     await self._send(self.wire.commit(final=True))
                     self._silent_frames = 0
                     self._user_was_talking = False
+                    self._video_turn += 1
+                    self.latest_jpeg = None
+                    self._latest_frame_receipt_us = None
 
     async def _receive_model(self) -> None:
         async for message in self._socket:
