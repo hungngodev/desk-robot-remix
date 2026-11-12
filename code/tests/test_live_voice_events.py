@@ -1124,3 +1124,48 @@ async def test_invalid_later_voice_event_has_no_partial_interrupt_side_effects(b
             assert listener.cursor == 2
             assert listener.handled == 0
         assert calls == []
+
+
+async def test_failed_speech_snapshot_retries_without_replaying_acked_interrupt():
+    """A failed snapshot consumer cannot replay an already acknowledged head STOP."""
+    calls = []
+    snapshots = 0
+
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 8, "events": [], "reset": False, "lost": False,
+                "active_human_robots": [],
+            })
+        return httpx.Response(200, json={
+            "cursor": 9, "reset": False, "lost": False,
+            "events": [{"seq": 9, "robot_id": "robot-01",
+                        "kind": "speech_start", "source": "xiaozhi_server_vad"}]
+            if request.url.params["after"] == "8" else [],
+            "active_human_robots": ["robot-01"],
+        })
+
+    async def interrupt(robot, kind):
+        calls.append((robot, kind))
+
+    async def snapshot(active):
+        nonlocal snapshots
+        snapshots += 1
+        if snapshots == 2:
+            raise OSError("snapshot consumer temporarily offline")
+        assert active == frozenset({"robot-01"}) if snapshots > 1 else not active
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=interrupt,
+            on_speech_snapshot=snapshot, require_snapshot=True,
+        )
+        await listener.poll()
+        with pytest.raises(OSError, match="snapshot consumer"):
+            await listener.poll()
+        assert listener.cursor == 9 and listener.handled == 1
+        assert calls == [("robot-01", "speech_start")]
+        assert await listener.poll() == 0
+        assert snapshots == 3
+        assert calls == [("robot-01", "speech_start")]
