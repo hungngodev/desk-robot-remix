@@ -227,7 +227,9 @@ def main():
             port.write((command + "\n").encode("ascii"))
             deadline = time.monotonic() + 0.5
             while time.monotonic() < deadline:
-                line = port.readline(1152).decode("ascii", errors="strict").strip()
+                # Match the 1664-byte Sense UART cap, not the old 1152-byte
+                # body status envelope. The WROOM reply buffer is now 1536B.
+                line = port.readline(1664).decode("ascii", errors="strict").strip()
                 if line.startswith("ERR "):
                     raise RuntimeError(line)
                 if command == "status" and line.startswith("{"):
