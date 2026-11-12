@@ -77,6 +77,16 @@ def test_unqualified_bus_edits_cannot_silently_change_critical_floor():
     bad["bus"]["mux_ranges"]["channels"][0]["position"] = "rear_obstacle"
     with pytest.raises(ValueError, match="Critical cliff"):
         harness.verify(bad, body, sense)
+    # The former check only covered lanes 0 and 4. A swapped rear cliff
+    # sensor could otherwise produce a plausible but dangerously wrong map.
+    for first, second in ((1, 2), (2, 3), (5, 6), (6, 7)):
+        bad = copy.deepcopy(plan)
+        lanes = bad["bus"]["mux_ranges"]["channels"]
+        lanes[first]["position"], lanes[second]["position"] = (
+            lanes[second]["position"], lanes[first]["position"]
+        )
+        with pytest.raises(ValueError, match="Critical cliff/obstacle"):
+            harness.verify(bad, body, sense)
     bad = copy.deepcopy(plan)
     bad["bus"]["mux_extras"]["channels"][5]["devices"].append(
         {"name": "same I2C address", "address": 0x24}
