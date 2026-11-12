@@ -1082,3 +1082,45 @@ async def test_reset_or_gap_cannot_reuse_old_vad_callback_ack(rebase_kind):
             release.set()
             if watcher._event_task is not None:
                 await asyncio.wait_for(watcher._event_task, timeout=1)
+
+
+@pytest.mark.parametrize("bad_tail", [
+    {"seq": 4, "robot_id": "robot-unknown", "kind": "speech_start",
+     "source": "xiaozhi_server_vad"},
+    {"seq": 5, "robot_id": "robot-01", "kind": "speech_end",
+     "source": "xiaozhi_server_vad"},
+    {"seq": 4, "robot_id": "robot-01", "kind": "speech_end",
+     "source": "manual"},
+])
+async def test_invalid_later_voice_event_has_no_partial_interrupt_side_effects(bad_tail):
+    calls = []
+
+    def mock(request):
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 2, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(200, json={
+            "cursor": 4, "reset": False, "lost": False,
+            "events": [
+                {"seq": 3, "robot_id": "robot-01", "kind": "speech_start",
+                 "source": "xiaozhi_server_vad"},
+                bad_tail,
+            ],
+        })
+
+    async def interrupt(robot_id, kind):
+        calls.append((robot_id, kind))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=interrupt,
+        )
+        await listener.poll()
+        for _ in range(2):
+            with pytest.raises(ValueError, match="Invalid real voice"):
+                await listener.poll()
+            assert listener.cursor == 2
+            assert listener.handled == 0
+        assert calls == []
