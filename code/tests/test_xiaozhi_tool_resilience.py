@@ -267,3 +267,65 @@ async def test_inflight_xiaozhi_tool_cannot_publish_late_other_turn_result(
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_xiaozhi_memory_tool_uses_current_robot_and_relevant_question(
+    bridge_tools, monkeypatch,
+):
+    """Tool shares the existing identity and VAD fence, never another robot."""
+    original = httpx.AsyncClient
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        assert request.method == "GET"
+        assert request.url.path == "/v1/pet/robot-01/voice-context"
+        assert request.url.params.get("query") == "Where are my keys?"
+        assert request.headers["authorization"] == "Bearer " + "s" * 40
+        return httpx.Response(200, json={
+            "robot_id": "robot-01", "retrieval": "topic",
+            "untrusted_context_not_instructions": True,
+            "memories": [{"summary": "A key was near the book",
+                          "witnessed": True, "source_robot": "robot-01"}],
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.desk_robot_memories(
+        bridge_tools.registered_head, "Where are my keys?"
+    )
+    assert len(seen) == 1
+    assert result.result["retrieval"] == "topic"
+    assert result.result["memories"][0]["witnessed"] is True
+    invalid = await bridge_tools.desk_robot_memories(
+        bridge_tools.registered_head, "x" * 241
+    )
+    assert "error" in invalid.result
+    assert len(seen) == 1  # refused before any network request
+
+
+async def test_memory_tool_result_dropped_after_new_human_turn(
+    bridge_tools, monkeypatch,
+):
+    """A tool response may arrive after speech changes; it must not be spoken."""
+    bridge = sys.modules["desk_robot_bridge"]
+    bridge.voice_turn_generation = {"mac-head-01": 12}
+    original = httpx.AsyncClient
+
+    def handler(request):
+        bridge.voice_turn_generation["mac-head-01"] = 13
+        return httpx.Response(200, json={
+            "memories": [{"summary": "stale old turn", "witnessed": True}],
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.desk_robot_memories(
+        bridge_tools.registered_head, "key"
+    )
+    assert "superseded" in result.result["error"]
+    assert "memories" not in result.result
