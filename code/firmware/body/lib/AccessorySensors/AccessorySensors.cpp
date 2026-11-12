@@ -261,6 +261,8 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
     c.temp_centi = sht_temp_centi(t);
     c.humidity_centi = sht_humidity_centi(h);
     c.at_ms = now_ms;
+    ++c.sample_seq;
+    if (c.sample_seq == 0U) ++c.sample_seq;
   }
   sht_pending_ = false;
 }
