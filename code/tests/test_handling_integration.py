@@ -59,10 +59,15 @@ async def test_qualified_real_wroom_imu_tilt_reaches_only_own_memory(tmp_path):
     state.quiet = True
     try:
         for _ in range(8):
-            await pet._observe_imu("robot-01", 8, status())
+            frame = status()
+            await pet._observe_imu("robot-01", 8, frame)
+            await pet._observe_imu("robot-01", 8, frame)
+        # Duplicate HTTP observations of one hardware conversion are ignored.
         assert memory.count("robot-01") == 0
         for _ in range(2):
-            await pet._observe_imu("robot-01", 8, status(acc=(12551, 0, 10531)))
+            frame = status(acc=(12551, 0, 10531))
+            await pet._observe_imu("robot-01", 8, frame)
+            await pet._observe_imu("robot-01", 8, frame)
         records = memory.recent("robot-01")
         assert [r.kind for r in records] == ["handling_tilt"]
         assert records[0].source_robot == "robot-01"
