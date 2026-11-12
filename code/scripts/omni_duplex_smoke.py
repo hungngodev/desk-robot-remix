@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
-from desk_robot.realtime_omni_protocol import OmniDuplexWire
+from desk_robot.realtime_omni_protocol import OmniDuplexWire, verify_native_server
 
 
 def server_url(url: str) -> str:
@@ -82,8 +82,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
         ) as socket:
             await socket.send_json(wire.session_update())
             greeting = await socket.receive_json(timeout=10)
-            if greeting.get("type") != "session.created":
-                raise RuntimeError("Native duplex server refused session handshake")
+            verify_native_server(greeting, wire.model)
             wire.handle_event(greeting)
 
             async def reader():
