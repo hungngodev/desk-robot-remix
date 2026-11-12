@@ -58,3 +58,12 @@ def test_dock_vision_rejects_bad_frames_without_cv2_or_io():
         detect_apriltag(b"", calibration(), captured_at=1)
     with pytest.raises(ValueError):
         detect_apriltag(b"hello", calibration(), captured_at=float("nan"))
+
+
+def test_dock_vision_rejects_nonnumeric_timing_without_loading_cv2():
+    for value in (None, "1", True, float("inf")):
+        with pytest.raises(ValueError):
+            detect_apriltag(b"jpeg", calibration(), captured_at=value)
+        with pytest.raises(ValueError):
+            detect_apriltag(b"jpeg", calibration(), captured_at=1,
+                            max_reprojection_error_px=value)
