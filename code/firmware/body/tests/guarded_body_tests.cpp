@@ -284,6 +284,15 @@ static void extra_three_ranging_channels_are_diagnostics_only() {
   CHECK(status.find("\"age_ms\":[20,19,18]") != std::string::npos);
   CHECK(status.find("\"present_mask\":7,\"valid_mask\":5") != std::string::npos);
   CHECK(status.find("\"motion_certified\":false") != std::string::npos);
+  // At 350ms source age a previously valid optional direction may still
+  // be reported. After that, old physical data is only a raw diagnostic.
+  const std::string borderline = send(body, "status", 360);
+  CHECK(borderline.find("\"age_ms\":[350,349,348]") != std::string::npos);
+  CHECK(borderline.find("\"present_mask\":7,\"valid_mask\":5") != std::string::npos);
+  const std::string stale = send(body, "status", 363);
+  CHECK(stale.find("\"age_ms\":[353,352,351]") != std::string::npos);
+  CHECK(stale.find("\"present_mask\":7,\"valid_mask\":0") != std::string::npos);
+  CHECK(stale.find("\"motion_certified\":false") != std::string::npos);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 30) == "ERR arm safety_interlock");
 }
