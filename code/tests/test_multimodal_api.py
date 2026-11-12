@@ -120,6 +120,62 @@ def test_native_model_instructions_contain_only_own_pet_persona_without_unapprov
         assert body["robot_id"] == pet.id
         assert pet.persona in body["instructions"]
         assert body["memory_enabled"] is False
+        assert body["transcript_memory_enabled"] is False
         assert body["model_can_arm_motors"] is False
         assert len(body["instructions"]) <= 2000
         assert client.get(f"/v1/pet/{pet.id}/omni-context").status_code == 401
+
+
+def test_native_asr_memory_requires_independent_consent_and_deduplicates(
+    settings, tokens, tmp_path,
+):
+    from types import SimpleNamespace
+    from desk_robot.memory import MemoryStore
+
+    pet = settings.robots[0]
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    memory = MemoryStore(tmp_path / "private", [r.id for r in settings.robots])
+
+    class StubRuntime:
+        coordinator = SimpleNamespace(robot=lambda robot_id: (
+            pet if robot_id == pet.id
+            else (_ for _ in ()).throw(KeyError(robot_id))
+        ))
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    runtime = StubRuntime()
+    runtime.memory = memory
+    url = f"/v1/pet/{pet.id}/omni-heard"
+    request = {
+        "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
+        "transcript": "I put a key beside the robot",
+    }
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        assert client.post(url, json=request).status_code == 401
+        first = client.post(url, headers=tool, json=request)
+        assert first.status_code == 200
+        assert first.json()["stored"] is True
+        assert first.json()["motor_authorized"] is False
+        assert first.json()["speaker_identity_verified"] is False
+        second = client.post(url, headers=tool, json=request)
+        assert second.status_code == 200
+        assert second.json()["stored"] is False
+        assert client.post(url, headers=tool, json={
+            "event_id": "../bad", "transcript": "Move the robot"
+        }).status_code == 422
+        assert len(memory.recent(pet.id)) == 1
+        heard = memory.recent(pet.id)[0]
+        assert heard.kind == "heard_human"
+        assert heard.witnessed is True
+        assert heard.confidence == 0.6
+        assert "key beside the robot" in heard.summary
+        settings.voice_transcript_memory_enabled = False
+        assert client.post(url, headers=tool, json=request).status_code == 403
