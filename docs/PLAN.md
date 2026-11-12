@@ -55,10 +55,13 @@ There are **not two competing build plans**. The original seven stages above are
 
 ## Current evidence
 
-The Sense and body profiles compile. Portable stepper control and fault policy
-have software tests, and five-robot mock conversation runs. The stepper build
-refuses to arm while real sensor readings and measured calibration are missing.
-Physical fit, power, speech interruption, pickup and fleet play are still open.
+The Sense and body build profiles and their test targets exist in source, including
+the eight VL53L4CD full WROOM target and five-pet host simulation. This is not a
+claim that the current PR head compiles or passes: recent GitHub Actions jobs fail
+before recording any steps, with unavailable logs. The stepper design is intended
+to refuse arming without fresh required sensors and calibration, but the real
+bench stop margin remains unmeasured. Physical fit, power, speech interruption,
+pickup and fleet play are still open.
 
 [Implementation progress](guides/firmware-foundation.md) · [Test evidence](records/verification.md) · [Reuse and licenses](source-map.md)
 
