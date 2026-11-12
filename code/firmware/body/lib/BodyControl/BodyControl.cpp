@@ -231,7 +231,8 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   if (dock_power_lockout_) {
     force_disarm();
   } else if ((dock.present || dock_monitor_required_) &&
-             (!dock.present || !dock.valid || dock.sample_seq == 0U)) {
+             (!state_.accessories.dock.valid || !dock.present ||
+              dock.sample_seq == 0U)) {
     // A required but missing MCP23017 is not an optional absent sensor.
     // Preserve jaw PWM on transport loss to avoid dropping a held object.
     stop_motion();
