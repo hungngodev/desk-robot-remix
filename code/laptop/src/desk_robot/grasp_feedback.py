@@ -88,7 +88,8 @@ async def guarded_grasp(
                     "force_newtons_measured": False, "physical_acceptance_pass": False,
                 }
         raise OperationError("Closed jaw limit reached with no tactile contact")
-    except Exception:
+    except (Exception, asyncio.CancelledError):
+        # Cancellation also can arrive AFTER a jaw command has moved the servo.
         # A failed partial grasp can leave a powered MG90S squeezing an object.
         # Transport failures and hardware timeout exceptions matter too: a
         # remote command or ADC read can fail AFTER a previous jaw close.
