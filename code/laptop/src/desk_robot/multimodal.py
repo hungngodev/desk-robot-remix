@@ -8,6 +8,8 @@ are never persisted, never authorize motors and expire on disconnect/close.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import math
 import re
 import time
@@ -316,7 +318,11 @@ class MultimodalOrchestrator:
             robot.id: asyncio.Lock() for robot in settings.robots
         }
         # Prevent five large JPEG decoders/encoders from running at once.
-        self._preprocess_budget = asyncio.Semaphore(2)
+        # Own actual native JPEG lifetime, not a cancellable asyncio wrapper.
+        self._preprocess_slots = threading.BoundedSemaphore(2)
+        self._preprocess_pool = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="desk-jpeg"
+        )
         self._vision_timeout_s = 15.0  # bounded responsiveness, not SLA
         self._metrics = {
             robot.id: {
@@ -500,6 +506,32 @@ class MultimodalOrchestrator:
         except asyncio.CancelledError:
             raise
 
+    async def _prepare_bounded(self, jpeg: bytes) -> tuple[bytes, bytes, float]:
+        """Limit native Pillow workers even if their awaiter is cancelled.
+
+        asyncio.to_thread can continue decoding after an asyncio cancellation.
+        A native future completion owns this capacity until Pillow truly exits.
+        Under overload, drop optional camera work instead of starting extra
+        native workers and interfering with live human audio.
+        """
+        if not self._preprocess_slots.acquire(blocking=False):
+            raise RuntimeError("JPEG preprocessing busy; do not queue stale frames")
+        try:
+            future = self._preprocess_pool.submit(_prepare, jpeg)
+        except (RuntimeError, OSError):
+            self._preprocess_slots.release()
+            raise
+
+        def finished(done) -> None:
+            try:
+                if not done.cancelled():
+                    done.exception()  # retrieve late native worker exceptions
+            finally:
+                self._preprocess_slots.release()
+
+        future.add_done_callback(finished)
+        return await asyncio.wrap_future(future)
+
     async def capture(self, robot_id: str, *, source: str) -> CameraEvidence:
         self.hub._check(robot_id)
         if self._closed:
@@ -531,8 +563,7 @@ class MultimodalOrchestrator:
                         self.heads[robot_id].snapshot(), timeout=4
                     )
                 received = time.monotonic()
-                async with self._preprocess_budget:
-                    prepared = await asyncio.to_thread(_prepare, jpeg)
+                prepared = await self._prepare_bounded(jpeg)
                 # Source JPEG reception is not the last priority boundary.
                 # A human can begin speaking while the CPU worker is
                 # decoding/resizing this JPEG, after the proactive network
@@ -561,8 +592,7 @@ class MultimodalOrchestrator:
         # CPU preprocessing runs off-thread. Never publish late paused frames.
         self.hub._check(robot_id)
         generation = self.hub._generation[robot_id]
-        async with self._preprocess_budget:
-            prepared = await asyncio.to_thread(_prepare, jpeg)
+        prepared = await self._prepare_bounded(jpeg)
         if self._any_human_active(time.monotonic()):
             return  # never commit low-priority JPEG after fresh human VAD
         self.hub.offer_prepared(
@@ -697,3 +727,4 @@ class MultimodalOrchestrator:
         self._look_tasks.clear()
         self._proactive_snapshots.clear()
         self.hub.close()
+        self._preprocess_pool.shutdown(wait=False, cancel_futures=True)
