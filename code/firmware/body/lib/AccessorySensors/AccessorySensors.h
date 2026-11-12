@@ -56,6 +56,9 @@ class AccessorySensors {
   void barometer(std::uint32_t now_ms);
   void power(std::uint32_t now_ms);
   void dock_status(std::uint32_t now_ms);
+  bool nfc_write(std::uint8_t command, const std::uint8_t* body, std::size_t size);
+  int nfc_read(std::uint8_t* frame, std::uint8_t count); // 1 ready, 0 pending, -1 fault
+  void nfc_poll(std::uint32_t now_ms);
 };
 } // namespace desk_robot
 #endif
