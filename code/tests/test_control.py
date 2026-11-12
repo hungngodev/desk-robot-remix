@@ -201,6 +201,45 @@ async def test_real_pickup_rejects_sub_three_second_hold(settings, tmp_path):
         await c.close()
 
 
+async def test_emergency_stop_reaches_body_before_blocking_job_cleanup(settings):
+    from desk_robot.controller import Job
+
+    c, head = make(settings)
+    stalled = asyncio.Event()
+    entered = asyncio.Event()
+    stop_sent = asyncio.Event()
+
+    class ObservedHead(SimulatedHead):
+        async def command(self, command):
+            if command == "stop":
+                stop_sent.set()
+            return await super().command(command)
+
+    c.heads["robot-01"] = ObservedHead("robot-01")
+
+    async def cannot_cancel_quickly():
+        entered.set()
+        try:
+            await asyncio.sleep(99)
+        except asyncio.CancelledError:
+            await stalled.wait()
+
+    task = asyncio.create_task(cannot_cancel_quickly())
+    job = Job("blocked-cleanup", "robot-01", "exploration", state="running")
+    c.jobs[job.id], c.tasks[job.id] = job, task
+    await asyncio.wait_for(entered.wait(), timeout=0.3)
+    stopping = asyncio.create_task(c.stop("robot-01"))
+    try:
+        await asyncio.wait_for(stop_sent.wait(), timeout=0.2)
+        assert not task.done()
+        assert "robot-01" not in c.permits
+    finally:
+        stalled.set()
+        await asyncio.wait_for(stopping, timeout=1)
+        await c.close()
+    assert job.state == "cancelled"
+
+
 async def test_cancel_running_job_stops_and_ends_keepalive(settings):
     c, head = make(settings)
     try:
