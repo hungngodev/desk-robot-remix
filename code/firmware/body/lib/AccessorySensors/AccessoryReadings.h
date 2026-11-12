@@ -99,6 +99,7 @@ struct AccessoryReadings {
   ForceRaw force{};
   GaugeRaw gauge{};
   DockPinRaw dock{};
+  NfcRaw nfc{}; // optional toy tag reading, never arm/dock authority
   ProximityRaw proximity{};
 };
 } // namespace desk_robot
