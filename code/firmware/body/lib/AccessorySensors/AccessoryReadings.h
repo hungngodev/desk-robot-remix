@@ -41,6 +41,7 @@ struct ClimateRaw {
   bool present = false, valid = false;
   int temp_centi = 0, humidity_centi = 0;
   std::uint32_t at_ms = 0;
+  std::uint32_t sample_seq = 0; // increments only after complete CRC-valid SHT41 read
 };
 struct BarometerRaw {
   bool present = false, valid = false;
