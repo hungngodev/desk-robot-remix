@@ -56,7 +56,7 @@
 | Dedicated regulated 3.3V expansion sensor supply | Buy | 1  |
 | Rated switch, fuse, power leads, JST style keyed connectors, decoupling | Buy | 1  |
 | Keyed charging contacts and alignment switch set | Buy | 1 ; Charging contact protection unqualified |
-| Printed docking cradle, printed camera marker and 5V charging input | Buy | 1 ; Autonomous dock not coded/physically tested |
+| Printed docking cradle, printed camera marker and 5V charging input | Buy | 1 ; Dock motion and AprilTag perception exist in source; final dual IR bearing, stopped contact alignment, actual safe charger, fit and physical dock trials are NOT qualified |
 | Filament, printed chassis/head/gripper mounts, fasteners, inserts, insulated harness | Buy | 1  |
 | SCD40 CO2 module | Buy if installing environment station | 1, not part of safety core |
 | BME688 VOC air quality module | Buy if installing environment station | 1 |
