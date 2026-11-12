@@ -126,6 +126,15 @@ class Runtime:
         for robot_id in sorted(missing_ends):
             visual.voice_ended(robot_id)
         visual.hub.reconcile_speech_snapshot(active, time.monotonic())
+        # A transport outage cancels optional camera workers without
+        # pretending a still-active human stopped speaking. Resume their
+        # sampler ONLY after the authenticated monitor is healthy again.
+        recovering = getattr(visual, "_reconnect_needs_sampler", None)
+        if recovering and getattr(self.pet, "voice_monitor_ready", False):
+            for robot_id in sorted(active & recovering):
+                if robot_id not in missing_starts:
+                    visual.voice_started(robot_id)
+            recovering.clear()
 
     async def _on_voice_monitor_ready(self, ready: bool) -> None:
         # Re-enable spontaneous voice only after a successful authenticated
@@ -136,6 +145,10 @@ class Runtime:
         if reason not in ("gap", "reset", "stream_unavailable"):
             raise ValueError("Unsupported global voice transport fault")
         self.pet.set_voice_monitor_ready(False)
+        visual = getattr(self, "multimodal", None)
+        invalidate = getattr(visual, "voice_transport_unavailable", None)
+        if callable(invalidate):
+            invalidate()  # Sync cancellation; no camera/network await here.
         await self._preempt_audio_floor()
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
