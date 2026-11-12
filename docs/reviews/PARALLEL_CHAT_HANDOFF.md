@@ -38,6 +38,14 @@ The existing pinned xinnan bridge already knew whether a registered head had an 
 
 See `docs/guides/xiaozhi-voice-event-integration.md` for the exact transport contract.
 
+## November 11 source safety and CI followup
+
+One canonical PR #17 remains active. Existing Coordinator exploration now rechecks the WROOM safety state **after** a possibly slow camera snapshot and immediately before a drive pulse, and bounds camera capture in both phases. Regression tests in `test_control.py` cover disarm during snapshot and hung captures. `grasp_feedback.py` now attempts guarded jaw relief after transport/ADC exceptions as well as planned grasp refusal, but only if the same current WROOM health permits movement; `test_grasp_feedback.py` covers both safe release and forbidden release after disarm. None of this is qualified real hardware evidence.
+
+The hardware voice event listener now requires an authenticated current VAD snapshot on the real pinned server, not merely an empty legacy replay feed, before enabling proactive speech; legacy direct listener fixtures remain backward compatible but are **not** physical acceptance. Relevant tests have been committed.
+
+[Read the measured GitHub Actions pre-step runner failure triage](CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md). The latest failing jobs lack even the first execution step, so diagnose check-run annotations and billing/runner policy before rewriting tests. Full Python, host C++ and both firmware compilers remain unverified.
+
 ## The user's cross-chat constraints, all retained
 
 1. **One complete robot, then four identical functional copies.** Five different personalities and removable costumes, not five different incomplete hardware architectures. Day zero design includes the entire desired core; physical bringup may still be staged for safe testing.
