@@ -153,17 +153,17 @@ class Coordinator:
             acknowledgement = await self.heads[robot_id].command("stop")
         finally:
             if running:
-                try:
-                    await asyncio.wait_for(
-                        asyncio.gather(*running, return_exceptions=True),
-                        timeout=2.0,
-                    )
-                except TimeoutError:
-                    # Never claim cancellation is complete. Local WROOM pulse
-                    # expiry/watchdog remain required as final barriers.
+                # asyncio.wait_for(gather(...)) is NOT bounded if a task
+                # catches cancellation. A wait() set timeout returns even
+                # when an uncooperative child refuses to finish.
+                done, pending = await asyncio.wait(running, timeout=2.0)
+                for task in done:
+                    if not task.cancelled():
+                        task.exception()  # observe any failure
+                if pending:
                     for jid, task in self.tasks.items():
                         if (self.jobs[jid].robot_id == robot_id
-                                and not task.done()):
+                                and task in pending):
                             self.jobs[jid].state = "failed"
                             self.jobs[jid].error = "Cancelled job ignored timeout; WROOM stop dispatched"
         for jid, task in self.tasks.items():
@@ -270,12 +270,13 @@ class Coordinator:
                     job.state = "failed"
                 pending = [t for t in (operation, keeper) if t is not None]
                 if pending:
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.gather(*pending, return_exceptions=True),
-                            timeout=2.0,
-                        )
-                    except TimeoutError:
+                    done, unresponsive = await asyncio.wait(
+                        pending, timeout=2.0
+                    )
+                    for task in done:
+                        if not task.cancelled():
+                            task.exception()
+                    if unresponsive:
                         job.error = (
                             f"{job.error or ''}; cancellation cleanup timed out"
                         )
