@@ -165,7 +165,12 @@ private:
         config.pin_pwdn = CAMERA_PIN_PWDN;
         config.pin_reset = CAMERA_PIN_RESET;
         config.xclk_freq_hz = XCLK_FREQ_HZ;
-        config.pixel_format = PIXFORMAT_RGB565;
+        // The pinned Xiaozhi Esp32Camera handles PIXFORMAT_JPEG natively.
+        // Avoid VGA RGB565 copies and software JPEG compression on the S3:
+        // leave CPU headroom for PDM AEC, Opus and emergency audio flush.
+        // One PSRAM frame buffer limits peak RAM and camera contention until
+        // real simultaneous microphone/camera stress measurements exist.
+        config.pixel_format = PIXFORMAT_JPEG;
         config.frame_size = FRAMESIZE_VGA;
         config.jpeg_quality = 12;
         config.fb_count = 1;
