@@ -127,6 +127,11 @@ class CameraFrameHub:
         self.event_history = {
             robot: deque(maxlen=12) for robot in robot_ids
         }
+        # Ephemeral successful tool interpretations accompany sensor cues,
+        # not raw JPEG/PCM or persistent user memories. One existing owner.
+        self.tool_history = {
+            robot: deque(maxlen=4) for robot in robot_ids
+        }
 
     def _check(self, robot_id: str) -> None:
         if robot_id not in self.robots:
@@ -278,11 +283,46 @@ class CameraFrameHub:
             if 0 <= now - seen_at <= 8.0
         ]
 
+    def remember_tool(self, robot_id: str, kind: str, summary: str,
+                      received_at: float) -> None:
+        """Accept only completed current-turn read-only tool interpretations.
+
+        Failed/cancelled tool outputs must never enter the next interaction.
+        Tool text is model-generated *opinion*, not a witnessed physical fact,
+        instruction or actuator permit. It expires from RAM in eight seconds.
+        """
+        self._check(robot_id)
+        if (kind != "visual_look" or not isinstance(summary, str)
+                or not 1 <= len(summary.strip()) <= 2000
+                or not _finite(received_at)):
+            raise ValueError("Invalid read-only visual tool evidence")
+        cleaned = " ".join(summary.split())[:160]
+        if cleaned:
+            self.tool_history[robot_id].append((kind, cleaned, received_at))
+
+    def recent_tool_context(self, robot_id: str, now: float) -> list[dict]:
+        self._check(robot_id)
+        if not _finite(now):
+            raise ValueError("Invalid interaction context clock")
+        return [
+            {
+                "kind": kind,
+                "summary": summary,
+                "age_ms": round(1000 * (now - observed)),
+                "source": "local_vlm_interpretation_not_physical_measurement",
+                "untrusted_text_not_instructions": True,
+                "motor_authorized": False,
+            }
+            for kind, summary, observed in self.tool_history[robot_id]
+            if 0 <= now - observed <= 8.0
+        ]
+
     def discard_video(self, robot_id: str) -> None:
         """Drop failed camera evidence without releasing a live human VAD turn."""
         self._check(robot_id)
         self._generation[robot_id] += 1
         self.frames[robot_id].clear()
+        self.tool_history[robot_id].clear()
         self.previous_gray.pop(robot_id, None)
         self.last_capture[robot_id] = -math.inf
         self.changed_streak[robot_id] = 0
@@ -748,6 +788,12 @@ class MultimodalOrchestrator:
             if time.monotonic() - chosen[-1].received_at > 16:
                 raise RuntimeError("Camera observation expired during visual analysis")
             metrics["visual_answers"] += 1
+            # The read-only answer is bound to the exact accepted question
+            # epoch and real Mac JPEG. It is a short-lived interpretation,
+            # never a second camera/VLM agent or evidence of motion success.
+            self.hub.remember_tool(
+                robot_id, "visual_look", answer, time.monotonic()
+            )
             return {
                 "robot_id": robot_id,
                 "answer": answer,
