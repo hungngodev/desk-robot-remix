@@ -19,13 +19,6 @@ One narrow continuation on the canonical PR, without new PRs, external MCP, loca
 **Next independent verification:** run `PYTHONPATH=code/laptop/src python -m pytest code/tests/test_grasp_feedback.py code/tests/test_power_preflight.py -q` in a working checked-out environment, then test real XIAO/WROOM cancellation and live force safeguards under a monitored bench setup. Preserve unchanged dock and charging permissions and do not represent code-only evidence as hardware acceptance.
 
 
-### Followup found: MPU6050 acquisition identity for handling provenance
-
-Source review of `BerryImu.h/.cpp`, `BodyControl.cpp`, `handling.py`, and `test_handling.py` found a distinct **not yet fixed** provenance gap: the physical WROOM IMU polling updates `BerryReading.at_ms` on a successful new conversion, but the `status` JSON exposes only `imu.age_ms` and raw axes. `HandlingGate.observe` relies on Mac observation time and age <=200 ms; two HTTP reads of the same WROOM sample within the freshness window can count as independent tilt or shake evidence, or advance the eight sample upright baseline. The `qualified` switch does not by itself establish new acquisition identity.
-
-**Small safe implementation sequence:** first design a bounded wire-compatible IMU acquisition token (existing WROOM `at_ms` or new sequence, explicitly handle reboot/rollover) and audit `kReplyCapacity=640` against the *worst-case* status JSON, so an added field cannot silently yield `response_too_long`. Then update the firmware serial contract, Mac handling gate and all affected tests together. Two identical HTTP replays must not calibrate the baseline or cause a handling event; two truly distinct IMU conversions may. Preserve WROOM local motion interlocks, current pin mapping, no motion permissions, and the existing user-required raw MPU6050 sensor. This is **source analysis, not a tested regression or applied fix**.
-
-
 ## November 12 comment reconciliation: dock GPIO provenance, status bytes and IMU identity
 
 **Latest reviewed sources:** canonical draft PR #17, 18 normalized discussion comments and zero inline review threads at inspection. Newly actionable [dock sample lockout finding](https://github.com/hungngodev/desk-robot-remix/pull/17#issuecomment-6831006176) and [MPU6050 acquisition identity review](https://github.com/hungngodev/desk-robot-remix/pull/17#issuecomment-6830964118) were reconciled against the actual branch, not an older chat summary.
