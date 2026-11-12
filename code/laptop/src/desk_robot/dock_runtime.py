@@ -42,8 +42,13 @@ async def observe_actual_dock(head, robot) -> dict:
         }
     jpeg = await asyncio.wait_for(head.snapshot(), timeout=3.0)
     received_at = time.monotonic()
-    pose = detect_apriltag(jpeg, calib, captured_at=received_at)
-    assessment = assess_dock(pose, now=received_at, target_distance_mm=target)
+    pose = await asyncio.wait_for(
+        asyncio.to_thread(detect_apriltag, jpeg, calib, captured_at=received_at),
+        timeout=2.0,
+    )
+    # Receipt timestamp is not the end of OpenCV computation. A slow or
+    # stalled detector cannot authorize a now-stale dock observation.
+    assessment = assess_dock(pose, now=time.monotonic(), target_distance_mm=target)
     return {
         "robot_id": robot.id, "phase": assessment.phase,
         "reason": assessment.reason,
