@@ -105,6 +105,10 @@ Before changing firmware wiring or shopping: verify (1) selected IR demodulator 
 No final IR driver, fitted dock, charging controller or qualified last-centimeter movement is implemented by this note. This prevents an unsafe unsupported implementation shortcut while preserving the complete required product.
 
 
+## November 11: final marker age check after health polling
+
+An additional time-of-check versus time-of-use race remained after moving PnP off the event loop: a valid new AprilTag pose could become stale **during** the subsequent authenticated WROOM sensor status HTTP request. The existing local guard protects cliff and touch state, but that does not make the previously captured marker position current. `Coordinator._dock_approach` now invokes `assess_dock` again immediately before the command, using the actual monotonic clock. Any changed phase, in practice an expired marker, results in a `hold` response with no drive and no charging permission. `test_dock_motion.py` now includes a second WROOM status request delayed beyond the existing 200 ms marker validity window to enforce this rule. This is a source-level race fix with unverified CI and not a physical terminal docking acceptance.
+
 ## November 11: AprilTag inference age and audio event loop isolation
 
 A concrete cross-robot priority bug was identified in the existing docking path. `Coordinator._dock_approach` called CPU heavy OpenCV AprilTag and PnP synchronously on the Mac asyncio event loop, potentially blocking the authenticated human speech and urgent cancellation tasks. Worse, it passed the **JPEG receipt time** as both the pose timestamp and the time to `assess_dock`. A detector taking longer than the existing 200 ms validity window could still produce an allegedly fresh marker and allow a drive based on old geometry.
