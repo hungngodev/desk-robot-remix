@@ -46,6 +46,7 @@ async def measure(
     camera_sizes: list[int] = []
     camera_errors: list[str] = []
     status_errors: list[str] = []
+    camera_error_count = status_error_count = 0
     seen_camera_identities: set[tuple[int, int, int]] = set()
     started = time.monotonic()
     deadline = started + seconds
@@ -55,7 +56,11 @@ async def measure(
         while time.monotonic() < deadline:
             begin = time.monotonic()
             try:
-                jpeg = await head.snapshot()
+                # Never leave an optional camera HTTP request blocking this
+                # bounded, read-only acoustic/contention experiment forever.
+                jpeg = await asyncio.wait_for(
+                    head.snapshot(), timeout=min(4.0, max(0.05, deadline - begin))
+                )
                 if not isinstance(jpeg, bytes) or not jpeg.startswith(b"\xff\xd8") \
                         or not jpeg.endswith(b"\xff\xd9"):
                     raise ValueError("Head returned truncated or non-JPEG data")
@@ -67,7 +72,11 @@ async def measure(
                 camera_sizes.append(len(jpeg))
                 camera_times.append(time.monotonic() - begin)
             except Exception as exc:
-                camera_errors.append(type(exc).__name__ + ": " + str(exc)[:110])
+                camera_error_count += 1
+                if len(camera_errors) < 20:
+                    camera_errors.append(
+                        type(exc).__name__ + ": " + str(exc)[:110]
+                    )
             # Skip missed slots rather than burst catching up after a
             # stalled JPEG; audio and body telemetry keep priority.
             due = max(due + camera_period_s, time.monotonic())
@@ -78,12 +87,18 @@ async def measure(
         while time.monotonic() < deadline:
             begin = time.monotonic()
             try:
-                state = await head.status()
+                state = await asyncio.wait_for(
+                    head.status(), timeout=min(0.8, max(0.05, deadline - begin))
+                )
                 if not isinstance(state, dict) or state.get("robot_id") != robot_id:
                     raise ValueError("Head status identity invalid")
                 status_times.append(time.monotonic() - begin)
             except Exception as exc:
-                status_errors.append(type(exc).__name__ + ": " + str(exc)[:110])
+                status_error_count += 1
+                if len(status_errors) < 20:
+                    status_errors.append(
+                        type(exc).__name__ + ": " + str(exc)[:110]
+                    )
             due = max(due + status_period_s, time.monotonic())
             await asyncio.sleep(max(0, min(deadline, due) - time.monotonic()))
 
@@ -99,9 +114,9 @@ async def measure(
         "largest_jpeg_bytes": max(camera_sizes, default=0),
         "distinct_source_camera_identities": len(seen_camera_identities),
         "camera_errors": camera_errors[:20],
-        "camera_error_count": len(camera_errors),
+        "camera_error_count": camera_error_count,
         "status_errors": status_errors[:20],
-        "status_error_count": len(status_errors),
+        "status_error_count": status_error_count,
         "camera_transport_probe_only": True,
         "sensor_exposure_clock_synchronized": False,
         "physical_aec_latency_measured": False,
