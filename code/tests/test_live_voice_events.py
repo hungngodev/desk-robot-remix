@@ -951,3 +951,49 @@ async def test_failed_xiaozhi_event_interrupt_is_retryable_without_cursor_loss()
         assert watcher.cursor == 5
         assert await watcher.poll() == 1
         assert calls == 2 and watcher.cursor == 6
+
+
+async def test_repeated_fleet_fallback_does_not_duplicate_unresponsive_head():
+    """A cancellation-resistant one-pet transport cannot spawn infinite tasks."""
+    import asyncio
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    attempts = []
+
+    async def interrupt(robot_id, reason):
+        attempts.append((robot_id, reason))
+        if robot_id != "robot-01":
+            return
+        started.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+
+    async with httpx.AsyncClient() as client:
+        watcher = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=interrupt,
+        )
+        try:
+            with pytest.raises(TimeoutError, match="Fleet interruption incomplete"):
+                await watcher._preempt_all("stream_unavailable")
+            assert started.is_set()
+            with pytest.raises(TimeoutError, match="Fleet interruption incomplete"):
+                await watcher._preempt_all("stream_unavailable")
+            # The responsive peer can retry; the still active native owner
+            # for robot-01 must not be invoked a second time.
+            assert attempts.count(("robot-01", "stream_unavailable")) == 1
+            assert attempts.count(("robot-02", "stream_unavailable")) == 2
+            release.set()
+            await asyncio.wait_for(watcher._fallback_abort_tasks["robot-01"], 1)
+            await watcher._preempt_all("stream_unavailable")
+            assert attempts.count(("robot-01", "stream_unavailable")) == 2
+        finally:
+            release.set()
+            await asyncio.gather(
+                *watcher._fallback_abort_tasks.values(),
+                return_exceptions=True,
+            )
