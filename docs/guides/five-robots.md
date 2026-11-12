@@ -94,11 +94,24 @@ should be enabled only when the user explicitly chooses local peer memory
 sharing and understands these memories persist in the Mac private directory.
 
 
-Try a bounded word game with the local models after real speech setup, e.g.
-“Take turns naming a new animal; do not repeat a previous animal.” This is a
-conversation prompt, not a deterministic game referee. Autonomous chasing,
-collision avoidance, object handoff and camera-grounded group chat are not
-implemented. Pickup remains a separate supervised, camera-guided job.
+The Mac now supports **explicitly consented, event-triggered two-pet social
+dialogue** as well as manually requested two-to-five-pet conversation. Set
+`fleet_text_sharing_enabled = true` and
+`fleet_social_autonomy_enabled = true` together in the private hardware config
+after confirming that every participating head can be interrupted by real
+Xiaozhi VAD. The source selects a quiet, enabled peer for a recent witnessed
+key, candy, object, hand-wave, petting or NFC event, rotates eligible partners,
+uses the existing exclusive speaker lease, and limits the exchange to two turns.
+The listening pet is told explicitly which peer witnessed the event and must
+not pretend it saw that scene. A separate cooldown suppresses repetitive
+invitations. Default consent stays false; see
+[the authoritative multimedia and social contract](multimodal-voice-video-orchestration.md).
+
+A word game such as “Take turns naming an animal without repetition” is still
+only a prompted language activity, **not** a deterministic scored game referee.
+The software does not currently prove autonomous collision-safe chasing,
+coordinated physical object handoff, visually verified joint manipulation or
+a physical five-head acoustic trial. Pickup remains separately supervised.
 
 ## Identities and setup after one passes
 
@@ -173,13 +186,16 @@ Exact owned board/bank counts and five-unit delivered costs are unresolved. Use
 
 ## Planned initiative, not only replies
 
-The [active-pet plan](../plans/2026-11-03-active-desk-pet.md) adds local idle eyes
-and a Mac event scheduler: curiosity, rest, attention requests, bounded exploration
-and peer invitations. Distinct per-ID persistent memories and cooldowns avoid
-identity mixups and endless peer chatter. Start stationary, then human-enabled
-short motion; stops/faults/lease expiry cancel queued activity with no auto-resume.
-RoboEyes is GPL3 and needs an ESP-IDF adapter. No new face/pet/cliff code is
-implemented by the documentation update.
+The [original active-pet plan](../plans/2026-11-03-active-desk-pet.md) is
+historical design context. The present implementation has the Mac witnessed
+event and bounded social initiation gate, sensor-triggered camera capture, five
+independent memories and the pinned Stackchan OLED state machine. It is **not**
+an unconditionally awake or physically qualified animal-like robot: spontaneous
+speech requires live authenticated Xiaozhi human-turn monitoring, opt-in,
+fresh source evidence, available speech floor and cooldown. A model must never
+command autonomous movement based on a social prompt. RoboEyes GPL3 is not
+bundled or imported. The unbuilt power path and mechanical assembly still
+prevent a claim of assembly-only readiness.
 
 
 ## Persistent operator-enabled exploration using the existing body controller
