@@ -329,13 +329,14 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool ping = std::strcmp(command, "ping") == 0;
   const bool status = std::strcmp(command, "status") == 0;
   const bool aux = std::strcmp(command, "aux") == 0;
+  const bool ir = std::strcmp(command, "ir") == 0;
   const bool calfloor = std::strcmp(command, "calfloor") == 0;
   const bool calfront = std::strcmp(command, "calfront") == 0;
   const bool calfresh = std::strcmp(command, "calfresh") == 0;
   const bool calcommit = std::strcmp(command, "calcommit") == 0;
   const bool calabort = std::strcmp(command, "calabort") == 0;
   const bool calibration = calfloor || calfront || calfresh || calcommit || calabort;
-  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || calibration)) {
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || ir || calibration)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
@@ -452,6 +453,27 @@ void BodyControl::execute(const char* line, std::size_t length,
 
   if (ping) {
     std::snprintf(reply, capacity, "OK ping");
+  } else if (ir) {
+    const auto& e = state_.terminal_ir;
+    // RMT observation is read-only. A matching IR code is not an estimate
+    // of mechanical bearing or proof of a powered/accepted charging dock.
+    const int written = std::snprintf(
+        reply, capacity,
+        "{\"left_valid\":%s,\"right_valid\":%s,\"match\":%s,"
+        "\"left_seq\":%lu,\"right_seq\":%lu,"
+        "\"left_age_ms\":%lu,\"right_age_ms\":%lu,\"code\":%lu,"
+        "\"motor_authorized\":false,\"charging_authorized\":false,"
+        "\"physical_qualified\":false}",
+        e.left_fresh ? "true" : "false",
+        e.right_fresh ? "true" : "false",
+        e.same_code ? "true" : "false",
+        static_cast<unsigned long>(e.left_seq),
+        static_cast<unsigned long>(e.right_seq),
+        static_cast<unsigned long>(e.left_age_ms),
+        static_cast<unsigned long>(e.right_age_ms),
+        static_cast<unsigned long>(e.code));
+    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
+      std::snprintf(reply, capacity, "ERR ir response_too_long");
   } else if (aux) {
     const auto& raw = state_.paw_pulse;
     const auto& a = state_.accessories;
