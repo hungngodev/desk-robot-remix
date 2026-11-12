@@ -460,3 +460,182 @@ async def test_native_opus_packet_checks_live_human_floor_even_after_reply_start
     assert service.head_packets == 0
     assert module._output_owner is None
     assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
+
+
+async def test_native_voice_sends_one_video_frame_per_camera_receipt(native):
+    """Audio stays live, but an unchanged JPEG is never replayed each second."""
+    module, bridge = native
+    conn, _sent = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    observed = []
+
+    class ModelSocket:
+        async def send_json(self, packet):
+            observed.append(packet)
+
+    service._socket = ModelSocket()
+    worker = asyncio.create_task(service._send_mic())
+    try:
+        service.queue_mic(b"\0" * 3200, True)
+        await asyncio.wait_for(service._camera_wakeup.wait(), timeout=1)
+        assert service._user_was_talking
+        jpeg = b"\xff\xd8" + b"live camera" + b"\xff\xd9"
+        service.latest_jpeg = jpeg
+        service.latest_frame_time = module.time.monotonic()
+        service._latest_frame_receipt_us = 125_678
+        for _ in range(19):
+            service.queue_mic(b"\0" * 3200, True)
+        for _ in range(3):
+            service.queue_mic(b"\0" * 3200, False)
+        async with asyncio.timeout(2):
+            while len([x for x in observed if
+                       x["type"] == "input_audio_buffer.append"]) < 23:
+                await asyncio.sleep(.001)
+        appends = [x for x in observed if
+                   x["type"] == "input_audio_buffer.append"]
+        image_events = [x for x in appends if x.get("video_frames")]
+        assert len(image_events) == 1
+        assert base64.b64decode(image_events[0]["video_frames"][0]) == jpeg
+        assert service.wire.frames_sent == 1
+        assert service._last_video_sent_receipt_us == 125_678
+        assert service._user_was_talking is False
+        assert service.latest_jpeg is None
+        # Another spoken turn cannot inherit that now-expired visual context.
+        service.queue_mic(b"\0" * 3200, True)
+        async with asyncio.timeout(1):
+            while len([x for x in observed if
+                       x["type"] == "input_audio_buffer.append"]) < 24:
+                await asyncio.sleep(.001)
+        assert service.latest_jpeg is None
+        assert service._last_video_sent_receipt_us is None
+    finally:
+        service.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_camera_selects_keyframe_motion_and_static_refresh(native):
+    """Use the Mac motion estimate; do not decode JPEG again on the server."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    service._user_was_talking = True
+    service._video_turn = 1
+    calls = []
+
+    class FrameReply:
+        status = 200
+
+        def __init__(self, index):
+            self.index = index
+            self.headers = {
+                "X-Desk-Robot-Id": "robot-01",
+                "Content-Type": "image/jpeg",
+                "X-Desk-Camera-Age-Ms": "0",
+                "X-Desk-Camera-Receipt-Us": str([501, 502, 503, 503][index]),
+                "X-Desk-Frame-Motion-Ppm": str([0, 0, 25_000, 25_000][index]),
+            }
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def read(self):
+            return b"\xff\xd8" + bytes([65 + self.index]) * 20 + b"\xff\xd9"
+
+    class MacHTTP:
+        def get(self, *_args, **_kwargs):
+            index = min(len(calls), 3)
+            calls.append(index)
+            return FrameReply(index)
+
+    worker = asyncio.create_task(service._camera(MacHTTP()))
+    try:
+        async with asyncio.timeout(2):
+            while service.video_frames_selected < 1:
+                await asyncio.sleep(.001)
+        assert service._latest_frame_receipt_us == 501
+        service._camera_wakeup.set()
+        async with asyncio.timeout(2):
+            while service.video_frames_skipped_static < 1:
+                await asyncio.sleep(.001)
+        assert service._latest_frame_receipt_us == 501
+        service._camera_wakeup.set()
+        async with asyncio.timeout(2):
+            while service.video_frames_selected < 2:
+                await asyncio.sleep(.001)
+        assert service._latest_frame_receipt_us == 503
+        service._camera_wakeup.set()
+        async with asyncio.timeout(2):
+            while service.video_frames_skipped_duplicate < 1:
+                await asyncio.sleep(.001)
+        assert service.video_frames_selected == 2
+        assert service.video_frames_skipped_static == 1
+        assert service.video_frames_skipped_duplicate == 1
+    finally:
+        service.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_camera_rejects_late_jpeg_from_previous_vad_turn(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    service._user_was_talking = True
+    service._video_turn = 10
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SlowReply:
+        status = 200
+        headers = {
+            "X-Desk-Robot-Id": "robot-01",
+            "Content-Type": "image/jpeg",
+            "X-Desk-Camera-Age-Ms": "0",
+            "X-Desk-Camera-Receipt-Us": "7654321",
+            "X-Desk-Frame-Motion-Ppm": "75000",
+        }
+
+        async def __aenter__(self):
+            entered.set()
+            await release.wait()
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def read(self):
+            return b"\xff\xd8" + b"delayed JPEG" + b"\xff\xd9"
+
+    class SlowHTTP:
+        def get(self, *_args, **_kwargs):
+            return SlowReply()
+
+    worker = asyncio.create_task(service._camera(SlowHTTP()))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        service._user_was_talking = False
+        service._video_turn += 1
+        release.set()
+        await asyncio.sleep(.03)
+        assert service.latest_jpeg is None
+        assert service.video_frames_selected == 0
+    finally:
+        release.set()
+        service.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
