@@ -29,6 +29,7 @@ class TwoWire {
   std::uint8_t dock_gpioA = 0x0F; // switches closed, no input or charger
   bool range_mux_stuck = false;
   bool optional_mux_stuck = false;
+  bool optional_mux_installed = true;
   bool range_mux_write_nack = false;
   bool range_mux_read_nack = false;
   bool range_mux_bad_readback = false;
@@ -51,7 +52,8 @@ class TwoWire {
     return 1;
   }
   bool connected(std::uint8_t addr) const {
-    if (addr == 0x70 || addr == 0x71) return true;
+    if (addr == 0x70) return true;
+    if (addr == 0x71) return optional_mux_installed;
     if (addr == 0x29)
       return ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0;
     if (ranges != 0 || extras == 0) return false;
