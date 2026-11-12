@@ -199,3 +199,49 @@ async def test_group_conversation_reuses_each_pets_own_relevant_context(
     assert "silver key beside the notebook yesterday" not in peer
     assert "not current visual evidence or permission to move" in own
     assert [robot_id for robot_id, _ in speaker.spoken] == ids
+
+
+def test_voice_brain_merges_sensor_and_tool_cues_without_persisting_images(
+    settings, tokens, tmp_path
+):
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.memory_dir = tmp_path
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = True
+    tool = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        hub = CameraFrameHub([r.id for r in settings.robots])
+        now = time.monotonic()
+        hub.notify("robot-01", "touch_tap", now)
+        hub.remember_tool(
+            "robot-01", "visual_look",
+            "A red cup might be near the notebook", now,
+        )
+        class Visual:
+            def __init__(self, hub):
+                self.hub = hub
+
+        runtime.multimodal = Visual(hub)
+        try:
+            result = client.get(
+                "/v1/pet/robot-01/voice-context",
+                headers=tool, params={"query": "keys"},
+            )
+            assert result.status_code == 200
+            data = result.json()
+            assert [cue["kind"] for cue in data["live_sensor_cues"]] == ["touch_tap"]
+            assert data["recent_tool_interpretations"][0]["kind"] == "visual_look"
+            assert data["recent_tool_interpretations"][0]["motor_authorized"] is False
+            assert data["sensor_cues_are_not_physical_action_confirmation"]
+            # A different pet's authorized voice context may not borrow
+            # the first pet's camera/tool events or private experiences.
+            other = client.get(
+                "/v1/pet/robot-02/voice-context",
+                headers=tool, params={"query": "keys"},
+            ).json()
+            assert other["recent_tool_interpretations"] == []
+            assert other["live_sensor_cues"] == []
+        finally:
+            runtime.multimodal = None
