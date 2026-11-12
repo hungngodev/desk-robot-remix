@@ -18,8 +18,9 @@ class VoiceEventListener:
         on_global_interrupt: Callable[[str], Awaitable[None]] | None = None,
         on_monitor_ready: Callable[[bool], Awaitable[None]] | None = None,
         on_speech_snapshot: Callable[[frozenset[str]], Awaitable[None]] | None = None,
+        require_snapshot: bool = False,
     ):
-        if not robot_ids or len(token) < 24:
+        if not robot_ids or len(token) < 24 or type(require_snapshot) is not bool:
             raise ValueError("Known robot IDs and private speech token required")
         self.client, self.url, self.token = client, url.rstrip("/"), token
         self.robot_ids = frozenset(robot_ids)
@@ -27,6 +28,7 @@ class VoiceEventListener:
         self.on_global_interrupt = on_global_interrupt
         self.on_monitor_ready = on_monitor_ready
         self.on_speech_snapshot = on_speech_snapshot
+        self.require_snapshot = require_snapshot
         self.monitor_ready = False
         self.cursor: int | None = None
         self.handled = 0
@@ -73,6 +75,10 @@ class VoiceEventListener:
                 or len(data["events"]) > 128):
             raise ValueError("Malformed or oversized voice event stream")
         active = data.get("active_human_robots")
+        if self.require_snapshot and active is None:
+            # A legacy event-only bridge cannot recover VAD edges missed
+            # during reconnect; never treat its empty replay as silence.
+            raise ValueError("Live human VAD snapshot required for hardware speech")
         if active is not None and (
             not isinstance(active, list)
             or len(active) > len(self.robot_ids)
