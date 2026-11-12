@@ -476,6 +476,8 @@ void BodyControl::execute(const char* line, std::size_t length,
                                  now_ms - a.proximity.at_ms < 350U;
     const bool dock_fresh = a.dock.present && a.dock.valid &&
                             now_ms - a.dock.at_ms < 500U;
+    const bool nfc_fresh = a.nfc.present && a.nfc.valid &&
+                           a.nfc.scan_seq != 0U && now_ms - a.nfc.at_ms < 1500U;
     // Independent bounded read-only telemetry. No synthesized heartbeat,
     // grip force, wheel odometry, current amps or gesture direction.
     const int written = std::snprintf(
@@ -494,7 +496,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"physically_qualified\":false},"
         "\"dock\":{\"present\":%s,\"valid\":%s,\"left_seated\":%s,\"right_seated\":%s,"
         "\"input_good\":%s,\"charge_indicated\":%s,\"seq\":%lu,\"age_ms\":%lu,"
-        "\"charging_verified\":false}}",
+        "\"charging_verified\":false},\"nfc\":{\"v\":%s,\"t\":%lu,\"e\":%lu,\"s\":%lu}}",
         raw.present ? "true" : "false",
         raw.valid && age <= 250U ? "true" : "false",
         static_cast<unsigned>(raw.part_id),
@@ -536,7 +538,11 @@ void BodyControl::execute(const char* line, std::size_t length,
         dock_fresh && a.dock.charge_indicated ? "true" : "false",
         static_cast<unsigned long>(a.dock.sample_seq),
         static_cast<unsigned long>(
-            a.dock.present ? now_ms - a.dock.at_ms : 0U));
+            a.dock.present ? now_ms - a.dock.at_ms : 0U),
+        nfc_fresh ? "true" : "false",
+        static_cast<unsigned long>(nfc_fresh && a.nfc.tag_visible ? a.nfc.tag_token : 0U),
+        static_cast<unsigned long>(a.nfc.tag_events),
+        static_cast<unsigned long>(a.nfc.scan_seq));
     if (written < 0 || static_cast<std::size_t>(written) >= capacity)
       std::snprintf(reply, capacity, "ERR aux response_too_long");
   } else if (status) {
