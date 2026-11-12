@@ -413,6 +413,12 @@ class MultimodalOrchestrator:
             # camera frames and never touch the authenticated human VAD lease.
             pass
 
+    def sensor_burst_pending(self, robot_id: str) -> bool:
+        """One sensor burst owns this head's optional JPEG budget until done."""
+        self.hub._check(robot_id)
+        pending = self._sensor_tasks.get(robot_id)
+        return pending is not None and not pending.done()
+
     def _any_human_active(self, now: float) -> bool:
         return any(
             self.hub.user_active(robot_id, now) for robot_id in self.hub.robots
