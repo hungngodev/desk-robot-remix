@@ -961,7 +961,7 @@ async def test_cancelled_preprocess_retains_native_worker_slot_until_it_exits(mo
         else:
             pytest.fail("native decoder exit did not release preprocess budget")
         result = await visual._prepare_bounded(image())
-        assert result[0].startswith(b"\\xff\\xd8")
+        assert result[0].startswith(b"\xff\xd8")
     finally:
         release.set()
         if not pending.done():
