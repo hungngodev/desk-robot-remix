@@ -806,7 +806,6 @@ class PetController:
         state.safety_fault_events += 1
         state.events += 1
         state.last_event = description
-        self._notify_sensor(robot_id, "safety_fault")
         # The WROOM already stopped locally. Also cancel the Mac operation and
         # invalidate any pending operator permit, so an in-flight pickup or
         # exploratory action cannot continue once this transition was observed.
@@ -816,6 +815,9 @@ class PetController:
                 await self.on_local_fault(robot_id)
             except Exception as exc:
                 state.last_error = f"Local stop: {type(exc).__name__}: {str(exc)[:80]}"
+        # A context JPEG must never compete with the urgent Mac stop and
+        # permit invalidation. Schedule it only after the stop attempt.
+        self._notify_sensor(robot_id, "safety_fault")
         # Report the firmware's own status, not an inferred physical drop,
         # desk height, or an unverified cliff-stop distance.
         await self._store_observation(robot_id, SceneChange(
