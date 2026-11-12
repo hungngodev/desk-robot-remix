@@ -92,6 +92,8 @@ class OmniDuplexWire:
         self._needs_new_input = False
         self._input_after_interrupt = False
         self._server_response_epoch: int | None = None
+        self._server_epoch_seen = 0
+        self._session_created = False
         self._min_server_epoch: int | None = None
         self._interrupted = False
 
@@ -184,8 +186,14 @@ class OmniDuplexWire:
         """Cancel stale backend speech; the separate head MUST flush its DMA."""
         self.epoch += 1
         self._interrupted = True
-        if self._server_response_epoch is not None:
-            self._min_server_epoch = self._server_response_epoch + 1
+        # Both response.cancel AND output_audio_buffer.clear advance the
+        # upstream native server epoch. Count both, including consecutive
+        # barge-ins before any newly created response has arrived.
+        self._min_server_epoch = max(
+            self._min_server_epoch or 0,
+            self._server_response_epoch or 0,
+            self._server_epoch_seen,
+        ) + 2
         self.accept_output = False
         self.response_id = None
         self.generated_bytes = 0
@@ -208,6 +216,20 @@ class OmniDuplexWire:
         if kind == "error":
             raise RuntimeError("Realtime backend reported a protocol error")
         if kind == "session.created":
+            if self._session_created:
+                raise ValueError("Duplicate native session.created")
+            session = event.get("session")
+            initial = session.get("epoch", 0) if isinstance(session, dict) else 0
+            if type(initial) is not int or initial < 0:
+                raise ValueError("Invalid native session epoch")
+            self._server_epoch_seen = initial
+            self._session_created = True
+            # A native session is new, so a local audio abort issued before
+            # connection cannot fence every future legitimate model reply.
+            self._min_server_epoch = None
+            self._interrupted = False
+            self._needs_new_input = False
+            self._input_after_interrupt = False
             self.accept_output = True
             return None
         if kind == "response.created":
@@ -236,19 +258,23 @@ class OmniDuplexWire:
                 native.get("epoch") if isinstance(native, dict)
                 else event.get("epoch")
             )
-            if server_epoch is not None and type(server_epoch) is not int:
+            if server_epoch is not None and (
+                type(server_epoch) is not int or server_epoch < 0
+            ):
                 raise ValueError("Invalid realtime response epoch")
-            # Server cancellation increments the native session epoch.
-            # After our first barge-in, an old response may arrive AFTER
-            # another audio commit. Do not accept it based on timing alone.
-            if self._interrupted and (
-                server_epoch is None or (
+            # Never allow an old response to regain the speaker owner, even
+            # AFTER a newer epoch has already been accepted. The two urgent
+            # cancellation events advance the upstream epoch independently.
+            if (server_epoch is not None and (
+                server_epoch < self._server_epoch_seen or (
                     self._min_server_epoch is not None
                     and server_epoch < self._min_server_epoch
                 )
-            ):
+            )) or (self._interrupted and server_epoch is None):
                 return None
             self._interrupted = False
+            if server_epoch is not None:
+                self._server_epoch_seen = server_epoch
             self._server_response_epoch = server_epoch
             self.response_id = response_id
             self.generated_bytes = 0
