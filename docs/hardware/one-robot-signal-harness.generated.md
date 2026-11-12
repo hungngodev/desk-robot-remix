@@ -33,7 +33,7 @@ Signal-only list. Never infer a power source from a logic voltage.
 | XIAO GPIO7 | MAX98357A LRC | 3.3V head signal | Source allocated |
 | XIAO GPIO8 | MAX98357A DIN | 3.3V head signal | Source allocated |
 | XIAO onboard GPIO41 DIN + GPIO42 CLK | Sense PDM microphone | Integrated board pins, NOT connections to WROOM | Source allocated |
-| XIAO GPIO9 reserved | RGB heart data | Driver not implemented; SD J3 physical conflict unresolved | Do NOT wire yet |
+| XIAO GPIO9 reserved | RGB heart data | Xiaozhi WS2812 driver compiled only with explicit opt-in; SD J3 and 5V level buffer still unqualified | Do NOT wire yet |
 | Range TCA9548A 0x70 CH0 SDA/SCL | VL53L4CD (0x29) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
 | Range TCA9548A 0x70 CH1 SDA/SCL | VL53L4CD (0x29) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
 | Range TCA9548A 0x70 CH2 SDA/SCL | VL53L4CD (0x29) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
