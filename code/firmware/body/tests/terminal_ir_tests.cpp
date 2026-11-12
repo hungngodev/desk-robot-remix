@@ -77,6 +77,31 @@ int main() {
     CHECK(!invalidated.assess(130).same_code);
     invalidated.accept(1, code, 140);
     CHECK(invalidated.assess(140).same_code);
+    // IDF 4.4 has no receive timestamp. An unqualified poll cannot relabel
+    // queued old RMT frames as fresh directional evidence.
+    desk_robot::IrFrameQueueGate queue;
+    CHECK(!queue.on_poll(100)); // first poll is a drain-only baseline
+    CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
+    CHECK(queue.on_poll(150)); // previous queues were observed empty
+    CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
+    CHECK(!queue.on_poll(400)); // old messages after a long stall are stale
+    CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
+    CHECK(queue.on_poll(450));
+    CHECK(!queue.finish(0, 3, true)); // three packets mean ambiguous backlog
+    CHECK(queue.finish(1, 1, true)); // other side's evidence must be discarded
+    CHECK(queue.on_poll(500));
+    CHECK(!queue.finish(0, 8, false)); // receive budget ran out
+    CHECK(queue.draining(0));
+    CHECK(!queue.finish(0, 2, true)); // merely draining is not a new sighting
+    CHECK(!queue.draining(0));
+    CHECK(queue.finish(0, 1, true)); // only a later batch can reacquire
+    CHECK(!queue.draining(9));
+    CHECK(!queue.finish(9, 1, true));
+    queue.reset();
+    CHECK(!queue.on_poll(0xfffffff0U));
+    CHECK(queue.finish(0, 0, true) && queue.finish(1, 0, true));
+    CHECK(queue.on_poll(0x00000022U)); // wrapping short interval is timely
+    CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
     // Clock wrapping after both receivers captured real, independent bursts.
     desk_robot::DualIrEvidence wrapped;
     wrapped.accept(0, code, 0xfffffff0U);
