@@ -152,3 +152,56 @@ async def test_detector_failure_holds_without_motion(tmp_path, monkeypatch, fail
     assert result["charging_authorized"] is False
     assert result["physical_acceptance_pass"] is False
     assert head.commands == []
+
+
+async def test_detector_timeout_does_not_queue_another_native_worker(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def blocked_detector(image, calibration, *, captured_at):
+        calls.append(captured_at)
+        started.set()
+        release.wait(timeout=10)
+        return DockPose(0, 0, 450, 0.5, captured_at)
+
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked_detector)
+    try:
+        first = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
+        await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=1)
+        second = await dock_runtime.observe_actual_dock(Head(), robot)
+        assert second["phase"] == "hold"
+        assert second["source"] == "apriltag_detector_busy"
+        assert second["motor_authorized"] is False
+        assert second["charging_authorized"] is False
+        assert len(calls) == 1
+
+        timed_out = await asyncio.wait_for(first, timeout=4)
+        assert timed_out["source"] == "apriltag_detection_failed"
+        still_busy = await dock_runtime.observe_actual_dock(Head(), robot)
+        assert still_busy["source"] == "apriltag_detector_busy"
+        assert len(calls) == 1
+    finally:
+        release.set()
+
+    # The worker releases the slot after it really exits, not at timeout.
+    for _ in range(100):
+        if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
+            dock_runtime._DETECTOR_SLOT.release()
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("Detector worker did not release its slot")
+    recovered = await dock_runtime.observe_actual_dock(Head(), robot)
+    assert recovered["motor_authorized"] is False
+    assert recovered["charging_authorized"] is False
+    assert len(calls) == 2
