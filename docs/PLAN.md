@@ -5,6 +5,14 @@ Build and qualify one robot before making four copies. The
 acceptance criteria. The [parts list](hardware/parts.md) owns inventory and
 shopping. This page owns the original seven physical build stages; the [full day-zero forward-only sequence](#complete-linear-build-and-permanent-verification-stages) owns the complete integrated experience, including proactive conversation, memory, all selected sensors and expansion interfaces. Both descriptions preserve the same final product rather than replacing it mid-build.
 
+## November 12 integration checkpoint
+
+The hardware and experience scope is **unchanged**: one fully featured body first, then four identical bodies with independent names, personas and memory. [PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17) is the only integration PR. The [current document entrypoint](README.md), [actual upstream copy versus inspiration audit](ATTRIBUTION.md), [sensor source/physics matrix](hardware/full-feature-wiring-and-shopping.md#current-sensor-source-and-behavior-closure-matrix), [natural multimodal/social flow](guides/multimodal-voice-video-orchestration.md#november-12-source-truthful-natural-social-behavior-and-active-camera-triggers) and [proof ledger](records/verification.md#2026-11-12-live-source-cross-layer-checks-not-passing-hardware-evidence) own details. Do not create a fresh companion chatbot, independent camera broker or new parallel PR.
+
+**Software source done this review:** required trigger labels, nonblocking sensor JPEG requests, rapid VAD restart protection, source-truthful proactive remarks, stale model deadline, explicitly consented two-pet dialogue with existing exclusive Xiaozhi session, peer quiet/motion-state cancellation, source consent and generation proof, original source attribution, and cross-layer static wiring invariants. **Tests are added but currently not executed** because all four GitHub Actions jobs fail before their first recorded step. The previous committed sensor and firmware drivers are likewise not new hardware qualification.
+
+**Required before calling this an assembly-only product:** restore actual CI and fix real logged code defects; complete and dimensional-check one licensed Fusion/STL assembly for body, gripper, camera/head and docking cradle; finalize and independently current/thermal-test protected 1S pack, regulator and isolated charge contact path; complete the two simultaneous independent final IR homing receiver allocation without displacing PIR/reed and WROOM safety GPIO; physically test all sensor bus/carrier timing and XIAO J3 speaker pin isolation; calibrate jaw force and 8/10 key and candy pickup/placement; measure live XIAO Opus/echo cancellation/video and five-pet speaker-floor and latency. The source cannot substitute imaginary measurements; these remain real gates rather than optional extras.
+
 ## Build order
 
 | Stage | What to do | Ready when |
