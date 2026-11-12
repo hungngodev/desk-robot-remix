@@ -101,6 +101,23 @@ int main() {
       CHECK(!bus.begin(21, 22, -1));
       CHECK(!bus.ready());
     }
+    {
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      CHECK(bus.begin(21, 22, -1));
+      // The last initialized range lane is still selected (channel 7).
+      // An ACKed but ineffective disconnect must NOT probe a downstream IMU.
+      Wire.range_mux_stuck = true;
+      CHECK(bus.probe_imu().family == 0);
+      CHECK(Wire.imu_probe_attempts == 0);
+      Wire.range_mux_stuck = false;
+      Wire.range_mux_read_nack = true;
+      CHECK(bus.probe_imu().family == 0);
+      CHECK(Wire.imu_probe_attempts == 0);
+      Wire.range_mux_read_nack = false;
+      CHECK(bus.probe_imu().family == 0); // this fake has no physical IMU
+      CHECK(Wire.imu_probe_attempts > 0); // only after proven disconnect
+    }
     std::cout << "PASS TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {
