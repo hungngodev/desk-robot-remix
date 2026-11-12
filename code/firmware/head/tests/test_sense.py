@@ -144,6 +144,25 @@ class SenseOverlayTests(unittest.TestCase):
 
 
 class SenseSelectionTests(unittest.TestCase):
+    def test_native_jpeg_sensor_path_keeps_aec_and_camera_buffers_bounded(self):
+        # This source contract checks the pinned Xiaozhi JPEG passthrough.
+        # It does NOT measure real ESP32 PSRAM, capture FPS or audio glitches.
+        board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+        snapshot = (HEAD / "modular_snapshot.inc").read_text()
+        installer = (HEAD / "install_overlay.py").read_text()
+        self.assertIn("config.pixel_format = PIXFORMAT_JPEG;", board)
+        self.assertNotIn("config.pixel_format = PIXFORMAT_RGB565;", board)
+        self.assertIn("config.frame_size = FRAMESIZE_VGA;", board)
+        self.assertIn("config.fb_count = 1;", board)
+        self.assertIn("config.fb_location = CAMERA_FB_IN_PSRAM;", board)
+        self.assertIn("config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;", board)
+        self.assertIn("current_fb_->format == PIXFORMAT_JPEG", snapshot)
+        self.assertIn("buf[0] != 0xff || buf[1] != 0xd8", snapshot)
+        self.assertIn("buf[len - 2] != 0xff || buf[len - 1] != 0xd9", snapshot)
+        self.assertIn("return std::vector<uint8_t>(buf, buf + len);", snapshot)
+        # Overlay is generated into an isolated pinned Xiaozhi copy.
+        self.assertIn('(HERE / "modular_snapshot.inc").read_text()', installer)
+
     def test_vendor_stackchan_behavior_compiles_without_motor_framework(self):
         compiler = shutil.which("c++")
         self.assertIsNotNone(compiler, "Native C++20 compiler required")
