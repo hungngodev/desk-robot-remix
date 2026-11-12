@@ -1052,6 +1052,13 @@ class PetController:
                              or frame.received_at > state.last_scene_frame_at)
                     ]
                     if not candidates and hub.due(robot_id, time.monotonic()):
+                        # The same XIAO cannot serve a sensor confirmation
+                        # burst and an unrelated low-priority sampler. Wait
+                        # for the authenticated sensor owner to publish.
+                        burst = getattr(self.multimodal, "sensor_burst_pending", None)
+                        if callable(burst) and burst(robot_id):
+                            await asyncio.sleep(self.interval)
+                            continue
                         # A pending VAD utterance is never a license to
                         # launch another low-priority background HTTP capture.
                         if self._human_active_in_fleet(time.monotonic()):
