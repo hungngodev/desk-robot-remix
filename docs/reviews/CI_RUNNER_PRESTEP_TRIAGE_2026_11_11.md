@@ -43,3 +43,24 @@ The pinned Xiaozhi Sense build requires its exact upstream fixture, ESP-IDF 6.1,
 ## Evidence rule
 
 Label tests **committed but not executed** until a terminal or runner records a command, exit code and relevant logs. Keep PR #17 draft; do not merge or describe the finished desk pet as qualified from an annotation-free failed run.
+
+## November 12 refreshed blocker on latest integrated head
+
+The four jobs in [run #43167840502](https://github.com/hungngodev/desk-robot-remix/actions/runs/43167840502) **all completed as failure with zero recorded job steps**:
+
+| Job | Check-run ID | Annotations count | GitHub API output |
+| --- | --- | --- | --- |
+| Python and head tests | `131013784847` | 2 | empty title, summary and text |
+| WROOM PlatformIO firmware compile | `131013784865` | 2 | empty title, summary and text |
+| XIAO Sense ESP-IDF compile | `131013784728` | 2 | empty title, summary and text |
+| Body C++ sanitizer host tests | `131013784584` | 2 | empty title, summary and text |
+
+The connected GitHub fetch interface **explicitly rejects the check-run annotations endpoint** as unsupported; the two diagnostic annotations per job cannot be retrieved in this chat. Job steps and logs are still absent. This does not prove a billing problem or a code problem. An authorized terminal or the GitHub UI must read the annotations before running another expensive speculative source rewrite:
+
+```sh
+gh api repos/hungngodev/desk-robot-remix/check-runs/131013784847/annotations
+gh api repos/hungngodev/desk-robot-remix/check-runs/131013784865/annotations
+```
+
+Use the two actual messages to distinguish account billing/usage/runner restrictions from malformed workflow config or service faults. No permission to spend money or alter account security is implied. Once a runner actually records real execution steps, run and fix compiler/Python regressions; do not infer green tests from GitGuardian secret scanning.
+
