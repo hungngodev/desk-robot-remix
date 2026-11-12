@@ -12,6 +12,7 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | --- | --- |
 | See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](PLAN.md#complete-linear-build-and-permanent-verification-stages) |
 | Continue work across parallel chats or coding agents | [Repository agent instructions](../AGENTS.md) and [cross-chat engineering handoff](reviews/PARALLEL_CHAT_HANDOFF.md) |
+| Check the cross-layer wiring and event registry regression contract | [Integration contract tests](../code/tests/test_integration_contracts.py) and [CI runner startup blocker](reviews/CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md) |
 | Research natural proactive social robot behavior | [Reachy Mini source and proactive interaction papers](reviews/REACHY_MINI_PROACTIVE_REUSE_2026_11_11.md) |
 | Check useful features in closed PRs before rewriting them | [Actual closed PR patch reconciliation](reviews/CLOSED_PR_RECONCILIATION.md) |
 | Find every requested idea and link | [200 feature entries](source-map.md#original-html-feature-and-sensor-idea-register) and [131 original HTML URLs](source-map.md#complete-original-html-research-link-index) and [original file followup](research/2026-11-10-original-html-link-and-hardware-audit.md) |
@@ -24,18 +25,26 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 
 **Next step.** First settle the day-zero architecture, part variant, final fit and full delivered cost gates, then check one MG90S servo in the saved gripper before printing the whole robot. Keep robot motion disabled during fit work.
 
-**Current status, 2026-11-11.** The canonical integration source and host
-tests live in draft [PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17).
-Earlier source builds and simulations are documented, but the current GitHub
-Actions run reports four failed jobs with unavailable execution logs, so the
-latest head is **not** certified as compiling or passing tests. Source includes
-five safety/facing VL53L4CD channels plus three read-only left/right/rear
-directions in the full profile; real modules are not assembled or physically
-validated. Native Xiaozhi/MiniCPM microphone and speaker bridging is opt-in
-software and not a verified acoustic experience. Robot one still needs a
-measured CAD fit, real powertrain, safe charger, terminal docking and grasp
-trials. The prototype cap is **$50 delivered**, including money already spent;
-a compliant full-feature delivered quote is still open.
+**Current status, 2026-11-12.** All integrated sensor, five-pet audio,
+vision and autonomous social source work belongs in one draft
+[PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17). Its source now
+contains four local cliff VL53L4CD channels, one front clearance channel and
+three additional read-only directions; MPU6050/BerryIMU options, touch/gesture,
+FSR, rotary angle, climate, battery, optical paw and a bounded PN532 toy tag
+reader. New physical sensor events can request the existing camera asynchronously,
+and an explicitly consented two-pet dialogue uses the same one-speaker owner.
+See the [full source versus physical sensor matrix](hardware/full-feature-wiring-and-shopping.md#current-sensor-source-and-behavior-closure-matrix),
+[actual open-source incorporation audit](ATTRIBUTION.md#what-is-actually-reused-versus-locally-implemented-november-12-audit)
+and [multimodal social/camera data path](guides/multimodal-voice-video-orchestration.md#november-12-source-truthful-natural-social-behavior-and-active-camera-triggers).
+
+**Not assembled or certified.** Four GitHub Actions jobs continue to fail
+before recording any step, so newly added Python/C++ tests and both firmware
+builds have no current execution evidence. Live XIAO microphone/Opus interruption,
+actual concurrent camera speed, full socket/pin power/charging protection,
+terminal dual-IR docking, measured lift/grip force, final dimensionally fitted
+printable CAD and five physical robots remain open. The original **$50 delivered**
+prototype cap still conflicts with the requested sensor hardware. Never place a
+bulk hardware order or call this an assembly-only kit based on committed code.
 
 ## Reference
 
