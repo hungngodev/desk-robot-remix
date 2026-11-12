@@ -40,12 +40,30 @@ async def observe_actual_dock(head, robot) -> dict:
             "source": "not_calibrated", "motor_authorized": False,
             "charging_authorized": False, "physical_acceptance_pass": False,
         }
-    jpeg = await asyncio.wait_for(head.snapshot(), timeout=3.0)
+    try:
+        jpeg = await asyncio.wait_for(head.snapshot(), timeout=3.0)
+    except (OSError, ConnectionError, TimeoutError) as exc:
+        return {
+            "robot_id": robot.id, "phase": "hold",
+            "reason": f"Dock camera unavailable: {type(exc).__name__}",
+            "source": "head_snapshot_failed", "pose": None,
+            "motor_authorized": False, "charging_authorized": False,
+            "physical_acceptance_pass": False,
+        }
     received_at = time.monotonic()
-    pose = await asyncio.wait_for(
-        asyncio.to_thread(detect_apriltag, jpeg, calib, captured_at=received_at),
-        timeout=2.0,
-    )
+    try:
+        pose = await asyncio.wait_for(
+            asyncio.to_thread(detect_apriltag, jpeg, calib, captured_at=received_at),
+            timeout=2.0,
+        )
+    except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
+        return {
+            "robot_id": robot.id, "phase": "hold",
+            "reason": f"Dock marker detection unavailable: {type(exc).__name__}",
+            "source": "apriltag_detection_failed", "pose": None,
+            "motor_authorized": False, "charging_authorized": False,
+            "physical_acceptance_pass": False,
+        }
     # Receipt timestamp is not the end of OpenCV computation. A slow or
     # stalled detector cannot authorize a now-stale dock observation.
     assessment = assess_dock(pose, now=time.monotonic(), target_distance_mm=target)
