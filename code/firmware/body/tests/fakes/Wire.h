@@ -18,6 +18,9 @@ class TwoWire {
   std::size_t pos = 0;
   bool pending_sht = false;
   bool fail_dock_gpio = false;
+  bool fail_optional_gpio = false;
+  unsigned optional_gpio_reads = 0;
+  std::uint8_t optional_gpioB = 0x01; // reed open, PIR low
   bool nfc_connected = false;
   bool nfc_tag_present = false;
   std::uint8_t nfc_command = 0, nfc_phase = 0;
@@ -110,6 +113,10 @@ class TwoWire {
       if (fail_dock_gpio) return 0;
       ++dock_gpio_reads;
       inbound = {dock_gpioA};
+    } else if (addr == 0x20 && register_address == 0x13) {
+      if (fail_optional_gpio) return 0;
+      ++optional_gpio_reads;
+      inbound = {optional_gpioB};
     } else if (addr == 0x44 && pending_sht && count == 6) {
       const std::uint8_t temp[2] = {0x66, 0x66};
       const std::uint8_t humidity[2] = {0x80, 0x00};
