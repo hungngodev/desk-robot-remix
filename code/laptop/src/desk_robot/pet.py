@@ -480,7 +480,9 @@ class PetController:
                 and paw["part_id"] == 0x15 and paw["age_ms"] <= 250
                 and type(seq) is int and seq > 0):
             previous = state.last_paw_seq
-            if previous is None or seq <= previous or seq - previous > 1000:
+            if previous is not None and seq == previous:
+                pass  # Replayed HTTP response; do not reset or confirm contact.
+            elif previous is None or seq < previous or seq - previous > 1000:
                 # First valid sample after reconnect is only a baseline.
                 state.last_paw_contact = paw["ir"] >= threshold
                 state.paw_contact_streak = state.paw_release_streak = 0
@@ -526,9 +528,11 @@ class PetController:
                 and 0 <= ambient["age_ms"] < 1000):
             current_ambient = (ambient["temp_centi"], ambient["rh_centi"])
             previous_seq = state.last_ambient_seq
-            if (previous_seq is None or ambient_seq <= previous_seq
-                    or ambient_seq - previous_seq > 1000
-                    or state.ambient_baseline is None):
+            if previous_seq is not None and ambient_seq == previous_seq:
+                pass  # Replayed HTTP frame cannot erase a real pending change.
+            elif (previous_seq is None or ambient_seq < previous_seq
+                  or ambient_seq - previous_seq > 1000
+                  or state.ambient_baseline is None):
                 state.ambient_baseline = current_ambient
                 state.ambient_streak = 0
             else:
