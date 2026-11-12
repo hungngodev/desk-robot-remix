@@ -130,9 +130,12 @@ def test_overlay_targets_pinned_server_and_compiles():
     changes = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
     assert len(changes) == 9
     assert "core/providers/tools/server_plugins/plugin_executor.py" in changes
-    assert "run_in_executor(_PLUGIN_POOL, call)" in changes[
-        "core/providers/tools/server_plugins/plugin_executor.py"
-    ]
+    plugin = changes["core/providers/tools/server_plugins/plugin_executor.py"]
+    assert "_PLUGIN_SLOTS = threading.BoundedSemaphore(8)" in plugin
+    assert "native = _PLUGIN_POOL.submit(call)" in plugin
+    assert "native.add_done_callback(finished)" in plugin
+    assert "result = await asyncio.wrap_future(native)" in plugin
+    assert "Synchronous plugin capacity exhausted" in plugin
     assert "desk_robot_native_omni.py" in changes
     assert "desk_robot_omni_wire.py" in changes
     assert "desk_robot_native_omni.route_audio" in changes["core/handle/receiveAudioHandle.py"]
