@@ -3,6 +3,7 @@ import importlib.util
 import shutil
 import subprocess
 from pathlib import Path
+from struct import pack
 
 import pytest
 
@@ -15,6 +16,20 @@ def module():
     source = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(source)
     return source
+
+
+def tetra_stl(*, flip_one_face: bool = False) -> bytes:
+    vertices = ((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    faces = [(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)]
+    if flip_one_face:
+        faces[0] = (0, 1, 2)
+    data = bytearray(bytes(80) + len(faces).to_bytes(4, "little"))
+    for face in faces:
+        floats = [0.0, 0.0, 0.0]
+        for index in face:
+            floats.extend(vertices[index])
+        data.extend(pack("<12fH", *floats, 0))
+    return bytes(data)
 
 
 def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
@@ -31,6 +46,14 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
         source.binary_stl_triangles(output)
     output.write_bytes(bytes(80) + (1).to_bytes(4, "little") + bytes(50))
     assert source.binary_stl_triangles(output) == 1
+    with pytest.raises(ValueError, match="Open"):
+        source.closed_mesh_edges(output)
+    output.write_bytes(tetra_stl())
+    assert source.binary_stl_triangles(output) == 4
+    assert source.closed_mesh_edges(output) == 6
+    output.write_bytes(tetra_stl(flip_one_face=True))
+    with pytest.raises(ValueError, match="inconsistent"):
+        source.closed_mesh_edges(output)
 
 
 def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatch, tmp_path):
@@ -47,7 +70,7 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         assert kwargs["check"] and kwargs["timeout"] <= 180
         assert "--export-format" in command and "binstl" in command
         out = Path(command[command.index("-o") + 1])
-        out.write_bytes(bytes(80) + (1).to_bytes(4, "little") + bytes(50))
+        out.write_bytes(tetra_stl())
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(source.subprocess, "run", fake_render)
@@ -59,6 +82,7 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
+    assert all(item["manifold_edges"] == 6 for item in report["parts"])
     for key in (
         "hardware_fit_verified", "full_printable_assembly_verified",
         "dock_charge_contacts_approved", "commercial_manufacture_authorized",
@@ -80,9 +104,7 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
         tries += 1
         if tries == 2:
             raise subprocess.CalledProcessError(1, command)
-        Path(command[command.index("-o") + 1]).write_bytes(
-            bytes(80) + (1).to_bytes(4, "little") + bytes(50)
-        )
+        Path(command[command.index("-o") + 1]).write_bytes(tetra_stl())
 
     monkeypatch.setattr(source.subprocess, "run", fail_after_one)
     output = tmp_path / "rendered"
