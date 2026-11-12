@@ -165,6 +165,43 @@ Until approved, physically disconnect portable power for USB programming and
 disconnect laptop USB before energizing robot power. The matched1S kit needs appropriate charging/protection; never treat Sense
 charging or an arbitrary boost board as the complete actuator power system.
 
+## XIAO external power and Sense SD J3 acceptance
+
+Do this with **no Li-ion pack connected, no dock contact energized, tracks
+lifted, and the MAX98357A/speaker output disconnected**. A qualified person
+should select and verify the current-rated XIAO external 5V isolation path
+against the actual shipped Sense revision, rather than soldering a guessed
+diode or tying USB and the robot boost together.
+
+1. With all supplies absent, inspect the expansion board for Seeed's SD
+   J3 connection. If the selected I2S GPIO7/8 map is retained, follow
+   [Seeed's documented SD disconnect procedure](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/).
+   Confirm the slot is unpopulated, the J3 SD link is open by continuity
+   measurement, and the camera/microphone connectors are intact.
+2. With only the isolated and current-limited **bench** supply connected to
+   the approved robot 5V input, record XIAO input voltage and polarity under
+   idle, camera, WiFi, OLED and speaker loads. Do not attach a laptop USB
+   cable or a cell. If the output browns out or the chosen diode exceeds
+   its continuous/thermal ratings, reject this path.
+3. Remove that supply, attach **USB alone**, and confirm normal programming.
+   Measure the disconnected robot-side input with a high-impedance meter:
+   there must be no unintended backfeed capable of energizing actuators,
+   unprotected charge contacts or the external boost converter.
+4. Only if the selected power-path design specifically permits both inputs,
+   repeat with both current-limited sources, verify reverse current, diode
+   temperature and correct source switching under worst-case head load.
+   Otherwise enforce a mechanically exclusive USB versus portable supply
+   mode and label it on the enclosure. Never extrapolate this bench result
+   to a protected battery, charger or dock acceptance.
+
+Log instrument model, board revision, unloaded/loaded voltages,
+reverse current or verified absence of conductive backfeed, photos
+and source-to-connector continuity in the physical trial record.
+Neither a successful ESP-IDF build nor an unmodified STL establishes
+these physical facts. The machine receipt keeps
+`sense_sd_j3_isolation_verified` and
+`sense_vbus_power_path_verified` false until reviewed evidence exists.
+
 ## Bring-up and stopping
 
 1. Keep tracks off the surface; remove servo horns/loads. Verify supplies,
