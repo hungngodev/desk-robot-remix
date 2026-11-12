@@ -117,3 +117,47 @@ async def test_local_disarm_never_bypassed_to_release_jaw(monkeypatch):
     with pytest.raises(OperationError, match="Body disarmed"):
         await guarded_grasp(head, Settings(), health=intermittent_health)
     assert head.commands == ["grip 65"]
+
+
+async def test_uncertain_transport_failure_after_jaw_move_attempts_safe_relief(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101, 150])
+    original = head.aux_status
+
+    async def failing_adc():
+        if "grip 65" in head.commands:
+            raise OSError("ADC bus timed out after jaw movement")
+        return await original()
+
+    head.aux_status = failing_adc
+    with pytest.raises(OSError, match="ADC bus timed out"):
+        await guarded_grasp(head, Settings(), health=healthy)
+    assert head.commands == ["grip 65", "grip 60"]
+
+
+async def test_uncertain_transport_failure_does_not_override_local_disarm(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101])
+    original = head.aux_status
+
+    async def failing_adc():
+        if "grip 65" in head.commands:
+            raise OSError("ADC bus timed out")
+        return await original()
+
+    head.aux_status = failing_adc
+
+    async def status():
+        if head.commands:
+            raise OperationError("WROOM disarmed")
+        return {"armed": True}
+
+    with pytest.raises(OSError, match="ADC bus timed out"):
+        await guarded_grasp(head, Settings(), health=status)
+    assert head.commands == ["grip 65"]
