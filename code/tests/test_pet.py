@@ -1505,3 +1505,119 @@ async def test_proactive_model_rejects_long_uninvited_monologue_without_tts(
     finally:
         state.enabled = False
         await pet.close()
+
+
+async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
+    fleet, tmp_path,
+):
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    fleet.fleet_social_min_interval_seconds = 300
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    chat = GroundedChat()
+    conversation = Conversation(fleet, chat, speaker, memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), speech_cooldown=0,
+    )
+    for id_ in ("robot-01", "robot-02", "robot-03"):
+        pet.states[id_].enabled = True
+        pet.states[id_].generation = 2
+    try:
+        event = SceneChange("nfc_tag", "My toy NFC tag 12345678 arrived", 1.0)
+        await pet._store_observation("robot-01", event)
+        pet._consider_speech("robot-01", event, 2)
+        await wait_for(lambda: pet.states["robot-01"].spoken == 1)
+        assert speaker.spoken == [
+            ("robot-01", "A new object! That looks interesting."),
+            ("robot-02", "A new object! That looks interesting."),
+        ]
+        assert pet.states["robot-02"].spoken == 1
+        assert pet.states["robot-03"].spoken == 0
+        assert len(chat.prompts) == 2
+        prompt = chat.prompts[1][1]["content"]
+        assert "Only Pip observed it" in prompt
+        assert "must not pretend it saw or sensed" in prompt
+        peer_memories = memory.recent("robot-02")
+        assert any(m.kind == "nfc_tag" and not m.witnessed
+                   and m.source_robot == "robot-01" for m in peer_memories)
+        # Immediate second event cannot manufacture another peer conversation.
+        await wait_for(lambda: pet._speech_task is None)
+        pet._consider_speech(
+            "robot-01", SceneChange(
+                "hand_wave", "My local gesture sensor noticed a wave", 1.0
+            ), 2,
+        )
+        await wait_for(lambda: pet.states["robot-01"].spoken == 2)
+        assert len(speaker.spoken) == 3
+        assert speaker.spoken[-1][0] == "robot-01"
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
+async def test_social_event_never_shares_without_explicit_local_consent(
+    fleet, tmp_path,
+):
+    fleet.fleet_social_autonomy_enabled = True
+    # Deliberately leave fleet_text_sharing_enabled false.
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    pet.states["robot-01"].enabled = pet.states["robot-02"].enabled = True
+    pet.states["robot-01"].generation = 3
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("petting_zone", "Pad 3 was touched", 1.0), 3
+        )
+        await wait_for(lambda: pet.states["robot-01"].spoken == 1)
+        assert len(speaker.spoken) == 1
+        assert speaker.spoken[0][0] == "robot-01"
+        assert memory.count("robot-02") == 0
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
+async def test_quiet_on_listening_peer_cancels_shared_social_turn(
+    fleet, tmp_path,
+):
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowChat:
+        async def reply(self, history):
+            entered.set()
+            await release.wait()
+            return "Should we try a simple word game?"
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SlowChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    for id_ in ("robot-01", "robot-02"):
+        pet.states[id_].enabled, pet.states[id_].generation = True, 4
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A brass key appeared", .97), 4
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        assert pet._speech_participants == frozenset(
+            {"robot-01", "robot-02"}
+        )
+        await asyncio.wait_for(pet.set_quiet("robot-02", True), timeout=3)
+        assert conversation.active is None
+        assert pet._speech_task is None
+        assert pet._speech_participants == frozenset()
+        assert speaker.spoken == []
+        assert all(state.spoken == 0 for state in pet.states.values())
+    finally:
+        release.set()
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
