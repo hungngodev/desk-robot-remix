@@ -531,6 +531,16 @@ class MultimodalOrchestrator:
                 received = time.monotonic()
                 async with self._preprocess_budget:
                     prepared = await asyncio.to_thread(_prepare, jpeg)
+                # Source JPEG reception is not the last priority boundary.
+                # A human can begin speaking while the CPU worker is
+                # decoding/resizing this JPEG, after the proactive network
+                # task has already disappeared from its cancellation map.
+                # Never publish obsolete low-priority sensor/idle images.
+                if (source in ("proactive", "sensor")
+                        and self._any_human_active(time.monotonic())):
+                    raise RuntimeError(
+                        "Human speech superseded autonomous camera preprocessing"
+                    )
                 evidence = self.hub.offer_prepared(
                     robot_id, prepared, received, source=source,
                     generation=generation,
@@ -551,6 +561,8 @@ class MultimodalOrchestrator:
         generation = self.hub._generation[robot_id]
         async with self._preprocess_budget:
             prepared = await asyncio.to_thread(_prepare, jpeg)
+        if self._any_human_active(time.monotonic()):
+            return  # never commit low-priority JPEG after fresh human VAD
         self.hub.offer_prepared(
             robot_id, prepared, now, source="proactive",
             generation=generation,
