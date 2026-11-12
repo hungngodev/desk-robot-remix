@@ -325,6 +325,10 @@ class MultimodalOrchestrator:
                 "visual_answers": 0, "visual_errors": 0,
                 "camera_latency_last_ms": None,
                 "model_latency_last_ms": None,
+                "sensor_triggers": 0, "sensor_bursts": 0,
+                "sensor_coalesced": 0, "sensor_deferred_human": 0,
+                "sensor_trigger_to_first_jpeg_last_ms": None,
+                "sensor_followup_frames": 0, "proactive_camera_preemptions": 0,
             } for robot in settings.robots
         }
         self._turn_epoch = {r.id: 0 for r in settings.robots}
@@ -360,19 +364,23 @@ class MultimodalOrchestrator:
         """
         now = time.monotonic()
         self.hub.notify(robot_id, kind, now)
+        self._metrics[robot_id]["sensor_triggers"] += 1
         if self._closed or self._any_human_active(now):
+            self._metrics[robot_id]["sensor_deferred_human"] += 1
             return  # any live human voice owns the fleet's camera priority
         self._cancel_proactive_snapshot(robot_id)
         pending = self._sensor_tasks.get(robot_id)
         if (pending is not None and not pending.done()
                 or now - self._last_sensor_request[robot_id] < 0.8):
+            self._metrics[robot_id]["sensor_coalesced"] += 1
             return
         self._last_sensor_request[robot_id] = now
+        self._metrics[robot_id]["sensor_bursts"] += 1
         self._sensor_tasks[robot_id] = asyncio.create_task(
-            self._sensor_frame(robot_id)
+            self._sensor_frame(robot_id, requested_at=now)
         )
 
-    async def _sensor_frame(self, robot_id: str) -> None:
+    async def _sensor_frame(self, robot_id: str, *, requested_at: float) -> None:
         """Confirm a triggered scene using at most two fresh device frames.
 
         A single capture populates context but cannot confirm that an object
@@ -389,7 +397,15 @@ class MultimodalOrchestrator:
                     time.monotonic()
                 ) or (question is not None and not question.done())):
                     return
-                await self.capture(robot_id, source="sensor")
+                evidence = await self.capture(robot_id, source="sensor")
+                if index == 0:
+                    # This clock starts with the Mac receiving a real sensor
+                    # edge; camera exposure timing on the XIAO is unknown.
+                    self._metrics[robot_id][
+                        "sensor_trigger_to_first_jpeg_last_ms"
+                    ] = round(max(0, evidence.received_at - requested_at) * 1000)
+                else:
+                    self._metrics[robot_id]["sensor_followup_frames"] += 1
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -405,6 +421,7 @@ class MultimodalOrchestrator:
     def _cancel_proactive_snapshot(self, robot_id: str) -> None:
         pending = self._proactive_snapshots.get(robot_id)
         if pending is not None and not pending.done():
+            self._metrics[robot_id]["proactive_camera_preemptions"] += 1
             pending.cancel()  # Never cancel the permanent PetController task.
 
     def voice_started(self, robot_id: str) -> None:
