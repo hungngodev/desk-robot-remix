@@ -357,3 +357,63 @@ async def test_dock_slow_marker_inference_never_drives_from_expired_image(
         assert head.commands == []
     finally:
         await controller.close()
+
+
+
+async def test_dock_marker_expires_while_waiting_for_second_body_status(
+    settings, monkeypatch,
+):
+    import asyncio
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration, DockPose
+
+    settings.mode = "hardware"
+
+    class SlowStatus:
+        def __init__(self):
+            self.reads = 0
+            self.commands = []
+
+        async def status(self):
+            self.reads += 1
+            if self.reads == 2:
+                # WROOM is healthy, but its response came after old image
+                # geometry was already outside the 200 ms marker age policy.
+                await asyncio.sleep(0.26)
+            return {
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [50, 50, 50, 50, 700],
+                           "age_ms": [5, 5, 5, 5, 5]},
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+            }
+
+        async def snapshot(self):
+            return b"marker-frame"
+
+        async def command(self, command):
+            self.commands.append(command)
+
+    head = SlowStatus()
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    calibration = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    monkeypatch.setattr(
+        "desk_robot.controller.detect_apriltag",
+        lambda image, camera, *, captured_at: DockPose(
+            0, 0, 500, 0.5, captured_at
+        ),
+    )
+    try:
+        result = await controller._dock_approach(
+            Job("stale-after-status", "robot-01", "dock_approach"),
+            calibration, 200, 1, 1,
+        )
+        assert head.reads == 2
+        assert result["phase"] == "hold"
+        assert "stale" in result["reason"].lower()
+        assert not result["charging_authorized"]
+        assert head.commands == []
+    finally:
+        await controller.close()
