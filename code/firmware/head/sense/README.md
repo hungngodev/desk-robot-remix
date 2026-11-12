@@ -14,6 +14,28 @@ unmeasured on the user's hardware. Ordinary-speech interruption must still pass 
 without supplying actual synchronized mic/reference data. RIO's speaker pins
 differ from the table below; do not mix the two wiring maps.
 
+## Native JPEG for natural live video
+
+The selected Sense firmware now asks the pinned `Esp32Camera` for
+`PIXFORMAT_JPEG` at VGA, with one PSRAM frame buffer and
+`CAMERA_GRAB_WHEN_EMPTY`. The upstream pinned
+[`Esp32Camera::Capture`](https://github.com/78/xiaozhi-esp32/blob/c435f99a88066029ec2dbd2d758c8cc9d051565b/main/boards/common/esp32_camera.cc)
+handles sensor JPEG without copying VGA RGB565 and reencoding it in software.
+The existing `modular_snapshot.inc` passes through the already compressed JPEG
+under the camera mutex and now checks both JPEG boundary markers and a 512 KiB
+size cap. The OLED is used for emotional expressions, not the upstream LVGL
+camera preview, which the pinned upstream explicitly skips for JPEG.
+
+The Mac still owns the only camera transport, frame motion scoring, small
+RAM-only frame ring, user VAD priority and selective forwarding to the
+native duplex model. This is **selected JPEG video over repeated snapshots**
+at bounded cadence, not a new MJPEG server and not 30 FPS ESP32 streaming.
+Mic AEC, Opus and urgent speech flush continue through the Xiaozhi audio
+stack. One frame buffer is deliberate until tests on the physical shipped
+OV3660/OV5640 board establish PSRAM headroom, camera throughput, frame age,
+acoustic interruption and heat during simultaneous work. Do not raise
+`fb_count` or enable continuous capture from a static source assertion.
+
 ## Pin source and allocation
 
 [Seeed's official pin table](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/)
