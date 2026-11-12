@@ -665,6 +665,32 @@ static void inconsistent_dock_acquisition_requires_new_sample_to_recover() {
   CHECK(send(body, "disarm", 50) == "OK disarm");
 }
 
+static void dock_charge_indication_alone_cannot_release_motion() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_dock_monitor(true);
+  desk_robot::AccessoryReadings r{};
+  r.dock.present = r.dock.valid = true;
+  r.dock.sample_seq = 1;
+  r.dock.at_ms = 100;
+  body.set_accessories(r, 101);
+  CHECK(send(body, "arm", 102) == "OK arm");
+  CHECK(send(body, "drive 20 20 100", 103).find("OK drive") == 0);
+  r.dock.charge_indicated = true; // CHG without PGOOD/seat is inconsistent
+  r.dock.sample_seq = 2;
+  r.dock.at_ms = 104;
+  body.set_accessories(r, 105);
+  CHECK(!body.state().armed);
+  CHECK(body.state().left == 0 && body.state().right == 0);
+  CHECK(send(body, "arm", 106) == "ERR arm dock_power_connected");
+  r.dock.charge_indicated = false;
+  r.dock.sample_seq = 3;
+  r.dock.at_ms = 107;
+  body.set_accessories(r, 108);
+  CHECK(!body.state().armed); // no automatic motor rearm
+  CHECK(send(body, "arm", 109) == "OK arm");
+  CHECK(send(body, "disarm", 110) == "OK disarm");
+}
+
 static void dock_removal_accepts_genuine_uint32_wrap() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_dock_monitor(true);
@@ -898,6 +924,7 @@ int main() {
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
     dock_removal_needs_new_fresh_real_gpio_sample();
     dock_removal_accepts_genuine_uint32_wrap();
+    dock_charge_indication_alone_cannot_release_motion();
     dock_replayed_gpio_bits_do_not_preserve_arm_permission();
     inconsistent_dock_acquisition_requires_new_sample_to_recover();
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
