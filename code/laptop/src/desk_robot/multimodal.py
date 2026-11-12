@@ -308,6 +308,8 @@ class MultimodalOrchestrator:
         self.hub = CameraFrameHub([r.id for r in settings.robots])
         self._capture_tasks: dict[str, asyncio.Task] = {}
         self._sensor_tasks: dict[str, asyncio.Task] = {}
+        # Own only the optional HTTP snapshot, not its permanent pet loop.
+        self._proactive_snapshots: dict[str, asyncio.Task] = {}
         self._last_sensor_request = {r.id: -math.inf for r in settings.robots}
         self._look_tasks: dict[str, asyncio.Task] = {}
         self._camera_locks = {
@@ -364,6 +366,7 @@ class MultimodalOrchestrator:
         if (pending is not None and not pending.done()
                 or now - self._last_sensor_request[robot_id] < 0.8):
             return
+        self._cancel_proactive_snapshot(robot_id)
         self._last_sensor_request[robot_id] = now
         self._sensor_tasks[robot_id] = asyncio.create_task(
             self._sensor_frame(robot_id)
@@ -394,6 +397,11 @@ class MultimodalOrchestrator:
             # camera frames and never touch the authenticated human VAD lease.
             pass
 
+    def _cancel_proactive_snapshot(self, robot_id: str) -> None:
+        pending = self._proactive_snapshots.get(robot_id)
+        if pending is not None and not pending.done():
+            pending.cancel()  # Never cancel the permanent PetController task.
+
     def voice_started(self, robot_id: str) -> None:
         self._voice_activity(robot_id, end_expected=True)
 
@@ -409,6 +417,7 @@ class MultimodalOrchestrator:
         else:
             self.hub.barge_in(robot_id, now)
         self._turn_epoch[robot_id] += 1
+        self._cancel_proactive_snapshot(robot_id)
         pending_sensor = self._sensor_tasks.get(robot_id)
         if pending_sensor is not None and not pending_sensor.done():
             pending_sensor.cancel()  # Human audio/video outranks low-priority sensors.
@@ -472,9 +481,22 @@ class MultimodalOrchestrator:
             # Camera latency is measured before CPU postprocessing. A new
             # human voice can still preempt the event loop during decoding.
             try:
-                jpeg = await asyncio.wait_for(
-                    self.heads[robot_id].snapshot(), timeout=4
-                )
+                if source == "proactive":
+                    if self.hub.user_active(robot_id, time.monotonic()):
+                        raise RuntimeError("Human speech preempts autonomous camera")
+                    pending = asyncio.create_task(
+                        self.heads[robot_id].snapshot()
+                    )
+                    self._proactive_snapshots[robot_id] = pending
+                    try:
+                        jpeg = await asyncio.wait_for(pending, timeout=4)
+                    finally:
+                        if self._proactive_snapshots.get(robot_id) is pending:
+                            self._proactive_snapshots.pop(robot_id, None)
+                else:
+                    jpeg = await asyncio.wait_for(
+                        self.heads[robot_id].snapshot(), timeout=4
+                    )
                 received = time.monotonic()
                 async with self._preprocess_budget:
                     prepared = await asyncio.to_thread(_prepare, jpeg)
@@ -521,6 +543,7 @@ class MultimodalOrchestrator:
         pending_sensor = self._sensor_tasks.get(robot_id)
         if pending_sensor is not None and not pending_sensor.done():
             pending_sensor.cancel()  # An explicit question takes camera priority.
+        self._cancel_proactive_snapshot(robot_id)
         previous = self._look_tasks.get(robot_id)
         if previous is not None and previous is not current and not previous.done():
             previous.cancel()
@@ -605,11 +628,13 @@ class MultimodalOrchestrator:
         tasks = (list(self._capture_tasks.values())
                  + list(self._sensor_tasks.values())
                  + list(self._look_tasks.values()))
-        for task in tasks:
+        for task in tasks + list(self._proactive_snapshots.values()):
             task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        pending = tasks + list(self._proactive_snapshots.values())
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         self._capture_tasks.clear()
         self._sensor_tasks.clear()
         self._look_tasks.clear()
+        self._proactive_snapshots.clear()
         self.hub.close()
