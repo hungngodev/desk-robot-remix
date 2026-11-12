@@ -601,3 +601,78 @@ async def test_hung_shared_audio_owner_times_out_without_claiming_flush():
         with pytest.raises(TimeoutError, match="Shared fleet interruption incomplete"):
             await asyncio.wait_for(listener._preempt_all("stream_unavailable"), 1)
         assert attempts == ["stream_unavailable", "stream_unavailable"]
+
+
+async def test_failed_bootstrap_snapshot_does_not_consume_cursor():
+    requests = []
+    snapshots = []
+    reject_first = True
+
+    def mock(request):
+        requests.append(dict(request.url.params))
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 10, "events": [], "reset": False, "lost": False,
+                "active_human_robots": ["robot-01"],
+            })
+        raise AssertionError("Cannot poll events before bootstrap is accepted")
+
+    async def snapshot(active):
+        nonlocal reject_first
+        snapshots.append(active)
+        if reject_first:
+            reject_first = False
+            raise OSError("Speech owner unavailable")
+
+    async def interrupt(robot_id, reason):
+        raise AssertionError("No replayed event may interrupt")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=interrupt,
+            on_speech_snapshot=snapshot, require_snapshot=True,
+        )
+        with pytest.raises(OSError, match="Speech owner"):
+            await listener.poll()
+        assert listener.cursor is None and listener.monitor_ready is False
+        assert await listener.poll() == 0
+        assert listener.cursor == 10 and listener.monitor_ready is True
+        assert len(snapshots) == 2
+        assert all(request.get("bootstrap") == "1" for request in requests)
+
+
+async def test_failed_bootstrap_health_notification_retries_bootstrap():
+    requests = []
+    ready_calls = []
+
+    def mock(request):
+        requests.append(dict(request.url.params))
+        if request.url.params.get("bootstrap"):
+            return httpx.Response(200, json={
+                "cursor": 7, "events": [], "reset": False, "lost": False,
+            })
+        raise AssertionError("Failed bootstrap must not switch to event polling")
+
+    async def health(ready):
+        ready_calls.append(ready)
+        if len(ready_calls) == 1:
+            raise OSError("Health consumer unavailable")
+
+    async def interrupt(robot_id, reason):
+        raise AssertionError("No events expected")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=interrupt,
+            on_monitor_ready=health,
+        )
+        with pytest.raises(OSError, match="Health consumer"):
+            await listener.poll()
+        assert listener.cursor is None
+        assert listener._monitor_delivered is None
+        assert await listener.poll() == 0
+        assert listener.cursor == 7 and ready_calls == [True, True]
+        assert len(requests) == 2
+        assert all(request.get("bootstrap") == "1" for request in requests)
