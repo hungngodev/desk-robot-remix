@@ -23,6 +23,7 @@ _EVENT_ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 _EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
 
 
+_CORE_SLOT = re.compile(r"[a-z][a-z0-9_]{1,39}\\Z")
 _WORDS = re.compile(r"[a-z0-9]{2,}")
 _QUERY_FILLER = frozenset({
     "a", "an", "and", "are", "at", "be", "can", "did", "do", "for", "from",
@@ -55,6 +56,14 @@ class Memory:
     confidence: float
 
 
+@dataclass(frozen=True)
+class CoreFact:
+    robot_id: str
+    slot: str
+    value: str
+    updated_at: float
+
+
 class MemoryStore:
     """One local SQLite database per robot; explicit observed vs told provenance."""
 
@@ -81,6 +90,16 @@ class MemoryStore:
                          summary TEXT NOT NULL,
                          observed_at REAL NOT NULL,
                          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1)
+                       )"""
+                )
+                # Operator-curated core identity/preferences are distinct
+                # from automatic sensor episodes. Like Letta core memory,
+                # a tiny stable block survives the 250-event rolling buffer.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS core_facts (
+                         slot TEXT PRIMARY KEY,
+                         value TEXT NOT NULL,
+                         updated_at REAL NOT NULL
                        )"""
                 )
 
@@ -214,6 +233,68 @@ class MemoryStore:
             ))
         ranked.sort(key=lambda item: item[0], reverse=True)
         return [entry for _, entry in ranked[:limit]]
+
+    def set_core_fact(self, robot_id: str, slot: str, value: str) -> bool:
+        """Curate one long-lived preference; ONLY operator API may invoke.
+
+        No model/tool automatically edits identity, user preferences or safety
+        policy. This bounded core is separate from ephemeral episodes.
+        """
+        if robot_id not in self.robot_ids:
+            raise ValueError("Unknown robot memory identity")
+        if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
+            raise ValueError("Invalid core memory slot")
+        if (not isinstance(value, str) or not 1 <= len(value.strip()) <= 200
+                or "\x00" in value):
+            raise ValueError("Invalid bounded core memory value")
+        clean = " ".join(value.split())
+        with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute(
+                "SELECT value FROM core_facts WHERE slot=?", (slot,)
+            ).fetchone()
+            if old is None and db.execute(
+                "SELECT count(*) FROM core_facts"
+            ).fetchone()[0] >= 24:
+                raise ValueError("Robot core memory limited to 24 slots")
+            if old is not None and old[0] == clean:
+                return False
+            db.execute(
+                """INSERT INTO core_facts (slot,value,updated_at)
+                   VALUES (?,?,?)
+                   ON CONFLICT(slot) DO UPDATE SET
+                       value=excluded.value,updated_at=excluded.updated_at""",
+                (slot, clean, time.time()),
+            )
+            return True
+
+    def core_facts(self, robot_id: str, *, limit: int = 12) -> list[CoreFact]:
+        if type(limit) is not int or not 1 <= limit <= 24:
+            raise ValueError("Core memory limit must be 1..24")
+        with self._connect(robot_id) as db:
+            rows = db.execute(
+                """SELECT slot,value,updated_at FROM core_facts
+                   ORDER BY updated_at DESC,slot ASC LIMIT ?""", (limit,)
+            ).fetchall()
+        return [CoreFact(robot_id, slot, value, at)
+                for slot, value, at in rows]
+
+    def forget_core_fact(self, robot_id: str, slot: str) -> bool:
+        if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
+            raise ValueError("Invalid core memory slot")
+        with self._connect(robot_id) as db:
+            return db.execute(
+                "DELETE FROM core_facts WHERE slot=?", (slot,)
+            ).rowcount == 1
+
+    def forget_episode(self, robot_id: str, event_id: str) -> bool:
+        """Explicit per-pet deletion; does not silently mutate peer memories."""
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        with self._connect(robot_id) as db:
+            return db.execute(
+                "DELETE FROM memories WHERE event_id=?", (event_id,)
+            ).rowcount == 1
 
     def count(self, robot_id: str) -> int:
         with self._connect(robot_id) as db:
