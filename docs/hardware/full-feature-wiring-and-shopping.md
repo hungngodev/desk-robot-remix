@@ -125,9 +125,9 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 | 2 | VL53L4CD, 0x29 | floor rear left | Existing WROOM five-channel driver |
 | 3 | VL53L4CD, 0x29 | floor rear right | Existing WROOM five-channel driver |
 | 4 | VL53L4CD, 0x29 | front obstacle | Existing WROOM five-channel driver |
-| 5 | VL53L4CD, 0x29 | left obstacle | Needs driver extension and physical qualification |
-| 6 | VL53L4CD, 0x29 | right obstacle | Needs driver extension and physical qualification |
-| 7 | VL53L4CD, 0x29 | rear obstacle | Needs driver extension and physical qualification |
+| 5 | VL53L4CD, 0x29 | left obstacle | Implemented read only in esp32_full; physical qualification pending |
+| 6 | VL53L4CD, 0x29 | right obstacle | Implemented read only in esp32_full; physical qualification pending |
+| 7 | VL53L4CD, 0x29 | rear obstacle | Implemented read only in esp32_full; physical qualification pending |
 
 ### Mux B, address 0x71: extra pet features, lower polling priority
 
