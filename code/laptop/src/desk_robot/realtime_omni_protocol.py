@@ -88,7 +88,6 @@ class OmniDuplexWire:
         # Real Mac reception identity, not the position in an audio byte
         # counter. The same JPEG cannot be forwarded twice as fresh video.
         self._last_video_receipt_us = 0
-        self._last_video_audio_ms = -1000
         self._last_speech_audio_ms = -1000
         self._needs_new_input = False
         self._input_after_interrupt = False
@@ -166,7 +165,6 @@ class OmniDuplexWire:
                 and frame_receipt_us > self._last_video_receipt_us):
             event["video_frames"] = [base64.b64encode(jpeg).decode("ascii")]
             self._last_video_receipt_us = frame_receipt_us
-            self._last_video_audio_ms = self.input_ms
             self.frames_sent += 1
         return event
 
