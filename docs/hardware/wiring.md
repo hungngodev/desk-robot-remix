@@ -49,21 +49,35 @@ acceleration, loaded speed, stop/hold current and thermal limits need measuremen
 ## Sensor topology
 
 ```text
-WROOM GPIO21/22 -> user's reported MPU6050 0x68 (AD0 low) or 0x69 (AD0 high), upstream; BerryIMU optional alternative
-               -> TCA9548A upstream I²C
-                  channel 0 -> front-left downward VL53L4CD candidate, 0x29
-                  channel 1 -> front-right downward VL53L4CD candidate, 0x29
-                  channel 2 -> rear-left downward VL53L4CD candidate, 0x29
-                  channel 3 -> rear-right downward VL53L4CD candidate, 0x29
-                  channel 4 -> separate forward VL53L4CD candidate, 0x29
-Sense -> separate head-owned OLED bus
+WROOM GPIO21/22 -> selected MPU6050 0x68/0x69 on the UPSTREAM body I2C bus
+  -> TCA9548A RANGE mux 0x70
+     CH0 front-left floor VL53L4CD 0x29
+     CH1 front-right floor VL53L4CD 0x29
+     CH2 rear-left floor VL53L4CD 0x29
+     CH3 rear-right floor VL53L4CD 0x29
+     CH4 front obstacle VL53L4CD 0x29
+     CH5 left-side VL53L4CD 0x29, read-only
+     CH6 right-side VL53L4CD 0x29, read-only
+     CH7 rear obstacle VL53L4CD 0x29, read-only
+  -> TCA9548A ACCESSORY mux 0x71
+     CH0 CAP1188 0x28 + MAX30102 0x57
+     CH1 APDS9960 0x39 + AS5600 nose 0x36
+     CH2 ADS1115 force 0x48
+     CH3 SHT41 0x44 + BMP280 0x76 (verify breakout)
+     CH4 INA226 0x40 + MAX17048 0x36
+     CH5 MCP23017 0x20 (GPIOA mandatory dock, GPIOB slow reed/PIR)
+         + PN532 0x24 toy NFC only
+     CH6 AS5600 left wheel 0x36
+     CH7 AS5600 right wheel 0x36
+XIAO -> independent HEAD-owned OLED GPIO5/6 bus; NOT connected to WROOM SDA/SCL
 ```
 
 The earlier ST VL6180X proposal has been superseded by the selected
 **VL53L4CD**. The current `esp32_full` source scans **eight 0x29
 VL53L4CD channels** on TCA9548A 0x70: four floor, one forward and
-three left/right/rear read-only directions. The five-channel table above
-describes the local safety subset, **not** the complete hardware. Actual
+three left/right/rear read-only directions. The first five channels
+form the local movement guard; the other three add separate read-only
+observations. The topology above lists the entire source allocation. Actual
 optical short-range calibration and the mounting geometry are still pending.
 Select only one multiplexer lane at a time for reads and configuration. Confirm channel numbering in firmware, module
 supply, reset behavior, default mux address and **3.3 V signal pullups**. Generic
@@ -306,9 +320,9 @@ InvenSense MPU6050 RM-MPU-6000A and Adafruit AT42QT1010 breakout:
 | Input or bus | Purpose and current ownership | Real electrical gate |
 | --- | --- | --- |
 | GPIO21 SDA / GPIO22 SCL, TCA9548A upstream | Preferred MPU6050 at 0x68 or 0x69; one selected IMU | Real MPU WHO_AM_I register 0x75 gives 0x68; 3.3 V logic, not a second Wire instance |
-| TCA9548A channels 0,1,2,3,4 | Four actual cliff footprints and one front VL53L4CD | Distinct mux lanes, sensor 0x29, floor calibration and stopping distance |
-| TCA9548A channel 5 reserved | Optional owned Bosch BMP280 at 0x76/0x77 | Confirm chip ID 0x58 and carrier power; pressure/temperature only, NOT humidity; channel is not currently sampled |
-| TCA9548A channels 6,7 reserved | Optional light sensor, touch-zone expander, opted-in accessory | One address/channel owner, timeout, external pullups and per-module actual VCC |
+| RANGE mux 0x70 channels 0 through 4 | Four actual cliff footprints and front VL53L4CD | Distinct mux lanes, device 0x29, floor calibration and stopping distance |
+| RANGE mux 0x70 channels 5 through 7 | Three actual read-only left, right and rear VL53L4CD | Existing firmware source acquires these in esp32_full; no local reverse/turn movement permission |
+| ACCESSORY mux 0x71 channels 0 through 7 | CAP/paw, gesture/nose, force, SHT41/BMP280, power gauges, MCP dock/PN532, wheel angles | See complete channel list above and source checked generated harness; chip IDs, breakout VCC and I2C pullups remain unqualified |
 | GPIO34 | Required active HIGH AT42QT1010 head pad | 3.3 V power and output, through-case physical false-touch trials |
 | GPIO35, build flag DESK_ROBOT_ENABLE_BUMPER | Optional normally-closed mechanical bumper, raw local trip | External 3.3 V pullup, active LOW; must be physically fitted and tested before enable |
 | MCP23017 GPIOB0, build flag DESK_ROBOT_ENABLE_REED | Slow read-only magnetic costume accessory reed closure | Source polls BANK=0 GPIOB 0x13, active LOW, 3.3 V pullup, actual dwell and magnet interference need measurement |
@@ -323,7 +337,7 @@ use a qualified level converter when required. A reed contact near the motors
 may trigger from their magnetic fields. The BMP280 can add atmospheric pressure
 and temperature *only* if its existing vendor driver is selected and tested on
 the actual hardware. Its address may conflict with an optional Berry pressure
-chip if someone wires both upstream: isolate it on mux lane 5. No extra I2C
+chip if someone wires both upstream: keep BMP280 on ACCESSORY mux 0x71 channel 3. No extra I2C
 sampling may starve five-channel floor polling. None of this bypasses WROOM
 local guard, MPU heartbeat, one-use operator permit, or the robot's $50 cap.
 
