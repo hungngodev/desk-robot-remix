@@ -26,6 +26,10 @@ exploration_qualified = false
 dock_motion_qualified = false
 gesture_interactions_qualified = false
 battery_low_percent = 20
+# Measure raw IR against the actual paw shell before enabling optical contact.
+# Never infer a human pulse or medical measurement from this value.
+paw_contact_interactions_qualified = false
+# paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
 [[robots]]
 id = "robot-02"
@@ -40,6 +44,10 @@ exploration_qualified = false
 dock_motion_qualified = false
 gesture_interactions_qualified = false
 battery_low_percent = 20
+# Measure raw IR against the actual paw shell before enabling optical contact.
+# Never infer a human pulse or medical measurement from this value.
+paw_contact_interactions_qualified = false
+# paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
 [[robots]]
 id = "robot-03"
@@ -54,6 +62,10 @@ exploration_qualified = false
 dock_motion_qualified = false
 gesture_interactions_qualified = false
 battery_low_percent = 20
+# Measure raw IR against the actual paw shell before enabling optical contact.
+# Never infer a human pulse or medical measurement from this value.
+paw_contact_interactions_qualified = false
+# paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
 [[robots]]
 id = "robot-04"
@@ -68,6 +80,10 @@ exploration_qualified = false
 dock_motion_qualified = false
 gesture_interactions_qualified = false
 battery_low_percent = 20
+# Measure raw IR against the actual paw shell before enabling optical contact.
+# Never infer a human pulse or medical measurement from this value.
+paw_contact_interactions_qualified = false
+# paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
 [[robots]]
 id = "robot-05"
@@ -82,4 +98,8 @@ exploration_qualified = false
 dock_motion_qualified = false
 gesture_interactions_qualified = false
 battery_low_percent = 20
+# Measure raw IR against the actual paw shell before enabling optical contact.
+# Never infer a human pulse or medical measurement from this value.
+paw_contact_interactions_qualified = false
+# paw_contact_ir_raw_threshold = 12000  # EXAMPLE ONLY, not a calibration
 
