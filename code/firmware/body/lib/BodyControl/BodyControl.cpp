@@ -212,16 +212,22 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
     dock_last_at_ms_ = dock.at_ms;
     dock_last_pins_ = pins;
     dock_sample_seen_ = true;
+    dock_provenance_fault_ = false;
     if (!contact) {
       // Only a truly new, fresh, fully unseated read clears the latch.
       // Clearing the latch does NOT automatically rearm or enable charging.
       dock_power_lockout_ = false;
     }
+  } else if (current && dock_sample_seen_ && !repeated) {
+    // A corrupted or out-of-order record is not repaired by replaying an
+    // earlier cached value. Recovery requires a NEW completed GPIOA read.
+    dock_provenance_fault_ = true;
   }
   // A changed GPIO value under the same sample identity, an older sample,
   // or an expired timestamp cannot substantiate a local safety interlock.
   // Preserve the last latch and fail closed until a fresh acquisition.
-  state_.accessories.dock.valid = new_sample || repeated;
+  state_.accessories.dock.valid =
+      (new_sample || repeated) && !dock_provenance_fault_;
   if (dock_power_lockout_) {
     force_disarm();
   } else if ((dock.present || dock_monitor_required_) &&
