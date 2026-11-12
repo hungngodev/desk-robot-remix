@@ -101,6 +101,48 @@ async def test_sensor_burst_uses_existing_camera_owner_and_coalesces_requests():
         await visual.close()
 
 
+async def test_sensor_two_frame_burst_never_blocks_human_speech_priority():
+    heads = {"robot-01": Head(), "robot-02": Head()}
+    visual = MultimodalOrchestrator(
+        config(enabled=False), heads, Vision(), asyncio.Lock()
+    )
+    try:
+        visual.sensor_event("robot-01", "petting_zone")
+        async with asyncio.timeout(2):
+            while heads["robot-01"].captures < 1:
+                await asyncio.sleep(.01)
+        # A real VAD begins during the deliberately short second-frame gap.
+        visual.voice_started("robot-01")
+        await asyncio.sleep(.55)
+        assert heads["robot-01"].captures == 1
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        visual.voice_ended("robot-01")
+    finally:
+        await visual.close()
+
+
+async def test_sensor_two_frame_burst_is_bounded_and_camera_serial():
+    head = Head()
+    visual = MultimodalOrchestrator(
+        config(enabled=False),
+        {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        visual.sensor_event("robot-01", "paw_contact")
+        async with asyncio.timeout(3):
+            while len(visual.hub.frames["robot-01"]) != 2:
+                await asyncio.sleep(.01)
+        frames = list(visual.hub.frames["robot-01"])
+        assert frames[0].source == frames[1].source == "sensor"
+        assert frames[0].received_at < frames[1].received_at
+        assert head.captures == 2
+        assert visual._metrics["robot-01"]["camera_successes"] == 2
+        assert head.captures <= 2
+    finally:
+        await visual.close()
+
+
 async def test_immediate_new_speech_after_end_replaces_cancelling_camera_worker():
     visual = MultimodalOrchestrator(
         config(enabled=True),
