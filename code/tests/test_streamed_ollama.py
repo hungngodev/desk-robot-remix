@@ -163,8 +163,8 @@ async def test_failed_stream_flushes_physical_head_before_group_lease_releases(s
     assert events == [
         ("session", "begin"),
         ("spoken", "robot-01", "I started saying something."),
-        ("session", "end"),
         ("head_abort", "robot-01"),
+        ("session", "end"),
     ]
     assert c.active is None
 
