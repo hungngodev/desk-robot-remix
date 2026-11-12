@@ -339,7 +339,7 @@ def test_native_configuration_error_preserved_and_retries_throttled(native, monk
     monkeypatch.delenv("DESK_ROBOT_OMNI_URL", raising=False)
     monkeypatch.delenv("DESK_ROBOT_TOOL_TOKEN", raising=False)
     for _ in range(25):
-        assert module.route_audio(conn, b"\\0" * 3200, True)
+        assert module.route_audio(conn, b"\0" * 3200, True)
     assert module._sessions == {}
     assert module.status("mac-01")["native_backend_connected"] is False
     assert module.status("mac-01")["retry_delay_seconds"] > 0
