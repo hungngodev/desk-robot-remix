@@ -22,6 +22,7 @@ class TerminalIr {
   RingbufHandle_t ring_[2] = {nullptr, nullptr};
   bool installed_[2] = {false, false};
   bool ready_ = false;
+  IrFrameQueueGate queue_{};
   DualIrEvidence readings_{};
 };
 } // namespace desk_robot
