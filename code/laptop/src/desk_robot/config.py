@@ -81,6 +81,8 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def unique_ids(self):
+        if self.fleet_social_autonomy_enabled and not self.fleet_text_sharing_enabled:
+            raise ValueError("Automatic peer dialogue requires explicit local text sharing consent")
         ids = [r.id for r in self.robots]
         if not ids or len(set(ids)) != len(ids):
             raise ValueError("At least one robot and unique robot IDs are required")
