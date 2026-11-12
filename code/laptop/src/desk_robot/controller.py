@@ -341,7 +341,10 @@ class Coordinator:
             await self._assert_armed_health(job.robot_id, require_front_clearance=True)
             # The reused Sense camera source must be alive before and after
             # each short pulse; an image does not by itself prove a clear path.
-            await head.snapshot()
+            await asyncio.wait_for(head.snapshot(), timeout=2.0)
+            # A camera request can hang while a local cliff, touch or IMU
+            # fault disarms WROOM. Never drive from a pre-camera verdict.
+            await self._assert_armed_health(job.robot_id, require_front_clearance=True)
             await head.command("drive 20 20 100")
             await asyncio.sleep(0.12)
             await head.command("stop")
