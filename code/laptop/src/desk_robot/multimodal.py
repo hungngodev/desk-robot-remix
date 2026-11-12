@@ -307,6 +307,8 @@ class MultimodalOrchestrator:
         self.inference_lock = inference_lock
         self.hub = CameraFrameHub([r.id for r in settings.robots])
         self._capture_tasks: dict[str, asyncio.Task] = {}
+        self._sensor_tasks: dict[str, asyncio.Task] = {}
+        self._last_sensor_request = {r.id: -math.inf for r in settings.robots}
         self._look_tasks: dict[str, asyncio.Task] = {}
         self._camera_locks = {
             robot.id: asyncio.Lock() for robot in settings.robots
@@ -347,6 +349,39 @@ class MultimodalOrchestrator:
             "motor_authorized": False,
         }
 
+    def sensor_event(self, robot_id: str, kind: str) -> None:
+        """Fast event priority, separate from VLM, TTS and WROOM motion.
+
+        Schedule at most one camera request for this head per 800 ms, and
+        coalesce bursts across all touch, proximity, NFC and safety triggers.
+        The existing capture lock still serializes real XIAO JPEG requests.
+        """
+        now = time.monotonic()
+        self.hub.notify(robot_id, kind, now)
+        if self._closed or self.hub.user_active(robot_id, now):
+            return  # human speech owns the next camera opportunity
+        pending = self._sensor_tasks.get(robot_id)
+        if (pending is not None and not pending.done()
+                or now - self._last_sensor_request[robot_id] < 0.8):
+            return
+        self._last_sensor_request[robot_id] = now
+        self._sensor_tasks[robot_id] = asyncio.create_task(
+            self._sensor_frame(robot_id)
+        )
+
+    async def _sensor_frame(self, robot_id: str) -> None:
+        try:
+            if not self._closed and not self.hub.user_active(
+                robot_id, time.monotonic()
+            ):
+                await self.capture(robot_id, source="sensor")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Metrics already capture request/error; preserve older valid
+            # camera frames and never touch the authenticated human VAD lease.
+            pass
+
     def voice_started(self, robot_id: str) -> None:
         self._voice_activity(robot_id, end_expected=True)
 
@@ -362,6 +397,9 @@ class MultimodalOrchestrator:
         else:
             self.hub.barge_in(robot_id, now)
         self._turn_epoch[robot_id] += 1
+        pending_sensor = self._sensor_tasks.get(robot_id)
+        if pending_sensor is not None and not pending_sensor.done():
+            pending_sensor.cancel()  # Human audio/video outranks low-priority sensors.
         # A second spoken utterance supersedes an in-flight camera answer;
         # never let an old VLM response join the new Xiaozhi speech turn.
         prior = self._look_tasks.get(robot_id)
@@ -465,6 +503,9 @@ class MultimodalOrchestrator:
         self._question_epoch[robot_id] += 1
         question_epoch = self._question_epoch[robot_id]
         current = asyncio.current_task()
+        pending_sensor = self._sensor_tasks.get(robot_id)
+        if pending_sensor is not None and not pending_sensor.done():
+            pending_sensor.cancel()  # An explicit question takes camera priority.
         previous = self._look_tasks.get(robot_id)
         if previous is not None and previous is not current and not previous.done():
             previous.cancel()
@@ -546,11 +587,14 @@ class MultimodalOrchestrator:
 
     async def close(self) -> None:
         self._closed = True
-        tasks = list(self._capture_tasks.values()) + list(self._look_tasks.values())
+        tasks = (list(self._capture_tasks.values())
+                 + list(self._sensor_tasks.values())
+                 + list(self._look_tasks.values()))
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._capture_tasks.clear()
+        self._sensor_tasks.clear()
         self._look_tasks.clear()
         self.hub.close()
