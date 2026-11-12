@@ -58,16 +58,20 @@ async def observe_actual_dock(head, robot) -> dict:
         return _hold(robot.id, reason="Dock marker detector still busy", source="apriltag_detector_busy")
 
     def detect_once():
+        return detect_apriltag(jpeg, calib, captured_at=received_at)
+
+    # The task owns the slot, including if executor dispatch never starts.
+    # Shielding prevents caller cancellation from cancelling native work.
+    task = asyncio.create_task(asyncio.to_thread(detect_once))
+
+    def finish_detection(done: asyncio.Task) -> None:
         try:
-            return detect_apriltag(jpeg, calib, captured_at=received_at)
+            if not done.cancelled():
+                done.exception()  # Retrieve late detector failures.
         finally:
             _DETECTOR_SLOT.release()
 
-    # Shield the worker: wait_for cancellation must not hide its continued
-    # execution. The worker owns the slot until native detection actually ends.
-    task = asyncio.create_task(asyncio.to_thread(detect_once))
-    # Consume late native failures after the caller's deadline has elapsed.
-    task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+    task.add_done_callback(finish_detection)
     try:
         pose = await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
     except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
