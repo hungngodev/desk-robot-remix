@@ -19,3 +19,15 @@ https://github.com/ozzmaker/BerryIMU/tree/master/arduino-BerryIMU .
 No complete third-party driver/sketch is bundled. The shared Wire adapter,
 readonly telemetry and tests were integrated locally. Physical revision,
 accelerometer calibration, attitude and held-state safety remain unverified.
+
+
+PN532 read-only NFC toy support is original, small nonblocking integration
+code that follows **Seeed Studio PN532**, BSD-3-Clause command and framing
+conventions, https://github.com/Seeed-Studio/PN532/tree/arduino/src .
+The upstream library's synchronous ACK, response and card wait loops were
+NOT linked into the local WROOM cliff safety loop. The new bounded frame
+adapter under `lib/AccessorySensors/Pn532Frames.h` retains explicit source
+attribution and parses only ISO14443A UID game tokens. It cannot authenticate
+a person or operate the charger or motors. Check the retained upstream
+license at https://github.com/Seeed-Studio/PN532/blob/arduino/LICENSE .
+No real PN532 module, antenna, voltage or timing trial has passed.
