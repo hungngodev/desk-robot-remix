@@ -10,6 +10,7 @@
 #include "ExpansionTouch.h"
 #include "PulsePad.h"
 #include "AccessorySensors.h"
+#include "TerminalIr.h"
 #include <Preferences.h>
 #endif
 
@@ -25,6 +26,7 @@ desk_robot::TofBus tof;
 desk_robot::ExpansionTouch cap1188;
 desk_robot::PulsePad paw_pulse;
 desk_robot::AccessorySensors accessories;
+desk_robot::TerminalIr terminal_ir; // 2 independent direct RMT inputs, read-only
 desk_robot::BerryImu berry_imu;  // One six-axis adapter, MPU6050 or BerryIMU; shares Wire
 // AT42QT1010 owns the input threshold. Sample without internal pullups
 // (GPIO34 is input-only), debounce three equal 25ms samples, and retain
@@ -383,6 +385,12 @@ void setup() {
   const bool accessory_mux = accessories.begin(Wire);
   Serial.println(accessory_mux ? "INFO optional_accessory_bus_probed" :
                                  "INFO optional_accessory_bus_unavailable");
+  // Both demodulated IR receiver inputs are optional observed evidence.
+  // The main WROOM motor guard never consumes this signal to arm itself.
+  const bool ir_ready = terminal_ir.begin(
+      body_pins::kTerminalIrLeftInput, body_pins::kTerminalIrRightInput);
+  Serial.println(ir_ready ? "INFO dual_nec_rmt_rx_ready_read_only" :
+                            "WARN dual_nec_rmt_rx_unavailable_motion_unchanged");
 #if defined(DESK_ROBOT_REQUIRE_DOCK_MONITOR) && DESK_ROBOT_REQUIRE_DOCK_MONITOR
   control.require_dock_monitor(true);
   Serial.println(accessories.readings().dock.present ?
@@ -431,6 +439,8 @@ void loop() {
   control.set_paw_pulse(paw_pulse.sample());
   accessories.poll(millis());
   control.set_accessories(accessories.readings());
+  terminal_ir.poll(millis());  // bounded, nonblocking, after cliff/dock reads
+  control.set_terminal_ir(terminal_ir.evidence(millis()));
 #endif
   control.tick(millis());
   apply_outputs();
