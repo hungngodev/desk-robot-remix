@@ -432,3 +432,38 @@ async def test_detector_executor_submission_failure_releases_slot(tmp_path, monk
     assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
     assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
     assert recovered["physical_acceptance_pass"] is False
+
+
+async def test_real_snapshot_deadline_cancels_stalled_capture_without_motion(tmp_path):
+    """A real deadline, not an injected TimeoutError, must fail closed."""
+    import asyncio
+
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    head = Head()
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def stalled_snapshot():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    head.snapshot = stalled_snapshot
+    result = await asyncio.wait_for(
+        dock_runtime.observe_actual_dock(
+            head, SimpleNamespace(id="robot-01", dock_calibration=path)
+        ), timeout=4.0
+    )
+    assert entered.is_set() and cancelled.is_set()
+    assert result["phase"] == "hold"
+    assert result["source"] == "head_snapshot_failed"
+    assert result["pose"] is None
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert not result["physical_acceptance_pass"]
+    assert head.commands == []
