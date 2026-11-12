@@ -148,6 +148,23 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         robot = coordinator().robot(robot_id)
         return await observe_actual_dock(coordinator().heads[robot_id], robot)
 
+    @app.get("/v1/robots/{robot_id}/dock/ir",
+             dependencies=[Depends(authorize)])
+    async def dock_ir(robot_id: str):
+        """Observe two independent NEC receivers, never move or charge."""
+        coordinator().robot(robot_id)
+        if settings.mode != "hardware":
+            return {
+                "robot_id": robot_id, "available": False,
+                "physical_qualified": False,
+                "motor_authorized": False,
+                "charging_authorized": False,
+            }
+        getter = getattr(coordinator().heads[robot_id], "ir_status", None)
+        if not callable(getter):
+            raise OperationError("This head has no direct dual NEC receiver")
+        return await getter()
+
     @app.get("/v1/robots/{robot_id}/dock/evidence",
              dependencies=[Depends(authorize)])
     async def dock_evidence(robot_id: str):
