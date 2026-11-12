@@ -42,6 +42,11 @@ class VoiceEventListener:
         self._global_abort_task: asyncio.Task | None = None
         self._event_task: asyncio.Task | None = None
         self._event_sequence: int | None = None
+        # Sequence numbers may be reused after an authenticated bridge reset.
+        # A completed callback from an old server generation must never be
+        # mistaken for a physical interruption ACK in the new generation.
+        self._event_generation = 0
+        self._event_task_generation: int | None = None
         self._fallback_abort_tasks: dict[str, asyncio.Task] = {}
 
     async def _set_monitor_ready(self, ready: bool) -> None:
@@ -169,6 +174,7 @@ class VoiceEventListener:
             return 0
         data = await self._fetch()
         if data["reset"]:
+            self._event_generation += 1
             # Safety first: a slow/failing monitoring callback must not delay
             # stopping obsolete speech after the authenticated bridge resets.
             self.monitor_ready = False
@@ -181,6 +187,7 @@ class VoiceEventListener:
         if data["cursor"] < self.cursor:
             raise ValueError("Voice event cursor rolled backward without a restart")
         if data["lost"]:
+            self._event_generation += 1
             # The audio abort is time critical even when UI/health callbacks
             # are blocked or unavailable. Fail monitor ready immediately.
             self.monitor_ready = False
@@ -212,12 +219,24 @@ class VoiceEventListener:
             # refuse a duplicate callback while the first is still running.
             seq = event["seq"]
             task = self._event_task
+            if task is not None and self._event_task_generation != self._event_generation:
+                # A server restart or lost replay rebases sequence identity.
+                # If the previous transport still executes, do not create a
+                # second competing physical callback or consume its outcome.
+                if not task.done():
+                    task.cancel()
+                    raise TimeoutError("Old VAD generation interruption still in flight")
+                self._event_task = None
+                self._event_sequence = None
+                self._event_task_generation = None
+                task = None
             if task is None:
                 task = asyncio.create_task(
                     self.on_interrupt(event["robot_id"], event["kind"])
                 )
                 self._event_task = task
                 self._event_sequence = seq
+                self._event_task_generation = self._event_generation
 
                 def observe_event_result(completed: asyncio.Task) -> None:
                     if not completed.cancelled():
@@ -237,6 +256,7 @@ class VoiceEventListener:
                 if task.done():
                     self._event_task = None
                     self._event_sequence = None
+                    self._event_task_generation = None
                 else:
                     task.cancel()  # best effort; an uncooperative task stays owned
             current = seq
