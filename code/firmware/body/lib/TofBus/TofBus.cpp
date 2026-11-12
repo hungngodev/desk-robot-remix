@@ -7,19 +7,29 @@ namespace desk_robot {
 
 bool TofBus::quiesce_optional_mux() {
   if (!optional_mux_present_) return true;
-  // A fitted optional bus must not keep a channel selected while the local
-  // guard acquires the 0x70 floor sensor. A nonresponding second mux becomes
-  // a real bus fault, rather than allowing unsafe mixed channel reads.
+  // A fitted optional bus must not keep a lane selected while the local
+  // guard reads the 0x70 floor mux. Verify the CONTROL REGISTER, not just
+  // ACK: a stuck mux could expose a different sensor at the shared 0x29.
   wire_.beginTransmission(kOptionalMuxAddress);
   const bool wrote = wire_.write(static_cast<std::uint8_t>(0)) == 1;
-  return wrote && wire_.endTransmission(true) == 0;
+  if (!wrote || wire_.endTransmission(true) != 0) return false;
+  if (wire_.requestFrom(kOptionalMuxAddress, static_cast<size_t>(1), true) != 1 ||
+      wire_.available() < 1) return false;
+  return wire_.read() == 0;
 }
 
 bool TofBus::select(std::uint8_t channel) {
   if (channel >= kRangeCount || !quiesce_optional_mux()) return false;
+  const auto expected = static_cast<std::uint8_t>(1U << channel);
   wire_.beginTransmission(kMuxAddress);
-  if (wire_.write(static_cast<std::uint8_t>(1U << channel)) != 1) return false;
-  return wire_.endTransmission(true) == 0;
+  if (wire_.write(expected) != 1 || wire_.endTransmission(true) != 0)
+    return false;
+  // TCA9548A SCPS207H, section 7.5.4: one-byte control register readback.
+  // The explicit STOP above activates the selected channel before reading.
+  // A wrong/multiple channel must never be accepted as a cliff measurement.
+  if (wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) != 1 ||
+      wire_.available() < 1) return false;
+  return wire_.read() == expected;
 }
 
 bool TofBus::read_register(std::uint16_t reg, std::uint8_t* out, std::uint8_t length) {
