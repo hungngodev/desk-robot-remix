@@ -1110,12 +1110,28 @@ class PetController:
                     async with self._vision_lock:
                         if self._human_active_in_fleet(time.monotonic()):
                             continue
+                        # An observation that has expired while queued for
+                        # another robot's VLM must never start inference.
+                        remaining = self.max_observation_age - (
+                            time.monotonic() - received
+                        )
+                        if remaining <= 0:
+                            state.stale_camera_events += 1
+                            continue
                         inference = asyncio.create_task(
                             self.scene.compare(previous, jpeg)
                         )
                         self._vision_inflight = inference
                         try:
-                            change = await inference
+                            change = await asyncio.wait_for(
+                                inference, timeout=remaining
+                            )
+                        except TimeoutError:
+                            # Cancel the expensive speculative request at its
+                            # provenance deadline. A timeout is NOT a new
+                            # scene or evidence that anyone stopped talking.
+                            state.stale_camera_events += 1
+                            continue
                         except asyncio.CancelledError:
                             # User speech cancelled the speculative VLM,
                             # not the permanent sensor/camera observation loop.
