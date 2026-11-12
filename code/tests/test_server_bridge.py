@@ -128,7 +128,11 @@ def test_overlay_targets_pinned_server_and_compiles():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     changes = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
-    assert len(changes) == 8
+    assert len(changes) == 9
+    assert "core/providers/tools/server_plugins/plugin_executor.py" in changes
+    assert "run_in_executor(_PLUGIN_POOL, call)" in changes[
+        "core/providers/tools/server_plugins/plugin_executor.py"
+    ]
     assert "desk_robot_native_omni.py" in changes
     assert "desk_robot_omni_wire.py" in changes
     assert "desk_robot_native_omni.route_audio" in changes["core/handle/receiveAudioHandle.py"]
