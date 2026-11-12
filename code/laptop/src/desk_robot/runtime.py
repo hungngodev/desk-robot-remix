@@ -75,12 +75,15 @@ class Runtime:
 
     async def _preempt_audio_floor(self) -> None:
         """Human and VAD transport failures share one five-pet audio owner."""
+        # Independent five-pet and coordinated social audio owners must be
+        # cancelled concurrently. Waiting for a slow pet's Xiaozhi session
+        # teardown BEFORE stopping a separate group speaker delays human VAD
+        # interruption, especially during a failed network call.
         results = await asyncio.gather(
             *(self.pet.interrupt(robot.id) for robot in self.settings.robots),
+            self.conversation.stop(),
             return_exceptions=True,
         )
-        # Stop the peer audio lease even if an individual pet callback fails.
-        await self.conversation.stop()
         failures = [result for result in results if isinstance(result, BaseException)]
         if failures:
             raise RuntimeError("Unable to preempt one or more pet speakers") from failures[0]
