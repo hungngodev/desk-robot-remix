@@ -587,6 +587,49 @@ async def test_new_real_human_utterance_cancels_old_vlm_image_answer():
         await service.close()
 
 
+async def test_new_human_on_one_head_cancels_other_heads_stale_visual_answer():
+    entered = asyncio.Event()
+
+    class SlowVision:
+        async def answer(self, question, frames):
+            entered.set()
+            await asyncio.Event().wait()
+            return "stale cross-head visual answer"
+
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        SlowVision(), asyncio.Lock(),
+    )
+    task = asyncio.create_task(service.look("robot-02", "What is next to me?"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        service.voice_started("robot-01")
+        with pytest.raises(RuntimeError, match="newer speech"):
+            await asyncio.wait_for(task, timeout=1)
+        assert service.hub.user_active("robot-01", time.monotonic())
+        assert not service._look_tasks
+        service.voice_ended("robot-01")
+    finally:
+        await service.close()
+
+
+async def test_cross_head_visual_tools_wait_for_current_human_floor():
+    heads = {"robot-01": Head(), "robot-02": Head()}
+    model = Vision()
+    service = MultimodalOrchestrator(config(), heads, model, asyncio.Lock())
+    try:
+        service.voice_started("robot-01")
+        with pytest.raises(RuntimeError, match="Another human turn"):
+            await service.look("robot-02", "What is on the table?")
+        assert heads["robot-02"].captures == 0
+        assert model.calls == []
+        service.voice_ended("robot-01")
+        answer = await service.look("robot-02", "What is on the table?")
+        assert answer["robot_id"] == "robot-02"
+    finally:
+        await service.close()
+
+
 async def test_second_visual_tool_call_replaces_previous_stale_question():
     first = asyncio.Event()
     class TwoVision:
