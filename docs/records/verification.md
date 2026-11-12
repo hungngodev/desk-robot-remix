@@ -1,5 +1,10 @@
 # Verification and physical trials
 
+## November 12 authenticated VAD snapshot recovery: commit evidence
+
+PR #17 commits `8e4ad80`, `b8dfd1a`, `75c7d76`, and `f8067e8` fix and test missed speech start/end reconciliation. The Mac now invokes the existing live `MultimodalOrchestrator` voice owner for recovered starts after urgently cancelling the fleet speech floor, preempting peer optional camera requests and updating visual-turn epochs. Recovered ends cancel the head's speech camera sampler. A real orchestrator regression and a small callback regression are checked in. **No repository pytest, Ruff, firmware compile, hardware camera or acoustic measurement executed for these changes in this session.** The most recently inspected completed Actions run, `43309538180`, failed all four jobs with `steps: null`; the new commit's subsequent runner state must be checked again. This is not evidence of a code failure or a green check. Physical VAD-to-silence and image exposure timing still need instrumented measurements.
+
+
 Use the [trial sheet](physical-trials.csv) to record bench results. The
 [report archive](reports) contains earlier machine-readable outputs. Entries
 in historical reports preserve the commands and paths used at the time.
