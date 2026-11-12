@@ -350,7 +350,7 @@
       "required_dock_gpioa_is_separate": true,
       "source_implemented": true,
       "physical_qualified": false,
-      "note": "Read only GPIOB 0x13 for slow reed and PIR after a fresh required GPIOA 0x12 dock read. Reserved WROOM GPIO36 and 39 are for two direct terminal IR receivers, but no NEC decoder or final movement/charging authorizer exists; actual board and RTC ADC glitch erratum must be tested."
+      "note": "Read only GPIOB 0x13 for slow reed and PIR after a fresh required GPIOA 0x12 dock read. Reserved WROOM GPIO36 and 39 are for two direct terminal IR receivers, and source now implements two legacy ESP-IDF 4.4 RMT read-only receivers and bounded full 34-symbol NEC decoder. No final movement/charging authorizer or physically verified board, optical baffle or RTC ADC glitch filtering exists."
     },
     "sense_gpio": {
       "oled_sda": 5,
@@ -599,6 +599,10 @@
       "touch": "code/firmware/body/lib/ExpansionTouch/ExpansionTouch.cpp",
       "pulse": "code/firmware/body/lib/PulsePad/PulsePad.cpp",
       "dock": "code/firmware/body/lib/BodyControl/BodyControl.cpp",
+      "dual_ir_rx": "code/firmware/body/lib/TerminalIr/TerminalIr.cpp",
+      "dual_ir_nec": "code/firmware/body/lib/TerminalIr/NecBurst.h",
+      "dual_ir_mac": "code/laptop/src/desk_robot/dock_ir.py",
+      "dual_ir_physical_qualified": false,
       "pet_consumer": "code/laptop/src/desk_robot/pet.py",
       "side_consumer": "code/laptop/src/desk_robot/side_ranging.py",
       "full_profile": "code/firmware/body/platformio.ini",
