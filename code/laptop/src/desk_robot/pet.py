@@ -42,6 +42,10 @@ _VISUAL_INITIATIVE_MIN_CONFIDENCE = {
     "scene": 0.95,
 }
 
+_SOCIAL_EVENT_KINDS = frozenset({
+    "key", "candy", "object", "hand_wave", "petting_zone", "nfc_tag",
+})
+
 _PHYSICAL_INITIATIVE_KINDS = frozenset({
     "touch", "touch_tap", "touch_double", "touch_hold", "petting_zone",
     "squeeze", "hand_wave", "nose_twist", "nearby_object",
@@ -168,7 +172,10 @@ class PetController:
         self.voice_monitor_ready = settings.mode != "hardware"
         self._speech_task: asyncio.Task | None = None
         self._speech_robot: str | None = None
+        self._speech_participants: frozenset[str] = frozenset()
         self._group_last_spoken = -math.inf
+        self._social_last_started = -math.inf
+        self._social_round = 0
         # Same class alone is not an identity: two distinct keys appearing
         # in rapid succession must not be merged. Descriptions remain model
         # assessments, not measured spatial event identities.
@@ -316,7 +323,8 @@ class PetController:
 
     async def _cancel_speech(self, robot_id: str) -> None:
         task = self._speech_task
-        if task is not None and not task.done() and self._speech_robot == robot_id:
+        if (task is not None and not task.done()
+                and robot_id in self._speech_participants):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
@@ -1077,6 +1085,27 @@ class PetController:
             for robot in self.settings.robots
         )
 
+    def _social_peer(self, robot_id: str, kind: str, now: float) -> str | None:
+        """Offer a short, shared witnessed event to a different consenting pet.
+
+        No second TTS broker, planner, camera owner or physical actuator.
+        Pair rotation prevents one peer monopolizing the conversation.
+        """
+        if (not self.settings.fleet_social_autonomy_enabled
+                or not self.settings.fleet_text_sharing_enabled
+                or kind not in _SOCIAL_EVENT_KINDS
+                or now - self._social_last_started
+                   < self.settings.fleet_social_min_interval_seconds):
+            return None
+        candidates = [
+            robot.id for robot in self.settings.robots
+            if robot.id != robot_id and self.states[robot.id].enabled
+            and not self.states[robot.id].quiet
+        ]
+        if not candidates:
+            return None
+        return candidates[self._social_round % len(candidates)]
+
     def _consider_speech(self, robot_id: str, change: SceneChange, generation: int) -> None:
         state = self.states[robot_id]
         now = time.monotonic()
@@ -1112,14 +1141,22 @@ class PetController:
             state.last_initiative_suppression = "quiet_voice_or_group_budget"
             return
         state.last_initiative_suppression = None
+        peer_id = self._social_peer(robot_id, change.kind, now)
+        if peer_id is not None:
+            self._social_round += 1
+            self._social_last_started = now
         self._speech_robot = robot_id
+        self._speech_participants = frozenset(
+            {robot_id, peer_id} if peer_id is not None else {robot_id}
+        )
         self._speech_task = asyncio.create_task(
-            self._speak(robot_id, change, generation, offered_at=now)
+            self._speak(robot_id, change, generation,
+                        offered_at=now, social_peer_id=peer_id)
         )
 
     async def _speak(
         self, robot_id: str, change: SceneChange, generation: int,
-        *, offered_at: float,
+        *, offered_at: float, social_peer_id: str | None = None,
     ) -> None:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
@@ -1138,6 +1175,37 @@ class PetController:
             recent = "; ".join(
                 origin(x) + x.summary for x in reversed(memory)
             )
+            # A social turn is NOT five independent agents speaking at once.
+            # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
+            # each pet's own persona, two bounded turns and per-pet memory.
+            # The other pet only *hears* this firsthand source event.
+            if social_peer_id is not None:
+                peer = self.states[social_peer_id]
+                if (not peer.enabled or peer.quiet or not self.voice_monitor_ready
+                        or self._human_active_in_fleet(time.monotonic())
+                        or time.monotonic() - offered_at > self.max_observation_age):
+                    state.suppressed += 1
+                    state.last_initiative_suppression = "social_peer_or_event_unavailable"
+                    return
+                topic = (
+                    f"{robot.name} reported this new event from its own "
+                    f"{'sensor' if change.kind in _PHYSICAL_INITIATIVE_KINDS else 'camera model'}: "
+                    f"{change.description[:160]}. Only {robot.name} observed it. "
+                    "Respond to each other naturally in one short sentence each. "
+                    "Suggest a harmless verbal game or shared curiosity. "
+                    "The listening pet must not pretend it saw or sensed the event. "
+                    "Do not move, grasp, command motors or claim new physical facts."
+                )
+                turns = await asyncio.wait_for(
+                    self.conversation.run(
+                        [robot_id, social_peer_id], topic, utterances=2
+                    ), timeout=75.0
+                )
+                if len(turns) == 2:
+                    state.spoken += 1
+                    peer.spoken += 1
+                    self._group_last_spoken = time.monotonic()
+                return
             text = await self.conversation.chat.reply([
                 {
                     "role": "system",
@@ -1209,6 +1277,7 @@ class PetController:
             if asyncio.current_task() is self._speech_task:
                 self._speech_task = None
                 self._speech_robot = None
+                self._speech_participants = frozenset()
 
     async def close(self) -> None:
         self._closed = True
