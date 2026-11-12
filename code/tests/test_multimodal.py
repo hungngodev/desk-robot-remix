@@ -54,6 +54,21 @@ def config(enabled=True):
     )
 
 
+def test_all_new_physical_interactions_trigger_camera_without_extra_sensor_drivers():
+    hub = CameraFrameHub(["robot-01", "robot-02"], idle_fps=0.3)
+    hub.offer("robot-01", image(), 100.0, source="proactive")
+    hub.offer("robot-02", image(), 100.0, source="proactive")
+    assert not hub.due("robot-01", 100.2)
+    for kind in ("paw_contact", "ambient_shift", "nfc_tag"):
+        hub.notify("robot-01", kind, 100.25)
+    assert hub.due("robot-01", 100.3)
+    assert not hub.due("robot-02", 100.3)
+    assert [x["kind"] for x in hub.recent_events("robot-01", 100.3)] == [
+        "paw_contact", "ambient_shift", "nfc_tag",
+    ]
+    assert hub.recent_events("robot-02", 100.3) == []
+
+
 def test_brightness_shift_not_mistaken_for_localized_motion():
     a = bytes([90] * (64 * 48))
     b = bytes([130] * (64 * 48))
