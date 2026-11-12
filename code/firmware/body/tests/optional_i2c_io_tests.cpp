@@ -79,7 +79,37 @@ int main() {
     CHECK(read.dock.valid);
     CHECK(read.dock.sample_seq > sampled);
     CHECK(read.dock.sample_seq == Wire.dock_gpio_reads);
-    std::cout << "PASS optional sensor register IO, validated mux isolation and no blocking samples\n";
+    // Genuine framed PN532 state transitions share the OPTIONAL mux slot.
+    // The MCU still updates MCP23017 seat evidence before each NFC action.
+    TwoWire nfc_wire;
+    nfc_wire.nfc_connected = true;
+    nfc_wire.nfc_tag_present = true;
+    desk_robot::AccessorySensors nfc_accessories;
+    CHECK(nfc_accessories.begin(nfc_wire));
+    for (std::uint32_t ms = 0; ms < 2600; ms += 12) {
+      nfc_accessories.poll(ms);
+      CHECK(!nfc_wire.unsafe_parallel_mux);
+      CHECK(nfc_wire.ranges == 0 && nfc_wire.extras == 0);
+    }
+    const auto& nfc = nfc_accessories.readings().nfc;
+    CHECK(nfc.present && nfc.valid && nfc.tag_visible);
+    CHECK(nfc.tag_events == 1U && nfc.tag_token != 0U);
+    CHECK(nfc.scan_seq > 1U);
+    CHECK(nfc_wire.dock_gpio_reads > 0);
+    nfc_wire.nfc_tag_present = false;
+    for (std::uint32_t ms = 2604; ms < 4200; ms += 12) {
+      nfc_accessories.poll(ms);
+      CHECK(!nfc_wire.unsafe_parallel_mux);
+    }
+    CHECK(nfc.valid && !nfc.tag_visible && nfc.tag_events == 1U);
+    nfc_wire.nfc_tag_present = true;
+    for (std::uint32_t ms = 4200; ms < 6100; ms += 12) {
+      nfc_accessories.poll(ms);
+      CHECK(!nfc_wire.unsafe_parallel_mux);
+    }
+    CHECK(nfc.valid && nfc.tag_visible && nfc.tag_events == 2U);
+    CHECK(nfc_wire.dock_gpio_reads > 0);
+    std::cout << "PASS optional sensor register IO, NFC framing and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
     return 1;
