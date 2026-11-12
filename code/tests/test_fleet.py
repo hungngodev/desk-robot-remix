@@ -27,6 +27,17 @@ def fleet():
 def test_fleet_examples_keep_identical_core_and_hardware_disarmed(fleet):
     hardware = load_settings(ROOT / "config/fleet.example.toml")
     assert [r.id for r in hardware.robots] == [r.id for r in fleet.robots] == IDS
+    starter = load_settings(ROOT / "config/robots.example.toml")
+    assert [r.id for r in starter.robots] == IDS
+    # Both documented hardware entrypoints must describe the same full fleet
+    # while remaining disarmed and requiring actual per-device credentials.
+    assert [(r.id, r.name, r.head_url, r.token_env)
+            for r in starter.robots] == [
+                (r.id, r.name, r.head_url, r.token_env)
+                for r in hardware.robots
+            ]
+    assert all(not r.motion_enabled and not r.device_id
+               for r in starter.robots)
     assert all(not r.motion_enabled and not r.device_id for r in hardware.robots)
     assert len({r.token_env for r in hardware.robots}) == 5
     assert len({r.head_url for r in hardware.robots}) == 5
