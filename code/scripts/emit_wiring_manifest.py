@@ -135,7 +135,7 @@ def render(plan: dict, body: str, head: str) -> str:
     row("XIAO onboard GPIO41 DIN + GPIO42 CLK", "Sense PDM microphone",
         "Integrated board pins, NOT connections to WROOM")
     row("XIAO GPIO9 reserved", "RGB heart data",
-        "Driver not implemented; SD J3 physical conflict unresolved", "Do NOT wire yet")
+        "Xiaozhi WS2812 driver compiled only with explicit opt-in; SD J3 and 5V level buffer still unqualified", "Do NOT wire yet")
     for group, mux in (("Range", bus["mux_ranges"]), ("Accessory", bus["mux_extras"])):
         for lane in mux["channels"]:
             devices = ", ".join(
