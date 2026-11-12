@@ -2,6 +2,8 @@
 
 Last reconciled 2026-11-11. This document is **repository-local shared memory**, not a claim of feature completion. Every future reviewer, including ChatGPT Work, Codespaces, CLI agents and separate conversations, should use it as a starting point. Do not make external Cognee, Mem0, Obsidian or Notion availability a prerequisite. Keep actual decisions and implementation evidence in GitHub.
 
+**CI runner evidence:** read [pre-step GitHub Actions diagnosis](docs/reviews/CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md) before changing workflow YAML or claiming tests passed. Four independent jobs failed in approximately two seconds with no job steps or downloadable logs; inspect check-run annotations and account Actions billing/policies. Do not mistake runner provisioning failure for source test failure.
+
 **Current Reachy Mini and proactive conversation reuse:** read [the November 11 Reachy Mini research and paper review](docs/reviews/REACHY_MINI_PROACTIVE_REUSE_2026_11_11.md) before changing autonomous speech, VAD, spontaneous multimodal observation or expression. Preserve the existing WROOM safety owner, Mac event memory and Xiaozhi lease. Cheap contextual *when to speak* precedes LLM *what to say*; actual human voice from any of the five heads overrides spontaneous output. Do not import Reachy joint trajectories or claim native motion on the two MG90S jaw and lift servos.
 
 ## Source order and one active integration branch
