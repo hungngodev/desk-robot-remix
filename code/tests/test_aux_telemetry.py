@@ -105,12 +105,28 @@ async def test_authenticated_head_aux_rejects_wrong_robot(settings, tokens):
             await head.aux_status()
 
 
+@pytest.mark.parametrize("patch", [
+    {"seq": 0}, {"seq": True}, {"seq": -1},
+    {"age_ms": -1}, {"age_ms": 2000}, {"age_ms": "50"},
+])
+def test_optional_bmp280_acquisition_identity_rejects_replay_or_bad_age(patch):
+    d = sample()
+    d["bmp280"] = {
+        "present": True, "valid": True, "chip_id": 0x58,
+        "temp_centi": 2508, "pressure_pa": 100653,
+        "seq": 10, "age_ms": 50, "physically_verified": False,
+    }
+    d["bmp280"].update(patch)
+    with pytest.raises(ValueError):
+        validate_aux(d, "robot-01")
+
+
 def test_optional_bmp280_factory_compensation_is_raw_ambient_not_qualification():
     d = sample()
     d["bmp280"] = {
         "present": True, "valid": True, "chip_id": 0x58,
         "temp_centi": 2508, "pressure_pa": 100653,
-        "physically_verified": False,
+        "seq": 10, "age_ms": 50, "physically_verified": False,
     }
     assert validate_aux(d, "robot-01")["bmp280"]["pressure_pa"] == 100653
 
@@ -128,7 +144,7 @@ def test_bmp280_bad_identity_stale_or_unqualified_claim_rejected(patch):
     d["bmp280"] = {
         "present": True, "valid": True, "chip_id": 0x58,
         "temp_centi": 2508, "pressure_pa": 100653,
-        "physically_verified": False,
+        "seq": 10, "age_ms": 50, "physically_verified": False,
     }
     d["bmp280"].update(patch)
     with pytest.raises(ValueError):
