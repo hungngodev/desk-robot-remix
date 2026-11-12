@@ -6,6 +6,10 @@
 
 **One current repository and PR:** [hungngodev/desk-robot-remix](https://github.com/hungngodev/desk-robot-remix), [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17), `impl/mac-hardware-safety-preflight-2026-11-10`. The PR head changes as reviewers commit. Compare to actual current head, not a historical ChatGPT response.
 
+## November 12 terminal IR queue-age guard source followup
+
+The independent QA backlog finding now has a narrow source correction on the canonical PR: `NecBurst.h` adds a portable bounded poll/queue gate, `TerminalIr.cpp` discards on a poll gap above 100 ms or either side's ambiguous backlog and drains up to eight packets per receiver without accepting an old dequeue as fresh. Receiver reinitialization resets the baseline. `terminal_ir_tests.cpp` adds deterministic interval, overflow, drain and rollover cases. A separate local standalone C++ harness for exactly the small gate compiled with `g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined` and passed its 18 asserted cases; the repository C++ test target and actual WROOM firmware have **not** run here. See [source rationale and remaining RMT integration tests](../research/2026-11-12-terminal-ir-backlog-freshness-design.md#november-12-source-implementation-after-independent-review). This does not confer dock motor/charging permission or solve real sensor electrical timing.
+
 ## November 12 cross-chat lookup and native detector lifecycle
 
 The user explicitly pointed reviewers at recent `Look Up GitHub Repo`, `Review GitHub Chat`, and an oddly named `Bluetooth keyboard` conversation that discusses the same robot. Conversation titles are **discovery hints, not technical sources**: recover concrete user requirements and preserve this handoff, then verify every claim against the current source and hardware plan. The binding constraints remain one complete full-featured robot followed by four independent peers, reuse of the existing upstream/hardware first, tiny scoped loops, all work in this draft PR and no unverified assembly-ready claim. Do not require new memory/MCP infrastructure.
