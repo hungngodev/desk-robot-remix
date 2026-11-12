@@ -12,7 +12,7 @@ SPEC = importlib.util.spec_from_file_location(
 bench = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bench)
 
-JPEG = b"\\xff\\xd8" + b"real frame" + b"\\xff\\xd9"
+JPEG = b"\xff\xd8" + b"real frame" + b"\xff\xd9"
 
 
 async def test_camera_bench_keeps_status_independent_and_never_qualifies_hardware():
