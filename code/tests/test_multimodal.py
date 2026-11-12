@@ -587,6 +587,81 @@ async def test_new_real_human_utterance_cancels_old_vlm_image_answer():
         await service.close()
 
 
+async def test_real_vad_during_jpeg_cpu_prepare_suppresses_late_idle_frame(monkeypatch):
+    import threading
+    import desk_robot.multimodal as media
+
+    entered = threading.Event()
+    release = threading.Event()
+    real_prepare = media._prepare
+
+    def slow_prepare(jpeg):
+        entered.set()
+        release.wait(timeout=2)
+        return real_prepare(jpeg)
+
+    monkeypatch.setattr(media, "_prepare", slow_prepare)
+    service = MultimodalOrchestrator(
+        config(enabled=False),
+        {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    task = asyncio.create_task(
+        service.capture("robot-02", source="proactive")
+    )
+    try:
+        assert await asyncio.wait_for(
+            asyncio.to_thread(entered.wait, 0.8), timeout=1
+        )
+        service.voice_started("robot-01")
+        release.set()
+        with pytest.raises(RuntimeError, match="superseded"):
+            await asyncio.wait_for(task, timeout=1)
+        assert not service.hub.frames["robot-02"]
+        assert service.hub.user_active("robot-01", time.monotonic())
+        service.voice_ended("robot-01")
+    finally:
+        release.set()
+        await service.close()
+
+
+async def test_prepare_from_external_pet_cannot_add_frame_during_human_voice(monkeypatch):
+    import threading
+    import desk_robot.multimodal as media
+
+    entered = threading.Event()
+    release = threading.Event()
+    real_prepare = media._prepare
+
+    def slow_prepare(jpeg):
+        entered.set()
+        release.wait(timeout=2)
+        return real_prepare(jpeg)
+
+    monkeypatch.setattr(media, "_prepare", slow_prepare)
+    service = MultimodalOrchestrator(
+        config(enabled=False),
+        {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    task = asyncio.create_task(
+        service.offer_proactive("robot-02", image(), time.monotonic())
+    )
+    try:
+        assert await asyncio.wait_for(
+            asyncio.to_thread(entered.wait, 0.8), timeout=1
+        )
+        service.voice_started("robot-01")
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert not service.hub.frames["robot-02"]
+        assert service.hub.user_active("robot-01", time.monotonic())
+        service.voice_ended("robot-01")
+    finally:
+        release.set()
+        await service.close()
+
+
 async def test_new_human_on_one_head_cancels_other_heads_stale_visual_answer():
     entered = asyncio.Event()
 
