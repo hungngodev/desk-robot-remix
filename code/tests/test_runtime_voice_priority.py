@@ -246,8 +246,24 @@ async def test_server_vad_snapshot_preempts_missing_start_and_releases_missing_e
     runtime.pet = Pet()
     runtime.conversation = Conversation()
     hub = CameraFrameHub(["robot-01", "robot-02"])
-    runtime.multimodal = SimpleNamespace(hub=hub)
+
+    class Visual:
+        def __init__(self):
+            self.hub = hub
+            self.edges = []
+
+        def voice_started(self, robot_id):
+            self.edges.append(("start", robot_id))
+            self.hub.notify(robot_id, "human_voice", time.monotonic())
+
+        def voice_ended(self, robot_id):
+            self.edges.append(("end", robot_id))
+            self.hub.speech_ended(robot_id, time.monotonic())
+
+    visual = Visual()
+    runtime.multimodal = visual
     await runtime._on_voice_snapshot(frozenset({"robot-02"}))
+    assert visual.edges == [("start", "robot-02")]
     assert hub.user_active("robot-02", time.monotonic())
     assert calls == [
         ("pet", "robot-01"), ("pet", "robot-02"), ("speaker", "stop"),
@@ -255,4 +271,63 @@ async def test_server_vad_snapshot_preempts_missing_start_and_releases_missing_e
     await runtime._on_voice_snapshot(frozenset({"robot-02"}))
     assert len(calls) == 3  # Identical snapshot is not another interruption.
     await runtime._on_voice_snapshot(frozenset())
+    assert visual.edges == [("start", "robot-02"), ("end", "robot-02")]
     assert not hub.user_active("robot-02", time.monotonic())
+
+
+async def test_missing_vad_start_reuses_real_multimodal_camera_preemption():
+    import asyncio
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    class SlowHead:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def snapshot(self):
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            return None
+
+    class Conversation:
+        async def stop(self):
+            return None
+
+    slow = SlowHead()
+    settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01"), SimpleNamespace(id="robot-02")],
+        voice_vision_tools_enabled=False,
+        vision_model="",
+    )
+    visual = MultimodalOrchestrator(
+        settings, {"robot-01": slow, "robot-02": slow},
+        SimpleNamespace(), asyncio.Lock(),
+    )
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = settings
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = visual
+    optional = asyncio.create_task(visual.capture("robot-02", source="proactive"))
+    try:
+        await asyncio.wait_for(slow.started.wait(), timeout=1)
+        # An authenticated reconnect discovers speech on the OTHER pet.
+        # It must cancel the old optional HTTP request before new work starts.
+        await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+        result = await asyncio.gather(optional, return_exceptions=True)
+        assert isinstance(result[0], asyncio.CancelledError)
+        assert slow.cancelled
+        assert visual.hub.user_active("robot-01", __import__("time").monotonic())
+        assert not visual.hub.frames["robot-02"]
+        assert visual._turn_epoch["robot-02"] == 1
+        await runtime._on_voice_snapshot(frozenset())
+        assert not visual.hub.user_active("robot-01", __import__("time").monotonic())
+    finally:
+        await visual.close()
