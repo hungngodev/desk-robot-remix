@@ -814,3 +814,52 @@ async def test_gap_audio_preempts_before_failed_monitor_notification(event_name)
         ]
         assert listener.monitor_ready is False
         assert listener.cursor == 5  # never accept reset/gap without health
+
+
+async def test_voice_stream_outage_preempts_while_health_callback_is_stalled():
+    """A disconnected health monitor must not delay real shared audio abort."""
+    import asyncio
+
+    requests = 0
+    aborted = asyncio.Event()
+    blocking_health = asyncio.Event()
+    health_entered = asyncio.Event()
+
+    def mock(_request):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return httpx.Response(200, json={
+                "cursor": 2, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(503, json={"error": "head offline"})
+
+    async def global_abort(_reason):
+        aborted.set()
+
+    async def health(ready):
+        if not ready:
+            health_entered.set()
+            await blocking_health.wait()
+
+    async def no_single_robot_abort(_id, _reason):
+        raise AssertionError("Shared audio owner must own fleet interruption")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"},
+            on_interrupt=no_single_robot_abort,
+            on_global_interrupt=global_abort,
+            on_monitor_ready=health,
+        )
+        await listener.poll()
+        runner = asyncio.create_task(listener.run())
+        try:
+            await asyncio.wait_for(health_entered.wait(), timeout=2)
+            assert aborted.is_set()
+            assert listener.monitor_ready is False
+        finally:
+            blocking_health.set()
+            runner.cancel()
+            await asyncio.gather(runner, return_exceptions=True)
