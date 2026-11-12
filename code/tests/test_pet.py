@@ -1621,3 +1621,51 @@ async def test_quiet_on_listening_peer_cancels_shared_social_turn(
         for state in pet.states.values():
             state.enabled = False
         await pet.close()
+
+
+async def test_simultaneous_human_interrupts_cancel_one_social_head_flush_once(
+    fleet, tmp_path,
+):
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    entered = asyncio.Event()
+
+    class SlowChat:
+        async def reply(self, history):
+            entered.set()
+            await asyncio.Event().wait()
+
+    class StopSpeaker(SimulatedSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.stop_requests = []
+
+        async def interrupt(self, robot):
+            self.stop_requests.append(robot.id)
+            await asyncio.sleep(0.03)  # real device abort RPC is asynchronous
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = StopSpeaker()
+    conversation = Conversation(fleet, SlowChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    for id_ in ("robot-01", "robot-02"):
+        pet.states[id_].enabled, pet.states[id_].generation = True, 8
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A red key appeared", 0.98), 8
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        await asyncio.wait_for(
+            asyncio.gather(
+                pet.interrupt("robot-01"), pet.interrupt("robot-02")
+            ), timeout=3,
+        )
+        assert speaker.stop_requests == ["robot-01"]
+        assert speaker.spoken == []
+        assert conversation.active is None
+        assert pet._speech_task is None
+        assert pet._speech_participants == frozenset()
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
