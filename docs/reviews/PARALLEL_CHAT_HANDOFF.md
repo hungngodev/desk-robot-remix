@@ -132,6 +132,12 @@ Independent live source inspection of `MultimodalOrchestrator._voice_activity` f
 
 Regression tests in `code/tests/test_multimodal.py` cover a blocked B VLM interrupted by A VAD, and a B request rejected during A VAD then succeeding after a true A speech end. Code and tests committed to existing draft PR #17. These tests are **NOT green or executed through CI**; four GitHub jobs historically fail before any step. No second voice server or extra PR added. This change does not prove actual microphone timing, five physical speakers or battery safety.
 
+## November 12 later skeptical VAD and visual evidence review
+
+Newly audited source failure: `MultimodalOrchestrator.look` previously reused an idle frame up to 600 ms old without checking whether that frame was captured **before the current user began the spoken visual question**. A natural conversation could therefore answer from a pre-question picture despite receiving authenticated real Xiaozhi VAD. `_voice_activity` now records each robot's actual monotonic spoken-turn start. `look` requests a new head JPEG when the recent frame predates this start, regardless of its nominal 600 ms freshness, while preserving preceding frames for temporal before/after questions. If the existing JPEG was captured after the turn began it is reused without another camera request. Two deterministic host regression cases in `test_multimodal.py` exercise both transitions. No camera exposure timestamp or physical microphone latency is invented.
+
+A separate race occurs after JPEG transport ends but before `_prepare` worker finishes: initial VAD preemption cancelled in-flight network snapshots, but could still accept a late low-priority proactive/sensor JPEG whose network task had already finished. Both orchestrated `capture` and external `offer_proactive` now recheck fleet human priority immediately **after** CPU preprocessing before committing such a frame. Added thread-blocked VAD tests with independent peer voices. **All tests committed but not confirmed executing** because GitHub Actions still fails before recorded steps. Continue source hard critique and do not claim physical completion.
+
 ## The user's cross-chat constraints, all retained
 
 1. **One complete robot, then four identical functional copies.** Five different personalities and removable costumes, not five different incomplete hardware architectures. Day zero design includes the entire desired core; physical bringup may still be staged for safe testing.
