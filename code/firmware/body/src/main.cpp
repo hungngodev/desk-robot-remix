@@ -424,7 +424,10 @@ void loop() {
   // CliffGuard remains the only local motion/safety authority.
   if (tof.ready()) {
     const auto scan_ms = millis();
+    const auto errors_before = tof.errors();
     tof.poll(cliff_guard, scan_ms);
+    if (tof.errors() != errors_before)
+      control.invalidate_side_ranges();
     const auto extra = tof.new_extra_channel();
     if (extra < 3) {
       const auto sample = tof.extra_diagnostic(extra, scan_ms);
