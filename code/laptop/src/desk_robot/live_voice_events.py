@@ -133,10 +133,13 @@ class VoiceEventListener:
             data = await self._fetch(bootstrap=True)
             if data["events"]:
                 raise ValueError("Bootstrapping must not replay stale audio events")
-            self.cursor = data["cursor"]
-            self._stream_failed = False
+            # Commit bootstrap only after both downstream consumers accept it.
+            # Otherwise a failed snapshot/health callback must retry bootstrap,
+            # not consume later events with an uninitialized speech owner.
             await self._reconcile_snapshot(data)
             await self._set_monitor_ready(True)
+            self.cursor = data["cursor"]
+            self._stream_failed = False
             return 0
         data = await self._fetch()
         if data["reset"]:
