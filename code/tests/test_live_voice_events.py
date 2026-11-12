@@ -268,6 +268,30 @@ async def test_monitor_health_is_lost_on_gap_until_authenticated_resumption():
         assert health == [True, False, True]
 
 
+async def test_hardware_monitor_refuses_legacy_or_null_voice_snapshot():
+    for payload in (
+        {"cursor": 4, "events": [], "reset": False, "lost": False},
+        {"cursor": 4, "events": [], "reset": False, "lost": False,
+         "active_human_robots": None},
+    ):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json=payload)
+            )
+        ) as client:
+            async def deliver(robot_id, kind):
+                raise AssertionError("No unauthenticated voice turn")
+            listener = VoiceEventListener(
+                client, url="http://127.0.0.1:8766", token="s" * 32,
+                robot_ids={"robot-01"}, on_interrupt=deliver,
+                require_snapshot=True,
+            )
+            with pytest.raises(ValueError, match="snapshot required"):
+                await listener.poll()
+            assert not listener.monitor_ready
+            assert listener.cursor is None
+
+
 async def test_current_vad_snapshot_survives_missed_start_at_bootstrap():
     snapshots = []
     requests = 0
