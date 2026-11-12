@@ -25,7 +25,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/
 | No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not ESP32 strapping GPIO4 |
 | GND | Head, body, sensors and actuator-supply common logic reference |
 |34 | Owned Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Firmware has debounced tap, double tap, hold and local motion stop; actual connection, shell timing and noise testing remain open |
-| 35 / 36 / 39 | Full source supports 35 normally closed bumper, 36 optional reed and 39 optional PIR, all 3.3V logic input only with separately chosen external bias. Original dual IR terminal dock wants two capture inputs here too, so final hardware allocation is **not** frozen. Read [the terminal IR pin conflict](charging-design-and-validation.md#terminal-homing-pin-budget-real-blocker-not-a-fake-finished-dock) before wiring. |
+| 35 / 36 / 39 | GPIO35 is the direct normally closed bumper. GPIO36/39 are now reserved **only** for left/right 38 kHz terminal IR demodulated inputs, still without an IR decoder or validated RMT timing. Slow reed/PIR move to MCP23017 GPIOB0/B1 on mux 0x71 lane 5. See [terminal IR verification](charging-design-and-validation.md#terminal-homing-pin-budget-real-blocker-not-a-fake-finished-dock) before wiring. |
 
 The conservative output set has 15 pins. Steppers8 + servos2 + UART2 + I²C2
 consume 14, so there are not five spare outputs for sensor XSHUT lines. The mux
@@ -311,12 +311,14 @@ InvenSense MPU6050 RM-MPU-6000A and Adafruit AT42QT1010 breakout:
 | TCA9548A channels 6,7 reserved | Optional light sensor, touch-zone expander, opted-in accessory | One address/channel owner, timeout, external pullups and per-module actual VCC |
 | GPIO34 | Required active HIGH AT42QT1010 head pad | 3.3 V power and output, through-case physical false-touch trials |
 | GPIO35, build flag DESK_ROBOT_ENABLE_BUMPER | Optional normally-closed mechanical bumper, raw local trip | External 3.3 V pullup, active LOW; must be physically fitted and tested before enable |
-| GPIO36, build flag DESK_ROBOT_ENABLE_REED | Optional magnetic costume accessory reed closure | External 3.3 V pullup, active LOW; magnet interference and contact bounce |
-| GPIO39, build flag DESK_ROBOT_ENABLE_PIR | Optional photographed PIR motion output | Measure HIGH <=3.3 V and actual timing; external pulldown; PIR is not a person recognizer |
+| MCP23017 GPIOB0, build flag DESK_ROBOT_ENABLE_REED | Slow read-only magnetic costume accessory reed closure | Source polls BANK=0 GPIOB 0x13, active LOW, 3.3 V pullup, actual dwell and magnet interference need measurement |
+| MCP23017 GPIOB1, build flag DESK_ROBOT_ENABLE_PIR | Slow read-only PIR motion output | Source polls same expander byte, active HIGH; measured 3.3 V output, pulse dwell and external bias needed; not person recognition |
+| WROOM GPIO36 and GPIO39 reserved | Two independent demodulated left/right terminal beacon inputs | **NO NEC decoder or physical qualifications.** External bias, ESP32 RTC/ADC glitch erratum, actual interrupts/RMT version and optical baffles must be checked |
 
-Those three digital extras are disabled in normal builds, even if their firmware
-can decode host simulated test vectors. GPIO34 through GPIO39 have no internal
-pull resistors. Do not plug an anonymous PIR 5 V logic output into the ESP32;
+The optional reed/PIR event reports remain disabled by compile flags until
+each actual MCP23017 input is wired and qualified. The bumper remains direct,
+with an independently latched local motor stop. GPIO34 through GPIO39 have
+no internal pull resistors and are not interchangeable with the expander. Do not plug an anonymous PIR 5 V logic output into the ESP32;
 use a qualified level converter when required. A reed contact near the motors
 may trigger from their magnetic fields. The BMP280 can add atmospheric pressure
 and temperature *only* if its existing vendor driver is selected and tested on
