@@ -47,10 +47,13 @@ void poll_optional(std::uint32_t now_ms) {
   // Slow magnetic/PIR inputs arrive from MCP23017 GPIOB on the existing
   // accessory mux. The required dock seat/PGOOD remains independent GPIOA.
   // Never interpret an old optional bus value as a new local event.
+#if (defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED) || \
+    (defined(DESK_ROBOT_ENABLE_PIR) && DESK_ROBOT_ENABLE_PIR)
   const auto& extension = accessories.readings().optional_inputs;
   const bool extension_fresh = extension.present && extension.valid &&
       extension.sample_seq != 0 &&
       now_ms - extension.at_ms <= 250U;
+#endif
 #if defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED
   if (extension_fresh) {
     mask |= 2U;
