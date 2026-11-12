@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import time
 import threading
 
-# A timed-out native detector may continue running. Never queue a second one.
+# Keep the native future itself as the worker lifetime owner. An asyncio wrapper
+# can be cancelled during shutdown while the C detector is still running.
 _DETECTOR_SLOT = threading.BoundedSemaphore(1)
+_DETECTOR_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desk-apriltag")
 
 from .dock_vision import DockCameraCalibration, assess_dock, detect_apriltag
 
@@ -57,23 +60,36 @@ async def observe_actual_dock(head, robot) -> dict:
     if not _DETECTOR_SLOT.acquire(blocking=False):
         return _hold(robot.id, reason="Dock marker detector still busy", source="apriltag_detector_busy")
 
-    def detect_once():
-        return detect_apriltag(jpeg, calib, captured_at=received_at)
+    # ThreadPoolExecutor.submit returns the *native* concurrent future.
+    # Its completion cannot precede the worker's actual exit, unlike the
+    # cancellable asyncio task returned by asyncio.to_thread.
+    try:
+        work = _DETECTOR_POOL.submit(
+            detect_apriltag, jpeg, calib, captured_at=received_at
+        )
+    except (RuntimeError, OSError) as exc:
+        _DETECTOR_SLOT.release()  # Dispatch failed: no native worker exists.
+        return _hold(
+            robot.id,
+            reason=f"Dock marker dispatch unavailable: {type(exc).__name__}",
+            source="apriltag_detection_failed",
+        )
 
-    # The task owns the slot, including if executor dispatch never starts.
-    # Shielding prevents caller cancellation from cancelling native work.
-    task = asyncio.create_task(asyncio.to_thread(detect_once))
-
-    def finish_detection(done: asyncio.Task) -> None:
+    def finish_detection(done) -> None:
         try:
             if not done.cancelled():
-                done.exception()  # Retrieve late detector failures.
+                done.exception()  # Retrieve late native detector failures.
         finally:
             _DETECTOR_SLOT.release()
 
-    task.add_done_callback(finish_detection)
+    work.add_done_callback(finish_detection)
     try:
-        pose = await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+        # A timeout or observer cancellation only abandons the *await*.
+        # Even if event-loop shutdown cancels this wrapper, the semaphore is
+        # held until the concurrent future completes or cancels pre-dispatch.
+        pose = await asyncio.wait_for(
+            asyncio.shield(asyncio.wrap_future(work)), timeout=2.0
+        )
     except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
         return _hold(robot.id, reason=f"Dock marker detection unavailable: {type(exc).__name__}", source="apriltag_detection_failed")
     # Receipt timestamp is not the end of OpenCV computation. A slow or
