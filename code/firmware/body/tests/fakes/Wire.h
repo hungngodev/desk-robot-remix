@@ -34,11 +34,15 @@ class TwoWire {
   bool range_mux_bad_readback = false;
   std::uint16_t tof_register = 0;
   unsigned tof_samples = 0;
+  unsigned imu_probe_attempts = 0;
 
   void begin(int, int, int) {}
   void setTimeOut(unsigned) {}
 
   void beginTransmission(std::uint8_t addr) {
+    if (addr == 0x68 || addr == 0x69 || addr == 0x6a || addr == 0x6b ||
+        addr == 0x1c || addr == 0x1d || addr == 0x1e)
+      ++imu_probe_attempts;
     current_address = addr;
     outbound.clear();
   }
