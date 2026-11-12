@@ -73,6 +73,7 @@ class Settings(BaseModel):
     vision_weights: Path | None = None
     vision_model: str = ""  # Explicit local Ollama VLM; never silently use a cloud model.
     voice_memory_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi to read own episodic text.
+    voice_transcript_memory_enabled: bool = False  # Separate consent to retain model-estimated spoken words as text.
     voice_vision_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi camera questions/voice frame selection.
     pet_autostart_enabled: bool = False  # Explicit hardware opt-in for idle camera and sensor observation.
     fleet_text_sharing_enabled: bool = False  # Opt-in local, provenance-tagged text only.
