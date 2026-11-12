@@ -316,9 +316,10 @@ void setup() {
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
   pinMode(body_pins::kBumperInput, INPUT); // external pullup mandatory
 #endif
-// GPIO36/39 are reserved for separate terminal dock IR receivers.
-// Reed and PIR are optional read-only MCP23017 GPIOB, not MCU pinMode.
-// No IR decoder or terminal movement is enabled in this firmware revision.
+// GPIO36/39 are reserved for independent read-only dock NEC RMT inputs.
+// Reed and PIR use optional MCP23017 GPIOB, not MCU pinMode.
+// The existing decoder is compiled only with DESK_ROBOT_ENABLE_TERMINAL_IR;
+// no IR evidence authorizes motor movement or charger contacts.
 #endif
   for (int pin : body_pins::kServoPins) {
     pinMode(pin, OUTPUT);
