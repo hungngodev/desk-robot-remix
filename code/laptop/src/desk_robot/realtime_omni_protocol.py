@@ -193,6 +193,9 @@ class OmniDuplexWire:
         self.played_ms = 0
         self._needs_new_input = True
         self._input_after_interrupt = False
+        # No JPEG in the old voice tail may be paired with new silence after
+        # an urgent barge-in. Only fresh authenticated speech opens that gate.
+        self._last_speech_audio_ms = -1000
         self._server_response_epoch = None
         return (
             {"type": "response.cancel"},
