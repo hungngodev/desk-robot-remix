@@ -72,3 +72,30 @@ async def test_fake_or_bad_dock_calibration_never_looks_or_drives(tmp_path, chan
     )
     assert result["phase"] == "hold"
     assert head.captures == 0 and not head.commands
+
+
+
+async def test_slow_apriltag_diagnostic_holds_stale_pose_without_any_motion(
+    tmp_path, monkeypatch,
+):
+    import time
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    head = Head()
+
+    def slow_detector(image, camera, *, captured_at):
+        time.sleep(0.25)
+        return DockPose(0, 0, 450, 0.5, captured_at)
+
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", slow_detector)
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=calibration)
+    )
+    assert result["phase"] == "hold"
+    assert "stale" in result["reason"].lower()
+    assert result["motor_authorized"] is False
+    assert result["charging_authorized"] is False
+    assert head.captures == 1 and head.commands == []
