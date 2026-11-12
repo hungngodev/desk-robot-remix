@@ -408,7 +408,10 @@ class MultimodalOrchestrator:
         if self._closed or not self.settings.voice_vision_tools_enabled:
             return
         task = self._capture_tasks.get(robot_id)
-        if task is None or task.done():
+        if task is None or task.done() or task.cancelling():
+            # A new VAD start can race with the prior speech_end cancellation.
+            # Replace that cancelling worker instead of leaving the new
+            # utterance without any camera samples.
             # NEVER await a camera capture in the realtime VAD cancellation
             # callback. Audio playback stops without waiting for JPEG/LLM.
             self._capture_tasks[robot_id] = asyncio.create_task(
