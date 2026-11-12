@@ -963,6 +963,62 @@ async def test_optical_paw_is_silent_until_hardware_qualified(fleet, tmp_path):
         await pet.close()
 
 
+async def test_sht41_ambient_change_requires_fresh_distinct_samples(fleet, tmp_path):
+    """No guessed room weather, replayed climate frames or unqualified voice."""
+    fleet.mode = "hardware"
+    robot = fleet.robots[0]
+    robot.ambient_interactions_qualified = True
+    robot.ambient_temp_change_centi = 200
+    robot.ambient_humidity_change_centi = 800
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 13
+
+    def report(seq, temp, rh, *, valid=True, age=50):
+        return {
+            "robot_id": "robot-01",
+            "pulse": {"present": False, "valid": False, "part_id": 0,
+                      "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
+            "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                       "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [0, 0], "jaw_seq": 0,
+                      "valid": False, "calibrated": False},
+            "climate": {"temp_centi": temp, "rh_centi": rh,
+                        "valid": valid, "seq": seq, "age_ms": age},
+            "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                      "shunt_uv": 0, "fuel_valid": False,
+                      "monitor_valid": False, "current_calibrated": False},
+            "proximity": {"raw": 0, "valid": False, "gesture": 0,
+                          "gesture_events": 0, "physically_qualified": False},
+        }
+
+    try:
+        async def observe(seq, temp, rh, **kwargs):
+            await pet._observe_aux("robot-01", 13, report(seq, temp, rh, **kwargs))
+
+        await observe(20, 2200, 5000)  # environmental baseline only
+        await observe(21, 2440, 5000)
+        await observe(21, 2440, 5000)  # replay cannot confirm a change
+        assert not any(m.kind == "ambient_shift" for m in memory.recent("robot-01"))
+        await observe(22, 2450, 5000)
+        assert sum(m.kind == "ambient_shift" for m in memory.recent("robot-01")) == 1
+        await observe(23, 2450, 5000)
+        assert sum(m.kind == "ambient_shift" for m in memory.recent("robot-01")) == 1
+        await observe(24, 2450, 6200)
+        await observe(25, 2450, 6300)
+        assert sum(m.kind == "ambient_shift" for m in memory.recent("robot-01")) == 2
+        await observe(26, 2200, 3000, valid=False)
+        await observe(1, 2900, 3000)  # reboot baseline does not announce climate
+        await observe(1, 2900, 3000)
+        assert sum(m.kind == "ambient_shift" for m in memory.recent("robot-01")) == 2
+        assert memory.count("robot-02") == 0
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_sensor_interactions_disabled_until_measured_thresholds(fleet, tmp_path):
     fleet.mode = "hardware"
     memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
