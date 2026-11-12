@@ -332,6 +332,7 @@ class MultimodalOrchestrator:
             } for robot in settings.robots
         }
         self._turn_epoch = {r.id: 0 for r in settings.robots}
+        self._voice_turn_at = {r.id: -math.inf for r in settings.robots}
         self._question_epoch = {r.id: 0 for r in settings.robots}
         self._closed = False
 
@@ -440,6 +441,7 @@ class MultimodalOrchestrator:
 
     def _voice_activity(self, robot_id: str, *, end_expected: bool) -> None:
         now = time.monotonic()
+        self._voice_turn_at[robot_id] = now
         if end_expected:
             self.hub.notify(robot_id, "human_voice", now)
         else:
@@ -609,7 +611,12 @@ class MultimodalOrchestrator:
 
         try:
             last = self.hub.frames[robot_id]
-            if not last or time.monotonic() - last[-1].received_at > 0.6:
+            if (not last
+                    or time.monotonic() - last[-1].received_at > 0.6
+                    or last[-1].received_at < self._voice_turn_at[robot_id]):
+                # A recent pre-VAD idle frame is NOT evidence captured during
+                # the current spoken visual question. Still retain earlier
+                # frames for before/after questions when a new one arrives.
                 await self.capture(robot_id, source="voice_question")
             if not current_turn():
                 raise RuntimeError("Visual question superseded by new human speech")
