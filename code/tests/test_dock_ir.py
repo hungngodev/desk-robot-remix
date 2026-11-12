@@ -3,7 +3,6 @@
 No NEC frame, no matter how convincing, independently authorizes a motor
 command or charger output.
 """
-import copy
 
 import httpx
 import pytest
