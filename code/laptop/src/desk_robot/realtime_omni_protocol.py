@@ -159,7 +159,6 @@ class OmniDuplexWire:
                 and frame_receipt_us > self._last_video_receipt_us
                 and self.input_ms - self._last_video_audio_ms >= 1000):
             event["video_frames"] = [base64.b64encode(jpeg).decode("ascii")]
-            event["video_receipt_us"] = frame_receipt_us
             self._last_video_receipt_us = frame_receipt_us
             self._last_video_audio_ms = self.input_ms
             self.frames_sent += 1
