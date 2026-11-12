@@ -68,7 +68,9 @@ async def measure(
                 camera_times.append(time.monotonic() - begin)
             except Exception as exc:
                 camera_errors.append(type(exc).__name__ + ": " + str(exc)[:110])
-            due += camera_period_s
+            # Skip missed slots rather than burst catching up after a
+            # stalled JPEG; audio and body telemetry keep priority.
+            due = max(due + camera_period_s, time.monotonic())
             await asyncio.sleep(max(0, min(deadline, due) - time.monotonic()))
 
     async def poll_status():
@@ -82,7 +84,7 @@ async def measure(
                 status_times.append(time.monotonic() - begin)
             except Exception as exc:
                 status_errors.append(type(exc).__name__ + ": " + str(exc)[:110])
-            due += status_period_s
+            due = max(due + status_period_s, time.monotonic())
             await asyncio.sleep(max(0, min(deadline, due) - time.monotonic()))
 
     await asyncio.gather(poll_camera(), poll_status())
