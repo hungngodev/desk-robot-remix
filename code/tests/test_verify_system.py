@@ -94,5 +94,7 @@ def test_passing_source_checks_never_clear_commercial_or_physical_batch_gates(
     assert receipt["commercial_batch_release_ready"] is False
     assert receipt["assembly_ready"] is False
     assert receipt["charging_verified"] is False
+    assert receipt["sense_sd_j3_isolation_verified"] is False
+    assert receipt["sense_vbus_power_path_verified"] is False
     assert receipt["print_fit_verified"] is False
     assert receipt["five_robot_acoustics_verified"] is False
