@@ -464,3 +464,32 @@ The selected OOMWOO final alignment hardware **source path** now exists without 
 **Cancellation priority:** `Coordinator.stop` and the job cleanup path now dispatch the WROOM STOP before awaiting any canceled camera or model tasks. The host no longer uses `asyncio.wait_for(gather(...))`, which can itself block indefinitely on a cancellation-resistant child; it uses `asyncio.wait(..., timeout=2)` and preserves failure status for unresponsive cleanup. `test_control.py` injects a hanging canceled job to assert physical STOP dispatch first. Still unexecuted on the full repository. The local WROOM watchdog and independently latched cliff/bumper/dock stops remain the last safeguard.
 
 **Repeatable future execution:** `python3 code/scripts/verify_system.py --suite body --report verification-result.json` runs real CMake, C++ sanitizer build and CTest with actual subprocess codes. `--suite all` additionally requests Python, Ruff, all three PlatformIO profiles and actual pinned Sense build. The script creates a machine readable receipt with each stage result and **never** sets `assembly_ready`, `charging_verified`, `print_fit_verified` or `five_robot_acoustics_verified` true. The four GitHub Actions jobs are still failing before recording any step and logs cannot be retrieved through the current connector. No arbitrary number of changes, commits or simulated trials substitutes for real live electrical, mechanical and acoustic evidence.
+
+
+## November 12 native portable source tests, exact blob identity
+
+**Evidence class: HOST_TESTED for the five standalone portable C++ tests listed here only.** Source and test files were retrieved from the canonical PR #17 head, recreated byte-for-byte in an isolated working directory, and verified with `git hash-object` against the actual GitHub blob SHAs before compilation. Executed using GNU g++ 14.2.0, C++11, `-Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer`; five processes returned exit code 0 and printed their PASS markers. These are actual compiled and executed repository test sources, not a simulated interpretation of source code. The isolated directory did not contain the complete firmware tree and was not an authorized real rover or full CMake build.
+
+| Actual source test | Verified Git blobs (header(s); test) | Observed executable result |
+| --- | --- | --- |
+| `range_scan_tests.cpp` | `RangeScanOrder.h` 79330bae; test e146643e | PASS: five critical channels before each rotating optional direction |
+| `terminal_ir_tests.cpp` | `NecBurst.h` 7114aba7; test 93e5b98c | PASS: 100 valid classic NEC frames, 400 corruptions, stale pair invalidation, queue age and wrap |
+| `pn532_frames_tests.cpp` | `Pn532Frames.h` 596be478; test e91576a4 | PASS: PN532 bounded framing, ACK and checksum, absent/present/invalid tag |
+| `pulse_raw_tests.cpp` | `OpticalRaw.h` c08681c2; test adf93510 | PASS: MAX30102 raw 18-bit parsing and uninitialized sample status |
+| `accessory_math_tests.cpp` | `AccessoryReadings.h` eaf15dd3, `Bmp280Math.h` f9778e6e, `GestureDecoder.h` e2bd53a9; test 1141127c | PASS: SHT CRC and conversions, BMP pressure/temperature, INA226/MAX17048, APDS9960 direction and empty state |
+
+The commands followed the same portable target pattern (each exact source path substituted):
+
+```sh
+g++ -std=c++11 -Wall -Wextra -Wpedantic -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  -I <isolated-git-blob-matched-header-directory> \
+  <isolated-git-blob-matched-tests/target.cpp> -o <target>
+<target>    # observed exit 0 and PASS
+```
+
+**New source change not covered by those five passes:** `dc9fb75` invalidates the cached side/rear ToF diagnostics upon a shared mux or I2C fault, and `999f6f2` adds a regression in `tof_mux_tests.cpp`. The new regression initially assumed incorrect scan order. Independent compilation and execution of a small scanner schedule harness established the actual sequence (critical 0..4, then optional 5/6/7 in rotation), and `5006f24` corrected the new test. **This new `tof_mux_tests` regression was not executed or compiled as part of this portable set.** Next run `cmake -S code/firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON`, build, then `ctest --test-dir /tmp/desk-robot-body-host --output-on-failure` in a full checked-out branch, including the actual fake Wire implementation and CliffGuard.
+
+**CI environmental blocker persists:** Four Actions jobs for the recent PR heads still finish with zero recorded steps, and requested downloadable job logs return HTTP 404 `BlobNotFound`. Direct terminal `git ls-remote` failed with `Could not resolve host: github.com` in the working execution container. This isolated exact-blob route verifies portable components without suggesting that full Python, PlatformIO or ESP-IDF builds passed.
+
+**Still not physically qualified:** cliff stops, camera/VAD acoustic latency, gripper force and fit, terminal IR GPIO36/39 actual receiver timing, approved protected battery/charger/NTC/load sharing, dock contacts and 1S pack current, dimensionally fitted CAD, real motor outputs, five physically active robots. `assembly_ready=false`, `charging_verified=false`, `print_fit_verified=false`, `five_robot_acoustics_verified=false`. Preserve PR #17 draft and do not turn these portable test passes into acceptance of the complete robot.
