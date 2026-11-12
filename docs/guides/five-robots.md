@@ -139,7 +139,7 @@ uv run desk-robot --config config/local.toml secrets --add-missing
 ```
 
 Values stay in ignored `config/local.env`, permissions 0600, hidden from output.
-**Sense now compiles, but physical peripheral/fit tests remain.** After it is
+**The Sense source build target exists, but the latest GitHub Actions run never reached the compiler, and physical peripheral/fit tests remain open.** After it is
 qualified, prepare each head using its own configured identity,
 rebuilding one private binary at a time; see [firmware builds](build.md):
 
