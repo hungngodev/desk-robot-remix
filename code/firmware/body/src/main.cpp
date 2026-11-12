@@ -441,8 +441,10 @@ void loop() {
   control.set_paw_pulse(paw_pulse.sample());
   accessories.poll(millis());
   control.set_accessories(accessories.readings());
+#if defined(DESK_ROBOT_ENABLE_TERMINAL_IR) && DESK_ROBOT_ENABLE_TERMINAL_IR
   terminal_ir.poll(millis());  // bounded, nonblocking, after cliff/dock reads
   control.set_terminal_ir(terminal_ir.evidence(millis()));
+#endif
 #endif
   control.tick(millis());
   apply_outputs();
