@@ -331,8 +331,12 @@ bool AccessorySensors::nfc_write(
   const std::size_t n = pn532_encode(command, body, size, frame, sizeof(frame));
   if (!n) return false;
   wire_->beginTransmission(kPn532Address);
-  for (std::size_t i = 0; i < n; ++i)
-    if (wire_->write(frame[i]) != 1) return false;
+  for (std::size_t i = 0; i < n; ++i) {
+    if (wire_->write(frame[i]) != 1) {
+      wire_->endTransmission(true); // always release an incomplete I2C write
+      return false;
+    }
+  }
   return wire_->endTransmission(true) == 0;
 }
 
@@ -471,7 +475,12 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
     case 2: force(now_ms); break;
     case 3: climate(now_ms); barometer(now_ms); break;
     case 4: power(now_ms); break;
-    case 5: dock_status(now_ms); nfc_poll(now_ms); break;
+    case 5:
+      dock_status(now_ms);
+      // Optional NFC work is subordinate to the required dock monitor.
+      // Never spend a second bus transaction if mandatory GPIO failed.
+      if (data_.dock.present && data_.dock.valid) nfc_poll(now_ms);
+      break;
     case 6: angle(1, now_ms); break;
     case 7: angle(2, now_ms); break;
     default: break;
