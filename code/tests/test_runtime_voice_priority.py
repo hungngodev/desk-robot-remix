@@ -1,5 +1,6 @@
 """A human speaking to one Sense preempts the shared fleet speech floor."""
 from types import SimpleNamespace
+import time
 
 from desk_robot.runtime import Runtime
 
@@ -226,7 +227,6 @@ async def test_aec_barge_uses_bounded_video_lease_not_unended_speech_start():
 
 
 async def test_server_vad_snapshot_preempts_missing_start_and_releases_missing_end():
-    import time
     from desk_robot.multimodal import CameraFrameHub
 
     calls = []
@@ -324,10 +324,10 @@ async def test_missing_vad_start_reuses_real_multimodal_camera_preemption():
         result = await asyncio.gather(optional, return_exceptions=True)
         assert isinstance(result[0], asyncio.CancelledError)
         assert slow.cancelled
-        assert visual.hub.user_active("robot-01", __import__("time").monotonic())
+        assert visual.hub.user_active("robot-01", time.monotonic())
         assert not visual.hub.frames["robot-02"]
         assert visual._turn_epoch["robot-02"] == 1
         await runtime._on_voice_snapshot(frozenset())
-        assert not visual.hub.user_active("robot-01", __import__("time").monotonic())
+        assert not visual.hub.user_active("robot-01", time.monotonic())
     finally:
         await visual.close()
