@@ -134,6 +134,7 @@ class OmniDuplexWire:
             not isinstance(jpeg, bytes)
             or not 10 <= len(jpeg) <= self.MAX_IMAGE_BYTES
             or not jpeg.startswith(b"\xff\xd8")
+            or not jpeg.endswith(b"\xff\xd9")
             or type(camera_age_ms) is not int
             or not 0 <= camera_age_ms <= 1000
             or type(frame_receipt_us) is not int
