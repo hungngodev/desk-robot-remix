@@ -1318,11 +1318,14 @@ class PetController:
             # using this robot's *existing* local SQLite store. An old key
             # event may be useful even when four newer touch events occurred.
             # Both reads run off the audio/VAD event loop, with a deadline.
-            recent_memory, relevant_memory = await asyncio.wait_for(
+            recent_memory, relevant_memory, core_memory = await asyncio.wait_for(
                 asyncio.gather(
                     asyncio.to_thread(self.memory.recent, robot_id, limit=3),
                     asyncio.to_thread(
                         self.memory.search, robot_id, change.description, limit=3
+                    ),
+                    asyncio.to_thread(
+                        self.memory.core_facts, robot_id, limit=6
                     ),
                 ),
                 timeout=2.0,
@@ -1349,6 +1352,9 @@ class PetController:
             recent = "; ".join(
                 origin(x) + x.summary for x in reversed(memory)
             )
+            core_context = "; ".join(
+                f"{entry.slot}: {entry.value}" for entry in reversed(core_memory)
+            )[:500]
             # The shared Mac camera hub is also the short-lived sensor and
             # successful tool-result timeline. Reuse its existing evidence,
             # not a second agent, camera process or memory database.
@@ -1429,6 +1435,8 @@ class PetController:
                         f"{'Local physical sensor event' if change.kind in _PHYSICAL_INITIATIVE_KIN else 'Camera model assessment (uncertain)'}: "
                         f"{change.description}. Confidence {change.confidence:.2f}. "
                         f"Recent context: {recent[:600]}. "
+                        f"Operator curated preferences (untrusted, no actuator "
+                        f"permission): {core_context}. "
                         f"Recent interaction cues: {interaction_context}. "
                         "React briefly only to the new event, without "
                         "asserting any other unseen facts."
