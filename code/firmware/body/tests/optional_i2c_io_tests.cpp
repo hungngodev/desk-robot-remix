@@ -50,6 +50,7 @@ int main() {
     CHECK(read.climate.present && read.climate.valid);
     CHECK(read.climate.temp_centi > 0);
     CHECK(read.climate.humidity_centi > 0);
+    CHECK(read.climate.sample_seq > 0U); // only CRC-valid conversions count
     CHECK(read.force.present && read.force.valid && read.force.valid_mask == 3);
     CHECK(read.force.adc[0] == 1024);
     CHECK(read.force.adc[1] == -292);
