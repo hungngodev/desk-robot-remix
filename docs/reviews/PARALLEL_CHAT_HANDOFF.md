@@ -378,3 +378,8 @@ Source-only documentation commit `ae7bc335` adds the TI BQ24195 supplement-mode 
 ### Live voice identity type regression
 
 Commits `d8467f7` and `f6bea1a` make authenticated VAD event validation reject list/dict/null `robot_id` with a consistent `ValueError` before set membership, instead of leaking a `TypeError` from malformed unhashable values. The existing invalid-event test now includes those cases and still requires no audio event to be delivered or cursor to advance. Source and regression commits only; no passing repository test or measured physical barge-in is claimed.
+
+
+### Bounded concurrent fallback audio interruption
+
+`694bfae` updates the existing `VoiceEventListener._preempt_all` fallback to dispatch per-head aborts concurrently and use a 0.5 second best-effort timeout rather than awaiting each pet serially. A head that hangs or ignores cancellation no longer blocks abort attempts on the other four heads. If any head does not finish, the callback raises a retryable timeout and explicitly **does not report physical interruption success**. The production `on_global_interrupt` single group audio owner is unchanged. `556da97` adds regressions for a hanging head while a peer is aborted and explicit listener cancellation. Source/tests are committed but not executed as repository pytest, no measured microphone barge-in or PCM drain evidence; the realtime target remains pending.
