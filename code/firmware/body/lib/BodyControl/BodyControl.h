@@ -87,7 +87,7 @@ class BodyControl {
   void set_paw_pulse(const OpticalRaw& sample) { state_.paw_pulse = sample; }
   // Fresh physical dock switch + charger PGOOD is an independent local
   // DISARM interlock. It never enables charging, nor grants movement.
-  void set_accessories(const AccessoryReadings& readings);
+  void set_accessories(const AccessoryReadings& readings, std::uint32_t now_ms);
   void set_terminal_ir(const IrPairEvidence& evidence) {
     state_.terminal_ir = evidence; // entirely read-only; no arm or charge
   }
@@ -133,6 +133,8 @@ class BodyControl {
   bool cap_initialized_ = false;
   bool extras_initialized_ = false;
   bool dock_power_lockout_ = false;  // stays latched across missing I2C samples
+  bool dock_sample_seen_ = false;
+  std::uint32_t dock_last_seq_ = 0, dock_last_at_ms_ = 0;
   bool dock_monitor_required_ = false; // full robot build, set at boot only
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};
