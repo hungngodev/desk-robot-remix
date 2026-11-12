@@ -69,6 +69,7 @@ class Runtime:
             on_global_interrupt=self._on_voice_global,
             on_monitor_ready=self._on_voice_monitor_ready,
             on_speech_snapshot=self._on_voice_snapshot,
+            require_snapshot=True,
         )
         self._voice_task = asyncio.create_task(self.voice_events.run())
 
