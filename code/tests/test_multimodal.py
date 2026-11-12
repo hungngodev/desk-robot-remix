@@ -101,6 +101,30 @@ async def test_sensor_burst_uses_existing_camera_owner_and_coalesces_requests():
         await visual.close()
 
 
+async def test_immediate_new_speech_after_end_replaces_cancelling_camera_worker():
+    visual = MultimodalOrchestrator(
+        config(enabled=True),
+        {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        visual.voice_started("robot-01")
+        first = visual._capture_tasks["robot-01"]
+        visual.voice_ended("robot-01")
+        assert first.cancelling()
+        visual.voice_started("robot-01")  # no event-loop yield between edges
+        second = visual._capture_tasks["robot-01"]
+        assert second is not first
+        async with asyncio.timeout(2):
+            while not visual.hub.frames["robot-01"]:
+                await asyncio.sleep(0.01)
+        assert visual.hub.frames["robot-01"][-1].source == "speech"
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        visual.voice_ended("robot-01")
+    finally:
+        await visual.close()
+
+
 async def test_human_vad_cancels_pending_sensor_camera_before_speech_frames():
     class BlockedFirstCamera(Head):
         def __init__(self):
