@@ -235,7 +235,7 @@
       "name": "Magnetic reed switch",
       "per_robot": 1,
       "reported_owned_total": 1,
-      "notes": "One owned; GPIO36 input, magnets on changeable hats",
+      "notes": "One owned; optional read-only MCP23017 GPIOB0 active-low reed input on mux 0x71 lane 5. WROOM GPIO36 is reserved exclusively for left terminal IR receiver.",
       "group": "pet"
     },
     {
@@ -243,7 +243,7 @@
       "name": "PIR thermal motion sensor",
       "per_robot": 1,
       "reported_owned_total": 1,
-      "notes": "One owned; GPIO39 only if output verified <=3.3V",
+      "notes": "One owned; optional read-only MCP23017 GPIOB1 active-high PIR input on mux 0x71 lane 5, level verified <=3.3V. WROOM GPIO39 is reserved exclusively for right terminal IR receiver.",
       "group": "pet"
     },
     {
@@ -275,7 +275,7 @@
       "name": "MCP23017 16 channel I2C GPIO expander",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "Only optional signals, never WROOM fail-safe stop or motor pulses",
+      "notes": "Required MCP23017 GPIOA dock seating/charger status is a local fail-closed WROOM motion interlock. GPIOB0 reed and GPIOB1 PIR are read-only optional signals. I2C expander never directly drives motors or charging.",
       "group": "pet"
     },
     {
