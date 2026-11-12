@@ -80,10 +80,11 @@ def test_unbalanced_optics_cannot_be_sold_as_differential_bearing():
     rows = position_records()
     # All signal samples from all locations appear identical. RMT frame
     # sequences still legitimately advance, but baffles tell us nothing.
-    for row in rows:
+    for n, row in enumerate(rows, 1):
         row["ir"].update(
             left_valid=True, right_valid=True, match=True,
-            code=0xCB34ED12, left_age_ms=15, right_age_ms=15,
+            left_seq=n, right_seq=n, code=0xCB34ED12,
+            left_age_ms=15, right_age_ms=15,
         )
     result = cal.analyze(rows, "robot-01")
     assert result["candidate_differential_signal"] is False
