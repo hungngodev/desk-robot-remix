@@ -27,6 +27,10 @@ lease_cleanup_task: asyncio.Task | None = None
 speaker_lock = asyncio.Lock()
 # Retain the PR #7 device-specific generation fence for queued or encoding TTS.
 interrupt_generation: dict[str, int] = {}
+# Each real current-head human speech start supersedes tool results from
+# an older utterance. Unlike an audio decoder epoch, this stays stable across
+# speech_end until the next actual person begins speaking.
+voice_turn_generation: dict[str, int] = {}
 # Never allow one robot to cancel another's reply based on hearing its speaker.
 # Only the current device may contribute AEC-cleaned voice during group speech.
 active_device_id: str | None = None
@@ -110,6 +114,7 @@ def record_human_voice(conn, kind: str) -> bool:
                   else "xiaozhi_aec_vad",
     })
     if kind in ("speech_start", "normal", "group"):
+        voice_turn_generation[device] = voice_turn_generation.get(device, 0) + 1
         native = _native_adapter()
         if native is not None:
             # Never block original AEC/VAD while silencing other native pets.
@@ -160,6 +165,9 @@ def unregister(conn):
         # A queued request may outlive this socket and a replacement register.
         interrupt_generation[conn.device_id] = (
             interrupt_generation.get(conn.device_id, 0) + 1
+        )
+        voice_turn_generation[conn.device_id] = (
+            voice_turn_generation.get(conn.device_id, 0) + 1
         )
 
 
