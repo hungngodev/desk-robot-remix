@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <esp_system.h>
 
 #include "BodyControl.h"
 #include "BodyPins.h"
@@ -305,6 +306,9 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool loca
 void setup() {
   // The first hardware action disables every motor/phase input, before UART.
   all_motor_inputs_low();
+  // This is observation identity only, not cryptographic authentication.
+  // New WROOM boots must not reuse the last IMU observation session.
+  control.set_boot_epoch(esp_random() | 1U);
 #if DESK_ROBOT_STEPPER
   // The touch breakout OUT is actively driven and powered at 3.3V.
   // GPIO34 has no internal pullup; do not leave it floating when fitted.
