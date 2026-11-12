@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 
-import httpx
 import pytest
 from desk_robot.api import create_app
 from desk_robot.memory import MemoryStore
@@ -102,4 +101,6 @@ def test_voice_memory_tool_opt_in_and_same_pet_topical_recall(
             "/v1/pet/robot-02/voice-context",
             headers=tool, params={"query": "keys"},
         )
-        assert other.status_code == 404  # simulation fixture has only robot-01
+        assert other.status_code == 200
+        assert other.json()["matched"] is False
+        assert other.json()["memories"] == []  # separate private SQLite database
