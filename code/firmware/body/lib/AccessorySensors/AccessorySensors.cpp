@@ -131,6 +131,12 @@ bool AccessorySensors::begin(TwoWire& wire) {
     data_.dock.present = probe(0x20) &&
         write8(0x20, 0x00, 0xFF) &&  // all GPIOA inputs
         write8(0x20, 0x0C, 0x0F);    // 3.3V pullups GPA0..3
+    // GPIOB is a separate slow read-only optional input port. Moving reed
+    // and PIR here keeps WROOM GPIO36/39 free for timer-capable dock IR.
+    // Never make GPIOB validity a substitute for required GPIOA freshness.
+    data_.optional_inputs.present = data_.dock.present &&
+        write8(0x20, 0x01, 0xFF) && // all GPIOB inputs, no output drivers
+        write8(0x20, 0x0D, 0x01);   // B0 reed pullup; B1 PIR externally biased
     // PN532 is truly optional and cannot replace MCP23017 dock interlock.
     // An address ACK only starts a nonblocking SAM protocol verification.
     if (probe(kPn532Address)) nfc_stage_ = NfcStage::StartSam;
@@ -325,6 +331,18 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
 }
 
 
+void AccessorySensors::optional_gpio(std::uint32_t now_ms) {
+  auto& extra = data_.optional_inputs;
+  if (!extra.present) return;
+  std::uint8_t bits = 0;
+  extra.valid = read(0x20, 0x13, &bits, 1); // MCP23017 BANK=0 GPIOB
+  if (!extra.valid) return;
+  extra.reed_closed = (bits & 0x01U) == 0; // external 3.3V switch to GND
+  extra.pir_active = (bits & 0x02U) != 0;  // verified 3.3V output
+  extra.at_ms = now_ms;
+  ++extra.sample_seq;
+}
+
 bool AccessorySensors::nfc_write(
     std::uint8_t command, const std::uint8_t* body, std::size_t size) {
   std::uint8_t frame[32]{};
@@ -479,8 +497,13 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
       dock_status(now_ms);
       // Optional NFC work is subordinate to the required dock monitor.
       // Never spend a second bus transaction if mandatory GPIO failed.
-      if (data_.dock.present && data_.dock.valid) nfc_poll(now_ms);
-      else data_.nfc.valid = false; // never trust optional tag on dock bus failure
+      if (data_.dock.present && data_.dock.valid) {
+        optional_gpio(now_ms);
+        nfc_poll(now_ms);
+      } else {
+        data_.optional_inputs.valid = false;
+        data_.nfc.valid = false; // no optional bus work on dock failure
+      }
       break;
     case 6: angle(1, now_ms); break;
     case 7: angle(2, now_ms); break;
@@ -492,6 +515,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
     data_.climate.valid = data_.force.valid =
       data_.proximity.valid = data_.gauge.fuel_valid =
       data_.gauge.monitor_valid = data_.dock.valid = data_.nfc.valid = false;
+    data_.optional_inputs.valid = false;
     for (auto& sample : data_.angle) sample.valid = false;
   }
 }
