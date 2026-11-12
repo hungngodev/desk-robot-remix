@@ -867,6 +867,102 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
         await pet.close()
 
 
+async def test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold(fleet, tmp_path):
+    """Optical paw contact is an interaction, not a medical pulse reading."""
+    fleet.mode = "hardware"
+    robot = fleet.robots[0]
+    robot.paw_contact_ir_raw_threshold = 10000
+    robot.paw_contact_interactions_qualified = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 7
+
+    def report(seq, ir, *, age=20, valid=True):
+        return {
+            "robot_id": "robot-01",
+            "pulse": {
+                "present": True, "valid": valid, "part_id": 0x15,
+                "red": 1000, "ir": ir, "age_ms": age, "seq": seq,
+                "bpm": None, "medical": False,
+            },
+            "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                       "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [0, 0], "jaw_seq": 0, "valid": False,
+                      "calibrated": False},
+            "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
+            "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                      "shunt_uv": 0, "fuel_valid": False,
+                      "monitor_valid": False, "current_calibrated": False},
+            "proximity": {"raw": 0, "valid": False, "gesture": 0,
+                          "gesture_events": 0, "physically_qualified": False},
+        }
+
+    try:
+        async def observe(seq, ir, **kwargs):
+            await pet._observe_aux("robot-01", 7, report(seq, ir, **kwargs))
+
+        await observe(1, 1000)  # initial optical baseline never announces touch
+        await observe(2, 30000)
+        await observe(2, 30000)  # HTTP replay does not count twice
+        assert not any(m.kind == "paw_contact" for m in memory.recent("robot-01"))
+        await observe(3, 33000)
+        assert sum(m.kind == "paw_contact" for m in memory.recent("robot-01")) == 1
+        await observe(4, 30000)
+        await observe(5, 1000)
+        await observe(6, 1000)  # two confirmed low samples release pad
+        await observe(7, 30000)
+        await observe(8, 33000)
+        assert sum(m.kind == "paw_contact" for m in memory.recent("robot-01")) == 2
+        await observe(9, 1000, age=400)  # stale sample invalidates baseline
+        await observe(1, 30000)  # firmware reboot: rebaseline, no old replay
+        await observe(1, 30000)
+        assert sum(m.kind == "paw_contact" for m in memory.recent("robot-01")) == 2
+        assert memory.count("robot-02") == 0
+        assert not any("heartbeat" in m.summary.lower()
+                       for m in memory.recent("robot-01"))
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_optical_paw_is_silent_until_hardware_qualified(fleet, tmp_path):
+    fleet.mode = "hardware"
+    fleet.robots[0].paw_contact_ir_raw_threshold = 10000
+    # The unverified flag is deliberately still false.
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 11
+    from desk_robot.aux import validate_aux
+    payload = {
+        "robot_id": "robot-01",
+        "pulse": {"present": True, "valid": True, "part_id": 21,
+                  "red": 200, "ir": 120000, "age_ms": 20, "seq": 3,
+                  "bpm": None, "medical": False},
+        "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                   "valid_mask": 0, "magnet": [0, 0, 0]},
+        "force": {"adc": [0, 0], "jaw_seq": 0, "valid": False,
+                  "calibrated": False},
+        "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
+        "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                  "shunt_uv": 0, "fuel_valid": False,
+                  "monitor_valid": False, "current_calibrated": False},
+        "proximity": {"raw": 0, "valid": False, "gesture": 0,
+                      "gesture_events": 0, "physically_qualified": False},
+    }
+    try:
+        for seq in (3, 4, 5):
+            payload["pulse"]["seq"] = seq
+            await pet._observe_aux("robot-01", 11, validate_aux(payload, "robot-01"))
+        assert not any(m.kind == "paw_contact" for m in memory.recent("robot-01"))
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_sensor_interactions_disabled_until_measured_thresholds(fleet, tmp_path):
     fleet.mode = "hardware"
     memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
