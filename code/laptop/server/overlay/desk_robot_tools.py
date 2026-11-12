@@ -3,6 +3,7 @@
 import os
 
 import httpx
+import desk_robot_bridge as bridge
 from desk_robot_bridge import connections, robot_for_device
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
 
@@ -15,6 +16,10 @@ async def call(conn, route, payload=None):
         # A detached old WebSocket must not issue a Mac action after a
         # replacement head reconnects under the same configured device ID.
         return {"error": "Current registered head or local tool credential missing"}
+    # A slow VLM or job poll belongs to the exact current human utterance.
+    # A newer speech_start, AEC barge, or head reconnect invalidates its
+    # result even when the Mac completed its HTTP request successfully.
+    generation = getattr(bridge, "voice_turn_generation", {}).get(conn.device_id, 0)
     try:
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:8765", timeout=5,
@@ -40,6 +45,15 @@ async def call(conn, route, payload=None):
         # Xiaozhi. No retry, no stale substitute response, no raw LAN/token
         # diagnostics in the text returned to the language model.
         return {"error": "Robot Mac connection unavailable", "retried": False}
+    if (connections.get(conn.device_id) is not conn
+            or robot_for_device(conn.device_id) != robot
+            or getattr(bridge, "voice_turn_generation", {}).get(
+                conn.device_id, 0
+            ) != generation):
+        return {
+            "error": "Robot tool result superseded by new speech or reconnect",
+            "retried": False,
+        }
     if response.status_code >= 400:
         return {
             "error": f"Robot Mac rejected request ({response.status_code})",
