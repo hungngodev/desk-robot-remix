@@ -61,6 +61,12 @@ async def test_gap_preempts_all_robot_speech_and_rebaselines():
 @pytest.mark.parametrize("event", [
     {"seq": 3, "robot_id": "robot-99", "kind": "normal",
      "source": "xiaozhi_aec_vad"},
+    {"seq": 3, "robot_id": ["robot-01"], "kind": "normal",
+     "source": "xiaozhi_aec_vad"},
+    {"seq": 3, "robot_id": {"id": "robot-01"}, "kind": "normal",
+     "source": "xiaozhi_aec_vad"},
+    {"seq": 3, "robot_id": None, "kind": "normal",
+     "source": "xiaozhi_aec_vad"},
     {"seq": 4, "robot_id": "robot-01", "kind": "normal",
      "source": "xiaozhi_aec_vad"},
     {"seq": 3, "robot_id": "robot-01", "kind": "normal", "source": "manual"},
