@@ -208,7 +208,9 @@ async def test_detector_timeout_does_not_queue_another_native_worker(tmp_path, m
 
 
 async def test_cancel_before_detector_dispatch_releases_slot(tmp_path, monkeypatch):
+    """A queued native future must release its slot if dispatch is cancelled."""
     import asyncio
+    from concurrent.futures import Future
 
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
@@ -216,19 +218,18 @@ async def test_cancel_before_detector_dispatch_releases_slot(tmp_path, monkeypat
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
     robot = SimpleNamespace(id="robot-01", dock_calibration=path)
-    dispatched = asyncio.Event()
-    allow_dispatch = asyncio.Event()
-    original_to_thread = asyncio.to_thread
+    queued = Future()
+    submitted = asyncio.Event()
+    real_submit = dock_runtime._DETECTOR_POOL.submit
 
-    async def delayed_dispatch(func, *args, **kwargs):
-        dispatched.set()
-        await allow_dispatch.wait()
-        return await original_to_thread(func, *args, **kwargs)
+    def not_dispatched_yet(*args, **kwargs):
+        submitted.set()
+        return queued
 
-    monkeypatch.setattr(dock_runtime.asyncio, "to_thread", delayed_dispatch)
+    monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", not_dispatched_yet)
     observer = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
     try:
-        await asyncio.wait_for(dispatched.wait(), timeout=1)
+        await asyncio.wait_for(submitted.wait(), timeout=1)
         observer.cancel()
         with pytest.raises(asyncio.CancelledError):
             await observer
@@ -236,7 +237,9 @@ async def test_cancel_before_detector_dispatch_releases_slot(tmp_path, monkeypat
         assert busy["source"] == "apriltag_detector_busy"
         assert not busy["motor_authorized"] and not busy["charging_authorized"]
     finally:
-        allow_dispatch.set()
+        # Model executor cancellation *before* a worker has started.
+        assert queued.cancel()
+        monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", real_submit)
 
     for _ in range(100):
         if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
@@ -244,7 +247,7 @@ async def test_cancel_before_detector_dispatch_releases_slot(tmp_path, monkeypat
             break
         await asyncio.sleep(0.01)
     else:
-        pytest.fail("Cancelled observer leaked the detector slot")
+        pytest.fail("Cancelled native future leaked the detector slot")
 
     def detector(image, calibration, *, captured_at):
         return DockPose(0, 0, 450, 0.5, captured_at)
@@ -310,3 +313,68 @@ async def test_cancel_after_native_detector_starts_keeps_slot(tmp_path, monkeypa
     assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
     assert not recovered["physical_acceptance_pass"]
     assert len(calls) == 2
+
+
+
+async def test_cancel_asyncio_future_while_native_detector_runs_still_holds_slot(
+    tmp_path, monkeypatch,
+):
+    """Cancelling the asyncio wrapper cannot make active C work seem finished."""
+    import asyncio
+    import threading
+
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
+    started, release = threading.Event(), threading.Event()
+    wrappers = []
+    calls = []
+    original_wrap = asyncio.wrap_future
+
+    def tracked_wrap(native_future, *args, **kwargs):
+        wrapper = original_wrap(native_future, *args, **kwargs)
+        wrappers.append(wrapper)
+        return wrapper
+
+    def blocked_detector(image, calibration, *, captured_at):
+        calls.append(captured_at)
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("Detector test release was not signalled")
+        return DockPose(0, 0, 450, 0.5, captured_at)
+
+    monkeypatch.setattr(dock_runtime.asyncio, "wrap_future", tracked_wrap)
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked_detector)
+    observer = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=2)
+        assert wrappers
+        # Simulate the event loop cancelling its adapter task at shutdown.
+        wrappers[0].cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await observer
+        busy = await dock_runtime.observe_actual_dock(Head(), robot)
+        assert busy["source"] == "apriltag_detector_busy"
+        assert busy["phase"] == "hold"
+        assert not busy["motor_authorized"] and not busy["charging_authorized"]
+        assert len(calls) == 1
+    finally:
+        release.set()
+        if not observer.done():
+            observer.cancel()
+            await asyncio.gather(observer, return_exceptions=True)
+
+    for _ in range(100):
+        if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
+            dock_runtime._DETECTOR_SLOT.release()
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("Completed native detector never released its slot")
+    recovered = await dock_runtime.observe_actual_dock(Head(), robot)
+    assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
+    assert len(calls) == 2
+    assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
