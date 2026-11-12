@@ -215,3 +215,55 @@ async def test_pinned_plugin_executor_keeps_live_loop_responsive_under_sync_tool
         release.set()
         await asyncio.gather(task, *extras, return_exceptions=True)
         ns["_PLUGIN_POOL"].shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.parametrize("superseded_by", ["new_speech", "head_reconnect"])
+async def test_inflight_xiaozhi_tool_cannot_publish_late_other_turn_result(
+    bridge_tools, monkeypatch, superseded_by,
+):
+    """An old camera/tool answer cannot become the response to a new person."""
+    import asyncio
+
+    ready, release = asyncio.Event(), asyncio.Event()
+    bridge = bridge_tools.bridge
+    bridge.voice_turn_generation = {"mac-head-01": 3}
+
+    class DelayedMac:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, *args, **kwargs):
+            ready.set()
+            await release.wait()
+            return httpx.Response(200, json={
+                "robot_id": "robot-01", "answer": "OLD CAMERA ANSWER",
+                "motor_authorized": False,
+            })
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", DelayedMac)
+    task = asyncio.create_task(bridge_tools.call(
+        bridge_tools.registered_head, "look",
+        {"question": "What is on the desk?"},
+    ))
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=1)
+        if superseded_by == "new_speech":
+            bridge.voice_turn_generation["mac-head-01"] += 1
+        else:
+            bridge.connections["mac-head-01"] = SimpleNamespace(
+                device_id="mac-head-01"
+            )
+        release.set()
+        result = await asyncio.wait_for(task, timeout=1)
+        assert result["retried"] is False
+        assert "superseded" in result["error"]
+        assert "OLD CAMERA ANSWER" not in str(result)
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
