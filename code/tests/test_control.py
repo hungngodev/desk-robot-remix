@@ -371,6 +371,48 @@ async def test_exploration_drops_on_body_disarm_and_never_rearms(settings):
         await c.close()
 
 
+async def test_exploration_rechecks_body_after_slow_camera_before_drive(settings):
+    """A new cliff fault after a JPEG must stop the robot without a pulse."""
+    c, head = make(settings)
+    old_snapshot = head.snapshot
+
+    async def disarm_during_camera():
+        image = await old_snapshot()
+        head.armed = False
+        return image
+
+    head.snapshot = disarm_during_camera
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=4)
+        assert job.state == "failed"
+        assert "disarmed" in job.error
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()
+
+
+async def test_exploration_camera_hang_expires_before_any_drive(settings):
+    c, head = make(settings)
+
+    async def hung_camera():
+        await asyncio.sleep(30)
+
+    head.snapshot = hung_camera
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=4)
+        assert job.state == "failed"
+        assert "timeout" in (job.error or "").lower()
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()
+
+
 async def test_hardware_exploration_requires_real_swept_path_qualification(settings):
     c, head = make(settings)
     settings.mode = "hardware"
