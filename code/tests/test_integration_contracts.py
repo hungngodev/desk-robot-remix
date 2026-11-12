@@ -14,8 +14,8 @@ from pydantic import ValidationError
 from desk_robot.config import Settings, load_settings
 from desk_robot.multimodal import TRIGGERS
 from desk_robot.pet import (
-    _PHYSICAL_INITIATIVE_KINDS, _SOCIAL_EVENT_KINDS,
-    _VISUAL_INITIATIVE_MIN_CONFIDENCE,
+    _DIRECT_INTERACTION_KINDS, _PHYSICAL_INITIATIVE_KINDS,
+    _SOCIAL_EVENT_KINDS, _VISUAL_INITIATIVE_MIN_CONFIDENCE,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +26,7 @@ def test_all_firmware_sensor_reactions_have_a_real_camera_priority_label():
     # Every event produced by physical input and eligible to initiate speech
     # must be representable as a separate authenticated camera context hint.
     assert _PHYSICAL_INITIATIVE_KINDS <= TRIGGERS
+    assert _DIRECT_INTERACTION_KINDS <= _PHYSICAL_INITIATIVE_KINDS
     assert _SOCIAL_EVENT_KINDS <= (
         _PHYSICAL_INITIATIVE_KINDS | _VISUAL_INITIATIVE_MIN_CONFIDENCE.keys()
     )
