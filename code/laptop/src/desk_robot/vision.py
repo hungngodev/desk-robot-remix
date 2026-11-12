@@ -94,10 +94,11 @@ class VisualChangeGate:
         if self._pixel_baseline is None:
             self._pixel_baseline, self._baseline = current, jpeg
             return None
-        changed = sum(
-            1 for before, after in zip(self._pixel_baseline, current, strict=True)
-            if abs(before - after) >= 18
-        ) / len(current)
+        # Reuse the existing low-cost Frigate-style motion score. Global
+        # exposure/lighting drift does not justify another expensive VLM
+        # comparison for every camera in a five-pet fleet.
+        from .multimodal import change_fraction
+        changed = change_fraction(self._pixel_baseline, current, threshold=18)
         if changed < self.min_changed_fraction:
             self._hits = 0
             return None
