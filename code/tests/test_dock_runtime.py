@@ -253,3 +253,60 @@ async def test_cancel_before_detector_dispatch_releases_slot(tmp_path, monkeypat
     recovered = await dock_runtime.observe_actual_dock(Head(), robot)
     assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
     assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
+
+
+async def test_cancel_after_native_detector_starts_keeps_slot(tmp_path, monkeypatch):
+    """Cancellation of the observer must not release a running native worker."""
+    import asyncio
+    import threading
+
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def blocked_detector(image, calibration, *, captured_at):
+        calls.append(captured_at)
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("Test worker release never arrived")
+        return DockPose(0, 0, 450, 0.5, captured_at)
+
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked_detector)
+    observer = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=2)
+        observer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await observer
+
+        busy = await dock_runtime.observe_actual_dock(Head(), robot)
+        assert busy["source"] == "apriltag_detector_busy"
+        assert busy["phase"] == "hold"
+        assert not busy["motor_authorized"] and not busy["charging_authorized"]
+        assert not busy["physical_acceptance_pass"]
+        assert len(calls) == 1
+    finally:
+        release.set()
+        if not observer.done():
+            observer.cancel()
+            await asyncio.gather(observer, return_exceptions=True)
+
+    for _ in range(100):
+        if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
+            dock_runtime._DETECTOR_SLOT.release()
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("Native detector did not release slot after worker completion")
+
+    recovered = await dock_runtime.observe_actual_dock(Head(), robot)
+    assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
+    assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
+    assert not recovered["physical_acceptance_pass"]
+    assert len(calls) == 2
