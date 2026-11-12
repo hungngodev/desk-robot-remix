@@ -104,3 +104,64 @@ def test_voice_memory_tool_opt_in_and_same_pet_topical_recall(
         assert other.status_code == 200
         assert other.json()["matched"] is False
         assert other.json()["memories"] == []  # separate private SQLite database
+
+
+async def test_proactive_reasoning_reuses_relevant_old_experience_not_only_last_four(
+    settings, tmp_path
+):
+    import time
+    from desk_robot.conversation import Conversation
+    from desk_robot.pet import PetController
+    from desk_robot.simulator import SimulatedSpeaker
+    from desk_robot.vision import SceneChange
+
+    settings.memory_dir = tmp_path
+    ids = [r.id for r in settings.robots]
+    store = MemoryStore(tmp_path, ids)
+    store.remember(
+        "robot-01", "key_history",
+        "I saw a silver key next to the notebook yesterday",
+        kind="key", source_robot="robot-01", witnessed=True,
+        observed_at=time.time() - 24 * 3600,
+    )
+    for index in range(5):
+        store.remember(
+            "robot-01", f"recent_touch_{index}",
+            f"Someone tapped the desk {index} times",
+            kind="touch", source_robot="robot-01", witnessed=True,
+            observed_at=time.time() - 60 + index,
+        )
+    prompts = []
+
+    class NaturalChat:
+        async def reply(self, history):
+            prompts.append(history)
+            return "That key looks familiar! Is it the one by your notebook?"
+
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(
+        settings, NaturalChat(), speaker, memory=store
+    )
+    pet = PetController(settings, {}, conversation, store, scene=None)
+    pet.states["robot-01"].enabled = True
+    try:
+        await pet._speak(
+            "robot-01",
+            SceneChange(
+                "key", "A silver key appeared near the notebook", 0.97
+            ),
+            pet.states["robot-01"].generation,
+            offered_at=time.monotonic(),
+        )
+        assert len(prompts) == 1
+        prompt = prompts[0][1]["content"]
+        assert "silver key next to the notebook yesterday" in prompt
+        assert "Recent context:" in prompt
+        assert len(speaker.spoken) == 1
+        # The recalled visual event remains distinct from the robot's spoken
+        # words. A remembered event never becomes a motion authorization.
+        records = store.recent("robot-01", limit=6)
+        assert any(m.kind == "own_utterance" for m in records)
+        assert any(m.kind == "key" for m in store.search("robot-01", "keys"))
+    finally:
+        await pet.close()
