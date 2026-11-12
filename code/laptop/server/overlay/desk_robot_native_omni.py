@@ -489,6 +489,16 @@ class NativeOmniSession:
     async def _invalidate_head_first(self) -> tuple[dict, ...]:
         """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
+        # A barge-in invalidates both obsolete robot audio and visual
+        # context. A camera fetch already in flight must not reintroduce
+        # old-turn JPEGs after the head's audio has been flushed.
+        self._video_turn += 1
+        self.latest_jpeg = None
+        self._latest_frame_receipt_us = None
+        self._last_video_sent_receipt_us = None
+        self._last_video_selected_at = float("-inf")
+        if self._user_was_talking:
+            self._camera_wakeup.set()
         while not self.outgoing.empty():
             try:
                 self.outgoing.get_nowait()
