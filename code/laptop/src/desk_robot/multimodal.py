@@ -338,6 +338,7 @@ class MultimodalOrchestrator:
                 "sensor_coalesced": 0, "sensor_deferred_human": 0,
                 "sensor_trigger_to_first_jpeg_last_ms": None,
                 "sensor_followup_frames": 0, "proactive_camera_preemptions": 0,
+                "native_speech_camera_reuses": 0,
             } for robot in settings.robots
         }
         self._turn_epoch = {r.id: 0 for r in settings.robots}
@@ -499,7 +500,9 @@ class MultimodalOrchestrator:
                     break
                 if self.hub.due(robot_id, time.monotonic()):
                     try:
-                        await self.capture(robot_id, source="speech")
+                        await self.capture(
+                            robot_id, source="speech", reuse_if_recent_s=0.65
+                        )
                     except Exception:
                         # Camera failure does NOT prove the human stopped
                         # speaking. Only discard stale frames, never VAD state.
@@ -546,14 +549,30 @@ class MultimodalOrchestrator:
         future.add_done_callback(finished)
         return await asyncio.wrap_future(future)
 
-    async def capture(self, robot_id: str, *, source: str) -> CameraEvidence:
+    async def capture(self, robot_id: str, *, source: str,
+                      reuse_if_recent_s: float = 0.0) -> CameraEvidence:
         self.hub._check(robot_id)
         if self._closed:
             raise RuntimeError("Multimodal orchestrator closed")
+        if not 0 <= reuse_if_recent_s <= 1.0:
+            raise ValueError("Invalid shared live camera age")
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
             metrics = self._metrics[robot_id]
+            # Recheck AFTER waiting for the one camera lock. Two HTTP
+            # consumers racing for the same VAD frame now produce ONE physical
+            # capture even when both found the hub empty before this lock.
+            if source == "speech" and reuse_if_recent_s:
+                recent = self.hub.frames[robot_id]
+                if recent:
+                    frame = recent[-1]
+                    now = time.monotonic()
+                    if (frame.source in ("speech", "voice_question")
+                            and 0 <= now - frame.received_at <= reuse_if_recent_s
+                            and frame.received_at >= self._voice_turn_at[robot_id]):
+                        metrics["native_speech_camera_reuses"] += 1
+                        return frame
             metrics["camera_requests"] += 1
             started = time.monotonic()
             generation = self.hub._generation[robot_id]
@@ -604,25 +623,14 @@ class MultimodalOrchestrator:
                 raise
 
     async def native_frame(self, robot_id: str) -> CameraEvidence:
-        """Reuse a real fresh speech JPEG before asking XIAO for another.
+        """Share the actual VAD JPEG under the same physical camera lock.
 
-        The idle voice sampler and native duplex server share the exact same
-        per-head camera transport and ring. Reuse only a frame received after
-        this head's current human VAD edge: an idle/background photograph must
-        not masquerade as live visual evidence from the present conversation.
+        The lock-coalesced capture rechecks after another consumer finishes;
+        never reuse idle/old-turn video or start another camera transport.
         """
-        self.hub._check(robot_id)
-        if self._closed:
-            raise RuntimeError("Multimodal orchestrator closed")
-        recent = self.hub.frames[robot_id]
-        now = time.monotonic()
-        if recent:
-            frame = recent[-1]
-            if (frame.source in ("speech", "voice_question")
-                    and 0 <= now - frame.received_at <= 0.65
-                    and frame.received_at >= self._voice_turn_at[robot_id]):
-                return frame
-        return await self.capture(robot_id, source="speech")
+        return await self.capture(
+            robot_id, source="speech", reuse_if_recent_s=0.65
+        )
 
     async def offer_proactive(self, robot_id: str, jpeg: bytes, now: float) -> None:
         # Pet snapshots share the same authenticated head.capture_lock. Only
