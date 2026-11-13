@@ -137,7 +137,22 @@ def test_mac_semantic_tool_plan_fail_closed_without_ollama_or_memory_consent(
             "transcript": "What did I say earlier?"
         })
         assert result.status_code == 200
-        assert [tool["route"] for tool in result.json()["tools"]] == ["look"]
+        assert result.json()["tools"] == []
+        # Without durable-memory consent, an incorrect Ollama suggestion
+        # cannot turn a recall question into a camera request.
+        settings.voice_memory_tools_enabled = True
+        allowed = client.post(url, headers=headers, json={
+            "transcript": "What did I say earlier?"
+        })
+        assert [tool["route"] for tool in allowed.json()["tools"]] == [
+            "voice-context",
+        ]
+        compound = client.post(url, headers=headers, json={
+            "transcript": "What did I say earlier and can you look at the desk?"
+        })
+        assert [tool["route"] for tool in compound.json()["tools"]] == [
+            "voice-context", "look",
+        ]
         # Memory permission alone is neither camera permission nor movement.
         assert result.json()["model_can_arm_motors"] is False
         assert client.post(url, headers=headers, json={
