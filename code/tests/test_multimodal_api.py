@@ -1099,3 +1099,65 @@ def test_pet_quiet_and_pause_stop_motors_before_unavailable_voice_bridge(
             assert events == [
                 "wroom_stop", expected, "voice_bridge_attempt",
             ]
+
+
+def test_failed_body_stop_still_revokes_native_speech_and_pet_autonomy(
+    settings, tokens,
+):
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    robot = settings.robots[0]
+    events = []
+
+    class Pet:
+        states = {robot.id: SimpleNamespace(enabled=True, quiet=False)}
+
+        async def set_quiet(self, rid, quiet):
+            events.append("quiet")
+            self.states[rid].quiet = quiet
+            return {"quiet": quiet}
+
+        async def pause(self, rid):
+            events.append("pause")
+            self.states[rid].enabled = False
+            return {"enabled": False}
+
+    class Speaker:
+        async def interrupt(self, selected):
+            assert selected.id == robot.id
+            events.append("native_stop")
+
+    class Coordinator:
+        def robot(self, rid):
+            return settings.robot(rid)
+
+        async def stop(self, rid):
+            events.append("wroom_stop_attempt")
+            raise RuntimeError("Body safety channel unreachable")
+
+    class Runtime:
+        coordinator = Coordinator()
+        pet = Pet()
+        conversation = SimpleNamespace(speaker=Speaker())
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    with TestClient(
+        create_app(settings, runtime=Runtime()), raise_server_exceptions=False
+    ) as client:
+        for path, json_body, state_change in (
+            (f"/v1/pet/{robot.id}/pause", None, "pause"),
+            (f"/v1/pet/{robot.id}/quiet", {"quiet": True}, "quiet"),
+        ):
+            events.clear()
+            result = client.post(path, headers=auth, json=json_body)
+            assert result.status_code >= 500
+            assert events == [
+                "wroom_stop_attempt", state_change, "native_stop",
+            ]
