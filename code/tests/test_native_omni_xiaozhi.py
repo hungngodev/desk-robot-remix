@@ -1902,6 +1902,108 @@ async def test_native_context_send_is_not_counted_without_backend_ack(native):
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_native_minicpm_context_update_rejection_keeps_actual_audio_session(
+    native,
+):
+    """Official MiniCPM backend rejects late instructions, not PCM traffic."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._context_update_attempted = True
+    session._context_pending = "New live camera evidence"
+    session._context_ack.clear()
+
+    class Socket:
+        async def __aiter__(self):
+            yield SimpleNamespace(
+                type=module.aiohttp.WSMsgType.TEXT,
+                data=json.dumps({
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "code": "instructions_update_unsupported",
+                        "message": "Native context locked after first audio",
+                    },
+                }),
+            )
+            yield SimpleNamespace(
+                type=module.aiohttp.WSMsgType.TEXT,
+                data=json.dumps({"type": "response.done", "response_id": "old"}),
+            )
+
+    session._socket = Socket()
+    await session._receive_model()
+    assert session.connected and not session.closed
+    assert session._context_update_unsupported is True
+    assert session._context_ack.is_set()
+    module._sessions["mac-01"] = session
+    assert module.status("mac-01")["native_context_model_application_verified"] is False
+    assert module.status("mac-01")["native_context_instruction_updates_unsupported"] is True
+
+
+async def test_native_unsupported_context_keeps_polling_mac_consent_without_sending(
+    native,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._context_update_unsupported = True
+    session._context_instructions = session._base_instructions
+    sent = []
+    checks = []
+    async def send(event):
+        sent.append(event)
+    session._send = send
+
+    class Reply:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return False
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "model_context": "Recent tool: likely red key",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
+            }
+    class Mac:
+        def get(self, url, **kwargs):
+            checks.append(url)
+            return Reply()
+
+    worker = asyncio.create_task(session._refresh_live_context(Mac()))
+    try:
+        session._context_wakeup.set()
+        async with asyncio.timeout(1):
+            while not checks:
+                await asyncio.sleep(.005)
+        await asyncio.sleep(.01)
+        assert sent == []  # No impossible MiniCPM instruction change.
+        assert session.native_context_updates == 0
+        assert session.connected and not session.closed
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_live_context_refuses_cross_robot_and_stale_turn_data(native):
     module, bridge = native
     conn, _ = connection()
