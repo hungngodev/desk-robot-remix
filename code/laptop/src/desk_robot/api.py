@@ -326,7 +326,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         """
         if settings.mode != "hardware":
             return
-        speaker = getattr(app.state.runtime.conversation, "speaker", None)
+        conversation = getattr(app.state.runtime, "conversation", None)
+        speaker = getattr(conversation, "speaker", None)
         interrupt = getattr(speaker, "interrupt", None)
         robot = settings.robot(robot_id)
         if callable(interrupt) and robot.device_id:
