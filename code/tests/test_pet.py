@@ -183,6 +183,51 @@ async def test_background_camera_cancel_for_user_speech_does_not_kill_pet_loop(
 
 
 @pytest.mark.parametrize("local_object", [False, True])
+async def test_explicit_look_preempts_background_vlm_waiting_for_shared_lock(
+    fleet, tmp_path,
+):
+    """Queued observer lacks an inference task, but must yield to the person."""
+    class CountingScene:
+        def __init__(self):
+            self.calls = 0
+
+        async def compare(self, before, after):
+            self.calls += 1
+            return SceneChange("key", "Old background camera guess", 0.96)
+
+    scene = CountingScene()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet,
+        {r.id: ChangingCamera() for r in fleet.robots},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, scene, interval=.01, speech_cooldown=0,
+    )
+    await pet._vision_lock.acquire()
+    try:
+        pet.start("robot-01")
+        await wait_for(
+            lambda: bool(pet._vision_lock._waiters), timeout=2
+        )
+        # MultimodalOrchestrator.look() calls this before waiting for VLM.
+        # The observer already queued here, so cancelling only
+        # _vision_inflight would not help: it does not exist yet.
+        assert pet._vision_inflight is None
+        prior = pet._vision_preemption_epoch
+        pet.preempt_background_vision()
+        assert pet._vision_preemption_epoch == prior + 1
+        pet._vision_lock.release()
+        await asyncio.sleep(.1)
+        assert scene.calls == 0
+        assert pet.status("robot-01")["camera_change_events"] == 0
+        assert pet.status("robot-01")["enabled"] is True
+        assert memory.count("robot-01") == 0
+    finally:
+        if pet._vision_lock.locked():
+            pet._vision_lock.release()
+        await pet.close()
+
+
 async def test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner(
     fleet, tmp_path, local_object
 ):
