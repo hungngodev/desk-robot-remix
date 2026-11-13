@@ -245,3 +245,59 @@ def test_voice_brain_merges_sensor_and_tool_cues_without_persisting_images(
             assert other["live_sensor_cues"] == []
         finally:
             runtime.multimodal = None
+
+
+def test_live_situation_is_available_without_persistent_memory_consent(
+    settings, tokens, tmp_path
+):
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.memory_dir = tmp_path
+    settings.voice_memory_tools_enabled = False
+    settings.voice_vision_tools_enabled = True
+    tool = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.memory.remember(
+            "robot-01", "private001", "My private secret is never a live sensor",
+            kind="object", source_robot="robot-01", witnessed=True,
+        )
+        hub = CameraFrameHub([r.id for r in settings.robots])
+        now = time.monotonic()
+        hub.notify("robot-01", "touch_tap", now)
+        hub.remember_tool("robot-01", "visual_look",
+                          "A hand may be nearby", now)
+        class Visual:
+            def __init__(self, hub):
+                self.hub = hub
+
+        runtime.multimodal = Visual(hub)
+        try:
+            live = client.get(
+                "/v1/pet/robot-01/interaction-context", headers=tool
+            )
+            assert live.status_code == 200
+            payload = live.json()
+            assert payload["persistent_memory_included"] is False
+            assert payload["raw_media_included"] is False
+            assert payload["motor_authorized"] is False
+            assert [cue["channel"] for cue in payload[
+                "current_interaction_timeline"
+            ]] == ["sensor", "tool"]
+            assert "private secret" not in live.text
+            assert client.get(
+                "/v1/pet/robot-01/voice-context", headers=tool
+            ).status_code == 403
+            peer = client.get(
+                "/v1/pet/robot-02/interaction-context", headers=tool
+            ).json()
+            assert peer["current_interaction_timeline"] == []
+            assert client.get(
+                "/v1/pet/unconfigured/interaction-context", headers=tool
+            ).status_code == 404
+            settings.voice_vision_tools_enabled = False
+            assert client.get(
+                "/v1/pet/robot-01/interaction-context", headers=tool
+            ).status_code == 403
+        finally:
+            runtime.multimodal = None
