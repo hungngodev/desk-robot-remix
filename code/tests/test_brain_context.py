@@ -251,3 +251,35 @@ def test_prompt_deduplicates_repetitive_camera_receipts_and_keeps_tool_results()
     assert result.interaction.count("playback unverified") == 1
     assert "Physical sensor edge: touch_tap" in result.interaction
     assert len(result.interaction) <= 400
+
+
+def test_camera_or_voice_monitor_outage_preserves_actual_spoken_context():
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    hub.notify("robot-01", "touch_tap", now - 2)
+    hub.remember_tool("robot-01", "visual_look", "Maybe a key", now - 1)
+    hub.remember_spoken("robot-01", "Want to play a game?", now - 0.5)
+    hub.discard_video("robot-01")
+    live = hub.interaction_timeline("robot-01", now)
+    assert [cue["channel"] for cue in live] == ["sensor", "robot_speech"]
+    assert live[-1]["playback_verified"] is False
+    assert "play a game" in live[-1]["content"]
+    assert hub.recent_tool_context("robot-01", now) == []
+    hub.clear("robot-01")
+    assert hub.interaction_timeline("robot-01", now) == []
+
+
+def test_interaction_timeline_respects_every_small_limit_under_sensor_flood():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01"])
+    hub.notify("robot-01", "human_voice", now - 2)
+    hub.remember_tool("robot-01", "visual_look", "Might be a cup", now - 1)
+    hub.remember_spoken("robot-01", "Hi there", now - 0.5)
+    for i in range(8):
+        hub.notify("robot-01", "touch_tap", now - 0.4 + i * 0.04)
+    for count in (1, 2, 3, 4):
+        chosen = hub.interaction_timeline("robot-01", now, limit=count)
+        assert len(chosen) == count
+        assert chosen[0]["channel"] == "human_voice"
+        if count >= 2:
+            assert any(cue["channel"] == "tool" for cue in chosen)
