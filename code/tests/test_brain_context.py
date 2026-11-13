@@ -691,3 +691,18 @@ def test_earlier_compound_asr_clause_keeps_battery_tool_under_budget():
     assert "Battery 23 percent" in result
     assert "A small key beside the cup" in result
     assert len(result) <= 400
+
+
+def test_delayed_tool_completion_cannot_replace_newer_same_kind_receipt():
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    hub.remember_tool("robot-01", "visual_look", "Current cup", now - 1)
+    hub.remember_tool("robot-01", "visual_look", "Obsolete key", now - 3)
+    receipts = hub.recent_tool_context("robot-01", now)
+    assert len(receipts) == 1
+    assert receipts[0]["summary"] == "Current cup"
+    assert "Current cup" in compose_brain_context(
+        [], [], hub.interaction_timeline("robot-01", now)
+    ).interaction
+    hub.remember_tool("robot-01", "visual_look", "New mug", now - .5)
+    assert hub.recent_tool_context("robot-01", now)[0]["summary"] == "New mug"
