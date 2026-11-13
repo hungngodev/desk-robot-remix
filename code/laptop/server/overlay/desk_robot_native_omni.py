@@ -148,6 +148,8 @@ def status(device: str) -> dict:
         "native_tool_audio_transmitted_not_acknowledged": s.native_tool_audio_sent,
         "native_recent_dialogue_turns": len(s._tool_dialogue),
         "mac_proactive_speech_lease_active": s._external_speech_active,
+        "mac_operator_pet_quiet": s._pet_quiet,
+        "mac_operator_pet_autonomy_enabled": s._pet_autonomy_enabled,
         "native_tool_speech_errors": s.native_tool_speech_errors,
         "tool_audio_playback_acknowledged": False,
         "tool_results_ingested_by_native_duplex_kv": False,
@@ -2115,6 +2117,7 @@ async def suspend_proactive_for_operator(conn) -> bool:
     if session is None or session.conn is not conn or session.closed:
         return False
     session._pet_autonomy_enabled = False
+    session._pet_quiet = True
     await session.barge()
     return True
 
