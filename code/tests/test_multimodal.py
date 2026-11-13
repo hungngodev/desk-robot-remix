@@ -1170,6 +1170,7 @@ async def test_lost_xiaozhi_voice_transport_cancels_old_visual_turns_without_unm
     now = time.monotonic()
     visual.hub.notify("robot-01", "human_voice", now)
     visual.hub.offer("robot-01", image(), now, source="speech")
+    visual.hub.remember_heard("robot-01", "asr_before_reset", "A red key", now)
     pending = asyncio.Event()
     task = asyncio.create_task(pending.wait())
     visual._look_tasks["robot-01"] = task
@@ -1178,6 +1179,7 @@ async def test_lost_xiaozhi_voice_transport_cancels_old_visual_turns_without_unm
         await asyncio.gather(task, return_exceptions=True)
         assert task.cancelled()
         assert not visual.hub.frames["robot-01"]
+        assert not visual.hub.heard_history["robot-01"]
         assert visual.hub.user_active("robot-01", time.monotonic())
         assert visual._reconnect_needs_sampler == {"robot-01", "robot-02"}
     finally:
