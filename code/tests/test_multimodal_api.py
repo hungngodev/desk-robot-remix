@@ -878,3 +878,57 @@ def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cros
         assert client.get(
             "/v1/jobs/first", headers=tool
         ).json()["state"] == "failed"
+
+
+def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_tool(
+    settings, tokens,
+):
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+    import time
+
+    robot = settings.robots[0].id
+    hub = CameraFrameHub([r.id for r in settings.robots])
+    visual = SimpleNamespace(
+        hub=hub, _turn_epoch={r.id: 5 for r in settings.robots},
+    )
+
+    class CurrentHead:
+        async def aux_status(self):
+            return {
+                "robot_id": robot,
+                "climate": {"valid": True, "temp_centi": 2210,
+                            "rh_centi": 5400},
+                "bmp280": {"valid": True, "pressure_pa": 101312},
+            }
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            robot=lambda rid: settings.robot(rid),
+            heads={robot: CurrentHead()},
+        ),
+        multimodal=visual,
+        start=noop, close=noop,
+    )
+    token = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/robots/{robot}/aux"
+        assert client.get(url).status_code == 401
+        ordinary = client.get(url, headers=token)
+        assert ordinary.status_code == 200
+        assert hub.tool_history[robot] == []
+        tool = client.get(url, headers={
+            **token, "X-Desk-Robot-Tool-Receipt": "1",
+        })
+        assert tool.status_code == 200
+        assert len(hub.tool_history[robot]) == 1
+        kind, summary, when = hub.tool_history[robot][0]
+        assert kind == "sensor_telemetry"
+        assert "temp_centi=2210" in summary
+        assert "pressure_pa=101312" in summary
+        assert 0 <= time.monotonic() - when <= 2
+        for other in settings.robots[1:]:
+            assert hub.tool_history[other.id] == []
