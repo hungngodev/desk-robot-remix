@@ -113,6 +113,25 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         r"^(?:how much (?:battery|power) (?:is )?left)\b", polite
     ):
         return "power-status", {}
+    # Source-qualified accessory readings are different from generic body
+    # status or a visual guess. The pinned WROOM aux adapter validates raw
+    # SHT41, BMP280, contact, NFC and proximity fields before they become
+    # model context. Questions about HOW a sensor works are not live reads.
+    if (re.match(
+            r"^(?:check|read|show|tell(?: me)?|what|how|is|are)\b", polite)
+            and re.search(
+                r"\b(?:your |the |current |measured |sensor )?"
+                r"(?:temperature|humidity|pressure|climate|proximity|"
+                r"paw sensor|force sensor|touch sensor|nfc|"
+                r"sht41|bmp280|apds9960|as5600|"
+                r"magnetic angle|dock contact|sensor readings)\b",
+                polite,
+            )
+            and not re.match(
+                r"^(?:what (?:is|does) (?:a |an )?|how (?:does|do) )",
+                polite,
+            )):
+        return "aux-status", {}
     if (
         re.match(r"^(?:check|what|how|is|are|tell)\b", polite)
         and re.search(
@@ -222,6 +241,56 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
             return None
         return {"source": "local_camera_model_guess",
                 "interpretation_not_proof": " ".join(answer.split())[:350]}
+    if route == "aux-status":
+        if result.get("available") is False:
+            return {"source": "wroom_aux", "available": False}
+        climate = result.get("climate")
+        power = result.get("power")
+        if not isinstance(climate, dict) or not isinstance(power, dict):
+            return None  # Never infer real measurements from a partial payload.
+        observed = {
+            "source": "validated_wroom_raw_aux_not_calibrated",
+            "physical_acceptance_verified": False,
+        }
+        if (climate.get("valid") is True
+                and type(climate.get("temp_centi")) is int
+                and type(climate.get("rh_centi")) is int):
+            observed["sht41"] = {
+                "temp_centi": climate["temp_centi"],
+                "humidity_centi": climate["rh_centi"],
+                "age_ms": climate.get("age_ms"),
+            }
+        bmp = result.get("bmp280")
+        if isinstance(bmp, dict) and bmp.get("valid") is True:
+            observed["bmp280"] = {
+                "pressure_pa": bmp.get("pressure_pa"),
+                "temp_centi": bmp.get("temp_centi"),
+                "physically_verified": False,
+            }
+        prox = result.get("proximity")
+        if isinstance(prox, dict) and prox.get("valid") is True:
+            observed["apds9960"] = {
+                "raw": prox.get("raw"), "gesture": prox.get("gesture"),
+                "physically_qualified": False,
+            }
+        if power.get("fuel_valid") is True:
+            observed["fuel_gauge"] = {
+                "reported_soc_centi": power.get("soc_centi"),
+                "reported_cell_mv": power.get("cell_mv"),
+                "qualified": False,
+            }
+        dock = result.get("dock")
+        if isinstance(dock, dict) and dock.get("valid") is True:
+            observed["dock_pins"] = {
+                "left_seated": dock.get("left_seated"),
+                "right_seated": dock.get("right_seated"),
+                "charge_indicated": dock.get("charge_indicated"),
+                "charging_verified": False,
+            }
+        nfc = result.get("nfc")
+        if isinstance(nfc, dict) and nfc.get("v") is True:
+            observed["nfc"] = {"events": nfc.get("e")}
+        return observed
     if route == "power-status":
         if result.get("source") != "wroom_aux_fuel_gauge_raw_unqualified":
             return None
