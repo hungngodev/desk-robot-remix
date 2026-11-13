@@ -45,6 +45,25 @@ def bridge_tools(monkeypatch):
     return module
 
 
+@pytest.mark.parametrize("route", [
+    "arm", "enable", "move", "drive", "../enable", "charger/enable", "",
+])
+async def test_xiaozhi_tool_router_refuses_unregistered_physical_actions_before_http(
+    bridge_tools, monkeypatch, route,
+):
+    class ForbiddenHTTP:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Unknown tool route reached Mac HTTP")
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", ForbiddenHTTP)
+    denied = await bridge_tools.call(
+        bridge_tools.registered_head, route, {"command": "enable"}
+    )
+    assert denied == {
+        "error": "Unsupported robot tool route", "retried": False,
+    }
+
+
 @pytest.mark.parametrize("failure", [
     "connect", "timeout", "http_error", "invalid_json", "invalid_shape",
 ])
