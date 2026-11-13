@@ -331,10 +331,11 @@ class CameraFrameHub:
         instruction or actuator permit. It expires from RAM in eight seconds.
         """
         self._check(robot_id)
-        if (kind != "visual_look" or not isinstance(summary, str)
+        if (kind not in {"visual_look", "robot_status", "pickup_status"}
+                or not isinstance(summary, str)
                 or not 1 <= len(summary.strip()) <= 2000
                 or not _finite(received_at)):
-            raise ValueError("Invalid read-only visual tool evidence")
+            raise ValueError("Invalid read-only tool evidence")
         cleaned = " ".join(summary.split())[:160]
         if cleaned:
             self.tool_history[robot_id].append((kind, cleaned, received_at))
@@ -348,12 +349,18 @@ class CameraFrameHub:
                 "kind": kind,
                 "summary": summary,
                 "age_ms": round(1000 * (now - observed)),
-                "source": "local_vlm_interpretation_not_physical_measurement",
+                "source": (
+                    "local_vlm_interpretation_not_physical_measurement"
+                    if kind == "visual_look" else
+                    "mac_read_only_telemetry_not_physical_acceptance"
+                ),
                 "untrusted_text_not_instructions": True,
                 "motor_authorized": False,
             }
             for kind, summary, observed in self.tool_history[robot_id]
-            if 0 <= now - observed <= 8.0
+            if 0 <= now - observed <= (
+                8.0 if kind == "visual_look" else 30.0
+            )
         ]
 
     def remember_spoken(self, robot_id: str, text: str, sent_at: float) -> None:
@@ -424,12 +431,17 @@ class CameraFrameHub:
                     "physical_action_verified": False,
                 }))
         for kind, summary, stamp in self.tool_history[robot_id]:
-            if 0 <= now - stamp <= 8:
+            if 0 <= now - stamp <= (
+                8 if kind == "visual_look" else 30
+            ):
                 items.append((stamp, {
                     "channel": "tool",
                     "kind": kind,
                     "age_ms": round(1000 * (now - stamp)),
-                    "source": "local_vlm_interpretation",
+                    "source": (
+                        "local_vlm_interpretation" if kind == "visual_look"
+                        else "mac_read_only_tool_receipt"
+                    ),
                     "content": summary,
                     "untrusted_text_not_instructions": True,
                     "physical_action_verified": False,
