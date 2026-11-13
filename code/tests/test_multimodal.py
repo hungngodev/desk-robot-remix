@@ -1195,6 +1195,23 @@ def test_readonly_tool_context_rejects_untrusted_shapes():
         hub.remember_tool("robot-99", "visual_look", "some object", 5.0)
 
 
+def test_repeated_status_tools_preserve_distinct_job_and_visual_context():
+    hub = CameraFrameHub(["robot-01"])
+    hub.remember_tool("robot-01", "visual_look", "Maybe a key", 100.0)
+    hub.remember_tool("robot-01", "pickup_status", "job queued", 100.1)
+    for i in range(10):
+        hub.remember_tool(
+            "robot-01", "robot_status", f"armed=False seq={i}", 100.2 + i * .1
+        )
+    context = hub.recent_tool_context("robot-01", 102.0)
+    assert len(context) == 3
+    assert {entry["kind"] for entry in context} == {
+        "visual_look", "pickup_status", "robot_status"
+    }
+    assert any("seq=9" in entry["summary"] for entry in context)
+    assert not any("seq=0" in entry["summary"] for entry in context)
+
+
 def test_interaction_timeline_orders_camera_sensor_and_tool_without_raw_media():
     """One chronological context view, unlike three unsorted agent memories."""
     hub = CameraFrameHub(["robot-01", "robot-02"])
