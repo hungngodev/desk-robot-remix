@@ -700,6 +700,9 @@ class MultimodalOrchestrator:
                 if task is not None and not task.done():
                     task.cancel()
             self.hub.discard_video(robot_id)  # not voice_until
+            # Transport loss ends provenance for native audio transcripts,
+            # even when their 30-second display TTL has not yet elapsed.
+            self.hub.heard_history[robot_id].clear()
 
     def voice_started(self, robot_id: str) -> None:
         self.prepare_human_turn(robot_id, end_expected=True)
