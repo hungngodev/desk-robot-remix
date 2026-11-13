@@ -935,7 +935,7 @@ class NativeOmniSession:
                 break
             self.native_readonly_tools_dropped += 1
 
-    def _queue_readonly_tool(self, event: dict) -> None:
+    def _queue_readonly_tool(self, event: dict) -> bool:
         """One explicit actual ASR request, never guessed physical authority."""
         if not self._live_transcript_enabled:
             return
@@ -989,6 +989,7 @@ class NativeOmniSession:
             if len(self._readonly_seen) >= 128:
                 self._readonly_seen.clear()
             self._readonly_seen.add(item)
+        return queued
 
     async def _run_readonly_batch(
         self, entries: list[tuple[str, dict, int, int]],
@@ -1001,16 +1002,20 @@ class NativeOmniSession:
         """
         from plugins_func.functions.desk_robot_tools import call
 
-        tasks = [
-            asyncio.create_task(asyncio.wait_for(
+        async def invoke(route: str, payload: dict):
+            return route, await asyncio.wait_for(
                 call(self.conn, route, payload), timeout=24,
-            )) for route, payload, _, _ in entries
+            )
+        tasks = [
+            asyncio.create_task(invoke(route, payload))
+            for route, payload, _, _ in entries
         ]
         epoch, request_turn = entries[0][2:]
+        facts: list[dict] = []
         try:
             for completed in asyncio.as_completed(tasks):
                 try:
-                    result = await completed
+                    route, result = await completed
                 except asyncio.CancelledError:
                     # An individual optional Mac HTTP may be cancelled or
                     # disconnected without changing the human turn. Keep
@@ -1081,6 +1086,15 @@ class NativeOmniSession:
                     continue
                 self.native_readonly_tools_completed += 1
                 self._context_wakeup.set()
+                fact = native_grounded_fact(route, result)
+                if fact is not None:
+                    facts.append(fact)
+            if facts and self._tool_speech_turn == (epoch, request_turn):
+                async with aiohttp.ClientSession() as chat_http:
+                    await self._speak_tool_results(
+                        chat_http, self._tool_question, facts,
+                        epoch, request_turn,
+                    )
         finally:
             for task in tasks:
                 if not task.done():
@@ -1204,6 +1218,9 @@ class NativeOmniSession:
                     self._readonly_turn += 1
                     self._readonly_requests.clear()
                     self._discard_queued_readonly()
+                    self._tool_speech_turn = None
+                    self._tool_audio_response_id = None
+                    self._tool_question = ""
                     self.latest_jpeg = None
                     self._latest_frame_receipt_us = None
                     self._last_video_sent_receipt_us = None
@@ -1280,11 +1297,22 @@ class NativeOmniSession:
             elif kind == "conversation.item.input_audio_transcription.completed":
                 if self._accept_current_audio_item(event):
                     self._accept_heard_transcript(event)
-                    self._queue_readonly_tool(event)
+                    if self._queue_readonly_tool(event):
+                        self._tool_question = str(event.get("transcript", ""))[:280]
+                        # Real tool results cannot enter this native duplex's
+                        # established KV. Cancel its competing audio and speak
+                        # the Mac grounded response through the SAME speaker.
+                        await self._reserve_tool_speech()
             elif kind == "response.done" and self._live_transcript_enabled:
                 # Refresh the next model turn from the same Mac evidence
                 # owner. Never await tool/context HTTP in audio reception.
                 self._context_wakeup.set()
+            if (self._tool_speech_turn ==
+                    (self._generation, self._readonly_turn)
+                    and kind in ("response.output_audio.delta", "response.done")):
+                # The native thinker never saw the tool receipt. Do not speak
+                # its ungrounded competing answer to this same human turn.
+                continue
             if kind == "response.output_audio.delta" and pcm is not None:
                 self.model_chunks += 1
                 try:
@@ -1323,7 +1351,7 @@ class NativeOmniSession:
                 continue
             response_id, chunk24k = item
             if (self.wire.response_id != response_id
-                    or self.closed):
+                    and self._tool_audio_response_id != response_id) or self.closed:
                 continue
             if current_response != response_id or generation != self._generation:
                 pending.clear()
@@ -1419,6 +1447,9 @@ class NativeOmniSession:
         self._readonly_turn += 1
         self._readonly_requests.clear()
         self._discard_queued_readonly()
+        self._tool_speech_turn = None
+        self._tool_audio_response_id = None
+        self._tool_question = ""
         # A barge-in invalidates both obsolete robot audio and visual
         # context. A camera fetch already in flight must not reintroduce
         # old-turn JPEGs after the head's audio has been flushed.
