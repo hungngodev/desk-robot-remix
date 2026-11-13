@@ -1220,7 +1220,10 @@ class NativeOmniSession:
                             # Read-only image input belongs to the selected
                             # model even if no one is currently talking.
                             now = time.monotonic()
-                            if receipt == self._latest_frame_receipt_us:
+                            if (self._latest_frame_receipt_us is not None
+                                    and receipt <= self._latest_frame_receipt_us):
+                                # A reordered network packet is not a new
+                                # observation even if its motion score is high.
                                 self.video_frames_skipped_duplicate += 1
                             elif (self._latest_frame_receipt_us is None
                                   or motion >= 15_000
