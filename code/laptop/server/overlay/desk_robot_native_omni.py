@@ -1697,16 +1697,20 @@ class NativeOmniSession:
                 self._schedule_remote_cancel(events)
                 return False
             if self.closed or generation != self._generation:
+                async with _output_owner_lock:
+                    if _output_owner == self.device:
+                        _output_owner = None
                 return False
         speech_raced = False
+        refused_after_claim = False
         async with self._device_send_lock:
             if (self.closed or generation != self._generation
                     or self._external_speech_active
                     or (state == "start" and self._pet_quiet)):
-                return False
+                refused_after_claim = True
             # VAD may start between claim_speaker and acquiring the device
             # send lock. Suppress the TTS START packet in that case.
-            if state == "start" and bridge.human_speech_active():
+            elif state == "start" and bridge.human_speech_active():
                 speech_raced = True
             else:
                 if state == "start":
@@ -1715,6 +1719,12 @@ class NativeOmniSession:
                 await self.conn.websocket.send(json.dumps({
                     "type": "tts", "state": state, "session_id": self.conn.session_id,
                 }))
+        if refused_after_claim:
+            if state == "start":
+                async with _output_owner_lock:
+                    if _output_owner == self.device:
+                        _output_owner = None
+            return False
         if speech_raced:
             events = await self._invalidate_head_first()
             self._schedule_remote_cancel(events)
