@@ -1154,6 +1154,127 @@ async def test_native_barge_drops_old_queued_tools_without_physical_retry(native
     assert session._readonly_queue.get_nowait()[0] == "power-status"
 
 
+@pytest.mark.parametrize(
+    ("route", "response", "expected"),
+    [
+        ("look", {"source": "authenticated_xiao_camera_and_local_vlm",
+                   "answer": "Maybe a blue mug"},
+         "local_camera_model_guess"),
+        ("look", {"source": "fabricated", "answer": "Definitely a mug"}, None),
+        ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
+                          "gauge_available": False}, "wroom_fuel_gauge"),
+        ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
+                          "gauge_available": True, "reported_soc_centi": 5000,
+                          "reported_cell_mv": 3700}, "unqualified_wroom_gauge"),
+        ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
+                          "gauge_available": True, "reported_soc_centi": "99",
+                          "reported_cell_mv": 3700}, None),
+        ("interaction-context", {"persistent_memory_included": True,
+                                 "raw_media_included": False,
+                                 "model_context": "private information"}, None),
+        ("voice-context", {"memories": [{"summary": "A red key yesterday"}]},
+         "private_opt_in_memory_not_current_sight"),
+    ],
+)
+def test_native_tool_chat_receives_only_typed_sourced_facts(
+    native, route, response, expected,
+):
+    module, _ = native
+    fact = module.native_grounded_fact(route, response)
+    assert (fact["source"] if fact else None) == expected
+    if fact:
+        assert "motor_authorized" not in fact
+        assert "charging_authorized" not in fact
+
+
+async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
+    native,
+):
+    import io
+    import wave
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(b"\\x00" * 48000)
+    encoded = base64.b64encode(audio.getvalue()).decode()
+    calls = []
+
+    class Response:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+        async def json(self):
+            return {"choices": [
+                {"message": {"content": "The camera suggests a mug."}},
+                {"message": {"audio": {"data": encoded}}},
+            ]}
+
+    class Http:
+        def post(self, url, *, json, timeout):
+            calls.append((url, json))
+            return Response()
+
+    await session._speak_tool_results(
+        Http(), "What color is the mug?",
+        [{"source": "local_camera_model_guess",
+          "interpretation_not_proof": "Perhaps a blue mug"}], 0, 0,
+    )
+    assert calls[0][0] == "http://127.0.0.1:8099/v1/chat/completions"
+    assert calls[0][1]["model"] == "openbmb/MiniCPM-o-4_5"
+    assert "Perhaps a blue mug" in calls[0][1]["messages"][1]["content"]
+    assert session.native_tool_spoken_responses == 1
+    chunks = [session.outgoing.get_nowait() for _ in range(6)]
+    assert len(chunks) == 6 and chunks[-1] is None
+    assert all(item[0].startswith("tool_") and len(item[1]) == 9600
+               for item in chunks[:-1])
+    assert session._tool_audio_response_id == chunks[0][0]
+    # Old future tool completion cannot speak into the next human turn.
+    session._tool_speech_turn = None
+    await session._speak_tool_results(Http(), "What color?", [
+        {"source": "local_camera_model_guess"}], 0, 0)
+    assert len(calls) == 1
+    assert session.outgoing.empty()
+
+
+async def test_native_tool_reservation_fences_model_pcm_without_dropping_tools(
+    native,
+):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._readonly_queue.put_nowait(("look", {"question": "What color?"}, 0, 0))
+    session.outgoing.put_nowait(("old_audio", b"stale"))
+    cancelled = []
+    session._schedule_remote_cancel = lambda events: cancelled.extend(events)
+    await session._reserve_tool_speech()
+    assert session._generation == 1
+    assert session._readonly_turn == 0
+    assert session._tool_speech_turn == (1, 0)
+    assert session.outgoing.empty()
+    assert session._readonly_queue.get_nowait()[2:] == (1, 0)
+    assert cancelled and cancelled[0]["type"] == "response.cancel"
+    assert sent == []  # no speaker was active; not a fake playback ack
+
+
 async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
     native, monkeypatch,
 ):
