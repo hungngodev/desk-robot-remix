@@ -1671,6 +1671,7 @@ class NativeOmniSession:
         generation = -1
         dropped_response_id: str | None = None
         sent_audio = False  # actual head Opus transmission in THIS response
+        fully_sent = True  # no refused packet within the completed response
         while not self.closed:
             item = await self.outgoing.get()
             # A terminal marker MUST belong to the response it closes.
@@ -1689,18 +1690,18 @@ class NativeOmniSession:
                 if current_response is not None and generation == self._generation:
                     if pending:
                         tail = bytes(pending).ljust(1920, b"\0")
-                        sent_audio = (
-                            await self._send_device_opus(
-                                encoder.encode(tail, 960), generation
-                            )
-                        ) or sent_audio
+                        delivered = await self._send_device_opus(
+                            encoder.encode(tail, 960), generation
+                        )
+                        sent_audio = delivered or sent_audio
+                        fully_sent = fully_sent and delivered
                     stop_sent = await self._send_device_state("stop", generation)
                     if (stop_sent is not False and generation == self._generation
                             and current_response):
                         # A START and STOP without even one transmitted Opus
                         # packet is NOT speech. Do not put its model text in
                         # the shared Mac history or claim a delivered reply.
-                        if sent_audio:
+                        if sent_audio and fully_sent:
                             self._tool_audio_sent(current_response, generation)
                             self._native_audio_sent(current_response, generation)
                             if current_response == self._tool_audio_response_id:
@@ -1716,6 +1717,7 @@ class NativeOmniSession:
                 resample_state = None
                 current_response = None
                 sent_audio = False
+                fully_sent = True
                 continue
             if response_id == dropped_response_id:
                 continue  # Refused native reply cannot restart mid sentence.
@@ -1750,10 +1752,12 @@ class NativeOmniSession:
                             pending.clear()
                             resample_state = None
                             sent_audio = False
+                            fully_sent = True
                             continue
                 pending.clear()
                 resample_state = None
                 sent_audio = False
+                fully_sent = True
                 current_response = response_id
                 generation = self._generation
                 started = await self._send_device_state("start", generation)
@@ -1763,6 +1767,7 @@ class NativeOmniSession:
                     pending.clear()
                     resample_state = None
                     sent_audio = False
+                    fully_sent = True
                     continue
             pcm16k, resample_state = audioop.ratecv(
                 chunk24k, 2, 1, 24000, 16000, resample_state
@@ -1771,11 +1776,11 @@ class NativeOmniSession:
             while len(pending) >= 1920 and generation == self._generation:
                 frame = bytes(pending[:1920])
                 del pending[:1920]
-                sent_audio = (
-                    await self._send_device_opus(
-                        encoder.encode(frame, 960), generation
-                    )
-                ) or sent_audio
+                delivered = await self._send_device_opus(
+                    encoder.encode(frame, 960), generation
+                )
+                sent_audio = sent_audio or delivered
+                fully_sent = fully_sent and delivered
 
     async def _send_device_state(self, state: str, generation: int) -> bool:
         global _output_owner

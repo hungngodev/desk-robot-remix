@@ -2292,10 +2292,11 @@ async def test_stale_response_done_does_not_split_new_grounded_tool_speech(
 
 
 
+@pytest.mark.parametrize("first_packet_allowed", [False, True])
 async def test_native_tts_start_stop_without_opus_never_writes_spoken_history(
-    native, monkeypatch,
+    native, monkeypatch, first_packet_allowed,
 ):
-    """A swallowed audio frame is not a spoken response, even if STOP succeeded."""
+    """Neither zero audio nor a partial frame sequence is a completed reply."""
     module, bridge = native
     conn, _ = connection()
     bridge.connections["mac-01"] = conn
@@ -2331,7 +2332,9 @@ async def test_native_tts_start_stop_without_opus_never_writes_spoken_history(
 
     async def refused_opus(frame, generation):
         attempts.append(frame)
-        return False  # Privacy or barge fence won before the physical send.
+        # False: no audio sent. True: a first real packet followed by
+        # refusal of all later packets. Neither completed the model reply.
+        return first_packet_allowed and len(attempts) == 1
 
     session._send_device_state = send_state
     session._send_device_opus = refused_opus
@@ -2340,7 +2343,7 @@ async def test_native_tts_start_stop_without_opus_never_writes_spoken_history(
     worker = asyncio.create_task(session._play())
     try:
         await asyncio.wait_for(done.wait(), timeout=1)
-        assert attempts
+        assert len(attempts) >= 2
         assert states == ["start", "stop"]
         assert session.native_tool_audio_sent == 0
         assert not session._tool_dialogue
