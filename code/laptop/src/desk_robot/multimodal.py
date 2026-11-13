@@ -51,9 +51,13 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     with Image.open(BytesIO(jpeg)) as im:
         if im.format != "JPEG":
             raise ValueError("Authenticated camera source must return JPEG")
-        im.load()
+        # JPEG headers expose the declared dimensions without decoding the
+        # image. Reject oversized frames BEFORE allocating the RGB raster.
+        # With five active heads an untrusted decompression bomb must never
+        # consume the live audio/camera worker's memory budget.
         if not 1 <= im.width <= 4096 or not 1 <= im.height <= 4096:
             raise ValueError("Camera dimensions invalid")
+        im.load()
         rgb = ImageOps.exif_transpose(im).convert("RGB")
     rgb.thumbnail((max_side, max_side), Image.Resampling.BILINEAR)
     gray = ImageOps.grayscale(rgb).resize((64, 48))
