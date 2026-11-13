@@ -627,14 +627,21 @@ class MultimodalOrchestrator:
             self.hub.discard_video(robot_id)  # not voice_until
 
     def voice_started(self, robot_id: str) -> None:
-        self._voice_activity(robot_id, end_expected=True)
+        self.prepare_human_turn(robot_id, end_expected=True)
+        self.start_speech_frames(robot_id)
 
     def voice_interrupted(self, robot_id: str) -> None:
-        # Confirmed AEC double talk stops old robot speech but does not
-        # promise the server will emit an idle speech_end for this event.
-        self._voice_activity(robot_id, end_expected=False)
+        # AEC double talk has no guaranteed matching speech_end.
+        self.prepare_human_turn(robot_id, end_expected=False)
+        self.start_speech_frames(robot_id)
 
-    def _voice_activity(self, robot_id: str, *, end_expected: bool) -> None:
+    def prepare_human_turn(self, robot_id: str, *, end_expected: bool) -> None:
+        """Immediately fence camera/old tools before awaiting slow audio STOP.
+
+        The authenticated Mac VAD callback calls this synchronously, then
+        urgently flushes the ONE Xiaozhi speech owner. No JPEG is scheduled
+        until that higher-priority stop has returned.
+        """
         now = time.monotonic()
         self._voice_turn_at[robot_id] = now
         self._last_fleet_human_turn_at = now
@@ -658,7 +665,11 @@ class MultimodalOrchestrator:
             prior = self._look_tasks.get(peer)
             if prior is not None and not prior.done():
                 prior.cancel()
-        if self._closed or not self.settings.voice_vision_tools_enabled:
+    def start_speech_frames(self, robot_id: str) -> None:
+        """Start optional VAD JPEGs only after the urgent speaker cleanup."""
+        self.hub._check(robot_id)
+        if (self._closed or not self.settings.voice_vision_tools_enabled
+                or not self.hub.user_active(robot_id, time.monotonic())):
             return
         task = self._capture_tasks.get(robot_id)
         if task is None or task.done() or task.cancelling():
