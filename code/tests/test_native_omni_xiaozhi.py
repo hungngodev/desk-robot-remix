@@ -306,6 +306,48 @@ async def test_native_audio_refused_by_mac_speaker_never_sends_stop_or_records_h
         await asyncio.gather(playback, return_exceptions=True)
 
 
+@pytest.mark.parametrize("cancel_mode", ["raised", "task_cancel"])
+async def test_cancelled_proactive_handoff_releases_fleet_speaker_lease(
+    native, cancel_mode,
+):
+    """No leaked exclusive XIAO speaker lease after native task cancellation."""
+    module, bridge = native
+    conn, _sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    module._sessions["mac-01"] = session
+    entered = asyncio.Event()
+
+    async def interrupted_cutover():
+        entered.set()
+        if cancel_mode == "raised":
+            raise asyncio.CancelledError()
+        await asyncio.sleep(100)
+
+    session._invalidate_head_first = interrupted_cutover
+    session._schedule_remote_cancel = lambda events: None
+    pending = asyncio.create_task(module.begin_external_speech(conn))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        if cancel_mode == "task_cancel":
+            pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        assert module._external_speaker_owner is None
+        assert module._external_speaker_connection is None
+        assert session._external_speech_active is False
+    finally:
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await module.end_external_speech(conn)
+        module._sessions.clear()
+
+
 async def test_proactive_mac_and_native_voice_share_one_interruptible_speaker_lease(
     native,
 ):
