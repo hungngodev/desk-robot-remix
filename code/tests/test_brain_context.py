@@ -433,3 +433,18 @@ def test_brain_budget_keeps_newest_evidence_and_deduplicates_late_updates():
     assert "stale key location" not in composed.recent
     assert "new value" in composed.core and "old value" not in composed.core
     assert len(composed.recent) <= 600 and len(composed.core) <= 500
+
+
+def test_dense_camera_receipts_do_not_evict_earlier_tool_and_touch():
+    # A noisy camera may publish far more receipts than the former 16-cue
+    # composer window; distinct evidence must survive deduplication.
+    timeline = [
+        {"channel": "tool", "kind": "visual_look", "content": "Maybe a red key"},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ] + [{"channel": "camera", "kind": "speech"} for _ in range(30)]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Earlier local VLM guess" in result
+    assert "Maybe a red key" in result
+    assert "Physical sensor edge: touch_tap" in result
+    assert result.count("XIAO frame received") == 1
+    assert len(result) <= 400
