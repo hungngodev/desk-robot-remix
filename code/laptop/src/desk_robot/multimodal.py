@@ -135,6 +135,12 @@ class CameraFrameHub:
         self.tool_history = {
             robot: deque(maxlen=4) for robot in robot_ids
         }
+        # Keep only the pet's actual transmitted text, not fake "heard"
+        # playback evidence. Unlike a VLM guess this can survive the NEXT
+        # human VAD, so a reply to the pet has useful short-term context.
+        self.spoken_history = {
+            robot: deque(maxlen=3) for robot in robot_ids
+        }
 
     def _check(self, robot_id: str) -> None:
         if robot_id not in self.robots:
@@ -334,6 +340,16 @@ class CameraFrameHub:
             if 0 <= now - observed <= 8.0
         ]
 
+    def remember_spoken(self, robot_id: str, text: str, sent_at: float) -> None:
+        """One bounded Mac-owned utterance, transmitted but not acoustically ACKed."""
+        self._check(robot_id)
+        if (not isinstance(text, str) or not 1 <= len(text.strip()) <= 280
+                or not _finite(sent_at)):
+            raise ValueError("Invalid actual transmitted pet speech")
+        self.spoken_history[robot_id].append(
+            (" ".join(text.split())[:200], sent_at)
+        )
+
     def interaction_timeline(self, robot_id: str, now: float,
                              *, limit: int = 10) -> list[dict]:
         """One ordered, bounded Mac view of authenticated multimodal cues.
@@ -381,6 +397,17 @@ class CameraFrameHub:
                     "untrusted_text_not_instructions": True,
                     "physical_action_verified": False,
                 }))
+        for said, stamp in self.spoken_history[robot_id]:
+            if 0 <= now - stamp <= 30:
+                items.append((stamp, {
+                    "channel": "robot_speech",
+                    "kind": "own_utterance",
+                    "age_ms": round(1000 * (now - stamp)),
+                    "source": "mac_tts_transmitted_not_speaker_playback_ack",
+                    "content": said,
+                    "playback_verified": False,
+                    "physical_action_verified": False,
+                }))
         items.sort(key=lambda item: item[0])
         return [entry for _, entry in items[-limit:]]
 
@@ -390,6 +417,7 @@ class CameraFrameHub:
         self._generation[robot_id] += 1
         self.frames[robot_id].clear()
         self.tool_history[robot_id].clear()
+        self.spoken_history[robot_id].clear()
         self.previous_gray.pop(robot_id, None)
         self.last_capture[robot_id] = -math.inf
         self.changed_streak[robot_id] = 0
