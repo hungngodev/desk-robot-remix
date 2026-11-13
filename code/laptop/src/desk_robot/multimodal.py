@@ -344,7 +344,7 @@ class CameraFrameHub:
             # visual result from the shared small context buffer.
             entries = self.tool_history[robot_id]
             # An older async completion must not evict a newer receipt.
-            if any(old_kind == kind and old_stamp > received_at
+            if any(old_kind == kind and old_stamp >= received_at
                    for old_kind, _, old_stamp in entries):
                 return
             for previous in tuple(entries):
