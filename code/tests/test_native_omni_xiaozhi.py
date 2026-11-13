@@ -1415,6 +1415,7 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     )
     session.connected = True
     session._tool_speech_turn = (0, 0)
+    session._voice_persona = "Pip, a curious robot who likes old clocks"
     audio = io.BytesIO()
     with wave.open(audio, "wb") as wav:
         wav.setnchannels(1)
@@ -1448,6 +1449,9 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     )
     assert calls[0][0] == "http://127.0.0.1:8099/v1/chat/completions"
     assert calls[0][1]["model"] == "openbmb/MiniCPM-o-4_5"
+    assert "Pip, a curious robot who likes old clocks" in (
+        calls[0][1]["messages"][0]["content"]
+    )
     assert "Perhaps a blue mug" in calls[0][1]["messages"][1]["content"]
     assert session.native_tool_audio_queued == 1
     chunks = [session.outgoing.get_nowait() for _ in range(6)]
@@ -3408,6 +3412,7 @@ async def test_native_persona_negotiates_live_asr_without_disk_permission(native
         async def json(self):
             return {
                 "robot_id": "robot-01", "instructions": "Be kind and concise.",
+                "persona": "Pip, a curious desk robot",
                 "model_can_arm_motors": False,
                 "live_transcript_context_enabled": True,
                 "transcript_memory_enabled": False,
@@ -3422,6 +3427,7 @@ async def test_native_persona_negotiates_live_asr_without_disk_permission(native
     assert session._live_transcript_enabled is True
     assert session._transcript_memory_enabled is False
     assert session.wire.instructions == "Be kind and concise."
+    assert session._voice_persona == "Pip, a curious desk robot"
 
 
 async def test_native_asr_live_only_context_does_not_count_as_saved_memory(native):
