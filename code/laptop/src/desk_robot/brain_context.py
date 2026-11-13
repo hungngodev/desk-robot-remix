@@ -29,7 +29,9 @@ def _clean(value: str, *, limit: int) -> str:
 
 def _memory_label(entry: Memory) -> str:
     if entry.kind == "heard_human":
-        return "I may have heard (uncertain transcription)"
+        return ("I may have heard (uncertain transcription)"
+                if entry.source_robot == entry.robot_id
+                else f"{entry.source_robot} reported uncertain human speech")
     if (entry.kind == "own_utterance" and entry.witnessed
             and entry.source_robot == entry.robot_id):
         return "I said"
