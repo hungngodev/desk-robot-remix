@@ -1370,6 +1370,49 @@ async def test_native_tool_dialogue_only_remembers_sent_uninterrupted_audio(
     assert len(session._tool_dialogue) == 1
 
 
+async def test_second_asr_clause_same_human_turn_survives_native_audio_fence(
+    native,
+):
+    """Tool speech cancellation must not invalidate the human's next ASR item."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._asr_item_turns["first"] = (0, 0)
+    session._asr_item_turns["second"] = (0, 0)
+    first = {
+        "item_id": "first", "transcript": "What color is the mug?",
+    }
+    second = {
+        "item_id": "second", "transcript": "Check your battery status",
+    }
+    assert session._accept_current_audio_item(first)
+    assert session._queue_readonly_tool(first)
+    assert session._readonly_queue.qsize() == 1
+    session._schedule_remote_cancel = lambda events: None
+    await session._reserve_tool_speech()
+    assert session._generation == 1 and session._input_generation == 0
+    assert session._accept_current_audio_item(second)
+    assert session._queue_readonly_tool(second)
+    await session._reserve_tool_speech()  # same human, do not bump generation
+    assert session._generation == 1
+    assert session._readonly_turn == 0
+    assert {session._readonly_queue.get_nowait()[0] for _ in range(2)} == {
+        "look", "power-status",
+    }
+    session._asr_item_turns["stale"] = (0, 0)
+    session._input_generation += 1
+    session._readonly_turn += 1
+    assert not session._accept_current_audio_item({
+        "item_id": "stale", "transcript": "Old question",
+    })
+
+
 async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native):
     import io
     import wave
