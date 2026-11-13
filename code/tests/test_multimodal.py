@@ -10,7 +10,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from desk_robot.multimodal import (
-    CameraFrameHub, MultimodalOrchestrator, change_fraction,
+    CameraFrameHub, MultimodalOrchestrator, _prepare, change_fraction,
 )
 from desk_robot.vision import OllamaScene
 
@@ -22,6 +22,16 @@ def image(color="gray", square=False):
     out = BytesIO()
     im.save(out, "JPEG", quality=92)
     return out.getvalue()
+
+
+def test_oversized_jpeg_header_rejected_before_pixel_decompression():
+    """A JPEG may advertise huge dimensions in a tiny source byte stream."""
+    frame = bytearray(image())
+    sof = frame.find(b"\xff\xc0")
+    assert sof > 0  # PIL's default generated RGB JPEG is baseline SOF0.
+    frame[sof + 5:sof + 9] = (5000).to_bytes(2, "big") * 2
+    with pytest.raises(ValueError, match="Camera dimensions invalid"):
+        _prepare(bytes(frame))
 
 
 class Head:
