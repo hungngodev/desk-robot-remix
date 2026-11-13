@@ -843,7 +843,7 @@ async def test_native_proactive_stream_rejects_delayed_and_future_receipts(nativ
         model="openbmb/MiniCPM-o-4_5", token="p" * 32,
     )
     original_us = round(module.time.monotonic() * 1_000_000)
-    jpeg = b"\\xff\\xd8" + b"camera source verified" + b"\\xff\\xd9"
+    jpeg = b"\xff\xd8" + b"camera source verified" + b"\xff\xd9"
 
     def frame(receipt):
         return (json.dumps({
@@ -853,7 +853,7 @@ async def test_native_proactive_stream_rejects_delayed_and_future_receipts(nativ
             "motion_ppm": 30000,
             "jpeg_base64": base64.b64encode(jpeg).decode("ascii"),
             "motor_authorized": False, "charging_authorized": False,
-        }) + "\\n").encode("ascii")
+        }) + "\n").encode("ascii")
 
     batch = (
         frame(original_us - 3_000_000)
