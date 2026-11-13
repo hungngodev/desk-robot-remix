@@ -583,6 +583,10 @@ class NativeOmniSession:
                 # microphone forwarding, cancellation, or existing speaker.
                 self.native_context_errors += 1
 
+    def _clear_obsolete_tool_turn(self) -> None:
+        """Clear old turn speech and tools once, preserving remembered dialogue."""
+        self._clear_obsolete_tool_turn()
+
     async def _reserve_tool_speech(self) -> None:
         """FENCE native model audio but preserve this spoken tool request.
 
@@ -1229,15 +1233,7 @@ class NativeOmniSession:
                     self._video_turn += 1
                     self._readonly_turn += 1
                     self._input_generation += 1
-                    self._readonly_requests.clear()
-                    self._discard_queued_readonly()
-                    self._tool_speech_turn = None
-                    self._tool_answer_started_turn = None
-                    self._tool_audio_response_id = None
-                    self._tool_reply_pending.clear()
-                    self._native_output_words.clear()
-                    self._last_human_transcript = ""
-                    self._tool_question = ""
+                    self._clear_obsolete_tool_turn()
                     self.latest_jpeg = None
                     self._latest_frame_receipt_us = None
                     self._last_video_sent_receipt_us = None
