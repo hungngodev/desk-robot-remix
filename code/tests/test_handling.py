@@ -363,3 +363,19 @@ def test_qualification_reenable_rejects_replayed_conversion():
     assert qualified(gate, sample(sample_ms=4001), 101.1,
                      new_sample=False) == ()
     assert len(gate.startup_samples) == 1
+
+
+def test_malformed_retired_boot_packet_cannot_erase_new_boot_calibration():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    assert qualified(gate, sample(boot_id=2), 102) == ()
+    calibrated(gate, 103)
+    assert gate.last_boot_id == 2
+    assert gate.reference is not None
+    # A delayed packet from boot 1 must not revoke the valid boot 2 pose.
+    assert qualified(gate, sample(boot_id=1, valid=False), 105) == ()
+    assert gate.last_boot_id == 2
+    assert gate.reference is not None
+    # A malformed packet from the CURRENT boot must still fail closed.
+    assert qualified(gate, sample(boot_id=2, valid=False), 105.1) == ()
+    assert gate.reference is None
