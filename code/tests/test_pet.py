@@ -2496,3 +2496,77 @@ async def test_proactive_inspection_rejects_cross_pet_receipts_and_tool_loops(
     finally:
         state.enabled = False
         await pet.close()
+
+
+async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fields(
+    fleet, tmp_path,
+):
+    class RealAux:
+        async def aux_status(self):
+            return {
+                "robot_id": "robot-01",
+                "climate": {
+                    "valid": True, "temp_centi": 2225, "rh_centi": 4650,
+                    "seq": 14, "age_ms": 100,
+                },
+                "bmp280": {"valid": True, "pressure_pa": 100927},
+                "proximity": {"valid": True, "gesture": 2},
+                "nfc": {"v": True, "e": 4},
+                "dock": {
+                    "valid": True, "left_seated": True,
+                    "right_seated": True, "charge_indicated": True,
+                },
+                "power": {
+                    "fuel_valid": True, "soc_centi": 6320,
+                    "cell_mv": 3820, "current_calibrated": False,
+                },
+                "credentials": "must never leak to the model",
+            }
+
+        async def command(self, *_):
+            raise AssertionError("Proactive sensors never issue motor commands")
+
+    class DecisionChat:
+        def __init__(self):
+            self.history = []
+
+        async def proactive_decision(self, history):
+            self.history.append(json.loads(json.dumps(history)))
+            if len(self.history) == 1:
+                return {"action": "inspect", "text": "", "tool": "aux_status"}
+            return {"action": "silence", "text": "", "tool": "none"}
+
+        async def reply(self, history):
+            raise AssertionError("Do not synthesize a reply when choosing silence")
+
+    chat = DecisionChat()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": RealAux()},
+        Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 56
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange(
+                "ambient_shift", "My environment changed", 1.0
+            ), 56,
+        )
+        await wait_for(lambda: pet._speech_task is None)
+        assert len(chat.history) == 2
+        receipt = json.loads(chat.history[-1][-1]["content"])
+        assert receipt["source"] == "authenticated_wroom_read_only_aux_status"
+        assert receipt["data"]["sht41"]["temp_centi"] == 2225
+        assert receipt["data"]["bmp280"]["pressure_pa"] == 100927
+        assert receipt["data"]["fuel_gauge"]["qualified"] is False
+        assert receipt["data"]["dock_contacts"]["charging_verified"] is False
+        assert "credentials" not in chat.history[-1][-1]["content"]
+        assert speaker.spoken == []
+        assert state.last_initiative_suppression == "model_chose_silence"
+    finally:
+        state.enabled = False
+        await pet.close()
