@@ -4,6 +4,105 @@ from fastapi.testclient import TestClient
 from desk_robot.api import create_app
 
 
+def test_mac_existing_ollama_selects_only_consented_readonly_tools(
+    settings, tokens,
+):
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    robot = settings.robots[0].id
+
+    class Model:
+        def __init__(self):
+            self.calls = []
+
+        async def reply(self, history):
+            self.calls.append(history)
+            return json.dumps({"tools": [
+                {"route": "move"}, {"route": "look"}, {"route": "status"},
+                {"route": "voice-context"}, {"route": "charge"},
+            ]})
+
+    model = Model()
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=model),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        request = {"transcript": "Could you inspect the desk and battery?"}
+        response = client.post(url, headers=headers, json=request)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["robot_id"] == robot
+        assert [tool["route"] for tool in body["tools"]] == [
+            "look", "status",
+        ]
+        assert body["tools"][0]["payload"] == {
+            "question": request["transcript"]
+        }
+        assert body["tools"][1]["payload"] == {}
+        assert body["model_can_arm_motors"] is False
+        assert body["motor_authorized"] is False
+        assert body["charging_authorized"] is False
+        assert body["untrusted_model_selection"] is True
+        assert model.calls
+        assert "Never propose physical commands" in model.calls[0][0]["content"]
+        assert request["transcript"] in model.calls[0][1]["content"]
+        assert client.post(url, json=request).status_code == 401
+        assert client.post(
+            f"/v1/pet/unknown-head/plan-readonly", headers=headers,
+            json=request,
+        ).status_code == 404
+        settings.voice_vision_tools_enabled = False
+        assert client.post(url, headers=headers, json=request).status_code == 403
+
+
+def test_mac_semantic_tool_plan_fail_closed_without_ollama_or_memory_consent(
+    settings, tokens,
+):
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    robot = settings.robots[0].id
+
+    class Model:
+        async def reply(self, history):
+            return '{"tools":[{"route":"voice-context"},' \
+                '{"route":"stop"},{"route":"charging"},{"route":"look"}]}'
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        result = client.post(url, headers=headers, json={
+            "transcript": "What did I say earlier?"
+        })
+        assert result.status_code == 200
+        assert [tool["route"] for tool in result.json()["tools"]] == ["look"]
+        # Memory permission alone is neither camera permission nor movement.
+        assert result.json()["model_can_arm_motors"] is False
+        assert client.post(url, headers=headers, json={
+            "transcript": "a" * 281
+        }).status_code == 422
+
+
 def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
     settings, tokens,
 ):
