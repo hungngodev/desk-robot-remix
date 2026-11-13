@@ -212,6 +212,10 @@ class NativeOmniSession:
         self._pet_quiet = False
         self._pet_autonomy_enabled = False
         self._last_human_speech_at = float("-inf")
+        # A quiet or paused pet gets at most one reply per verified local
+        # human VAD turn. Audio packet receipt is not a speech permit.
+        self._direct_reply_available = False
+        self._direct_reply_active = False
         self._silent_frames = 0
         self._playback_generation = -1
         # Consent comes from THIS pet's authenticated Mac context. Never
@@ -1421,6 +1425,7 @@ class NativeOmniSession:
                 self._last_human_speech_at = time.monotonic()
                 self._user_was_talking = True
                 if not was_talking:
+                    self._direct_reply_available = True
                     # No image from the preceding spoken turn may be sent
                     # with this voice. Wake the camera without HTTP in VAD.
                     self._video_turn += 1
@@ -1678,12 +1683,15 @@ class NativeOmniSession:
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
         if state == "start":
-            # Quiet is a hard voice mute. Pause leaves direct speech
-            # available, but never enables the model to address the room
-            # unsolicited. Use actual VAD receipt, not camera or model text.
-            if (self._pet_quiet or (
-                not self._pet_autonomy_enabled
-                and time.monotonic() - self._last_human_speech_at > 12.0
+            # Both quiet and pause prohibit unsolicited model speech, not
+            # a single genuine reply to the next authenticated human VAD.
+            # A recent timestamp alone was not sufficient: it previously
+            # let unlimited unrelated model responses slip through.
+            direct_required = self._pet_quiet or not self._pet_autonomy_enabled
+            if (direct_required and not (
+                self._direct_reply_available
+                and 0 <= time.monotonic() -
+                    self._last_human_speech_at <= 12.0
             )):
                 return False
             if self._external_speech_active:
@@ -1706,7 +1714,11 @@ class NativeOmniSession:
         async with self._device_send_lock:
             if (self.closed or generation != self._generation
                     or self._external_speech_active
-                    or (state == "start" and self._pet_quiet)):
+                    or (state == "start" and direct_required and not (
+                        self._direct_reply_available
+                        and 0 <= time.monotonic() -
+                            self._last_human_speech_at <= 12.0
+                    ))):
                 refused_after_claim = True
             # VAD may start between claim_speaker and acquiring the device
             # send lock. Suppress the TTS START packet in that case.
@@ -1719,6 +1731,9 @@ class NativeOmniSession:
                 await self.conn.websocket.send(json.dumps({
                     "type": "tts", "state": state, "session_id": self.conn.session_id,
                 }))
+                if state == "start" and direct_required:
+                    self._direct_reply_available = False
+                    self._direct_reply_active = True
         if refused_after_claim:
             if state == "start":
                 async with _output_owner_lock:
@@ -1733,6 +1748,7 @@ class NativeOmniSession:
                     _output_owner = None
             return False
         if state == "stop":
+            self._direct_reply_active = False
             self.conn.client_is_speaking = False
             async with _output_owner_lock:
                 if _output_owner == self.device:
@@ -1741,9 +1757,11 @@ class NativeOmniSession:
 
     async def _send_device_opus(self, packet: bytes, generation: int) -> None:
         global _output_owner
-        if (self.closed or self._pet_quiet
+        if (self.closed
                 or generation != self._generation
-                or self._external_speech_active):
+                or self._external_speech_active
+                or ((self._pet_quiet or not self._pet_autonomy_enabled)
+                    and not self._direct_reply_active)):
             return
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
@@ -1753,9 +1771,11 @@ class NativeOmniSession:
             # Human VAD can begin AFTER a reply already started, before the
             # queued cross-pet preemption task runs. Check real floor state
             # before every 60 ms packet, not just the TTS START frame.
-            if (self.closed or self._pet_quiet
+            if (self.closed
                     or generation != self._generation
-                    or self._external_speech_active):
+                    or self._external_speech_active
+                    or ((self._pet_quiet or not self._pet_autonomy_enabled)
+                        and not self._direct_reply_active)):
                 return
             if bridge.human_speech_active():
                 blocked_by_human = True
@@ -1775,6 +1795,8 @@ class NativeOmniSession:
     async def _invalidate_head_first(self) -> tuple[dict, ...]:
         """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
+        self._direct_reply_available = False
+        self._direct_reply_active = False
         self._readonly_turn += 1
         self._input_generation += 1
         self._clear_obsolete_tool_turn()
