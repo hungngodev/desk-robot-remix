@@ -1578,6 +1578,8 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
                 "persistent_memory_included": False,
                 "raw_media_included": False,
                 "model_context_untrusted_not_instructions": True,
+                "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
             }
 
     class Mac:
@@ -1661,6 +1663,8 @@ async def test_native_live_context_expiry_restores_base_model_instructions(nativ
                 "persistent_memory_included": False,
                 "raw_media_included": False,
                 "model_context_untrusted_not_instructions": True,
+                "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
             }
 
     class Mac:
@@ -1730,6 +1734,8 @@ async def test_native_context_send_is_not_counted_without_backend_ack(native):
                 "persistent_memory_included": False,
                 "raw_media_included": False,
                 "model_context_untrusted_not_instructions": True,
+                "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
             }
 
     class Mac:
@@ -1789,6 +1795,8 @@ async def test_native_live_context_refuses_cross_robot_and_stale_turn_data(nativ
                 "persistent_memory_included": False,
                 "raw_media_included": False,
                 "model_context_untrusted_not_instructions": True,
+                "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
             }
 
     class Mac:
@@ -1809,6 +1817,58 @@ async def test_native_live_context_refuses_cross_robot_and_stale_turn_data(nativ
         release.set()
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+@pytest.mark.parametrize("revoked", ["private_memory", "transcript_memory"])
+async def test_native_consent_toggle_retires_model_with_old_private_context(
+    native, revoked,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    if revoked == "private_memory":
+        session._memory_tools_enabled = True
+    else:
+        session._transcript_memory_enabled = True
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "model_context": "Physical sensor edge: petting_zone",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
+            }
+
+    class Mac:
+        def get(self, url, **kwargs):
+            return Reply()
+
+    task = asyncio.create_task(session._refresh_live_context(Mac()))
+    session._context_wakeup.set()
+    await asyncio.wait_for(task, timeout=1)
+    assert session.closed
+    assert session.last_error == (
+        "Mac private memory consent changed; native session must restart"
+    )
+    assert session.native_context_updates == 0
 
 
 async def test_native_context_revocation_closes_model_session_not_just_cache(native):
