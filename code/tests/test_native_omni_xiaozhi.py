@@ -2038,16 +2038,19 @@ async def test_failed_tool_speech_releases_native_floor_without_duplicate(
 
 
 @pytest.mark.parametrize(
-    "previous_question,seconds_old,expected",
+    "previous_question,seconds_old,followup,expected",
     [
-        ("Look at the mug on my desk", 5, True),
-        ("Look at the mug on my desk", 60, False),
-        ("Check your battery", 5, False),
-        ("", 0, False),
+        ("Look at the mug on my desk", 5, "What about the one beside it?", True),
+        ("Look at the mug on my desk", 5, "And the other one?", True),
+        ("Look at the mug on my desk", 5, "What about that?", True),
+        ("Look at the mug on my desk", 5, "Can you drive over there?", False),
+        ("Look at the mug on my desk", 60, "What about the one beside it?", False),
+        ("Check your battery", 5, "What about the one beside it?", False),
+        ("", 0, "What about the one beside it?", False),
     ],
 )
 def test_native_visual_followup_uses_only_prior_real_sent_visual_question(
-    native, previous_question, seconds_old, expected,
+    native, previous_question, seconds_old, followup, expected,
 ):
     """Resolve object anaphora only through the current pet's recent speech."""
     module, bridge = native
@@ -2066,7 +2069,7 @@ def test_native_visual_followup_uses_only_prior_real_sent_visual_question(
         ))
     event = {
         "item_id": "fresh_second_turn",
-        "transcript": "What about the one beside it?",
+        "transcript": followup,
     }
     assert session._queue_readonly_tool(event) is expected
     if expected:
@@ -2074,7 +2077,7 @@ def test_native_visual_followup_uses_only_prior_real_sent_visual_question(
         assert route == "look"
         assert "Prior completed user visual question:" in payload["question"]
         assert "Look at the mug" in payload["question"]
-        assert "What about the one beside it?" in payload["question"]
+        assert followup in payload["question"]
         assert epoch == session._generation and turn == session._readonly_turn
         assert len(payload["question"]) <= 280
     else:
