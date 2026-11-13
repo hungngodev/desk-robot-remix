@@ -126,6 +126,7 @@ def status(device: str) -> dict:
             and s._camera_stream_connected
             and s._last_mic_received_at is not None
             and 0 <= time.monotonic() - s._last_mic_received_at < 1.5
+            and 0 <= time.monotonic() - s._last_video_selected_at < 2.5
             and s.wire.frames_sent > 0
         ),
         "jpeg_frames_forwarded": s.wire.frames_sent,
