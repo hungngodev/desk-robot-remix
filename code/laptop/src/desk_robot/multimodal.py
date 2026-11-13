@@ -146,6 +146,10 @@ class CameraFrameHub:
         self.spoken_history = {
             robot: deque(maxlen=3) for robot in robot_ids
         }
+        # Native text receipts identify one actually transmitted response.
+        self.native_spoken_ids = {
+            robot: deque(maxlen=12) for robot in robot_ids
+        }
         # Completed model ASR is short-lived turn context, not durable memory.
         # Each robot's words remain isolated and deduped by source item ID.
         self.heard_history = {
@@ -380,15 +384,42 @@ class CameraFrameHub:
             )
         ]
 
-    def remember_spoken(self, robot_id: str, text: str, sent_at: float) -> None:
-        """One bounded Mac-owned utterance, transmitted but not acoustically ACKed."""
+    def remember_spoken(
+        self, robot_id: str, text: str, sent_at: float, *,
+        source: str = "mac_tts_transmitted_not_speaker_playback_ack",
+    ) -> None:
+        """Bounded sent audio text, never proof of acoustic playback."""
         self._check(robot_id)
         if (not isinstance(text, str) or not 1 <= len(text.strip()) <= 280
-                or not _finite(sent_at)):
+                or not _finite(sent_at) or source not in {
+                    "mac_tts_transmitted_not_speaker_playback_ack",
+                    "native_model_text_opus_sent_playback_unverified",
+                }):
             raise ValueError("Invalid actual transmitted pet speech")
         self.spoken_history[robot_id].append(
-            (" ".join(text.split())[:200], sent_at)
+            (" ".join(text.split())[:200], sent_at, source)
         )
+
+    def remember_native_spoken(
+        self, robot_id: str, event_id: str, text: str, sent_at: float,
+    ) -> bool:
+        """Deduplicate native model text associated with sent head Opus."""
+        self._check(robot_id)
+        if (not isinstance(event_id, str)
+                or re.fullmatch(r"omni_sent_[0-9a-f]{12}_[0-9a-f]{20}", event_id)
+                    is None):
+            raise ValueError("Invalid native sent audio receipt")
+        if event_id in self.native_spoken_ids[robot_id]:
+            return False
+        if (not _finite(sent_at)
+                or not 0 <= time.monotonic() - sent_at <= 5):
+            raise ValueError("Stale or future native audio receipt")
+        self.remember_spoken(
+            robot_id, text, sent_at,
+            source="native_model_text_opus_sent_playback_unverified",
+        )
+        self.native_spoken_ids[robot_id].append(event_id)
+        return True
 
     def remember_heard(self, robot_id: str, event_id: str, transcript: str,
                        received_at: float) -> bool:
@@ -476,13 +507,13 @@ class CameraFrameHub:
                     "speaker_identity_verified": False,
                     "physical_action_verified": False,
                 }))
-        for said, stamp in self.spoken_history[robot_id]:
+        for said, stamp, source in self.spoken_history[robot_id]:
             if 0 <= now - stamp <= 30:
                 items.append((stamp, {
                     "channel": "robot_speech",
                     "kind": "own_utterance",
                     "age_ms": round(1000 * (now - stamp)),
-                    "source": "mac_tts_transmitted_not_speaker_playback_ack",
+                    "source": source,
                     "content": said,
                     "playback_verified": False,
                     "physical_action_verified": False,
@@ -562,6 +593,7 @@ class CameraFrameHub:
         self.discard_video(robot_id)
         self.tool_history[robot_id].clear()
         self.spoken_history[robot_id].clear()
+        self.native_spoken_ids[robot_id].clear()
         self.heard_history[robot_id].clear()
         self.event_history[robot_id].clear()
         self.voice_until[robot_id] = -math.inf

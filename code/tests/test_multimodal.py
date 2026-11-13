@@ -1825,3 +1825,29 @@ async def test_lost_voice_transport_invalidates_old_tool_turn_not_only_visuals()
                    for robot_id in ("robot-01", "robot-02"))
     finally:
         await visual.close()
+
+
+def test_native_sent_audio_receipts_enter_only_own_bounded_live_history():
+    """Model text is a sent-Opus estimate, never another pet's heard speech."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    identity = "omni_sent_" + "a" * 12 + "_" + "b" * 20
+    assert hub.remember_native_spoken("robot-01", identity, "I noticed the mug", now)
+    assert not hub.remember_native_spoken("robot-01", identity, "replayed", now)
+    timeline = hub.interaction_timeline("robot-01", now)
+    speech = [item for item in timeline if item["channel"] == "robot_speech"]
+    assert len(speech) == 1
+    assert speech[0]["content"] == "I noticed the mug"
+    assert speech[0]["source"] == (
+        "native_model_text_opus_sent_playback_unverified"
+    )
+    assert speech[0]["playback_verified"] is False
+    assert hub.interaction_timeline("robot-02", now) == []
+    with pytest.raises(ValueError):
+        hub.remember_native_spoken("robot-02", identity, "expired", now - 10)
+    with pytest.raises(ValueError):
+        hub.remember_native_spoken("robot-02", identity, "future", now + 10)
+    assert not hub.interaction_timeline("robot-01", now + 31)
+    hub.clear("robot-01")
+    assert not hub.native_spoken_ids["robot-01"]
+

@@ -665,7 +665,7 @@ def test_completed_native_asr_blends_with_live_camera_context_without_disk_conse
     runtime.memory = memory
     headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     request = {
-        "event_id": "omni_live_transcript_1",
+        "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
         "transcript": "The red key is beside the mug",
     }
     with TestClient(create_app(settings, runtime=runtime)) as client:
@@ -1161,3 +1161,64 @@ def test_failed_body_stop_still_revokes_native_speech_and_pet_autonomy(
             assert events == [
                 "wroom_stop_attempt", state_change, "native_stop",
             ]
+
+
+def test_native_model_speech_text_enters_shared_mac_context_without_disk_storage(
+    settings, tokens,
+):
+    """Only scoped authenticated sent Opus text becomes ephemeral pet history."""
+    import time
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+    ids = [entry.id for entry in settings.robots]
+    hub = CameraFrameHub(ids)
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=lambda rid: settings.robot(rid)),
+        multimodal=SimpleNamespace(hub=hub), start=noop, close=noop,
+    )
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    url = f"/v1/pet/{robot}/omni-spoken"
+    payload = {
+        "event_id": "omni_sent_" + "a" * 12 + "_" + "b" * 20,
+        "model_text": "I saw something interesting on the desk",
+        "sent_at_us": int(time.monotonic() * 1_000_000),
+    }
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        assert client.post(url, json=payload).status_code == 401
+        first = client.post(url, headers=auth, json=payload)
+        assert first.status_code == 200
+        assert first.json()["ephemeral_context_added"] is True
+        assert first.json()["retained_on_disk"] is False
+        assert first.json()["audio_playback_verified"] is False
+        assert first.json()["motor_authorized"] is False
+        again = client.post(url, headers=auth, json=payload)
+        assert again.status_code == 200
+        assert again.json()["ephemeral_context_added"] is False
+        live = client.get(f"/v1/pet/{robot}/interaction-context", headers=auth)
+        assert live.status_code == 200
+        spoken = [item for item in live.json()["current_interaction_timeline"]
+                  if item["channel"] == "robot_speech"]
+        assert len(spoken) == 1
+        assert spoken[0]["source"] == (
+            "native_model_text_opus_sent_playback_unverified"
+        )
+        assert "native model estimated" in live.json()["model_context"]
+        assert client.post(
+            url, headers=auth, json={**payload, "event_id": "forged"}
+        ).status_code == 422
+        assert client.post(
+            url, headers=auth, json={**payload, "sent_at_us": 1}
+        ).status_code == 400
+        settings.voice_vision_tools_enabled = False
+        assert client.post(url, headers=auth, json=payload).status_code == 403
+    assert not hub.interaction_timeline(ids[1], time.monotonic())
+
+

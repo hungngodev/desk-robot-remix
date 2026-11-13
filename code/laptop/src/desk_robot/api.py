@@ -59,6 +59,13 @@ class NativeHeardRequest(BaseModel):
     transcript: str = Field(min_length=1, max_length=240)
 
 
+class NativeSpokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(pattern=r"^omni_sent_[0-9a-f]{12}_[0-9a-f]{20}$")
+    model_text: str = Field(min_length=1, max_length=200)
+    sent_at_us: int = Field(gt=0, strict=True)
+
+
 class PeerShareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     to_robot: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,40}$")
@@ -564,6 +571,34 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "speaker_identity_verified": False,
             "audio_playback_verified": False,
             "motor_authorized": False,
+        }
+
+    @app.post("/v1/pet/{robot_id}/omni-spoken",
+              dependencies=[Depends(authorize)])
+    async def omni_spoken(robot_id: str, request: NativeSpokenRequest):
+        """Share only native model text paired with transmitted XIAO Opus.
+
+        No audio, playback claim, persistent memory, or motor permission.
+        Reuses the Mac's bounded per-pet multimodal conversation timeline.
+        """
+        coordinator().robot(robot_id)
+        if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
+            raise HTTPException(403, "Native live context is disabled")
+        visual = getattr(app.state.runtime, "multimodal", None)
+        if visual is None:
+            raise HTTPException(503, "No authenticated Mac interaction owner")
+        added = visual.hub.remember_native_spoken(
+            robot_id, request.event_id, request.model_text,
+            request.sent_at_us / 1_000_000,
+        )
+        return {
+            "robot_id": robot_id,
+            "ephemeral_context_added": added,
+            "retained_on_disk": False,
+            "source": "native_model_text_opus_sent_playback_unverified",
+            "audio_playback_verified": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
         }
 
     @app.get("/v1/pet/{robot_id}/omni-stream",

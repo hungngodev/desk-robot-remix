@@ -207,10 +207,14 @@ def compose_brain_context(
         elif channel == "robot_speech" and kind == "own_utterance":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
-                phrase = (
-                    "I previously sent this spoken line (playback unverified): "
-                    + _clean(result, limit=90)
+                label = (
+                    "My native model estimated these words for sent Opus "
+                    "(playback unverified): "
+                    if item.get("source") ==
+                    "native_model_text_opus_sent_playback_unverified"
+                    else "I previously sent this spoken line (playback unverified): "
                 )
+                phrase = label + _clean(result, limit=90)
         if phrase:
             seen_cues.add(identity)
             priority = priorities[channel]
