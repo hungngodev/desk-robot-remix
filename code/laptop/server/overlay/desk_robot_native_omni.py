@@ -943,7 +943,8 @@ class NativeOmniSession:
             simple = transcript.casefold().strip()
             observational = re.search(
                 r"\b(?:camera|vision|see|visible|desk|object|battery|power|"
-                r"sensor|touch|remember|recall|memory|pickup|grasp|"
+                r"sensor|touch|temperature|humidity|pressure|proximity|"
+                r"nfc|sht41|bmp280|readings|remember|recall|memory|pickup|grasp|"
                 r"happened|look|notice|picture)\b", simple,
             )
             interrogative = re.match(
@@ -1039,8 +1040,8 @@ class NativeOmniSession:
                     # fences. Never present planner guesses as scene facts.
                     intents = result.get("tools")
                     allowed = {
-                        "look", "status", "power-status", "latest-pickup",
-                        "interaction-context", "voice-context",
+                        "look", "status", "power-status", "aux-status",
+                        "latest-pickup", "interaction-context", "voice-context",
                     }
                     if (not isinstance(intents, list) or len(intents) > 2
                             or result.get("untrusted_model_selection") is not True
