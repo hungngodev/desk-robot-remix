@@ -540,6 +540,47 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # answer. Return an explicit conflict, never old model text.
             raise OperationError(str(exc)) from exc
 
+    @app.get("/v1/pet/{robot_id}/power-status",
+             dependencies=[Depends(authorize)])
+    async def read_only_power_status(robot_id: str, request: Request):
+        """Only validated actual WROOM AUX fuel-gauge readings, if present.
+
+        Raw gauge estimates have no independently verified sample age or
+        pack-current calibration. They NEVER certify charge, safe voltage,
+        a working battery, battery capacity, or an actuator permit.
+        """
+        coordinator().robot(robot_id)
+        data = await coordinator().heads[robot_id].aux_status()
+        power = data.get("power", {}) if isinstance(data, dict) else {}
+        valid = power.get("fuel_valid") is True
+        cell = power.get("cell_mv")
+        soc = power.get("soc_centi")
+        if (valid and (type(cell) is not int or not 0 <= cell <= 4500
+                       or type(soc) is not int or not 0 <= soc <= 10000)):
+            raise OperationError("Malformed WROOM auxiliary fuel gauge values")
+        result = {
+            "robot_id": robot_id,
+            "gauge_available": valid,
+            "reported_cell_mv": cell if valid else None,
+            "reported_soc_centi": soc if valid else None,
+            "sample_freshness_verified": False,
+            "charging_verified": False,
+            "battery_capacity_verified": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+            "source": "wroom_aux_fuel_gauge_raw_unqualified",
+        }
+        owner = requested_tool_context(request, robot_id)
+        if valid:
+            summary = (
+                f"WROOM fuel gauge reports {soc / 100:.1f}% estimate and "
+                f"{cell}mV; sample freshness and charging unverified"
+            )
+        else:
+            summary = "WROOM fuel gauge unavailable; no verified charge or battery percentage"
+        remember_tool_context(owner, robot_id, "robot_status", summary)
+        return result
+
     @app.get("/v1/pet/{robot_id}/interaction-context",
              dependencies=[Depends(authorize)])
     async def pet_live_situation(robot_id: str):
