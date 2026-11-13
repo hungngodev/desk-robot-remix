@@ -400,13 +400,14 @@ class NativeOmniSession:
         """
         address = f"http://127.0.0.1:8765/v1/pet/{self.robot}/interaction-context"
         while not self.closed:
-            await self._context_wakeup.wait()
+            try:
+                # Even a quiet connected session must detect revoked consent
+                # and remove expired context. No voice/audio worker awaits it.
+                await asyncio.wait_for(self._context_wakeup.wait(), timeout=5.0)
+            except TimeoutError:
+                pass
             self._context_wakeup.clear()
             if not self.connected or not self._live_transcript_enabled:
-                continue
-            # Never reconfigure the model during an active human audio turn.
-            # The next response.done or completed ASR will request a refresh.
-            if self._user_was_talking:
                 continue
             delay = 1.5 - (time.monotonic() - self._context_last_sync_at)
             if delay > 0:
@@ -443,7 +444,9 @@ class NativeOmniSession:
                         or self._generation != epoch
                         or self._video_turn != video_turn
                         or self._user_was_talking):
-                    continue  # A newer human turn owns the context.
+                    # We still checked the Mac's permission during speech,
+                    # but cannot rewrite model instructions mid-utterance.
+                    continue
                 live = " ".join(data["model_context"].split())
                 instructions = self._base_instructions
                 if live:
