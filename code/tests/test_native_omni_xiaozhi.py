@@ -923,6 +923,29 @@ def test_native_long_natural_asr_uses_only_explicit_final_readonly_question(nati
     ) == ()  # Over 2400 ASR characters must not enter any tool.
 
 
+@pytest.mark.parametrize("spoken", [
+    "Is there a way to charge the battery on the desk?",
+    "How do I replace my battery?",
+    "What is the best way to charge my battery?",
+    "How can I see what the camera captures?",
+    "Could you tell me how to fix the sensor?",
+])
+def test_native_howto_does_not_fall_through_to_semantic_tool_planner(
+    native, spoken,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    session._queue_readonly_tool({"item_id": "howto-01", "transcript": spoken})
+    assert session._readonly_queue.empty()
+    assert session._readonly_requests == set()
+
+
 def test_native_compound_asr_queues_distinct_tools_once_per_real_audio_item(native):
     module, bridge = native
     conn, _ = connection()
