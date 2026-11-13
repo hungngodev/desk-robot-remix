@@ -68,10 +68,10 @@ def size_5v_supply(
     }
     if all(rating is not None for rating in ratings):
         requirements["candidate_electrically_sufficient_on_paper"] = (
-            Decimal(str(boost_max_input_a)) >= required_cell_peak
-            and Decimal(str(boost_continuous_input_a)) >= required_cell_cont
-            and Decimal(str(boost_continuous_output_a)) >= required_5v_peak
-            and Decimal(str(protected_cell_continuous_a)) >= required_cell_peak
+            Decimal(str(boost_max_input_a)) >= Decimal(str(cell_peak))
+            and Decimal(str(boost_continuous_input_a)) >= Decimal(str(cell_cont))
+            and Decimal(str(boost_continuous_output_a)) >= Decimal(str(boosted_peak))
+            and Decimal(str(protected_cell_continuous_a)) >= Decimal(str(cell_peak))
         )
         requirements["candidate_physically_qualified"] = False
     else:
