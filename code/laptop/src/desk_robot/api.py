@@ -708,8 +708,16 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "interaction-context", "voice-context",
         }
         picked = []
+        battery_question = any(
+            key in transcript.casefold()
+            for key in ("battery", "charge level", "power level", "cell voltage")
+        )
         for item in choices[:3] if isinstance(choices, list) else []:
             route = item.get("route") if isinstance(item, dict) else None
+            if route == "status" and battery_question:
+                # Ollama can choose a general read-only status tool, but a
+                # battery question must use the real WROOM fuel gauge source.
+                route = "power-status"
             if route not in allowed or route in picked:
                 continue
             if route == "voice-context" and not settings.voice_memory_tools_enabled:
