@@ -45,6 +45,10 @@ def native(monkeypatch):
     class ConsentfulFakeSession(actual_session):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
+            # The loopback fake grants what the real Mac endpoint must grant
+            # on every native startup, without ever authenticating production.
+            self._mac_context_verified = True
+            self._last_authenticated_mac_at = module.time.monotonic()
             self._pet_autonomy_enabled = True
 
     module.NativeOmniSession = ConsentfulFakeSession
