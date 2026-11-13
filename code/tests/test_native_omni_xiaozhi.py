@@ -797,6 +797,10 @@ async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
     }
     session._queue_readonly_tool(transcript)
     session._queue_readonly_tool(transcript)
+    # Different model ASR item IDs may replay the exact same request.
+    session._queue_readonly_tool({
+        "item_id": "model_item_1b", "transcript": transcript["transcript"],
+    })
     assert session._readonly_queue.qsize() == 1
     # A complete spoken sentence closes its VIDEO turn before a slow
     # read-only lookup finishes. That must not revoke the same human request.
@@ -815,6 +819,62 @@ async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
         session.closed = True
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"robot_id": "robot-02", "answer": "Other pet private data"},
+        {"robot_id": "robot-01", "motor_authorized": True},
+        {"robot_id": "robot-01", "charging_authorized": True},
+        {"answer": "Unidentified head response"},
+    ],
+)
+async def test_native_voice_tool_rejects_wrong_pet_and_action_permissions(
+    native, monkeypatch, result,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+
+    async def call(current, route, payload):
+        return result
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    session._queue_readonly_tool({
+        "item_id": "native_wrong_owner",
+        "transcript": "Check your battery status",
+    })
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        async with asyncio.timeout(1):
+            while session.native_readonly_tools_dropped < 1:
+                await asyncio.sleep(.005)
+        assert session.native_readonly_tools_completed == 0
+        assert not session._context_wakeup.is_set()
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
 
 
 async def test_native_speech_tool_old_result_cannot_enter_next_human_turn(
