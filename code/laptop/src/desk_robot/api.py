@@ -554,6 +554,15 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise OperationError("No current multimodal camera/sensor owner")
         now = time.monotonic()
         timeline = visual.hub.interaction_timeline(robot_id, now, limit=10)
+        if not settings.voice_memory_tools_enabled:
+            # Revoking memory consent also revokes the transient retrieval
+            # result. A still-active camera permit is not permission to read
+            # yesterday's private text through a native model prompt.
+            timeline = [
+                entry for entry in timeline
+                if not (entry.get("channel") == "tool"
+                        and entry.get("kind") == "memory_recall")
+            ]
         # The native audio session receives a compact source-labeled text
         # summary through its existing authenticated Mac context endpoint.
         # Neither raw media nor historical SQLite memory enters this view.
@@ -572,7 +581,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.get("/v1/pet/{robot_id}/voice-context", dependencies=[Depends(authorize)])
     async def pet_voice_context(
-        robot_id: str, query: str | None = Query(default=None, max_length=240),
+        robot_id: str, request: Request,
+        query: str | None = Query(default=None, max_length=240),
     ):
         # The language model cannot read persistent memories by default.
         # Explicit opt-in applies to the one authenticated robot identity only.
@@ -610,6 +620,24 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         core = await asyncio.to_thread(
             app.state.runtime.memory.core_facts, robot_id, limit=8
         )
+        if settings.voice_vision_tools_enabled and visual is not None:
+            # Only the explicit authenticated voice-tool lookup may supply a
+            # short-lived memory receipt to the native speech model.
+            # Operator/dashboard polling must not inject historical claims.
+            owner = requested_tool_context(request, robot_id)
+            if owner is not None:
+                if records:
+                    item = records[0]
+                    provenance = (
+                        "own observed event" if item.witnessed
+                        else f"reported by {item.source_robot}"
+                    )
+                    summary = provenance + ": " + item.summary[:160]
+                else:
+                    summary = "No matching historical memories for this query"
+                remember_tool_context(
+                    owner, robot_id, "memory_recall", summary[:200]
+                )
         return {
             "robot_id": robot_id,
             "core_facts": [
