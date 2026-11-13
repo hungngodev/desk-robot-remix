@@ -4650,3 +4650,40 @@ async def test_native_expired_mac_authorization_stops_private_media_without_tool
     assert "authorization expired" in session.last_error
     assert session._pet_autonomy_enabled is True  # fake opt in is not an ACK
     assert module.status("mac-01")["native_backend_connected"] is False
+
+
+async def test_native_model_connection_never_opens_without_current_mac_consent(
+    native, monkeypatch,
+):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._mac_context_verified = False
+    attempts = []
+
+    async def denied(http):
+        attempts.append("mac_auth_denied")
+        session._mac_context_verified = False
+
+    session._load_private_persona = denied
+
+    class FakeHTTP:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        def ws_connect(self, *args, **kwargs):
+            raise AssertionError("Private media reached model without Mac grant")
+
+    monkeypatch.setattr(module.aiohttp, "ClientSession", FakeHTTP)
+    await asyncio.wait_for(session.run(), timeout=2)
+    assert attempts == ["mac_auth_denied"]
+    assert session.closed and not session.connected
+    assert "Mac permission required" in session.last_error
+    assert not any(isinstance(item, bytes) for item in sent)
