@@ -346,3 +346,20 @@ def test_delayed_old_boot_cannot_displace_new_boot_calibration():
     assert gate.reference is not None
     assert qualified(gate, sample(boot_id=22, sample_ms=9),
                      102.1, new_sample=False) == ()
+
+
+def test_qualification_reenable_rejects_replayed_conversion():
+    gate = HandlingGate()
+    frame = sample(sample_ms=4000)
+    assert qualified(gate, frame, 100.0, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
+    # Physical qualification may be revoked without a WROOM reboot.
+    assert gate.observe(frame, 100.1, qualified=False) == ()
+    assert gate.reference is None and gate.startup_samples == []
+    assert gate.last_boot_id == 1 and gate.last_sample_ms == 4000
+    for i in range(8):
+        assert qualified(gate, frame, 100.2 + i * .1, new_sample=False) == ()
+    assert gate.startup_samples == []
+    assert qualified(gate, sample(sample_ms=4001), 101.1,
+                     new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
