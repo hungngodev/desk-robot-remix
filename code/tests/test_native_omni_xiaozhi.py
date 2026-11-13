@@ -885,8 +885,8 @@ def test_native_compound_speech_dispatches_only_explicit_readonly_tools(
         ),
         (
             "Look around and then please tell me what happened",
-            ("look",),
-            "Look around and then please tell me what happened",
+            ("look", "interaction-context"),
+            "Look around",
         ),
     ],
 )
