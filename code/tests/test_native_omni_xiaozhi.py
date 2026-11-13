@@ -4716,3 +4716,38 @@ async def test_operator_quiet_never_blocks_emergency_native_stop(native):
         session.closed = True
         module._sessions.clear()
         module._output_owner = None
+
+
+async def test_operator_quiet_while_waiting_for_head_send_releases_fleet_speaker(
+    native,
+):
+    """A denied START cannot strand the single speaker lease for all pets."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = session
+    await session._device_send_lock.acquire()
+    pending = asyncio.create_task(
+        session._send_device_state("start", session._generation)
+    )
+    try:
+        async with asyncio.timeout(1):
+            while module._output_owner != "mac-01":
+                await asyncio.sleep(.002)
+        assert not pending.done()
+        session._pet_quiet = True  # Actual operator changes permission.
+    finally:
+        session._device_send_lock.release()
+    try:
+        assert await asyncio.wait_for(pending, timeout=1) is False
+        assert sent == []
+        assert conn.client_is_speaking is False
+        assert module._output_owner is None
+    finally:
+        session.closed = True
+        module._sessions.clear()
+        module._output_owner = None
