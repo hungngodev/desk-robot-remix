@@ -266,6 +266,33 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
                     }
                     if (GetDeviceState() == kDeviceStateSpeaking) {""",
         )
+        # BOOT privacy stop must also work while Xiaozhi is speaking.
+        # Its stock StopListening() handles only the Listening state, which
+        # would leave realtime microphone upload alive after a spoken reply.
+        # Patch only the selected Sense board and only with explicit opt in.
+        text = replace_once(
+            text,
+            """        SetDeviceState(kDeviceStateIdle);
+    }
+}
+
+void Application::HandleWakeWordDetectedEvent() {""",
+            """        SetDeviceState(kDeviceStateIdle);
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    } else if (state == kDeviceStateSpeaking) {
+        AbortSpeaking(kAbortReasonNone);
+        audio_service_.ResetDecoder();
+        Board::GetInstance().GetAudioCodec()->EnableOutput(false);
+        if (protocol_) {
+            protocol_->CloseAudioChannel();
+        }
+        SetDeviceState(kDeviceStateIdle);
+#endif
+    }
+}
+
+void Application::HandleWakeWordDetectedEvent() {""",
+        )
         files[path] = text.encode()
         return files
     files = cores3_files(target)
