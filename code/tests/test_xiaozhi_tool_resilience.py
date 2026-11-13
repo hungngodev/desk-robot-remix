@@ -329,6 +329,44 @@ async def test_one_human_cancels_only_own_visual_tool_not_four_other_pets(
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
 
+async def test_voice_battery_tool_uses_actual_unqualified_wroom_power_source(
+    bridge_tools, monkeypatch,
+):
+    original = httpx.AsyncClient
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        assert request.url.path == "/v1/pet/robot-01/power-status"
+        assert request.method == "GET"
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "source": "wroom_aux_fuel_gauge_raw_unqualified",
+            "gauge_available": True,
+            "reported_cell_mv": 3800,
+            "reported_soc_centi": 5900,
+            "sample_freshness_verified": False,
+            "charging_verified": False,
+            "battery_capacity_verified": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "power-status"
+    )
+    assert len(seen) == 1
+    assert result["robot_id"] == "robot-01"
+    assert result["reported_soc_centi"] == 5900
+    assert result["sample_freshness_verified"] is False
+    assert result["charging_verified"] is False
+    assert result["motor_authorized"] is False
+
+
 async def test_unknown_xiaozhi_head_cannot_borrow_another_robots_mac_tool(
     bridge_tools, monkeypatch,
 ):
