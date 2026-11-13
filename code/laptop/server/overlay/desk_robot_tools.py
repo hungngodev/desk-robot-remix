@@ -14,7 +14,7 @@ async def call(conn, route, payload=None):
     # arbitrary model-supplied paths, even to a separately protected API.
     if route not in {
         "status", "latest-pickup", "interaction-context", "voice-context",
-        "look", "pickup", "stop",
+        "look", "pickup", "stop", "plan-readonly",
     }:
         return {"error": "Unsupported robot tool route", "retried": False}
     robot = robot_for_device(conn.device_id)
@@ -62,6 +62,11 @@ async def call(conn, route, payload=None):
                     f"/v1/pet/{robot}/look", json=payload or {},
                     timeout=50,
                 )
+            elif route == "plan-readonly":
+                response = await client.post(
+                    f"/v1/pet/{robot}/plan-readonly",
+                    json=payload or {}, timeout=4,
+                )
             else:
                 response = await client.post(
                     f"/v1/robots/{robot}/{route}", json=payload or {}
@@ -74,7 +79,8 @@ async def call(conn, route, payload=None):
     # Safety STOP and permitted pickup jobs must keep their established
     # physical acknowledgement/owner semantics, not lose an HTTP request.
     readonly = route in {
-        "status", "latest-pickup", "voice-context", "interaction-context", "look",
+        "status", "latest-pickup", "voice-context", "interaction-context",
+        "look", "plan-readonly",
     }
     observe_turn = getattr(bridge, "tool_turn_cancel_event", None)
     try:
@@ -165,6 +171,23 @@ async def call(conn, route, payload=None):
     # A free-form answer is not evidence that the authenticated XIAO camera
     # was used. Only the existing Mac look() response contract may become
     # a visual answer spoken by Xiaozhi or consumed by native duplex.
+    if route == "plan-readonly" and (
+        result.get("source") != "existing_mac_ollama_readonly_route_selection"
+        or result.get("model_can_arm_motors") is not False
+        or result.get("untrusted_model_selection") is not True
+        or not isinstance(result.get("tools"), list)
+        or len(result["tools"]) > 2
+        or any(
+            not isinstance(tool, dict)
+            or tool.get("route") not in {
+                "look", "status", "latest-pickup",
+                "interaction-context", "voice-context",
+            }
+            or not isinstance(tool.get("payload"), dict)
+            for tool in result["tools"]
+        )
+    ):
+        return {"error": "Invalid read-only Mac intent plan", "retried": False}
     if route == "look" and (
         result.get("source") != "authenticated_xiao_camera_and_local_vlm"
         or type(result.get("frames_used")) is not int
