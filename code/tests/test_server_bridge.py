@@ -1386,3 +1386,43 @@ def test_authenticated_vad_invalidates_old_tool_requests_but_not_speech_end(brid
     assert third.is_set()
     with pytest.raises(ValueError, match="connected"):
         bridge.tool_turn_cancel_event("mac-01")
+
+
+async def test_operator_interrupt_reuses_native_generation_flush_not_duplicate_stop(
+    bridge, monkeypatch,
+):
+    """Operator quiet must cancel model PCM, not just send one TTS STOP."""
+    stopped = []
+    first = conn("mac-01")
+    first.session_id = "private-01"
+
+    class WebSocket:
+        async def send(self, frame):
+            stopped.append(json.loads(frame))
+
+    first.websocket = WebSocket()
+    bridge.register(first)
+
+    async def suspend(current):
+        assert current is first
+        stopped.append({
+            "source": "native_cancelled_generation",
+            "device": current.device_id,
+        })
+        return True
+
+    native = SimpleNamespace(suspend_proactive_for_operator=suspend)
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni", native)
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        response = await client.post(
+            "/interrupt", headers=headers, json={"device_id": "mac-01"}
+        )
+    assert response.status == 200
+    assert (await response.json())["interrupted"] is True
+    assert stopped == [{
+        "source": "native_cancelled_generation",
+        "device": "mac-01",
+    }]
+    assert bridge.interrupt_generation["mac-01"] == 1
+    assert first.client_abort is True
