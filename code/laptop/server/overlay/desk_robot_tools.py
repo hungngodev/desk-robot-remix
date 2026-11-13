@@ -182,6 +182,7 @@ async def call(conn, route, payload=None):
         or len(result["tools"]) > 2
         or any(
             not isinstance(tool, dict)
+            or not isinstance(tool.get("route"), str)
             or tool.get("route") not in {
                 "look", "status", "power-status", "latest-pickup",
                 "interaction-context", "voice-context",
