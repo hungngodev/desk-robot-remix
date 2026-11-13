@@ -416,9 +416,11 @@ class CameraFrameHub:
         # completed vision tool result or the pet's last spoken line.
         # Retain each present modality's LATEST event, then use remaining
         # capacity for recent detail. Never turn a frame into a sighting.
-        modalities = ("human_voice", "sensor", "tool", "robot_speech", "camera")
+        modalities = ("human_voice", "tool", "sensor", "robot_speech", "camera")
         required: set[int] = set()
         for channel in modalities:
+            if len(required) >= limit:
+                break
             for index in range(len(items) - 1, -1, -1):
                 if items[index][1]["channel"] == channel:
                     required.add(index)
