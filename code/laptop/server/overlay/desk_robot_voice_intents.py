@@ -152,7 +152,8 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         r"have we (?:talked|discussed)|tell me what you remember|"
         r"remind me (?:of|about))\b", spoken,
     ) or re.match(
-        r"^(?:remember|recall) (?:what|when|where|who|the)\b", polite,
+        r"^(?:(?:remember|recall) (?:what|when|where|who|the|anything)\b|"
+        r"tell me what you remember\b|remind me (?:of|about)\b)", polite,
     ):
         # A broad "do you remember anything?" is a RECENT recall request,
         # not a search for the literal words "remember" or "anything".
@@ -160,8 +161,8 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         generic = re.fullmatch(
             r"(?:do you (?:remember|recall)(?: (?:anything|me|yesterday))?|"
             r"what do you remember|tell me what you remember|"
-            r"can you recall anything)(?: (?:from|about) yesterday)?",
-            spoken,
+            r"(?:can you )?recall anything)(?: (?:from|about) yesterday)?",
+            polite,
         )
         return "voice-context", {} if generic else {"question": text[:240]}
     if re.match(
