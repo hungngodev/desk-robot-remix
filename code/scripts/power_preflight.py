@@ -46,15 +46,20 @@ def size_5v_supply(
                           / (Decimal(str(cell_low_v))
                              * Decimal(str(measured_boost_efficiency))))
     required_5v_cont = Decimal(str(measured_continuous_5v_a)) * Decimal(str(margin))
+    required_cell_cont = (Decimal(5) * required_5v_cont
+                          / (Decimal(str(cell_low_v))
+                             * Decimal(str(measured_boost_efficiency))))
     milliamp = Decimal("0.001")
     boosted_peak = float(required_5v_peak.quantize(milliamp, rounding=ROUND_CEILING))
     cell_peak = float(required_cell_peak.quantize(milliamp, rounding=ROUND_CEILING))
     boosted_cont = float(required_5v_cont.quantize(milliamp, rounding=ROUND_CEILING))
+    cell_cont = float(required_cell_cont.quantize(milliamp, rounding=ROUND_CEILING))
     requirements = {
         "measured_peak_5v_a": measured_peak_5v_a,
         "minimum_rated_5v_output_a": boosted_peak,
         "minimum_rated_cell_and_boost_input_a": cell_peak,
         "minimum_rated_continuous_5v_a": boosted_cont,
+        "minimum_continuous_cell_input_a": cell_cont,
         "minimum_protected_cell_discharge_a": cell_peak,
         "charger_and_load_sharing_verified": False,
         "thermal_and_brownout_verified": False,
