@@ -105,6 +105,12 @@ class HandlingGate:
             previous = (self.last_boot_id, self.last_sample_ms)
             self.reset()
             self.last_boot_id, self.last_sample_ms = previous
+        # A delayed retired boot packet is not evidence that the CURRENT
+        # WROOM sensor failed, even if its old payload is malformed.
+        imu = body.get("imu") if isinstance(body, dict) else None
+        if (isinstance(imu, dict) and type(imu.get("boot_id")) is int
+                and imu["boot_id"] in self.retired_boot_ids):
+            return ()
         sample = raw_mpu6050(body)
         if sample is None:
             # Bad telemetry invalidates pose, not the last trusted acquisition.
