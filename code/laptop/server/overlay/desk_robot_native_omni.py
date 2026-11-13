@@ -738,6 +738,21 @@ class NativeOmniSession:
                 # microphone forwarding, cancellation, or existing speaker.
                 self.native_context_errors += 1
 
+    def _discard_queued_readonly(self) -> None:
+        """New human speech must not wait behind stale optional Mac tools.
+
+        The queue has only three slots. Cancelling the active HTTP batch
+        without removing queued prior-turn work can otherwise drop a valid
+        question from the new turn even though those slots will later be
+        rejected as obsolete by the worker.
+        """
+        while True:
+            try:
+                self._readonly_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self.native_readonly_tools_dropped += 1
+
     def _queue_readonly_tool(self, event: dict) -> None:
         """One explicit actual ASR request, never guessed physical authority."""
         if not self._live_transcript_enabled:
@@ -1006,6 +1021,7 @@ class NativeOmniSession:
                     self._video_turn += 1
                     self._readonly_turn += 1
                     self._readonly_requests.clear()
+        self._discard_queued_readonly()
                     self.latest_jpeg = None
                     self._latest_frame_receipt_us = None
                     self._last_video_sent_receipt_us = None
@@ -1220,6 +1236,7 @@ class NativeOmniSession:
         self._generation += 1
         self._readonly_turn += 1
         self._readonly_requests.clear()
+        self._discard_queued_readonly()
         # A barge-in invalidates both obsolete robot audio and visual
         # context. A camera fetch already in flight must not reintroduce
         # old-turn JPEGs after the head's audio has been flushed.
