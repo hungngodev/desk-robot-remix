@@ -644,6 +644,54 @@ async def test_mac_proactive_tts_claims_and_releases_native_speaker_owner(
     assert not sent
 
 
+async def test_human_vad_during_tts_start_cannot_send_obsolete_sentence(
+    bridge, monkeypatch,
+):
+    """A human interrupt inside the first async TTS START forbids captions."""
+    import types
+
+    states, packets = [], []
+    class Socket:
+        async def send(self, payload):
+            packets.append(payload)
+
+    current = SimpleNamespace(
+        device_id="mac-01", conn_from_mqtt_gateway=False,
+        client_abort=False, client_is_speaking=False,
+        websocket=Socket(), session_id="head",
+        clearSpeakStatus=lambda: None,
+    )
+
+    async def send_tts_message(owner, state, content=None):
+        states.append(state)
+        if state == "start":
+            bridge.interrupt_generation[owner.device_id] += 1
+            owner.client_abort = True
+
+    pkg = types.ModuleType("core")
+    pkg.__path__ = []
+    handle = types.ModuleType("core.handle")
+    handle.__path__ = []
+    audio = types.ModuleType("core.handle.sendAudioHandle")
+    audio.send_tts_message = send_tts_message
+    for name, mod in (
+        ("core", pkg), ("core.handle", handle),
+        ("core.handle.sendAudioHandle", audio),
+    ):
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
+    bridge.interrupt_generation["mac-01"] = 0
+    bridge.lease_ids = frozenset({"mac-01"})
+    bridge.lease_until = time.monotonic() + 10
+    with pytest.raises(RuntimeError, match="Speech interrupted"):
+        await bridge.transmit(current, "obsolete sentence", [b"opus"])
+    assert states == ["start"]
+    assert not any(isinstance(packet, bytes) for packet in packets)
+    assert any(isinstance(packet, str) and '"flush": true' in packet
+               for packet in packets)
+
+
 @pytest.mark.parametrize("vad_mode", ["generation", "fleet_floor"])
 async def test_human_vad_during_native_speaker_handoff_cannot_restart_old_tts(
     bridge, monkeypatch, vad_mode,
