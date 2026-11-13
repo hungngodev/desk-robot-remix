@@ -349,8 +349,8 @@ async def test_continuous_stream_changes_reach_real_pet_scene_memory_without_pol
     visual.start_streams()
     observer = asyncio.create_task(pet._observe("robot-01", 17))
     try:
-        await wait_for(lambda: scene.calls >= 1, timeout=5)
-        assert state.events == 1
+        await wait_for(lambda: state.events >= 1, timeout=5)
+        assert scene.calls == 1 and state.events == 1
         assert head.snapshot_calls == 0
         assert memory.count("robot-01") == 1
         remembered = memory.recent("robot-01")[0]
