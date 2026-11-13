@@ -97,7 +97,7 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
     # without saying "look" or "see". Keep this limited to explicit visual
     # questions; do not turn statements, memories or motor requests into tools.
     visual_attribute = re.match(
-        r"^what (?:colou?r|shape|size) (?:is|are)\b", polite,
+        r"^(?:tell me )?what (?:colou?r|shape|size) (?:is|are)\b", polite,
     )
     scene_location = re.search(
         r"\b(?:on (?:my|the) (?:desk|table)|"
@@ -105,7 +105,7 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         r"in front of (?:me|you)|next to|beside|behind|visible)\b",
         polite,
     )
-    visual_count = re.match(r"^(?:how many|can you count)\b", polite)
+    visual_count = re.match(r"^(?:how many|count)\b", polite)
     visual_relation = re.match(
         r"^(?:is|are) (?:there\b|(?:this|that|the|my) [a-z0-9-]+\b)",
         polite,
@@ -117,8 +117,13 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         )
         and re.search(r"\b(?:say|read|show)\b", polite)
     )
-    if (visual_attribute or (scene_location and (visual_count or visual_relation))
-            or visible_text):
+    # Spatial words inside a how-to question are not an invitation to look.
+    abstract_query = re.match(
+        r"^(?:is|are) there (?:a |an |any )?(?:way|method|reason|chance|plan)\b",
+        polite,
+    )
+    if (visual_attribute or (scene_location and (visual_count or (
+            visual_relation and not abstract_query))) or visible_text):
         return "look", {"question": text}
     # A status query must ASK about an existing action. Merely saying
     # "pick up the key" must NEVER be interpreted as a job submission.
