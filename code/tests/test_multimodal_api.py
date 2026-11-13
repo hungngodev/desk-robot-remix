@@ -325,6 +325,74 @@ def test_completed_native_asr_blends_with_live_camera_context_without_disk_conse
         assert hub.interaction_timeline(pet.id, time.monotonic()) == []
 
 
+def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
+    settings, tokens, tmp_path,
+):
+    from types import SimpleNamespace
+    from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
+
+    pet = settings.robots[0]
+    peer = settings.robots[1]
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    ids = [robot.id for robot in settings.robots]
+    memory = MemoryStore(tmp_path / "private", ids)
+    memory.remember(
+        pet.id, "old_key_sighting", "My key was beside the green mug",
+        kind="object", source_robot=pet.id, witnessed=True,
+    )
+    hub = CameraFrameHub(ids)
+
+    class Runtime:
+        coordinator = SimpleNamespace(robot=lambda rid: (
+            settings.robot(rid)
+        ))
+        multimodal = SimpleNamespace(hub=hub, _turn_epoch={rid: 0 for rid in ids})
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    runtime = Runtime()
+    runtime.memory = memory
+    headers = {
+        "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
+        "X-Desk-Robot-Tool-Receipt": "1",
+    }
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{pet.id}/voice-context"
+        recall = client.get(
+            url, params={"query": "key green mug"}, headers=headers
+        )
+        assert recall.status_code == 200
+        assert recall.json()["matched"] is True
+        timeline = client.get(
+            f"/v1/pet/{pet.id}/interaction-context", headers=headers
+        )
+        assert timeline.status_code == 200
+        cues = timeline.json()["model_context"]
+        assert "Opt-in private past memory" in cues
+        assert "green mug" in cues
+        assert "not current sight" in cues
+        assert "green mug" not in client.get(
+            f"/v1/pet/{peer.id}/interaction-context", headers=headers
+        ).json()["model_context"]
+        settings.voice_memory_tools_enabled = False
+        # The live camera permit does not retain permission to send an
+        # earlier private memory result to the model after opt-out.
+        revoked = client.get(
+            f"/v1/pet/{pet.id}/interaction-context", headers=headers
+        )
+        assert revoked.status_code == 200
+        assert "green mug" not in revoked.json()["model_context"]
+        assert client.get(url, headers=headers).status_code == 403
+        assert memory.count(pet.id) == 1
+
+
 def test_native_personality_uses_shared_brain_provenance_and_private_core(
     settings, tokens, tmp_path,
 ):
