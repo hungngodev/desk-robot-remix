@@ -62,6 +62,22 @@ as eyewitness history. One Xiaozhi speaker lease, separate SQLite
 memories and the established operator motion permits remain unchanged.
 No second microphone, camera, tool executor or agent graph exists.
 
+**Historical group memory consent** is independent of memory retention:
+on real hardware, the existing group chat no longer injects private core
+facts or retrieved episode text when fleet text sharing is disabled.
+One-to-one robot memory stays on its existing separately authorized
+path. Source tests cover the consent-off and consent-on group cases.
+The native model `status()` now separately reports live ASR delivery
+count, whether transient context is enabled, and
+`native_tool_calls_supported=false` for this current MiniCPM adapter.
+A supported native audio/video session is not a general agent tool
+runtime. If tool-capable duplex is desired, investigate a published
+backend with negotiated function-call capability and verify it with the
+pinned Xiaozhi bridge rather than forging unsupported MiniCPM events.
+The [vLLM Omni duplex contract](https://github.com/vllm-project/vllm-omni/blob/main/docs/serving/realtime_duplex_api.md)
+distinguishes models with function calls from MiniCPM-o 4.5, which
+does not currently advertise them.
+
 **Live priority and recovery:** A direct `desk_robot_look` request
 now cancels only the optional in-flight pet scene comparison before
 waiting for the shared VLM lock; it never cancels the permanent observer
