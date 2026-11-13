@@ -794,6 +794,7 @@ class NativeOmniSession:
                             or result.get("model_can_arm_motors") is not False
                             or any(
                                 not isinstance(planned, dict)
+                                or not isinstance(planned.get("route"), str)
                                 or planned.get("route") not in allowed
                                 or not isinstance(planned.get("payload"), dict)
                                 for planned in intents
