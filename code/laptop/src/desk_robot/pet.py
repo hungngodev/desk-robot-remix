@@ -1429,16 +1429,65 @@ class PetController:
         if (not isinstance(result, dict)
                 or result.get("robot_id") != robot_id):
             raise RuntimeError("Proactive tool returned wrong robot identity")
-        # Do not inject unbounded messages or bearer secrets into the model.
-        # This is an authenticated source receipt, not an instruction.
-        selected = {
-            key: result[key] for key in (
-                "ok", "valid", "status", "battery", "power", "data",
-                "imu", "ranges", "range", "touch", "climate", "body",
-                "sensors", "error",
-            ) if key in result
-        }
-        payload = json.dumps(selected, ensure_ascii=True, default=str)
+        # A real HttpHead validates full auxiliary telemetry upstream.
+        # Pass only small typed readings, never its entire raw diagnostics,
+        # tokens, model-controlled strings or an unqualified charge claim.
+        if tool == "aux_status":
+            selected = {}
+            climate = result.get("climate")
+            if isinstance(climate, dict) and climate.get("valid") is True:
+                if (type(climate.get("temp_centi")) is int
+                        and type(climate.get("rh_centi")) is int):
+                    selected["sht41"] = {
+                        "temp_centi": climate["temp_centi"],
+                        "rh_centi": climate["rh_centi"],
+                    }
+            bmp = result.get("bmp280")
+            if isinstance(bmp, dict) and bmp.get("valid") is True:
+                if type(bmp.get("pressure_pa")) is int:
+                    selected["bmp280"] = {
+                        "pressure_pa": bmp["pressure_pa"],
+                        "physically_verified": False,
+                    }
+            power = result.get("power")
+            if isinstance(power, dict) and power.get("fuel_valid") is True:
+                if (type(power.get("soc_centi")) is int
+                        and type(power.get("cell_mv")) is int):
+                    selected["fuel_gauge"] = {
+                        "soc_centi": power["soc_centi"],
+                        "cell_mv": power["cell_mv"],
+                        "qualified": False,
+                    }
+            proximity = result.get("proximity")
+            if isinstance(proximity, dict) and proximity.get("valid") is True:
+                if type(proximity.get("gesture")) is int:
+                    selected["proximity"] = {
+                        "gesture": proximity["gesture"],
+                        "physically_qualified": False,
+                    }
+            nfc = result.get("nfc")
+            if isinstance(nfc, dict) and nfc.get("v") is True:
+                if type(nfc.get("e")) is int:
+                    selected["nfc"] = {"event_count": nfc["e"]}
+            dock = result.get("dock")
+            if isinstance(dock, dict) and dock.get("valid") is True:
+                if all(type(dock.get(field)) is bool for field in (
+                    "left_seated", "right_seated", "charge_indicated",
+                )):
+                    selected["dock_contacts"] = {
+                        "left_seated": dock["left_seated"],
+                        "right_seated": dock["right_seated"],
+                        "charge_indicated": dock["charge_indicated"],
+                        "charging_verified": False,
+                    }
+        else:
+            selected = {
+                key: result[key] for key in (
+                    "ok", "valid", "armed", "safety", "status", "battery",
+                    "power", "data", "body",
+                ) if key in result
+            }
+        payload = json.dumps(selected, ensure_ascii=True)
         if not selected or len(payload) > 1400:
             raise RuntimeError("No bounded authenticated tool evidence")
         return {
