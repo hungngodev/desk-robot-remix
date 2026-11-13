@@ -595,7 +595,26 @@ class NativeOmniSession:
             return
         requests = native_readonly_requests(event.get("transcript"))
         if not requests:
-            return
+            transcript = event.get("transcript")
+            if not isinstance(transcript, str):
+                return
+            # Only ambiguous OBSERVATIONAL speech needs semantic selection.
+            # Ordinary social talk and actuator requests never open another
+            # planner call. The Mac model can only SELECT read-only routes.
+            simple = transcript.casefold().strip()
+            observational = re.search(
+                r"\b(?:camera|vision|see|visible|desk|object|battery|power|"
+                r"sensor|touch|remember|recall|memory|pickup|grasp|"
+                r"happened|look|notice|picture)\b", simple,
+            )
+            interrogative = re.match(
+                r"^(?:hey [a-z]+[, ]+)?(?:can|could|would|will|do|"
+                r"what|how|where|which|is|are|did|have|has|please|"
+                r"check|tell|show|describe|look)\b", simple,
+            )
+            if observational is None or interrogative is None:
+                return
+            requests = (("plan-readonly", {"transcript": transcript}),)
         signature_text = " ".join(
             event["transcript"].casefold().split()
         ).strip(" ?!.")
@@ -659,6 +678,38 @@ class NativeOmniSession:
                         or result.get("error")
                         or result.get("_desk_robot_turn_superseded")):
                     self.native_readonly_tools_dropped += 1
+                    continue
+                if result.get("source") == (
+                    "existing_mac_ollama_readonly_route_selection"
+                ):
+                    # Planning is not a tool observation. Queue only the
+                    # Mac validated read-only route selections, then they
+                    # re-enter this SAME pinned HTTP executor with new turn
+                    # fences. Never present planner guesses as scene facts.
+                    intents = result.get("tools")
+                    if not isinstance(intents, list):
+                        self.native_readonly_tools_dropped += 1
+                        continue
+                    for planned in intents[:2]:
+                        if not isinstance(planned, dict):
+                            continue
+                        route = planned.get("route")
+                        payload = planned.get("payload")
+                        if (route not in {
+                            "look", "status", "latest-pickup",
+                            "interaction-context", "voice-context",
+                        } or not isinstance(payload, dict)):
+                            continue
+                        key = (route, "__semantic_planner__")
+                        if key in self._readonly_requests:
+                            continue
+                        try:
+                            self._readonly_queue.put_nowait(
+                                (route, payload, epoch, request_turn)
+                            )
+                            self._readonly_requests.add(key)
+                        except asyncio.QueueFull:
+                            self.native_readonly_tools_dropped += 1
                     continue
                 self.native_readonly_tools_completed += 1
                 self._context_wakeup.set()
