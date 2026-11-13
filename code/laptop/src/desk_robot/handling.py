@@ -151,7 +151,11 @@ class HandlingGate:
                 )
                 norm = math.hypot(x, y, z)
                 if not 0.91 <= norm <= 1.09:
+                    # Conflicting stationary vectors invalidate calibration,
+                    # not the identity of the conversion just consumed.
+                    previous = (self.last_boot_id, self.last_sample_ms)
                     self.reset()
+                    self.last_boot_id, self.last_sample_ms = previous
                     return ()
                 self.reference = (x / norm, y / norm, z / norm)
                 self.startup_samples.clear()
