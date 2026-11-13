@@ -1,5 +1,67 @@
 # Native Xiaozhi + adaptive live video: full desk pet orchestration
 
+## November 12 brain consistency fixes and genuinely reusable upstream architecture
+
+**Implemented in the existing runtime, not a new agent framework.** Changes:
+`Conversation.run` keeps the completed part of a failed/interrupted
+streamed Ollama sentence in only that speaking robot's private memory,
+*after* attempting the real head abort. It labels this
+`sent, playback unverified` and does **not** copy it to peers as
+heard speech. The previous implementation lost every successful segment
+when the next stream chunk failed. Tests use successful first transmission,
+later model failure, cancellation and peer memory isolation.
+
+`CameraFrameHub.interaction_timeline` now retains the newest voice,
+read-only tool, physical sensor, transmitted robot speech and camera cue
+under its bound, instead of letting ten background receipts evict the
+human's actual interaction. Every limit from 1 to 16 is respected; at very
+small limits authenticated human voice and completed tool evidence win.
+`compose_brain_context` now collapses repetitive camera receipts and
+preserves the distinct source labels within a 400-character transient
+prompt budget, with separate 600-character episodic and 500-character
+operator-curated core budgets. Losing a camera or Xiaozhi monitoring
+stream invalidates stale JPEGs/VLM guesses while retaining the pet's
+brief, truly transmitted speech timeline. A full stop/clear still erases
+that transient context.
+
+The native Omni opt-in persona endpoint now consumes **the same** pure
+`compose_brain_context` labels as proactive Mac speech. The five
+robots' private SQLite facts remain separate, operator core facts and
+durable history still require separate memory consent, and no speech
+prompt may arm motors. This fixes diverging memory interpretations
+between native audio and Mac verbal proactivity.
+
+**Research reused as architecture, not copied wholesale:** [Reachy Mini
+conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app)
+has one motion/expression scheduler, camera tool and curated tool profile;
+[LiveKit Agents](https://docs.livekit.io/agents/logic/turns/) separates
+VAD from turn completion, including false interruption handling;
+[Pipecat](https://github.com/pipecat-ai/pipecat) separates interruptible
+frames from critical control frames; [LangGraph persistence]
+(https://github.com/langchain-ai/docs/blob/main/src/oss/langgraph/persistence.mdx)
+splits thread checkpoints from long-term stores;
+[Letta memory](https://github.com/letta-ai/ai-memory-sdk) distinguishes
+small in-context identity from archival history; [LeRobot]
+(https://github.com/huggingface/lerobot) separates observations and policy
+actions; [Nav2 behavior trees]
+(https://github.com/ros-navigation/docs.nav2.org) isolate action
+execution and bounded recovery. No architecture above grants the LLM
+physical safety authority; WROOM remains the sole body and cliff control.
+
+**Remaining fundamental gaps, not hidden by this patch:** an untested
+physical audio playback ACK and AEC double-talk path, missing native
+tool calls in the selected MiniCPM-o realtime model, validated visual
+exposure timing and cross-modal latency, real bounded head camera and
+mic concurrency, motion and docking physical feedback, fitted complete
+Fusion assembly, protected charging electronics and five-pet trials.
+In particular, MiniCPM audio+video does NOT become a tool-capable live
+agent merely because we improved its prompt: preserve the original
+Xiaozhi tool-capable server path and adopt a new native backend only
+after real model capability negotiation. Source test additions exist,
+but the full Python 3.11/ESP-IDF/PlatformIO pipelines are NOT verified
+by this update because GitHub Actions still fails before running steps.
+
+
 
 ## November 12 integrated Mac brain building blocks
 
