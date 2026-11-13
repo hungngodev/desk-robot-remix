@@ -785,6 +785,11 @@ async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
     session._queue_readonly_tool(transcript)
     session._queue_readonly_tool(transcript)
     assert session._readonly_queue.qsize() == 1
+    # A complete spoken sentence closes its VIDEO turn before a slow
+    # read-only lookup finishes. That must not revoke the same human request.
+    human_request = session._readonly_turn
+    session._video_turn += 1
+    assert session._readonly_turn == human_request
     task = asyncio.create_task(session._readonly_tool_worker())
     try:
         async with asyncio.timeout(1):
@@ -838,6 +843,7 @@ async def test_native_speech_tool_old_result_cannot_enter_next_human_turn(
     try:
         await asyncio.wait_for(entered.wait(), timeout=1)
         session._video_turn += 1
+        session._readonly_turn += 1  # A genuinely NEW human request.
         session._readonly_inflight.cancel()
         async with asyncio.timeout(1):
             while session._readonly_inflight is not None:
