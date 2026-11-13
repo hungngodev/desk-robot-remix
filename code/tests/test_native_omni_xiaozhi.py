@@ -733,10 +733,10 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         ("Can you identify this part?", "look"),
         ("Where is my red key?", "look"),
         ("What is in the picture?", "look"),
-        ("Check your battery status", "status"),
-        ("Could you check your battery status?", "status"),
-        ("How much battery is left?", "status"),
-        ("What's your power level?", "status"),
+        ("Check your battery status", "power-status"),
+        ("Could you check your battery status?", "power-status"),
+        ("How much battery is left?", "power-status"),
+        ("What's your power level?", "power-status"),
         ("Is the pickup job done?", "latest-pickup"),
         ("Did you pick up the key already?", "latest-pickup"),
         ("Can you check the pickup job status?", "latest-pickup"),
@@ -765,8 +765,8 @@ def test_native_speech_tools_allow_only_explicit_readonly_requests(
     assert (request[0] if request else None) == route
     if request:
         assert request[0] in {
-            "look", "status", "latest-pickup", "interaction-context",
-            "voice-context",
+            "look", "status", "power-status", "latest-pickup",
+            "interaction-context", "voice-context",
         }
 
 
@@ -799,7 +799,7 @@ def test_native_memory_request_chooses_recent_or_topic_query(
     [
         (
             "Can you look around and check your battery status?",
-            ("look", "status"),
+            ("look", "power-status"),
         ),
         (
             "What do you see and did you pick up the key already?",
@@ -819,7 +819,7 @@ def test_native_memory_request_chooses_recent_or_topic_query(
         ),
         (
             "Look at the desk then check your battery status also what just happened?",
-            ("look", "status", "interaction-context"),
+            ("look", "power-status", "interaction-context"),
         ),
     ],
 )
@@ -854,7 +854,7 @@ def test_native_compound_asr_queues_distinct_tools_once_per_real_audio_item(nati
     assert session._readonly_queue.qsize() == 2
     first = session._readonly_queue.get_nowait()
     second = session._readonly_queue.get_nowait()
-    assert (first[0], second[0]) == ("look", "status")
+    assert (first[0], second[0]) == ("look", "power-status")
     assert first[2:] == second[2:]
     assert first[3] == session._readonly_turn
 
@@ -923,7 +923,7 @@ def test_native_only_current_committed_audio_can_enter_tools_and_memory(native):
     assert session._accept_current_audio_item(event)
     session._accept_heard_transcript(event)
     session._queue_readonly_tool(event)
-    assert session._readonly_queue.get_nowait()[0] == "status"
+    assert session._readonly_queue.get_nowait()[0] == "power-status"
     assert session._heard_queue.qsize() == 1
     assert not session._accept_current_audio_item(event)  # replay
     assert session.native_readonly_tools_dropped == 2
@@ -1146,7 +1146,7 @@ async def test_compound_native_tool_worker_executes_two_existing_mac_readonly_ro
         async with asyncio.timeout(1):
             while session.native_readonly_tools_completed < 2:
                 await asyncio.sleep(.005)
-        assert [route for route, _ in received] == ["look", "status"]
+        assert [route for route, _ in received] == ["look", "power-status"]
         assert session._context_wakeup.is_set()
         assert session.native_readonly_tools_dropped == 0
     finally:
@@ -1264,7 +1264,7 @@ async def test_native_barge_cancels_entire_inflight_compound_tool_batch(
         async with asyncio.timeout(.8):
             while session._readonly_inflight is not None:
                 await asyncio.sleep(.005)
-        assert cancelled == {"look", "status"}
+        assert cancelled == {"look", "power-status"}
         assert session.native_readonly_tools_completed == 0
         assert not session._context_wakeup.is_set()
         assert not worker.done()
