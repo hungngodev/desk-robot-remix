@@ -160,7 +160,10 @@ class Conversation:
         self.multimodal = None  # Existing Mac live context, attached in hardware mode.
 
     def _persona_with_memory(self, robot: RobotConfig) -> str:
-        if self.memory is None:
+        if (self.memory is None or (
+            self.settings.mode == "hardware"
+            and not self.settings.fleet_text_sharing_enabled
+        )):
             return robot.persona
         recent = self.memory.recent(robot.id, limit=6)
         core = self.memory.core_facts(robot.id, limit=8)
@@ -226,7 +229,10 @@ class Conversation:
             # Topic-specific memory is separate from the last six memories.
             # If the group starts talking about a key after many unrelated
             # interactions, each pet retrieves only its OWN relevant text.
-            if self.memory is None:
+            if (self.memory is None or (
+                self.settings.mode == "hardware"
+                and not self.settings.fleet_text_sharing_enabled
+            )):
                 topical = [[] for _ in robots]
             else:
                 topical = await asyncio.wait_for(
