@@ -806,7 +806,7 @@ class NativeOmniSession:
                 if self._tool_speech_turn != (epoch, request_turn):
                     return
                 await self.outgoing.put((response_id, pcm[offset:offset + 9600]))
-            await self.outgoing.put(None)
+            await self.outgoing.put((response_id, None))
             self.native_tool_audio_queued += 1
             audio_queued = True
         except asyncio.CancelledError:
@@ -1311,7 +1311,7 @@ class NativeOmniSession:
                     raise RuntimeError("Model audio too fast for XIAO speaker") from exc
             elif (kind == "response.done"
                   and event.get("response_id") == self.wire.response_id):
-                await self.outgoing.put(None)
+                await self.outgoing.put((event["response_id"], None))
 
     async def _play(self) -> None:
         """24k model PCM to the SAME Xiaozhi 16k Opus speaker.
@@ -1330,8 +1330,19 @@ class NativeOmniSession:
         dropped_response_id: str | None = None
         while not self.closed:
             item = await self.outgoing.get()
+            # A terminal marker MUST belong to the response it closes.
+            # A late native response.done cannot end a newer Mac tool reply.
+            # Ignore untyped legacy markers instead of terminating a random
+            # active speaker or recording false audio-delivery history.
             if item is None:
-                dropped_response_id = None
+                continue
+            response_id, chunk24k = item
+            if chunk24k is None:
+                if response_id == dropped_response_id:
+                    dropped_response_id = None
+                    continue
+                if response_id != current_response:
+                    continue
                 if current_response is not None and generation == self._generation:
                     if pending:
                         tail = bytes(pending).ljust(1920, b"\0")
@@ -1351,7 +1362,6 @@ class NativeOmniSession:
                 resample_state = None
                 current_response = None
                 continue
-            response_id, chunk24k = item
             if response_id == dropped_response_id:
                 continue  # Refused native reply cannot restart mid sentence.
             if (self.wire.response_id != response_id
