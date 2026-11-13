@@ -111,6 +111,39 @@ def test_mismatched_own_speech_source_never_claims_first_person():
     assert "robot-02 reported:" in context.recent
 
 
+def test_live_asr_is_bounded_uncertain_and_keeps_visual_tool_provenance():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    assert hub.remember_heard(
+        "robot-01", "asr_item_1", "I put the key near the mug", now
+    )
+    assert not hub.remember_heard(
+        "robot-01", "asr_item_1", "I put the key near the mug", now
+    )
+    hub.notify("robot-01", "touch_tap", now)
+    hub.remember_tool("robot-01", "visual_look", "A key might be near a cup", now)
+    timeline = hub.interaction_timeline("robot-01", now, limit=2)
+    assert {entry["channel"] for entry in timeline} == {
+        "human_transcript", "tool"
+    }
+    context = compose_brain_context([], [], hub.interaction_timeline(
+        "robot-01", now, limit=10
+    ))
+    assert "Recent model ASR guess, not a verified command" in context.interaction
+    assert "I put the key near the mug" in context.interaction
+    assert "Earlier local VLM guess, not fresh sighting" in context.interaction
+    assert "Physical sensor edge: touch_tap" in context.interaction
+    assert "I put the key near the mug" not in compose_brain_context(
+        [], [], hub.interaction_timeline("robot-02", now)
+    ).interaction
+    assert len(context.interaction) <= 400
+    hub.discard_video("robot-01")
+    assert any(c["channel"] == "human_transcript" for c in
+               hub.interaction_timeline("robot-01", now + 1))
+    hub.clear("robot-01")
+    assert hub.interaction_timeline("robot-01", now + 1) == []
+
+
 def test_context_budget_is_constant_even_with_many_long_model_outputs():
     memory = [
         episode("robot-01", f"event{i}", "object", "x" * 300)
