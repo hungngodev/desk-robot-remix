@@ -1,5 +1,6 @@
 """Xiaozhi tools cannot create an operator permit or send raw motor commands."""
 
+import asyncio
 import os
 
 import httpx
@@ -20,32 +21,75 @@ async def call(conn, route, payload=None):
     # A newer speech_start, AEC barge, or head reconnect invalidates its
     # result even when the Mac completed its HTTP request successfully.
     generation = getattr(bridge, "voice_turn_generation", {}).get(conn.device_id, 0)
-    try:
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:8765", timeout=5,
-            headers={"Authorization": f"Bearer {token}"}
-        ) as client:
-            if route == "status":
-                response = await client.get(f"/v1/robots/{robot}/status")
-            elif route == "job":
-                response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
-            elif route == "voice-context":
-                if payload and payload.get("question"):
-                    response = await client.get(
-                        f"/v1/pet/{robot}/voice-context",
-                        params={"query": payload["question"]},
-                    )
-                else:
-                    response = await client.get(f"/v1/pet/{robot}/voice-context")
-            elif route == "look":
-                response = await client.post(
-                    f"/v1/pet/{robot}/look", json=payload or {},
-                    timeout=50,
+    async def request_mac():
+    async with httpx.AsyncClient(
+        base_url="http://127.0.0.1:8765", timeout=5,
+        headers={"Authorization": f"Bearer {token}"}
+    ) as client:
+        if route == "status":
+            response = await client.get(f"/v1/robots/{robot}/status")
+        elif route == "job":
+            response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
+        elif route == "voice-context":
+            if payload and payload.get("question"):
+                response = await client.get(
+                    f"/v1/pet/{robot}/voice-context",
+                    params={"query": payload["question"]},
                 )
             else:
-                response = await client.post(
-                    f"/v1/robots/{robot}/{route}", json=payload or {}
+                response = await client.get(f"/v1/pet/{robot}/voice-context")
+        elif route == "look":
+            response = await client.post(
+                f"/v1/pet/{robot}/look", json=payload or {},
+                timeout=50,
+            )
+        else:
+            response = await client.post(
+                f"/v1/robots/{robot}/{route}", json=payload or {}
+            )
+
+        return response
+
+    # Reuse the *existing* authenticated Xiaozhi turn generation as the
+    # cancellation owner. Only read-only tools may be aborted this way.
+    # Safety STOP and permitted pickup jobs must keep their established
+    # physical acknowledgement/owner semantics, not lose an HTTP request.
+    readonly = route in {"status", "job", "voice-context", "look"}
+    observe_turn = getattr(bridge, "tool_turn_cancel_event", None)
+    try:
+        if readonly and callable(observe_turn):
+            signal = observe_turn(conn.device_id)
+            request_task = asyncio.create_task(request_mac())
+            turn_task = asyncio.create_task(signal.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    {request_task, turn_task},
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
+                if turn_task in done:
+                    return {
+                        "error": "Robot tool result superseded by new speech or reconnect",
+                        "retried": False,
+                    }
+                response = request_task.result()
+            finally:
+                turn_task.cancel()
+                if not request_task.done():
+                    request_task.cancel()
+                # Task cancellation must be requested before returning to
+                # the active human turn. Never hold the speaker on a hung
+                # optional VLM task that suppresses cancellation.
+                pending = [task for task in (request_task, turn_task)
+                           if not task.done()]
+                if pending:
+                    done, pending = await asyncio.wait(pending, timeout=0.2)
+                    for task in pending:
+                        task.add_done_callback(
+                            lambda completed: None if completed.cancelled()
+                            else completed.exception()
+                        )
+        else:
+            response = await request_mac()
     except (httpx.TransportError, httpx.TimeoutException):
         # The Mac may be offline while a real human is still speaking to
         # Xiaozhi. No retry, no stale substitute response, no raw LAN/token
