@@ -182,7 +182,6 @@ async def test_background_camera_cancel_for_user_speech_does_not_kill_pet_loop(
         await pet.close()
 
 
-@pytest.mark.parametrize("local_object", [False, True])
 async def test_explicit_look_preempts_background_vlm_waiting_for_shared_lock(
     fleet, tmp_path,
 ):
