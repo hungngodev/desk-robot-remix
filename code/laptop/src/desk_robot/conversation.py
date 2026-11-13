@@ -71,8 +71,8 @@ class OllamaChat:
         run through the single authenticated Xiaozhi/Mac tool bridge.
         """
         routes = [
-            "look", "status", "latest-pickup", "interaction-context",
-            "voice-context",
+            "look", "status", "power-status", "latest-pickup",
+            "interaction-context", "voice-context",
         ]
         schema = {
             "type": "object",
