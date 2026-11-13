@@ -254,7 +254,10 @@ class Conversation:
                 # Reuse the same Mac per-pet evidence composer as proactive
                 # speech. No new camera, ASR, memory or speaker owner.
                 if (self.multimodal is not None
-                        and self.settings.voice_vision_tools_enabled):
+                        and self.settings.voice_vision_tools_enabled
+                        and self.settings.fleet_text_sharing_enabled):
+                    # A group may talk from its supplied topic without
+                    # revealing another pet's private live ASR/tool context.
                     timeline = self.multimodal.hub.interaction_timeline(
                         robot_id, time.monotonic(), limit=10
                     )
