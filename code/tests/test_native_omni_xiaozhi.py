@@ -718,6 +718,59 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_native_asr_live_only_context_does_not_count_as_saved_memory(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    assert session._transcript_memory_enabled is False
+    event = {"item_id": "asr1", "transcript": "That little key moved"}
+    session._accept_heard_transcript(event)
+    session._accept_heard_transcript(event)
+    assert session._heard_queue.qsize() == 1
+    delivered = []
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "stored": False,
+                "ephemeral_context_added": True,
+                "source": "model_estimated_xiaozhi_audio_transcription",
+            }
+
+    class Mac:
+        def post(self, url, **kwargs):
+            delivered.append(kwargs["json"])
+            assert url.endswith("/v1/pet/robot-01/omni-heard")
+            return Reply()
+
+    worker = asyncio.create_task(session._persist_heard(Mac()))
+    try:
+        async with asyncio.timeout(1):
+            while session.heard_live_delivered < 1:
+                await asyncio.sleep(.001)
+        assert len(delivered) == 1
+        assert delivered[0]["transcript"] == "That little key moved"
+        assert session.heard_memories_stored == 0
+        assert session.heard_memories_dropped == 0
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_first_human_camera_wake_does_not_double_fetch_on_esp32(native):
     """The initial VAD event is consumed before the first Mac camera HTTP."""
     module, bridge = native
