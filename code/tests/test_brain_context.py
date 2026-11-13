@@ -42,7 +42,7 @@ def test_context_provenance_and_source_types_are_not_interchangeable():
     result = compose_brain_context(recent, core, timeline)
     assert result.recent.count("A key appeared") == 1
     assert "I observed: A key appeared" in result.recent
-    assert "I heard robot-02 say: I saw a dragon" in result.recent
+    assert "robot-02 said (peer report, not my sighting): I saw a dragon" in result.recent
     assert "uncertain transcription" in result.recent
     assert "favorite_game: chess" in result.core
     assert "XIAO frame received (contents not inferred)" in result.interaction
@@ -64,9 +64,17 @@ def test_peer_utterance_cannot_become_firsthand_visual_evidence():
                    "There is a key on the desk", source="robot-02",
                    witnessed=True)
     context = compose_brain_context([peer], [], [])
-    assert "robot-02 said (peer report, not my sighting)" in context.recent
+    assert "I heard robot-02 say" in context.recent
     assert "I observed" not in context.recent
+    assert "peer report, not my sighting" not in context.recent
+
+def test_unwitnessed_peer_speech_cannot_claim_firsthand_hearing():
+    peer = episode("robot-01", "unwitnessed-peer", "peer_utterance",
+                   "The dock is clear", source="robot-02", witnessed=False)
+    context = compose_brain_context([peer], [], [])
+    assert "robot-02 said (peer report, not my sighting)" in context.recent
     assert "I heard robot-02 say" not in context.recent
+
 
 def test_peer_sourced_human_asr_never_claims_firsthand_hearing():
     peer_asr = episode("robot-01", "peer-asr", "heard_human",
