@@ -41,7 +41,7 @@ def test_context_provenance_and_source_types_are_not_interchangeable():
     ]
     result = compose_brain_context(recent, core, timeline)
     assert result.recent.count("A key appeared") == 1
-    assert "I observed: A key appeared" in result.recent
+    assert "My camera model suggested: A key appeared" in result.recent
     assert "robot-02 said (peer report, not my sighting): I saw a dragon" in result.recent
     assert "uncertain transcription" in result.recent
     assert "favorite_game: chess" in result.core
@@ -55,6 +55,21 @@ def test_context_provenance_and_source_types_are_not_interchangeable():
     assert len(result.core) <= 500
     assert len(result.interaction) <= 400
 
+
+
+def test_vision_model_memory_is_a_guess_even_from_the_own_camera():
+    records = [
+        episode("robot-01", "local_key", "key", "A silver key appeared"),
+        episode("robot-01", "remote_key", "key", "A silver key appeared",
+                source="robot-02", witnessed=False),
+        episode("robot-01", "local_sensor", "touch_tap",
+                "The physical touch sensor was pressed"),
+    ]
+    context = compose_brain_context(records, [], [])
+    assert "My camera model suggested: A silver key appeared" in context.recent
+    assert "robot-02 reported a camera model guess: A silver key appeared" in context.recent
+    assert "I observed: The physical touch sensor was pressed" in context.recent
+    assert "I observed: A silver key appeared" not in context.recent
 
 
 def test_peer_utterance_cannot_become_firsthand_visual_evidence():
