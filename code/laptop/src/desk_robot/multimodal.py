@@ -937,6 +937,9 @@ class MultimodalOrchestrator:
                 if task is not None and not task.done():
                     task.cancel()
             self.hub.discard_video(robot_id)  # not voice_until
+            # A lost authenticated voice session invalidates its tool turn,
+            # unlike a camera-only outage that preserves nonvisual readings.
+            self.hub.tool_history[robot_id].clear()
             # Transport loss ends provenance for native audio transcripts,
             # even when their 30-second display TTL has not yet elapsed.
             self.hub.heard_history[robot_id].clear()

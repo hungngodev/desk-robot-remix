@@ -1794,3 +1794,25 @@ async def test_other_pets_new_human_turn_preserves_my_completed_nonvisual_tools(
         visual.voice_ended("robot-02")
     finally:
         await visual.close()
+
+
+async def test_lost_voice_transport_invalidates_old_tool_turn_not_only_visuals():
+    """Disconnected voice auth cannot feed an interrupted tool reply next turn."""
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        now = time.monotonic()
+        for robot_id in ("robot-01", "robot-02"):
+            visual.hub.remember_tool(robot_id, "robot_status", "old status", now)
+            visual.hub.remember_tool(robot_id, "visual_look", "old guess", now)
+            assert visual.hub.recent_tool_context(robot_id, now)
+        visual.voice_transport_unavailable()
+        for robot_id in ("robot-01", "robot-02"):
+            assert visual.hub.recent_tool_context(robot_id, time.monotonic()) == []
+        # Audio/transcript provenance is reset without forging a speech end.
+        assert all(not visual.hub.heard_history[robot_id]
+                   for robot_id in ("robot-01", "robot-02"))
+    finally:
+        await visual.close()
