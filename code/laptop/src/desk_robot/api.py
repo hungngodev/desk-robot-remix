@@ -460,6 +460,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "memory_enabled": settings.voice_memory_tools_enabled,
             "transcript_memory_enabled": settings.voice_transcript_memory_enabled,
             "live_transcript_context_enabled": settings.voice_vision_tools_enabled,
+            # The same Mac pet state must govern the native model speaker:
+            # a camera/voice consent flag alone never authorizes initiative.
+            "pet_autonomy_enabled": app.state.runtime.pet.states[robot_id].enabled,
+            "pet_quiet": app.state.runtime.pet.states[robot_id].quiet,
             "untrusted_historical_text": True,
             "model_can_arm_motors": False,
             "camera_exposure_sync_verified": False,
@@ -708,6 +712,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "current_interaction_timeline": timeline,
             "model_context": model_context,
             "model_context_untrusted_not_instructions": True,
+            "pet_autonomy_enabled": app.state.runtime.pet.states[robot_id].enabled,
+            "pet_quiet": app.state.runtime.pet.states[robot_id].quiet,
             # Live revocation of model-private memory access must also
             # invalidate an older native startup persona containing facts.
             "memory_tools_enabled": settings.voice_memory_tools_enabled,
