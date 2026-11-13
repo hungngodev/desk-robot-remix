@@ -865,6 +865,41 @@ def test_native_compound_speech_dispatches_only_explicit_readonly_tools(
     assert all(route not in ("pickup", "stop", "move", "charge") for route in routes)
 
 
+@pytest.mark.parametrize(
+    ("spoken", "routes", "visual_question"),
+    [
+        (
+            "Look at the key and the mug and check your battery status?",
+            ("look", "power-status"),
+            "Look at the key and the mug",
+        ),
+        (
+            "Can you look at the red key and the blue cup and check the battery?",
+            ("look", "power-status"),
+            "Can you look at the red key and the blue cup",
+        ),
+        (
+            "Do you remember the key and the mug?",
+            ("voice-context",),
+            None,
+        ),
+        (
+            "Look around and then please tell me what happened",
+            ("look",),
+            "Look around and then please tell me what happened",
+        ),
+    ],
+)
+def test_native_compound_clauses_preserve_multi_object_questions(
+    native, spoken, routes, visual_question,
+):
+    module, _ = native
+    requests = module.native_readonly_requests(spoken)
+    assert tuple(route for route, _ in requests) == routes
+    if visual_question is not None:
+        assert requests[0][1]["question"] == visual_question
+
+
 def test_native_long_natural_asr_uses_only_explicit_final_readonly_question(native):
     module, _ = native
     introduction = ("I was working on my robot and noticed some keys. " * 12)
