@@ -1700,9 +1700,9 @@ class NativeOmniSession:
                 return False
         speech_raced = False
         async with self._device_send_lock:
-            if (self.closed or self._pet_quiet
-                    or generation != self._generation
-                    or self._external_speech_active):
+            if (self.closed or generation != self._generation
+                    or self._external_speech_active
+                    or (state == "start" and self._pet_quiet)):
                 return False
             # VAD may start between claim_speaker and acquiring the device
             # send lock. Suppress the TTS START packet in that case.
