@@ -590,8 +590,18 @@ class NativeOmniSession:
                 self.native_context_errors += 1
 
     def _clear_obsolete_tool_turn(self) -> None:
-        """Clear old turn speech and tools once, preserving remembered dialogue."""
-        self._clear_obsolete_tool_turn()
+        """Forget superseded turn work without changing committed dialogue."""
+        self._readonly_requests.clear()
+        self._discard_queued_readonly()
+        self._tool_speech_turn = None
+        self._tool_answer_started_turn = None
+        self._tool_audio_response_id = None
+        self._tool_reply_pending.clear()
+        self._native_output_words.clear()
+        self._last_human_transcript = ""
+        self._tool_question = ""
+        while not self.outgoing.empty():
+            self.outgoing.get_nowait()
 
     async def _reserve_tool_speech(self) -> None:
         """FENCE native model audio but preserve this spoken tool request.
@@ -1664,15 +1674,7 @@ class NativeOmniSession:
         self._generation += 1
         self._readonly_turn += 1
         self._input_generation += 1
-        self._readonly_requests.clear()
-        self._discard_queued_readonly()
-        self._tool_speech_turn = None
-        self._tool_answer_started_turn = None
-        self._tool_audio_response_id = None
-        self._tool_reply_pending.clear()
-        self._native_output_words.clear()
-        self._last_human_transcript = ""
-        self._tool_question = ""
+        self._clear_obsolete_tool_turn()
         # A barge-in invalidates both obsolete robot audio and visual
         # context. A camera fetch already in flight must not reintroduce
         # old-turn JPEGs after the head's audio has been flushed.
@@ -1686,11 +1688,6 @@ class NativeOmniSession:
         self._last_video_selected_at = float("-inf")
         if self._user_was_talking:
             self._camera_wakeup.set()
-        while not self.outgoing.empty():
-            try:
-                self.outgoing.get_nowait()
-            except asyncio.QueueEmpty:
-                break
         events = self.wire.interrupt()  # even without a connected backend
         await flush_head(self)
         return events
