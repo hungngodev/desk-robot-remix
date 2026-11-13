@@ -1444,7 +1444,14 @@ class NativeOmniSession:
                         stopped = await self._send_device_state(
                             "stop", generation
                         )
-                        if stopped is False:
+                        # STOP can yield to a new human VAD, a head
+                        # reconnect, or a replaced tool answer. Recheck
+                        # ownership AFTER the await so an obsolete reply
+                        # cannot start when the brief interruption ends.
+                        if (stopped is False or self.closed
+                                or generation != self._generation
+                                or (self.wire.response_id != response_id
+                                    and self._tool_audio_response_id != response_id)):
                             dropped_response_id = response_id
                             current_response = None
                             pending.clear()
