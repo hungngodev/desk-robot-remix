@@ -1091,6 +1091,14 @@ class NativeOmniSession:
                     finally:
                         if self._readonly_inflight is pending:
                             self._readonly_inflight = None
+            # A read-only Mac lookup can return no trustworthy facts, and the
+            # optional MiniCPM audio endpoint may fail. In either case there
+            # is NO audio response to close the reserved tool speech turn.
+            # Do not strand the physical speaker lease indefinitely.
+            if (self._tool_speech_turn == (epoch, request_turn)
+                    and self._tool_audio_response_id is None):
+                self._tool_speech_turn = None
+                self._tool_question = ""
 
     async def _camera(self, http: aiohttp.ClientSession) -> None:
         """Select real JPEG receipts independently from realtime microphone I/O.
