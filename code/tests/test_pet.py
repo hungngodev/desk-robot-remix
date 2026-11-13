@@ -83,6 +83,20 @@ def test_visual_change_gate_requires_persistent_difference():
         VisualChangeGate(min_changed_fraction=2)
 
 
+def test_predecoded_scene_gate_reuses_exact_original_motion_and_confirmation_semantics():
+    """Native JPEG preprocessing must not change event thresholds or hysteresis."""
+    original = VisualChangeGate()
+    deferred = VisualChangeGate()
+    for frame in (WHITE, WHITE, RED, RED, RED, WHITE, WHITE):
+        assert deferred.observe_reduced(
+            frame, VisualChangeGate._reduced(frame)
+        ) == original.observe(frame)
+        assert deferred._hits == original._hits
+        assert deferred._pixel_baseline == original._pixel_baseline
+    with pytest.raises(ValueError, match="64x48"):
+        deferred.observe_reduced(WHITE, b"incomplete")
+
+
 def test_proactive_frame_gate_reuses_motion_filter_to_ignore_global_exposure():
     from PIL import ImageDraw
     gate = VisualChangeGate(min_changed_fraction=0.008, confirmations=2)
