@@ -446,6 +446,8 @@ class NativeOmniSession:
         # Tool identity advances on the next HUMAN request, not on the end
         # of the current utterance. Video turns also advance at speech_end.
         self._readonly_turn = 0
+        # Audio generation changes on tool replies; human input identity does not.
+        self._input_generation = 0
         # Bind model-estimated ASR to its actual committed audio item. The
         # backend can deliver an OLD transcript after a NEW VAD turn starts.
         # Never infer a transcript's owner from receive time alone.
@@ -615,7 +617,7 @@ class NativeOmniSession:
             return False
         original = self._asr_item_turns.pop(item, None)
         accepted = (
-            original == (self._generation, self._readonly_turn)
+            original == (self._input_generation, self._readonly_turn)
             and not self.closed and self.connected
             and not self._user_was_talking
         )
@@ -819,6 +821,11 @@ class NativeOmniSession:
         intent; the same model's chat-completions endpoint will speak the
         grounded answer on the existing XIAO decoder instead.
         """
+        # A second ASR chunk in the SAME human turn must not interrupt the
+        # already reserved tool output or cancel its active Mac work.
+        if (self._tool_speech_turn is not None
+                and self._tool_speech_turn[1] == self._readonly_turn):
+            return
         old = (self._generation, self._readonly_turn)
         self._generation += 1  # invalidates already queued native PCM
         self._tool_speech_turn = (self._generation, self._readonly_turn)
@@ -1329,6 +1336,7 @@ class NativeOmniSession:
                     # with this voice. Wake the camera without HTTP in VAD.
                     self._video_turn += 1
                     self._readonly_turn += 1
+                    self._input_generation += 1
                     self._readonly_requests.clear()
                     self._discard_queued_readonly()
                     self._tool_speech_turn = None
@@ -1372,7 +1380,7 @@ class NativeOmniSession:
                         self.fail("Native model input commit acknowledgements stalled")
                         return
                     self._pending_audio_commits.append((
-                        self._generation, self._readonly_turn,
+                        self._input_generation, self._readonly_turn,
                     ))
                     await self._send(self.wire.commit(final=True))
                     self._silent_frames = 0
@@ -1562,6 +1570,7 @@ class NativeOmniSession:
         """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
         self._readonly_turn += 1
+        self._input_generation += 1
         self._readonly_requests.clear()
         self._discard_queued_readonly()
         self._tool_speech_turn = None
