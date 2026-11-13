@@ -1769,6 +1769,11 @@ def test_native_turn_cleanup_preserves_dialogue_but_clears_old_tool_claims(
     session._last_human_transcript = "What is on the desk?"
     session._tool_question = "What is on the desk?"
     session.latest_jpeg = b"existing_frame"
+    session.outgoing.put_nowait(("native_previous", b"old audio"))
+    session.outgoing.put_nowait(("native_previous", None))
+    session._clear_obsolete_tool_turn()
+    assert session.outgoing.empty()
+    # A repeated human VAD must remain idempotent; it must never recurse.
     session._clear_obsolete_tool_turn()
     assert session._tool_speech_turn is None
     assert session._tool_answer_started_turn is None
