@@ -1801,22 +1801,23 @@ async def preempt_others_for_human(source_device: str) -> None:
     import desk_robot_bridge as bridge
 
     # Native audio cancellation alone does NOT stop the Mac's proactive
-    # Opus sender. It checks bridge.interrupt_generation/client_abort, so
-    # advance both BEFORE any async speaker flush. A human at robot A must
-    # also interrupt Mac speech on robot B, not just its native model.
-    async with _output_owner_lock:
-        external = _external_speaker_connection
-        external_device = _external_speaker_owner
-        if (external_device is not None and external is not None
-                and getattr(external, "device_id", None) == external_device
-                and bridge.connections.get(external_device) is external):
-            bridge.interrupt_generation[external_device] = (
-                bridge.interrupt_generation.get(external_device, 0) + 1
-            )
-            external.client_abort = True
-        else:
-            external = None
-            external_device = None
+    # Opus sender. Mark abort and advance its generation synchronously,
+    # before ANY await. A slow peer decoder or shared output lock must not
+    # allow another old Opus packet after a real human VAD.
+    # These shared asyncio objects are mutated on this one event loop. The
+    # initial snapshot and abort deliberately contain no suspension point.
+    external = _external_speaker_connection
+    external_device = _external_speaker_owner
+    if (external_device is not None and external is not None
+            and getattr(external, "device_id", None) == external_device
+            and bridge.connections.get(external_device) is external):
+        bridge.interrupt_generation[external_device] = (
+            bridge.interrupt_generation.get(external_device, 0) + 1
+        )
+        external.client_abort = True
+    else:
+        external = None
+        external_device = None
 
     peers = [
         (device, session) for device, session in list(_sessions.items())
@@ -1837,7 +1838,9 @@ async def preempt_others_for_human(source_device: str) -> None:
     # invalidation could have flushed its physical head. Still send urgent
     # STOP. A failed STOP does NOT release the external lease or imply that
     # the speaker was physically silenced.
-    if external is not None and external_device not in safely_invalidated:
+    if (external is not None and external_device not in safely_invalidated
+            and _external_speaker_owner == external_device
+            and _external_speaker_connection is external):
         try:
             async with _external_device_send_lock(external):
                 await external.websocket.send(json.dumps({
