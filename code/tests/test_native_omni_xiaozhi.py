@@ -1332,9 +1332,11 @@ async def test_native_semantic_planner_cannot_queue_model_proposed_motor_actions
     worker = asyncio.create_task(session._readonly_tool_worker())
     try:
         async with asyncio.timeout(1):
-            while session.native_readonly_tools_completed < 1:
+            while session.native_readonly_tools_dropped < 1:
                 await asyncio.sleep(.005)
-        assert calls == ["plan-readonly", "status"]
+        assert calls == ["plan-readonly"]
+        assert session.native_readonly_tools_completed == 0
+        assert not session._context_wakeup.is_set()
         assert "move" not in calls and "charge" not in calls
     finally:
         session.closed = True
