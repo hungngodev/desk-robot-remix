@@ -395,7 +395,8 @@ async def test_cancel_asyncio_future_while_native_detector_runs_still_holds_slot
     assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
 
 
-async def test_detector_executor_submission_failure_releases_slot(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", [RuntimeError("Executor unavailable"), ValueError("Bad executor submission")])
+async def test_detector_executor_submission_failure_releases_slot(tmp_path, monkeypatch, failure):
     """A rejected native job must not permanently block subsequent observations."""
     import asyncio
 
@@ -408,7 +409,7 @@ async def test_detector_executor_submission_failure_releases_slot(tmp_path, monk
     original_submit = dock_runtime._DETECTOR_POOL.submit
 
     def rejected_submit(*args, **kwargs):
-        raise RuntimeError("Executor unavailable")
+        raise failure
 
     monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", rejected_submit)
     first_head = Head()
