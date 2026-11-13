@@ -1,6 +1,49 @@
 # Verification and physical trials
 
 
+## November 12 next robot brain source checkpoint: intent epoch and physical job continuity
+
+**Real source code committed in PR #17**: `1946af90` installs a pinned
+Xiaozhi `intentHandler.py` turn epoch guard, capturing generation before
+slow model intent detection; old tool replies, obsolete context replies,
+and the nested model speech output are rejected after human barge or
+registered head replacement. Pinned upstream original anchors were
+independently checked in GitHub and all **8 anchors matched uniquely**.
+The isolated pinned intent worker regression
+`code/tests/test_xiaozhi_intent_guard.py` (`5ff57a7e`) tests delayed
+tool work, delayed nested language model speech, valid uninterrupted
+responses and generation captured before LLM detection; overlay map
+contract `28bd583e`. This is NOT an executed Python test.
+
+**Accepted robot jobs survive voice epochs and WiFi reconnects:** Mac
+`Coordinator.jobs` already contains per-robot job identity and status.
+New authenticated read-only `GET
+/v1/robots/{robot_id}/jobs/latest-pickup` (`070511aa`) returns only
+the requesting robot's latest pickup, with explicit
+`available=false, physical_grasp_verified=false` for no record.
+Xiaozhi's `desk_robot_job` now reads this Mac owner instead of an
+ephemeral WebSocket attribute (`1d1b92b8`). Mutating pickup and STOP
+requests retain their original physical HTTP completion semantics, but
+if newer speech supersedes their previous reply, the model sees only
+silent payload-free `Action.NONE` (`0d2972ab`, `b648af43`).
+No action is retried or declared physically successful. New source tests
+`1de6f176` and `c30cd4a8` verify reconnection, single-robot
+privacy, accepted/pending state and STOP silent receipts.
+Ten latest direct GitHub file content checks returned expected
+contract markers; this is static verification, **not** Python execution.
+
+Next executed suites on a checkout containing pinned Xiaozhi server:
+`cd code && uv run --no-sync pytest -q
+tests/test_xiaozhi_intent_guard.py tests/test_xiaozhi_tool_resilience.py
+tests/test_server_bridge.py tests/test_multimodal_api.py`.
+All full GitHub Actions jobs still report pre-step failures without
+runner name or steps, and the app cannot retrieve their annotation
+body (though GitHub check-run API reports 2 annotations per job).
+Source status alone cannot certify audio interruption, physical gripper,
+charging, mechanics, docking or five real powered units.
+
+
+
 ## November 12 pinned Xiaozhi tool speech and multi-call contract repair
 
 **Source evidence:** In the exact pinned upstream xinnan-tech/xiaozhi-esp32-server
