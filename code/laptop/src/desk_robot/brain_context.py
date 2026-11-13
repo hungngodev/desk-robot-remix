@@ -81,5 +81,12 @@ def compose_brain_context(
                     "Earlier local VLM guess, not fresh sighting: "
                     + _clean(result, limit=120)
                 )
+        elif channel == "robot_speech" and kind == "own_utterance":
+            result = item.get("content")
+            if isinstance(result, str) and result.strip():
+                cue_parts.append(
+                    "I previously sent this spoken line (playback unverified): "
+                    + _clean(result, limit=120)
+                )
     interaction = _clean("; ".join(cue_parts), limit=400)
     return ContextBundle(recent_text, core_text, interaction)
