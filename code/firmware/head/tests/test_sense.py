@@ -283,6 +283,7 @@ class SenseSelectionTests(unittest.TestCase):
             settings = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
             self.assertIn('CONFIG_DESK_ROBOT_ID="robot-05"', settings)
             self.assertIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS=90', settings)
+            self.assertIn('CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=n', settings)
             args.extend(['--aec-delay-ms', '115'])
             with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \
                     patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32):
@@ -290,6 +291,20 @@ class SenseSelectionTests(unittest.TestCase):
             calibrated = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
             self.assertIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS=115', calibrated)
             self.assertNotIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS=90', calibrated)
+            # The operator must opt in to always listening on every private
+            # build. A prior opt in must not silently survive regeneration.
+            args.append('--continuous-audio')
+            with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \\
+                    patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32):
+                private.main()
+            live = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
+            self.assertIn('CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=y', live)
+            args.pop()
+            with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \\
+                    patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32):
+                private.main()
+            muted = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
+            self.assertIn('CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=n', muted)
             args[-1] = '251'
             with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \
                     patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32), \
