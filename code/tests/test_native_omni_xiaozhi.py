@@ -348,6 +348,63 @@ async def test_cancelled_proactive_handoff_releases_fleet_speaker_lease(
         module._sessions.clear()
 
 
+@pytest.mark.parametrize("lease_owner", ["same_head", "another_head"])
+async def test_native_output_refuses_external_mac_speaker_without_pcm_or_delivery(
+    native, monkeypatch, lease_owner,
+):
+    """A denied TTS START must return False, never None.
+
+    The playback worker compares START with False specifically. An implicit
+    None previously let a model response enter the Opus loop despite losing
+    the one physical Xiaozhi speaker lease.
+    """
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    session._tool_audio_response_id = "tool_refused"
+    if lease_owner == "same_head":
+        session._external_speech_active = True
+    else:
+        module._external_speaker_owner = "mac-02"
+        module._external_speaker_connection = object()
+    class Encoder:
+        def __init__(self, *args):
+            pass
+        def encode(self, data, frame_size):
+            return b"unwanted_opus"
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    session.outgoing.put_nowait(("tool_refused", bytes(9600)))
+    session.outgoing.put_nowait(None)
+    player = None
+    try:
+        assert await session._send_device_state("start", 0) is False
+        player = asyncio.create_task(session._play())
+        async with asyncio.timeout(1):
+            while not session.outgoing.empty():
+                await asyncio.sleep(0.005)
+        await asyncio.sleep(0)
+        assert sent == []
+        assert session.head_packets == 0
+        assert session.native_tool_audio_sent == 0
+        assert session._tool_speech_turn == (0, 0)
+        assert not session._tool_dialogue
+    finally:
+        session.closed = True
+        if player is not None:
+            player.cancel()
+            await asyncio.gather(player, return_exceptions=True)
+        module._external_speaker_owner = None
+        module._external_speaker_connection = None
+
+
 async def test_proactive_mac_and_native_voice_share_one_interruptible_speaker_lease(
     native,
 ):
