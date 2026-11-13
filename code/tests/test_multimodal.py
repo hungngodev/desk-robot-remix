@@ -178,6 +178,42 @@ async def test_proactive_pet_can_wake_on_pushed_frame_without_camera_poll():
         await visual.close()
 
 
+async def test_other_pets_keep_streaming_passive_vision_during_human_conversation():
+    """One person's speech owns audible inference, not all camera lenses."""
+    class LiveHead(Head):
+        async def stream_frames(self):
+            for index in range(12):
+                yield image(square=index >= 3), time.monotonic()
+                await asyncio.sleep(.26)
+            await asyncio.Event().wait()
+
+    head = LiveHead()
+    scene = Vision()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": head},
+        scene, asyncio.Lock(),
+    )
+    visual.voice_started("robot-01")
+    visual.start_streams()
+    try:
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        async with asyncio.timeout(3):
+            while visual.status("robot-02")["software_timings"][
+                "stream_frames_selected"
+            ] < 2:
+                await asyncio.sleep(.03)
+        metrics = visual.status("robot-02")["software_timings"]
+        assert metrics["stream_frames_received"] >= 5
+        assert metrics["stream_frames_selected"] >= 2
+        assert all(f.source == "proactive"
+                   for f in visual.hub.frames["robot-02"])
+        assert scene.calls == []  # no stolen VLM slot during another VAD
+        assert head.captures == 0  # one real stream, zero snapshot pulls
+    finally:
+        visual.voice_ended("robot-01")
+        await visual.close()
+
+
 async def test_continuous_camera_stream_supplies_voice_frames_without_new_poller():
     class LiveHead(Head):
         async def stream_frames(self):
