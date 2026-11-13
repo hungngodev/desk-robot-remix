@@ -69,7 +69,7 @@ def test_current_body_and_sense_firmware_gpio_match_machine_readable_harness():
         "terminal_ir_right_reserved": "kTerminalIrRightInput",
     }
     for key, symbol in body_names.items():
-        match = re.search(rf"constexpr int {symbol} = (\\d+);", body)
+        match = re.search(rf"constexpr int {symbol} = (\d+);", body)
         assert match is not None, f"Missing exact firmware pin {symbol}"
         assert int(match.group(1)) == planned_body[key], key
 
@@ -78,7 +78,7 @@ def test_current_body_and_sense_firmware_gpio_match_machine_readable_harness():
         ("right_stepper", "kRightStepperPins"),
     ):
         match = re.search(
-            rf"constexpr int {symbol}\\[\\] = \\{{([0-9, ]+)\\}};", body
+            rf"constexpr int {symbol}\[\] = \{{([0-9, ]+)\}};", body
         )
         assert match is not None
         assert [int(pin.strip()) for pin in match.group(1).split(",")] == planned_body[key]
@@ -92,7 +92,7 @@ def test_current_body_and_sense_firmware_gpio_match_machine_readable_harness():
         "head_uart_tx": "ROBOT_UART_TX", "head_uart_rx": "ROBOT_UART_RX",
     }
     for key, symbol in sense_names.items():
-        match = re.search(rf"#define {symbol} GPIO_NUM_(\\d+)\\b", sense)
+        match = re.search(rf"#define {symbol} GPIO_NUM_(\d+)\b", sense)
         assert match is not None, f"Missing Sense firmware pin {symbol}"
         assert int(match.group(1)) == PLAN["bus"]["sense_gpio"][key], key
     assert "#define AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42" in sense
