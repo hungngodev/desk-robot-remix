@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Protocol
 
-from .brain_context import compose_brain_context
+from .brain_context import compose_brain_context, repeated_spontaneous_line
 from .config import Settings
 from .conversation import Conversation
 from .handling import HandlingGate
@@ -1330,7 +1330,7 @@ class PetController:
             # Both reads run off the audio/VAD event loop, with a deadline.
             recent_memory, relevant_memory, core_memory = await asyncio.wait_for(
                 asyncio.gather(
-                    asyncio.to_thread(self.memory.recent, robot_id, limit=3),
+                    asyncio.to_thread(self.memory.recent, robot_id, limit=12),
                     asyncio.to_thread(
                         self.memory.search, robot_id, change.description, limit=3
                     ),
@@ -1447,6 +1447,15 @@ class PetController:
             if not text:
                 state.suppressed += 1
                 state.last_initiative_suppression = "model_reply_not_concise"
+                return
+            # Human-like initiative includes knowing when NOT to repeat the
+            # last unsolicited line. Only this pet's own actual, recent
+            # speech counts; not other robots, camera guesses or user ASR.
+            if repeated_spontaneous_line(
+                text, recent_memory, now_wall=time.time()
+            ):
+                state.suppressed += 1
+                state.last_initiative_suppression = "repetitive_spontaneous_reply"
                 return
             # A slow local model cannot turn an old scene or fleeting
             # gesture into an immediate remark minutes after it happened.
