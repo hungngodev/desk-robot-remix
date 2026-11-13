@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -385,6 +386,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "instructions": prefix[:2000],
             "memory_enabled": settings.voice_memory_tools_enabled,
             "transcript_memory_enabled": settings.voice_transcript_memory_enabled,
+            "live_transcript_context_enabled": settings.voice_vision_tools_enabled,
             "untrusted_historical_text": True,
             "model_can_arm_motors": False,
             "camera_exposure_sync_verified": False,
@@ -399,20 +401,34 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         become a command, a physical eyewitness claim, or playback ACK.
         """
         coordinator().robot(robot_id)
-        if (settings.mode != "hardware"
-                or not settings.voice_transcript_memory_enabled):
-            raise HTTPException(403, "Voice transcript retention is disabled")
+        if settings.mode != "hardware" or not (
+            settings.voice_vision_tools_enabled
+            or settings.voice_transcript_memory_enabled
+        ):
+            raise HTTPException(403, "Native transcript context is disabled")
         spoken = " ".join(request.transcript.split())
         if not spoken or "\x00" in spoken:
             raise HTTPException(400, "Invalid model-estimated transcript")
-        inserted = await asyncio.to_thread(
-            app.state.runtime.memory.remember, robot_id, request.event_id,
-            "Someone spoke (uncertain ASR): " + spoken[:240],
-            kind="heard_human", source_robot=robot_id, witnessed=True,
-            confidence=0.6,
-        )
+        visual = getattr(app.state.runtime, "multimodal", None)
+        ephemeral = False
+        if settings.voice_vision_tools_enabled and visual is not None:
+            remember = getattr(visual.hub, "remember_heard", None)
+            if callable(remember):
+                ephemeral = remember(
+                    robot_id, request.event_id, spoken[:240], time.monotonic()
+                )
+        inserted = False
+        if settings.voice_transcript_memory_enabled:
+            inserted = await asyncio.to_thread(
+                app.state.runtime.memory.remember, robot_id, request.event_id,
+                "Someone spoke (uncertain ASR): " + spoken[:240],
+                kind="heard_human", source_robot=robot_id, witnessed=True,
+                confidence=0.6,
+            )
         return {
             "robot_id": robot_id, "stored": inserted,
+            "ephemeral_context_added": ephemeral,
+            "retained_on_disk": settings.voice_transcript_memory_enabled,
             "source": "model_estimated_xiaozhi_audio_transcription",
             "speaker_identity_verified": False,
             "audio_playback_verified": False,
