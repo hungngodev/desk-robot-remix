@@ -302,17 +302,45 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     async def pickup(robot_id: str, request: PickupRequest):
         return coordinator().pickup(robot_id, request.target).data()
 
+    async def stop_native_pet_speech(robot_id: str):
+        """Interrupt the one existing Xiaozhi speaker, never a second TTS."""
+        if settings.mode != "hardware":
+            return
+        conversation = getattr(app.state.runtime, "conversation", None)
+        speaker = getattr(conversation, "speaker", None)
+        interrupt = getattr(speaker, "interrupt", None)
+        robot = settings.robot(robot_id)
+        if callable(interrupt) and robot.device_id:
+            await asyncio.wait_for(interrupt(robot), timeout=2.5)
+
+    async def stop_pet_and_audio(robot_id: str, *, quiet: bool):
+        """Single safety order for STOP, pause and operator quiet.
+
+        A failed body command still revokes pet initiative and attempts to
+        flush native audio. A failed audio service never delays the real
+        WROOM stop request. No alternate motor or speaker is introduced.
+        """
+        acknowledgement = None
+        pet_status = None
+        try:
+            acknowledgement = await coordinator().stop(robot_id)
+        finally:
+            try:
+                if quiet:
+                    pet_status = await app.state.runtime.pet.set_quiet(
+                        robot_id, True
+                    )
+                else:
+                    pet_status = await app.state.runtime.pet.pause(robot_id)
+            finally:
+                await stop_native_pet_speech(robot_id)
+        return acknowledgement, pet_status
+
     @app.post("/v1/robots/{robot_id}/stop", dependencies=[Depends(authorize)])
     async def stop(robot_id: str):
         coordinator().robot(robot_id)
-        try:
-            # Physical safety dominates optional pet/task/audio cleanup.
-            return await coordinator().stop(robot_id)
-        finally:
-            try:
-                await app.state.runtime.pet.pause(robot_id)
-            finally:
-                await stop_native_pet_speech(robot_id)
+        acknowledgement, _ = await stop_pet_and_audio(robot_id, quiet=False)
+        return acknowledgement
 
     @app.get("/v1/pet/{robot_id}", dependencies=[Depends(authorize)])
     async def pet_status(robot_id: str):
@@ -324,50 +352,17 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         return app.state.runtime.pet.start(robot_id)
 
-    async def stop_native_pet_speech(robot_id: str):
-        """One existing Xiaozhi speaker is also used by native MiniCPM.
-
-        Pet quiet/pause revokes its unsolicited output promptly instead of
-        waiting for a five-second model context refresh.
-        """
-        if settings.mode != "hardware":
-            return
-        conversation = getattr(app.state.runtime, "conversation", None)
-        speaker = getattr(conversation, "speaker", None)
-        interrupt = getattr(speaker, "interrupt", None)
-        robot = settings.robot(robot_id)
-        if callable(interrupt) and robot.device_id:
-            await asyncio.wait_for(interrupt(robot), timeout=2.5)
-
     @app.post("/v1/pet/{robot_id}/pause", dependencies=[Depends(authorize)])
     async def pet_pause(robot_id: str):
         coordinator().robot(robot_id)
-        try:
-            # Stop wheels before awaiting vision/TTS task cancellation.
-            await coordinator().stop(robot_id)
-        finally:
-            try:
-                result = await app.state.runtime.pet.pause(robot_id)
-            finally:
-                # Even if motor STOP fails, revoke native initiative and
-                # request physical speaker interruption.
-                await stop_native_pet_speech(robot_id)
+        _, result = await stop_pet_and_audio(robot_id, quiet=False)
         return result
 
     @app.post("/v1/pet/{robot_id}/quiet", dependencies=[Depends(operator)])
     async def pet_quiet(robot_id: str, request: QuietRequest):
         coordinator().robot(robot_id)
         if request.quiet:
-            # A wedged TTS task must never hold off the motor STOP.
-            try:
-                await coordinator().stop(robot_id)
-            finally:
-                try:
-                    result = await app.state.runtime.pet.set_quiet(
-                        robot_id, True
-                    )
-                finally:
-                    await stop_native_pet_speech(robot_id)
+            _, result = await stop_pet_and_audio(robot_id, quiet=True)
             return result
         return await app.state.runtime.pet.set_quiet(robot_id, False)
 
