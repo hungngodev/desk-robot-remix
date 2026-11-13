@@ -63,6 +63,55 @@ class OllamaChat:
         return text
 
 
+    async def readonly_tool_plan(self, history: list[dict]) -> str:
+        """Reuse the existing Mac Ollama process with constrained read-only JSON.
+
+        This is only a text classification request. It has no access to the
+        head, camera bytes, motion permit or job executor. Actual tools still
+        run through the single authenticated Xiaozhi/Mac tool bridge.
+        """
+        routes = [
+            "look", "status", "latest-pickup", "interaction-context",
+            "voice-context",
+        ]
+        schema = {
+            "type": "object",
+            "properties": {
+                "tools": {
+                    "type": "array",
+                    "maxItems": 2,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "route": {"type": "string", "enum": routes},
+                        },
+                        "required": ["route"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["tools"],
+            "additionalProperties": False,
+        }
+        response = await self.client.post(
+            self.settings.ollama_url.rstrip("/") + "/api/chat",
+            json={
+                "model": self.settings.ollama_model,
+                "messages": history,
+                "format": schema,
+                "stream": False,
+                "think": False,
+                "options": {"num_predict": 128, "temperature": 0},
+            },
+            timeout=4,
+        )
+        response.raise_for_status()
+        reply = response.json()["message"]["content"]
+        if not isinstance(reply, str) or not 1 <= len(reply) <= 1200:
+            raise RuntimeError("Invalid bounded Ollama read-only plan")
+        return reply
+
+
     async def stream_reply(self, history: list[dict]):
         """Speak the first sentence before Ollama finishes the entire reply."""
         async with self.client.stream(
