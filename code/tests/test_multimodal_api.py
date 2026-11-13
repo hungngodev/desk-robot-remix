@@ -179,3 +179,59 @@ def test_native_asr_memory_requires_independent_consent_and_deduplicates(
         assert "key beside the robot" in heard.summary
         settings.voice_transcript_memory_enabled = False
         assert client.post(url, headers=tool, json=request).status_code == 403
+
+
+def test_native_personality_uses_shared_brain_provenance_and_private_core(
+    settings, tokens, tmp_path,
+):
+    from types import SimpleNamespace
+    from desk_robot.memory import MemoryStore
+
+    ids = [robot.id for robot in settings.robots]
+    memory = MemoryStore(tmp_path / "private", ids)
+    memory.set_core_fact("robot-01", "favorite_game", "hide the key")
+    memory.remember(
+        "robot-01", "sent_1", "Hello, my little friend",
+        kind="own_utterance", source_robot="robot-01", witnessed=True,
+    )
+    memory.remember(
+        "robot-01", "heard_1", "Maybe you asked me about a key",
+        kind="heard_human", source_robot="robot-01", witnessed=True,
+    )
+    memory.remember(
+        "robot-02", "heard_peer", "I saw a pink key",
+        kind="peer_utterance", source_robot="robot-01", witnessed=False,
+    )
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+
+    class StubRuntime:
+        coordinator = SimpleNamespace(robot=settings.robot)
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    runtime = StubRuntime()
+    runtime.memory = memory
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        own = client.get("/v1/pet/robot-01/omni-context", headers=auth)
+        other = client.get("/v1/pet/robot-02/omni-context", headers=auth)
+        assert own.status_code == other.status_code == 200
+        text = own.json()["instructions"]
+        assert "favorite_game: hide the key" in text
+        assert "I said: Hello, my little friend" in text
+        assert "uncertain transcription" in text
+        assert "I observed: Hello" not in text
+        peer_text = other.json()["instructions"]
+        assert "I heard robot-01 say: I saw a pink key" in peer_text
+        assert "favorite_game" not in peer_text
+        assert "Hello, my little friend" not in peer_text
+        settings.voice_memory_tools_enabled = False
+        disabled = client.get("/v1/pet/robot-01/omni-context", headers=auth)
+        assert disabled.status_code == 200
+        assert disabled.json()["memory_enabled"] is False
+        assert "hide the key" not in disabled.json()["instructions"]
