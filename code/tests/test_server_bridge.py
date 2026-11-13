@@ -148,7 +148,24 @@ def test_overlay_targets_pinned_server_and_compiles():
     assert "Synchronous plugin capacity exhausted" in plugin
     assert "desk_robot_native_omni.py" in changes
     assert "desk_robot_omni_wire.py" in changes
-    assert "desk_robot_native_omni.route_audio" in changes["core/handle/receiveAudioHandle.py"]
+    patched_audio = changes["core/handle/receiveAudioHandle.py"]
+    assert "desk_robot_native_omni.route_audio" in patched_audio
+    # The actual pinned upstream contains only the AEC comment, NOT our
+    # native route. VAD and emergency speaker preemption must run first,
+    # then exactly one native PCM route may bypass legacy ASR.
+    assert patched_audio.count("desk_robot_native_omni.route_audio") == 1
+    assert patched_audio.index("interrupt_for_user_voice") < patched_audio.index(
+        "desk_robot_native_omni.route_audio"
+    )
+    assert patched_audio.index("interrupt_for_normal_voice") < patched_audio.index(
+        "desk_robot_native_omni.route_audio"
+    )
+    assert patched_audio.index("observe_idle_human_voice") < patched_audio.index(
+        "desk_robot_native_omni.route_audio"
+    )
+    assert patched_audio.index("desk_robot_native_omni.route_audio") < patched_audio.index(
+        "await conn.asr.receive_audio"
+    )
     assert "desk_robot_bridge.register(self)" in changes["core/connection.py"]
     assert "desk_robot_bridge.unregister(handler)" in changes["core/websocket_server.py"]
     for path, source in changes.items():
