@@ -24,6 +24,18 @@ def simulated_mac(*, wrong_head=False, old_frame=False,
     def respond(request):
         path = request.url.path
         seen.append((request.method, path))
+        if path.endswith("/power-status"):
+            return httpx.Response(200, json={
+                "robot_id": "robot-01",
+                "source": "wroom_aux_fuel_gauge_raw_unqualified",
+                "gauge_available": True,
+                "reported_soc_centi": 6050,
+                "reported_cell_mv": 3810,
+                "charging_verified": False,
+                "sample_freshness_verified": False,
+                "motor_authorized": False,
+                "charging_authorized": False,
+            })
         if path.endswith("/status"):
             return httpx.Response(200, json={
                 "robot_id": "robot-02" if wrong_head else "robot-01",
@@ -137,9 +149,18 @@ async def test_real_camera_cli_commands_route_to_existing_mac_authorities(
     args.action = "vision"
     status = await request(args, settings)
     assert status["multimodal_model_configured"] is True
-    assert [item[0] for item in observed] == ["POST", "GET", "GET"]
+    args.action = "power"
+    battery = await request(args, settings)
+    assert battery["reported_soc_centi"] == 6050
+    assert battery["charging_verified"] is False
     assert all("/v1/pet/robot-01/" in item[1] for item in observed)
     settings.voice_vision_tools_enabled = False
+    # Power is real authenticated read-only WROOM telemetry and does NOT
+    # require camera permission; visual questions still do.
+    assert (await request(args, settings))["gauge_available"] is True
+    assert [item[0] for item in observed] == [
+        "POST", "GET", "GET", "GET", "GET"
+    ]
     args.action = "look"
     with pytest.raises(ValueError, match="consent"):
         await request(args, settings)
