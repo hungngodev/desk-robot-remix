@@ -760,3 +760,39 @@ def test_new_voice_without_completed_asr_cannot_reuse_prior_question():
     assert "Physical sensor edge: touch_tap" in output
     assert "Check your battery" not in output
     assert "model ASR guess" not in output
+
+
+def test_prior_turn_tool_cannot_steal_new_voice_requested_receipt_priority():
+    # A stale visual result remains historical context, not the answer to a
+    # newer human's visual question. A fresh status result must win budget.
+    timeline = [
+        {"channel": "tool", "kind": "visual_look",
+         "content": "Old camera result " + "v" * 75},
+        {"channel": "human_voice", "kind": "voice_start"},
+        {"channel": "tool", "kind": "robot_status",
+         "content": "Current battery 31 percent"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Please look at the cup and check your battery"},
+        {"channel": "tool", "kind": "memory_recall",
+         "content": "Unrelated story " + "m" * 90},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Current battery 31 percent" in result
+    assert "Recent model ASR guess" in result
+    assert len(result) <= 400
+
+
+def test_tool_receipt_after_current_voice_can_still_be_prioritized():
+    timeline = [
+        {"channel": "human_voice", "kind": "voice_start"},
+        {"channel": "tool", "kind": "visual_look",
+         "content": "Current visual result is a blue mug"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Please look at the mug"},
+        {"channel": "tool", "kind": "memory_recall",
+         "content": "Unrelated memory " + "x" * 90},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Current visual result is a blue mug" in result
+    assert len(result) <= 400
