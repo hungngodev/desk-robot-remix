@@ -538,6 +538,7 @@ class MultimodalOrchestrator:
         self.heads = heads
         self.scene = scene
         self.inference_lock = inference_lock
+        self.preempt_background_vision = None  # Existing PetController VLM task owner.
         self.hub = CameraFrameHub([r.id for r in settings.robots])
         self._capture_tasks: dict[str, asyncio.Task] = {}
         self._sensor_tasks: dict[str, asyncio.Task] = {}
@@ -971,6 +972,11 @@ class MultimodalOrchestrator:
         if pending_sensor is not None and not pending_sensor.done():
             pending_sensor.cancel()  # An explicit question takes camera priority.
         self._cancel_proactive_snapshot(robot_id)
+        # Direct human visual questions outrank an in-flight optional pet
+        # scene comparator holding the shared expensive vision lock.
+        preempt = self.preempt_background_vision
+        if callable(preempt):
+            preempt()
         previous = self._look_tasks.get(robot_id)
         if previous is not None and previous is not current and not previous.done():
             previous.cancel()
