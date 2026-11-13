@@ -503,6 +503,7 @@ def test_native_model_instructions_contain_only_own_pet_persona_without_unapprov
         body = result.json()
         assert body["robot_id"] == pet.id
         assert pet.persona in body["instructions"]
+        assert body["persona"] == pet.persona[:900]
         assert body["memory_enabled"] is False
         assert body["transcript_memory_enabled"] is False
         assert body["model_can_arm_motors"] is False
