@@ -40,6 +40,25 @@ def native(monkeypatch):
     return module, fake_bridge
 
 
+def test_native_voice_intents_are_one_pure_shared_module(native):
+    """The pinned session aliases one read-only router; no duplicated grammar."""
+    module, _bridge = native
+    import desk_robot_voice_intents as intents
+
+    assert module.native_readonly_request is intents.native_readonly_request
+    assert module.native_readonly_requests is intents.native_readonly_requests
+    assert module.native_grounded_fact is intents.native_grounded_fact
+    assert module._advice_only_request is intents._advice_only_request
+    assert module.native_readonly_request("How do I charge a battery?") is None
+    assert module.native_readonly_request("Check your battery") == (
+        "power-status", {},
+    )
+    assert module.native_readonly_request("What color is this mug?")[0] == "look"
+    assert set(route for route, _ in module.native_readonly_requests(
+        "Look at my desk, and check your battery"
+    )) == {"look", "power-status"}
+
+
 def healthy_session(model="openbmb/MiniCPM-o-4_5"):
     # Match the published vLLM-Omni session.created capability contract,
     # not an artificially permissive fake backend.
