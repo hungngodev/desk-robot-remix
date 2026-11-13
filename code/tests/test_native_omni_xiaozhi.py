@@ -761,7 +761,8 @@ async def test_native_proactive_model_sees_video_while_microphone_reports_no_spe
     jpeg = b"\xff\xd8" + b"new mug on the desk" + b"\xff\xd9"
     payload = (json.dumps({
         "robot_id": "robot-01", "source": "proactive",
-        "camera_age_ms": 2, "camera_receipt_us": 50001,
+        "camera_age_ms": 2,
+        "camera_receipt_us": round(module.time.monotonic() * 1_000_000),
         "motion_ppm": 30000,
         "jpeg_base64": base64.b64encode(jpeg).decode("ascii"),
         "motor_authorized": False, "charging_authorized": False,
@@ -828,6 +829,81 @@ async def test_native_proactive_model_sees_video_while_microphone_reports_no_spe
         for task in (video, mic):
             task.cancel()
         await asyncio.gather(video, mic, return_exceptions=True)
+
+
+
+
+async def test_native_proactive_stream_rejects_delayed_and_future_receipts(native):
+    """Mac and Xiaozhi share a monotonic clock, not producer-side age trust."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    original_us = round(module.time.monotonic() * 1_000_000)
+    jpeg = b"\\xff\\xd8" + b"camera source verified" + b"\\xff\\xd9"
+
+    def frame(receipt):
+        return (json.dumps({
+            "robot_id": "robot-01", "source": "proactive",
+            # A compromised / buffered producer could falsely claim age=0.
+            "camera_age_ms": 0, "camera_receipt_us": receipt,
+            "motion_ppm": 30000,
+            "jpeg_base64": base64.b64encode(jpeg).decode("ascii"),
+            "motor_authorized": False, "charging_authorized": False,
+        }) + "\\n").encode("ascii")
+
+    batch = (
+        frame(original_us - 3_000_000)
+        + frame(original_us + 3_000_000)
+        + frame(original_us)
+    )
+
+    class Chunks:
+        async def iter_chunked(self, _):
+            yield batch[:43]
+            yield batch[43:]
+            await asyncio.Event().wait()
+
+    class Reply:
+        status = 200
+        headers = {
+            "X-Desk-Robot-Id": "robot-01",
+            "Content-Type": "application/x-ndjson",
+        }
+        content = Chunks()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class Mac:
+        calls = 0
+
+        def get(self, *_args, **_kwargs):
+            self.calls += 1
+            return Reply()
+
+    mac = Mac()
+    worker = asyncio.create_task(service._camera_stream(mac))
+    try:
+        async with asyncio.timeout(1):
+            while service.video_frames_selected == 0:
+                await asyncio.sleep(.005)
+        assert service.video_frames_skipped_stale == 2
+        assert service.video_frames_selected == 1
+        assert service.latest_jpeg == jpeg
+        assert abs(service.latest_frame_time - original_us / 1_000_000) < .00001
+        assert service._camera_stream_connected is True
+        assert mac.calls == 1  # dropped frames do not cause HTTP reconnect
+    finally:
+        service.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
 
 
 async def test_native_camera_selects_keyframe_motion_and_static_refresh(native):
