@@ -140,6 +140,40 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
 
 
 
+
+def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
+    """Select up to three DISTINCT read-only tools from explicit clauses.
+
+    This is not an agent action planner or a physical action command.
+    Preserve one complete question for ordinary single-intent ASR. Split
+    only when multiple independent natural requests are actually recognized.
+    """
+    if not isinstance(transcript, str) or len(transcript) > 280:
+        return ()
+    whole = native_readonly_request(transcript)
+    clauses = re.split(
+        r"\s+(?:and(?:\s+then)?|then|also)\s+", transcript,
+        maxsplit=2, flags=re.IGNORECASE,
+    )
+    candidates = [native_readonly_request(part) for part in clauses]
+    found: list[tuple[str, dict]] = []
+    seen: set[str] = set()
+    for part, request in zip(clauses, candidates):
+        if request is None:
+            continue
+        route, payload = request
+        if route in seen:
+            continue
+        seen.add(route)
+        found.append((route, payload))
+        if len(found) >= 3:
+            break
+    if len(found) < 2:
+        return (whole,) if whole is not None else ()
+    return tuple(found)
+
+
+
 def opted_in(conn) -> bool:
     robot = _robot_id(conn)
     selected = {
@@ -556,24 +590,30 @@ class NativeOmniSession:
         if (not isinstance(item, str) or not 1 <= len(item) <= 128
                 or not item.isascii() or item in self._readonly_seen):
             return
-        request = native_readonly_request(event.get("transcript"))
-        if request is None:
+        requests = native_readonly_requests(event.get("transcript"))
+        if not requests:
             return
-        route, payload = request
-        signature = (route, " ".join(event["transcript"].casefold().split()).strip(" ?!."))
-        if signature in self._readonly_requests:
-            return
-        try:
-            self._readonly_queue.put_nowait(
-                (route, payload, self._generation, self._readonly_turn)
-            )
-        except asyncio.QueueFull:
-            self.native_readonly_tools_dropped += 1
-            return
-        if len(self._readonly_seen) >= 128:
-            self._readonly_seen.clear()
-        self._readonly_seen.add(item)
-        self._readonly_requests.add(signature)
+        signature_text = " ".join(
+            event["transcript"].casefold().split()
+        ).strip(" ?!.")
+        queued = False
+        for route, payload in requests:
+            signature = (route, signature_text)
+            if signature in self._readonly_requests:
+                continue
+            try:
+                self._readonly_queue.put_nowait(
+                    (route, payload, self._generation, self._readonly_turn)
+                )
+            except asyncio.QueueFull:
+                self.native_readonly_tools_dropped += 1
+                continue
+            self._readonly_requests.add(signature)
+            queued = True
+        if queued:
+            if len(self._readonly_seen) >= 128:
+                self._readonly_seen.clear()
+            self._readonly_seen.add(item)
 
     async def _readonly_tool_worker(self) -> None:
         """Reuse the pinned Xiaozhi read-only Mac bridge, not a new executor.
