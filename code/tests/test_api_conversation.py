@@ -61,6 +61,35 @@ async def test_conversation_six_total_alternating_independent_histories(settings
         await c.run(["robot-01", "robot-02"], "hello", 7)
 
 
+async def test_group_chat_uses_each_pet_own_live_audio_sensor_and_tool_context(settings):
+    import time
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.voice_vision_tools_enabled = True
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    hub.notify("robot-01", "petting_zone", now)
+    hub.remember_heard("robot-01", "asr_one", "Can we play hide the key?", now)
+    hub.remember_tool(
+        "robot-02", "robot_status", "backend=stepper_28byj48; armed=False", now,
+    )
+    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    conversation.multimodal = SimpleNamespace(hub=hub)
+    await conversation.run(["robot-01", "robot-02"], "Play a tiny game", 2)
+    own = conversation.histories["robot-01"][1]["content"]
+    peer = conversation.histories["robot-02"][1]["content"]
+    assert "Recent model ASR guess" in own
+    assert "Can we play hide the key?" in own
+    assert "Physical sensor edge: petting_zone" in own
+    assert "Recent head telemetry" not in own
+    assert "Recent head telemetry" in peer
+    assert "Can we play hide the key?" not in peer
+    assert "Physical sensor edge: petting_zone" not in peer
+    assert "not physical action permits" in own
+    assert "not physical action permits" in peer
+
+
 async def test_unknown_robot_does_not_poison_future_conversation(settings):
     c = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
     with pytest.raises(KeyError):
