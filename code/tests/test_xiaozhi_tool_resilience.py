@@ -57,6 +57,7 @@ async def test_real_xiaozhi_tool_failure_returns_bounded_no_retry_error(
     def handler(request):
         calls.append(request)
         assert request.headers["authorization"] == "Bearer " + "s" * 40
+        assert request.headers["x-desk-robot-tool-receipt"] == "1"
         if failure == "connect":
             raise httpx.ConnectError("private host disconnected", request=request)
         if failure == "timeout":
