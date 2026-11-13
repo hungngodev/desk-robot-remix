@@ -142,7 +142,7 @@ async def call(conn, route, payload=None):
     return result
 
 
-def read_only_response(result: dict) -> ActionResponse:
+def voice_turn_response(result: dict) -> ActionResponse:
     """Never narrate an obsolete turn, even when a physical job was accepted.
 
     Pinned Xiaozhi's Action.NONE is silent ONLY without response/result.
@@ -189,7 +189,7 @@ async def desk_robot_pickup(conn, target):
     result = await call(conn, "pickup", {"target": target})
     # The Mac Coordinator owns job identities and progress. A WebSocket
     # connection may vanish while the accepted job continues.
-    return read_only_response(result)
+    return voice_turn_response(result)
 
 
 @register_function(
@@ -198,7 +198,7 @@ async def desk_robot_pickup(conn, target):
     ToolType.IOT_CTL,
 )
 async def desk_robot_stop(conn):
-    return read_only_response(await call(conn, "stop"))
+    return voice_turn_response(await call(conn, "stop"))
 
 
 @register_function(
@@ -211,7 +211,7 @@ async def desk_robot_stop(conn):
     ToolType.IOT_CTL,
 )
 async def desk_robot_job(conn):
-    return read_only_response(await call(conn, "latest-pickup"))
+    return voice_turn_response(await call(conn, "latest-pickup"))
 
 @register_function(
     "desk_robot_memories",
@@ -235,7 +235,7 @@ async def desk_robot_memories(conn, question=""):
     data = await call(
         conn, "voice-context", {"question": question.strip()}
     )
-    return read_only_response(data)
+    return voice_turn_response(data)
 
 
 @register_function(
@@ -253,7 +253,7 @@ async def desk_robot_memories(conn, question=""):
     ToolType.IOT_CTL,
 )
 async def desk_robot_situation(conn):
-    return read_only_response(
+    return voice_turn_response(
         await call(conn, "interaction-context")
     )
 
@@ -280,4 +280,4 @@ async def desk_robot_look(conn, question):
             Action.REQLLM, result={"error": "Ask a short specific visual question"}
         )
     result = await call(conn, "look", {"question": question.strip()})
-    return read_only_response(result)
+    return voice_turn_response(result)
