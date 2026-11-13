@@ -1090,6 +1090,70 @@ def test_native_audio_commit_rejects_bad_identity_without_consuming_local_turn(
     assert session.native_readonly_tools_dropped == 1
 
 
+async def test_new_human_voice_clears_stale_native_tool_queue_before_new_question(
+    native,
+):
+    """Three obsolete tool slots must not starve a new human's request."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    for route in ("look", "status", "interaction-context"):
+        session._readonly_queue.put_nowait((route, {}, 0, 0))
+
+    class ModelSocket:
+        async def send_json(self, packet):
+            assert packet["type"] == "input_audio_buffer.append"
+
+    session._socket = ModelSocket()
+    worker = asyncio.create_task(session._send_mic())
+    try:
+        session.queue_mic(b"\\x00" * 3200, True)
+        async with asyncio.timeout(1):
+            while session._readonly_turn == 0:
+                await asyncio.sleep(.005)
+        assert session._readonly_queue.empty()
+        assert session.native_readonly_tools_dropped == 3
+        session._queue_readonly_tool({
+            "item_id": "fresh_human_vision",
+            "transcript": "What do you see on the desk?",
+        })
+        selected = session._readonly_queue.get_nowait()
+        assert selected[0] == "look"
+        assert selected[2:] == (session._generation, session._readonly_turn)
+        assert session.native_readonly_tools_dropped == 3
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_barge_drops_old_queued_tools_without_physical_retry(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    session._readonly_queue.put_nowait(("look", {}, 0, 0))
+    session._readonly_queue.put_nowait(("power-status", {}, 0, 0))
+    await session.barge()
+    assert session._readonly_queue.empty()
+    assert session.native_readonly_tools_dropped == 2
+    assert session._generation == 1 and session._readonly_turn == 1
+    session._queue_readonly_tool({
+        "item_id": "post_barge_tool",
+        "transcript": "Check your battery status",
+    })
+    assert session._readonly_queue.get_nowait()[0] == "power-status"
+
+
 async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
     native, monkeypatch,
 ):
