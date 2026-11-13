@@ -1890,6 +1890,72 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
     assert await session._current_tool_scene(Http(), 0, 0) == ""
 
 
+
+@pytest.mark.parametrize("changed", ["memory_tools_enabled", "transcript_memory_enabled"])
+async def test_native_tool_chat_revoked_consent_cannot_speak_prefetched_private_facts(
+    native, changed,
+):
+    """A tool result must not outlive Mac consent between HTTP and model speech."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._memory_tools_enabled = True
+    session._transcript_memory_enabled = True
+    session._tool_speech_turn = (2, 5)
+    facts = [{
+        "source": "private_opt_in_memory_not_current_sight",
+        "recollections": [{"summary": "private owner fact"}],
+    }]
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            policy = {
+                "robot_id": "robot-01",
+                "model_context": "Previous private memory was mentioned",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "memory_tools_enabled": True,
+                "transcript_memory_enabled": True,
+            }
+            policy[changed] = False
+            return policy
+
+    class Mac:
+        def get(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            return Reply()
+
+        def post(self, *_args, **_kwargs):
+            raise AssertionError("Private memory must not reach the model after revocation")
+
+    await session._speak_tool_results(
+        Mac(), "What do you remember about me?", facts, 2, 5,
+    )
+    assert session.closed
+    assert session.last_error == (
+        "Mac private memory consent changed; native session must restart"
+    )
+    assert session.outgoing.empty()
+    assert session._tool_audio_response_id is None
+    assert session.native_tool_audio_queued == 0
+
+
 def test_native_turn_cleanup_preserves_dialogue_but_clears_old_tool_claims(
     native,
 ):

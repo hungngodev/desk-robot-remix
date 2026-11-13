@@ -746,10 +746,20 @@ class NativeOmniSession:
                     or info.get("persistent_memory_included") is not False
                     or info.get("model_context_untrusted_not_instructions") is not True
                     or info.get("motor_authorized") is not False
-                    or info.get("charging_authorized") is not False
-                    or info.get("memory_tools_enabled") is not self._memory_tools_enabled
-                    or info.get("transcript_memory_enabled")
-                        is not self._transcript_memory_enabled):
+                    or info.get("charging_authorized") is not False):
+                return ""
+            # A completed memory lookup may outlive permission revocation.
+            # Returning empty context here would still allow the already
+            # fetched PRIVATE facts to reach the speech model. Retire the
+            # native session instead, including its queued decoder output.
+            if (type(info.get("memory_tools_enabled")) is not bool
+                    or type(info.get("transcript_memory_enabled")) is not bool
+                    or info["memory_tools_enabled"] != self._memory_tools_enabled
+                    or info["transcript_memory_enabled"]
+                        != self._transcript_memory_enabled):
+                self.fail(
+                    "Mac private memory consent changed; native session must restart"
+                )
                 return ""
             context = info.get("model_context")
             if (self.closed or not self.connected
