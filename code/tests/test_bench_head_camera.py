@@ -87,3 +87,69 @@ async def test_replayed_xiao_frame_identity_rejected_by_camera_bench():
     assert report["camera_latency"]["count"] == 1
     assert report["camera_error_count"] >= 1
     assert "duplicate camera identity" in report["camera_errors"][0]
+
+
+async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http():
+    import time
+
+    class StreamingHead:
+        def __init__(self):
+            self._last_camera = None
+            self.snapshot_calls = 0
+            self.status_calls = 0
+
+        async def snapshot(self):
+            self.snapshot_calls += 1
+            raise AssertionError("MJPEG bench must never pull single snapshots")
+
+        async def stream_frames(self):
+            for seq in range(12):
+                await asyncio.sleep(.025)
+                self._last_camera = (31337, seq + 1, (seq + 1) * 25000)
+                yield JPEG, time.monotonic()
+
+        async def status(self):
+            self.status_calls += 1
+            return {"robot_id": "robot-01"}
+
+    head = StreamingHead()
+    result = await bench.measure(
+        head, "robot-01", seconds=.21, status_period_s=.035, stream=True
+    )
+    assert result["camera_acquisition_mode"] == "persistent_mjpeg"
+    assert result["camera_frames_received"] >= 4
+    assert result["successful_camera_fps"] > 4
+    assert result["distinct_source_camera_identities"] >= 4
+    assert result["stream_frame_interarrival"]["count"] >= 3
+    assert result["camera_latency"]["count"] == 0  # no snapshot timing invented
+    assert result["status_latency"]["count"] >= 3
+    assert head.snapshot_calls == 0
+    assert head.status_calls >= 3
+    assert result["camera_error_count"] == 0
+
+
+async def test_stalled_continuous_mjpeg_is_reported_not_mistaken_for_live():
+    class StalledHead:
+        _last_camera = None
+        status_calls = 0
+
+        async def stream_frames(self):
+            await asyncio.Event().wait()
+            yield JPEG, 0.0
+
+        async def status(self):
+            self.status_calls += 1
+            return {"robot_id": "robot-01"}
+
+    head = StalledHead()
+    report = await asyncio.wait_for(
+        bench.measure(
+            head, "robot-01", seconds=.12,
+            status_period_s=.04, stream=True,
+        ), timeout=1.5
+    )
+    assert report["camera_frames_received"] == 0
+    assert report["camera_error_count"] >= 1
+    assert report["status_latency"]["count"] >= 2
+    assert head.status_calls >= 2
+    assert report["speaker_silence_verified"] is False
