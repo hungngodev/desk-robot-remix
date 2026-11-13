@@ -600,6 +600,30 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         return await app.state.runtime.pet.interrupt(robot_id)
 
+    @app.get("/v1/robots/{robot_id}/jobs/latest-pickup",
+             dependencies=[Depends(authorize)])
+    async def latest_pickup(robot_id: str):
+        """Read the Mac job owner after a head WiFi reconnect.
+
+        A per-WebSocket remembered ID is not durable. Only jobs for this
+        robot and pickup kind are visible; no job means no inferred success.
+        This endpoint cannot submit, permit or retry a physical action.
+        """
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
+        matches = [
+            job for job in coordinator().jobs.values()
+            if job.robot_id == robot_id and job.kind == "pickup"
+        ]
+        if not matches:
+            return {
+                "robot_id": robot_id, "available": False,
+                "physical_grasp_verified": False,
+            }
+        return {"available": True, **matches[-1].data()}
+
     @app.get("/v1/jobs/{job_id}", dependencies=[Depends(authorize)])
     async def job(job_id: str):
         if job_id not in coordinator().jobs:
