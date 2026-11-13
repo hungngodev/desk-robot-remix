@@ -35,6 +35,7 @@ def summarize(values: list[float]) -> dict:
 async def measure(
     head, robot_id: str, *, seconds: float,
     camera_period_s: float = 1.0, status_period_s: float = 0.2,
+    stream: bool = False,
 ) -> dict:
     """Exercise existing head transport; never send any POST/motion command."""
     if not (0.1 <= seconds <= 3600
@@ -42,6 +43,7 @@ async def measure(
             and 0.05 <= status_period_s <= 10):
         raise ValueError("Invalid read-only bench duration or periods")
     camera_times: list[float] = []
+    stream_intervals: list[float] = []
     status_times: list[float] = []
     camera_sizes: list[int] = []
     camera_errors: list[str] = []
@@ -83,6 +85,50 @@ async def measure(
             due = max(due + camera_period_s, time.monotonic())
             await asyncio.sleep(max(0, min(deadline, due) - time.monotonic()))
 
+    async def receive_stream():
+        """Actually read MJPEG on ONE socket while status polls in parallel.
+
+        No HTTP snapshot requests, images on disk or invented camera timing.
+        A quiet or stalled stream remains a measurable bench failure.
+        """
+        nonlocal camera_error_count
+        last_frame_at: float | None = None
+        try:
+            async with asyncio.timeout(seconds + 0.5):
+                async for jpeg, received in head.stream_frames():
+                    if time.monotonic() >= deadline:
+                        break
+                    if (not isinstance(jpeg, bytes)
+                            or not jpeg.startswith(b"\xff\xd8")
+                            or not jpeg.endswith(b"\xff\xd9")):
+                        raise ValueError("Incomplete JPEG in continuous stream")
+                    if last_frame_at is not None:
+                        if received <= last_frame_at:
+                            raise ValueError("Camera stream receipt clock regressed")
+                        stream_intervals.append(received - last_frame_at)
+                    last_frame_at = received
+                    identity = getattr(head, "_last_camera", None)
+                    if identity is None:
+                        raise ValueError("Stream has no authenticated frame identity")
+                    if identity in seen_camera_identities:
+                        raise ValueError("Duplicate live camera frame identity")
+                    seen_camera_identities.add(identity)
+                    camera_sizes.append(len(jpeg))
+                if time.monotonic() < deadline - 0.15:
+                    raise RuntimeError("Continuous camera stream ended early")
+        except TimeoutError:
+            # Hitting the deadline is expected only if recent real JPEGs
+            # arrived. A stalled stream does not count as continuous video.
+            if last_frame_at is None or deadline - last_frame_at > 1.2:
+                camera_error_count += 1
+                camera_errors.append("TimeoutError: continuous camera stalled")
+        except Exception as exc:
+            camera_error_count += 1
+            if len(camera_errors) < 20:
+                camera_errors.append(
+                    type(exc).__name__ + ": " + str(exc)[:110]
+                )
+
     async def poll_status():
         nonlocal status_error_count
         due = started
@@ -104,13 +150,20 @@ async def measure(
             due = max(due + status_period_s, time.monotonic())
             await asyncio.sleep(max(0, min(deadline, due) - time.monotonic()))
 
-    await asyncio.gather(poll_camera(), poll_status())
+    await asyncio.gather(
+        receive_stream() if stream else poll_camera(), poll_status()
+    )
     elapsed = max(0.001, time.monotonic() - started)
     return {
         "robot_id": robot_id,
         "elapsed_s": round(elapsed, 3),
-        "requested_camera_fps": round(1.0 / camera_period_s, 3),
-        "successful_camera_fps": round(len(camera_times) / elapsed, 3),
+        "camera_acquisition_mode": (
+            "persistent_mjpeg" if stream else "legacy_snapshot"
+        ),
+        "requested_camera_fps": None if stream else round(1.0 / camera_period_s, 3),
+        "successful_camera_fps": round(len(camera_sizes) / elapsed, 3),
+        "camera_frames_received": len(camera_sizes),
+        "stream_frame_interarrival": summarize(stream_intervals),
         "camera_latency": summarize(camera_times),
         "status_latency": summarize(status_times),
         "largest_jpeg_bytes": max(camera_sizes, default=0),
@@ -135,6 +188,8 @@ async def main() -> int:
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--camera-period", type=float, default=1.0)
     parser.add_argument("--status-period", type=float, default=0.2)
+    parser.add_argument("--stream", action="store_true",
+                        help="Bench the real persistent MJPEG socket instead of snapshots")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     if not 5 <= args.seconds <= 300:
@@ -151,11 +206,12 @@ async def main() -> int:
             head, robot.id, seconds=args.seconds,
             camera_period_s=args.camera_period,
             status_period_s=args.status_period,
+            stream=args.stream,
         )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))
-    return 0 if (result["camera_latency"]["count"] > 0
+    return 0 if (result["camera_frames_received"] > 0
                  and result["status_latency"]["count"] > 0
                  and not result["camera_error_count"]
                  and not result["status_error_count"]) else 1
