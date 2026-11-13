@@ -156,8 +156,10 @@ async def call(conn, route, payload=None):
     # bridge. Reject cross-pet or unidentified read-only results HERE; a
     # separate native worker check is not enough for legacy model replies.
     if readonly and (result.get("robot_id") != robot
-                     or result.get("motor_authorized") is True
-                     or result.get("charging_authorized") is True):
+                     or ("motor_authorized" in result
+                         and result["motor_authorized"] is not False)
+                     or ("charging_authorized" in result
+                         and result["charging_authorized"] is not False)):
         return {"error": "Robot Mac tool identity or authority invalid",
                 "retried": False}
     return result
