@@ -67,6 +67,7 @@ async def test_group_chat_uses_each_pet_own_live_audio_sensor_and_tool_context(s
     from desk_robot.multimodal import CameraFrameHub
 
     settings.voice_vision_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
     hub = CameraFrameHub(["robot-01", "robot-02"])
     now = time.monotonic()
     hub.notify("robot-01", "petting_zone", now)
@@ -88,6 +89,28 @@ async def test_group_chat_uses_each_pet_own_live_audio_sensor_and_tool_context(s
     assert "Physical sensor edge: petting_zone" not in peer
     assert "not physical action permits" in own
     assert "not physical action permits" in peer
+
+
+async def test_group_chat_never_exposes_live_asr_without_fleet_text_consent(settings):
+    import time
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.voice_vision_tools_enabled = True
+    settings.fleet_text_sharing_enabled = False
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.remember_heard(
+        "robot-01", "asr_private", "A private conversation about my keys",
+        time.monotonic(),
+    )
+    agent = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    agent.multimodal = SimpleNamespace(hub=hub)
+    await agent.run(["robot-01", "robot-02"], "Discuss a tiny game", 2)
+    assert all(
+        "A private conversation about my keys" not in
+        agent.histories[robot_id][1]["content"]
+        for robot_id in ("robot-01", "robot-02")
+    )
 
 
 async def test_unknown_robot_does_not_poison_future_conversation(settings):
