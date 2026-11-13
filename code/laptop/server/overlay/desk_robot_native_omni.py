@@ -573,15 +573,21 @@ class NativeOmniSession:
                         or len(data["model_context"]) > 400
                         or type(data.get("memory_tools_enabled")) is not bool
                         or type(data.get("transcript_memory_enabled")) is not bool
-                        or type(data.get("pet_quiet")) is not bool
-                        or type(data.get("pet_autonomy_enabled")) is not bool):
+                        or (data.get("pet_quiet") is not None
+                            and type(data["pet_quiet"]) is not bool)
+                        or (data.get("pet_autonomy_enabled") is not None
+                            and type(data["pet_autonomy_enabled"]) is not bool)):
                     self.native_context_errors += 1
                     continue
                 self._last_authenticated_mac_at = time.monotonic()
                 old_quiet = self._pet_quiet
                 old_autonomy = self._pet_autonomy_enabled
-                self._pet_quiet = data["pet_quiet"]
-                self._pet_autonomy_enabled = data["pet_autonomy_enabled"]
+                # Older read-only test adapters may omit policy, but that
+                # omission can NEVER grant speech permission.
+                self._pet_quiet = data.get("pet_quiet", True)
+                self._pet_autonomy_enabled = data.get(
+                    "pet_autonomy_enabled", False
+                )
                 # Model instruction updates may be impossible; the audio
                 # permissions must still change in the existing Python
                 # speaker, independent of Stage 0 KV support.
