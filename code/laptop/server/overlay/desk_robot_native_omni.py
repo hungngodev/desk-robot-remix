@@ -77,6 +77,17 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
     polite = re.sub(
         r"^(?:can|could|would|will) you (?:please )?", "", spoken,
     )
+    # Requests for advice about a battery or dock are not read-only sensor
+    # measurements, even if their text contains "battery" or "on the desk".
+    # Apply this before BOTH the camera and fuel-gauge matchers.
+    if re.match(
+        r"^(?:(?:is|are) there (?:a |an |any )?"
+        r"(?:way|method|reason|chance|plan)\b|"
+        r"how (?:do|can|should) (?:i|we|you)\b|"
+        r"what(?:'s| is) (?:the |a )?(?:best )?way to\b)",
+        polite,
+    ):
+        return None
     look = (
         r"(?:look (?:at|around|over|toward|for)\b|"
         r"what (?:can|do) you see\b|"
@@ -117,13 +128,8 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         )
         and re.search(r"\b(?:say|read|show)\b", polite)
     )
-    # Spatial words inside a how-to question are not an invitation to look.
-    abstract_query = re.match(
-        r"^(?:is|are) there (?:a |an |any )?(?:way|method|reason|chance|plan)\b",
-        polite,
-    )
-    if (visual_attribute or (scene_location and (visual_count or (
-            visual_relation and not abstract_query))) or visible_text):
+    if (visual_attribute or (scene_location and (visual_count or visual_relation))
+            or visible_text):
         return "look", {"question": text}
     # A status query must ASK about an existing action. Merely saying
     # "pick up the key" must NEVER be interpreted as a job submission.
