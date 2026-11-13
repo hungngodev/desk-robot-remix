@@ -258,15 +258,15 @@ def compose_brain_context(
         # must not preferentially omit the second result.
         latest = heard_requests[0]
         if re.search(
-            r"\\b(?:(?:can|could|would) you (?:please )?look|"
-            r"(?:and|then|also) (?:can you |please )?look)\\b", latest,
+            r"\b(?:(?:can|could|would) you (?:please )?look|"
+            r"(?:and|then|also) (?:can you |please )?look)\b", latest,
         ):
             requested_tools.add("visual_look")
         if re.search(
-            r"\\b(?:(?:can|could|would) you (?:please )?check "
+            r"\b(?:(?:can|could|would) you (?:please )?check "
             r"(?:your |the )?battery|"
             r"(?:and|then|also) (?:please )?(?:check (?:your |the )?"
-            r"battery|how much battery|what(?:'s| is) your battery))\\b",
+            r"battery|how much battery|what(?:'s| is) your battery))\b",
             latest,
         ):
             requested_tools.add("robot_status")
