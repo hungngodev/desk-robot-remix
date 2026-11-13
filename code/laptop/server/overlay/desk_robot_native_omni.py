@@ -1590,12 +1590,12 @@ class NativeOmniSession:
             raise RuntimeError("Physical robot identity changed during native speech")
         if state == "start":
             if self._external_speech_active:
-                return  # The Mac proactive owner already holds this decoder.
+                return False  # The Mac proactive owner already holds this decoder.
             # Source-authenticated human VAD has priority even if this model
             # response was already queued. Never speak over another pet's user.
             if not await claim_speaker(self):
                 if self._external_speech_active or _external_speaker_owner is not None:
-                    return  # Do not flush the Mac voice that already owns it.
+                    return False  # Do not flush the Mac voice that already owns it.
                 events = await self._invalidate_head_first()
                 self._schedule_remote_cancel(events)
                 return False
