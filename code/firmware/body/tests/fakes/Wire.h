@@ -29,6 +29,7 @@ class TwoWire {
   std::uint8_t dock_gpioA = 0x0F; // switches closed, no input or charger
   bool range_mux_stuck = false;
   bool optional_mux_stuck = false;
+  bool fail_optional_mux_write = false;
   bool optional_mux_installed = true;
   bool range_mux_write_nack = false;
   bool range_mux_read_nack = false;
@@ -48,6 +49,7 @@ class TwoWire {
     outbound.clear();
   }
   std::size_t write(std::uint8_t v) {
+    if (fail_optional_mux_write && current_address == 0x71) return 0;
     outbound.push_back(v);
     return 1;
   }
