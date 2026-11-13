@@ -583,6 +583,67 @@ def test_only_current_duplex_speaker_passes_microphone_while_group_talks(bridge)
 
 
 
+async def test_mac_proactive_tts_claims_and_releases_native_speaker_owner(
+    bridge, monkeypatch,
+):
+    import types
+
+    calls = []
+    async def begin(conn):
+        calls.append(("claim", conn.device_id))
+        return True
+
+    async def end(conn):
+        calls.append(("release", conn.device_id))
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        begin_external_speech=begin, end_external_speech=end,
+    ))
+    async def fake_tts(conn, state, message=None):
+        calls.append((state, message))
+
+    pkg = types.ModuleType("core")
+    pkg.__path__ = []
+    handle = types.ModuleType("core.handle")
+    handle.__path__ = []
+    speech = types.ModuleType("core.handle.sendAudioHandle")
+    speech.send_tts_message = fake_tts
+    for name, mod in (("core", pkg), ("core.handle", handle),
+                      ("core.handle.sendAudioHandle", speech)):
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    sent = []
+    class Socket:
+        async def send(self, payload):
+            sent.append(payload)
+
+    current = SimpleNamespace(
+        device_id="mac-01", conn_from_mqtt_gateway=False,
+        client_abort=False, client_is_speaking=False,
+        websocket=Socket(), session_id="sid",
+        clearSpeakStatus=lambda: calls.append(("clear", None)),
+    )
+    bridge.lease_ids = frozenset({"mac-01"})
+    bridge.lease_until = time.monotonic() + 30
+    await bridge.transmit(current, "I noticed you touched my head", [b"opus"])
+    assert calls[0] == ("claim", "mac-01")
+    assert calls[-1] == ("release", "mac-01")
+    assert ("start", None) in calls
+    assert ("sentence_start", "I noticed you touched my head") in calls
+    assert ("stop", None) in calls
+    assert sent == [b"opus"]
+
+    async def deny(conn):
+        return False
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        begin_external_speech=deny, end_external_speech=end,
+    ))
+    sent.clear()
+    with pytest.raises(RuntimeError, match="Live human/native"):
+        await bridge.transmit(current, "Should not overlap", [b"opus"])
+    assert not sent
+
+
 async def test_normal_xiaozhi_realtime_listening_barges_into_its_own_tts(bridge):
     sent, cleared = [], []
 
