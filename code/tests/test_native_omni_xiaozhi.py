@@ -967,6 +967,10 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
 
     async def send(event):
         sent.append(event)
+        session._ack_context_update({
+            "type": "session.updated",
+            "session": {"instructions": event["session"]["instructions"]},
+        })
 
     session._send = send
 
@@ -1049,6 +1053,10 @@ async def test_native_live_context_expiry_restores_base_model_instructions(nativ
 
     async def send(event):
         observed.append(event)
+        session._ack_context_update({
+            "type": "session.updated",
+            "session": {"instructions": event["session"]["instructions"]},
+        })
 
     session._send = send
 
@@ -1093,6 +1101,66 @@ async def test_native_live_context_expiry_restores_base_model_instructions(nativ
             session._base_instructions
         )
         assert session.native_context_errors == 0
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_context_send_is_not_counted_without_backend_ack(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    sent = []
+
+    async def send(event):
+        sent.append(event)
+        # A stale server acknowledgement must not certify new context.
+        session._ack_context_update({
+            "type": "session.updated",
+            "session": {"instructions": "older unrelated turn"},
+        })
+
+    session._send = send
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "model_context": "Physical sensor edge: touch_tap",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+            }
+
+    class Mac:
+        def get(self, url, **kwargs):
+            return Reply()
+
+    worker = asyncio.create_task(session._refresh_live_context(Mac()))
+    try:
+        session._context_wakeup.set()
+        async with asyncio.timeout(2):
+            while session.native_context_errors < 1:
+                await asyncio.sleep(.01)
+        assert len(sent) == 1
+        assert session.native_context_updates == 0
+        assert session._context_pending is None
+        assert session._context_instructions == session.wire.instructions
     finally:
         session.closed = True
         worker.cancel()
