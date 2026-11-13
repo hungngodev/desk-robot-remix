@@ -738,19 +738,23 @@ class NativeOmniSession:
                     # re-enter this SAME pinned HTTP executor with new turn
                     # fences. Never present planner guesses as scene facts.
                     intents = result.get("tools")
-                    if not isinstance(intents, list):
+                    allowed = {
+                        "look", "status", "latest-pickup",
+                        "interaction-context", "voice-context",
+                    }
+                    if (not isinstance(intents, list) or len(intents) > 2
+                            or any(
+                                not isinstance(planned, dict)
+                                or planned.get("route") not in allowed
+                                or not isinstance(planned.get("payload"), dict)
+                                for planned in intents
+                            )):
+                        # Never partially accept a malformed agent plan,
+                        # even if another layer already validates it.
                         self.native_readonly_tools_dropped += 1
                         continue
-                    for planned in intents[:2]:
-                        if not isinstance(planned, dict):
-                            continue
-                        route = planned.get("route")
-                        payload = planned.get("payload")
-                        if (route not in {
-                            "look", "status", "latest-pickup",
-                            "interaction-context", "voice-context",
-                        } or not isinstance(payload, dict)):
-                            continue
+                    for planned in intents:
+                        route, payload = planned["route"], planned["payload"]
                         key = (route, "__semantic_planner__")
                         if key in self._readonly_requests:
                             continue
