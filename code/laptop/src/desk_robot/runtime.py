@@ -53,6 +53,9 @@ class Runtime:
             )
             self.pet.multimodal = self.multimodal
             self.conversation.multimodal = self.multimodal
+            self.multimodal.preempt_background_vision = (
+                self.pet.preempt_background_vision
+            )
         self.voice_events: VoiceEventListener | None = None
         self._voice_task: asyncio.Task | None = None
 
