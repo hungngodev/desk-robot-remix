@@ -58,42 +58,65 @@ def approved_backend_url(url: str) -> str:
 
 
 def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
-    """Select only explicit, consented observational Mac tools from native ASR.
+    """Route explicit natural questions to existing read-only Mac authorities.
 
-    MiniCPM does not emit function calls. This deterministic adapter never
-    guesses that a vague remark permits an actuator, charger or job. Results
-    enter the existing Mac tool history for the NEXT conversational turn.
+    MiniCPM-o native duplex has no verified function-call stream here. This
+    small conservative speech grammar does not infer permission for pickup,
+    drive, charger, operator memory changes or any physical side effect.
     """
     if not isinstance(transcript, str):
         return None
     text = " ".join(transcript.split())
-    if not 3 <= len(text) <= 280:
+    if not 3 <= len(text) <= 280 or "\x00" in text:
         return None
-    lowered = text.casefold()
-    # Require an actual direct request, not a quoted tool name in a story.
-    lowered = re.sub(r"^hey (?:robot|pip|dot)[, ]+", "", lowered)
-    if re.match(
-        r"^(?:please |can you |could you |would you )?"
-        r"(?:look (?:at|around)|what (?:can|do) you see|"
-        r"what(?:'s| is) (?:this|that|in front of you)|"
-        r"what am i holding|do you see )",
-        lowered,
-    ):
+    spoken = text.casefold().strip(" ?!.,")
+    spoken = re.sub(r"^hey (?:robot|pip|dot)[, ]+", "", spoken)
+    spoken = re.sub(r"^please\s+", "", spoken)
+    # A polite question still has to name the read-only observation action.
+    polite = re.sub(
+        r"^(?:can|could|would|will) you (?:please )?", "", spoken,
+    )
+    look = (
+        r"(?:look (?:at|around|over|toward|for)\b|"
+        r"what (?:can|do) you see\b|"
+        r"(?:tell|show) me what you (?:can )?see\b|"
+        r"what(?:'s| is) (?:this|that|on (?:my|the) desk|"
+        r"in front of (?:me|you)|in (?:your|the) camera)\b|"
+        r"what am i holding\b|"
+        r"do you see\b|"
+        r"can you identify\b|"
+        r"(?:describe|inspect) (?:this|that|the desk|what you see)\b)"
+    )
+    if re.match(r"^(?:" + look + r")", polite):
         return "look", {"question": text}
-    if (re.match(r"^(?:is|did|check|what|has)\b", lowered)
-            and re.search(r"\b(?:pickup|pick up|grasp)\b", lowered)
-            and re.search(r"\b(?:done|finished|succeed|status|complete|job)\b", lowered)):
+    # A status query must ASK about an existing action. Merely saying
+    # "pick up the key" must NEVER be interpreted as a job submission.
+    if re.match(
+        r"^(?:is|did|check|what|has|have|how)\b", spoken
+    ) and re.search(r"\b(?:pickup|pick up|picked up|grasp|grasped)\b", spoken) and (
+        re.search(r"\b(?:done|finished|finish|succeed|success|status|"
+                  r"complete|completed|job|already|yet)\b", spoken)
+        or spoken.startswith(("did you pick up", "have you picked up"))
+    ):
         return "latest-pickup", {}
-    if (re.match(r"^(?:check|what|how|is|are|tell)\b", lowered)
-            and re.search(r"\b(?:robot status|your status|battery|safety status)\b",
-                          lowered)):
+    if (
+        re.match(r"^(?:check|what|how|is|are|tell)\b", spoken)
+        and re.search(
+            r"\b(?:robot status|your status|battery|charge level|"
+            r"sensor status|safety status|power level)\b", spoken,
+        )
+    ) or re.match(
+        r"^(?:how much (?:battery|power) (?:is )?left|"
+        r"how are your sensors)\b", spoken
+    ):
         return "status", {}
     if re.match(
-        r"^(?:what (?:just )?happened|did (?:i|someone) (?:touch|tap) you)",
-        lowered,
+        r"^(?:what (?:just )?happened|what did you (?:just )?(?:notice|"
+        r"sense|detect)|did (?:i|someone) (?:touch|tap) you)\b", spoken,
     ):
         return "interaction-context", {}
     return None
+
 
 
 def opted_in(conn) -> bool:
