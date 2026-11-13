@@ -330,6 +330,62 @@ def status(device: str) -> dict:
     }
 
 
+def native_grounded_fact(route: str, result: dict) -> dict | None:
+    """Small source-labelled facts, never full private HTTP/JSON dumps."""
+    if not isinstance(result, dict):
+        return None
+    if route == "look":
+        answer = result.get("answer")
+        if (result.get("source") != "authenticated_xiao_camera_and_local_vlm"
+                or not isinstance(answer, str) or not answer.strip()):
+            return None
+        return {"source": "local_camera_model_guess",
+                "interpretation_not_proof": " ".join(answer.split())[:350]}
+    if route == "power-status":
+        if result.get("source") != "wroom_aux_fuel_gauge_raw_unqualified":
+            return None
+        if result.get("gauge_available") is not True:
+            return {"source": "wroom_fuel_gauge", "available": False}
+        soc, mv = result.get("reported_soc_centi"), result.get("reported_cell_mv")
+        if (type(soc) is not int or type(mv) is not int
+                or not 0 <= soc <= 10000 or not 0 <= mv <= 4500):
+            return None
+        return {"source": "unqualified_wroom_gauge",
+                "estimated_percent": round(soc / 100, 1),
+                "cell_mv": mv, "charging_verified": False}
+    if route == "latest-pickup":
+        state = result.get("state")
+        return {"source": "mac_pickup_job",
+                "state": str(state)[:45] if result.get("available") else "none",
+                "physical_grasp_verified": False}
+    if route == "status":
+        safety = result.get("safety")
+        if not isinstance(safety, dict):
+            return None
+        return {"source": "wroom_status", "safety_fault":
+                str(safety.get("fault", "unknown"))[:65],
+                "physical_acceptance_verified": False}
+    if route == "interaction-context":
+        summary = result.get("model_context")
+        if (result.get("persistent_memory_included") is not False
+                or result.get("raw_media_included") is not False
+                or not isinstance(summary, str)):
+            return None
+        return {"source": "transient_mac_events",
+                "untrusted_summary": " ".join(summary.split())[:350]}
+    if route == "voice-context":
+        records = result.get("memories")
+        if not isinstance(records, list):
+            return None
+        return {"source": "private_opt_in_memory_not_current_sight",
+                "recollections": [
+                    " ".join(item["summary"].split())[:155]
+                    for item in records[:2] if isinstance(item, dict)
+                    and isinstance(item.get("summary"), str)
+                ]}
+    return None
+
+
 @dataclass(frozen=True)
 class MicFrame:
     pcm16k: bytes
@@ -407,6 +463,7 @@ class NativeOmniSession:
         self.native_readonly_tools_completed = 0
         self.native_readonly_tools_dropped = 0
         self._tool_speech_turn: tuple[int, int] | None = None
+        self._tool_question = ""
         self._tool_audio_response_id: str | None = None
         self.native_tool_spoken_responses = 0
         self.native_tool_speech_errors = 0
