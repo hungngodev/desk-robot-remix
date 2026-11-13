@@ -3291,6 +3291,64 @@ async def test_first_human_camera_wake_does_not_double_fetch_on_esp32(native):
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_delayed_mac_opus_is_serialized_before_fleet_human_stop(native):
+    """No asynchronous Mac Opus send may complete AFTER a human STOP."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    bridge.interrupt_generation = {"mac-01": 5}
+    module._external_speaker_owner = "mac-01"
+    module._external_speaker_connection = conn
+    first_started, unblock = asyncio.Event(), asyncio.Event()
+    emitted = []
+
+    class SlowSocket:
+        async def send(self, packet):
+            if packet == b"opus_before_stop":
+                first_started.set()
+                await unblock.wait()
+            emitted.append(packet)
+    conn.websocket = SlowSocket()
+    conn.client_is_speaking = True
+    first = asyncio.create_task(
+        module.send_external_opus(conn, b"opus_before_stop", 5)
+    )
+    stopper = None
+    try:
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+        stopper = asyncio.create_task(
+            module.preempt_others_for_human("mac-02")
+        )
+        async with asyncio.timeout(1):
+            while not conn.client_abort:
+                await asyncio.sleep(.005)
+        assert emitted == []
+        unblock.set()
+        await asyncio.wait_for(
+            asyncio.gather(first, stopper), timeout=1,
+        )
+        assert emitted[0] == b"opus_before_stop"
+        stop = json.loads(emitted[1])
+        assert stop["type"] == "tts"
+        assert stop["state"] == "stop" and stop["flush"] is True
+        assert len(emitted) == 2
+        assert bridge.interrupt_generation["mac-01"] == 6
+        with pytest.raises(RuntimeError, match="Mac speech interrupted"):
+            await module.send_external_opus(conn, b"opus_after_stop", 5)
+        assert len(emitted) == 2
+    finally:
+        unblock.set()
+        first.cancel()
+        if stopper is not None:
+            stopper.cancel()
+        await asyncio.gather(
+            first, *( [stopper] if stopper is not None else [] ),
+            return_exceptions=True,
+        )
+        module._external_speaker_owner = None
+        module._external_speaker_connection = None
+
+
 @pytest.mark.parametrize("has_native_session", [False, True])
 async def test_human_on_one_robot_interrupts_other_mac_proactive_sender(
     native, has_native_session,
