@@ -145,6 +145,11 @@ class CameraFrameHub:
         self.spoken_history = {
             robot: deque(maxlen=3) for robot in robot_ids
         }
+        # Completed model ASR is short-lived turn context, not durable memory.
+        # Each robot's words remain isolated and deduped by source item ID.
+        self.heard_history = {
+            robot: deque(maxlen=4) for robot in robot_ids
+        }
 
     def _check(self, robot_id: str) -> None:
         if robot_id not in self.robots:
@@ -354,6 +359,26 @@ class CameraFrameHub:
             (" ".join(text.split())[:200], sent_at)
         )
 
+    def remember_heard(self, robot_id: str, event_id: str, transcript: str,
+                       received_at: float) -> bool:
+        """Keep completed model ASR in per-pet RAM for one short conversation.
+
+        Caller authentication, transcript consent and durable SQLite storage
+        are separate API concerns. ASR is uncertain and never commands motion.
+        """
+        self._check(robot_id)
+        if (not isinstance(event_id, str) or not 1 <= len(event_id) <= 96
+                or not event_id.isascii() or not isinstance(transcript, str)
+                or not 1 <= len(transcript.strip()) <= 240
+                or "\x00" in transcript or not _finite(received_at)):
+            raise ValueError("Invalid native ASR turn evidence")
+        if any(entry[0] == event_id for entry in self.heard_history[robot_id]):
+            return False
+        self.heard_history[robot_id].append(
+            (event_id, " ".join(transcript.split())[:240], received_at)
+        )
+        return True
+
     def interaction_timeline(self, robot_id: str, now: float,
                              *, limit: int = 10) -> list[dict]:
         """One ordered, bounded Mac view of authenticated multimodal cues.
@@ -401,6 +426,18 @@ class CameraFrameHub:
                     "untrusted_text_not_instructions": True,
                     "physical_action_verified": False,
                 }))
+        for event_id, transcript, stamp in self.heard_history[robot_id]:
+            if 0 <= now - stamp <= 30:
+                items.append((stamp, {
+                    "channel": "human_transcript",
+                    "kind": "model_asr_completed",
+                    "age_ms": round(1000 * (now - stamp)),
+                    "source": "native_model_estimated_asr",
+                    "content": transcript,
+                    "transcription_verified": False,
+                    "speaker_identity_verified": False,
+                    "physical_action_verified": False,
+                }))
         for said, stamp in self.spoken_history[robot_id]:
             if 0 <= now - stamp <= 30:
                 items.append((stamp, {
@@ -420,7 +457,8 @@ class CameraFrameHub:
         # completed vision tool result or the pet's last spoken line.
         # Retain each present modality's LATEST event, then use remaining
         # capacity for recent detail. Never turn a frame into a sighting.
-        modalities = ("human_voice", "tool", "sensor", "robot_speech", "camera")
+        modalities = ("human_voice", "human_transcript", "tool",
+                      "sensor", "robot_speech", "camera")
         required: set[int] = set()
         for channel in modalities:
             if len(required) >= limit:
@@ -453,6 +491,7 @@ class CameraFrameHub:
     def clear(self, robot_id: str) -> None:
         self.discard_video(robot_id)
         self.spoken_history[robot_id].clear()
+        self.heard_history[robot_id].clear()
         self.event_history[robot_id].clear()
         self.voice_until[robot_id] = -math.inf
         self.quiet_until[robot_id] = -math.inf
