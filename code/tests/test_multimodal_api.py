@@ -181,6 +181,78 @@ def test_native_asr_memory_requires_independent_consent_and_deduplicates(
         assert client.post(url, headers=tool, json=request).status_code == 403
 
 
+def test_completed_native_asr_blends_with_live_camera_context_without_disk_consent(
+    settings, tokens, tmp_path,
+):
+    import time
+    from types import SimpleNamespace
+    from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
+
+    pet = settings.robots[0]
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    settings.voice_transcript_memory_enabled = False
+    ids = [robot.id for robot in settings.robots]
+    memory = MemoryStore(tmp_path / "private", ids)
+    hub = CameraFrameHub(ids)
+
+    class Runtime:
+        coordinator = SimpleNamespace(robot=lambda rid: (
+            pet if rid == pet.id else (_ for _ in ()).throw(KeyError(rid))
+        ))
+        multimodal = SimpleNamespace(hub=hub)
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    runtime = Runtime()
+    runtime.memory = memory
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    request = {
+        "event_id": "omni_live_transcript_1",
+        "transcript": "The red key is beside the mug",
+    }
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        consent = client.get(f"/v1/pet/{pet.id}/omni-context", headers=headers)
+        assert consent.status_code == 200
+        assert consent.json()["live_transcript_context_enabled"] is True
+        assert consent.json()["transcript_memory_enabled"] is False
+        url = f"/v1/pet/{pet.id}/omni-heard"
+        first = client.post(url, json=request, headers=headers)
+        assert first.status_code == 200
+        assert first.json()["ephemeral_context_added"] is True
+        assert first.json()["stored"] is False
+        assert first.json()["retained_on_disk"] is False
+        again = client.post(url, json=request, headers=headers)
+        assert again.json()["ephemeral_context_added"] is False
+        situation = client.get(
+            f"/v1/pet/{pet.id}/interaction-context", headers=headers
+        )
+        assert situation.status_code == 200
+        transcript = [
+            item for item in situation.json()["current_interaction_timeline"]
+            if item["channel"] == "human_transcript"
+        ]
+        assert len(transcript) == 1
+        assert transcript[0]["content"] == request["transcript"]
+        assert transcript[0]["transcription_verified"] is False
+        assert transcript[0]["speaker_identity_verified"] is False
+        assert situation.json()["persistent_memory_included"] is False
+        assert memory.count(pet.id) == 0
+        assert memory.count(ids[1]) == 0
+        assert client.get(
+            f"/v1/pet/{pet.id}/voice-context", headers=headers
+        ).status_code == 403
+        assert not hub.interaction_timeline(pet.id, time.monotonic() + 31)
+        hub.clear(pet.id)
+        assert hub.interaction_timeline(pet.id, time.monotonic()) == []
+
+
 def test_native_personality_uses_shared_brain_provenance_and_private_core(
     settings, tokens, tmp_path,
 ):
