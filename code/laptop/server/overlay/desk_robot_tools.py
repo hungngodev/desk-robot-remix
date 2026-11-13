@@ -152,6 +152,14 @@ async def call(conn, route, payload=None):
                 else {"error": "Unexpected robot Mac tool response", "retried": False})
     if turn_superseded:
         return {**result, "_desk_robot_turn_superseded": True}
+    # Both native duplex and legacy Xiaozhi function calling use this same
+    # bridge. Reject cross-pet or unidentified read-only results HERE; a
+    # separate native worker check is not enough for legacy model replies.
+    if readonly and (result.get("robot_id") != robot
+                     or result.get("motor_authorized") is True
+                     or result.get("charging_authorized") is True):
+        return {"error": "Robot Mac tool identity or authority invalid",
+                "retried": False}
     return result
 
 
