@@ -114,6 +114,87 @@ async def test_unknown_voice_source_cannot_interrupt_the_fleet():
     assert events == []
 
 
+async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
+    """Audio stop may block, but old autonomous camera work cannot survive."""
+    import asyncio
+    from io import BytesIO
+
+    from PIL import Image
+
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    ready, release = asyncio.Event(), asyncio.Event()
+
+    class SlowStopPet:
+        async def interrupt(self, robot_id):
+            if robot_id == "robot-01":
+                ready.set()
+                await release.wait()
+
+    class Conversation:
+        async def stop(self):
+            return None
+
+    class Camera:
+        def __init__(self, blocking=False):
+            self.blocking = blocking
+            self.started = asyncio.Event()
+            self.cancelled = False
+            self.captures = 0
+
+        async def snapshot(self):
+            self.captures += 1
+            if self.blocking:
+                self.started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+            image = BytesIO()
+            Image.new("RGB", (64, 48), "gray").save(image, "JPEG")
+            return image.getvalue()
+
+    heads = {"robot-01": Camera(), "robot-02": Camera(blocking=True)}
+    settings = SimpleNamespace(
+        robots=[SimpleNamespace(id=i) for i in heads],
+        voice_vision_tools_enabled=True, vision_model="local-vlm",
+    )
+    visual = MultimodalOrchestrator(settings, heads, object(), asyncio.Lock())
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings, runtime.pet = settings, SlowStopPet()
+    runtime.conversation, runtime.multimodal = Conversation(), visual
+    background = asyncio.create_task(
+        visual.capture("robot-02", source="proactive")
+    )
+    interrupt = None
+    try:
+        await asyncio.wait_for(heads["robot-02"].started.wait(), timeout=1)
+        interrupt = asyncio.create_task(
+            runtime._on_voice_interrupt("robot-01", "speech_start")
+        )
+        await asyncio.wait_for(ready.wait(), timeout=1)
+        # The fresh VAD is already active even while Xiaozhi audio STOP is
+        # blocked; old optional HTTP must be cancelled immediately.
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        assert heads["robot-02"].cancelled
+        assert heads["robot-01"].captures == 0
+        assert not visual._capture_tasks.get("robot-01")
+        assert not interrupt.done()
+        release.set()
+        await asyncio.wait_for(interrupt, timeout=1)
+        async with asyncio.timeout(2):
+            while heads["robot-01"].captures < 1:
+                await asyncio.sleep(.01)
+        assert visual.hub.frames["robot-01"][-1].source == "speech"
+    finally:
+        release.set()
+        if interrupt is not None:
+            await asyncio.gather(interrupt, return_exceptions=True)
+        await asyncio.gather(background, return_exceptions=True)
+        await visual.close()
+
+
 async def test_initial_human_speech_primes_video_only_after_urgent_audio_stop():
     events = []
 
