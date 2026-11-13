@@ -308,7 +308,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             return
         conversation = getattr(app.state.runtime, "conversation", None)
         speaker = getattr(conversation, "speaker", None)
-        interrupt = getattr(speaker, "interrupt", None)
+        # Older simulated speakers expose only interrupt(). Hardware
+        # KokoroHeadSpeaker uses explicit operator_stop() so ordinary human
+        # barge does not silently revoke future proactive initiative.
+        interrupt = getattr(speaker, "operator_stop", None)
+        if not callable(interrupt):
+            interrupt = getattr(speaker, "interrupt", None)
         robot = settings.robot(robot_id)
         if callable(interrupt) and robot.device_id:
             await asyncio.wait_for(interrupt(robot), timeout=2.5)
