@@ -95,8 +95,8 @@ async def observe_actual_dock(head, robot) -> dict:
     except (OSError, ConnectionError, TimeoutError, RuntimeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
     # Reject malformed or oversized snapshots before occupying the sole native
-    # AprilTag worker. The detector is not a JPEG transport validator.
-    if (not isinstance(jpeg, bytes) or len(jpeg) < 4 or len(jpeg) > 512 * 1024
+    # AprilTag worker. Match the native detector's 512000-byte bound.
+    if (not isinstance(jpeg, bytes) or len(jpeg) < 4 or len(jpeg) > 512000
             or not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9")):
         return _hold(robot.id, reason="Invalid dock JPEG", source="head_snapshot_invalid")
     received_at = time.monotonic()
