@@ -162,7 +162,8 @@ class Conversation:
     def _persona_with_memory(self, robot: RobotConfig) -> str:
         if (self.memory is None or (
             self.settings.mode == "hardware"
-            and not self.settings.fleet_text_sharing_enabled
+            and not (self.settings.fleet_text_sharing_enabled
+                     and self.settings.voice_memory_tools_enabled)
         )):
             return robot.persona
         recent = self.memory.recent(robot.id, limit=6)
@@ -231,7 +232,8 @@ class Conversation:
             # interactions, each pet retrieves only its OWN relevant text.
             if (self.memory is None or (
                 self.settings.mode == "hardware"
-                and not self.settings.fleet_text_sharing_enabled
+                and not (self.settings.fleet_text_sharing_enabled
+                         and self.settings.voice_memory_tools_enabled)
             )):
                 topical = [[] for _ in robots]
             else:
