@@ -1152,6 +1152,97 @@ class NativeOmniSession:
                 self._tool_speech_turn = None
                 self._tool_question = ""
 
+    async def _camera_stream(self, http: aiohttp.ClientSession) -> None:
+        """Subscribe to Mac's REAL continuous JPEG feed during quiet and speech.
+
+        The Mac owns camera capture and bounded motion selection. The selected
+        vLLM MiniCPM model already receives every actual 16 kHz PCM packet,
+        including silence. Reuse that same native realtime session for video,
+        rather than fetching one photograph only after human VAD turns true.
+        """
+        address = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-stream"
+        headers = {"Authorization": f"Bearer {self.token}"}
+        while not self.closed:
+            try:
+                async with http.get(
+                    address, headers=headers,
+                    timeout=aiohttp.ClientTimeout(
+                        total=None, sock_connect=3, sock_read=8
+                    ),
+                ) as response:
+                    if (response.status != 200
+                            or response.headers.get("X-Desk-Robot-Id") != self.robot
+                            or not response.headers.get(
+                                "Content-Type", ""
+                            ).startswith("application/x-ndjson")):
+                        self.latest_jpeg = None
+                        self._latest_frame_receipt_us = None
+                        await asyncio.sleep(2)
+                        continue
+                    buffer = bytearray()
+                    async for chunk in response.content.iter_chunked(65536):
+                        if self.closed:
+                            return
+                        buffer.extend(chunk)
+                        if len(buffer) > 1_600_000:
+                            raise ValueError("Oversized Mac video event")
+                        while b"\n" in buffer:
+                            line, _, remainder = buffer.partition(b"\n")
+                            buffer = bytearray(remainder)
+                            if not 0 < len(line) <= 1_500_000:
+                                raise ValueError("Invalid Mac video event size")
+                            data = json.loads(line)
+                            if (not isinstance(data, dict)
+                                    or data.get("robot_id") != self.robot
+                                    or data.get("source") not in (
+                                        "speech", "proactive"
+                                    )
+                                    or data.get("motor_authorized") is not False
+                                    or data.get("charging_authorized") is not False):
+                                raise ValueError("Untrusted Mac camera event")
+                            age = data.get("camera_age_ms")
+                            receipt = data.get("camera_receipt_us")
+                            motion = data.get("motion_ppm")
+                            encoded = data.get("jpeg_base64")
+                            if (type(age) is not int or not 0 <= age <= 1000
+                                    or type(receipt) is not int
+                                    or not 0 < receipt < 0x7fffffffffffffff
+                                    or type(motion) is not int
+                                    or not 0 <= motion <= 1_000_000
+                                    or not isinstance(encoded, str)
+                                    or len(encoded) > 1_400_000):
+                                raise ValueError("Invalid Mac camera provenance")
+                            jpeg = base64.b64decode(encoded, validate=True)
+                            if (not 10 <= len(jpeg) <= 1_000_000
+                                    or not jpeg.startswith(b"\xff\xd8")
+                                    or not jpeg.endswith(b"\xff\xd9")):
+                                raise ValueError("Invalid actual Mac JPEG")
+                            # Read-only image input belongs to the selected
+                            # model even if no one is currently talking.
+                            now = time.monotonic()
+                            if receipt == self._latest_frame_receipt_us:
+                                self.video_frames_skipped_duplicate += 1
+                            elif (self._latest_frame_receipt_us is None
+                                  or motion >= 15_000
+                                  or now - self._last_video_selected_at >= 0.95):
+                                self.latest_jpeg = jpeg
+                                self.latest_frame_time = now - age / 1000
+                                self._latest_frame_receipt_us = receipt
+                                self._last_video_selected_at = now
+                                self.video_frames_selected += 1
+                            else:
+                                self.video_frames_skipped_static += 1
+                # An ended subscription is NOT a valid last scene.
+                self.latest_jpeg = None
+                self._latest_frame_receipt_us = None
+            except asyncio.CancelledError:
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError,
+                    json.JSONDecodeError, base64.binascii.Error):
+                self.latest_jpeg = None
+                self._latest_frame_receipt_us = None
+            await asyncio.sleep(1)  # bounded reconnect, no camera HTTP polling
+
     async def _camera(self, http: aiohttp.ClientSession) -> None:
         """Select real JPEG receipts independently from realtime microphone I/O.
 
@@ -1640,7 +1731,7 @@ class NativeOmniSession:
                         asyncio.create_task(self._send_mic()),
                         asyncio.create_task(self._receive_model()),
                         asyncio.create_task(self._play()),
-                        asyncio.create_task(self._camera(http)),
+                        asyncio.create_task(self._camera_stream(http)),
                     ]
                     if (self._live_transcript_enabled
                             or self._transcript_memory_enabled):
