@@ -1129,7 +1129,18 @@ class PetController:
                             self.multimodal, "stream_owns_camera", None
                         )
                         if callable(owns_stream) and owns_stream(robot_id):
-                            await asyncio.sleep(self.interval)
+                            # Wake when the existing JPEG stream publishes
+                            # evidence, not after a fixed hub polling delay.
+                            wake = getattr(
+                                self.multimodal, "wait_for_proactive_frame", None
+                            )
+                            if callable(wake):
+                                await wake(
+                                    robot_id, state.last_scene_frame_at,
+                                    timeout_s=self.interval,
+                                )
+                            else:
+                                await asyncio.sleep(self.interval)
                             continue
                     if not candidates and hub.due(robot_id, time.monotonic()):
                         # The same XIAO cannot serve a sensor confirmation
@@ -1282,7 +1293,23 @@ class PetController:
                     # A failed authenticated device requires explicit re-enable.
                     state.enabled = False
                     break
-            await asyncio.sleep(self.interval)
+            # The camera stream owns the observation clock. On a scene that
+            # arrived during VLM work, immediately process its newest frame;
+            # do not impose an extra blind sleep before checking the hub.
+            wake = getattr(
+                self.multimodal, "wait_for_proactive_frame", None
+            ) if self.multimodal is not None else None
+            owns_stream = getattr(
+                self.multimodal, "stream_owns_camera", None
+            ) if self.multimodal is not None else None
+            if (callable(wake) and callable(owns_stream)
+                    and owns_stream(robot_id)):
+                await wake(
+                    robot_id, state.last_scene_frame_at,
+                    timeout_s=self.interval,
+                )
+            else:
+                await asyncio.sleep(self.interval)
 
     def _human_active_in_fleet(self, now: float) -> bool:
         """Human VAD and brief post-turn quiet protect the fleet speech floor.
