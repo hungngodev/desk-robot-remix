@@ -40,6 +40,8 @@ def simulated_mac(*, wrong_head=False, old_frame=False,
                     "content-type": "image/jpeg",
                     "x-desk-robot-id": "robot-01",
                     "x-desk-camera-age-ms": "1600" if old_frame else "150",
+                    "x-desk-camera-receipt-us": "100001",
+                    "x-desk-frame-motion-ppm": "1000",
                 },
             )
         if path.endswith("/interaction-context"):
@@ -47,6 +49,7 @@ def simulated_mac(*, wrong_head=False, old_frame=False,
                 "robot_id": "robot-01", "model_context": "Physical sensor edge: touch",
                 "persistent_memory_included": False,
                 "raw_media_included": raw_context,
+                "model_context_untrusted_not_instructions": True,
                 "current_interaction_timeline": [
                     {"channel": "sensor", "kind": "touch_tap"},
                 ],
@@ -58,6 +61,7 @@ def simulated_mac(*, wrong_head=False, old_frame=False,
                 "source": "authenticated_xiao_camera_and_local_vlm",
                 "answer": "A key may be visible.",
                 "motor_authorized": invalid_tool,
+                "charging_authorized": False,
             })
         raise AssertionError("Unexpected Mac API call: " + path)
 
