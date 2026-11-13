@@ -91,6 +91,7 @@ class CameraEvidence:
     received_at: float  # Mac receive time, NOT sensor exposure time.
     motion_fraction: float
     source: str
+    trigger_kind: str | None = None  # Scheduling cause, NOT object recognition.
 
 
 class CameraFrameHub:
@@ -240,7 +241,8 @@ class CameraFrameHub:
 
     def offer_prepared(self, robot_id: str, prepared: tuple[bytes, bytes, float],
                        received_at: float, *, source: str,
-                       generation: int | None = None) -> CameraEvidence:
+                       generation: int | None = None,
+                       trigger_kind: str | None = None) -> CameraEvidence:
         """Commit preprocessed media on its single event-loop owner.
 
         Image decoding may run in a worker, but no worker can mutate this hub.
@@ -253,6 +255,10 @@ class CameraFrameHub:
             "proactive", "speech", "voice_question", "sensor"
         }:
             raise ValueError("Unknown image source or invalid time")
+        if trigger_kind is not None and (
+            source != "sensor" or trigger_kind not in TRIGGERS
+        ):
+            raise ValueError("Only a real sensor burst can label its trigger")
         if received_at <= self.last_capture[robot_id]:
             raise ValueError("Out of order camera reception timestamp")
         reduced, gray, _ = prepared
@@ -269,7 +275,8 @@ class CameraFrameHub:
         )
         self.last_capture[robot_id] = received_at
         self.urgent[robot_id] = False
-        evidence = CameraEvidence(reduced, received_at, motion, source)
+        evidence = CameraEvidence(reduced, received_at, motion, source,
+                                  trigger_kind)
         self.frames[robot_id].append(evidence)
         return evidence
 
@@ -410,6 +417,7 @@ class CameraFrameHub:
                     "kind": frame.source,
                     "age_ms": round(1000 * (now - frame.received_at)),
                     "source": "authenticated_xiao_jpeg_received_by_mac",
+                    "trigger_kind": frame.trigger_kind,
                     "motion_fraction": round(frame.motion_fraction, 4),
                     "content": None,  # never put JPEG bytes or guessed objects here
                     "exposure_timestamp_verified": False,
@@ -595,10 +603,11 @@ class MultimodalOrchestrator:
         self._last_sensor_request[robot_id] = now
         self._metrics[robot_id]["sensor_bursts"] += 1
         self._sensor_tasks[robot_id] = asyncio.create_task(
-            self._sensor_frame(robot_id, requested_at=now)
+            self._sensor_frame(robot_id, requested_at=now, trigger_kind=kind)
         )
 
-    async def _sensor_frame(self, robot_id: str, *, requested_at: float) -> None:
+    async def _sensor_frame(self, robot_id: str, *, requested_at: float,
+                            trigger_kind: str) -> None:
         """Confirm a triggered scene using at most two fresh device frames.
 
         A single capture populates context but cannot confirm that an object
@@ -615,7 +624,9 @@ class MultimodalOrchestrator:
                     time.monotonic()
                 ) or (question is not None and not question.done())):
                     return
-                evidence = await self.capture(robot_id, source="sensor")
+                evidence = await self.capture(
+                    robot_id, source="sensor", trigger_kind=trigger_kind
+                )
                 if index == 0:
                     # This clock starts with the Mac receiving a real sensor
                     # edge; camera exposure timing on the XIAO is unknown.
@@ -793,12 +804,17 @@ class MultimodalOrchestrator:
         return await asyncio.wrap_future(future)
 
     async def capture(self, robot_id: str, *, source: str,
-                      reuse_if_recent_s: float = 0.0) -> CameraEvidence:
+                      reuse_if_recent_s: float = 0.0,
+                      trigger_kind: str | None = None) -> CameraEvidence:
         self.hub._check(robot_id)
         if self._closed:
             raise RuntimeError("Multimodal orchestrator closed")
         if not 0 <= reuse_if_recent_s <= 1.0:
             raise ValueError("Invalid shared live camera age")
+        if trigger_kind is not None and (
+            source != "sensor" or trigger_kind not in TRIGGERS
+        ):
+            raise ValueError("Invalid sensor camera scheduling cause")
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
@@ -862,7 +878,7 @@ class MultimodalOrchestrator:
                     )
                 evidence = self.hub.offer_prepared(
                     robot_id, prepared, received, source=source,
-                    generation=generation,
+                    generation=generation, trigger_kind=trigger_kind,
                 )
                 metrics["camera_successes"] += 1
                 metrics["camera_latency_last_ms"] = round(
