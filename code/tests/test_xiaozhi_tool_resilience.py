@@ -261,6 +261,54 @@ async def test_five_registered_heads_route_simultaneous_status_to_own_robot(
     assert all("error" not in result for result in results)
 
 
+async def test_five_registered_heads_get_only_their_own_raw_power_gauge(
+    bridge_tools, monkeypatch,
+):
+    import asyncio
+
+    bridge = bridge_tools.bridge
+    heads = {
+        f"mac-head-{i:02d}": SimpleNamespace(device_id=f"mac-head-{i:02d}")
+        for i in range(1, 6)
+    }
+    bridge.connections.clear()
+    bridge.connections.update(heads)
+    resolve = lambda device: (
+        "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
+    )
+    bridge.robot_for_device = resolve
+    bridge_tools.robot_for_device = resolve
+    original = httpx.AsyncClient
+    requests = []
+
+    async def handler(request):
+        robot = request.url.path.split("/")[3]
+        requests.append(robot)
+        assert request.url.path.endswith("/power-status")
+        await asyncio.sleep(0)
+        return httpx.Response(200, json={
+            "robot_id": robot,
+            "source": "wroom_aux_fuel_gauge_raw_unqualified",
+            "gauge_available": True,
+            "reported_soc_centi": 6100,
+            "charging_verified": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    results = await asyncio.gather(*(
+        bridge_tools.call(head, "power-status") for head in heads.values()
+    ))
+    expected = [f"robot-{i:02d}" for i in range(1, 6)]
+    assert sorted(requests) == expected
+    assert sorted(item["robot_id"] for item in results) == expected
+    assert all(item["charging_verified"] is False for item in results)
+
+
 async def test_one_human_cancels_only_own_visual_tool_not_four_other_pets(
     bridge_tools, monkeypatch,
 ):
