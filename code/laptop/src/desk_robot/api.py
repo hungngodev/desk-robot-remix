@@ -278,7 +278,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.get("/v1/pet/{robot_id}/core-memory", dependencies=[Depends(operator)])
     async def operator_core_memory(robot_id: str):
-        settings.robot(robot_id)
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
         facts = await asyncio.to_thread(
             app.state.runtime.memory.core_facts, robot_id, limit=24
         )
@@ -295,7 +298,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
              dependencies=[Depends(operator)])
     async def set_core_memory(robot_id: str, slot: str,
                               request: CoreMemoryRequest):
-        settings.robot(robot_id)
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
         changed = await asyncio.to_thread(
             app.state.runtime.memory.set_core_fact,
             robot_id, slot, request.value
@@ -306,7 +312,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.delete("/v1/pet/{robot_id}/core-memory/{slot}",
                 dependencies=[Depends(operator)])
     async def delete_core_memory(robot_id: str, slot: str):
-        settings.robot(robot_id)
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
         removed = await asyncio.to_thread(
             app.state.runtime.memory.forget_core_fact, robot_id, slot
         )
@@ -315,7 +324,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.delete("/v1/pet/{robot_id}/memories/{event_id}",
                 dependencies=[Depends(operator)])
     async def delete_episode(robot_id: str, event_id: str):
-        settings.robot(robot_id)
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
         removed = await asyncio.to_thread(
             app.state.runtime.memory.forget_episode, robot_id, event_id
         )
