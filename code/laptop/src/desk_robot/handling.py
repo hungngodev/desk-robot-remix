@@ -66,6 +66,7 @@ class HandlingGate:
     last_at: float | None = None
     last_boot_id: int | None = None
     last_sample_ms: int | None = None
+    retired_boot_ids: list[int] = field(default_factory=list)
 
     def reset(self) -> None:
         self.startup_samples.clear()
@@ -111,9 +112,16 @@ class HandlingGate:
             return ()
         boot_id = body["imu"]["boot_id"]
         sample_ms = body["imu"]["sample_ms"]
+        if boot_id in self.retired_boot_ids:
+            # Delayed status from a prior boot must not displace the current
+            # calibration or revive a previously accepted conversion.
+            return ()
         if self.last_boot_id is not None:
             if boot_id != self.last_boot_id:
+                old_boot = self.last_boot_id
                 self.reset()  # new WROOM boot identity requires fresh calibration
+                self.retired_boot_ids.append(old_boot)
+                self.retired_boot_ids = self.retired_boot_ids[-8:]
             elif sample_ms < self.last_sample_ms:
                 # Only a near-uint32 wrap can legitimately restart the clock.
                 # A backward sample from the same boot must not be treated as
