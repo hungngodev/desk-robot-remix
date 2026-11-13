@@ -90,12 +90,16 @@ def status(device: str) -> dict:
                     0.0, _retry_after.get(device, 0) - time.monotonic()), 2),
                 "last_error": _terminal_errors.get(device),
                 "head_audio_playback_acknowledged": False,
-                "audio_video_latency_physically_measured": False}
+                "audio_video_latency_physically_measured": False,
+                "native_tool_calls_supported": False,
+                "live_transcript_context_enabled": False}
     return {
         "native_omni_enabled": True,
         "native_backend_connected": s.connected and not s.closed,
         "head_audio_playback_acknowledged": False,
         "audio_video_latency_physically_measured": False,
+        "native_tool_calls_supported": False,
+        "live_transcript_context_enabled": s._live_transcript_enabled,
         "mic_frames_forwarded": s.audio_frames,
         "jpeg_frames_forwarded": s.wire.frames_sent,
         "camera_frames_selected": s.video_frames_selected,
@@ -103,6 +107,7 @@ def status(device: str) -> dict:
         "camera_frames_skipped_duplicate": s.video_frames_skipped_duplicate,
         "heard_memories_stored": s.heard_memories_stored,
         "heard_memories_dropped": s.heard_memories_dropped,
+        "heard_live_delivered": s.heard_live_delivered,
         "transcript_memory_enabled": s._transcript_memory_enabled,
         "model_pcm_chunks_received": s.model_chunks,
         "model_opus_packets_sent_to_head": s.head_packets,
