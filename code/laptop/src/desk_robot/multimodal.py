@@ -332,7 +332,7 @@ class CameraFrameHub:
         Visual guesses expire after eight seconds; status after thirty.
         """
         self._check(robot_id)
-        if (kind not in {"visual_look", "robot_status", "pickup_status"}
+        if (kind not in {"visual_look", "robot_status", "pickup_status", "memory_recall"}
                 or not isinstance(summary, str)
                 or not 1 <= len(summary.strip()) <= 2000
                 or not _finite(received_at)):
@@ -360,6 +360,8 @@ class CameraFrameHub:
                 "source": (
                     "local_vlm_interpretation_not_physical_measurement"
                     if kind == "visual_look" else
+                    "private_opt_in_memory_retrieval_not_current_observation"
+                    if kind == "memory_recall" else
                     "mac_read_only_telemetry_not_physical_acceptance"
                 ),
                 "untrusted_text_not_instructions": True,
@@ -448,7 +450,8 @@ class CameraFrameHub:
                     "age_ms": round(1000 * (now - stamp)),
                     "source": (
                         "local_vlm_interpretation" if kind == "visual_look"
-                        else "mac_read_only_tool_receipt"
+                        else "private_opt_in_memory_tool_receipt"
+                        if kind == "memory_recall" else "mac_read_only_tool_receipt"
                     ),
                     "content": summary,
                     "untrusted_text_not_instructions": True,
