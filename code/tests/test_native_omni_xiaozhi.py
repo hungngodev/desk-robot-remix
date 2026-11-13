@@ -1250,6 +1250,64 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     assert session.outgoing.empty()
 
 
+async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native):
+    import io
+    import wave
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (2, 5)
+    arrived, release = asyncio.Event(), asyncio.Event()
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(bytes(48000))
+    blob = base64.b64encode(audio.getvalue()).decode()
+
+    class Response:
+        status = 200
+        async def __aenter__(self):
+            arrived.set()
+            await release.wait()
+            return self
+        async def __aexit__(self, *args):
+            return None
+        async def json(self):
+            return {"choices": [{"message": {"audio": {"data": blob}}}]}
+
+    class Http:
+        def post(self, url, *, json, timeout):
+            return Response()
+
+    task = asyncio.create_task(session._speak_tool_results(
+        Http(), "Where is my key?",
+        [{"source": "local_camera_model_guess",
+          "interpretation_not_proof": "Near a cup"}], 2, 5,
+    ))
+    try:
+        await asyncio.wait_for(arrived.wait(), timeout=1)
+        session._tool_speech_turn = None  # new actual human voice owns output
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert session.outgoing.empty()
+        assert session._tool_audio_response_id is None
+        assert session.native_tool_audio_queued == 0
+        assert session.native_tool_speech_errors == 0
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_native_tool_reservation_fences_model_pcm_without_dropping_tools(
     native,
 ):
