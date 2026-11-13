@@ -397,7 +397,7 @@ void Bridge::CameraStreamTask(void* context) {
     // the HTTP server's command/UART handler while waiting for camera frames.
     auto* req = static_cast<httpd_req_t*>(context);
     auto* bridge = static_cast<Bridge*>(req->user_ctx);
-    constexpr char kBoundary[] = "--deskrobotframe\\r\\n";
+    constexpr char kBoundary[] = "--deskrobotframe\r\n";
     constexpr std::size_t kMaxJpegBytes = 512 * 1024;
     esp_err_t status = httpd_resp_set_type(
         req, "multipart/x-mixed-replace; boundary=deskrobotframe");
@@ -421,11 +421,11 @@ void Bridge::CameraStreamTask(void* context) {
                 char headers[224] = {};
                 const int n = snprintf(
                     headers, sizeof(headers),
-                    "Content-Type: image/jpeg\\r\\n"
-                    "Content-Length: %zu\\r\\n"
-                    "X-Desk-Camera-Boot: %u\\r\\n"
-                    "X-Desk-Camera-Sequence: %u\\r\\n"
-                    "X-Desk-Camera-Complete-Us: %lld\\r\\n\\r\\n",
+                    "Content-Type: image/jpeg\r\n"
+                    "Content-Length: %zu\r\n"
+                    "X-Desk-Camera-Boot: %u\r\n"
+                    "X-Desk-Camera-Sequence: %u\r\n"
+                    "X-Desk-Camera-Complete-Us: %lld\r\n\r\n",
                     jpeg->size(), static_cast<unsigned>(bridge->boot_nonce_),
                     static_cast<unsigned>(seq), static_cast<long long>(completed));
                 if (n < 0 || static_cast<std::size_t>(n) >= sizeof(headers)) {
@@ -439,7 +439,7 @@ void Bridge::CameraStreamTask(void* context) {
                         status = httpd_resp_send_chunk(
                             req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
                     if (status == ESP_OK)
-                        status = httpd_resp_send_chunk(req, "\\r\\n", 2);
+                        status = httpd_resp_send_chunk(req, "\r\n", 2);
                 }
             }
         } // Release the pinned Xiaozhi JPEG before yielding to audio/other tasks.
