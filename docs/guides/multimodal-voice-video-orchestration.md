@@ -48,6 +48,26 @@ actions; [Nav2 behavior trees]
 execution and bounded recovery. No architecture above grants the LLM
 physical safety authority; WROOM remains the sole body and cliff control.
 
+**Reachy Mini research followup, November 12:** The [current conversation
+app](https://github.com/pollen-robotics/reachy_mini_conversation_app)
+runs local Silero VAD for immediate physical listening and temporary speaker
+ducking, while server VAD still confirms conversational turns and final
+interruption. Its audio playback uses paced 20ms chunks and drops obsolete
+buffered speech. This is a **two latency budget** pattern, not two competing
+conversation owners. Our Mac already fences obsolete answers, but XIAO native
+acoustic VAD, device audio duck/flush and actual stop latency remain unmeasured.
+Before porting, inspect the pinned Xiaozhi ESP-SR/AEC path and device CPU/I2S
+capacity; do not assume desktop Silero can run unmodified on XIAO.
+
+Research behind **when to speak**: [ProAct](https://arxiv.org/abs/2602.14048)
+separates a fast interactive behavioral system from slow proactive planning;
+[LlamaPIE](https://arxiv.org/abs/2505.04066) uses a small initiative decision
+before larger response generation. Existing `PetController._initiative_evidence`
+is a conservative nonlearned candidate gate, **not** a reproduction of either
+paper or validated human-like engagement. Our next enhancement should measure
+false initiations, missed social cues, human interruption to silence, gesture
+latency and memory relevance before adding another generative planner.
+
 **Remaining fundamental gaps, not hidden by this patch:** an untested
 physical audio playback ACK and AEC double-talk path, missing native
 tool calls in the selected MiniCPM-o realtime model, validated visual
