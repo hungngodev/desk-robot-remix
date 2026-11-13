@@ -113,6 +113,9 @@ def compose_brain_context(
     seen_cues: set[tuple[str, str]] = set()
     heard_count = 0
     heard_requests: list[str] = []
+    # A newer authenticated VAD starts a different human turn. Older ASR
+    # guesses must not influence which tool receipt is treated as requested.
+    crossed_voice_boundary = False
     priorities = {
         "human_transcript": 0, "tool": 1, "sensor": 2,
         "human_voice": 3, "robot_speech": 4, "camera": 5,
@@ -131,8 +134,10 @@ def compose_brain_context(
         # interaction. Keeping only the newest can omit the first clause of
         # a natural question. Retain at most two, with the earlier one behind
         # the actual sensor and visual tool evidence in the prompt budget.
+        if channel == "human_voice" and heard_count:
+            crossed_voice_boundary = True
         if channel == "human_transcript":
-            if heard_count >= 2:
+            if heard_count >= 2 or crossed_voice_boundary:
                 continue
             identity = (channel, str(heard_count))
         else:
