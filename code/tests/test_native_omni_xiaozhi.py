@@ -1033,6 +1033,177 @@ async def test_compound_native_tool_worker_executes_two_existing_mac_readonly_ro
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_native_fast_battery_context_before_slow_vision_completes(
+    native, monkeypatch,
+):
+    """Compound status must not sit behind a 24 second VLM."""
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def call(current, route, payload):
+        assert current is conn
+        if route == "look":
+            started.set()
+            await release.wait()
+        return {"robot_id": "robot-01", "motor_authorized": False}
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    session._queue_readonly_tool({
+        "item_id": "compound_slow_look",
+        "transcript": "Look at the desk and check your battery status",
+    })
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        async with asyncio.timeout(.8):
+            while session.native_readonly_tools_completed < 1:
+                await asyncio.sleep(.005)
+        assert not release.is_set()
+        assert session._context_wakeup.is_set()
+        release.set()
+        async with asyncio.timeout(.8):
+            while session.native_readonly_tools_completed < 2:
+                await asyncio.sleep(.005)
+    finally:
+        release.set()
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_barge_cancels_entire_inflight_compound_tool_batch(
+    native, monkeypatch,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    started, cancelled = set(), set()
+    both_started = asyncio.Event()
+
+    async def call(current, route, payload):
+        started.add(route)
+        if len(started) == 2:
+            both_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.add(route)
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    session._queue_readonly_tool({
+        "item_id": "compound_interrupt",
+        "transcript": "Look at the desk and check your battery status",
+    })
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        session._readonly_turn += 1
+        session._readonly_inflight.cancel()
+        async with asyncio.timeout(.8):
+            while session._readonly_inflight is not None:
+                await asyncio.sleep(.005)
+        assert cancelled == {"look", "status"}
+        assert session.native_readonly_tools_completed == 0
+        assert not session._context_wakeup.is_set()
+        assert not worker.done()
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+@pytest.mark.parametrize("invalid", [
+    {"robot_id": "robot-01", "motor_authorized": "false"},
+    {"robot_id": "robot-01", "charging_authorized": 0},
+    {"robot_id": "robot-02", "charging_authorized": False},
+])
+async def test_native_batch_refuses_malformed_authority_and_cross_pet(
+    native, monkeypatch, invalid,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+
+    async def call(current, route, payload):
+        return invalid
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    session._queue_readonly_tool({
+        "item_id": "malformed_receipt",
+        "transcript": "Check your battery status",
+    })
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        async with asyncio.timeout(.8):
+            while session.native_readonly_tools_dropped < 1:
+                await asyncio.sleep(.005)
+        assert session.native_readonly_tools_completed == 0
+        assert not session._context_wakeup.is_set()
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_speech_tool_old_result_cannot_enter_next_human_turn(
     native, monkeypatch,
 ):
