@@ -1478,6 +1478,7 @@ async def test_ambiguous_completed_asr_uses_existing_mac_planner_then_two_real_t
 
 @pytest.mark.parametrize("defect", [
     "duplicate_route", "missing_provenance", "claimed_model_motor_authority",
+    "nonstring_route",
 ])
 async def test_native_model_plan_rejects_duplicate_or_untrusted_routes(
     native, monkeypatch, defect,
@@ -1511,6 +1512,8 @@ async def test_native_model_plan_rejects_duplicate_or_untrusted_routes(
         plan["tools"][1]["route"] = "look"
     elif defect == "missing_provenance":
         plan.pop("untrusted_model_selection")
+    elif defect == "nonstring_route":
+        plan["tools"][0]["route"] = ["look"]
     else:
         plan["model_can_arm_motors"] = True
 
