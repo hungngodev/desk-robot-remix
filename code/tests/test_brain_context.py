@@ -213,6 +213,64 @@ def test_consent_based_private_memory_tool_is_not_camera_sighting():
     assert not hub.recent_tool_context("robot-01", now + 31)
 
 
+@pytest.mark.parametrize(
+    ("question", "wanted"),
+    [
+        ("What do you remember about my green mug?", "memory_recall"),
+        ("What do you see on my desk?", "visual_look"),
+        ("Is the pickup job done?", "pickup_status"),
+        ("Check your battery status", "robot_status"),
+    ],
+)
+def test_spoken_intent_fits_the_relevant_completed_tool_into_small_brain_budget(
+    question, wanted,
+):
+    results = {
+        "memory_recall": "Yesterday I saw a GREEN_MUG near your keyboard",
+        "visual_look": "The real current XIAO camera suggests a BLUE_KEY",
+        "pickup_status": "Mac pickup job remains GRASP_PENDING",
+        "robot_status": "Actual WROOM safety status is SAFELY_DISARMED",
+    }
+    # The most recent generic telemetry may otherwise consume the prompt
+    # budget before a previously completed relevant tool reaches the LLM.
+    timeline = [
+        {"channel": "tool", "kind": kind,
+         "content": "x" * 74 + " " + summary}
+        for kind, summary in results.items()
+    ]
+    timeline += [
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": question},
+        {"channel": "sensor", "kind": "touch_tap"},
+        {"channel": "camera", "kind": "speech"},
+    ]
+    text = compose_brain_context([], [], timeline).interaction
+    expected = {
+        "memory_recall": "Opt-in private past memory",
+        "visual_look": "Earlier local VLM guess",
+        "pickup_status": "Mac pickup job receipt",
+        "robot_status": "Recent head telemetry",
+    }
+    assert expected[wanted] in text
+    assert "Recent model ASR guess" in text
+    assert len(text) <= 400
+    assert "motor authorized" not in text.casefold()
+
+
+def test_unrelated_human_asr_does_not_reprioritize_non_tool_modalities():
+    timeline = [
+        {"channel": "tool", "kind": "visual_look", "content": "Maybe a key"},
+        {"channel": "sensor", "kind": "touch_tap"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "I had a pleasant day"},
+        {"channel": "camera", "kind": "speech"},
+    ]
+    text = compose_brain_context([], [], timeline).interaction
+    assert text.index("Recent model ASR guess") < text.index("Earlier local VLM guess")
+    assert "Physical sensor edge" in text
+    assert "XIAO frame received" in text
+
+
 def test_context_budget_is_constant_even_with_many_long_model_outputs():
     memory = [
         episode("robot-01", f"event{i}", "object", "x" * 300)
