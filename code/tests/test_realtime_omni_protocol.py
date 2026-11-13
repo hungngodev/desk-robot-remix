@@ -64,19 +64,32 @@ def test_partial_unit_never_falsely_claims_that_the_native_model_saw_a_frame():
     assert wire.frames_sent == 0
 
 
-def test_never_send_native_video_without_a_real_mac_receipt_or_recent_human_speech():
+def test_proactive_native_video_continues_during_quiet_room_audio():
     wire = OmniDuplexWire()
     jpeg = b"\xff\xd8" + b"frame" * 12 + b"\xff\xd9"
     with pytest.raises(ValueError):
         wire.append_audio(
             b"\0" * 3200, speech=True, jpeg=jpeg, camera_age_ms=1,
         )
+    for _ in range(9):
+        idle = wire.append_audio(
+            b"\0" * 3200, speech=False,
+            jpeg=jpeg, camera_age_ms=1, frame_receipt_us=5001,
+        )
+        assert "video_frames" not in idle
     idle = wire.append_audio(
         b"\0" * 3200, speech=False,
         jpeg=jpeg, camera_age_ms=1, frame_receipt_us=5001,
     )
-    assert "video_frames" not in idle
-    assert wire.frames_sent == 0
+    assert base64.b64decode(idle["video_frames"][0]) == jpeg
+    assert wire.frames_sent == 1
+    # An unchanged frame is not another new visual observation.
+    for _ in range(10):
+        result = wire.append_audio(
+            b"\0" * 3200, speech=False,
+            jpeg=jpeg, camera_age_ms=1, frame_receipt_us=5001,
+        )
+        assert "video_frames" not in result
 
 
 
