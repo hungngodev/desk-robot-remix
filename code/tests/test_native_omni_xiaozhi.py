@@ -879,6 +879,38 @@ async def test_native_live_context_refuses_cross_robot_and_stale_turn_data(nativ
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_native_context_revocation_closes_model_session_not_just_cache(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+
+    class Reply:
+        status = 403
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class Mac:
+        def get(self, url, **kwargs):
+            return Reply()
+
+    task = asyncio.create_task(session._refresh_live_context(Mac()))
+    session._context_wakeup.set()
+    await asyncio.wait_for(task, timeout=1)
+    assert session.closed
+    assert session.last_error == "Mac live context permission revoked"
+    assert session.native_context_updates == 0
+
+
 async def test_native_persona_negotiates_live_asr_without_disk_permission(native):
     module, bridge = native
     conn, _ = connection()
