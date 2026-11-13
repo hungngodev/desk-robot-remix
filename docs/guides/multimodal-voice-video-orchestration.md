@@ -1,5 +1,72 @@
 # Native Xiaozhi + adaptive live video: full desk pet orchestration
 
+## November 12 integrated speech, sensor and camera evidence path
+
+This is a **source implementation checkpoint**, not proof of acoustic latency
+or five connected physical robots. The Mac retains one `CameraFrameHub` for
+the five registered robot IDs. It now also accepts completed native MiniCPM
+audio transcription events as **up to four text-only, per-pet RAM cues**, each
+expired from the context after 30 seconds. The existing Xiaozhi server
+passes only completed ASR, not unbounded PCM, video or partial hypotheses.
+`/v1/pet/{robot_id}/omni-context` separately advertises
+`live_transcript_context_enabled` and
+`transcript_memory_enabled`. The `omni-heard` endpoint can add an
+uncertain transcript to ephemeral conversation context while SQLite writes
+remain disabled. This is not an identity-verified utterance, an operator
+memory preference or an instruction to move. An explicit hub clear removes
+it; camera-only failure does not erase a fresh spoken conversation.
+
+`interaction_timeline()` returns chronological, source-labelled evidence
+from authenticated human voice edges, completed uncertain ASR, physical
+sensor edges, current XIAO JPEG receipts, completed local visual tool
+interpretations and actually transmitted but **playback-unverified** robot
+speech. It contains neither raw JPEG nor PCM. The bounded
+`compose_brain_context` recognizes uncertain ASR separately from actual
+voice activity, and preserves sensor versus model interpretation and
+eyewitness versus peer-reported text. It may **summarize or omit** older
+transcript chunks under its 400-character live prompt budget. This is
+not a lossless transcript archive or a complete native-model state sync.
+
+A sensor burst now records `CameraEvidence.trigger_kind` only when the
+existing authenticated sensor event scheduled the two-frame XIAO capture.
+The link names the **scheduling cause**, never an inferred object or a
+verified camera exposure time. A combined touch/visual prompt can now say
+which sensor requested the frame without claiming the touch was visible.
+Coalesced later sensor edges remain separate event-history entries, not
+additional invented camera triggers. Human VAD still cancels the optional
+capture, fresh questions preempt it, and the WROOM still solely decides
+movement and dock safety.
+
+**Two source paths remain intentionally distinct:** Legacy Xiaozhi exposes
+the real `desk_robot_look`, `desk_robot_situation` and
+`desk_robot_memories` tools, using the authenticated Mac runtime. The
+optional vLLM Omni MiniCPM realtime duplex backend currently speaks with
+PCM and selected JPEGs but **does not have a verified native function-call
+contract**. A better Mac context formatter does not magically give it
+native tool use or synchronize complete model-internal conversation state.
+Do not synthesize unsupported tool packets or run competing TTS owners.
+
+Useful upstream patterns, not copied drop-in code:
+[Qwen Live Harness](https://github.com/QwenLM/Qwen-Live-Harness)
+separates continuous foreground video, on-demand visual analysis, proactive
+monitors, and memory updates with explicit delivery status;
+[Pipecat frame documentation](https://github.com/pipecat-ai/docs/blob/main/api-reference/server/frames/overview.mdx)
+separates interruptible audio/image/data frames from higher-priority
+control/system frames; [LangGraph memory](https://langchain-ai.github.io/langgraph/concepts/memory/)
+separates thread-scoped interaction state from long-lived knowledge.
+Their architecture motivates our single Mac evidence owner, but the
+selected models, sensor transport, device latency and permissions differ.
+
+**Focused verification still required on the exact PR head:**
+`python -m pytest code/tests/test_multimodal_api.py
+code/tests/test_brain_context.py code/tests/test_native_omni_xiaozhi.py
+code/tests/test_multimodal.py code/tests/test_runtime_voice_priority.py -q`.
+The code additions and test definitions are committed, but the latest
+GitHub Actions run still terminates before any recorded test step.
+Run real ESP-IDF/PlatformIO builds and measure synchronized microphone,
+JPEG receipt, model and audible output timing before claiming production
+multimodal quality.
+
 ## November 12 brain consistency fixes and genuinely reusable upstream architecture
 
 **Implemented in the existing runtime, not a new agent framework.** Changes:
