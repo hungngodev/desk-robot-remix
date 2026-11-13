@@ -137,10 +137,79 @@ async def test_existing_ollama_semantic_planner_uses_strict_json_schema(
     assert data["format"]["properties"]["tools"]["maxItems"] == 2
     routes = data["format"]["properties"]["tools"]["items"]["properties"]["route"]["enum"]
     assert set(routes) == {
-        "look", "status", "latest-pickup", "interaction-context",
-        "voice-context",
+        "look", "status", "power-status", "latest-pickup",
+        "interaction-context", "voice-context",
     }
     assert not {"move", "stop", "pickup", "enable", "charge"} & set(routes)
+
+
+def test_real_wroom_power_tool_reports_raw_gauge_only_without_charging_claim(
+    settings, tokens,
+):
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    robot = settings.robots[0].id
+
+    class RealAux:
+        def __init__(self):
+            self.raw = {
+                "robot_id": robot,
+                "power": {
+                    "fuel_valid": True, "cell_mv": 3875,
+                    "soc_centi": 6275, "current_calibrated": False,
+                },
+            }
+
+        async def aux_status(self):
+            return self.raw
+
+    head = RealAux()
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            robot=lambda rid: settings.robot(rid),
+            heads={robot: head},
+        ),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/power-status"
+        body = client.get(url, headers=headers)
+        assert body.status_code == 200
+        data = body.json()
+        assert data["robot_id"] == robot
+        assert data["gauge_available"] is True
+        assert data["reported_cell_mv"] == 3875
+        assert data["reported_soc_centi"] == 6275
+        assert data["sample_freshness_verified"] is False
+        assert data["charging_verified"] is False
+        assert data["battery_capacity_verified"] is False
+        assert data["motor_authorized"] is False
+        assert data["charging_authorized"] is False
+        assert client.get(url).status_code == 401
+        head.raw = {
+            "robot_id": robot,
+            "power": {
+                "fuel_valid": False, "cell_mv": 0,
+                "soc_centi": 0,
+            },
+        }
+        absent = client.get(url, headers=headers).json()
+        assert absent["gauge_available"] is False
+        assert absent["reported_cell_mv"] is None
+        assert absent["reported_soc_centi"] is None
+        head.raw = {"robot_id": "robot-02", "power": {
+            "fuel_valid": True, "cell_mv": 3800, "soc_centi": 6000
+        }}
+        invalid = client.get(url, headers=headers)
+        assert invalid.status_code != 200
+        settings.mode = "simulation"
+        assert client.get(url, headers=headers).status_code == 403
 
 
 def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
