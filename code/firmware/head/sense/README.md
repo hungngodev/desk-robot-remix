@@ -85,6 +85,34 @@ remain with pinned Xiaozhi. Four FPS is a software ceiling, NOT physically
 measured performance. One PSRAM frame buffer is deliberate pending real
 simultaneous camera, microphone, heat, JPEG age and WiFi measurements.
 
+## Continuous microphone is a separate explicit permit
+
+The native audiovisual thinker cannot hear ambient sounds until the existing
+Xiaozhi audio channel enters its `realtime` listening mode. On the selected
+Sense board the upstream `Application::ToggleChatState()` already opens that
+channel using full-duplex ESP-SR device AEC. A new Sense-only
+`CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED` switch reuses this existing
+code after boot, without another PDM driver or competing Opus connection.
+
+It defaults to **off**. For a private production build the operator must
+explicitly supply `--continuous-audio` to
+`firmware/head/private_config.py --board sense` along with the existing
+private credentials, selected robot and Mac server address. The on-device
+BOOT button can close the streaming channel even while the robot speaks;
+operator intervention disables automatic reactivation for that boot.
+A power cycle starts another explicitly configured continuous audio session.
+This is a software privacy control, **not an electrically qualified microphone
+mute switch**. Confirm the OLED listening state, AEC, silence-stream continuity
+and actual headset interruption with instruments before production.
+
+For actual continuous camera transport (not single-photo polling), run the
+existing read-only bench with `--stream`. This consumes exactly one
+authenticated `/api/camera.mjpg` connection while polling status separately,
+reports actual receiving FPS, JPEG identity continuity, frame interval and
+connection stalls, and never stores any photo or microphone recording. The
+`--camera-period` option applies only to legacy snapshot mode. A successful
+stream bench does not certify sound, inference, docking or electrical safety.
+
 ## Pin source and allocation
 
 [Seeed's official pin table](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/)
