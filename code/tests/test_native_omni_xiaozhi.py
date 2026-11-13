@@ -1918,6 +1918,62 @@ async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native
             await asyncio.gather(task, return_exceptions=True)
 
 
+async def test_two_completed_asr_clauses_keep_whole_question_and_one_reply(
+    native,
+):
+    """Two model ASR items from one actual human turn are not two speakers."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._schedule_remote_cancel = lambda events: None
+    session._pending_audio_commits.extend(((0, 0), (0, 0)))
+    events = [
+        {"type": "input_audio_buffer.committed", "item_id": "first",
+         "event": {"turn_id": 0}},
+        {"type": "conversation.item.input_audio_transcription.completed",
+         "item_id": "first", "transcript": "Look at the mug"},
+        {"type": "input_audio_buffer.committed", "item_id": "second",
+         "event": {"turn_id": 1}},
+        {"type": "conversation.item.input_audio_transcription.completed",
+         "item_id": "second", "transcript": "Check your battery level"},
+    ]
+    class ModelSocket:
+        def __aiter__(self):
+            async def reader():
+                for event in events:
+                    yield SimpleNamespace(
+                        type=module.aiohttp.WSMsgType.TEXT,
+                        data=json.dumps(event),
+                    )
+            return reader()
+    session._socket = ModelSocket()
+    await session._receive_model()
+    assert "Look at the mug" in session._tool_question
+    assert "Check your battery level" in session._tool_question
+    assert session._tool_question.count("Look at the mug") == 1
+    assert session._generation == 1
+    assert session._readonly_turn == 0
+    assert {session._readonly_queue.get_nowait()[0] for _ in range(2)} == {
+        "look", "power-status",
+    }
+
+    # The first combined answer was transmitted. A delayed third ASR item
+    # from this very human turn may not initiate another spoken tool answer.
+    session._tool_answer_started_turn = (1, 0)
+    session._tool_speech_turn = None
+    session._asr_item_turns["late"] = (0, 0)
+    late = {"item_id": "late", "transcript": "Check your battery"}
+    assert session._accept_current_audio_item(late)
+    assert not session._queue_readonly_tool(late)
+    assert session._readonly_queue.empty()
+
+
 async def test_native_tool_reservation_fences_model_pcm_without_dropping_tools(
     native,
 ):
