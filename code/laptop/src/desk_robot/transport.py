@@ -146,11 +146,16 @@ class HttpHead:
         self.strict_capture = strict_capture
         self._last_camera: tuple[int, int, int] | None = None
         self._stream_connected = False
+        self._stream_required = False
         self._stream_condition = asyncio.Condition()
         self._stream_latest: bytes | None = None
         self._stream_received_at = 0.0
         self._stream_version = 0
         self._snapshot_version = 0
+
+    def require_stream(self) -> None:
+        """Visual mode is continuous, never silently demoted to JPEG polling."""
+        self._stream_required = True
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
@@ -273,6 +278,8 @@ class HttpHead:
                             return self._stream_latest
                 except TimeoutError as exc:
                     raise HeadError("No fresh camera frame on live stream") from exc
+            if self._stream_required:
+                raise HeadError("Continuous XIAO camera stream is not connected")
             response = await self._request("GET", "/api/camera.jpg")
             if not (4 <= len(response.content) <= 4_000_000
                     and response.content.startswith(b"\xff\xd8")
