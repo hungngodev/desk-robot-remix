@@ -80,8 +80,9 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
         status = await http.get(f"/v1/robots/{robot_id}/status", timeout=6)
         status.raise_for_status()
         body = status.json()
-        if not isinstance(body, dict) or body.get("robot_id") != robot_id:
-            raise ValueError("Hardware status returned wrong robot identity")
+        if (not isinstance(body, dict) or body.get("robot_id") != robot_id
+                or body.get("backend") != "stepper_28byj48"):
+            raise ValueError("Real WROOM body or robot identity not confirmed")
 
         vision = await http.get(f"/v1/pet/{robot_id}/vision-status", timeout=6)
         vision.raise_for_status()
@@ -105,6 +106,13 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
             raise ValueError("Live XIAO frame age missing") from exc
         if not 0 <= age <= 1000:
             raise ValueError("Live XIAO frame expired")
+        try:
+            receipt = int(headers["x-desk-camera-receipt-us"])
+            motion = int(headers["x-desk-frame-motion-ppm"])
+        except (KeyError, ValueError) as exc:
+            raise ValueError("Real camera provenance metadata missing") from exc
+        if receipt <= 0 or not 0 <= motion <= 1_000_000:
+            raise ValueError("Real camera receipt or motion metadata invalid")
 
         context = await http.get(
             f"/v1/pet/{robot_id}/interaction-context", timeout=6
@@ -116,7 +124,10 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
                 or evidence.get("raw_media_included") is not False
                 or evidence.get("persistent_memory_included") is not False
                 or not isinstance(timeline, list)
-                or not isinstance(evidence.get("model_context"), str)):
+                or not isinstance(evidence.get("model_context"), str)
+                or len(evidence["model_context"]) > 400
+                or evidence.get("model_context_untrusted_not_instructions")
+                    is not True):
             raise ValueError("Multimodal source context contract invalid")
         result = {
             "robot_id": robot_id,
@@ -143,7 +154,8 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
                     or seen.get("source") != "authenticated_xiao_camera_and_local_vlm"
                     or type(seen.get("frames_used")) is not int
                     or seen["frames_used"] < 1
-                    or seen.get("motor_authorized") is not False):
+                    or seen.get("motor_authorized") is not False
+                    or seen.get("charging_authorized") is not False):
                 raise ValueError("Local VLM evidence or actuator boundary invalid")
             result["live_tool_tested"] = True
             result["visual_answer"] = seen.get("answer", "")[:300]
