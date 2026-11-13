@@ -532,3 +532,71 @@ def test_pinned_multitool_combine_preserves_structured_results_and_silent_cancel
     assert merge([response(actor.ERROR, response="fail"), camera]).action == (
         actor.ERROR
     )
+
+
+async def test_pickup_accepted_after_new_speech_remains_queryable_without_old_reply(
+    bridge_tools, monkeypatch,
+):
+    """Turn cancellation must not erase an already accepted physical job ID."""
+    bridge = bridge_tools.bridge
+    bridge.voice_turn_generation = {"mac-head-01": 7}
+    original = httpx.AsyncClient
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path))
+        if request.method == "POST" and request.url.path.endswith("/pickup"):
+            # The Mac accepted the job, then the person started talking.
+            bridge.voice_turn_generation["mac-head-01"] = 8
+            return httpx.Response(202, json={
+                "id": "physical-job-83", "state": "pending",
+            })
+        assert request.url.path == "/v1/jobs/physical-job-83"
+        return httpx.Response(200, json={
+            "id": "physical-job-83", "state": "running",
+            "physical_grasp_verified": False,
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    head = bridge_tools.registered_head
+    result = await bridge_tools.desk_robot_pickup(head, "key")
+    assert result.action == 1 and result.result is None
+    assert getattr(head, "desk_robot_last_job") == "physical-job-83"
+    status = await bridge_tools.desk_robot_job(head)
+    assert status.action == 3
+    assert status.result["state"] == "running"
+    assert status.result["physical_grasp_verified"] is False
+    assert seen == [
+        ("POST", "/v1/robots/robot-01/pickup"),
+        ("GET", "/v1/jobs/physical-job-83"),
+    ]
+
+
+@pytest.mark.parametrize("code", [200, 409, 500])
+async def test_stop_never_replays_previous_turn_after_new_speech(
+    bridge_tools, monkeypatch, code,
+):
+    """STOP is sent and allowed to finish, but old vocal ACK is suppressed."""
+    bridge = bridge_tools.bridge
+    bridge.voice_turn_generation = {"mac-head-01": 21}
+    original = httpx.AsyncClient
+    submitted = []
+
+    def handler(request):
+        submitted.append(request.url.path)
+        assert request.method == "POST"
+        bridge.voice_turn_generation["mac-head-01"] = 22
+        return httpx.Response(
+            code, json={"stopped": code == 200}, text=None if code == 200 else "",
+        )
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    response = await bridge_tools.desk_robot_stop(bridge_tools.registered_head)
+    assert submitted == ["/v1/robots/robot-01/stop"]
+    assert response.action == 1 and response.result is None
