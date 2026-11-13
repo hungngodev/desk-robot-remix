@@ -1214,6 +1214,59 @@ async def test_native_fast_battery_context_before_slow_vision_completes(
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_one_cancelled_native_tool_does_not_discard_other_observation(
+    native, monkeypatch,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    calls = []
+
+    async def call(current, route, payload):
+        calls.append(route)
+        if route == "look":
+            raise asyncio.CancelledError
+        return {"robot_id": "robot-01", "motor_authorized": False}
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    session._queue_readonly_tool({
+        "item_id": "partial_optional_failure",
+        "transcript": "Look at the desk and check your battery status",
+    })
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        async with asyncio.timeout(1):
+            while (session.native_readonly_tools_dropped < 1
+                   or session.native_readonly_tools_completed < 1):
+                await asyncio.sleep(.005)
+        assert set(calls) == {"look", "power-status"}
+        assert session._context_wakeup.is_set()
+        assert not worker.done()
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_barge_cancels_entire_inflight_compound_tool_batch(
     native, monkeypatch,
 ):
