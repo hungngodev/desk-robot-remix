@@ -235,3 +235,51 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
         assert disabled.status_code == 200
         assert disabled.json()["memory_enabled"] is False
         assert "hide the key" not in disabled.json()["instructions"]
+
+
+def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cross_pet_leak(
+    settings, tokens,
+):
+    from desk_robot.controller import Job
+
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings)) as client:
+        jobs = client.app.state.runtime.coordinator.jobs
+        jobs["first"] = Job(
+            "first", "robot-01", "pickup", state="failed",
+            error="Gripper did not detect physical contact",
+        )
+        jobs["dock"] = Job("dock", "robot-01", "dock_approach", state="queued")
+        jobs["second"] = Job(
+            "second", "robot-01", "pickup", state="running"
+        )
+        # Robot 02 must never inherit Robot 01's physical job progress.
+        jobs["peer"] = Job("peer", "robot-02", "pickup", state="queued")
+
+        url = "/v1/robots/robot-01/jobs/latest-pickup"
+        assert client.get(url).status_code == 401
+        latest = client.get(url, headers=tool)
+        assert latest.status_code == 200
+        assert latest.json()["id"] == "second"
+        assert latest.json()["kind"] == "pickup"
+        assert latest.json()["state"] == "running"
+        assert latest.json()["available"] is True
+        peer = client.get(
+            "/v1/robots/robot-02/jobs/latest-pickup", headers=tool
+        )
+        assert peer.json()["id"] == "peer"
+        untouched = client.get(
+            "/v1/robots/robot-03/jobs/latest-pickup", headers=tool
+        )
+        assert untouched.status_code == 200
+        assert untouched.json() == {
+            "robot_id": "robot-03", "available": False,
+            "physical_grasp_verified": False,
+        }
+        assert client.get(
+            "/v1/robots/unknown/jobs/latest-pickup", headers=tool
+        ).status_code == 404
+        # The old operator job-by-id API remains authoritative and intact.
+        assert client.get(
+            "/v1/jobs/first", headers=tool
+        ).json()["state"] == "failed"
