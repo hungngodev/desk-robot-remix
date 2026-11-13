@@ -1576,7 +1576,16 @@ async def test_recent_pet_words_survive_next_vad_but_not_acoustic_hardware_claim
             "robot-01", now + 31
         ) if entry["channel"] == "robot_speech"]
         visual.voice_transport_unavailable()
-        assert not visual.hub.spoken_history["robot-01"]
+        # A disconnected camera/voice source cannot revoke evidence of the
+        # Mac's previously transmitted words, but still cannot prove playback.
+        assert visual.hub.spoken_history["robot-01"]
+        retained = [
+            item for item in visual.hub.interaction_timeline(
+                "robot-01", time.monotonic()
+            ) if item["channel"] == "robot_speech"
+        ]
+        assert len(retained) == 1
+        assert retained[0]["playback_verified"] is False
     finally:
         await visual.close()
 
