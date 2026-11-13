@@ -37,6 +37,28 @@ additional invented camera triggers. Human VAD still cancels the optional
 capture, fresh questions preempt it, and the WROOM still solely decides
 movement and dock safety.
 
+**Completed read-only tool receipts now close another gap.** The pinned
+Xiaozhi tool adapter marks only its own authenticated Mac calls with a
+receipt header. The existing Mac API records concise WROOM status and
+latest pickup-job results into the one per-pet `tool_history`, only if
+the associated Mac human-turn epoch has not changed during the request.
+Normal operator UI status polling does not generate these memories.
+`visual_look` expires after 8 seconds; read-only status and job receipts
+after 30 seconds. Their labels say "head telemetry" or "Mac job receipt",
+never "physical success". They are bounded text only and cannot create an
+operator permit. Every new authenticated human VAD clears earlier tool
+interpretations, including from another robot; subsequent fresh calls
+may refill the correct pet's context.
+
+The existing `Conversation.run` group owner now consumes each invited
+pet's **own** `interaction_timeline()` through the same bounded
+`compose_brain_context()` as proactive speech. Its own completed ASR,
+sensor events, tool receipts and JPEG scheduling causes can inform a
+natural response. The peer does not inherit that evidence as eyewitness
+history, and the group retains its current single Xiaozhi speaker lease,
+separate SQLite memories and opt-in text-sharing policy. No second
+microphone, camera, tool executor, or agent graph has been added.
+
 **Two source paths remain intentionally distinct:** Legacy Xiaozhi exposes
 the real `desk_robot_look`, `desk_robot_situation` and
 `desk_robot_memories` tools, using the authenticated Mac runtime. The
