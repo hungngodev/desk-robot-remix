@@ -44,12 +44,14 @@ def test_mac_existing_ollama_selects_only_consented_readonly_tools(
         body = response.json()
         assert body["robot_id"] == robot
         assert [tool["route"] for tool in body["tools"]] == [
-            "look", "status",
+            "look", "power-status",
         ]
         assert body["tools"][0]["payload"] == {
             "question": request["transcript"]
         }
         assert body["tools"][1]["payload"] == {}
+        # Model emitted generic status, but the user asked about battery.
+        # The Mac must select real WROOM fuel telemetry rather than guess.
         assert body["model_can_arm_motors"] is False
         assert body["motor_authorized"] is False
         assert body["charging_authorized"] is False
