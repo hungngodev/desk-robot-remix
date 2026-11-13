@@ -539,8 +539,14 @@ async def transmit(conn, text, frames):
                     or generation != interrupt_generation.get(conn.device_id, 0)
                     or not muted(conn.device_id)):
                 raise RuntimeError("Speech interrupted or session expired")
-            # Reuse the firmware's existing 16 kHz mono, 60 ms Opus framing.
-            await conn.websocket.send(packet)
+            # Reuse the firmware's existing 16 kHz mono, 60 ms Opus
+            # framing. The native adapter already owns the device send lock:
+            # a human STOP must not race past an in-flight Mac Opus packet.
+            send_native = getattr(native, "send_external_opus", None)
+            if leased and callable(send_native):
+                await send_native(conn, packet, generation)
+            else:
+                await conn.websocket.send(packet)
             conn.last_activity_time = time.time() * 1000
             await asyncio.sleep(0.06)
         await asyncio.sleep(0.24)  # estimated buffer tail; no physical playback acknowledgement
