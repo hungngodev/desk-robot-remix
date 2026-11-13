@@ -1,5 +1,7 @@
 # Desk Robot Remix: parallel chat engineering handoff
 
+> **November 12 power preflight scoped implementation:** `510e794` now reports `minimum_continuous_cell_input_a` separately from peak cell/boost input sizing; `1a825ef` adds a numerical regression for 3 A peak, 1.8 A continuous, 3.0 V low cell and 85% assumed efficiency. This makes sustained thermal input demand visible without relaxing any candidate gate or claiming the default efficiency is measured. **New regression NOT EXECUTED**; source and test committed via GitHub connector. Next: run `python -m pytest code/tests/test_power_preflight.py -q` on exact current branch, then compare sustained and surge demands against a selected protected cell, boost board, fuse, wiring and independently measured motor/servo load. Charging remains electrically unqualified.
+
 > **November 12 protected 1S charging reuse research:** `docs/research/2026-11-12-protected-1s-charger-power-path-reuse.md` compares TI BQ24074 with published Adafruit CC BY SA Eagle board and TI BQ25185, including power path and separate charger/system current limits. No design copied or approved. Existing MCP23017 dock status and WROOM safety remain authoritative. Next inspect `power_preflight.py` for a demonstrated peak system load versus regulator rating gap before any focused test fix; independently qualify protected pack, thermals, contacts and brownout. No electrical or runtime verification this pass.
 
 
