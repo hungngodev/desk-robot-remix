@@ -487,7 +487,6 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             await reuse(robot_id) if callable(reuse)
             else await visual.capture(robot_id, source="speech")
         )
-        import time
         age_ms = round(1000 * (time.monotonic() - evidence.received_at))
         if not 0 <= age_ms <= 1000:
             raise OperationError("Stale video frame cannot be streamed to an audio model")
