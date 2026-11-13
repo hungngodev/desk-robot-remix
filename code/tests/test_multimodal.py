@@ -1404,6 +1404,49 @@ async def test_completed_brief_vad_cannot_publish_old_optional_jpeg(
         await service.close()
 
 
+@pytest.mark.parametrize("source", ["speech", "voice_question"])
+@pytest.mark.parametrize("invalidate", ["new_turn", "transport_loss"])
+async def test_old_native_camera_cannot_repopulate_new_voice_turn(
+    monkeypatch, source, invalidate,
+):
+    """An /omni-frame HTTP task is not owned by the cancellable VAD sampler."""
+    import threading
+    import desk_robot.multimodal as media
+
+    entered, release = threading.Event(), threading.Event()
+    original = media._prepare
+
+    def held_prepare(jpeg):
+        entered.set()
+        release.wait(timeout=2)
+        return original(jpeg)
+
+    monkeypatch.setattr(media, "_prepare", held_prepare)
+    service = MultimodalOrchestrator(
+        config(enabled=False),
+        {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    task = asyncio.create_task(service.capture("robot-01", source=source))
+    try:
+        assert await asyncio.wait_for(
+            asyncio.to_thread(entered.wait, 0.8), timeout=1
+        )
+        if invalidate == "new_turn":
+            service.voice_started("robot-02")
+            service.voice_ended("robot-02")
+        else:
+            service.voice_transport_unavailable()
+        release.set()
+        with pytest.raises(RuntimeError, match="superseded"):
+            await asyncio.wait_for(task, timeout=1)
+        assert not service.hub.frames["robot-01"]
+        assert service.status("robot-01")["software_timings"]["camera_errors"] >= 1
+    finally:
+        release.set()
+        await service.close()
+
+
 async def test_external_pet_photo_received_before_brief_voice_is_never_replayed():
     service = MultimodalOrchestrator(
         config(enabled=False),
