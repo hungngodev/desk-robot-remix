@@ -212,6 +212,51 @@ def test_real_wroom_power_tool_reports_raw_gauge_only_without_charging_claim(
         assert client.get(url, headers=headers).status_code == 403
 
 
+def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
+    settings, tokens,
+):
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    robot = settings.robots[0].id
+    hub = CameraFrameHub([robot])
+    visual = SimpleNamespace(_turn_epoch={robot: 10}, hub=hub)
+
+    class SlowSource:
+        async def aux_status(self):
+            # Simulate the next authenticated VAD occurring while a WROOM
+            # auxiliary read is in flight. The old receipt must be dropped.
+            visual._turn_epoch[robot] = 11
+            return {
+                "robot_id": robot,
+                "power": {
+                    "fuel_valid": True, "cell_mv": 3820, "soc_centi": 5400,
+                },
+            }
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            robot=lambda rid: settings.robot(rid),
+            heads={robot: SlowSource()},
+        ),
+        multimodal=visual, start=noop, close=noop,
+    )
+    headers = {
+        "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
+        "X-Desk-Robot-Tool-Receipt": "1",
+    }
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        result = client.get(f"/v1/pet/{robot}/power-status", headers=headers)
+        assert result.status_code == 200
+        assert result.json()["reported_cell_mv"] == 3820
+        assert visual._turn_epoch[robot] == 11
+        assert hub.recent_tool_context(robot, __import__("time").monotonic()) == []
+
+
 def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
     settings, tokens,
 ):
