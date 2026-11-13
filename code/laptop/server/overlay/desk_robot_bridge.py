@@ -527,6 +527,12 @@ async def transmit(conn, text, frames):
     conn.client_is_speaking = True
     try:
         await send_tts_message(conn, "start")
+        # The real microphone may have interrupted during the async START.
+        # Never publish even the old caption or subsequent Opus in that case.
+        if (conn.client_abort
+                or generation != interrupt_generation.get(conn.device_id, 0)
+                or not muted(conn.device_id) or human_speech_active()):
+            raise RuntimeError("Speech interrupted before the first sentence")
         await send_tts_message(conn, "sentence_start", text)
         for packet in frames:
             if (conn.client_abort
