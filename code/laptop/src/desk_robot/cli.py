@@ -96,8 +96,8 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
         if (headers.get("x-desk-robot-id") != robot_id
                 or not headers.get("content-type", "").startswith("image/jpeg")
                 or not 10 <= len(jpeg) <= 1_000_000
-                or not jpeg.startswith(b"\\xff\\xd8")
-                or not jpeg.endswith(b"\\xff\\xd9")):
+                or not jpeg.startswith(b"\xff\xd8")
+                or not jpeg.endswith(b"\xff\xd9")):
             raise ValueError("Real live XIAO JPEG identity or format invalid")
         try:
             age = int(headers["x-desk-camera-age-ms"])
