@@ -180,13 +180,39 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         return data
 
     @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])
-    async def aux(robot_id: str):
+    async def aux(robot_id: str, request: Request):
         coordinator().robot(robot_id)
         getter = getattr(coordinator().heads[robot_id], "aux_status", None)
         if not callable(getter):
             return {"robot_id": robot_id, "available": False,
                     "reason": "No physical accessory telemetry adapter"}
-        return await getter()
+        data = await getter()
+        # Only an authenticated, explicit head tool request may add a short
+        # physical sensor receipt to the shared multimodal brain timeline.
+        # Dashboard polling and failed/invalid measurements never inject it.
+        owner = requested_tool_context(request, robot_id)
+        if owner is not None and isinstance(data, dict):
+            cues = []
+            climate = data.get("climate")
+            if isinstance(climate, dict) and climate.get("valid") is True:
+                cues.append(
+                    "SHT41 local temp_centi="
+                    + str(climate.get("temp_centi"))[:8]
+                    + ", humidity_centi="
+                    + str(climate.get("rh_centi"))[:8]
+                )
+            bmp = data.get("bmp280")
+            if isinstance(bmp, dict) and bmp.get("valid") is True:
+                cues.append(
+                    "BMP280 local pressure_pa="
+                    + str(bmp.get("pressure_pa"))[:9]
+                )
+            if cues:
+                remember_tool_context(
+                    owner, robot_id, "sensor_telemetry",
+                    "; ".join(cues)[:180] + "; raw local probe, not calibrated",
+                )
+        return data
 
     @app.post("/v1/robots/{robot_id}/dock/approach",
               dependencies=[Depends(operator)], status_code=202)
@@ -736,7 +762,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             '{"route":"status"}]}. Choose 0 to 2 distinct tools for an '
             'EXPLICIT user request. Allowed read-only names: look for actual '
             'camera sight, power-status for raw battery gauge estimates, '
-            'status for body/safety telemetry, latest-pickup for '
+            'status for body/safety telemetry, aux-status for actual '
+            'SHT41/BMP280/climate/proximity/NFC sensor readings, '
+            'latest-pickup for '
             'existing grasp job status, interaction-context for recent '
             'touch/sensor events, voice-context for previously remembered '
             'facts. For ordinary conversation or movement/charging requests '
@@ -759,8 +787,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             parsed = {}
         choices = parsed.get("tools") if isinstance(parsed, dict) else None
         allowed = {
-            "look", "status", "power-status", "latest-pickup",
-            "interaction-context", "voice-context",
+            "look", "status", "power-status", "aux-status",
+            "latest-pickup", "interaction-context", "voice-context",
         }
         picked = []
         # A model can return valid JSON with the WRONG tool. An isolated
@@ -795,6 +823,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             if not isinstance(route, str) or route not in allowed or route in picked:
                 continue
             if recall_only and route != "voice-context":
+                continue
+            if route == "aux-status" and not any(
+                cue in utterance for cue in (
+                    "sensor", "temperature", "humidity", "pressure",
+                    "climate", "proximity", "nfc", "sht41", "bmp280",
+                    "apds9960", "as5600", "touch", "paw", "dock contact",
+                )
+            ):
                 continue
             if route == "voice-context" and not settings.voice_memory_tools_enabled:
                 continue
