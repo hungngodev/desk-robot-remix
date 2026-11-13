@@ -2162,10 +2162,13 @@ def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
     return True
 
 
-async def on_barge(conn) -> None:
+async def on_barge(conn) -> bool:
+    """Cancel just this output generation, never revoke pet autonomy."""
     session = _sessions.get(getattr(conn, "device_id", None))
-    if session is not None and session.conn is conn:
+    if session is not None and session.conn is conn and not session.closed:
         await session.barge()
+        return True
+    return False
 
 
 async def suspend_proactive_for_operator(conn) -> bool:
