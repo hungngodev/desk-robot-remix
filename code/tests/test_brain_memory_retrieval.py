@@ -4,9 +4,10 @@ from __future__ import annotations
 import time
 
 import pytest
+from fastapi.testclient import TestClient
+
 from desk_robot.api import create_app
 from desk_robot.memory import MemoryStore
-from fastapi.testclient import TestClient
 
 
 def test_relevant_episodic_recall_is_private_and_does_not_invent_matches(tmp_path):
