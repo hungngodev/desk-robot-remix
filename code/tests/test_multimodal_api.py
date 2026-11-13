@@ -68,6 +68,46 @@ def test_mac_existing_ollama_selects_only_consented_readonly_tools(
         assert client.post(url, headers=headers, json=request).status_code == 403
 
 
+def test_mac_semantic_planner_ignores_nonstring_tool_names_without_500(
+    settings, tokens,
+):
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    robot = settings.robots[0].id
+
+    class Model:
+        async def reply(self, history):
+            return json.dumps({"tools": [
+                {"route": ["move"]},
+                {"route": {"name": "stop"}},
+                {"route": "status"},
+            ]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        result = client.post(
+            f"/v1/pet/{robot}/plan-readonly",
+            headers=headers, json={"transcript": "Check my battery status"},
+        )
+    assert result.status_code == 200
+    assert result.json()["tools"] == [
+        {"route": "power-status", "payload": {}},
+    ]
+    assert result.json()["motor_authorized"] is False
+    assert result.json()["charging_authorized"] is False
+
+
 def test_mac_semantic_tool_plan_fail_closed_without_ollama_or_memory_consent(
     settings, tokens,
 ):
