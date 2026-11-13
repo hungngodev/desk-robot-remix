@@ -1218,8 +1218,17 @@ class PetController:
             await asyncio.sleep(self.interval)
 
     def _human_active_in_fleet(self, now: float) -> bool:
-        """One actual spoken human turn silences unsolicited *fleet* remarks."""
-        return self.multimodal is not None and any(
+        """Human VAD and brief post-turn quiet protect the fleet speech floor.
+
+        Only this spontaneous-response gate uses the Qwen-inspired 800ms
+        pause. Explicit user tool requests and sensor collection remain live.
+        """
+        if self.multimodal is None:
+            return False
+        busy = getattr(self.multimodal.hub, "spontaneous_floor_busy", None)
+        if callable(busy):
+            return busy(now)
+        return any(
             self.multimodal.hub.user_active(robot.id, now)
             for robot in self.settings.robots
         )
