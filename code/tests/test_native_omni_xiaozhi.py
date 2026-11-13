@@ -833,6 +833,26 @@ def test_native_compound_speech_dispatches_only_explicit_readonly_tools(
     assert all(route not in ("pickup", "stop", "move", "charge") for route in routes)
 
 
+def test_native_long_natural_asr_uses_only_explicit_final_readonly_question(native):
+    module, _ = native
+    introduction = ("I was working on my robot and noticed some keys. " * 12)
+    assert len(introduction) > 280
+    requests = module.native_readonly_requests(
+        introduction + "Can you look around and check your battery status?"
+    )
+    assert [route for route, _ in requests] == ["look", "power-status"]
+    assert requests[0][1]["question"] == "Can you look around"
+    assert module.native_readonly_requests(
+        introduction + "Could you drive to the charger?"
+    ) == ()
+    assert module.native_readonly_requests(
+        "I have been explaining my thoughts without a clear question " * 8
+    ) == ()
+    assert module.native_readonly_requests(
+        ("A long spoken message. " * 120) + "Look at the desk?"
+    ) == ()  # Over 2400 ASR characters must not enter any tool.
+
+
 def test_native_compound_asr_queues_distinct_tools_once_per_real_audio_item(native):
     module, bridge = native
     conn, _ = connection()
