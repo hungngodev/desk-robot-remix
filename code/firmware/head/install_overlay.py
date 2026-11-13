@@ -244,7 +244,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         files[path] = replace_once(
             files[path].decode(),
             'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nendmenu\n',
-            'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nconfig DESK_ROBOT_AEC_DELAY_MS\n    int "Sense playback reference delay in milliseconds (measure physically)"\n    range 0 250\n    default 90\nconfig DESK_ROBOT_RGB_HEART_ENABLED\n    bool "Enable GPIO9 RGB heart only after physical SD J3 isolation and logic/power approval"\n    default n\nendmenu\n',
+            'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nconfig DESK_ROBOT_AEC_DELAY_MS\n    int "Sense playback reference delay in milliseconds (measure physically)"\n    range 0 250\n    default 90\nconfig DESK_ROBOT_RGB_HEART_ENABLED\n    bool "Enable GPIO9 RGB heart only after physical SD J3 isolation and logic/power approval"\n    default n\nconfig DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED\n    bool "Opt in: start continuous Xiaozhi realtime microphone listening on boot"\n    depends on USE_AUDIO_PROCESSOR && USE_DEVICE_AEC\n    default n\nendmenu\n',
         ).encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
         # not a second decoder or audio transport. Normal TTS stops retain the
