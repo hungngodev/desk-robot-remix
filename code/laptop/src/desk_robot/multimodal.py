@@ -573,6 +573,9 @@ class MultimodalOrchestrator:
         self.end_direct_vision = None
         self.hub = CameraFrameHub([r.id for r in settings.robots])
         self._capture_tasks: dict[str, asyncio.Task] = {}
+        # One persistent XIAO JPEG feed per head; no second camera or model.
+        self._stream_tasks: dict[str, asyncio.Task] = {}
+        self._last_stream_sample = {r.id: -math.inf for r in settings.robots}
         self._sensor_tasks: dict[str, asyncio.Task] = {}
         # Own only the optional HTTP snapshot, not its permanent pet loop.
         self._proactive_snapshots: dict[str, asyncio.Task] = {}
@@ -603,6 +606,8 @@ class MultimodalOrchestrator:
                 "sensor_trigger_to_first_jpeg_last_ms": None,
                 "sensor_followup_frames": 0, "proactive_camera_preemptions": 0,
                 "native_speech_camera_reuses": 0,
+                "stream_frames_received": 0, "stream_frames_selected": 0,
+                "stream_frames_skipped": 0, "stream_reconnects": 0,
             } for robot in settings.robots
         }
         self._turn_epoch = {r.id: 0 for r in settings.robots}
@@ -618,6 +623,11 @@ class MultimodalOrchestrator:
         self.hub._check(robot_id)
         return {
             "robot_id": robot_id,
+            "camera_stream_task_active": (
+                robot_id in self._stream_tasks
+                and not self._stream_tasks[robot_id].done()
+            ),
+            "camera_stream_physically_qualified": False,
             "frames_in_ram": len(self.hub.frames[robot_id]),
             "software_timings": dict(self._metrics[robot_id]),
             "voice_trigger_until_monotonic": (
@@ -633,6 +643,91 @@ class MultimodalOrchestrator:
             "physical_vad_video_sync_verified": False,
             "motor_authorized": False,
         }
+
+    def start_streams(self) -> None:
+        """Own the one persistent visual feed whenever camera consent is on.
+
+        Not a separate controller. The permanent pet loop still decides if
+        selected change evidence is worth a model call or a spoken reaction.
+        """
+        if self._closed or not self.settings.voice_vision_tools_enabled:
+            return
+        for robot_id, head in self.heads.items():
+            if not callable(getattr(head, "stream_frames", None)):
+                continue
+            task = self._stream_tasks.get(robot_id)
+            if task is None or task.done():
+                self._stream_tasks[robot_id] = asyncio.create_task(
+                    self._consume_stream(robot_id, head)
+                )
+
+    async def _consume_stream(self, robot_id: str, head) -> None:
+        """Drain continuous JPEGs; drop excess frames instead of queuing them.
+
+        Frigate-style cheap frame comparison stays on the Mac. Only selected
+        snapshots enter the existing three-frame RAM ring and VisualChangeGate.
+        Voice/model requests still reuse this same authenticated source.
+        """
+        failures = 0
+        while not self._closed and self.settings.voice_vision_tools_enabled:
+            try:
+                async for jpeg, received in head.stream_frames():
+                    if self._closed:
+                        break
+                    metrics = self._metrics[robot_id]
+                    metrics["stream_frames_received"] += 1
+                    # Camera feed can be 4 FPS while cheap motion sampling is
+                    # at most 2 FPS. No frame means no model work; no queue
+                    # grows while Mac inference is busy.
+                    if received - self._last_stream_sample[robot_id] < 0.5:
+                        metrics["stream_frames_skipped"] += 1
+                        continue
+                    self._last_stream_sample[robot_id] = received
+                    now = time.monotonic()
+                    if self._any_human_active(now) and not self.hub.user_active(robot_id, now):
+                        metrics["stream_frames_skipped"] += 1
+                        continue
+                    source = ("speech" if self.hub.user_active(robot_id, now)
+                              else "proactive")
+                    turn = self._turn_epoch[robot_id]
+                    generation = self.hub._generation[robot_id]
+                    try:
+                        prepared = await self._prepare_bounded(
+                            jpeg, priority=source == "speech"
+                        )
+                    except RuntimeError:
+                        metrics["stream_frames_skipped"] += 1
+                        continue
+                    if (self._closed or turn != self._turn_epoch[robot_id]
+                            or generation != self.hub._generation[robot_id]
+                            or (source == "proactive" and (
+                                self._any_human_active(time.monotonic())
+                                or received <= self._last_fleet_human_turn_at))):
+                        metrics["stream_frames_skipped"] += 1
+                        continue
+                    try:
+                        self.hub.offer_prepared(
+                            robot_id, prepared, received, source=source,
+                            generation=generation,
+                        )
+                    except (RuntimeError, ValueError):
+                        metrics["stream_frames_skipped"] += 1
+                    else:
+                        metrics["stream_frames_selected"] += 1
+                if self._closed:
+                    break
+                raise RuntimeError("XIAO camera stream ended")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                failures += 1
+                self._metrics[robot_id]["stream_reconnects"] += 1
+                # Camera loss is not permission to touch the WROOM motor or
+                # release an authenticated voice floor. Old frames expire.
+                self.hub.discard_video(robot_id)
+                await asyncio.sleep(min(8, 2 ** min(failures - 1, 3)))
+            else:
+                failures = 0
 
     def sensor_event(self, robot_id: str, kind: str) -> None:
         """Fast event priority, separate from VLM, TTS and WROOM motion.
@@ -1125,13 +1220,15 @@ class MultimodalOrchestrator:
         self._closed = True
         tasks = (list(self._capture_tasks.values())
                  + list(self._sensor_tasks.values())
-                 + list(self._look_tasks.values()))
+                 + list(self._look_tasks.values())
+                 + list(self._stream_tasks.values()))
         for task in tasks + list(self._proactive_snapshots.values()):
             task.cancel()
         pending = tasks + list(self._proactive_snapshots.values())
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self._capture_tasks.clear()
+        self._stream_tasks.clear()
         self._sensor_tasks.clear()
         self._look_tasks.clear()
         self._proactive_snapshots.clear()
