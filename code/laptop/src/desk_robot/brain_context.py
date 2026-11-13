@@ -210,7 +210,7 @@ def compose_brain_context(
     # the one relevant to the latest actual spoken question, rather than
     # whichever unrelated tool happened to finish first. ASR is still only
     # uncertain language evidence, never a command or actuator permit.
-    requested_tool = None
+    requested_tools: set[str] = set()
     for heard in heard_requests:
         if re.match(
             r"^(?:hey [a-z]+[, ]+|please )*"
@@ -218,8 +218,7 @@ def compose_brain_context(
             r"what did i (?:tell|say)|remind me|what did we (?:discuss|talk))",
             heard,
         ):
-            requested_tool = "memory_recall"
-            break
+            requested_tools.add("memory_recall")
         if re.match(
             r"^(?:hey [a-z]+[, ]+|please )*"
             r"(?:what (?:can|do) you see|what am i holding|"
@@ -233,25 +232,21 @@ def compose_brain_context(
             r"(?:desk|table))\b)",
             heard,
         ):
-            requested_tool = "visual_look"
-            break
+            requested_tools.add("visual_look")
         if re.match(
             r"^(?:hey [a-z]+[, ]+|please )*"
             r"(?:is the pickup|did you pick up|have you picked up|"
             r"what is the pickup|check (?:the )?pickup)",
             heard,
         ):
-            requested_tool = "pickup_status"
-            break
+            requested_tools.add("pickup_status")
         if re.match(
             r"^(?:hey [a-z]+[, ]+|please )*"
             r"(?:check your battery|what is your (?:battery|status)|"
             r"how much battery|how are your sensors)",
             heard,
         ):
-            requested_tool = "robot_status"
-            break
-    requested_tools = {requested_tool} if requested_tool is not None else set()
+            requested_tools.add("robot_status")
     if heard_requests:
         # One completed ASR utterance may request TWO independent tools.
         # The speech router preserves those clauses, so the bounded prompt
