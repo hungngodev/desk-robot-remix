@@ -374,6 +374,40 @@ async def test_mac_model_planned_wroom_power_route_passes_existing_xiaozhi_bridg
         }
 
 
+@pytest.mark.parametrize("bad_route", [
+    ["look"], {"route": "status"},
+])
+async def test_shared_xiaozhi_bridge_refuses_nonstring_planned_routes(
+    bridge_tools, monkeypatch, bad_route,
+):
+    """Untrusted model JSON must return an error, never TypeError."""
+    original = httpx.AsyncClient
+
+    def handle(request):
+        assert request.url.path == "/v1/pet/robot-01/plan-readonly"
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "source": "existing_mac_ollama_readonly_route_selection",
+            "untrusted_model_selection": True,
+            "model_can_arm_motors": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+            "tools": [{"route": bad_route, "payload": {}}],
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handle), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "plan-readonly",
+        {"transcript": "Could you check the desk?"},
+    )
+    assert result == {
+        "error": "Invalid read-only Mac intent plan", "retried": False,
+    }
+
+
 async def test_voice_battery_tool_uses_actual_unqualified_wroom_power_source(
     bridge_tools, monkeypatch,
 ):
