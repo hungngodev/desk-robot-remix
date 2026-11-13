@@ -1570,10 +1570,10 @@ class NativeOmniSession:
                 del pending[:1920]
                 await self._send_device_opus(encoder.encode(frame, 960), generation)
 
-    async def _send_device_state(self, state: str, generation: int) -> None:
+    async def _send_device_state(self, state: str, generation: int) -> bool:
         global _output_owner
         if self.closed or generation != self._generation:
-            return
+            return False
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
@@ -1587,14 +1587,14 @@ class NativeOmniSession:
                     return  # Do not flush the Mac voice that already owns it.
                 events = await self._invalidate_head_first()
                 self._schedule_remote_cancel(events)
-                return
+                return False
             if self.closed or generation != self._generation:
-                return
+                return False
         speech_raced = False
         async with self._device_send_lock:
             if (self.closed or generation != self._generation
                     or self._external_speech_active):
-                return
+                return False
             # VAD may start between claim_speaker and acquiring the device
             # send lock. Suppress the TTS START packet in that case.
             if state == "start" and bridge.human_speech_active():
@@ -1612,12 +1612,13 @@ class NativeOmniSession:
             async with _output_owner_lock:
                 if _output_owner == self.device:
                     _output_owner = None
-            return
+            return False
         if state == "stop":
             self.conn.client_is_speaking = False
             async with _output_owner_lock:
                 if _output_owner == self.device:
                     _output_owner = None
+        return True
 
     async def _send_device_opus(self, packet: bytes, generation: int) -> None:
         global _output_owner
