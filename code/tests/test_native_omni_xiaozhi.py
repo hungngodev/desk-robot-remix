@@ -1207,7 +1207,7 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(24000)
-        wav.writeframes(b"\\x00" * 48000)
+        wav.writeframes(b"\x00" * 48000)
     encoded = base64.b64encode(audio.getvalue()).decode()
     calls = []
 
