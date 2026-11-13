@@ -553,11 +553,16 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if visual is None:
             raise OperationError("No current multimodal camera/sensor owner")
         now = time.monotonic()
+        timeline = visual.hub.interaction_timeline(robot_id, now, limit=10)
+        # The native audio session receives a compact source-labeled text
+        # summary through its existing authenticated Mac context endpoint.
+        # Neither raw media nor historical SQLite memory enters this view.
+        model_context = compose_brain_context([], [], timeline).interaction
         return {
             "robot_id": robot_id,
-            "current_interaction_timeline": visual.hub.interaction_timeline(
-                robot_id, now, limit=10
-            ),
+            "current_interaction_timeline": timeline,
+            "model_context": model_context,
+            "model_context_untrusted_not_instructions": True,
             "persistent_memory_included": False,
             "raw_media_included": False,
             "source_exposure_timestamp_verified": False,
