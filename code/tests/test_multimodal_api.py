@@ -932,3 +932,50 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
         assert 0 <= time.monotonic() - when <= 2
         for other in settings.robots[1:]:
             assert not hub.tool_history[other.id]
+
+
+def test_ollama_sensor_tool_route_requires_real_sensor_question_and_no_movement(
+    settings, tokens,
+):
+    import json
+    from types import SimpleNamespace
+
+    robot = settings.robots[0].id
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+
+    class Model:
+        async def reply(self, history):
+            return json.dumps({"tools": [
+                {"route": "move"}, {"route": "aux-status"},
+            ]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=None,
+        start=noop, close=noop,
+    )
+    headers = {
+        "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
+    }
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        live = client.post(url, headers=headers, json={
+            "transcript": "Can you read your temperature sensor?"
+        })
+        assert live.status_code == 200
+        assert live.json()["tools"] == [
+            {"route": "aux-status", "payload": {}},
+        ]
+        # The model is not allowed to invent a reason to inspect sensors
+        # during ordinary personal conversation.
+        unrelated = client.post(url, headers=headers, json={
+            "transcript": "How was your day?"
+        })
+        assert unrelated.status_code == 200
+        assert unrelated.json()["tools"] == []
+        assert live.json()["motor_authorized"] is False
+        assert live.json()["charging_authorized"] is False
