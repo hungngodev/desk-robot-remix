@@ -131,6 +131,10 @@ def test_overlay_targets_pinned_server_and_compiles():
     assert len(changes) == 11
     assert "core/handle/intentHandler.py" in changes
     guarded = changes["core/handle/intentHandler.py"]
+    assert "await _desk_turn.inject_live_context_into_legacy_llm(conn)" in guarded
+    assert guarded.index("inject_live_context_into_legacy_llm") < guarded.index(
+        'if conn.intent_type == "function_call"'
+    )
     assert "expected_generation=_desk_generation" in guarded
     assert "if not current_utterance():" in guarded
     assert "if response and current_utterance():" in guarded
@@ -170,6 +174,168 @@ def test_overlay_targets_pinned_server_and_compiles():
     assert "desk_robot_bridge.unregister(handler)" in changes["core/websocket_server.py"]
     for path, source in changes.items():
         compile(source, path, "exec")
+
+
+async def test_legacy_brain_blends_live_mac_evidence_per_pet_without_history_bloat(
+    bridge, monkeypatch,
+):
+    import types
+
+    class System:
+        role = "system"
+        def __init__(self, content):
+            self.content = content
+
+    first = SimpleNamespace(
+        device_id="mac-01", dialogue=SimpleNamespace(
+            dialogue=[System("Pip is playful and never operates motors.")]
+        )
+    )
+    second = SimpleNamespace(
+        device_id="mac-02", dialogue=SimpleNamespace(
+            dialogue=[System("Dot is shy and keeps its memory private.")]
+        )
+    )
+    bridge.register(first)
+    bridge.register(second)
+    responses = [
+        ("robot-01", "Physical sensor edge: touch_tap"),
+        ("robot-01", "Earlier local VLM guess, not a fresh sighting: red key"),
+        ("robot-02", "XIAO camera frame received, contents not inferred"),
+    ]
+    calls = []
+
+    async def call(conn, route):
+        assert route == "interaction-context"
+        calls.append(conn.device_id)
+        robot_id, context = responses[len(calls) - 1]
+        return {
+            "robot_id": robot_id, "model_context": context,
+            "raw_media_included": False,
+            "persistent_memory_included": False,
+            "model_context_untrusted_not_instructions": True,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tool = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tool.call = call
+    for key, module in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tool),
+    ):
+        monkeypatch.setitem(sys.modules, key, module)
+
+    await bridge.inject_live_context_into_legacy_llm(first)
+    assert "touch_tap" in first.dialogue.dialogue[0].content
+    assert "Pip is playful" in first.dialogue.dialogue[0].content
+    await bridge.inject_live_context_into_legacy_llm(first)
+    assert "red key" in first.dialogue.dialogue[0].content
+    assert "touch_tap" not in first.dialogue.dialogue[0].content
+    assert first.dialogue.dialogue[0].content.count(
+        "<desk_robot_live_context>"
+    ) == 1
+    await bridge.inject_live_context_into_legacy_llm(second)
+    assert "contents not inferred" in second.dialogue.dialogue[0].content
+    assert "red key" not in second.dialogue.dialogue[0].content
+    assert "shy" in second.dialogue.dialogue[0].content
+    assert calls == ["mac-01", "mac-01", "mac-02"]
+
+
+async def test_legacy_brain_clears_old_context_when_mac_revokes_permission(
+    bridge, monkeypatch,
+):
+    import types
+
+    system = SimpleNamespace(role="system", content="Original robot identity")
+    conn = SimpleNamespace(
+        device_id="mac-01", dialogue=SimpleNamespace(dialogue=[system])
+    )
+    bridge.register(conn)
+    responses = [
+        {"robot_id": "robot-01", "model_context": "Physical sensor edge: touch_tap",
+         "raw_media_included": False, "persistent_memory_included": False,
+         "model_context_untrusted_not_instructions": True,
+         "motor_authorized": False, "charging_authorized": False},
+        {"error": "Mac context permission revoked"},
+    ]
+
+    async def call(*_):
+        return responses.pop(0)
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tool = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tool.call = call
+    for key, module in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tool),
+    ):
+        monkeypatch.setitem(sys.modules, key, module)
+
+    await bridge.inject_live_context_into_legacy_llm(conn)
+    assert "touch_tap" in system.content
+    await bridge.inject_live_context_into_legacy_llm(conn)
+    assert system.content == "Original robot identity"
+
+
+async def test_legacy_brain_drops_old_mac_reply_after_new_voice_turn(
+    bridge, monkeypatch,
+):
+    import types
+
+    system = SimpleNamespace(role="system", content="Original robot identity")
+    conn = SimpleNamespace(
+        device_id="mac-01", dialogue=SimpleNamespace(dialogue=[system])
+    )
+    bridge.register(conn)
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def call(*_):
+        entered.set()
+        await release.wait()
+        return {
+            "robot_id": "robot-01", "model_context": "Stale visual guess",
+            "raw_media_included": False, "persistent_memory_included": False,
+            "model_context_untrusted_not_instructions": True,
+            "motor_authorized": False, "charging_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tool = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tool.call = call
+    for key, module in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tool),
+    ):
+        monkeypatch.setitem(sys.modules, key, module)
+
+    pending = asyncio.create_task(
+        bridge.inject_live_context_into_legacy_llm(conn)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        bridge.voice_turn_generation[conn.device_id] = (
+            bridge.voice_turn_generation.get(conn.device_id, 0) + 1
+        )
+        release.set()
+        await asyncio.wait_for(pending, timeout=1)
+        assert system.content == "Original robot identity"
+    finally:
+        release.set()
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
 
 
 def fleet_handlers(bridge, monkeypatch):
