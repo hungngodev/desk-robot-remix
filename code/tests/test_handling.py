@@ -399,3 +399,28 @@ def test_pre_wrap_delayed_packet_cannot_reseed_after_clock_wrap():
                      new_sample=False) == ()
     assert gate.last_sample_ms == 3
     assert len(gate.startup_samples) == 2
+
+
+def test_late_retired_boot_delivery_does_not_reset_current_calibration():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    # Establish a new boot and qualify its own eight distinct conversions.
+    assert qualified(gate, sample(boot_id=2), 102) == ()
+    for i in range(7):
+        assert qualified(gate, sample(boot_id=2), 102.15 + i * .15) == ()
+    assert gate.reference is not None
+    previous_at = gate.last_at
+    previous_sample = gate.last_sample_ms
+
+    # Even a malformed old packet arriving after a host poll gap cannot
+    # invalidate the active boot's pose or advance its acquisition clock.
+    assert qualified(gate, sample(boot_id=1, valid=False),
+                     previous_at + 1.5, new_sample=False) == ()
+    assert gate.reference is not None
+    assert gate.last_at == previous_at
+    assert gate.last_sample_ms == previous_sample
+
+    # The same gap on a CURRENT boot must still invalidate calibration.
+    assert qualified(gate, sample(boot_id=2, sample_ms=previous_sample + 1),
+                     previous_at + 1.6, new_sample=False) == ()
+    assert gate.reference is None
