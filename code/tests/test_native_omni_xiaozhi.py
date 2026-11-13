@@ -1236,7 +1236,7 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     assert calls[0][0] == "http://127.0.0.1:8099/v1/chat/completions"
     assert calls[0][1]["model"] == "openbmb/MiniCPM-o-4_5"
     assert "Perhaps a blue mug" in calls[0][1]["messages"][1]["content"]
-    assert session.native_tool_spoken_responses == 1
+    assert session.native_tool_audio_queued == 1
     chunks = [session.outgoing.get_nowait() for _ in range(6)]
     assert len(chunks) == 6 and chunks[-1] is None
     assert all(item[0].startswith("tool_") and len(item[1]) == 9600
