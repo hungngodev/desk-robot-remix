@@ -158,6 +158,41 @@ def test_live_asr_is_bounded_uncertain_and_keeps_visual_tool_provenance():
     assert hub.interaction_timeline("robot-01", now + 1) == []
 
 
+def test_context_keeps_two_recent_spoken_clauses_without_evicting_tools():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01"])
+    hub.remember_heard(
+        "robot-01", "asr_first", "Please look for my red key", now - 1.0
+    )
+    hub.remember_heard(
+        "robot-01", "asr_second", "It was beside the mug", now
+    )
+    hub.remember_tool(
+        "robot-01", "visual_look", "A red item may be on the desk", now
+    )
+    hub.notify("robot-01", "touch_tap", now)
+    prompt = compose_brain_context(
+        [], [], hub.interaction_timeline("robot-01", now, limit=10)
+    ).interaction
+    assert "Recent model ASR guess" in prompt
+    assert "It was beside the mug" in prompt
+    assert "Earlier model ASR guess" in prompt
+    assert "Please look for my red key" in prompt
+    assert "Earlier local VLM guess" in prompt
+    assert "Physical sensor edge: touch_tap" in prompt
+    assert len(prompt) <= 400
+    # A third earlier fragment must not compete with current tools.
+    hub.remember_heard(
+        "robot-01", "asr_third", "The picture is still uncertain", now + 1
+    )
+    newer = compose_brain_context(
+        [], [], hub.interaction_timeline("robot-01", now + 1, limit=10)
+    ).interaction
+    assert "The picture is still uncertain" in newer
+    assert "It was beside the mug" in newer
+    assert "Please look for my red key" not in newer
+
+
 def test_context_budget_is_constant_even_with_many_long_model_outputs():
     memory = [
         episode("robot-01", f"event{i}", "object", "x" * 300)
