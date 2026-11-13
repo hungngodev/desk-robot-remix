@@ -2264,6 +2264,7 @@ async def test_stale_response_done_does_not_split_new_grounded_tool_speech(
 
     async def send_opus(packet, generation):
         encoded.append(packet)
+        return True
 
     session._send_device_state = send_state
     session._send_device_opus = send_opus
@@ -2288,6 +2289,68 @@ async def test_stale_response_done_does_not_split_new_grounded_tool_speech(
         await asyncio.gather(worker, return_exceptions=True)
 
 
+
+
+
+async def test_native_tts_start_stop_without_opus_never_writes_spoken_history(
+    native, monkeypatch,
+):
+    """A swallowed audio frame is not a spoken response, even if STOP succeeded."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._tool_speech_turn = (0, 0)
+    session._tool_audio_response_id = "tool_no_audio"
+    session._tool_reply_pending["tool_no_audio"] = (
+        0, "What is there?", "I can see a mug",
+    )
+
+    class Encoder:
+        def __init__(self, *args):
+            pass
+        def encode(self, frame, sample_count):
+            return b"encoded-opus"
+
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    states, attempts = [], []
+    done = asyncio.Event()
+
+    async def send_state(name, generation):
+        states.append(name)
+        if name == "stop":
+            done.set()
+        return True
+
+    async def refused_opus(frame, generation):
+        attempts.append(frame)
+        return False  # Privacy or barge fence won before the physical send.
+
+    session._send_device_state = send_state
+    session._send_device_opus = refused_opus
+    session.outgoing.put_nowait(("tool_no_audio", bytes(9600)))
+    session.outgoing.put_nowait(("tool_no_audio", None))
+    worker = asyncio.create_task(session._play())
+    try:
+        await asyncio.wait_for(done.wait(), timeout=1)
+        assert attempts
+        assert states == ["start", "stop"]
+        assert session.native_tool_audio_sent == 0
+        assert not session._tool_dialogue
+        assert not session._tool_reply_pending
+        assert session._spoken_queue.empty()
+        assert session._tool_speech_turn is None
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
 
 async def test_new_native_response_stops_old_decoder_before_next_start(
     native, monkeypatch,
@@ -2330,6 +2393,7 @@ async def test_new_native_response_stops_old_decoder_before_next_start(
 
     async def send_opus(packet, generation):
         encoded.append((packet, generation))
+        return True
 
     session._send_device_state = send_state
     session._send_device_opus = send_opus
@@ -2392,6 +2456,7 @@ async def test_new_native_response_refuses_start_when_prior_stop_failed(
 
     async def send_opus(packet, generation):
         encoded.append(packet)
+        return True
 
     session._send_device_state = send_state
     session._send_device_opus = send_opus
@@ -2453,6 +2518,7 @@ async def test_brief_human_barge_during_old_stop_cannot_restart_stale_tool_audio
 
     async def send_opus(packet, generation):
         encoded.append((packet, generation))
+        return True
 
     session._send_device_state = send_state
     session._send_device_opus = send_opus
@@ -2506,6 +2572,7 @@ async def test_native_tool_dialogue_only_remembers_sent_uninterrupted_audio(
         sent_states.append((name, gen))
     async def opus(data, gen):
         opus_sent.append((data, gen))
+        return True
 
     session._send_device_state = state
     session._send_device_opus = opus
@@ -2565,6 +2632,7 @@ async def test_native_duplex_speech_text_enters_dialogue_only_after_opus_stop(
         states.append(name)
     async def send_opus(chunk, gen):
         packets.append(chunk)
+        return True
     session._send_device_state = state
     session._send_device_opus = send_opus
 

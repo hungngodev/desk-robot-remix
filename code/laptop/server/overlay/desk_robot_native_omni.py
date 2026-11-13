@@ -1670,6 +1670,7 @@ class NativeOmniSession:
         current_response: str | None = None
         generation = -1
         dropped_response_id: str | None = None
+        sent_audio = False  # actual head Opus transmission in THIS response
         while not self.closed:
             item = await self.outgoing.get()
             # A terminal marker MUST belong to the response it closes.
@@ -1688,21 +1689,33 @@ class NativeOmniSession:
                 if current_response is not None and generation == self._generation:
                     if pending:
                         tail = bytes(pending).ljust(1920, b"\0")
-                        await self._send_device_opus(encoder.encode(tail, 960), generation)
+                        sent_audio = (
+                            await self._send_device_opus(
+                                encoder.encode(tail, 960), generation
+                            )
+                        ) or sent_audio
                     stop_sent = await self._send_device_state("stop", generation)
                     if (stop_sent is not False and generation == self._generation
                             and current_response):
-                        self._tool_audio_sent(current_response, generation)
-                        self._native_audio_sent(current_response, generation)
-                        if current_response == self._tool_audio_response_id:
-                            self.native_tool_audio_sent += 1
-                        # Native output can yield to Mac proactive comments
-                        # after the complete current human tool response.
+                        # A START and STOP without even one transmitted Opus
+                        # packet is NOT speech. Do not put its model text in
+                        # the shared Mac history or claim a delivered reply.
+                        if sent_audio:
+                            self._tool_audio_sent(current_response, generation)
+                            self._native_audio_sent(current_response, generation)
+                            if current_response == self._tool_audio_response_id:
+                                self.native_tool_audio_sent += 1
+                        else:
+                            self._tool_reply_pending.pop(current_response, None)
+                            self._native_output_words.pop(current_response, None)
+                        # The reserved tool turn releases on STOP regardless
+                        # of whether audio actually reached the head.
                         if current_response == self._tool_audio_response_id:
                             self._tool_speech_turn = None
                 pending.clear()
                 resample_state = None
                 current_response = None
+                sent_audio = False
                 continue
             if response_id == dropped_response_id:
                 continue  # Refused native reply cannot restart mid sentence.
@@ -1736,9 +1749,11 @@ class NativeOmniSession:
                             current_response = None
                             pending.clear()
                             resample_state = None
+                            sent_audio = False
                             continue
                 pending.clear()
                 resample_state = None
+                sent_audio = False
                 current_response = response_id
                 generation = self._generation
                 started = await self._send_device_state("start", generation)
@@ -1747,6 +1762,7 @@ class NativeOmniSession:
                     current_response = None
                     pending.clear()
                     resample_state = None
+                    sent_audio = False
                     continue
             pcm16k, resample_state = audioop.ratecv(
                 chunk24k, 2, 1, 24000, 16000, resample_state
@@ -1755,7 +1771,11 @@ class NativeOmniSession:
             while len(pending) >= 1920 and generation == self._generation:
                 frame = bytes(pending[:1920])
                 del pending[:1920]
-                await self._send_device_opus(encoder.encode(frame, 960), generation)
+                sent_audio = (
+                    await self._send_device_opus(
+                        encoder.encode(frame, 960), generation
+                    )
+                ) or sent_audio
 
     async def _send_device_state(self, state: str, generation: int) -> bool:
         global _output_owner
@@ -1841,14 +1861,14 @@ class NativeOmniSession:
                     _output_owner = None
         return True
 
-    async def _send_device_opus(self, packet: bytes, generation: int) -> None:
+    async def _send_device_opus(self, packet: bytes, generation: int) -> bool:
         global _output_owner
         if (self.closed
                 or generation != self._generation
                 or self._external_speech_active
                 or ((self._pet_quiet or not self._pet_autonomy_enabled)
                     and not self._direct_reply_active)):
-            return
+            return False
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed")
@@ -1862,7 +1882,7 @@ class NativeOmniSession:
                     or self._external_speech_active
                     or ((self._pet_quiet or not self._pet_autonomy_enabled)
                         and not self._direct_reply_active)):
-                return
+                return False
             if bridge.human_speech_active():
                 blocked_by_human = True
             else:
@@ -1874,9 +1894,10 @@ class NativeOmniSession:
             async with _output_owner_lock:
                 if _output_owner == self.device:
                     _output_owner = None
-            return
+            return False
         # 60ms Opus audio pacing, not an acoustic playback confirmation.
         await asyncio.sleep(0.060)
+        return True
 
     async def _invalidate_head_first(self) -> tuple[dict, ...]:
         """Local audio generation, queued PCM and actual head flush first."""
