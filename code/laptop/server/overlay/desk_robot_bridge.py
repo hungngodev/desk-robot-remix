@@ -31,6 +31,25 @@ interrupt_generation: dict[str, int] = {}
 # an older utterance. Unlike an audio decoder epoch, this stays stable across
 # speech_end until the next actual person begins speaking.
 voice_turn_generation: dict[str, int] = {}
+# One cancellation signal per authenticated head turn. The existing tool
+# bridge awaits it alongside read-only HTTP requests: obsolete camera/VLM
+# work gets cancelled promptly, not merely rejected after a 50s timeout.
+_tool_turn_cancel: dict[str, asyncio.Event] = {}
+
+
+def tool_turn_cancel_event(device: str) -> asyncio.Event:
+    if device not in connections:
+        raise ValueError("Only a connected Xiaozhi head owns a tool turn")
+    return _tool_turn_cancel.setdefault(device, asyncio.Event())
+
+
+def _invalidate_tool_turn(device: str) -> None:
+    current = _tool_turn_cancel.get(device)
+    if current is not None:
+        current.set()
+    _tool_turn_cancel[device] = asyncio.Event()
+
+
 # Never allow one robot to cancel another's reply based on hearing its speaker.
 # Only the current device may contribute AEC-cleaned voice during group speech.
 active_device_id: str | None = None
@@ -115,6 +134,7 @@ def record_human_voice(conn, kind: str) -> bool:
     })
     if kind in ("speech_start", "normal", "group"):
         voice_turn_generation[device] = voice_turn_generation.get(device, 0) + 1
+        _invalidate_tool_turn(device)
         native = _native_adapter()
         if native is not None:
             # Never block original AEC/VAD while silencing other native pets.
@@ -169,6 +189,12 @@ def unregister(conn):
         voice_turn_generation[conn.device_id] = (
             voice_turn_generation.get(conn.device_id, 0) + 1
         )
+        # No memory, camera or status tool from the detached socket may
+        # continue waiting on the old turn. A new connection gets its own
+        # current signal, preserving the existing identity generation.
+        pending_tool = _tool_turn_cancel.pop(conn.device_id, None)
+        if pending_tool is not None:
+            pending_tool.set()
 
 
 def muted(device_id):
