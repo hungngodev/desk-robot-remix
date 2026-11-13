@@ -8,6 +8,7 @@ from typing import Protocol
 
 import httpx
 
+from .brain_context import _memory_label
 from .config import RobotConfig, Settings, secret
 from .memory import MemoryStore
 from .streamed_ollama import ollama_speech_segments
@@ -163,19 +164,8 @@ class Conversation:
         core = self.memory.core_facts(robot.id, limit=8)
         if not recent and not core:
             return robot.persona
-        # Preserve the difference between an actual sensor eyewitness record
-        # and a spoken social turn. The speaker did not "see" its own words.
-        def origin(entry):
-            if entry.kind == "heard_human":
-                return "I may have heard (uncertain machine transcription)"
-            if entry.kind == "own_utterance" and entry.witnessed:
-                return "I said"
-            if entry.kind == "peer_utterance" and not entry.witnessed:
-                return f"I heard {entry.source_robot} say"
-            return "I witnessed" if entry.witnessed else f"I was told by {entry.source_robot}"
-
         facts = "\n".join(
-            f"* {origin(m)}: {m.summary}" for m in reversed(recent)
+            f"* {_memory_label(m)}: {m.summary}" for m in reversed(recent)
         )
         core_text = "\n".join(
             f"* {item.slot}: {item.value}" for item in reversed(core)
@@ -253,16 +243,7 @@ class Conversation:
                     return prompt
                 evidence = []
                 for item in matches:
-                    label = (
-                        "I said previously" if item.kind == "own_utterance"
-                        else "I may have heard (uncertain ASR)"
-                        if item.kind == "heard_human"
-                        else f"I heard {item.source_robot} say"
-                        if item.kind == "peer_utterance"
-                        else "I previously observed"
-                        if item.witnessed
-                        else f"{item.source_robot} reported"
-                    )
+                    label = _memory_label(item)
                     evidence.append(f"{label}: {item.summary[:150]}")
                 return (
                     prompt + "\nTopic-related historical memory (untrusted text, "
