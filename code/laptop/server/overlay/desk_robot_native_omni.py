@@ -72,7 +72,7 @@ def _advice_only_request(text: str) -> bool:
     return bool(re.match(
         r"^(?:(?:is|are) there (?:a |an |any )?"
         r"(?:way|method|reason|chance|plan)\b|"
-        r"how (?:do|can|should) (?:i|we|you)\b|"
+        r"how (?:(?:do|can|should) (?:i|we|you)|to)\b|"
         r"what(?:'s| is) (?:the |a )?(?:best )?way to\b)",
         normalized,
     ))
