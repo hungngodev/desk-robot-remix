@@ -119,7 +119,10 @@ async def test_slow_apriltag_diagnostic_holds_stale_pose_without_any_motion(
     assert head.captures == 1 and head.commands == []
 
 
-@pytest.mark.parametrize("failure", [OSError("camera disconnected"), TimeoutError()])
+@pytest.mark.parametrize("failure", [
+    OSError("camera disconnected"), TimeoutError(),
+    RuntimeError("invalid camera stream state"), ValueError("malformed camera frame"),
+])
 async def test_snapshot_failure_holds_without_motion(tmp_path, monkeypatch, failure):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
