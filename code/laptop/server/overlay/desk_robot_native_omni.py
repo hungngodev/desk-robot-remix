@@ -1764,7 +1764,10 @@ class NativeOmniSession:
                     return_exceptions=True,
                 )
             try:
-                if self.conn.client_is_speaking:
+                if (self.conn.client_is_speaking
+                        and not self._external_speech_active):
+                    # Native model shutdown cannot stop a Mac proactive
+                    # utterance that currently owns the same decoder.
                     await self.conn.websocket.send(json.dumps({
                         "type": "tts", "state": "stop",
                         "session_id": self.conn.session_id, "flush": True,
