@@ -177,7 +177,9 @@ async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
         # The fresh VAD is already active even while Xiaozhi audio STOP is
         # blocked; old optional HTTP must be cancelled immediately.
         assert visual.hub.user_active("robot-01", time.monotonic())
-        assert heads["robot-02"].cancelled
+        async with asyncio.timeout(1):
+            while not heads["robot-02"].cancelled:
+                await asyncio.sleep(.01)
         assert heads["robot-01"].captures == 0
         assert not visual._capture_tasks.get("robot-01")
         assert not interrupt.done()
