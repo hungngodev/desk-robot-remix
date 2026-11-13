@@ -241,6 +241,9 @@ class NativeOmniSession:
             asyncio.Queue(maxsize=3)
         )
         self._readonly_seen: set[str] = set()
+        # Distinct upstream ASR item IDs can carry the SAME completed
+        # question. One human turn gets one Mac request per spoken intent.
+        self._readonly_requests: set[tuple[str, str]] = set()
         self._readonly_inflight: asyncio.Task | None = None
         self.native_readonly_tools_completed = 0
         self.native_readonly_tools_dropped = 0
@@ -508,15 +511,21 @@ class NativeOmniSession:
         request = native_readonly_request(event.get("transcript"))
         if request is None:
             return
-        if len(self._readonly_seen) >= 128:
-            self._readonly_seen.clear()
-        self._readonly_seen.add(item)
+        route, payload = request
+        signature = (route, " ".join(event["transcript"].casefold().split()).strip(" ?!."))
+        if signature in self._readonly_requests:
+            return
         try:
             self._readonly_queue.put_nowait(
-                (*request, self._generation, self._readonly_turn)
+                (route, payload, self._generation, self._readonly_turn)
             )
         except asyncio.QueueFull:
             self.native_readonly_tools_dropped += 1
+            return
+        if len(self._readonly_seen) >= 128:
+            self._readonly_seen.clear()
+        self._readonly_seen.add(item)
+        self._readonly_requests.add(signature)
 
     async def _readonly_tool_worker(self) -> None:
         """Reuse the pinned Xiaozhi read-only Mac bridge, not a new executor.
@@ -537,6 +546,15 @@ class NativeOmniSession:
                 ))
                 self._readonly_inflight = pending
                 result = await pending
+                # Even a successful local HTTP status response is untrusted
+                # until its identity matches the authenticated speaking head.
+                # Never add a different pet's receipt to this model session.
+                if (not isinstance(result, dict)
+                        or result.get("robot_id") != self.robot
+                        or result.get("motor_authorized") is True
+                        or result.get("charging_authorized") is True):
+                    self.native_readonly_tools_dropped += 1
+                    continue
                 if (not self.closed and self.connected
                         and self._generation == epoch
                         and self._readonly_turn == request_turn
@@ -637,6 +655,7 @@ class NativeOmniSession:
                     # with this voice. Wake the camera without HTTP in VAD.
                     self._video_turn += 1
                     self._readonly_turn += 1
+                    self._readonly_requests.clear()
                     self.latest_jpeg = None
                     self._latest_frame_receipt_us = None
                     self._last_video_sent_receipt_us = None
@@ -828,6 +847,7 @@ class NativeOmniSession:
         """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
         self._readonly_turn += 1
+        self._readonly_requests.clear()
         # A barge-in invalidates both obsolete robot audio and visual
         # context. A camera fetch already in flight must not reintroduce
         # old-turn JPEGs after the head's audio has been flushed.
