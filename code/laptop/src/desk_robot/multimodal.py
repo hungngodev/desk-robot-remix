@@ -565,6 +565,8 @@ class MultimodalOrchestrator:
         self.scene = scene
         self.inference_lock = inference_lock
         self.preempt_background_vision = None  # Existing PetController VLM task owner.
+        self.begin_direct_vision = None
+        self.end_direct_vision = None
         self.hub = CameraFrameHub([r.id for r in settings.robots])
         self._capture_tasks: dict[str, asyncio.Task] = {}
         self._sensor_tasks: dict[str, asyncio.Task] = {}
@@ -865,9 +867,17 @@ class MultimodalOrchestrator:
             source != "sensor" or trigger_kind not in TRIGGERS
         ):
             raise ValueError("Invalid sensor camera scheduling cause")
+        if (source == "proactive"
+                and (pending := self._look_tasks.get(robot_id)) is not None
+                and not pending.done()):
+            raise RuntimeError("Explicit human look owns this camera")
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
+            if (source == "proactive"
+                    and (pending := self._look_tasks.get(robot_id)) is not None
+                    and not pending.done()):
+                raise RuntimeError("Explicit human look owns this camera")
             metrics = self._metrics[robot_id]
             # Recheck AFTER waiting for the one camera lock. Two HTTP
             # consumers racing for the same VAD frame now produce ONE physical
@@ -1004,11 +1014,17 @@ class MultimodalOrchestrator:
         if pending_sensor is not None and not pending_sensor.done():
             pending_sensor.cancel()  # An explicit question takes camera priority.
         self._cancel_proactive_snapshot(robot_id)
-        # Direct human visual questions outrank an in-flight optional pet
-        # scene comparator holding the shared expensive vision lock.
-        preempt = self.preempt_background_vision
-        if callable(preempt):
-            preempt()
+        # Reserve the shared VLM until the direct question is completely
+        # resolved or cancelled. One-time preemption alone lets a new
+        # background comparison queue during the slow JPEG capture.
+        begin, end = self.begin_direct_vision, self.end_direct_vision
+        reserved = callable(begin) and callable(end)
+        if reserved:
+            begin()
+        else:
+            preempt = self.preempt_background_vision
+            if callable(preempt):
+                preempt()
         previous = self._look_tasks.get(robot_id)
         if previous is not None and previous is not current and not previous.done():
             previous.cancel()
@@ -1098,6 +1114,8 @@ class MultimodalOrchestrator:
         finally:
             if self._look_tasks.get(robot_id) is current:
                 self._look_tasks.pop(robot_id, None)
+            if reserved:
+                end()
 
     async def close(self) -> None:
         self._closed = True
