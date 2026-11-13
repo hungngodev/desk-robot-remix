@@ -1670,9 +1670,6 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
     assert await session._current_tool_scene(Http(), 0, 0) == ""
 
 
-@pytest.mark.parametrize("facts,audio_enqueued", [
-    (False, False), (True, False), (True, True),
-])
 def test_native_turn_cleanup_preserves_dialogue_but_clears_old_tool_claims(
     native,
 ):
@@ -1711,6 +1708,9 @@ def test_native_turn_cleanup_preserves_dialogue_but_clears_old_tool_claims(
     assert session.latest_jpeg == b"existing_frame"
 
 
+@pytest.mark.parametrize("facts,audio_enqueued", [
+    (False, False), (True, False), (True, True),
+])
 async def test_native_tool_worker_releases_speaker_if_no_audio_was_queued(
     native, facts, audio_enqueued,
 ):
