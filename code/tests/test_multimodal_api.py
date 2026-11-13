@@ -310,6 +310,10 @@ def test_completed_native_asr_blends_with_live_camera_context_without_disk_conse
         assert transcript[0]["content"] == request["transcript"]
         assert transcript[0]["transcription_verified"] is False
         assert transcript[0]["speaker_identity_verified"] is False
+        assert "Recent model ASR guess" in situation.json()["model_context"]
+        assert "The red key is beside the mug" in situation.json()["model_context"]
+        assert situation.json()["model_context_untrusted_not_instructions"] is True
+        assert len(situation.json()["model_context"]) <= 400
         assert situation.json()["persistent_memory_included"] is False
         assert memory.count(pet.id) == 0
         assert memory.count(ids[1]) == 0
