@@ -138,7 +138,7 @@ class CameraFrameHub:
         # Ephemeral successful tool interpretations accompany sensor cues,
         # not raw JPEG/PCM or persistent user memories. One existing owner.
         self.tool_history = {
-            robot: deque(maxlen=4) for robot in robot_ids
+            robot: deque(maxlen=5) for robot in robot_ids
         }
         # Keep only the pet's actual transmitted text, not fake "heard"
         # playback evidence. Unlike a VLM guess this can survive the NEXT
@@ -540,7 +540,13 @@ class CameraFrameHub:
         self._check(robot_id)
         self._generation[robot_id] += 1
         self.frames[robot_id].clear()
-        self.tool_history[robot_id].clear()
+        # Camera outages invalidate visual guesses, not authenticated
+        # status, pickup, sensor or private memory tool receipts.
+        tools = self.tool_history[robot_id]
+        self.tool_history[robot_id] = deque(
+            (entry for entry in tools if entry[0] != "visual_look"),
+            maxlen=tools.maxlen,
+        )
         # An image/voice-monitor outage invalidates camera interpretations,
         # not an actual line already transmitted by the Mac speaker owner.
         # Spoken text retains its own 30s TTL and is not playback proof.
@@ -551,6 +557,7 @@ class CameraFrameHub:
 
     def clear(self, robot_id: str) -> None:
         self.discard_video(robot_id)
+        self.tool_history[robot_id].clear()
         self.spoken_history[robot_id].clear()
         self.heard_history[robot_id].clear()
         self.event_history[robot_id].clear()

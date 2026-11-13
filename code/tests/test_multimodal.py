@@ -1714,3 +1714,30 @@ def test_equal_timestamp_tool_receipt_cannot_overwrite_first_result():
     assert receipts[0]["summary"] == "first completed frame"
     hub.remember_tool("robot-01", "visual_look", "new frame", 10.1)
     assert hub.recent_tool_context("robot-01", 11.0)[0]["summary"] == "new frame"
+
+
+def test_video_loss_retains_five_kinds_of_tool_receipts_without_visual_guess():
+    """A camera transport outage must not erase independent read-only facts."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    kinds = (
+        "visual_look", "robot_status", "pickup_status",
+        "sensor_telemetry", "memory_recall",
+    )
+    for index, kind in enumerate(kinds):
+        hub.remember_tool("robot-01", kind, kind + " evidence", 100.0 + index * .1)
+    hub.remember_tool("robot-02", "visual_look", "other pet visual guess", 100.0)
+    assert {item["kind"] for item in hub.recent_tool_context("robot-01", 101)} == set(kinds)
+
+    hub.discard_video("robot-01")
+    receipts = hub.recent_tool_context("robot-01", 101)
+    assert {item["kind"] for item in receipts} == set(kinds) - {"visual_look"}
+    assert all(item["source"] != "local_vlm_interpretation_not_physical_measurement"
+               for item in receipts)
+    assert [entry["kind"] for entry in hub.recent_tool_context("robot-02", 101)] == [
+        "visual_look"
+    ]
+    assert all(entry["kind"] != "visual_look" for entry in hub.interaction_timeline(
+        "robot-01", 101
+    ))
+    hub.clear("robot-01")
+    assert hub.recent_tool_context("robot-01", 101) == []
