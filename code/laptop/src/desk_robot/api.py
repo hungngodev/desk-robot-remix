@@ -309,7 +309,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # Physical safety dominates optional pet/task/audio cleanup.
             return await coordinator().stop(robot_id)
         finally:
-            await app.state.runtime.pet.pause(robot_id)
+            try:
+                await app.state.runtime.pet.pause(robot_id)
+            finally:
+                await stop_native_pet_speech(robot_id)
 
     @app.get("/v1/pet/{robot_id}", dependencies=[Depends(authorize)])
     async def pet_status(robot_id: str):
