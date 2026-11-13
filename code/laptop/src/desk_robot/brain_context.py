@@ -245,7 +245,8 @@ def compose_brain_context(
             requested_tool = "robot_status"
             break
     cue_parts.sort(key=lambda candidate: (
-        0.5 if candidate[2] == requested_tool else candidate[0]
+        0.5 if requested_tool is not None and candidate[2] == requested_tool
+        else candidate[0]
     ))
     selected: list[str] = []
     remaining = 400
