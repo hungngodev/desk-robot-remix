@@ -346,8 +346,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # Stop wheels before awaiting vision/TTS task cancellation.
             await coordinator().stop(robot_id)
         finally:
-            result = await app.state.runtime.pet.pause(robot_id)
-        await stop_native_pet_speech(robot_id)
+            try:
+                result = await app.state.runtime.pet.pause(robot_id)
+            finally:
+                # Even if motor STOP fails, revoke native initiative and
+                # request physical speaker interruption.
+                await stop_native_pet_speech(robot_id)
         return result
 
     @app.post("/v1/pet/{robot_id}/quiet", dependencies=[Depends(operator)])
@@ -358,10 +362,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             try:
                 await coordinator().stop(robot_id)
             finally:
-                result = await app.state.runtime.pet.set_quiet(
-                    robot_id, True
-                )
-            await stop_native_pet_speech(robot_id)
+                try:
+                    result = await app.state.runtime.pet.set_quiet(
+                        robot_id, True
+                    )
+                finally:
+                    await stop_native_pet_speech(robot_id)
             return result
         return await app.state.runtime.pet.set_quiet(robot_id, False)
 
