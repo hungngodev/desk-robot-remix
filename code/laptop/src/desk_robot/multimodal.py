@@ -680,8 +680,10 @@ class MultimodalOrchestrator:
         while not self._closed and self.settings.voice_vision_tools_enabled:
             try:
                 async for jpeg, received in head.stream_frames():
-                    if self._closed:
-                        break
+                    if self._closed or not self.settings.voice_vision_tools_enabled:
+                        self.hub.discard_video(robot_id)
+                        return
+                    failures = 0  # Healthy frames reset reconnection backoff.
                     metrics = self._metrics[robot_id]
                     metrics["stream_frames_received"] += 1
                     # Camera feed can be 4 FPS while cheap motion sampling is
