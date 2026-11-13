@@ -494,11 +494,21 @@ async def transmit(conn, text, frames):
     from core.handle.sendAudioHandle import send_tts_message
 
     global active_device_id
+    if conn.conn_from_mqtt_gateway:
+        raise ValueError("Speech bridge currently requires direct Xiaozhi WebSocket transport")
+    # This is the SAME physical decoder used by native MiniCPM. Preserve
+    # Mac proactive and social pet speech, but never let it overlap a human
+    # voice/tool answer or a peer robot's already claimed speech.
+    native = _native_adapter()
+    begin = getattr(native, "begin_external_speech", None)
+    leased = False
+    if callable(begin):
+        leased = await begin(conn)
+        if not leased:
+            raise RuntimeError("Live human/native tool speech owns the Xiaozhi speaker")
     active_device_id = conn.device_id
     voice_frames.pop(conn.device_id, None)
     voice_last_frame_at.pop(conn.device_id, None)
-    if conn.conn_from_mqtt_gateway:
-        raise ValueError("Speech bridge currently requires direct Xiaozhi WebSocket transport")
     # The speaker lock and callers serialize transmission, but cancellation
     # does not wait for that lock. Capture generation before clearing stale
     # abort state; once interrupted this exact transmission cannot restart.
@@ -532,9 +542,13 @@ async def transmit(conn, text, frames):
             else:
                 await send_tts_message(conn, "stop")
         finally:
-            conn.clearSpeakStatus()
-            if active_device_id == conn.device_id:
-                active_device_id = None
+            try:
+                conn.clearSpeakStatus()
+            finally:
+                if active_device_id == conn.device_id:
+                    active_device_id = None
+                if leased:
+                    await native.end_external_speech(conn)
 
 
 def create_app():
