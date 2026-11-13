@@ -1430,6 +1430,26 @@ class NativeOmniSession:
                     and self._tool_audio_response_id != response_id) or self.closed:
                 continue
             if current_response != response_id or generation != self._generation:
+                if current_response is not None:
+                    # Inspired by Pipecat's ordered, uninterruptible STOP
+                    # barrier: a newer reply must never begin while the
+                    # previous response still owns the physical decoder.
+                    # Discard the old partial words, not a fictional sent
+                    # utterance. A human barge already owns STOP when the
+                    # generation changed.
+                    self._tool_reply_pending.pop(current_response, None)
+                    self._native_output_words.pop(current_response, None)
+                    if (generation == self._generation
+                            and current_response != response_id):
+                        stopped = await self._send_device_state(
+                            "stop", generation
+                        )
+                        if stopped is False:
+                            dropped_response_id = response_id
+                            current_response = None
+                            pending.clear()
+                            resample_state = None
+                            continue
                 pending.clear()
                 resample_state = None
                 current_response = response_id
