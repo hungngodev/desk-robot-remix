@@ -892,6 +892,11 @@ class MultimodalOrchestrator:
         if (self._closed or not self.settings.voice_vision_tools_enabled
                 or not self.hub.user_active(robot_id, time.monotonic())):
             return
+        if self.stream_owns_camera(robot_id):
+            # This head already provides continuous live frames. VAD changes
+            # the selected frame priority, not physical acquisition. Starting
+            # an old one-FPS snapshot poller would duplicate that same JPEG.
+            return
         task = self._capture_tasks.get(robot_id)
         if task is None or task.done() or task.cancelling():
             # A new VAD start can race with the prior speech_end cancellation.
