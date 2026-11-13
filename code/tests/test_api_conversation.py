@@ -147,8 +147,8 @@ async def test_five_robot_social_history_labels_observation_and_speech_correctly
     transcripts = await c.run(ids, "Describe a new game", 5)
     assert [line["robot_id"] for line in transcripts] == ids
     assert len(speaker.spoken) == 5
-    assert "I witnessed: A key appeared" in c._persona_with_memory(settings.robots[0])
-    assert "I was told by robot-01: A key appeared" in c._persona_with_memory(settings.robots[1])
+    assert "I observed: A key appeared" in c._persona_with_memory(settings.robots[0])
+    assert "robot-01 reported: A key appeared" in c._persona_with_memory(settings.robots[1])
     for robot_id in ids:
         records = memory.recent(robot_id)
         assert any(m.kind == "own_utterance" and m.source_robot == robot_id
@@ -157,6 +157,29 @@ async def test_five_robot_social_history_labels_observation_and_speech_correctly
         assert memory.count(robot_id) == (6 if robot_id in ids[:2] else 5)
     context = c._persona_with_memory(settings.robots[1])
     assert "I said: " in context
-    assert "I heard robot-01 say: " in context
+    assert "robot-01 said (peer report, not my sighting): " in context
     assert "I witnessed: I see a candy" not in context
     assert c.histories[ids[0]] is not c.histories[ids[1]]
+
+
+async def test_group_prompts_never_promote_forged_peer_memory_to_firsthand(settings, tmp_path):
+    ids = ["robot-01", "robot-02"]
+    memory = MemoryStore(tmp_path, ids)
+    # Deliberately inconsistent provenance must remain attributed to its source
+    # in both the persona and topic-specific retrieval paths.
+    memory.remember(
+        "robot-02", "forged_utterance", "I picked up a key",
+        kind="own_utterance", source_robot="robot-01", witnessed=True,
+    )
+    memory.remember(
+        "robot-02", "foreign_asr", "The user asked for a move",
+        kind="heard_human", source_robot="robot-01", witnessed=True,
+    )
+    c = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=memory)
+    persona = c._persona_with_memory(settings.robot("robot-02"))
+    assert "robot-01 reported: I picked up a key" in persona
+    assert "robot-01 reported uncertain human speech" in persona
+    await c.run(ids, "picked up a key", 1)
+    prompt = c.histories["robot-02"][1]["content"]
+    assert "robot-01 reported: I picked up a key" in prompt
+    assert "I said previously: I picked up a key" not in prompt
