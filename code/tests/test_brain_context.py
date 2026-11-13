@@ -36,6 +36,8 @@ def test_context_provenance_and_source_types_are_not_interchangeable():
         {"channel": "sensor", "kind": "touch_tap"},
         {"channel": "tool", "kind": "visual_look",
          "content": "Might be a silver key"},
+        {"channel": "robot_speech", "kind": "own_utterance",
+         "content": "Let's try a guessing game!"},
     ]
     result = compose_brain_context(recent, core, timeline)
     assert result.recent.count("A key appeared") == 1
@@ -46,6 +48,8 @@ def test_context_provenance_and_source_types_are_not_interchangeable():
     assert "XIAO frame received (contents not inferred)" in result.interaction
     assert "Physical sensor edge: touch_tap" in result.interaction
     assert "Earlier local VLM guess, not fresh sighting" in result.interaction
+    assert "playback unverified" in result.interaction
+    assert "guessing game" in result.interaction
     assert "raw bytes" not in result.interaction
     assert len(result.recent) <= 600
     assert len(result.core) <= 500
@@ -110,6 +114,12 @@ async def test_pet_brain_uses_same_timeline_without_a_second_media_owner(
         assert "Earlier local VLM guess" in prompt
         assert "not fresh sighting" in prompt
         assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
+        spoken = [item for item in hub.interaction_timeline(
+            "robot-01", time.monotonic()
+        ) if item["channel"] == "robot_speech"]
+        assert len(spoken) == 1
+        assert "hiding game" in spoken[0]["content"]
+        assert spoken[0]["playback_verified"] is False
         assert memory.count("robot-02") == 0
     finally:
         await pet.close()
