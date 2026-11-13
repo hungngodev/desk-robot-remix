@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -61,6 +62,70 @@ class OllamaChat:
         if not text or len(text) > 2000:
             raise RuntimeError("Ollama returned empty or oversized speech")
         return text
+
+
+    async def proactive_decision(self, history: list[dict]) -> dict:
+        """Reuse Ollama's native JSON Schema constrained decoding as a
+        proactive speak/silence/read-only decision, not free-form TTS text.
+
+        One inference step may ask for the existing head status or aux
+        telemetry. The caller alone performs that read with source validation,
+        then sends its result as a separate typed tool message for one final
+        inference. There is no path from this API to motor or charger tools.
+        """
+        schema = {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["silence", "speak", "inspect"],
+                },
+                "text": {"type": "string", "maxLength": 200},
+                "tool": {
+                    "type": "string",
+                    "enum": ["none", "status", "aux_status"],
+                },
+            },
+            "required": ["action", "text", "tool"],
+            "additionalProperties": False,
+        }
+        response = await self.client.post(
+            self.settings.ollama_url.rstrip("/") + "/api/chat",
+            json={
+                "model": self.settings.ollama_model,
+                "messages": history,
+                "format": schema,
+                "stream": False,
+                "think": False,
+                "options": {"num_predict": 140, "temperature": 0},
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        raw = response.json()["message"]["content"]
+        if not isinstance(raw, str) or not 1 <= len(raw) <= 1200:
+            raise RuntimeError("Invalid proactive decision response")
+        try:
+            value = json.loads(raw)
+        except ValueError as exc:
+            raise RuntimeError("Malformed proactive model decision") from exc
+        if (not isinstance(value, dict)
+                or set(value) != {"action", "text", "tool"}
+                or value["action"] not in {"silence", "speak", "inspect"}
+                or value["tool"] not in {"none", "status", "aux_status"}
+                or not isinstance(value["text"], str)
+                or len(value["text"]) > 200
+                or (value["action"] == "speak" and (
+                    not value["text"].strip() or value["tool"] != "none"
+                ))
+                or (value["action"] == "inspect" and (
+                    value["tool"] == "none" or value["text"].strip()
+                ))
+                or (value["action"] == "silence" and (
+                    value["tool"] != "none" or value["text"].strip()
+                ))):
+            raise RuntimeError("Invalid proactive model decision envelope")
+        return value
 
 
     async def readonly_tool_plan(self, history: list[dict]) -> str:
