@@ -335,11 +335,15 @@ class PetController:
         self._group_last_spoken = time.monotonic()
         # Priority inversion would let an old 45-second background VLM call
         # block a human's direct look request. Abort the candidate analysis.
-        old_vision = self._vision_inflight
-        if old_vision is not None and not old_vision.done():
-            old_vision.cancel()
+        self.preempt_background_vision()
         await self._cancel_speech(robot_id)
         return self.status(robot_id)
+
+    def preempt_background_vision(self) -> None:
+        """Cancel only optional VLM inference, never the pet observer loop."""
+        pending = self._vision_inflight
+        if pending is not None and not pending.done():
+            pending.cancel()
 
     async def _cancel_speech(self, robot_id: str) -> None:
         task = self._speech_task
