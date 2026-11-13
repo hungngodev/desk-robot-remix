@@ -953,6 +953,73 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_native_live_context_expiry_restores_base_model_instructions(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._base_instructions = "Pip does not operate motors."
+    session._context_instructions = session._base_instructions
+    observed = []
+    current = ["Physical sensor edge: petting_zone"]
+
+    async def send(event):
+        observed.append(event)
+
+    session._send = send
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "model_context": current[0],
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+            }
+
+    class Mac:
+        def get(self, url, **kwargs):
+            return Reply()
+
+    worker = asyncio.create_task(session._refresh_live_context(Mac()))
+    try:
+        session._context_wakeup.set()
+        async with asyncio.timeout(1):
+            while session.native_context_updates < 1:
+                await asyncio.sleep(.005)
+        assert "petting_zone" in observed[-1]["session"]["instructions"]
+        # The Mac's 30s TTL has expired; the model must no longer retain
+        # a previously truthful but now stale situational instruction.
+        current[0] = ""
+        session._context_last_sync_at = float("-inf")
+        session._context_wakeup.set()
+        async with asyncio.timeout(1):
+            while session.native_context_updates < 2:
+                await asyncio.sleep(.005)
+        assert observed[-1]["session"]["instructions"] == (
+            session._base_instructions
+        )
+        assert session.native_context_errors == 0
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_live_context_refuses_cross_robot_and_stale_turn_data(native):
     module, bridge = native
     conn, _ = connection()
