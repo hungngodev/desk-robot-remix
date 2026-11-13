@@ -183,7 +183,7 @@ async def call(conn, route, payload=None):
         or any(
             not isinstance(tool, dict)
             or tool.get("route") not in {
-                "look", "status", "latest-pickup",
+                "look", "status", "power-status", "latest-pickup",
                 "interaction-context", "voice-context",
             }
             or not isinstance(tool.get("payload"), dict)
