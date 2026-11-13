@@ -4,13 +4,14 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from desk_robot.cli import inspect_live_media
+from desk_robot.cli import inspect_live_media, request
 
 
 def configured():
     robot = SimpleNamespace(id="robot-01", device_id="xiaozhi-01")
     return SimpleNamespace(
         mode="hardware", voice_vision_tools_enabled=True,
+        coordinator_token_env="DESK_ROBOT_API_TOKEN",
         robot=lambda robot_id: robot if robot_id == robot.id
         else (_ for _ in ()).throw(KeyError(robot_id)),
     )
@@ -108,3 +109,37 @@ async def test_live_doctor_refuses_simulation_and_unconsented_camera():
     config.voice_vision_tools_enabled = False
     with pytest.raises(ValueError):
         await inspect_live_media(config, "robot-01")
+
+
+async def test_real_camera_cli_commands_route_to_existing_mac_authorities(
+    monkeypatch,
+):
+    import desk_robot.cli as cli
+
+    original_client = httpx.AsyncClient
+    transport, observed = simulated_mac()
+    monkeypatch.setenv("DESK_ROBOT_API_TOKEN", "a" * 40)
+
+    def fake_client(*args, **kwargs):
+        return original_client(*args, transport=transport, **kwargs)
+
+    monkeypatch.setattr(cli.httpx, "AsyncClient", fake_client)
+    settings = configured()
+    args = SimpleNamespace(
+        url="http://127.0.0.1:8765", robot="robot-01",
+        action="look", question="What do you see in front of you?",
+    )
+    answer = await request(args, settings)
+    assert answer["answer"] == "A key may be visible."
+    args.action = "situation"
+    context = await request(args, settings)
+    assert context["raw_media_included"] is False
+    args.action = "vision"
+    status = await request(args, settings)
+    assert status["multimodal_model_configured"] is True
+    assert [item[0] for item in observed] == ["POST", "GET", "GET"]
+    assert all("/v1/pet/robot-01/" in item[1] for item in observed)
+    settings.voice_vision_tools_enabled = False
+    args.action = "look"
+    with pytest.raises(ValueError, match="consent"):
+        await request(args, settings)
