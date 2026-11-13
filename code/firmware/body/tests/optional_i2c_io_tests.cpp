@@ -175,6 +175,18 @@ int main() {
     CHECK(!stuck_accessories.readings().dock.valid);
     CHECK(stuck_accessories.readings().dock.sample_seq == before_range_fault);
     CHECK(!stuck_wire.unsafe_parallel_mux);
+    stuck_wire.ranges = 0;
+    stuck_wire.range_mux_stuck = false;
+    for (std::uint32_t ms = 1116; ms < 1600; ms += 12)
+      stuck_accessories.poll(ms);
+    CHECK(stuck_accessories.readings().dock.valid);
+    const auto before_failed_write = stuck_wire.transactions;
+    stuck_wire.fail_optional_mux_write = true;
+    stuck_accessories.poll(1608);
+    CHECK(!stuck_accessories.readings().dock.valid);
+    // Even if Wire::write rejects a control byte, finish BOTH attempted
+    // 0x71 transmissions with STOP; stale GPIOA evidence cannot survive.
+    CHECK(stuck_wire.transactions >= before_failed_write + 4);
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
