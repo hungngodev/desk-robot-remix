@@ -1340,7 +1340,10 @@ class NativeOmniSession:
                     if pending is not None and not pending.done():
                         pending.cancel()  # Superseded optional Mac tool.
             jpeg, age, receipt = None, None, None
-            if (self._user_was_talking and self.latest_jpeg is not None
+            # A proactive model sees selected live images alongside
+            # continuous microphone PCM, including genuine quiet-room audio.
+            # VAD controls speech turn cancellation, NOT camera visibility.
+            if (self.latest_jpeg is not None
                     and self._latest_frame_receipt_us
                     != self._last_video_sent_receipt_us):
                 candidate_age = round(
