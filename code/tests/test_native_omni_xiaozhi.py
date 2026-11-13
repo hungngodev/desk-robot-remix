@@ -855,6 +855,124 @@ def test_native_compound_asr_queues_distinct_tools_once_per_real_audio_item(nati
     assert first[3] == session._readonly_turn
 
 
+@pytest.mark.parametrize("superseded_by", [
+    "new_human_turn", "barge_generation", "active_new_speech",
+])
+def test_native_completed_asr_rejects_older_committed_audio_item(
+    native, superseded_by,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._readonly_turn = 1
+    session._pending_audio_commits.append((0, 1))
+    if superseded_by == "new_human_turn":
+        session._readonly_turn += 1
+    elif superseded_by == "barge_generation":
+        session._generation += 1
+    else:
+        session._user_was_talking = True
+    session._bind_native_audio_commit({
+        "type": "input_audio_buffer.committed",
+        "item_id": "old_audio_item",
+        "event": {"turn_id": 14},
+    })
+    assert not session._accept_current_audio_item({
+        "type": "conversation.item.input_audio_transcription.completed",
+        "item_id": "old_audio_item",
+        "transcript": "What do you see on the desk?",
+    })
+    assert session.native_readonly_tools_dropped == 1
+    assert not session.closed
+
+
+def test_native_only_current_committed_audio_can_enter_tools_and_memory(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._readonly_turn = 4
+    event = {
+        "type": "conversation.item.input_audio_transcription.completed",
+        "item_id": "verified_input_item",
+        "transcript": "Check your battery status",
+    }
+    assert not session._accept_current_audio_item(event)
+    assert session._readonly_queue.empty()
+    assert session._heard_queue.empty()
+    session._pending_audio_commits.append((0, 4))
+    session._bind_native_audio_commit({
+        "type": "input_audio_buffer.committed",
+        "item_id": "verified_input_item",
+        "event": {"turn_id": 42},
+    })
+    assert session._accept_current_audio_item(event)
+    session._accept_heard_transcript(event)
+    session._queue_readonly_tool(event)
+    assert session._readonly_queue.get_nowait()[0] == "status"
+    assert session._heard_queue.qsize() == 1
+    assert not session._accept_current_audio_item(event)  # replay
+    assert session.native_readonly_tools_dropped == 2
+
+
+def test_native_model_reordered_input_commits_fail_closed(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._pending_audio_commits.extend([(0, 0), (0, 0)])
+    session._bind_native_audio_commit({
+        "type": "input_audio_buffer.committed",
+        "item_id": "first", "event": {"turn_id": 88},
+    })
+    session._bind_native_audio_commit({
+        "type": "input_audio_buffer.committed",
+        "item_id": "reordered", "event": {"turn_id": 90},
+    })
+    assert session.closed
+    assert session.last_error == "Native model audio commit sequence inconsistent"
+
+
+@pytest.mark.parametrize("invalid", [
+    {"item_id": "", "event": {"turn_id": 1}},
+    {"item_id": "nonascii_\u00f1", "event": {"turn_id": 1}},
+    {"item_id": "safe", "event": {"turn_id": True}},
+    {"item_id": "safe", "event": {"turn_id": "1"}},
+    {"item_id": "safe"},
+])
+def test_native_audio_commit_rejects_bad_identity_without_consuming_local_turn(
+    native, invalid,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._pending_audio_commits.append((0, 0))
+    session._bind_native_audio_commit({
+        "type": "input_audio_buffer.committed", **invalid,
+    })
+    assert len(session._pending_audio_commits) == 1
+    assert not session._asr_item_turns
+    assert session.native_readonly_tools_dropped == 1
+
+
 async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
     native, monkeypatch,
 ):
