@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import secrets
 import time
@@ -8,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -474,6 +475,51 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "audio_playback_verified": False,
             "motor_authorized": False,
         }
+
+    @app.get("/v1/pet/{robot_id}/omni-stream",
+             dependencies=[Depends(authorize)])
+    async def omni_stream(robot_id: str, request: Request):
+        """One authenticated PUSH subscription to continuous Mac camera evidence.
+
+        No extra capture or snapshot request. The selected native MiniCPM
+        observer sees new frames even during silent microphone input, and a
+        slow reader drops frames instead of growing a queue.
+        """
+        coordinator().robot(robot_id)
+        if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
+            raise HTTPException(403, "Physical live camera requires explicit opt in")
+        visual = getattr(app.state.runtime, "multimodal", None)
+        if visual is None or not callable(getattr(visual, "native_live_frames", None)):
+            raise HTTPException(503, "Continuous visual observer unavailable")
+
+        async def events():
+            last_sent = float("-inf")
+            async for frame in visual.native_live_frames(robot_id):
+                if await request.is_disconnected():
+                    return
+                now = time.monotonic()
+                age_ms = round((now - frame.received_at) * 1000)
+                if (not 0 <= age_ms <= 1000
+                        or frame.received_at - last_sent < 0.85):
+                    continue
+                last_sent = frame.received_at
+                yield (json.dumps({
+                    "robot_id": robot_id,
+                    "camera_age_ms": age_ms,
+                    "camera_receipt_us": round(frame.received_at * 1_000_000),
+                    "motion_ppm": round(
+                        max(0.0, min(1.0, frame.motion_fraction)) * 1_000_000
+                    ),
+                    "source": frame.source,
+                    "jpeg_base64": base64.b64encode(frame.jpeg).decode("ascii"),
+                    "motor_authorized": False,
+                    "charging_authorized": False,
+                }, separators=(",", ":")) + "\n").encode("ascii")
+        return StreamingResponse(
+            events(), media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Desk-Robot-Id": robot_id,
+                     "X-Content-Type-Options": "nosniff"},
+        )
 
     @app.get("/v1/pet/{robot_id}/omni-frame", dependencies=[Depends(authorize)])
     async def omni_frame(robot_id: str):
