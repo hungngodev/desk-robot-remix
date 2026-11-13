@@ -94,6 +94,11 @@ async def observe_actual_dock(head, robot) -> dict:
         jpeg = await asyncio.wait_for(head.snapshot(), timeout=3.0)
     except (OSError, ConnectionError, TimeoutError) as exc:
         return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
+    # Reject malformed or oversized snapshots before occupying the sole native
+    # AprilTag worker. The detector is not a JPEG transport validator.
+    if (not isinstance(jpeg, bytes) or len(jpeg) < 4 or len(jpeg) > 512 * 1024
+            or not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9")):
+        return _hold(robot.id, reason="Invalid dock JPEG", source="head_snapshot_invalid")
     received_at = time.monotonic()
     try:
         pose = await detect_bounded(jpeg, calib, captured_at=received_at)
