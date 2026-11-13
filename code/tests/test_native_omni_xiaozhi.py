@@ -1242,6 +1242,9 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     assert all(item[0].startswith("tool_") and len(item[1]) == 9600
                for item in chunks[:-1])
     assert session._tool_audio_response_id == chunks[0][0]
+    await session._speak_tool_results(Http(), "One more unrelated read", [
+        {"source": "wroom_status", "safety_fault": "unknown"}], 0, 0)
+    assert len(calls) == 1  # one reply for one authenticated human turn
     # Old future tool completion cannot speak into the next human turn.
     session._tool_speech_turn = None
     await session._speak_tool_results(Http(), "What color?", [
