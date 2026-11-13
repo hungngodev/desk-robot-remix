@@ -119,7 +119,10 @@ class Runtime:
         # currently playing unsolicited or group speech before reconciliation.
         missing_starts = [
             robot_id for robot_id in active
-            if not visual.hub.user_active(robot_id, now)
+            # A finite seven-second AEC barge hold is NOT an explicit VAD
+            # start. An authenticated active snapshot must upgrade it to
+            # a real turn, preempt old camera work and start speech frames.
+            if visual.hub.voice_until[robot_id] != float("inf")
         ]
         # A reconnect snapshot can contain speech edges missed by the
         # ordered event stream. Merely setting hub.voice_until did not cancel
