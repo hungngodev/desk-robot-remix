@@ -89,6 +89,58 @@ def test_brightness_shift_not_mistaken_for_localized_motion():
     assert change_fraction(a, bytes(c)) > 0.01
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_direct_visual_request_reserves_fleet_vlm_and_camera_until_finished(cancel):
+    """No new speculative JPEG/VLM may overtake the entire human look."""
+    class HeldHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def snapshot(self):
+            self.captures += 1
+            self.entered.set()
+            await self.release.wait()
+            return image()
+
+    head, scene = HeldHead(), Vision()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        scene, asyncio.Lock(),
+    )
+    reservation = []
+    visual.begin_direct_vision = lambda: reservation.append("begin")
+    visual.end_direct_vision = lambda: reservation.append("end")
+    try:
+        task = asyncio.create_task(
+            visual.look("robot-01", "What is on the desk?")
+        )
+        await asyncio.wait_for(head.entered.wait(), timeout=1)
+        assert reservation == ["begin"]
+        # A new optional pet sample must fail BEFORE acquiring the same
+        # XIAO camera lock, instead of queuing behind the direct question.
+        with pytest.raises(RuntimeError, match="Explicit human look"):
+            await asyncio.wait_for(
+                visual.capture("robot-01", source="proactive"), timeout=.5
+            )
+        assert head.captures == 1
+        if cancel:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            head.release.set()
+            result = await asyncio.wait_for(task, timeout=2)
+            assert result["frames_used"] == 1
+            assert len(scene.calls) == 1
+        assert reservation == ["begin", "end"]
+        assert not visual._look_tasks
+    finally:
+        head.release.set()
+        await visual.close()
+
+
 async def test_sensor_burst_uses_existing_camera_owner_and_coalesces_requests():
     heads = {"robot-01": Head(), "robot-02": Head()}
     visual = MultimodalOrchestrator(config(), heads, Vision(), asyncio.Lock())
