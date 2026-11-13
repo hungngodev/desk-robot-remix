@@ -120,7 +120,16 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
     ) or re.match(
         r"^(?:remember|recall) (?:what|when|where|who|the)\b", polite,
     ):
-        return "voice-context", {"question": text[:240]}
+        # A broad "do you remember anything?" is a RECENT recall request,
+        # not a search for the literal words "remember" or "anything".
+        # Specific memories still use the existing topical SQLite search.
+        generic = re.fullmatch(
+            r"(?:do you (?:remember|recall)(?: (?:anything|me|yesterday))?|"
+            r"what do you remember|tell me what you remember|"
+            r"can you recall anything)(?: (?:from|about) yesterday)?",
+            spoken,
+        )
+        return "voice-context", {} if generic else {"question": text[:240]}
     if re.match(
         r"^(?:what (?:just )?happened|what did you (?:just )?(?:notice|"
         r"sense|detect)|did (?:i|someone) (?:touch|tap) you)\b",
