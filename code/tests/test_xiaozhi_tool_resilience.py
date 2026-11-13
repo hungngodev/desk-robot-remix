@@ -215,6 +215,120 @@ async def test_readonly_visual_tool_accepts_only_real_source_labeled_vlm_reply(
     assert answer == confirmed
 
 
+async def test_five_registered_heads_route_simultaneous_status_to_own_robot(
+    bridge_tools, monkeypatch,
+):
+    import asyncio
+
+    bridge = bridge_tools.bridge
+    heads = {
+        f"mac-head-{i:02d}": SimpleNamespace(device_id=f"mac-head-{i:02d}")
+        for i in range(1, 6)
+    }
+    # The installed plugin binds the original registry dict at import time.
+    bridge.connections.clear()
+    bridge.connections.update(heads)
+    resolve = lambda device: (
+        "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
+    )
+    bridge.robot_for_device = resolve
+    bridge_tools.robot_for_device = resolve
+    bridge.voice_turn_generation = {device: 3 for device in heads}
+    original = httpx.AsyncClient
+    requests = []
+
+    async def handler(request):
+        robot = request.url.path.split("/")[3]
+        requests.append(robot)
+        await asyncio.sleep(0)
+        return httpx.Response(200, json={
+            "robot_id": robot,
+            "backend": "stepper_28byj48",
+            "armed": False,
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    results = await asyncio.gather(*(
+        bridge_tools.call(head, "status") for head in heads.values()
+    ))
+    assert sorted(result["robot_id"] for result in results) == [
+        f"robot-{i:02d}" for i in range(1, 6)
+    ]
+    assert sorted(requests) == sorted(result["robot_id"] for result in results)
+    assert all("error" not in result for result in results)
+
+
+async def test_one_human_cancels_only_own_visual_tool_not_four_other_pets(
+    bridge_tools, monkeypatch,
+):
+    import asyncio
+
+    bridge = bridge_tools.bridge
+    heads = {
+        f"mac-head-{i:02d}": SimpleNamespace(device_id=f"mac-head-{i:02d}")
+        for i in range(1, 6)
+    }
+    bridge.connections.clear()
+    bridge.connections.update(heads)
+    resolve = lambda device: (
+        "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
+    )
+    bridge.robot_for_device = resolve
+    bridge_tools.robot_for_device = resolve
+    bridge.voice_turn_generation = {device: 3 for device in heads}
+    cancelled = {device: asyncio.Event() for device in heads}
+    bridge.tool_turn_cancel_event = lambda device: cancelled[device]
+    held, aborted = asyncio.Event(), asyncio.Event()
+    original = httpx.AsyncClient
+
+    async def handler(request):
+        robot = request.url.path.split("/")[3]
+        if robot == "robot-01":
+            held.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                aborted.set()
+        return httpx.Response(200, json={
+            "robot_id": robot,
+            "backend": "stepper_28byj48",
+            "armed": False,
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    tasks = {
+        device: asyncio.create_task(bridge_tools.call(head, "status"))
+        for device, head in heads.items()
+    }
+    try:
+        await asyncio.wait_for(held.wait(), timeout=1)
+        completed = await asyncio.wait_for(
+            asyncio.gather(*(task for device, task in tasks.items()
+                             if device != "mac-head-01")), timeout=1
+        )
+        assert {result["robot_id"] for result in completed} == {
+            f"robot-{i:02d}" for i in range(2, 6)
+        }
+        bridge.voice_turn_generation["mac-head-01"] += 1
+        cancelled["mac-head-01"].set()
+        rejected = await asyncio.wait_for(tasks["mac-head-01"], timeout=1)
+        assert "superseded" in rejected["error"]
+        assert aborted.is_set()
+        assert all(not cancelled[device].is_set()
+                   for device in heads if device != "mac-head-01")
+    finally:
+        for task in tasks.values():
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+
 async def test_unknown_xiaozhi_head_cannot_borrow_another_robots_mac_tool(
     bridge_tools, monkeypatch,
 ):
