@@ -162,6 +162,20 @@ async def call(conn, route, payload=None):
                          and result["charging_authorized"] is not False)):
         return {"error": "Robot Mac tool identity or authority invalid",
                 "retried": False}
+    # A free-form answer is not evidence that the authenticated XIAO camera
+    # was used. Only the existing Mac look() response contract may become
+    # a visual answer spoken by Xiaozhi or consumed by native duplex.
+    if route == "look" and (
+        result.get("source") != "authenticated_xiao_camera_and_local_vlm"
+        or type(result.get("frames_used")) is not int
+        or not 1 <= result["frames_used"] <= 2
+        or not isinstance(result.get("answer"), str)
+        or not 1 <= len(result["answer"].strip()) <= 2000
+        or result.get("motor_authorized") is not False
+        or result.get("charging_authorized") is not False
+    ):
+        return {"error": "Missing authenticated visual tool evidence",
+                "retried": False}
     return result
 
 
