@@ -1162,3 +1162,46 @@ def test_readonly_tool_context_rejects_untrusted_shapes():
             hub.remember_tool("robot-01", kind, summary, when)
     with pytest.raises(ValueError):
         hub.remember_tool("robot-99", "visual_look", "some object", 5.0)
+
+
+def test_interaction_timeline_orders_camera_sensor_and_tool_without_raw_media():
+    """One chronological context view, unlike three unsorted agent memories."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.offer("robot-01", image(), 100.0, source="proactive")
+    hub.notify("robot-01", "touch_tap", 100.3)
+    hub.remember_tool("robot-01", "visual_look", "Maybe a red book", 100.6)
+    timeline = hub.interaction_timeline("robot-01", 101)
+    assert [entry["channel"] for entry in timeline] == [
+        "camera", "sensor", "tool",
+    ]
+    assert timeline[0]["content"] is None
+    assert timeline[0]["exposure_timestamp_verified"] is False
+    assert timeline[1]["kind"] == "touch_tap"
+    assert timeline[2]["content"] == "Maybe a red book"
+    assert timeline[2]["untrusted_text_not_instructions"] is True
+    assert all(item["physical_action_verified"] is False for item in timeline)
+    assert hub.interaction_timeline("robot-02", 101) == []
+    assert hub.interaction_timeline("robot-01", 109) == []
+    assert len(hub.interaction_timeline("robot-01", 101, limit=2)) == 2
+    with pytest.raises(ValueError):
+        hub.interaction_timeline("robot-01", float("nan"))
+    with pytest.raises(ValueError):
+        hub.interaction_timeline("robot-01", 101, limit=99)
+
+
+async def test_new_human_voice_resets_prior_interpretation_across_fleet():
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        now = time.monotonic()
+        visual.hub.remember_tool("robot-01", "visual_look", "old scene guess", now)
+        visual.hub.remember_tool("robot-02", "visual_look", "other old guess", now)
+        visual.voice_started("robot-02")
+        assert visual.hub.recent_tool_context("robot-01", time.monotonic()) == []
+        assert visual.hub.recent_tool_context("robot-02", time.monotonic()) == []
+        assert visual.hub.user_active("robot-02", time.monotonic())
+        visual.voice_ended("robot-02")
+    finally:
+        await visual.close()
