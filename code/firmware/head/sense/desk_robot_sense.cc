@@ -221,6 +221,15 @@ public:
                 EnterWifiConfigMode();
                 return;
             }
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            if (app.GetDeviceState() == kDeviceStateSpeaking) {
+                // Stock ToggleChatState would only abort speech and resume
+                // continuous listening. The privacy button must CLOSE mic
+                // upload even if clicked while the model is talking.
+                app.StopListening();
+                return;
+            }
+#endif
             app.ToggleChatState();
         });
     }
