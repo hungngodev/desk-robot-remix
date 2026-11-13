@@ -669,3 +669,25 @@ def test_two_recent_asr_clauses_prioritize_both_distinct_tool_receipts():
     assert "Battery reading 72 percent" in result
     assert "Recent model ASR guess" in result
     assert len(result) <= 400
+
+
+def test_earlier_compound_asr_clause_keeps_battery_tool_under_budget():
+    # The latest chunk requests vision; the earlier one says "and check the
+    # battery". The latter is not a sentence-initial status request.
+    timeline = [
+        {"channel": "tool", "kind": "robot_status",
+         "content": "Battery 23 percent"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "And check the battery"},
+        {"channel": "tool", "kind": "memory_recall",
+         "content": "Unrelated long memory " + "m" * 90},
+        {"channel": "tool", "kind": "visual_look",
+         "content": "A small key beside the cup"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Please look at the cup"},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Battery 23 percent" in result
+    assert "A small key beside the cup" in result
+    assert len(result) <= 400
