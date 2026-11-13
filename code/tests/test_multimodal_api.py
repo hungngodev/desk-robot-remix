@@ -147,6 +147,12 @@ def test_mac_semantic_tool_plan_fail_closed_without_ollama_or_memory_consent(
         assert [tool["route"] for tool in allowed.json()["tools"]] == [
             "voice-context",
         ]
+        photo_memory = client.post(url, headers=headers, json={
+            "transcript": "What did I tell you about the photo?"
+        })
+        assert [tool["route"] for tool in photo_memory.json()["tools"]] == [
+            "voice-context",
+        ]
         compound = client.post(url, headers=headers, json={
             "transcript": "What did I say earlier and can you look at the desk?"
         })
