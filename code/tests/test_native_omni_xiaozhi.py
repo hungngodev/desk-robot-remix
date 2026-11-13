@@ -1928,6 +1928,57 @@ async def test_new_human_tool_turn_cancels_stalled_old_model_speech_http(
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_failed_tool_speech_releases_native_floor_without_duplicate(
+    native,
+):
+    """A backend HTTP 503 cannot lock out all future proactive pet speech."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._tool_speech_turn = (0, 0)
+    async def scene(http, epoch, turn):
+        return "One uncertain touch event"
+    session._current_tool_scene = scene
+
+    class ErrorResult:
+        status = 503
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+    class Http:
+        def post(self, *args, **kwargs):
+            return ErrorResult()
+
+    await session._speak_tool_results(
+        Http(), "What is on my desk?",
+        [{"source": "local_camera_model_guess",
+          "interpretation_not_proof": "Possibly a mug"}],
+        0, 0,
+    )
+    assert session.native_tool_speech_errors == 1
+    assert session._tool_speech_turn is None
+    assert session._tool_answer_started_turn == (0, 0)
+    assert session.outgoing.empty()
+    assert not session._queue_readonly_tool({
+        "item_id": "late_item", "transcript": "Check the battery",
+    })
+
+    module._sessions["mac-01"] = session
+    session._schedule_remote_cancel = lambda events: None
+    try:
+        assert await module.begin_external_speech(conn)
+    finally:
+        await module.end_external_speech(conn)
+        module._sessions.clear()
+
+
 async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native):
     import io
     import wave
