@@ -679,6 +679,7 @@ class MultimodalOrchestrator:
         self.hub._check(robot_id)
         condition = self._model_frame_conditions[robot_id]
         version = self._model_frame_versions[robot_id]
+        last_delivered = float("-inf")
         while not self._closed and self.settings.voice_vision_tools_enabled:
             async with condition:
                 try:
@@ -692,11 +693,17 @@ class MultimodalOrchestrator:
                 if self._closed or not self.settings.voice_vision_tools_enabled:
                     return
                 version = self._model_frame_versions[robot_id]
-            frames = self.hub.frames[robot_id]
-            if not frames:
-                continue
-            frame = frames[-1]
-            if 0 <= time.monotonic() - frame.received_at <= 1:
+            # Sensor confirmation can enter the same three-frame ring
+            # between stream publication and waking this subscriber.
+            # Native duplex only accepts actual stream speech/proactive
+            # sources; never close its video feed over a sensor burst.
+            frame = next((
+                item for item in reversed(self.hub.frames[robot_id])
+                if item.source in ("speech", "proactive")
+            ), None)
+            if (frame is not None and frame.received_at > last_delivered
+                    and 0 <= time.monotonic() - frame.received_at <= 1):
+                last_delivered = frame.received_at
                 yield frame
 
     async def wait_for_proactive_frame(

@@ -1741,3 +1741,32 @@ def test_video_loss_retains_five_kinds_of_tool_receipts_without_visual_guess():
     ))
     hub.clear("robot-01")
     assert hub.recent_tool_context("robot-01", 101) == []
+
+
+async def test_native_stream_subscriber_ignores_interleaved_sensor_snapshot():
+    """A sensor burst cannot poison the native continuous video source."""
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    reader = visual.native_live_frames("robot-01")
+    task = asyncio.create_task(anext(reader))
+    try:
+        await asyncio.sleep(0)
+        visual.hub.offer("robot-01", image(), time.monotonic(), source="proactive")
+        visual.hub.offer(
+            "robot-01", image(square=True), time.monotonic(), source="sensor",
+        )
+        assert visual.hub.frames["robot-01"][-1].source == "sensor"
+        async with visual._model_frame_conditions["robot-01"]:
+            visual._model_frame_versions["robot-01"] += 1
+            visual._model_frame_conditions["robot-01"].notify_all()
+        selected = await asyncio.wait_for(task, timeout=1)
+        assert selected.source == "proactive"
+        assert selected.jpeg.startswith(b"\xff\xd8")
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await reader.aclose()
+        await visual.close()
