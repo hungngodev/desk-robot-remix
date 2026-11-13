@@ -109,3 +109,15 @@ def test_sub_milliamp_rating_does_not_bypass_published_conservative_minimum():
     sufficient = tool(3, 1.8, boost_continuous_input_a=4.589, **ratings)
     assert sufficient["candidate_electrically_sufficient_on_paper"] is True
     assert sufficient["candidate_physically_qualified"] is False
+
+
+def test_contradictory_boost_input_ratings_are_rejected():
+    # A continuous board input rating cannot exceed its stated maximum.
+    with pytest.raises(ValueError, match="Continuous boost input rating"):
+        tool(1, 0.6, boost_max_input_a=3, boost_continuous_input_a=4,
+             boost_continuous_output_a=3, protected_cell_continuous_a=5)
+    # A coherent specification remains eligible for paper sizing only.
+    report = tool(1, 0.6, boost_max_input_a=4, boost_continuous_input_a=3,
+                  boost_continuous_output_a=3, protected_cell_continuous_a=5)
+    assert report["candidate_electrically_sufficient_on_paper"] is True
+    assert report["candidate_physically_qualified"] is False
