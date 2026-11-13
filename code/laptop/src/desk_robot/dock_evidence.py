@@ -18,6 +18,10 @@ def classify_dock(dock: dict) -> str:
     left, right = dock["left_seated"], dock["right_seated"]
     input_good = dock["input_good"]
     indicated = dock["charge_indicated"]
+    # CHG without valid power input is contradictory, not merely unseated
+    # or unpowered. Never hide a charger fault in an ordinary dock state.
+    if indicated and not input_good:
+        return "charge_signal_without_input_fault"
     if left != right:
         return "asymmetric_seat_or_fault"
     if not left and not right:
@@ -52,7 +56,14 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
         ))
         if index != 2:
             await asyncio.sleep(gap)
-    if not (0 < sample_sequences[0] < sample_sequences[1] < sample_sequences[2]):
+    # Match the WROOM's unsigned sequence freshness rule at uint32 rollover.
+    # An old/replayed sample, or a huge backwards jump, still fails closed.
+    def newer(new: int, old: int) -> bool:
+        delta = (new - old) & 0xffffffff
+        return 0 < delta < 0x80000000
+
+    if not (newer(sample_sequences[1], sample_sequences[0])
+            and newer(sample_sequences[2], sample_sequences[1])):
         return _result(robot_id, "dock_sample_replayed_or_reset", False)
     if snapshots[0] != snapshots[1] or snapshots[1] != snapshots[2]:
         return _result(robot_id, "dock_evidence_changed", False)

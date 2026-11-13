@@ -92,6 +92,8 @@ async def test_asymmetric_switch_or_changing_input_refuses_seated_claim(monkeypa
     (True, True, False, False, "seated_but_unpowered"),
     (True, True, True, False, "input_present_not_charging"),
     (False, False, True, True, "charger_input_without_seat"),
+    (False, False, False, True, "charge_signal_without_input_fault"),
+    (True, True, False, True, "charge_signal_without_input_fault"),
 ])
 def test_independent_input_truth_table(left, right, good, charging, state):
     dock = payload()["dock"]
@@ -147,3 +149,30 @@ async def test_dock_status_cannot_claim_valid_without_fresh_hardware_sample(
     bad["dock"][field] = value
     with pytest.raises(ValueError):
         await observe_dock_evidence(FakeHead([bad]), "robot-01")
+
+
+@pytest.mark.parametrize(("sequences", "expected_stable"), [
+    ((0xffffffff, 1, 2), True),
+    ((1, 0xfffffffe, 2), False),
+    ((0xfffffffe, 0xfffffffe, 1), False),
+])
+async def test_dock_gpio_sequence_rollover_matches_wroom_half_range_rule(
+    monkeypatch, sequences, expected_stable,
+):
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for sample, sequence in zip(samples, sequences, strict=True):
+        sample["dock"]["seq"] = sequence
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["stable_three_samples"] is expected_stable
+    assert result["state"] == (
+        "charger_reports_active" if expected_stable
+        else "dock_sample_replayed_or_reset"
+    )
+    assert result["charging_verified"] is False
+    assert result["motor_authorized"] is False
+
+
