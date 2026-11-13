@@ -689,6 +689,38 @@ class MultimodalOrchestrator:
             if 0 <= time.monotonic() - frame.received_at <= 1:
                 yield frame
 
+    async def wait_for_proactive_frame(
+        self, robot_id: str, after: float | None, *, timeout_s: float = 1.2
+    ) -> bool:
+        """Wake the existing pet observer on a real pushed visual receipt.
+
+        This does not poll the camera, allocate another frame buffer or call
+        the model. Use the same condition as the native live subscriber.
+        Every source and generation check still happens in the pet observer.
+        """
+        self.hub._check(robot_id)
+        condition = self._model_frame_conditions[robot_id]
+        latest = after if after is not None else -math.inf
+
+        def ready() -> bool:
+            return (self._closed or not self.settings.voice_vision_tools_enabled
+                    or any(
+                        frame.source == "proactive" and frame.received_at > latest
+                        for frame in self.hub.frames[robot_id]
+                    ))
+
+        async with condition:
+            try:
+                await asyncio.wait_for(
+                    condition.wait_for(ready), timeout=timeout_s
+                )
+            except TimeoutError:
+                return False
+            return not self._closed and any(
+                frame.source == "proactive" and frame.received_at > latest
+                for frame in self.hub.frames[robot_id]
+            )
+
     def start_streams(self) -> None:
         """Own the one persistent visual feed whenever camera consent is on.
 
