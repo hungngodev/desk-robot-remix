@@ -182,6 +182,63 @@ async def test_background_camera_cancel_for_user_speech_does_not_kill_pet_loop(
         await pet.close()
 
 
+
+@pytest.mark.parametrize("preemption", ["human", "direct_question"])
+async def test_late_native_gray_decode_does_not_rewrite_proactive_scene_baseline(
+    fleet, tmp_path, monkeypatch, preemption,
+):
+    """A VAD or direct look during Pillow must not mutate the visual gate."""
+    import threading
+
+    entered, release = threading.Event(), threading.Event()
+    original = VisualChangeGate._reduced
+
+    def slow_grayscale(jpeg_data):
+        entered.set()
+        if not release.wait(2):
+            raise TimeoutError("Test JPEG native worker was not released")
+        return original(jpeg_data)
+
+    monkeypatch.setattr(VisualChangeGate, "_reduced", staticmethod(slow_grayscale))
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": ChangingCamera()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(), interval=.01,
+    )
+    hub = CameraFrameHub([r.id for r in fleet.robots])
+    last_human = [float("-inf")]
+    pet.multimodal = SimpleNamespace(
+        hub=hub,
+        stream_owns_camera=lambda robot_id: robot_id == "robot-01",
+        latest_fleet_human_turn_at=lambda: last_human[0],
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 17, True
+    hub.offer("robot-01", WHITE, time.monotonic(), source="proactive")
+    observer = asyncio.create_task(pet._observe("robot-01", 17))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        if preemption == "human":
+            last_human[0] = time.monotonic()
+            hub.notify("robot-01", "human_voice", last_human[0])
+        else:
+            pet.preempt_background_vision()
+        release.set()
+        await wait_for(lambda: state.stale_camera_events >= 1, timeout=1)
+        assert state.gate._baseline is None
+        assert state.gate._pixel_baseline is None
+        assert state.events == 0
+        assert memory.count("robot-01") == 0
+        assert not observer.done()  # permanent perception owner survives
+    finally:
+        release.set()
+        state.enabled = False
+        observer.cancel()
+        await asyncio.gather(observer, return_exceptions=True)
+        await pet.close()
+
+
 async def test_explicit_look_preempts_background_vlm_waiting_for_shared_lock(
     fleet, tmp_path,
 ):
