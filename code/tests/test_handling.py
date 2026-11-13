@@ -301,3 +301,25 @@ def test_near_uint32_wrap_still_requires_new_stationary_baseline():
                      new_sample=False) == ()
     assert gate.last_sample_ms == 2
     assert len(gate.startup_samples) == 1
+
+
+def test_inconsistent_startup_vectors_do_not_reuse_last_conversion():
+    """Opposing individually plausible 1g readings cannot erase replay identity."""
+    gate = HandlingGate()
+    for i in range(8):
+        vector = (0, 0, 16384 if i < 4 else -16384)
+        assert qualified(gate, sample(acc=vector, sample_ms=200 + i),
+                         100 + i * .1, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_sample_ms == 207
+    assert gate.startup_samples == []
+
+    # Repeated final conversion cannot count toward the next baseline.
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=207),
+                         101 + i * .1, new_sample=False) == ()
+    assert gate.startup_samples == []
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=208 + i),
+                         102 + i * .1, new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
