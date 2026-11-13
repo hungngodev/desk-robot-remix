@@ -1802,6 +1802,64 @@ async def test_native_asr_camera_and_battery_clauses_are_spoken_together(
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_new_human_tool_turn_cancels_stalled_old_model_speech_http(
+    native, monkeypatch,
+):
+    """A wedged tool answer must not monopolize next user's tool worker."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    entered_chat, next_tool = asyncio.Event(), asyncio.Event()
+    cancelled = []
+
+    async def fake_read_batch(entries):
+        if entries[0][2:] == (1, 1):
+            next_tool.set()
+        return [{"source": "mac_readonly", "route": entries[0][0]}]
+
+    async def fake_speech(http, question, facts, epoch, request_turn):
+        if (epoch, request_turn) == (0, 0):
+            entered_chat.set()
+            try:
+                await asyncio.Event().wait()  # Stalled old MiniCPM HTTP
+            except asyncio.CancelledError:
+                cancelled.append((epoch, request_turn))
+                raise
+
+    class HTTP:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+
+    monkeypatch.setattr(module.aiohttp, "ClientSession", HTTP)
+    session._run_readonly_batch = fake_read_batch
+    session._speak_tool_results = fake_speech
+    session._readonly_queue.put_nowait(("look", {}, 0, 0))
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        await asyncio.wait_for(entered_chat.wait(), timeout=1)
+        assert session._readonly_inflight is not None
+        session._generation += 1
+        session._readonly_turn += 1
+        session._tool_speech_turn = (1, 1)
+        session._readonly_inflight.cancel()  # same human VAD cancel path
+        session._readonly_queue.put_nowait(("power-status", {}, 1, 1))
+        await asyncio.wait_for(next_tool.wait(), timeout=1)
+        assert cancelled == [(0, 0)]
+        assert not worker.done()
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native):
     import io
     import wave
