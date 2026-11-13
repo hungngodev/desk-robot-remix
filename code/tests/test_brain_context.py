@@ -380,6 +380,46 @@ def test_modalities_survive_dense_camera_sensor_timeline():
     assert len(result.interaction) <= 400
 
 
+def test_live_timeline_retains_all_distinct_tools_and_two_human_clauses():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-01", "human_voice", now - 5)
+    for kind, summary in (
+        ("memory_recall", "Yesterday a key was beside a mug"),
+        ("visual_look", "Maybe a metal key in front"),
+        ("pickup_status", "Grasp is not verified"),
+        ("robot_status", "Motors safely disarmed"),
+    ):
+        hub.remember_tool("robot-01", kind, summary, now - 4)
+    hub.remember_heard(
+        "robot-01", "clause_1", "Please look for my key", now - 3.1,
+    )
+    hub.remember_heard(
+        "robot-01", "clause_2", "I left it near the mug", now - 3.0,
+    )
+    hub.remember_spoken("robot-01", "I can take a look", now - 2.9)
+    hub.frames["robot-01"].append(
+        CameraEvidence(b"jpeg", now - 2.8, 0.0, "speech")
+    )
+    for step in range(10):
+        hub.notify("robot-01", "touch_tap", now - 2 + step * .1)
+    selected = hub.interaction_timeline("robot-01", now, limit=10)
+    assert len(selected) == 10
+    assert {entry["kind"] for entry in selected
+            if entry["channel"] == "tool"} == {
+                "memory_recall", "visual_look", "pickup_status", "robot_status",
+            }
+    assert sum(entry["channel"] == "human_transcript"
+               for entry in selected) == 2
+    assert {entry["channel"] for entry in selected} == {
+        "human_voice", "human_transcript", "tool", "sensor",
+        "robot_speech", "camera",
+    }
+    assert not [entry for entry in hub.interaction_timeline(
+        "robot-02", now
+    ) if entry["channel"] == "tool"]
+
+
 def test_prompt_deduplicates_repetitive_camera_receipts_and_keeps_tool_results():
     timeline = [
         {"channel": "tool", "kind": "visual_look", "content": "The cup moved"},
