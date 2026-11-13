@@ -906,6 +906,84 @@ async def test_native_proactive_stream_rejects_delayed_and_future_receipts(nativ
         await asyncio.gather(worker, return_exceptions=True)
 
 
+
+async def test_new_vad_turn_rejects_recent_but_pre_turn_video(native):
+    """A late NDJSON frame from prior silence cannot enter a new human turn."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+
+    class ModelSocket:
+        async def send_json(self, packet):
+            assert packet["type"] == "input_audio_buffer.append"
+
+    service._socket = ModelSocket()
+    captured_before_vad = module.time.monotonic_ns() // 1000
+    mic = asyncio.create_task(service._send_mic())
+    video = None
+    try:
+        service.queue_mic(b"\x00" * 3200, True)
+        async with asyncio.timeout(1):
+            while not service._user_was_talking:
+                await asyncio.sleep(.001)
+        assert service._video_turn_started_us > captured_before_vad
+        fresh_receipt = module.time.monotonic_ns() // 1000
+        jpeg = b"\xff\xd8" + b"fresh actual frame" + b"\xff\xd9"
+
+        def event(receipt):
+            return (json.dumps({
+                "robot_id": "robot-01", "source": "proactive",
+                "camera_age_ms": 0, "camera_receipt_us": receipt,
+                "motion_ppm": 20000,
+                "jpeg_base64": base64.b64encode(jpeg).decode("ascii"),
+                "motor_authorized": False, "charging_authorized": False,
+            }) + "\n").encode("ascii")
+
+        class Chunks:
+            async def iter_chunked(self, _):
+                payload = event(captured_before_vad) + event(fresh_receipt)
+                yield payload[:17]
+                yield payload[17:]
+                await asyncio.Event().wait()
+
+        class Reply:
+            status = 200
+            headers = {
+                "X-Desk-Robot-Id": "robot-01",
+                "Content-Type": "application/x-ndjson",
+            }
+            content = Chunks()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *_):
+                return False
+
+        class Mac:
+            def get(self, *_args, **_kwargs):
+                return Reply()
+
+        video = asyncio.create_task(service._camera_stream(Mac()))
+        async with asyncio.timeout(1):
+            while service.video_frames_selected < 1:
+                await asyncio.sleep(.001)
+        assert service.video_frames_skipped_stale == 1
+        assert service.latest_jpeg == jpeg
+        assert service._latest_frame_receipt_us == fresh_receipt
+    finally:
+        service.closed = True
+        mic.cancel()
+        if video is not None:
+            video.cancel()
+        await asyncio.gather(
+            *(t for t in (mic, video) if t is not None),
+            return_exceptions=True,
+        )
+
+
 async def test_native_camera_selects_keyframe_motion_and_static_refresh(native):
     """Use the Mac motion estimate; do not decode JPEG again on the server."""
     module, bridge = native
