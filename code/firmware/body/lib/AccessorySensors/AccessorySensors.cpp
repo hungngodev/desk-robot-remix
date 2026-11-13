@@ -5,11 +5,31 @@ bool AccessorySensors::mux(std::uint8_t address, std::uint8_t mask) {
   wire_->beginTransmission(address);
   return wire_->write(mask) == 1 && wire_->endTransmission(true) == 0;
 }
+bool AccessorySensors::verified_mux(std::uint8_t address, std::uint8_t mask) {
+  // TI TCA9548A SCPS207H: a write ACK is not a verified channel change.
+  // Read the control register after STOP, including on mux close. Otherwise
+  // a stuck optional lane can leave cached dock/seat evidence appearing live.
+  if (!mux(address, mask) ||
+      wire_->requestFrom(address, static_cast<std::size_t>(1), true) != 1 ||
+      wire_->available() < 1) return false;
+  return wire_->read() == mask;
+}
+void AccessorySensors::invalidate_cached() {
+  // One failed shared-bus/mux transfer invalidates ALL cached optional
+  // evidence. A valid GPIOA sample can return only after fresh acquisition.
+  data_.barometer.valid = false;
+  data_.climate.valid = data_.force.valid =
+    data_.proximity.valid = data_.gauge.fuel_valid =
+    data_.gauge.monitor_valid = data_.dock.valid = data_.nfc.valid = false;
+  data_.optional_inputs.valid = false;
+  for (auto& sample : data_.angle) sample.valid = false;
+}
 bool AccessorySensors::select(std::uint8_t lane) {
   if (lane >= 8 || !mux_present_) return false;
-  return mux(0x70, 0) && mux(0x71, static_cast<std::uint8_t>(1U << lane));
+  return verified_mux(0x70, 0) &&
+         verified_mux(0x71, static_cast<std::uint8_t>(1U << lane));
 }
-bool AccessorySensors::close() { return mux(0x71, 0); }
+bool AccessorySensors::close() { return verified_mux(0x71, 0); }
 bool AccessorySensors::probe(std::uint8_t address) {
   wire_->beginTransmission(address);
   return wire_->endTransmission(true) == 0;
@@ -495,7 +515,11 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
   last_ms_ = now_ms;
   const std::uint8_t lane = next_lane_;
   next_lane_ = lane >= 7 ? 1 : lane + 1;
-  if (!select(lane)) { close(); return; }
+  if (!select(lane)) {
+    invalidate_cached();
+    close();  // Best effort; TofBus independently verifies quiescence.
+    return;
+  }
   switch (lane) {
     case 1: gesture_proximity(now_ms); break;
     case 2: force(now_ms); break;
@@ -519,12 +543,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
   }
   if (!close()) {
     // 0x70 ToF owner will also fail closed if this mux cannot quiesce.
-    data_.barometer.valid = false;
-    data_.climate.valid = data_.force.valid =
-      data_.proximity.valid = data_.gauge.fuel_valid =
-      data_.gauge.monitor_valid = data_.dock.valid = data_.nfc.valid = false;
-    data_.optional_inputs.valid = false;
-    for (auto& sample : data_.angle) sample.valid = false;
+    invalidate_cached();
   }
 }
 } // namespace desk_robot
