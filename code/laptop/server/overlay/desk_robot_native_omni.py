@@ -85,7 +85,10 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         r"in front of (?:me|you)|in (?:your|the) camera)\b|"
         r"what am i holding\b|"
         r"do you see\b|"
-        r"can you identify\b|"
+        r"(?:see|identify) (?:this|that|the|my|an?)\b|"
+        r"where (?:is|are) (?:my|the|this|that) [a-z0-9]+\b|"
+        r"where's (?:my|the|this|that) [a-z0-9]+\b|"
+        r"what(?:'s| is) in (?:the|this|your) (?:picture|photo|frame|image)\b|"
         r"(?:describe|inspect) (?:this|that|the desk|what you see)\b)"
     )
     if re.match(r"^(?:" + look + r")", polite):
