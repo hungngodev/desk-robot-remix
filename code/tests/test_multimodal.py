@@ -273,6 +273,36 @@ async def test_direct_visual_question_preempts_background_camera_request():
         await visual.close()
 
 
+async def test_direct_visual_question_preempts_busy_optional_model_without_extra_owner():
+    lock = asyncio.Lock()
+    entered = asyncio.Event()
+
+    async def slow_speculation():
+        async with lock:
+            entered.set()
+            await asyncio.Event().wait()
+
+    pending = asyncio.create_task(slow_speculation())
+    visual = MultimodalOrchestrator(
+        config(enabled=True),
+        {"robot-01": Head(), "robot-02": Head()},
+        Vision(), lock,
+    )
+    visual.preempt_background_vision = pending.cancel
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        answer = await asyncio.wait_for(
+            visual.look("robot-01", "What is on the table?"), timeout=2
+        )
+        assert answer["frames_used"] == 1
+        assert answer["motor_authorized"] is False
+        assert pending.cancelled()
+    finally:
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        await visual.close()
+
+
 async def test_sensor_two_frame_burst_is_bounded_and_camera_serial():
     head = Head()
     visual = MultimodalOrchestrator(
