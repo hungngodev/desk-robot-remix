@@ -128,7 +128,13 @@ def test_overlay_targets_pinned_server_and_compiles():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     changes = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
-    assert len(changes) == 10
+    assert len(changes) == 11
+    assert "core/handle/intentHandler.py" in changes
+    guarded = changes["core/handle/intentHandler.py"]
+    assert "expected_generation=_desk_generation" in guarded
+    assert "if not current_utterance():" in guarded
+    assert "if response and current_utterance():" in guarded
+    assert "if current_utterance():" in guarded
     assert "core/providers/tools/unified_tool_handler.py" in changes
     multi = changes["core/providers/tools/unified_tool_handler.py"]
     assert "getattr(response, 'result', None)" in multi
