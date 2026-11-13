@@ -1273,3 +1273,72 @@ def test_spoken_receipt_requires_actual_bounded_transmitted_text():
             hub.remember_spoken("robot-01", value, when)
     with pytest.raises(ValueError):
         hub.remember_spoken("robot-02", "not my pet", 2.0)
+
+
+@pytest.mark.parametrize("source", ["proactive", "sensor", "external_pet"])
+async def test_completed_brief_vad_cannot_publish_old_optional_jpeg(
+    monkeypatch, source,
+):
+    """VAD may BEGIN and END during CPU decode; current voice=False is not enough."""
+    import threading
+    import desk_robot.multimodal as media
+
+    entered = threading.Event()
+    release = threading.Event()
+    original = media._prepare
+
+    def held_prepare(jpeg):
+        entered.set()
+        release.wait(timeout=2)
+        return original(jpeg)
+
+    monkeypatch.setattr(media, "_prepare", held_prepare)
+    service = MultimodalOrchestrator(
+        config(enabled=False),
+        {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    started = time.monotonic()
+    task = asyncio.create_task(
+        service.offer_proactive("robot-02", image(), started)
+        if source == "external_pet" else
+        service.capture("robot-02", source=source)
+    )
+    try:
+        assert await asyncio.wait_for(
+            asyncio.to_thread(entered.wait, 0.8), timeout=1
+        )
+        # Human voice on a DIFFERENT head gets the global attention floor.
+        service.voice_started("robot-01")
+        service.voice_ended("robot-01")
+        assert not service.hub.user_active("robot-01", time.monotonic())
+        release.set()
+        if source == "external_pet":
+            assert await asyncio.wait_for(task, timeout=1) is None
+        else:
+            with pytest.raises(RuntimeError, match="superseded"):
+                await asyncio.wait_for(task, timeout=1)
+        assert not service.hub.frames["robot-02"]
+    finally:
+        release.set()
+        await service.close()
+
+
+async def test_external_pet_photo_received_before_brief_voice_is_never_replayed():
+    service = MultimodalOrchestrator(
+        config(enabled=False),
+        {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        old_receipt = time.monotonic()
+        service.voice_started("robot-01")
+        service.voice_ended("robot-01")
+        await service.offer_proactive("robot-02", image(), old_receipt)
+        assert not service.hub.frames["robot-02"]
+        fresh = time.monotonic()
+        await service.offer_proactive("robot-02", image(), fresh)
+        assert len(service.hub.frames["robot-02"]) == 1
+        assert service.hub.frames["robot-02"][-1].received_at == fresh
+    finally:
+        await service.close()
