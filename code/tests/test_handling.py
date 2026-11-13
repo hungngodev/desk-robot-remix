@@ -254,3 +254,19 @@ def test_malformed_status_cannot_erase_last_imu_conversion_identity():
     assert qualified(gate, sample(sample_ms=9002),
                      100.6, new_sample=False) == ()
     assert len(gate.startup_samples) == 1
+
+
+def test_implausible_acceleration_preserves_last_conversion_replay_fence():
+    gate = HandlingGate()
+    assert qualified(gate, sample(sample_ms=500), 100.0, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
+    # Valid signed raw readings but physically implausible near-zero gravity.
+    bad = sample(acc=(0, 0, 0), sample_ms=501)
+    assert qualified(gate, bad, 100.1, new_sample=False) == ()
+    assert gate.reference is None and gate.startup_samples == []
+    assert gate.last_boot_id == 1 and gate.last_sample_ms == 501
+    # The same conversion must not be reused with a corrected payload.
+    assert qualified(gate, sample(sample_ms=501), 100.2, new_sample=False) == ()
+    assert gate.startup_samples == []
+    assert qualified(gate, sample(sample_ms=502), 100.3, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
