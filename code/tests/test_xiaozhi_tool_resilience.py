@@ -136,6 +136,85 @@ async def test_legacy_and_native_shared_tool_bridge_rejects_wrong_pet_receipt(
     assert "other pet" not in str(result)
 
 
+@pytest.mark.parametrize("untrusted", [
+    {"robot_id": "robot-01", "answer": "No real JPEG receipt"},
+    {
+        "robot_id": "robot-01",
+        "answer": "Old image may contain a key",
+        "source": "unverified_camera",
+        "frames_used": 1,
+        "motor_authorized": False,
+        "charging_authorized": False,
+    },
+    {
+        "robot_id": "robot-01",
+        "answer": "A key is visible",
+        "source": "authenticated_xiao_camera_and_local_vlm",
+        "frames_used": 0,
+        "motor_authorized": False,
+        "charging_authorized": False,
+    },
+    {
+        "robot_id": "robot-01",
+        "answer": "",
+        "source": "authenticated_xiao_camera_and_local_vlm",
+        "frames_used": 1,
+        "motor_authorized": False,
+        "charging_authorized": False,
+    },
+])
+async def test_readonly_visual_tool_requires_real_mac_camera_and_vlm_contract(
+    bridge_tools, monkeypatch, untrusted,
+):
+    original = httpx.AsyncClient
+
+    def handler(request):
+        assert request.url.path == "/v1/pet/robot-01/look"
+        return httpx.Response(200, json=untrusted)
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    outcome = await bridge_tools.call(
+        bridge_tools.registered_head, "look",
+        {"question": "What is right in front of you?"},
+    )
+    assert outcome == {
+        "error": "Missing authenticated visual tool evidence",
+        "retried": False,
+    }
+    assert "answer" not in outcome
+
+
+async def test_readonly_visual_tool_accepts_only_real_source_labeled_vlm_reply(
+    bridge_tools, monkeypatch,
+):
+    original = httpx.AsyncClient
+    confirmed = {
+        "robot_id": "robot-01",
+        "answer": "A small red object might be a key",
+        "source": "authenticated_xiao_camera_and_local_vlm",
+        "frames_used": 2,
+        "motor_authorized": False,
+        "charging_authorized": False,
+    }
+
+    def client_factory(*args, **kwargs):
+        return original(
+            *args, transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json=confirmed)
+            ), **kwargs
+        )
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    answer = await bridge_tools.call(
+        bridge_tools.registered_head, "look",
+        {"question": "What changed on the table?"},
+    )
+    assert answer == confirmed
+
+
 async def test_unknown_xiaozhi_head_cannot_borrow_another_robots_mac_tool(
     bridge_tools, monkeypatch,
 ):
