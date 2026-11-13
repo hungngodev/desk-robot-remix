@@ -1,3 +1,9 @@
+## November 13 independent QA: delayed pre-wrap MPU timestamp replay
+
+At starting PR #17 head `8c5c549d71f6a8444669e70ba4f2299c132e4849`, fetched all 35 issue comments and 35 merged discussion entries, zero reviews and zero review threads. Source `handling.py` accepted a numerically large delayed pre-wrap `sample_ms` after the same boot's uint32 clock rolled to a small value. This could consume an old conversion as fresh calibration evidence. Commit `fa092381` rejects forward jumps exceeding half the uint32 range without changing the existing near-wrap transition or WROOM motor authority. Test commit `bc511e59` injects repeated stale `0xffffffff` frames after a valid `0xfffffffe -> 2` rollover and then a genuinely new conversion.
+
+**Not executed:** This run did not execute pytest, C++ sanitizer tests, PlatformIO or physical MPU/dock trials. This is a source consistency fix only. Next owner independent QA: run `cd code && python -m pytest -q tests/test_handling.py tests/test_handling_integration.py` on exact current branch; confirm regression fails on parent and passes after fix. Inspect the uint32 source clock, replay after longer silence, and boot identity collisions. CI provisioning and physical qualification remain blocked. No charger or motor authorization changes.
+
 ## November 13 WROOM IMU stale malformed boot packet isolation
 
 Starting PR #17 head: `1a08f7ccf0527034bf1769d0daa5496abc04b704`. Reconciled 35 issue comments, 35 merged timeline entries, zero submitted reviews and zero inline threads. The newest user requirement continues to prioritize executable evidence and safe physical ownership. No concurrent newer branch head was present at write time.
