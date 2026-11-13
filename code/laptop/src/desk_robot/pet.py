@@ -1342,7 +1342,10 @@ class PetController:
             )
             selected_memory = {
                 item.event_id: item
-                for item in [*recent_memory, *relevant_memory]
+                # Keep the last three events and up to three topical
+                # recalls, even when many newer unrelated events exist.
+                # The additional recent entries only support novelty checks.
+                for item in [*recent_memory[:3], *relevant_memory]
             }
             memory = sorted(
                 selected_memory.values(), key=lambda item: item.observed_at
