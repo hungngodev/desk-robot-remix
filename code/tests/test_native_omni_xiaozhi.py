@@ -718,6 +718,139 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         await asyncio.gather(worker, return_exceptions=True)
 
 
+@pytest.mark.parametrize(
+    ("spoken", "route"),
+    [
+        ("What do you see on the desk?", "look"),
+        ("Please look at this object", "look"),
+        ("What am I holding?", "look"),
+        ("Check your battery status", "status"),
+        ("Is the pickup job done?", "latest-pickup"),
+        ("What just happened?", "interaction-context"),
+        ("Move forward", None),
+        ("Pick up this key", None),
+        ("Start the charger", None),
+        ("I heard somebody say look at this", None),
+        ("Do you remember yesterday?", None),
+    ],
+)
+def test_native_speech_tools_allow_only_explicit_readonly_requests(
+    native, spoken, route,
+):
+    module, _ = native
+    request = module.native_readonly_request(spoken)
+    assert (request[0] if request else None) == route
+    if request:
+        assert request[0] in {
+            "look", "status", "latest-pickup", "interaction-context"
+        }
+
+
+async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
+    native, monkeypatch,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    calls = []
+
+    async def call(current, route, payload):
+        calls.append((current, route, payload))
+        return {"robot_id": "robot-01", "answer": "Maybe a key"}
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    transcript = {
+        "item_id": "model_item_1",
+        "transcript": "What do you see near me?",
+    }
+    session._queue_readonly_tool(transcript)
+    session._queue_readonly_tool(transcript)
+    assert session._readonly_queue.qsize() == 1
+    task = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        async with asyncio.timeout(1):
+            while session.native_readonly_tools_completed < 1:
+                await asyncio.sleep(.005)
+        assert calls == [(conn, "look", {"question": transcript["transcript"]})]
+        assert session._context_wakeup.is_set()
+        assert session.native_readonly_tools_dropped == 0
+    finally:
+        session.closed = True
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_native_speech_tool_old_result_cannot_enter_next_human_turn(
+    native, monkeypatch,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    entered = asyncio.Event()
+
+    async def call(conn, route, payload):
+        entered.set()
+        await asyncio.Event().wait()
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tool = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tool.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tool),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    session._queue_readonly_tool({
+        "item_id": "model_item_2", "transcript": "Check your battery status"
+    })
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        session._video_turn += 1
+        session._readonly_inflight.cancel()
+        async with asyncio.timeout(1):
+            while session._readonly_inflight is not None:
+                await asyncio.sleep(.005)
+        assert session.native_readonly_tools_completed == 0
+        assert not session._context_wakeup.is_set()
+        assert not worker.done()
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 def test_native_status_discloses_live_memory_delivery_and_missing_tool_calls(native):
     module, bridge = native
     conn, _ = connection()
