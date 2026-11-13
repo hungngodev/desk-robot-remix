@@ -115,7 +115,9 @@ def compose_brain_context(
         "human_transcript": 0, "tool": 1, "sensor": 2,
         "human_voice": 3, "robot_speech": 4, "camera": 5,
     }
-    for item in reversed(timeline[-16:]):
+    # A burst of camera receipts must not erase older tool or touch evidence
+    # before modality-aware deduplication. Bound the scan for prompt latency.
+    for item in reversed(timeline[-64:]):
         if not isinstance(item, dict):
             continue
         channel, kind = item.get("channel"), item.get("kind")
