@@ -179,7 +179,10 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
     # Split only at a new spoken request. Splitting every "and" loses
     # object names in "look at the key and the mug and check the battery".
     clauses = re.split(
-        r"\s+(?:and(?:\s+then)?|then|also)\s+"
+        # Natural ASR frequently uses a comma or pause instead of "and".
+        # Only split before an explicit NEW request verb, never object lists
+        # such as "look at the key, the mug, and the blue cube".
+        r"(?:\s+(?:and(?:\s+then)?|then|also)\s+|[,;]\s+)"
         r"(?=(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?"
         r"(?:what|where|how|is|are|did|do|does|have|has|"
         r"check|look|tell|show|describe|inspect|remember|recall|"
