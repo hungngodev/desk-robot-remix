@@ -158,7 +158,7 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
     candidates = [native_readonly_request(part) for part in clauses]
     found: list[tuple[str, dict]] = []
     seen: set[str] = set()
-    for part, request in zip(clauses, candidates):
+    for request in candidates:
         if request is None:
             continue
         route, payload = request
