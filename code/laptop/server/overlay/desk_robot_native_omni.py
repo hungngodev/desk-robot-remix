@@ -583,6 +583,12 @@ class NativeOmniSession:
         intent; the same model's chat-completions endpoint will speak the
         grounded answer on the existing XIAO decoder instead.
         """
+        # An answer already sent for this HUMAN turn cannot be restarted
+        # by a delayed ASR chunk after the speaker STOP. New VAD resets this.
+        if (self._tool_answer_started_turn is not None
+                and self._tool_answer_started_turn[1] == self._readonly_turn
+                and self._tool_speech_turn is None):
+            return
         # A second ASR chunk in the SAME human turn must not interrupt the
         # already reserved tool output or cancel its active Mac work.
         if (self._tool_speech_turn is not None
@@ -825,6 +831,13 @@ class NativeOmniSession:
     def _queue_readonly_tool(self, event: dict) -> bool:
         """One explicit actual ASR request, never guessed physical authority."""
         if not self._live_transcript_enabled:
+            return False
+        # The first grounded reply was already sent. A late completed ASR
+        # chunk from that very same human utterance must not enqueue a
+        # second camera or battery read and make the robot answer twice.
+        if (self._tool_answer_started_turn is not None
+                and self._tool_answer_started_turn[1] == self._readonly_turn
+                and self._tool_speech_turn is None):
             return False
         item = event.get("item_id")
         if (not isinstance(item, str) or not 1 <= len(item) <= 128
@@ -1258,7 +1271,14 @@ class NativeOmniSession:
                         self._last_human_transcript = " ".join(raw_heard.split())[:180]
                     self._accept_heard_transcript(event)
                     if self._queue_readonly_tool(event):
-                        self._tool_question = str(event.get("transcript", ""))[:280]
+                        clause = " ".join(str(event.get("transcript", "")).split())
+                        if self._tool_question and clause and (
+                                clause.casefold() not in self._tool_question.casefold()):
+                            self._tool_question = (
+                                self._tool_question + " " + clause
+                            )[:280]
+                        elif not self._tool_question:
+                            self._tool_question = clause[:280]
                         # Real tool results cannot enter this native duplex's
                         # established KV. Cancel its competing audio and speak
                         # the Mac grounded response through the SAME speaker.
