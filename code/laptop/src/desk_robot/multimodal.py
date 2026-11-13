@@ -647,6 +647,12 @@ class MultimodalOrchestrator:
             "motor_authorized": False,
         }
 
+    def stream_owns_camera(self, robot_id: str) -> bool:
+        """One live visual worker owns acquisition, including reconnects."""
+        self.hub._check(robot_id)
+        task = self._stream_tasks.get(robot_id)
+        return task is not None and not task.done()
+
     def start_streams(self) -> None:
         """Own the one persistent visual feed whenever camera consent is on.
 
