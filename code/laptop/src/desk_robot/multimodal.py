@@ -763,6 +763,8 @@ class MultimodalOrchestrator:
             metrics["camera_requests"] += 1
             started = time.monotonic()
             generation = self.hub._generation[robot_id]
+            turn = self._turn_epoch[robot_id]
+            question = self._question_epoch[robot_id]
             # Camera latency is measured before CPU postprocessing. A new
             # human voice can still preempt the event loop during decoding.
             try:
@@ -791,10 +793,16 @@ class MultimodalOrchestrator:
                 # decoding/resizing this JPEG, after the proactive network
                 # task has already disappeared from its cancellation map.
                 # Never publish obsolete low-priority sensor/idle images.
-                if (source in ("proactive", "sensor")
-                        and self._any_human_active(time.monotonic())):
+                if source in ("proactive", "sensor") and (
+                    self._any_human_active(time.monotonic())
+                    or self._turn_epoch[robot_id] != turn
+                    or self._question_epoch[robot_id] != question
+                ):
+                    # A short VAD or direct visual question can start AND
+                    # finish before the Pillow worker returns. Live speaker
+                    # state alone cannot prove this old JPEG is current.
                     raise RuntimeError(
-                        "Human speech superseded autonomous camera preprocessing"
+                        "Newer conversation turn superseded autonomous camera preprocessing"
                     )
                 evidence = self.hub.offer_prepared(
                     robot_id, prepared, received, source=source,
@@ -824,9 +832,16 @@ class MultimodalOrchestrator:
         # CPU preprocessing runs off-thread. Never publish late paused frames.
         self.hub._check(robot_id)
         generation = self.hub._generation[robot_id]
+        turn = self._turn_epoch[robot_id]
+        question = self._question_epoch[robot_id]
         prepared = await self._prepare_bounded(jpeg)
-        if self._any_human_active(time.monotonic()):
-            return  # never commit low-priority JPEG after fresh human VAD
+        if (self._any_human_active(time.monotonic())
+                or self._turn_epoch[robot_id] != turn
+                or self._question_epoch[robot_id] != question
+                or now < self._voice_turn_at[robot_id]):
+            # External pet capture may finish just as an entire human VAD
+            # episode begins and ends. Receipt and generation both matter.
+            return
         self.hub.offer_prepared(
             robot_id, prepared, now, source="proactive",
             generation=generation,
