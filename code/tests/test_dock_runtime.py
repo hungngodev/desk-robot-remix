@@ -475,6 +475,7 @@ async def test_real_snapshot_deadline_cancels_stalled_capture_without_motion(tmp
 
 @pytest.mark.parametrize("payload", [
     b"", b"not jpeg", b"\\xff\\xd8truncated", b"\\xff\\xd8" + b"x" * (512 * 1024) + b"\\xff\\xd9",
+    b"\xff\xd8" + b"x" * 512000 + b"\xff\xd9",  # Within old 512 KiB limit, above native bound.
     "not bytes",
 ])
 async def test_invalid_dock_snapshot_never_starts_native_detector(tmp_path, monkeypatch, payload):
