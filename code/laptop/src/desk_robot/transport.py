@@ -126,8 +126,14 @@ class HttpHead:
         # not trip the Sense single-capture worker or block body keepalives.
         async with self.capture_lock:
             response = await self._request("GET", "/api/camera.jpg")
-            if len(response.content) > 4_000_000 or not response.content.startswith(b"\xff\xd8"):
-                raise HeadError("Camera did not return a bounded JPEG")
+            if not (4 <= len(response.content) <= 4_000_000
+                    and response.content.startswith(b"\\xff\\xd8")
+                    and response.content.endswith(b"\\xff\\xd9")):
+                # A camera HTTP response with only a valid SOI can be
+                # truncated during capture/transport. Refuse it BEFORE
+                # advancing boot/sequence evidence or sending it to a VLM,
+                # dock detector or pickup planner.
+                raise HeadError("Camera did not return a bounded complete JPEG")
             names = (
                 "X-Desk-Camera-Boot", "X-Desk-Camera-Sequence",
                 "X-Desk-Camera-Complete-Us",
