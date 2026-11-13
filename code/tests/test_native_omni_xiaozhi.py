@@ -258,6 +258,54 @@ async def test_fleet_native_speaker_claim_flushes_old_pet_before_second_pet_talk
     assert newer.conn.client_is_speaking is False
 
 
+async def test_native_audio_refused_by_mac_speaker_never_sends_stop_or_records_history(
+    native, monkeypatch,
+):
+    """A refused TTS START cannot become delivered speech or stop Mac TTS."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._external_speech_active = True
+    conn.client_is_speaking = True  # This belongs to the Mac lease, not native.
+    session._tool_audio_response_id = "tool_unclaimed"
+    session._tool_reply_pending["tool_unclaimed"] = (
+        0, "Where is my key?", "I can see a key.",
+    )
+
+    class Encoder:
+        def __init__(self, rate, channels, mode):
+            assert (rate, channels, mode) == (16000, 1, "audio")
+        def encode(self, pcm, samples):
+            raise AssertionError("Blocked native reply must never encode speaker PCM")
+
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    session.outgoing.put_nowait(("tool_unclaimed", bytes(9600)))
+    session.outgoing.put_nowait(("tool_unclaimed", bytes(9600)))
+    session.outgoing.put_nowait(None)
+    playback = asyncio.create_task(session._play())
+    try:
+        async with asyncio.timeout(1):
+            while not session.outgoing.empty():
+                await asyncio.sleep(.005)
+        await asyncio.sleep(.005)
+        assert sent == []  # No native TTS START, STOP or PCM may leak.
+        assert conn.client_is_speaking is True
+        assert session.native_tool_audio_sent == 0
+        assert not session._tool_dialogue
+        assert "tool_unclaimed" in session._tool_reply_pending
+    finally:
+        session.closed = True
+        playback.cancel()
+        await asyncio.gather(playback, return_exceptions=True)
+
+
 async def test_proactive_mac_and_native_voice_share_one_interruptible_speaker_lease(
     native,
 ):
