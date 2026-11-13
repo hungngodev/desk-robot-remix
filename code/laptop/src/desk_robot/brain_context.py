@@ -39,6 +39,12 @@ def _memory_label(entry: Memory) -> str:
         # A peer's words never establish this pet's firsthand observation.
         return (f"I heard {entry.source_robot} say" if entry.witnessed
                 else f"{entry.source_robot} said (peer report, not my sighting)")
+    if entry.kind in {"person", "hand", "key", "candy", "object", "scene"}:
+        # The robot witnessed a camera frame, NOT the truth of a local VLM
+        # classification. Keep uncertainty across local and peer memory.
+        return ("My camera model suggested" if
+                entry.witnessed and entry.source_robot == entry.robot_id
+                else f"{entry.source_robot} reported a camera model guess")
     return ("I observed" if entry.witnessed and entry.source_robot == entry.robot_id
             else f"{entry.source_robot} reported")
 
