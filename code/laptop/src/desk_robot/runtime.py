@@ -56,6 +56,10 @@ class Runtime:
             self.multimodal.preempt_background_vision = (
                 self.pet.preempt_background_vision
             )
+            # A human's look is higher priority for its ENTIRE camera +
+            # inference lifetime, not just the instant preemption is sent.
+            self.multimodal.begin_direct_vision = self.pet.begin_direct_vision
+            self.multimodal.end_direct_vision = self.pet.end_direct_vision
         self.voice_events: VoiceEventListener | None = None
         self._voice_task: asyncio.Task | None = None
 
