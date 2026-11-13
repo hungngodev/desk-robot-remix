@@ -204,6 +204,12 @@ class NativeOmniSession:
         self._generation = 0
         self._external_speech_active = False
         self._user_was_talking = False
+        # Mac's explicit pet controls, not the model, own initiative permission.
+        # Quiet mutes all unsolicited and solicited native audio; paused pets
+        # may still respond to direct human speech but cannot initiate.
+        self._pet_quiet = False
+        self._pet_autonomy_enabled = False
+        self._last_human_speech_at = float("-inf")
         self._silent_frames = 0
         self._playback_generation = -1
         # Consent comes from THIS pet's authenticated Mac context. Never
@@ -373,6 +379,12 @@ class NativeOmniSession:
                     )
                     self._live_transcript_enabled = (
                         data.get("live_transcript_context_enabled") is True
+                    )
+                    # Startup private Mac state is trusted only when the
+                    # response identifies the current authenticated pet.
+                    self._pet_quiet = data.get("pet_quiet") is True
+                    self._pet_autonomy_enabled = (
+                        data.get("pet_autonomy_enabled") is True
                     )
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             return
@@ -547,9 +559,24 @@ class NativeOmniSession:
                         or not isinstance(data.get("model_context"), str)
                         or len(data["model_context"]) > 400
                         or type(data.get("memory_tools_enabled")) is not bool
-                        or type(data.get("transcript_memory_enabled")) is not bool):
+                        or type(data.get("transcript_memory_enabled")) is not bool
+                        or type(data.get("pet_quiet")) is not bool
+                        or type(data.get("pet_autonomy_enabled")) is not bool):
                     self.native_context_errors += 1
                     continue
+                old_quiet = self._pet_quiet
+                old_autonomy = self._pet_autonomy_enabled
+                self._pet_quiet = data["pet_quiet"]
+                self._pet_autonomy_enabled = data["pet_autonomy_enabled"]
+                # Model instruction updates may be impossible; the audio
+                # permissions must still change in the existing Python
+                # speaker, independent of Stage 0 KV support.
+                if ((self._pet_quiet and not old_quiet)
+                        or (old_autonomy and not self._pet_autonomy_enabled
+                            and time.monotonic() -
+                                self._last_human_speech_at > 12)):
+                    events = await self._invalidate_head_first()
+                    self._schedule_remote_cancel(events)
                 if (data["memory_tools_enabled"] != self._memory_tools_enabled
                         or data["transcript_memory_enabled"]
                             != self._transcript_memory_enabled):
@@ -1371,6 +1398,7 @@ class NativeOmniSession:
                 self._context_update_unsupported = True
             was_talking = self._user_was_talking
             if packet.speech:
+                self._last_human_speech_at = time.monotonic()
                 self._user_was_talking = True
                 if not was_talking:
                     # No image from the preceding spoken turn may be sent
@@ -1630,6 +1658,14 @@ class NativeOmniSession:
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
         if state == "start":
+            # Quiet is a hard voice mute. Pause leaves direct speech
+            # available, but never enables the model to address the room
+            # unsolicited. Use actual VAD receipt, not camera or model text.
+            if (self._pet_quiet or (
+                not self._pet_autonomy_enabled
+                and time.monotonic() - self._last_human_speech_at > 12.0
+            )):
+                return False
             if self._external_speech_active:
                 return False  # The Mac proactive owner already holds this decoder.
             # Source-authenticated human VAD has priority even if this model
