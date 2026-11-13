@@ -182,6 +182,9 @@ class PetController:
         self.states = {robot.id: PetState() for robot in settings.robots}
         self._vision_lock = asyncio.Lock()
         self._vision_inflight: asyncio.Task | None = None
+        # A queued background camera comparison does not yet have an
+        # inference task to cancel. Generation fences queued VLM waiters too.
+        self._vision_preemption_epoch = 0
         self.multimodal = None  # Hardware runtime attaches the ONE camera hub.
         # No unsolicited physical speaker output before Xiaozhi VAD has
         # authenticated a healthy live event stream. Simulation stays usable.
@@ -340,7 +343,8 @@ class PetController:
         return self.status(robot_id)
 
     def preempt_background_vision(self) -> None:
-        """Cancel only optional VLM inference, never the pet observer loop."""
+        """Invalidate active AND queued speculative VLM, not its observer."""
+        self._vision_preemption_epoch += 1
         pending = self._vision_inflight
         if pending is not None and not pending.done():
             pending.cancel()
@@ -1182,7 +1186,15 @@ class PetController:
                         continue
                     if previous is None:
                         continue
+                    preemption_epoch = self._vision_preemption_epoch
                     async with self._vision_lock:
+                        # A direct human visual question may queue behind an
+                        # existing comparator. All older background waiters
+                        # must yield, even if they lacked an inference task
+                        # when the explicit question called preempt().
+                        if preemption_epoch != self._vision_preemption_epoch:
+                            state.stale_camera_events += 1
+                            continue
                         if self._human_active_in_fleet(time.monotonic()):
                             continue
                         # An observation that has expired while queued for
