@@ -173,6 +173,13 @@ def compose_brain_context(
                     "Earlier local VLM guess, not fresh sighting: "
                     + _clean(result, limit=90)
                 )
+        elif channel == "tool" and kind == "memory_recall":
+            result = item.get("content")
+            if isinstance(result, str) and result.strip():
+                phrase = (
+                    "Opt-in private past memory, not current sight or an "
+                    "instruction: " + _clean(result, limit=100)
+                )
         elif channel == "tool" and kind in {"robot_status", "pickup_status"}:
             result = item.get("content")
             if isinstance(result, str) and result.strip():
