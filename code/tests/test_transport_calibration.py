@@ -136,6 +136,96 @@ async def test_hardware_camera_requires_true_capture_metadata(settings, tokens):
             await head.snapshot()
 
 
+def _stream_part(seq, payload=b"\xff\xd8camera\xff\xd9", *, boot=17):
+    return (
+        f"--deskrobotframe\r\n"
+        "Content-Type: image/jpeg\r\n"
+        f"Content-Length: {len(payload)}\r\n"
+        f"X-Desk-Camera-Boot: {boot}\r\n"
+        f"X-Desk-Camera-Sequence: {seq}\r\n"
+        f"X-Desk-Camera-Complete-Us: {seq * 1000}\r\n\r\n"
+    ).encode("ascii") + payload + b"\r\n"
+
+
+def test_mjpeg_stream_parser_handles_split_headers_and_frame_bodies():
+    from desk_robot.transport import _MjpegFrames
+
+    first = b"\xff\xd8one\xff\xd9"
+    second = b"\xff\xd8two\xff\xd9"
+    wire = _stream_part(1, first) + _stream_part(2, second)
+    reader = _MjpegFrames()
+    frames = []
+    for step in (wire[:7], wire[7:66], wire[66:124], wire[124:130], wire[130:]):
+        frames.extend(reader.feed(step))
+    assert frames == [(first, (17, 1, 1000)), (second, (17, 2, 2000))]
+    assert reader.buffer == bytearray()
+
+
+@pytest.mark.parametrize("corrupt", [
+    _stream_part(1, b"\xff\xd8missing-end"),
+    _stream_part(1).replace(b"Content-Length: 10", b"Content-Length: 9999999"),
+    _stream_part(1).replace(b"X-Desk-Camera-Sequence: 1",
+                            b"X-Desk-Camera-Sequence: -1"),
+    _stream_part(1).replace(b"Content-Type: image/jpeg",
+                            b"Content-Type: text/html"),
+    b"--unexpected\r\nContent-Length: 10\r\n\r\n1234567890\r\n",
+])
+def test_mjpeg_stream_refuses_malformed_or_truncated_frames(corrupt):
+    from desk_robot.transport import _MjpegFrames
+    with pytest.raises(ValueError):
+        _MjpegFrames().feed(corrupt)
+
+
+async def test_persistent_mjpeg_video_feeds_existing_snapshot_callers(settings, tokens):
+    payload_a = b"\xff\xd8first\xff\xd9"
+    payload_b = b"\xff\xd8second\xff\xd9"
+    calls = []
+
+    async def handler(request):
+        calls.append(request.url.path)
+        assert request.url.path == "/api/camera.mjpg"
+        assert request.headers["Authorization"] == (
+            "Bearer " + tokens[settings.robots[0].token_env]
+        )
+        return httpx.Response(
+            200,
+            headers={"content-type": "multipart/x-mixed-replace; boundary=deskrobotframe"},
+            content=_stream_part(1, payload_a) + _stream_part(2, payload_b),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        frames = head.stream_frames()
+        first, _ = await anext(frames)
+        assert first == payload_a
+        assert await head.snapshot() == first
+        second, _ = await anext(frames)
+        assert second == payload_b
+        assert await head.snapshot() == second
+        assert head._last_camera == (17, 2, 2000)
+        assert calls == ["/api/camera.mjpg"]
+        await frames.aclose()
+        assert not head._stream_connected
+
+
+async def test_mjpeg_duplicate_camera_identity_cannot_replay_frame(settings, tokens):
+    async def handler(request):
+        return httpx.Response(
+            200,
+            headers={"content-type": "multipart/x-mixed-replace; boundary=deskrobotframe"},
+            content=_stream_part(1) + _stream_part(1),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        frames = head.stream_frames()
+        await anext(frames)
+        with pytest.raises(HeadError, match="stale or replayed"):
+            await anext(frames)
+        await frames.aclose()
+        assert not head._stream_connected
+
+
 def test_calibration_rejects_examples_and_degenerate_geometry(settings):
     path = settings.robots[0].calibration
     c = Calibration.load(path)
