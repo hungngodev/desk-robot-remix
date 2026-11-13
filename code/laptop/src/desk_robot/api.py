@@ -718,7 +718,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 # Ollama can choose a general read-only status tool, but a
                 # battery question must use the real WROOM fuel gauge source.
                 route = "power-status"
-            if route not in allowed or route in picked:
+            if not isinstance(route, str) or route not in allowed or route in picked:
                 continue
             if route == "voice-context" and not settings.voice_memory_tools_enabled:
                 continue
