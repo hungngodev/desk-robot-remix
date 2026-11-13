@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Protocol
 
 import httpx
@@ -60,6 +61,79 @@ def expected_ack(command: str) -> str:
     return f"OK {op}"
 
 
+class _MjpegFrames:
+    """Bounded parser for Espressif style multipart JPEG, not an image decoder.
+
+    Network chunks do not align with part headers or JPEG boundaries. Parse
+    exact Content-Length and camera identity before publishing any image.
+    Reject oversized headers, payloads, missing EOI, and malformed framing.
+    """
+
+    boundary = b"--deskrobotframe\\r\\n"
+
+    def __init__(self):
+        self.buffer = bytearray()
+
+    def feed(self, chunk: bytes) -> list[tuple[bytes, tuple[int, int, int]]]:
+        if not isinstance(chunk, bytes):
+            raise ValueError("Invalid MJPEG network chunk")
+        self.buffer.extend(chunk)
+        frames = []
+        while self.buffer:
+            if len(self.buffer) < len(self.boundary):
+                if not self.boundary.startswith(self.buffer):
+                    raise ValueError("Invalid MJPEG part boundary")
+                break
+            if not self.buffer.startswith(self.boundary):
+                raise ValueError("Invalid MJPEG part boundary")
+            end = self.buffer.find(b"\\r\\n\\r\\n", len(self.boundary))
+            if end < 0:
+                if len(self.buffer) > 512:
+                    raise ValueError("Oversized MJPEG part headers")
+                break
+            if end > 512:
+                raise ValueError("Oversized MJPEG part headers")
+            try:
+                lines = bytes(self.buffer[len(self.boundary):end]).decode("ascii").split("\\r\\n")
+                headers = {}
+                for line in lines:
+                    name, value = line.split(": ", 1)
+                    key = name.lower()
+                    if key in headers:
+                        raise ValueError("Duplicate MJPEG part header")
+                    headers[key] = value
+                if headers.get("content-type") != "image/jpeg":
+                    raise ValueError("MJPEG part is not JPEG")
+                def decimal(name: str) -> int:
+                    value = headers[name]
+                    if not 1 <= len(value) <= 20 or not value.isascii() or not value.isdecimal():
+                        raise ValueError("Invalid MJPEG numeric header")
+                    return int(value)
+                size = decimal("content-length")
+                boot = decimal("x-desk-camera-boot")
+                sequence = decimal("x-desk-camera-sequence")
+                completed = decimal("x-desk-camera-complete-us")
+            except (UnicodeError, KeyError, TypeError, ValueError) as exc:
+                raise ValueError("Malformed MJPEG part headers") from exc
+            if not (4 <= size <= 512 * 1024 and 0 <= boot <= 0xffffffff
+                    and 1 <= sequence <= 0xffffffff and completed > 0):
+                raise ValueError("MJPEG source bounds invalid")
+            start = end + 4
+            finish = start + size
+            if len(self.buffer) < finish + 2:
+                break
+            frame = bytes(self.buffer[start:finish])
+            if (not frame.startswith(b"\\xff\\xd8")
+                    or not frame.endswith(b"\\xff\\xd9")
+                    or self.buffer[finish:finish + 2] != b"\\r\\n"):
+                raise ValueError("MJPEG frame incomplete")
+            frames.append((frame, (boot, sequence, completed)))
+            del self.buffer[:finish + 2]
+        if len(self.buffer) > 512 * 1024 + 1024:
+            raise ValueError("MJPEG buffer exceeds maximum size")
+        return frames
+
+
 class HttpHead:
     def __init__(
         self, config: RobotConfig, client: httpx.AsyncClient,
@@ -71,6 +145,12 @@ class HttpHead:
         self.capture_lock = asyncio.Lock()
         self.strict_capture = strict_capture
         self._last_camera: tuple[int, int, int] | None = None
+        self._stream_connected = False
+        self._stream_condition = asyncio.Condition()
+        self._stream_latest: bytes | None = None
+        self._stream_received_at = 0.0
+        self._stream_version = 0
+        self._snapshot_version = 0
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
@@ -121,10 +201,78 @@ class HttpHead:
             except ValueError as exc:
                 raise HeadError(str(exc)) from exc
 
+    def _accept_camera_identity(self, identity: tuple[int, int, int]) -> None:
+        boot, sequence, completed = identity
+        earlier = self._last_camera
+        if earlier and earlier[0] == boot and (
+            sequence <= earlier[1] or completed <= earlier[2]
+        ):
+            raise HeadError("Camera returned stale or replayed frame metadata")
+        self._last_camera = identity
+
+    async def stream_frames(self):
+        """Consume one persistent authenticated XIAO MJPEG feed.
+
+        The Mac is the one remote frame reader. Other users of snapshot()
+        reuse distinct fresh stream frames rather than opening another
+        physical camera capture.
+        """
+        url = self.config.head_url.rstrip("/") + "/api/camera.mjpg"
+        headers = {"Authorization": f"Bearer {secret(self.config.token_env)}"}
+        try:
+            async with self.client.stream(
+                "GET", url, headers=headers,
+                timeout=httpx.Timeout(5, connect=1),
+            ) as response:
+                response.raise_for_status()
+                if not response.headers.get("content-type", "").lower().startswith(
+                    "multipart/x-mixed-replace; boundary=deskrobotframe"
+                ):
+                    raise HeadError("XIAO did not return MJPEG stream")
+                reader = _MjpegFrames()
+                async with self._stream_condition:
+                    self._stream_connected = True
+                    self._stream_condition.notify_all()
+                async for chunk in response.aiter_bytes():
+                    for jpeg, identity in reader.feed(chunk):
+                        self._accept_camera_identity(identity)
+                        received = time.monotonic()
+                        async with self._stream_condition:
+                            self._stream_latest = jpeg
+                            self._stream_received_at = received
+                            self._stream_version += 1
+                            self._stream_condition.notify_all()
+                        yield jpeg, received
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HeadError("XIAO authenticated camera stream unavailable") from exc
+        finally:
+            async with self._stream_condition:
+                self._stream_connected = False
+                self._stream_latest = None
+                self._stream_condition.notify_all()
+
     async def snapshot(self) -> bytes:
         # Separate camera serialization: concurrent Mac pet/pickup callers must
         # not trip the Sense single-capture worker or block body keepalives.
         async with self.capture_lock:
+            if self._stream_connected:
+                # Require a distinct fresh camera receipt for every physical
+                # observation. A stale last frame is not a second capture.
+                try:
+                    async with asyncio.timeout(2):
+                        async with self._stream_condition:
+                            while (self._stream_connected and (
+                                self._stream_latest is None
+                                or self._stream_version <= self._snapshot_version
+                                or time.monotonic() - self._stream_received_at > 1
+                            )):
+                                await self._stream_condition.wait()
+                            if not self._stream_connected:
+                                raise HeadError("Camera stream lost during snapshot")
+                            self._snapshot_version = self._stream_version
+                            return self._stream_latest
+                except TimeoutError as exc:
+                    raise HeadError("No fresh camera frame on live stream") from exc
             response = await self._request("GET", "/api/camera.jpg")
             if not (4 <= len(response.content) <= 4_000_000
                     and response.content.startswith(b"\xff\xd8")
@@ -147,10 +295,5 @@ class HttpHead:
                 boot, sequence, completed = map(int, values)
                 if not 0 <= boot <= 0xffffffff or not 1 <= sequence <= 0xffffffff or completed <= 0:
                     raise HeadError("Camera completion metadata out of bounds")
-                earlier = self._last_camera
-                if earlier and earlier[0] == boot and (
-                    sequence <= earlier[1] or completed <= earlier[2]
-                ):
-                    raise HeadError("Camera returned stale or replayed frame metadata")
-                self._last_camera = (boot, sequence, completed)
+                self._accept_camera_identity((boot, sequence, completed))
             return response.content
