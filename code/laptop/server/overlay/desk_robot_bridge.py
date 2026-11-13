@@ -499,6 +499,10 @@ async def transmit(conn, text, frames):
     # This is the SAME physical decoder used by native MiniCPM. Preserve
     # Mac proactive and social pet speech, but never let it overlap a human
     # voice/tool answer or a peer robot's already claimed speech.
+    # The human generation must be captured BEFORE yielding to the async
+    # native speaker lease. Otherwise a VAD race can reset client_abort and
+    # accidentally restart a superseded proactive remark.
+    generation = interrupt_generation.get(conn.device_id, 0)
     native = _native_adapter()
     begin = getattr(native, "begin_external_speech", None)
     leased = False
@@ -506,13 +510,19 @@ async def transmit(conn, text, frames):
         leased = await begin(conn)
         if not leased:
             raise RuntimeError("Live human/native tool speech owns the Xiaozhi speaker")
+    if (generation != interrupt_generation.get(conn.device_id, 0)
+            or human_speech_active()):
+        # The lease succeeded, but a real human started speaking while
+        # awaiting it. Release it BEFORE raising; never reset that abort.
+        if leased:
+            await native.end_external_speech(conn)
+        raise RuntimeError("Speech interrupted before the speaker lease started")
     active_device_id = conn.device_id
     voice_frames.pop(conn.device_id, None)
     voice_last_frame_at.pop(conn.device_id, None)
     # The speaker lock and callers serialize transmission, but cancellation
     # does not wait for that lock. Capture generation before clearing stale
     # abort state; once interrupted this exact transmission cannot restart.
-    generation = interrupt_generation.get(conn.device_id, 0)
     conn.client_abort = False
     conn.client_is_speaking = True
     try:
