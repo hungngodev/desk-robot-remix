@@ -919,7 +919,7 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
         assert client.get(url).status_code == 401
         ordinary = client.get(url, headers=token)
         assert ordinary.status_code == 200
-        assert hub.tool_history[robot] == []
+        assert not hub.tool_history[robot]
         tool = client.get(url, headers={
             **token, "X-Desk-Robot-Tool-Receipt": "1",
         })
@@ -931,4 +931,4 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
         assert "pressure_pa=101312" in summary
         assert 0 <= time.monotonic() - when <= 2
         for other in settings.robots[1:]:
-            assert hub.tool_history[other.id] == []
+            assert not hub.tool_history[other.id]
