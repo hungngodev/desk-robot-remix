@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from desk_robot.conversation import Conversation, OllamaChat
+from desk_robot.conversation import Conversation, KokoroHeadSpeaker, OllamaChat
 from desk_robot.streamed_ollama import ollama_speech_segments
 
 
@@ -342,3 +342,36 @@ async def test_ollama_proactive_refuses_invalid_actions_and_tool_requests(output
             await chat.proactive_decision([
                 {"role": "user", "content": "A genuine visual change"}
             ])
+
+
+async def test_existing_xiaozhi_speaker_keeps_human_barge_distinct_from_operator_quiet(
+    monkeypatch,
+):
+    sent = []
+
+    def handle(request: httpx.Request):
+        assert request.url.path == "/interrupt"
+        assert request.headers["authorization"] == "Bearer " + "s" * 40
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "interrupted": True,
+            "head_flush_requested": True,
+            "head_flush_acknowledged": False,
+        })
+
+    monkeypatch.setenv("BRIDGE_TEST_TOKEN", "s" * 40)
+    settings = SimpleNamespace(
+        speech_bridge_url="http://local-robot-bridge:9000",
+        speech_bridge_token_env="BRIDGE_TEST_TOKEN",
+    )
+    robot = SimpleNamespace(device_id="mac-01")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handle)
+    ) as client:
+        speaker = KokoroHeadSpeaker(settings, client)
+        assert (await speaker.interrupt(robot))["interrupted"] is True
+        assert (await speaker.operator_stop(robot))["interrupted"] is True
+    assert sent == [
+        {"device_id": "mac-01"},
+        {"device_id": "mac-01", "revoke_initiative": True},
+    ]
