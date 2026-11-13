@@ -720,9 +720,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 "can you recall", "remind me",
             ))
             and not any(cue in utterance for cue in (
-                "look at", "can you see", "what do you see", "camera",
-                "picture", "photo", "image", "what color",
-                "on the desk", "in front of",
+                " and can you ", " and could you ", " and look",
+                " and what ", " and check", " also ", " then ",
             ))
         )
         battery_question = any(
