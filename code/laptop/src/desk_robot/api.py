@@ -552,6 +552,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         if settings.mode != "hardware":
             raise HTTPException(403, "Only a real WROOM fuel gauge is reported")
+        # Capture the exact Mac human epoch BEFORE slow WROOM HTTP. A new
+        # voice turn during the read must not inherit this old fuel gauge.
+        owner = requested_tool_context(request, robot_id)
         data = await coordinator().heads[robot_id].aux_status()
         if (not isinstance(data, dict)
                 or data.get("robot_id") != robot_id
@@ -576,7 +579,6 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "charging_authorized": False,
             "source": "wroom_aux_fuel_gauge_raw_unqualified",
         }
-        owner = requested_tool_context(request, robot_id)
         if valid:
             summary = (
                 f"WROOM fuel gauge reports {soc / 100:.1f}% estimate and "
