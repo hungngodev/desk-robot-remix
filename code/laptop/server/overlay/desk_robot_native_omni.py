@@ -972,20 +972,20 @@ class NativeOmniSession:
         """
         from plugins_func.functions.desk_robot_tools import call
 
-        async def invoke(route: str, payload: dict):
-            return route, await asyncio.wait_for(
+        async def invoke(index: int, route: str, payload: dict):
+            return index, route, await asyncio.wait_for(
                 call(self.conn, route, payload), timeout=24,
             )
         tasks = [
-            asyncio.create_task(invoke(route, payload))
-            for route, payload, _, _ in entries
+            asyncio.create_task(invoke(index, route, payload))
+            for index, (route, payload, _, _) in enumerate(entries)
         ]
         epoch, request_turn = entries[0][2:]
-        facts: list[dict] = []
+        facts: dict[int, dict] = {}
         try:
             for completed in asyncio.as_completed(tasks):
                 try:
-                    route, result = await completed
+                    index, route, result = await completed
                 except asyncio.CancelledError:
                     # An individual optional Mac HTTP may be cancelled or
                     # disconnected without changing the human turn. Keep
@@ -1058,8 +1058,10 @@ class NativeOmniSession:
                 self._context_wakeup.set()
                 fact = native_grounded_fact(route, result)
                 if fact is not None:
-                    facts.append(fact)
-            return facts
+                    facts[index] = fact
+            # Reads finish concurrently, but the spoken model should receive
+            # facts in the human's requested clause order, not network order.
+            return [facts[index] for index in sorted(facts)]
         finally:
             for task in tasks:
                 if not task.done():
