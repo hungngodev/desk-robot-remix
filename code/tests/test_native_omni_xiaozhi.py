@@ -4620,3 +4620,33 @@ async def test_native_operator_stop_revokes_model_and_flushes_real_head(native):
     finally:
         session.closed = True
         module._sessions.clear()
+
+
+async def test_native_expired_mac_authorization_stops_private_media_without_tools(
+    native,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._last_authenticated_mac_at = module.time.monotonic() - 12
+
+    class NoMacCall:
+        def get(self, *args, **kwargs):
+            raise AssertionError(
+                "Expired Mac authorization must block a new media/tool poll"
+            )
+
+    session._context_wakeup.set()
+    await asyncio.wait_for(
+        session._refresh_live_context(NoMacCall()), timeout=1,
+    )
+    assert session.closed
+    assert "authorization expired" in session.last_error
+    assert session._pet_autonomy_enabled is True  # fake opt in is not an ACK
+    assert module.status("mac-01")["native_backend_connected"] is False
