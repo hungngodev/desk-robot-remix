@@ -323,3 +323,26 @@ def test_inconsistent_startup_vectors_do_not_reuse_last_conversion():
         assert qualified(gate, sample(sample_ms=208 + i),
                          102 + i * .1, new_sample=False) == ()
     assert gate.reference == (0, 0, 1)
+
+
+def test_delayed_old_boot_cannot_displace_new_boot_calibration():
+    gate = HandlingGate()
+    for i in range(8):
+        assert qualified(gate, sample(boot_id=11, sample_ms=100 + i),
+                         100 + i * .1, new_sample=False) == ()
+    assert gate.reference is not None
+    assert qualified(gate, sample(boot_id=22, sample_ms=1),
+                     101, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_boot_id == 22
+    for i in range(2, 9):
+        assert qualified(gate, sample(boot_id=22, sample_ms=i),
+                         101 + i * .1, new_sample=False) == ()
+    assert gate.reference is not None
+    # A delayed old boot packet cannot force another reset or become current.
+    assert qualified(gate, sample(boot_id=11, sample_ms=500),
+                     102, new_sample=False) == ()
+    assert gate.last_boot_id == 22
+    assert gate.reference is not None
+    assert qualified(gate, sample(boot_id=22, sample_ms=9),
+                     102.1, new_sample=False) == ()
