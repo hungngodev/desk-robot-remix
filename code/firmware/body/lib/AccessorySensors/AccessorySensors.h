@@ -39,6 +39,8 @@ class AccessorySensors {
   std::uint32_t gesture_started_ms_ = 0;
   bool gesture_collecting_ = false;
   bool mux(std::uint8_t address, std::uint8_t mask);
+  bool verified_mux(std::uint8_t address, std::uint8_t mask);
+  void invalidate_cached();
   bool select(std::uint8_t lane);
   bool close();
   bool probe(std::uint8_t address);
