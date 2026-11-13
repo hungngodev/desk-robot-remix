@@ -124,6 +124,20 @@ async def call(conn, route, payload=None):
     return result
 
 
+def read_only_response(result: dict) -> ActionResponse:
+    """Superseded tool output must never restart the previous human turn.
+
+    Pinned Xiaozhi's Action.NONE is silent ONLY with no response/result:
+    its intent handler otherwise speaks a backward-compatibility fallback.
+    Preserve normal REQLLM for current read-only results and errors.
+    """
+    if (result.get("error") ==
+            "Robot tool result superseded by new speech or reconnect"
+            and result.get("retried") is False):
+        return ActionResponse(Action.NONE)
+    return ActionResponse(Action.REQLLM, result=result)
+
+
 def description(name, text, properties=None, required=None):
     return {
         "type": "function",
@@ -181,7 +195,7 @@ async def desk_robot_job(conn):
         if getattr(conn, "desk_robot_last_job", None)
         else {"error": "No job requested"}
     )
-    return ActionResponse(Action.REQLLM, result=result)
+    return read_only_response(result)
 
 @register_function(
     "desk_robot_memories",
@@ -205,7 +219,7 @@ async def desk_robot_memories(conn, question=""):
     data = await call(
         conn, "voice-context", {"question": question.strip()}
     )
-    return ActionResponse(Action.REQLLM, result=data)
+    return read_only_response(data)
 
 
 @register_function(
@@ -223,8 +237,8 @@ async def desk_robot_memories(conn, question=""):
     ToolType.IOT_CTL,
 )
 async def desk_robot_situation(conn):
-    return ActionResponse(
-        Action.REQLLM, result=await call(conn, "interaction-context")
+    return read_only_response(
+        await call(conn, "interaction-context")
     )
 
 
@@ -250,4 +264,4 @@ async def desk_robot_look(conn, question):
             Action.REQLLM, result={"error": "Ask a short specific visual question"}
         )
     result = await call(conn, "look", {"question": question.strip()})
-    return ActionResponse(Action.REQLLM, result=result)
+    return read_only_response(result)
