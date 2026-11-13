@@ -116,6 +116,9 @@ class CameraFrameHub:
         }
         self.last_capture = {robot: -math.inf for robot in robot_ids}
         self.voice_until = {robot: -math.inf for robot in robot_ids}
+        # Qwen Live Harness defers unsolicited context/speech until quiet
+        # after the human turn. This does not pretend speaker DMA stopped.
+        self.quiet_until = {robot: -math.inf for robot in robot_ids}
         self.urgent = {robot: False for robot in robot_ids}
         # A captured JPEG may be resizing on a worker while a newer frame,
         # pause, or reconnect supersedes it. Only its owner can publish it.
@@ -167,6 +170,20 @@ class CameraFrameHub:
         if not _finite(now):
             raise ValueError("Invalid VAD end timestamp")
         self.voice_until[robot_id] = min(self.voice_until[robot_id], now)
+        self.quiet_until[robot_id] = now + 0.8
+
+    def spontaneous_floor_busy(self, now: float) -> bool:
+        """No unsolicited pet speech until 800ms after the latest human VAD.
+
+        This is a conservative conversational pause, not a physical speaker
+        playback acknowledgement or a permission to move the robot.
+        """
+        if not _finite(now):
+            raise ValueError("Invalid floor clock")
+        return any(
+            self.user_active(robot_id, now) or now < self.quiet_until[robot_id]
+            for robot_id in self.robots
+        )
 
     def reconcile_speech_snapshot(self, active: frozenset[str], now: float) -> None:
         """Reconcile missed idle VAD edges using the authenticated server state.
@@ -382,6 +399,7 @@ class CameraFrameHub:
         self.discard_video(robot_id)
         self.event_history[robot_id].clear()
         self.voice_until[robot_id] = -math.inf
+        self.quiet_until[robot_id] = -math.inf
 
     def close(self) -> None:
         for robot_id in self.robots:
