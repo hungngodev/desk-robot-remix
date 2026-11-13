@@ -141,9 +141,19 @@ def render(plan: dict, body: str, head: str) -> str:
             devices = ", ".join(
                 f"{d['name']} (0x{d['address']:02X})" for d in lane["devices"]
             )
+            # The selected Pololu VL53L4CD carrier may pull external
+            # SDA/SCL HIGH toward its VIN. A 5V VIN is not a 3.3V-safe
+            # WROOM/mux connection just because the sensor carrier powers on.
+            # This is a hard assembly hold, never a measured voltage claim.
+            if group == "Range":
+                signal = ("WROOM 3.3V logic ONLY; carrier VIN and external "
+                          "SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden")
+                evidence = "Unqualified carrier; DO NOT ENERGIZE before voltage checks"
+            else:
+                signal = "Isolated 3.3V I2C lane; separately qualify GND/VCC"
+                evidence = "Source driver; physical carrier unqualified"
             row(f"{group} TCA9548A 0x{mux['address']:02X} CH{lane['channel']} SDA/SCL",
-                devices, "Isolated 3.3V I2C lane; separately qualify GND/VCC",
-                "Source driver; physical carrier unqualified")
+                devices, signal, evidence)
     return "\n".join([
         "# One robot: firmware checked SIGNAL harness",
         "",
@@ -170,6 +180,9 @@ def render(plan: dict, body: str, head: str) -> str:
         "  GPIO36/39 for dual IR. Real timing, optical baffles, RTC/ADC erratum",
         "  filtering and final homing remain entirely unqualified.",
         "* Breakout VCC and I2C pullups, connector pin order and cable gauge.",
+        "* All eight VL53L4CD carriers: identify PCB revision and verify VIN",
+        "  plus upstream/downstream SDA/SCL HIGH voltages with motors OFF.",
+        "  Do NOT energize any ToF lane until 5V WROOM exposure is excluded.",
         "* Printed fit, local cliff geometry, audio and charger bench trials.",
         "",
         "**Assembly readiness: NO. Firmware signal allocation only.**",
