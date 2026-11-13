@@ -22,31 +22,31 @@ async def call(conn, route, payload=None):
     # result even when the Mac completed its HTTP request successfully.
     generation = getattr(bridge, "voice_turn_generation", {}).get(conn.device_id, 0)
     async def request_mac():
-    async with httpx.AsyncClient(
-        base_url="http://127.0.0.1:8765", timeout=5,
-        headers={"Authorization": f"Bearer {token}"}
-    ) as client:
-        if route == "status":
-            response = await client.get(f"/v1/robots/{robot}/status")
-        elif route == "job":
-            response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
-        elif route == "voice-context":
-            if payload and payload.get("question"):
-                response = await client.get(
-                    f"/v1/pet/{robot}/voice-context",
-                    params={"query": payload["question"]},
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:8765", timeout=5,
+            headers={"Authorization": f"Bearer {token}"}
+        ) as client:
+            if route == "status":
+                response = await client.get(f"/v1/robots/{robot}/status")
+            elif route == "job":
+                response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
+            elif route == "voice-context":
+                if payload and payload.get("question"):
+                    response = await client.get(
+                        f"/v1/pet/{robot}/voice-context",
+                        params={"query": payload["question"]},
+                    )
+                else:
+                    response = await client.get(f"/v1/pet/{robot}/voice-context")
+            elif route == "look":
+                response = await client.post(
+                    f"/v1/pet/{robot}/look", json=payload or {},
+                    timeout=50,
                 )
             else:
-                response = await client.get(f"/v1/pet/{robot}/voice-context")
-        elif route == "look":
-            response = await client.post(
-                f"/v1/pet/{robot}/look", json=payload or {},
-                timeout=50,
-            )
-        else:
-            response = await client.post(
-                f"/v1/robots/{robot}/{route}", json=payload or {}
-            )
+                response = await client.post(
+                    f"/v1/robots/{robot}/{route}", json=payload or {}
+                )
 
         return response
 
