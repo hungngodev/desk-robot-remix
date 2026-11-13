@@ -1682,7 +1682,8 @@ class NativeOmniSession:
                 return False
         speech_raced = False
         async with self._device_send_lock:
-            if (self.closed or generation != self._generation
+            if (self.closed or self._pet_quiet
+                    or generation != self._generation
                     or self._external_speech_active):
                 return False
             # VAD may start between claim_speaker and acquiring the device
@@ -1712,7 +1713,9 @@ class NativeOmniSession:
 
     async def _send_device_opus(self, packet: bytes, generation: int) -> None:
         global _output_owner
-        if self.closed or generation != self._generation or self._external_speech_active:
+        if (self.closed or self._pet_quiet
+                or generation != self._generation
+                or self._external_speech_active):
             return
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
@@ -1722,7 +1725,8 @@ class NativeOmniSession:
             # Human VAD can begin AFTER a reply already started, before the
             # queued cross-pet preemption task runs. Check real floor state
             # before every 60 ms packet, not just the TTS START frame.
-            if (self.closed or generation != self._generation
+            if (self.closed or self._pet_quiet
+                    or generation != self._generation
                     or self._external_speech_active):
                 return
             if bridge.human_speech_active():
