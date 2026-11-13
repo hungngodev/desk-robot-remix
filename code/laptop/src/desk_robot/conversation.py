@@ -269,6 +269,12 @@ class Conversation:
                     timeline = self.multimodal.hub.interaction_timeline(
                         robot_id, time.monotonic(), limit=10
                     )
+                    if not self.settings.voice_memory_tools_enabled:
+                        timeline = [
+                            item for item in timeline
+                            if not (item.get("channel") == "tool"
+                                    and item.get("kind") == "memory_recall")
+                        ]
                     live = compose_brain_context([], [], timeline).interaction
                     if live:
                         prompt += (
