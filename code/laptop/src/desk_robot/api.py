@@ -550,8 +550,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         a working battery, battery capacity, or an actuator permit.
         """
         coordinator().robot(robot_id)
+        if settings.mode != "hardware":
+            raise HTTPException(403, "Only a real WROOM fuel gauge is reported")
         data = await coordinator().heads[robot_id].aux_status()
-        power = data.get("power", {}) if isinstance(data, dict) else {}
+        if (not isinstance(data, dict)
+                or data.get("robot_id") != robot_id
+                or not isinstance(data.get("power"), dict)):
+            raise OperationError("WROOM fuel-gauge robot identity mismatch")
+        power = data["power"]
         valid = power.get("fuel_valid") is True
         cell = power.get("cell_mv")
         soc = power.get("soc_centi")
