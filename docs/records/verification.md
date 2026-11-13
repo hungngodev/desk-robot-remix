@@ -1,6 +1,47 @@
 # Verification and physical trials
 
 
+## November 12 pinned Xiaozhi tool speech and multi-call contract repair
+
+**Source evidence:** In the exact pinned upstream xinnan-tech/xiaozhi-esp32-server
+revision `d9c2e8c5`, `plugins_func/register.py` defines
+`ActionResponse(action,result,response)`, not `.content`. Yet the pinned
+`UnifiedToolHandler._combine_responses` directly accessed
+`response.content`, making grouped/parallel tool calls fail when they tried
+to combine Mac camera/memory/status outputs. The pinned
+`core/handle/intentHandler.py` processes `Action.REQLLM` by requesting
+a **new spoken LLM reply** even if the preceding tool was superseded
+by newer human VAD. For `Action.NONE`, its backward-compatible fallback
+still speaks when a result/response is present. These are source-observed
+behavioral defects, not hypothetical API semantics.
+
+**Actual source fixes:** `code/laptop/server/install_overlay.py` anchored
+`patch_unified_tool_handler` now reads the actual `.result` attribute
+from each tool, JSON-encodes structured results and filters silent
+`Action.NONE` results, preserving the pinned upstream checkout and the
+existing 8-worker plugin pool (`1eb4d120`). Existing tool wrappers call
+`read_only_response` for look, situation, memories and job: if and only if
+the Mac marks an old tool superseded by new speech/reconnect, return
+`ActionResponse(Action.NONE)` with **NO result and NO response** so no
+old speech is generated; valid and recoverable errors retain REQLLM;
+physical STOP and guarded pickup retain their separate ACK ownership
+(`452910f9`). New tests `d7be4d80`, `6507b62e`, `3ec87b28`
+check silent old output and actual pinned combined tool results.
+
+**Execution evidence:** all above source changes committed to same PR #17.
+The test additions have **NOT RUN** in this chat. Last observed GitHub Actions
+run [43350904666](https://github.com/hungngodev/desk-robot-remix/actions/runs/43350904666)
+failed all four jobs with `steps=null`, so compilation/pytest state remains
+unknown. Do not call green. Before escalating framework or hardware
+claims, run `cd code && uv run --no-sync pytest -q
+tests/test_xiaozhi_tool_resilience.py tests/test_server_bridge.py
+tests/test_streamed_ollama.py tests/test_brain_context.py
+tests/test_multimodal_api.py`, then actual pinned server overlay and
+XIAO AEC tests on devices. This is only software source qualification.
+Real charging, signed current, full fitted CAD, gripper, docking, playback
+and five connected robots are still open.
+
+
 ## November 12 scoped robot brain and context integration source audit
 
 **Only PR #17, no other branch.** Live GitHub blob readback after commits
