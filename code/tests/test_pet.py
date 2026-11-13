@@ -2071,3 +2071,52 @@ async def test_bmp280_air_pressure_events_require_distinct_measurements_and_opt_
     finally:
         state.enabled = False
         await pet.close()
+
+
+async def test_pet_drops_old_robot_frame_after_brief_peer_voice_turn(
+    fleet, tmp_path,
+):
+    """A human on robot-02 supersedes robot-01's old scene even after VAD end."""
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    class NoOldSceneInference:
+        def __init__(self):
+            self.calls = 0
+
+        async def compare(self, before, after):
+            self.calls += 1
+            raise AssertionError("Pre-human camera frame reached scene model")
+
+    scene = NoOldSceneInference()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": ChangingCamera()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, scene, interval=.05,
+    )
+    visual = MultimodalOrchestrator(
+        fleet, {}, scene, asyncio.Lock(),
+    )
+    pet.multimodal = visual
+    old_receipt = time.monotonic() - .25
+    visual.hub.offer("robot-01", WHITE, old_receipt, source="proactive")
+    visual.voice_started("robot-02")
+    visual.voice_ended("robot-02")
+    assert visual.latest_fleet_human_turn_at() > old_receipt
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.quiet = True
+    state.generation = 11
+    worker = asyncio.create_task(pet._observe("robot-01", 11))
+    try:
+        await wait_for(lambda: state.stale_camera_events >= 1)
+        assert scene.calls == 0
+        assert memory.count("robot-01") == 0
+        assert state.last_error is None
+        assert state.enabled is True
+    finally:
+        state.enabled = False
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        await pet.close()
+        await visual.close()
