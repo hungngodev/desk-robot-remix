@@ -627,6 +627,9 @@ class MultimodalOrchestrator:
                 robot_id in self._stream_tasks
                 and not self._stream_tasks[robot_id].done()
             ),
+            "camera_stream_connected": bool(
+                getattr(self.heads[robot_id], "_stream_connected", False)
+            ),
             "camera_stream_physically_qualified": False,
             "frames_in_ram": len(self.hub.frames[robot_id]),
             "software_timings": dict(self._metrics[robot_id]),
