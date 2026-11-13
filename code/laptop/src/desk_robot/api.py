@@ -6,7 +6,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -125,6 +125,26 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     def coordinator():
         return app.state.runtime.coordinator
 
+    def requested_tool_context(request: Request, robot_id: str):
+        # The Xiaozhi read-only tool explicitly marks its own requests.
+        # Background UI/status polling must not become conversation history.
+        if request.headers.get("x-desk-robot-tool-receipt") != "1":
+            return None
+        visual = getattr(app.state.runtime, "multimodal", None)
+        epochs = getattr(visual, "_turn_epoch", None)
+        if not isinstance(epochs, dict) or robot_id not in epochs:
+            return None
+        return visual, epochs[robot_id]
+
+    def remember_tool_context(owner, robot_id: str, kind: str, summary: str):
+        if owner is None:
+            return
+        visual, generation = owner
+        if visual._turn_epoch.get(robot_id) == generation:
+            visual.hub.remember_tool(
+                robot_id, kind, summary, time.monotonic()
+            )
+
     @app.get("/v1/robots", dependencies=[Depends(authorize)])
     async def robots():
         return {
@@ -137,9 +157,20 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         }
 
     @app.get("/v1/robots/{robot_id}/status", dependencies=[Depends(authorize)])
-    async def status(robot_id: str):
+    async def status(robot_id: str, request: Request):
         coordinator().robot(robot_id)
-        return await coordinator().heads[robot_id].status()
+        context = requested_tool_context(request, robot_id)
+        data = await coordinator().heads[robot_id].status()
+        if isinstance(data, dict):
+            safety = data.get("safety")
+            safety = safety if isinstance(safety, dict) else {}
+            summary = (
+                f"backend={str(data.get('backend', 'unknown'))[:24]}, "
+                f"armed={data.get('armed')}, "
+                f"safety_fault={str(safety.get('fault', 'unknown'))[:40]}"
+            )
+            remember_tool_context(context, robot_id, "robot_status", summary)
+        return data
 
     @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])
     async def aux(robot_id: str):
@@ -618,7 +649,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.get("/v1/robots/{robot_id}/jobs/latest-pickup",
              dependencies=[Depends(authorize)])
-    async def latest_pickup(robot_id: str):
+    async def latest_pickup(robot_id: str, request: Request):
         """Read the Mac job owner after a head WiFi reconnect.
 
         A per-WebSocket remembered ID is not durable. Only jobs for this
@@ -629,16 +660,27 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             settings.robot(robot_id)
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
+        owner = requested_tool_context(request, robot_id)
         matches = [
             job for job in coordinator().jobs.values()
             if job.robot_id == robot_id and job.kind == "pickup"
         ]
         if not matches:
+            remember_tool_context(
+                owner, robot_id, "pickup_status",
+                "No Mac pickup job recorded; no grasp verified",
+            )
             return {
                 "robot_id": robot_id, "available": False,
                 "physical_grasp_verified": False,
             }
-        return {"available": True, **matches[-1].data()}
+        job = matches[-1]
+        remember_tool_context(
+            owner, robot_id, "pickup_status",
+            f"pickup job {job.id[:24]} state={job.state}; "
+            "physical grasp requires separate trial evidence",
+        )
+        return {"available": True, **job.data()}
 
     @app.get("/v1/jobs/{job_id}", dependencies=[Depends(authorize)])
     async def job(job_id: str):
