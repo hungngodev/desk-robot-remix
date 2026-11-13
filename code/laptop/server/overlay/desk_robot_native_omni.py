@@ -38,6 +38,8 @@ except ModuleNotFoundError:
 
 _sessions: dict[str, "NativeOmniSession"] = {}
 _output_owner: str | None = None
+_external_speaker_owner: str | None = None
+_external_speaker_connection = None
 _output_owner_lock = asyncio.Lock()
 # Keep only bounded error diagnostics, never PCM/video or recovered transcripts.
 _terminal_errors: dict[str, str] = {}
@@ -425,6 +427,7 @@ class NativeOmniSession:
         self._socket_lock = asyncio.Lock()
         self._device_send_lock = asyncio.Lock()
         self._generation = 0
+        self._external_speech_active = False
         self._user_was_talking = False
         self._silent_frames = 0
         self._playback_generation = -1
@@ -1490,6 +1493,10 @@ class NativeOmniSession:
                     await self._send_device_state("stop", generation)
                     if generation == self._generation and current_response:
                         self._tool_audio_sent(current_response, generation)
+                        # Native output can yield to Mac proactive comments
+                        # after the complete current human tool response.
+                        if current_response == self._tool_audio_response_id:
+                            self._tool_speech_turn = None
                 pending.clear()
                 resample_state = None
                 current_response = None
@@ -1521,6 +1528,8 @@ class NativeOmniSession:
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
         if state == "start":
+            if self._external_speech_active:
+                return  # The Mac proactive owner already holds this decoder.
             # Source-authenticated human VAD has priority even if this model
             # response was already queued. Never speak over another pet's user.
             if not await claim_speaker(self):
@@ -1559,7 +1568,7 @@ class NativeOmniSession:
 
     async def _send_device_opus(self, packet: bytes, generation: int) -> None:
         global _output_owner
-        if self.closed or generation != self._generation:
+        if self.closed or generation != self._generation or self._external_speech_active:
             return
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
@@ -1569,7 +1578,8 @@ class NativeOmniSession:
             # Human VAD can begin AFTER a reply already started, before the
             # queued cross-pet preemption task runs. Check real floor state
             # before every 60 ms packet, not just the TTS START frame.
-            if self.closed or generation != self._generation:
+            if (self.closed or generation != self._generation
+                    or self._external_speech_active):
                 return
             if bridge.human_speech_active():
                 blocked_by_human = True
@@ -1725,12 +1735,58 @@ class NativeOmniSession:
                     _output_owner = None
 
 
+async def begin_external_speech(conn) -> bool:
+    """Lease the ONE Xiaozhi decoder for existing Mac proactive/group speech.
+
+    Live human mic, native tool answers and current native speech always win.
+    Never let two robots narrate at once or give the Mac a second audio owner.
+    """
+    global _external_speaker_owner, _external_speaker_connection
+    import desk_robot_bridge as bridge
+    if bridge.connections.get(getattr(conn, "device_id", None)) is not conn:
+        return False
+    session = _sessions.get(conn.device_id)
+    async with _output_owner_lock:
+        if (_external_speaker_owner is not None or _output_owner is not None
+                or bridge.human_speech_active()
+                or (session is not None and not session.closed
+                    and (session._user_was_talking
+                         or session._tool_speech_turn is not None))):
+            return False
+        _external_speaker_owner = conn.device_id
+        _external_speaker_connection = conn
+        if session is not None and not session.closed:
+            session._external_speech_active = True
+    if session is not None and not session.closed:
+        try:
+            events = await session._invalidate_head_first()
+            session._schedule_remote_cancel(events)
+        except Exception:
+            await end_external_speech(conn)
+            return False
+    return True
+
+
+async def end_external_speech(conn) -> None:
+    """Release only the exact authenticated Mac speaker lease holder."""
+    global _external_speaker_owner, _external_speaker_connection
+    async with _output_owner_lock:
+        if (_external_speaker_owner != getattr(conn, "device_id", None)
+                or _external_speaker_connection is not conn):
+            return
+        _external_speaker_owner = None
+        _external_speaker_connection = None
+        session = _sessions.get(conn.device_id)
+        if session is not None and session.conn is conn:
+            session._external_speech_active = False
+
+
 async def claim_speaker(session: NativeOmniSession) -> bool:
     """One native speaker owner, and NO new reply during human speech."""
     global _output_owner
     import desk_robot_bridge as bridge
     async with _output_owner_lock:
-        if bridge.human_speech_active():
+        if bridge.human_speech_active() or _external_speaker_owner is not None:
             return False
         other_id = _output_owner
         if other_id is not None and other_id != session.device:
