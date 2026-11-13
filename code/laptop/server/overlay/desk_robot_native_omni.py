@@ -150,6 +150,8 @@ def status(device: str) -> dict:
         "heard_live_delivered": s.heard_live_delivered,
         "native_context_updates": s.native_context_updates,
         "native_context_errors": s.native_context_errors,
+        "native_readonly_tools_completed": s.native_readonly_tools_completed,
+        "native_readonly_tools_dropped": s.native_readonly_tools_dropped,
         "transcript_memory_enabled": s._transcript_memory_enabled,
         "model_pcm_chunks_received": s.model_chunks,
         "model_opus_packets_sent_to_head": s.head_packets,
@@ -209,6 +211,13 @@ class NativeOmniSession:
         self._context_last_sync_at = float("-inf")
         self.native_context_updates = 0
         self.native_context_errors = 0
+        self._readonly_queue: asyncio.Queue[tuple[str, dict, int, int]] = (
+            asyncio.Queue(maxsize=3)
+        )
+        self._readonly_seen: set[str] = set()
+        self._readonly_inflight: asyncio.Task | None = None
+        self.native_readonly_tools_completed = 0
+        self.native_readonly_tools_dropped = 0
         self._heard_session = uuid.uuid4().hex[:12]
         self._heard_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=12)
         self._heard_seen: set[str] = set()
@@ -459,6 +468,66 @@ class NativeOmniSession:
                 # microphone forwarding, cancellation, or existing speaker.
                 self.native_context_errors += 1
 
+    def _queue_readonly_tool(self, event: dict) -> None:
+        """One explicit actual ASR request, never guessed physical authority."""
+        if not self._live_transcript_enabled:
+            return
+        item = event.get("item_id")
+        if (not isinstance(item, str) or not 1 <= len(item) <= 128
+                or not item.isascii() or item in self._readonly_seen):
+            return
+        request = native_readonly_request(event.get("transcript"))
+        if request is None:
+            return
+        if len(self._readonly_seen) >= 128:
+            self._readonly_seen.clear()
+        self._readonly_seen.add(item)
+        try:
+            self._readonly_queue.put_nowait(
+                (*request, self._generation, self._video_turn)
+            )
+        except asyncio.QueueFull:
+            self.native_readonly_tools_dropped += 1
+
+    async def _readonly_tool_worker(self) -> None:
+        """Reuse the pinned Xiaozhi read-only Mac bridge, not a new executor.
+
+        MiniCPM has no native function-call contract: the received Mac
+        result grounds the next duplex turn via the existing context refresh.
+        A slow vision call is cancellable; urgent STOP remains independent.
+        """
+        while not self.closed:
+            route, payload, epoch, video_turn = await self._readonly_queue.get()
+            if (epoch != self._generation or video_turn != self._video_turn
+                    or not self.connected):
+                continue
+            try:
+                from plugins_func.functions.desk_robot_tools import call
+                pending = asyncio.create_task(asyncio.wait_for(
+                    call(self.conn, route, payload), timeout=24
+                ))
+                self._readonly_inflight = pending
+                result = await pending
+                if (not self.closed and self.connected
+                        and self._generation == epoch
+                        and self._video_turn == video_turn
+                        and isinstance(result, dict)
+                        and not result.get("error")
+                        and not result.get("_desk_robot_turn_superseded")):
+                    self.native_readonly_tools_completed += 1
+                    # The Mac tool adapter recorded provenance into the SAME
+                    # hub; refresh existing model context for the NEXT turn.
+                    self._context_wakeup.set()
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling():
+                    raise
+                continue  # A new human started speaking; do not publish.
+            except Exception:
+                self.native_readonly_tools_dropped += 1
+            finally:
+                if self._readonly_inflight is not None:
+                    self._readonly_inflight = None
+
     async def _camera(self, http: aiohttp.ClientSession) -> None:
         """Select real JPEG receipts independently from realtime microphone I/O.
 
@@ -543,6 +612,9 @@ class NativeOmniSession:
                     self._last_video_sent_receipt_us = None
                     self._last_video_selected_at = float("-inf")
                     self._camera_wakeup.set()
+                    pending = self._readonly_inflight
+                    if pending is not None and not pending.done():
+                        pending.cancel()  # Superseded optional Mac tool.
             jpeg, age, receipt = None, None, None
             if (self._user_was_talking and self.latest_jpeg is not None
                     and self._latest_frame_receipt_us
@@ -589,6 +661,7 @@ class NativeOmniSession:
             pcm = self.wire.handle_event(event)
             if kind == "conversation.item.input_audio_transcription.completed":
                 self._accept_heard_transcript(event)
+                self._queue_readonly_tool(event)
             elif kind == "response.done" and self._live_transcript_enabled:
                 # Refresh the next model turn from the same Mac evidence
                 # owner. Never await tool/context HTTP in audio reception.
@@ -728,6 +801,9 @@ class NativeOmniSession:
         # context. A camera fetch already in flight must not reintroduce
         # old-turn JPEGs after the head's audio has been flushed.
         self._video_turn += 1
+        pending = self._readonly_inflight
+        if pending is not None and not pending.done():
+            pending.cancel()
         self.latest_jpeg = None
         self._latest_frame_receipt_us = None
         self._last_video_sent_receipt_us = None
@@ -800,6 +876,9 @@ class NativeOmniSession:
                     if self._live_transcript_enabled:
                         self._tasks.append(asyncio.create_task(
                             self._refresh_live_context(http)
+                        ))
+                        self._tasks.append(asyncio.create_task(
+                            self._readonly_tool_worker()
                         ))
                     done, _pending = await asyncio.wait(
                         self._tasks, return_when=asyncio.FIRST_COMPLETED
