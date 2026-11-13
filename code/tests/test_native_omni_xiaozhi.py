@@ -1407,6 +1407,79 @@ async def test_native_tool_dialogue_only_remembers_sent_uninterrupted_audio(
     assert len(session._tool_dialogue) == 1
 
 
+async def test_native_duplex_speech_text_enters_dialogue_only_after_opus_stop(
+    native, monkeypatch,
+):
+    """Real upstream text events + audio delivery give next turn continuity."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._last_human_transcript = "Tell me something interesting"
+    class Encoder:
+        def __init__(self, rate, ch, mode):
+            assert (rate, ch, mode) == (16000, 1, "audio")
+        def encode(self, pcm, samples):
+            return b"opus"
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    states = []
+    packets = []
+    async def state(name, gen):
+        states.append(name)
+    async def send_opus(chunk, gen):
+        packets.append(chunk)
+    session._send_device_state = state
+    session._send_device_opus = send_opus
+
+    pcm = base64.b64encode(bytes(4800)).decode()
+    events = [
+        {"type": "response.created", "response_id": "native_1",
+         "response": {"id": "native_1",
+                      "metadata": {"duplex_event": {"epoch": 0}}}},
+        {"type": "response.output_text.delta", "response_id": "native_1",
+         "delta": "Model text guess"},
+        {"type": "response.output_audio_transcript.delta",
+         "response_id": "native_1", "delta": "Hello from the robot."},
+        {"type": "response.output_audio.delta", "response_id": "native_1",
+         "format": "pcm16", "sample_rate_hz": 24000,
+         "delta": pcm, "metadata": {"epoch": 0}},
+        {"type": "response.done", "response_id": "native_1"},
+    ]
+    class ModelSocket:
+        def __aiter__(self):
+            async def incoming():
+                for event in events:
+                    yield SimpleNamespace(
+                        type=module.aiohttp.WSMsgType.TEXT,
+                        data=json.dumps(event),
+                    )
+            return incoming()
+    session._socket = ModelSocket()
+    await session._receive_model()
+    assert not session._tool_dialogue
+    playing = asyncio.create_task(session._play())
+    try:
+        async with asyncio.timeout(1):
+            while not session._tool_dialogue:
+                await asyncio.sleep(.005)
+        assert states == ["start", "stop"]
+        assert packets
+        message = session._tool_dialogue_context(module.time.monotonic())
+        assert "Tell me something interesting" in message
+        assert "Hello from the robot." in message
+        assert "Model text guess" not in message
+    finally:
+        session.closed = True
+        playing.cancel()
+        await asyncio.gather(playing, return_exceptions=True)
+
+
 async def test_second_asr_clause_same_human_turn_survives_native_audio_fence(
     native,
 ):
