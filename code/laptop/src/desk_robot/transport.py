@@ -69,7 +69,7 @@ class _MjpegFrames:
     Reject oversized headers, payloads, missing EOI, and malformed framing.
     """
 
-    boundary = b"--deskrobotframe\\r\\n"
+    boundary = b"--deskrobotframe\r\n"
 
     def __init__(self):
         self.buffer = bytearray()
@@ -86,7 +86,7 @@ class _MjpegFrames:
                 break
             if not self.buffer.startswith(self.boundary):
                 raise ValueError("Invalid MJPEG part boundary")
-            end = self.buffer.find(b"\\r\\n\\r\\n", len(self.boundary))
+            end = self.buffer.find(b"\r\n\r\n", len(self.boundary))
             if end < 0:
                 if len(self.buffer) > 512:
                     raise ValueError("Oversized MJPEG part headers")
@@ -94,7 +94,7 @@ class _MjpegFrames:
             if end > 512:
                 raise ValueError("Oversized MJPEG part headers")
             try:
-                lines = bytes(self.buffer[len(self.boundary):end]).decode("ascii").split("\\r\\n")
+                lines = bytes(self.buffer[len(self.boundary):end]).decode("ascii").split("\r\n")
                 headers = {}
                 for line in lines:
                     name, value = line.split(": ", 1)
@@ -123,9 +123,9 @@ class _MjpegFrames:
             if len(self.buffer) < finish + 2:
                 break
             frame = bytes(self.buffer[start:finish])
-            if (not frame.startswith(b"\\xff\\xd8")
-                    or not frame.endswith(b"\\xff\\xd9")
-                    or self.buffer[finish:finish + 2] != b"\\r\\n"):
+            if (not frame.startswith(b"\xff\xd8")
+                    or not frame.endswith(b"\xff\xd9")
+                    or self.buffer[finish:finish + 2] != b"\r\n"):
                 raise ValueError("MJPEG frame incomplete")
             frames.append((frame, (boot, sequence, completed)))
             del self.buffer[:finish + 2]
