@@ -339,7 +339,14 @@ class CameraFrameHub:
             raise ValueError("Invalid read-only tool evidence")
         cleaned = " ".join(summary.split())[:160]
         if cleaned:
-            self.tool_history[robot_id].append((kind, cleaned, received_at))
+            # Repeated status queries are not independent events: keep one
+            # latest receipt per tool kind so they cannot evict a pickup or
+            # visual result from the shared small context buffer.
+            entries = self.tool_history[robot_id]
+            for previous in tuple(entries):
+                if previous[0] == kind:
+                    entries.remove(previous)
+            entries.append((kind, cleaned, received_at))
 
     def recent_tool_context(self, robot_id: str, now: float) -> list[dict]:
         self._check(robot_id)
