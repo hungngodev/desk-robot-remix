@@ -739,7 +739,14 @@ class NativeOmniSession:
                 try:
                     result = await completed
                 except asyncio.CancelledError:
-                    raise
+                    # An individual optional Mac HTTP may be cancelled or
+                    # disconnected without changing the human turn. Keep
+                    # independent completed tool results. A real barge
+                    # cancellation still propagates through the parent.
+                    if asyncio.current_task().cancelling():
+                        raise
+                    self.native_readonly_tools_dropped += 1
+                    continue
                 except Exception:
                     self.native_readonly_tools_dropped += 1
                     continue
