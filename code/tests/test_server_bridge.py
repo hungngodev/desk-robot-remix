@@ -128,7 +128,11 @@ def test_overlay_targets_pinned_server_and_compiles():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     changes = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
-    assert len(changes) == 9
+    assert len(changes) == 10
+    assert "core/providers/tools/unified_tool_handler.py" in changes
+    multi = changes["core/providers/tools/unified_tool_handler.py"]
+    assert "getattr(response, 'result', None)" in multi
+    assert "response.content" not in multi.split("def _combine_responses", 1)[1]
     assert "core/providers/tools/server_plugins/plugin_executor.py" in changes
     plugin = changes["core/providers/tools/server_plugins/plugin_executor.py"]
     assert "_PLUGIN_SLOTS = threading.BoundedSemaphore(8)" in plugin
