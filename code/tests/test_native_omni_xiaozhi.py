@@ -718,6 +718,43 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_native_persona_negotiates_live_asr_without_disk_permission(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "instructions": "Be kind and concise.",
+                "model_can_arm_motors": False,
+                "live_transcript_context_enabled": True,
+                "transcript_memory_enabled": False,
+            }
+
+    class Mac:
+        def get(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/omni-context")
+            return Reply()
+
+    await session._load_private_persona(Mac())
+    assert session._live_transcript_enabled is True
+    assert session._transcript_memory_enabled is False
+    assert session.wire.instructions == "Be kind and concise."
+
+
 async def test_native_asr_live_only_context_does_not_count_as_saved_memory(native):
     module, bridge = native
     conn, _ = connection()
