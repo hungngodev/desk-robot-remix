@@ -708,6 +708,23 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "interaction-context", "voice-context",
         }
         picked = []
+        # A model can return valid JSON with the WRONG tool. An isolated
+        # memory question does not authorize an unrelated camera observation
+        # or status poll. Preserve genuine compound visual questions.
+        utterance = transcript.casefold().strip(" ?!.")
+        recall_only = (
+            utterance.startswith((
+                "what did i say", "what did i tell", "do you remember",
+                "what do you remember", "what did we discuss",
+                "what did we talk about", "have we talked about",
+                "can you recall", "remind me",
+            ))
+            and not any(cue in utterance for cue in (
+                "look at", "can you see", "what do you see", "camera",
+                "picture", "photo", "image", "what color",
+                "on the desk", "in front of",
+            ))
+        )
         battery_question = any(
             key in transcript.casefold()
             for key in ("battery", "charge level", "power level", "cell voltage")
@@ -719,6 +736,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 # battery question must use the real WROOM fuel gauge source.
                 route = "power-status"
             if not isinstance(route, str) or route not in allowed or route in picked:
+                continue
+            if recall_only and route != "voice-context":
                 continue
             if route == "voice-context" and not settings.voice_memory_tools_enabled:
                 continue
