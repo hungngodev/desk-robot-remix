@@ -1679,6 +1679,58 @@ async def test_proactive_speech_rechecks_all_human_vad_after_slow_model(
         await pet.close()
 
 
+async def test_brief_peer_voice_turn_supersedes_old_pet_reply_after_quiet_window(
+    fleet, tmp_path,
+):
+    """A completed short VAD must fence a slower OLD unsolicited answer."""
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SlowChat:
+        async def reply(self, history):
+            entered.set()
+            await release.wait()
+            return "I noticed that key."
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SlowChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), speech_cooldown=0,
+    )
+    # Use the actual fleet voice/camera epoch owner, not a fake VAD flag.
+    visual = MultimodalOrchestrator(
+        SimpleNamespace(robots=fleet.robots, voice_vision_tools_enabled=False),
+        {}, KeyScene(), asyncio.Lock(),
+    )
+    pet.multimodal = visual
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 6
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A key appeared", .97), 6
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        visual.voice_started("robot-05")
+        visual.voice_ended("robot-05")
+        # Even after the ordinary 800ms quiet pause, the old response must
+        # never resurface when the model finally returns.
+        await asyncio.sleep(.85)
+        assert not visual.hub.spontaneous_floor_busy(time.monotonic())
+        release.set()
+        await wait_for(lambda: pet._speech_task is None)
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        assert memory.count("robot-01") == 0
+        assert state.last_initiative_suppression == "human_started_during_reasoning"
+    finally:
+        release.set()
+        state.enabled = False
+        await pet.close()
+        await visual.close()
+
+
 async def test_uncertain_visual_event_is_not_spoken_and_does_not_consume_cooldown(
     fleet, tmp_path,
 ):
