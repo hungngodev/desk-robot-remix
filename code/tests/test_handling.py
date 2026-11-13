@@ -48,6 +48,19 @@ def test_real_mpu_scaled_only_if_wroom_source_fresh_stationary_and_valid():
         assert raw_mpu6050(body) is None
 
 
+def test_mpu_identity_mismatch_cannot_seed_handling_calibration():
+    gate = HandlingGate()
+    for wrong in (None, True, 0, 0x69, "104"):
+        frame = sample()
+        frame["imu"]["gyro_id"] = wrong
+        assert raw_mpu6050(frame) is None
+        assert gate.observe(frame, 100.0, qualified=True) == ()
+        assert gate.reference is None and gate.startup_samples == []
+    # A correctly identified, fresh acquisition can begin qualification.
+    assert qualified(gate, sample(sample_ms=2), 100.2, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
+
+
 def test_imu_disabled_by_default_never_creates_unqualified_event():
     gate = HandlingGate()
     for i in range(15):
