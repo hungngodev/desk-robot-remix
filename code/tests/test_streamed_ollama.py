@@ -193,3 +193,87 @@ async def test_proactive_speaker_partial_transport_failure_sends_real_abort(sett
         await c.say_proactive(settings.robots[0], "Hello there")
     assert events == ["session_begin", "partially_queued", "head_abort", "session_end"]
     assert c.active is None
+
+
+async def test_partially_transmitted_stream_is_private_and_labeled_uncertain(
+    settings, tmp_path,
+):
+    from desk_robot.memory import MemoryStore
+
+    sent, ended = [], []
+    memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
+
+    class Chat:
+        async def stream_reply(self, history):
+            yield "I noticed your silver key."
+            raise RuntimeError("Upstream stream dropped after one sentence")
+
+    class Speaker:
+        @asynccontextmanager
+        async def session(self, robots):
+            yield
+
+        async def say(self, robot, text):
+            sent.append((robot.id, text))
+
+        async def interrupt(self, robot):
+            ended.append(robot.id)
+
+    c = Conversation(settings, Chat(), Speaker(), memory=memory)
+    with pytest.raises(RuntimeError, match="Upstream stream dropped"):
+        await c.run(["robot-01", "robot-02"], "keys", 1)
+    assert sent == [("robot-01", "I noticed your silver key.")]
+    assert ended == ["robot-01"]
+    saved = memory.recent("robot-01")
+    assert len(saved) == 1
+    assert saved[0].kind == "own_utterance"
+    assert saved[0].summary == (
+        "I started to say (sent, playback unverified): "
+        "I noticed your silver key."
+    )
+    assert memory.recent("robot-02") == []
+    # A later model may know what was SENT without being told the peer heard.
+    reloaded = Conversation(settings, Chat(), Speaker(), memory=memory)
+    assert "playback unverified" in reloaded._persona_with_memory(
+        settings.robot("robot-01")
+    )
+
+
+async def test_cancelled_stream_keeps_only_completed_sends_for_speaker_owner(
+    settings, tmp_path,
+):
+    from desk_robot.memory import MemoryStore
+
+    first_sent, blocked, aborted = (
+        asyncio.Event(), asyncio.Event(), asyncio.Event()
+    )
+    memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
+
+    class Chat:
+        async def stream_reply(self, history):
+            yield "I was going to suggest a game."
+            blocked.set()
+            await asyncio.Event().wait()
+            yield "Never spoken."
+
+    class Speaker:
+        @asynccontextmanager
+        async def session(self, robots):
+            yield
+
+        async def say(self, robot, text):
+            first_sent.set()
+
+        async def interrupt(self, robot):
+            aborted.set()
+
+    c = Conversation(settings, Chat(), Speaker(), memory=memory)
+    task = asyncio.create_task(c.run(["robot-01", "robot-02"], "play", 1))
+    await asyncio.wait_for(blocked.wait(), timeout=1)
+    await c.stop()
+    assert task.cancelled()
+    assert aborted.is_set() and first_sent.is_set()
+    saved = memory.recent("robot-01")
+    assert len(saved) == 1 and "suggest a game" in saved[0].summary
+    assert "Never spoken" not in saved[0].summary
+    assert memory.recent("robot-02") == []
