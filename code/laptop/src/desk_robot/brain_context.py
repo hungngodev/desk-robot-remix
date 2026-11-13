@@ -66,33 +66,61 @@ def compose_brain_context(
     ]
     core_text = _clean("; ".join(core_parts), limit=500)
 
-    cue_parts = []
-    for item in timeline[-10:]:
+    # A speaking head can contribute several JPEG receipts in seconds.
+    # Repeating the same cue crowds out touch, completed tool context and
+    # conversational continuity. Keep the latest per kind, then budget
+    # independent modalities rather than truncating a large camera list.
+    cue_parts: list[tuple[int, str]] = []
+    seen_cues: set[tuple[str, str]] = set()
+    priorities = {
+        "tool": 0, "sensor": 1, "human_voice": 2,
+        "robot_speech": 3, "camera": 4,
+    }
+    for item in reversed(timeline[-16:]):
         if not isinstance(item, dict):
             continue
         channel, kind = item.get("channel"), item.get("kind")
+        if not isinstance(channel, str) or channel not in priorities:
+            continue
+        # Group every camera JPEG receipt under one cue, not ten fake new
+        # observations; preserve distinct physical sensor event kinds.
+        identity = (channel, kind if channel == "sensor"
+                    and isinstance(kind, str) else channel)
+        if identity in seen_cues:
+            continue
+        phrase = ""
         if channel == "sensor" and isinstance(kind, str):
-            cue_parts.append(f"Physical sensor edge: {_clean(kind, limit=40)}")
+            phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
         elif channel == "human_voice":
-            cue_parts.append("Authenticated human voice turn")
+            phrase = "Authenticated human voice turn"
         elif channel == "camera":
-            # A frame receipt does NOT assert anything visible in that photo.
-            cue_parts.append("XIAO frame received (contents not inferred)")
+            phrase = "XIAO frame received (contents not inferred)"
         elif channel == "tool" and kind == "visual_look":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
-                cue_parts.append(
+                phrase = (
                     "Earlier local VLM guess, not fresh sighting: "
-                    + _clean(result, limit=120)
+                    + _clean(result, limit=90)
                 )
         elif channel == "robot_speech" and kind == "own_utterance":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
-                cue_parts.append(
+                phrase = (
                     "I previously sent this spoken line (playback unverified): "
-                    + _clean(result, limit=120)
+                    + _clean(result, limit=90)
                 )
-    interaction = _clean("; ".join(cue_parts), limit=400)
+        if phrase:
+            seen_cues.add(identity)
+            cue_parts.append((priorities[channel], phrase))
+    cue_parts.sort(key=lambda candidate: candidate[0])
+    selected: list[str] = []
+    remaining = 400
+    for _, phrase in cue_parts:
+        cost = len(phrase) + (2 if selected else 0)
+        if cost <= remaining:
+            selected.append(phrase)
+            remaining -= cost
+    interaction = "; ".join(selected)
     return ContextBundle(recent_text, core_text, interaction)
 
 
