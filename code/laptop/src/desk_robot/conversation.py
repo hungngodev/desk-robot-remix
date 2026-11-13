@@ -282,7 +282,12 @@ class Conversation:
             async with asyncio.timeout(300):
                 async with self.session_lock, self.speaker.session(robots):
                     try:
+                        # Track only segments whose speaker.say actually
+                        # returned; cancellation during a WAV send cannot be
+                        # treated as an acknowledged transmission.
+                        completed_segments: list[str] = []
                         for index in range(turns):
+                            completed_segments = []
                             robot = robots[index % len(robots)]
                             current_robot = robot
                             async with self.speaker_lock:
@@ -290,13 +295,12 @@ class Conversation:
                                 if callable(stream_reply):
                                     # Speech and generation share the same Xiaozhi
                                     # session. No detached TTS tasks outlive it.
-                                    segments: list[str] = []
                                     async for segment in stream_reply(
                                         list(self.histories[robot.id])
                                     ):
                                         await self.speaker.say(robot, segment)
-                                        segments.append(segment)
-                                    text = " ".join(segments)
+                                        completed_segments.append(segment)
+                                    text = " ".join(completed_segments)
                                 else:
                                     text = await self.chat.reply(
                                         list(self.histories[robot.id])
@@ -311,9 +315,9 @@ class Conversation:
                                     )
                             transcript.append({"robot_id": robot.id, "text": text})
                     except BaseException:
-                        # Fail fast while the Xiaozhi group session still owns
-                        # this head. Releasing its lease first can delay a
-                        # physical decoder flush behind session teardown.
+                        # Urgently stop the head first. Only completed sends,
+                        # never the segment being cancelled or a guessed audio
+                        # duration, can be saved as uncertain speech history.
                         interrupt = getattr(self.speaker, "interrupt", None)
                         if current_robot is not None and callable(interrupt):
                             try:
@@ -322,6 +326,23 @@ class Conversation:
                                 )
                             except Exception:
                                 pass  # Preserve the original model/transport failure.
+                        if current_robot is not None and completed_segments:
+                            # Partial stream must NOT be copied as "heard" to
+                            # peers. Speaker transmission is not acoustic ACK.
+                            # Retain the private first-person history with an
+                            # explicit uncertainty marker for later turns.
+                            prefix = "I started to say (sent, playback unverified): "
+                            partial = prefix + " ".join(completed_segments)
+                            try:
+                                await asyncio.wait_for(
+                                    self._persist_spoken_turn(
+                                        current_robot, partial[:300],
+                                        [current_robot],
+                                    ),
+                                    timeout=2.0,
+                                )
+                            except Exception:
+                                pass  # Memory failures cannot mask audio abort.
                         raise
             return transcript
         finally:
