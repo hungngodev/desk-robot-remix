@@ -123,7 +123,7 @@ def compose_brain_context(
             continue
         # Group every camera JPEG receipt under one cue, not ten fake new
         # observations; preserve distinct physical sensor event kinds.
-        identity = (channel, kind if channel == "sensor"
+        identity = (channel, kind if channel in {"sensor", "tool"}
                     and isinstance(kind, str) else channel)
         if identity in seen_cues:
             continue
