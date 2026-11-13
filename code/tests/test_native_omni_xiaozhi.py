@@ -4579,10 +4579,18 @@ async def test_native_respects_operator_quiet_and_paused_direct_human_voice(nati
         # Direct authenticated human speech is still answerable in pause,
         # provided quiet mode was not selected by the operator.
         session._last_human_speech_at = module.time.monotonic()
+        session._direct_reply_available = True  # Actual VAD supplies this.
         assert await session._send_device_state("start", session._generation)
+        assert session._direct_reply_available is False
+        assert session._direct_reply_active is True
         assert any(isinstance(message, str) and '"state": "start"' in message
                    for message in sent)
+        await session._send_device_opus(b"direct-human-answer", session._generation)
+        assert any(isinstance(message, bytes) for message in sent)
         await session._send_device_state("stop", session._generation)
+        assert session._direct_reply_active is False
+        # A second reply without another real human turn is unsolicited.
+        assert await session._send_device_state("start", session._generation) is False
         session._pet_quiet = True
         assert await session._send_device_state("start", session._generation) is False
     finally:
@@ -4747,6 +4755,40 @@ async def test_operator_quiet_while_waiting_for_head_send_releases_fleet_speaker
         assert sent == []
         assert conn.client_is_speaking is False
         assert module._output_owner is None
+    finally:
+        session.closed = True
+        module._sessions.clear()
+        module._output_owner = None
+
+
+async def test_quiet_mode_answers_one_authenticated_human_turn_but_never_chats_alone(
+    native,
+):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._pet_quiet = True
+    session._pet_autonomy_enabled = True
+    module._sessions["mac-01"] = session
+    try:
+        assert await session._send_device_state("start", 0) is False
+        session._direct_reply_available = True
+        session._last_human_speech_at = module.time.monotonic()
+        assert await session._send_device_state("start", 0)
+        await session._send_device_opus(b"audio-from-direct-human-reply", 0)
+        assert any(isinstance(item, bytes) for item in sent)
+        assert await session._send_device_state("stop", 0)
+        assert not session._direct_reply_active
+        assert await session._send_device_state("start", 0) is False
+        # A new verified VAD turn can receive one new native answer.
+        session._direct_reply_available = True
+        session._last_human_speech_at = module.time.monotonic()
+        assert await session._send_device_state("start", 0)
+        await session._send_device_state("stop", 0)
     finally:
         session.closed = True
         module._sessions.clear()
