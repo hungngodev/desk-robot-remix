@@ -589,9 +589,7 @@ async def test_stop_never_replays_previous_turn_after_new_speech(
         submitted.append(request.url.path)
         assert request.method == "POST"
         bridge.voice_turn_generation["mac-head-01"] = 22
-        return httpx.Response(
-            code, json={"stopped": code == 200}, text=None if code == 200 else "",
-        )
+        return httpx.Response(code, json={"stopped": code == 200})
 
     def client_factory(*args, **kwargs):
         return original(*args, transport=httpx.MockTransport(handler), **kwargs)
