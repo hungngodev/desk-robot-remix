@@ -106,6 +106,10 @@ async def test_real_xiaozhi_tool_failure_returns_bounded_no_retry_error(
     {"answer": "missing authenticated identity"},
     {"robot_id": "robot-01", "motor_authorized": True},
     {"robot_id": "robot-01", "charging_authorized": True},
+    {"robot_id": "robot-01", "motor_authorized": "true"},
+    {"robot_id": "robot-01", "motor_authorized": 1},
+    {"robot_id": "robot-01", "charging_authorized": "false"},
+    {"robot_id": "robot-01", "charging_authorized": {"allowed": True}},
 ])
 async def test_legacy_and_native_shared_tool_bridge_rejects_wrong_pet_receipt(
     bridge_tools, monkeypatch, unsafe,
