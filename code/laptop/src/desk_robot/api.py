@@ -305,8 +305,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.post("/v1/robots/{robot_id}/stop", dependencies=[Depends(authorize)])
     async def stop(robot_id: str):
         coordinator().robot(robot_id)
-        await app.state.runtime.pet.pause(robot_id)
-        return await coordinator().stop(robot_id)
+        try:
+            # Physical safety dominates optional pet/task/audio cleanup.
+            return await coordinator().stop(robot_id)
+        finally:
+            await app.state.runtime.pet.pause(robot_id)
 
     @app.get("/v1/pet/{robot_id}", dependencies=[Depends(authorize)])
     async def pet_status(robot_id: str):
@@ -336,21 +339,28 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.post("/v1/pet/{robot_id}/pause", dependencies=[Depends(authorize)])
     async def pet_pause(robot_id: str):
         coordinator().robot(robot_id)
-        result = await app.state.runtime.pet.pause(robot_id)
-        # A dead audio bridge cannot delay or skip a physical WROOM stop.
-        await coordinator().stop(robot_id)
+        try:
+            # Stop wheels before awaiting vision/TTS task cancellation.
+            await coordinator().stop(robot_id)
+        finally:
+            result = await app.state.runtime.pet.pause(robot_id)
         await stop_native_pet_speech(robot_id)
         return result
 
     @app.post("/v1/pet/{robot_id}/quiet", dependencies=[Depends(operator)])
     async def pet_quiet(robot_id: str, request: QuietRequest):
         coordinator().robot(robot_id)
-        result = await app.state.runtime.pet.set_quiet(robot_id, request.quiet)
         if request.quiet:
-            # Motor stop is always earlier than optional native voice I/O.
-            await coordinator().stop(robot_id)
+            # A wedged TTS task must never hold off the motor STOP.
+            try:
+                await coordinator().stop(robot_id)
+            finally:
+                result = await app.state.runtime.pet.set_quiet(
+                    robot_id, True
+                )
             await stop_native_pet_speech(robot_id)
-        return result
+            return result
+        return await app.state.runtime.pet.set_quiet(robot_id, False)
 
     @app.get("/v1/pet/{robot_id}/memories", dependencies=[Depends(operator)])
     async def pet_memories(robot_id: str, limit: int = Query(default=12, ge=1, le=50)):
