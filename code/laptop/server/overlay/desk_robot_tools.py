@@ -13,7 +13,8 @@ async def call(conn, route, payload=None):
     # Only the pinned registered tools may reach the Mac. Never forward
     # arbitrary model-supplied paths, even to a separately protected API.
     if route not in {
-        "status", "latest-pickup", "interaction-context", "voice-context",
+        "status", "power-status", "latest-pickup",
+        "interaction-context", "voice-context",
         "look", "pickup", "stop", "plan-readonly",
     }:
         return {"error": "Unsupported robot tool route", "retried": False}
@@ -41,6 +42,8 @@ async def call(conn, route, payload=None):
         ) as client:
             if route == "status":
                 response = await client.get(f"/v1/robots/{robot}/status")
+            elif route == "power-status":
+                response = await client.get(f"/v1/pet/{robot}/power-status")
             elif route == "latest-pickup":
                 response = await client.get(
                     f"/v1/robots/{robot}/jobs/latest-pickup"
@@ -79,8 +82,8 @@ async def call(conn, route, payload=None):
     # Safety STOP and permitted pickup jobs must keep their established
     # physical acknowledgement/owner semantics, not lose an HTTP request.
     readonly = route in {
-        "status", "latest-pickup", "voice-context", "interaction-context",
-        "look", "plan-readonly",
+        "status", "power-status", "latest-pickup", "voice-context",
+        "interaction-context", "look", "plan-readonly",
     }
     observe_turn = getattr(bridge, "tool_turn_cancel_event", None)
     try:
