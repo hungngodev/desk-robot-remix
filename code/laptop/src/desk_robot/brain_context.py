@@ -111,6 +111,7 @@ def compose_brain_context(
     # independent modalities rather than truncating a large camera list.
     cue_parts: list[tuple[int, str]] = []
     seen_cues: set[tuple[str, str]] = set()
+    heard_count = 0
     priorities = {
         "human_transcript": 0, "tool": 1, "sensor": 2,
         "human_voice": 3, "robot_speech": 4, "camera": 5,
@@ -125,8 +126,17 @@ def compose_brain_context(
             continue
         # Group every camera JPEG receipt under one cue, not ten fake new
         # observations; preserve distinct physical sensor event kinds.
-        identity = (channel, kind if channel in {"sensor", "tool"}
-                    and isinstance(kind, str) else channel)
+        # The hub retains several completed ASR chunks from one human
+        # interaction. Keeping only the newest can omit the first clause of
+        # a natural question. Retain at most two, with the earlier one behind
+        # the actual sensor and visual tool evidence in the prompt budget.
+        if channel == "human_transcript":
+            if heard_count >= 2:
+                continue
+            identity = (channel, str(heard_count))
+        else:
+            identity = (channel, kind if channel in {"sensor", "tool"}
+                        and isinstance(kind, str) else channel)
         if identity in seen_cues:
             continue
         phrase = ""
@@ -137,10 +147,16 @@ def compose_brain_context(
         elif channel == "human_transcript" and kind == "model_asr_completed":
             value = item.get("content")
             if isinstance(value, str) and value.strip():
-                phrase = (
-                    "Recent model ASR guess, not a verified command: "
-                    + _clean(value, limit=105)
-                )
+                if heard_count == 0:
+                    phrase = (
+                        "Recent model ASR guess, not a verified command: "
+                        + _clean(value, limit=105)
+                    )
+                else:
+                    phrase = (
+                        "Earlier model ASR guess, not verified: "
+                        + _clean(value, limit=75)
+                    )
         elif channel == "camera":
             trigger = item.get("trigger_kind")
             phrase = "XIAO frame received (contents not inferred)"
@@ -175,7 +191,11 @@ def compose_brain_context(
                 )
         if phrase:
             seen_cues.add(identity)
-            cue_parts.append((priorities[channel], phrase))
+            priority = priorities[channel]
+            if channel == "human_transcript":
+                priority = 0 if heard_count == 0 else 5
+                heard_count += 1
+            cue_parts.append((priority, phrase))
     cue_parts.sort(key=lambda candidate: candidate[0])
     selected: list[str] = []
     remaining = 400
