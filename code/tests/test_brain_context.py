@@ -255,6 +255,9 @@ async def test_pet_brain_uses_same_timeline_without_a_second_media_owner(
     hub.notify("robot-01", "touch_tap", now)
     hub.remember_tool("robot-01", "visual_look",
                       "A silver key might be there", now)
+    hub.remember_tool("robot-01", "memory_recall",
+                      "A private phrase about a jade sculpture", now)
+    settings.voice_memory_tools_enabled = False
     pet.multimodal = SimpleNamespace(hub=hub)
     pet.states["robot-01"].enabled = True
     try:
@@ -270,6 +273,7 @@ async def test_pet_brain_uses_same_timeline_without_a_second_media_owner(
         assert "Physical sensor edge: touch_tap" in prompt
         assert "Earlier local VLM guess" in prompt
         assert "not fresh sighting" in prompt
+        assert "jade sculpture" not in prompt
         assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
         spoken = [item for item in hub.interaction_timeline(
             "robot-01", time.monotonic()
