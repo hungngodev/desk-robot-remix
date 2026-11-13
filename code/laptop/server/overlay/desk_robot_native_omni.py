@@ -255,6 +255,8 @@ class NativeOmniSession:
         self._camera_wakeup = asyncio.Event()
         self._camera_stream_connected = False
         self._latest_frame_receipt_us: int | None = None
+        # A late frame captured before a new human turn is not that turn's sight.
+        self._video_turn_started_us = 0
         self._last_video_sent_receipt_us: int | None = None
         self._last_video_selected_at = float("-inf")
         self.video_frames_selected = 0
@@ -1240,7 +1242,8 @@ class NativeOmniSession:
                             # network delivery; trust its original receipt,
                             # never reinterpret a delayed frame as fresh.
                             live_age_ms = (now * 1_000_000 - receipt) / 1000
-                            if not 0 <= live_age_ms <= 1000:
+                            if (not 0 <= live_age_ms <= 1000
+                                    or receipt <= self._video_turn_started_us):
                                 self.video_frames_skipped_stale += 1
                                 continue
                             if (self._latest_frame_receipt_us is not None
@@ -1356,6 +1359,9 @@ class NativeOmniSession:
                     # No image from the preceding spoken turn may be sent
                     # with this voice. Wake the camera without HTTP in VAD.
                     self._video_turn += 1
+                    self._video_turn_started_us = max(
+                        self._video_turn_started_us, time.monotonic_ns() // 1000
+                    )
                     self._readonly_turn += 1
                     self._input_generation += 1
                     self._clear_obsolete_tool_turn()
@@ -1689,6 +1695,9 @@ class NativeOmniSession:
         # context. A camera fetch already in flight must not reintroduce
         # old-turn JPEGs after the head's audio has been flushed.
         self._video_turn += 1
+        self._video_turn_started_us = max(
+            self._video_turn_started_us, time.monotonic_ns() // 1000
+        )
         pending = self._readonly_inflight
         if pending is not None and not pending.done():
             pending.cancel()
