@@ -771,6 +771,35 @@ def test_native_speech_tools_allow_only_explicit_readonly_requests(
 
 
 @pytest.mark.parametrize(
+    ("spoken", "route"),
+    [
+        ("What color is the mug?", "look"),
+        ("What shape is the key?", "look"),
+        ("What size is the box?", "look"),
+        ("How many keys are on the desk?", "look"),
+        ("Is there a blue mug on the table?", "look"),
+        ("Is the red key next to the mug?", "look"),
+        ("Does the screen say READY?", "look"),
+        ("How many batteries are left?", None),
+        ("Is the charger ready?", None),
+        ("Pick up the red key next to the mug", None),
+        ("I can see the red key on the table", None),
+        ("What color did I say the mug was?", None),
+        ("Does the battery say 80%?", None),
+        ("Can you move next to the mug?", None),
+    ],
+)
+def test_native_explicit_scene_questions_use_existing_camera_authority(
+    native, spoken, route,
+):
+    module, _ = native
+    result = module.native_readonly_request(spoken)
+    assert (result[0] if result else None) == route
+    if result:
+        assert result[1] == {"question": spoken}
+
+
+@pytest.mark.parametrize(
     ("spoken", "expected"),
     [
         ("Do you remember anything?", {}),
