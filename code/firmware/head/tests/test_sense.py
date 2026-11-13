@@ -294,13 +294,13 @@ class SenseSelectionTests(unittest.TestCase):
             # The operator must opt in to always listening on every private
             # build. A prior opt in must not silently survive regeneration.
             args.append('--continuous-audio')
-            with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \\
+            with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \
                     patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32):
                 private.main()
             live = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
             self.assertIn('CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=y', live)
             args.pop()
-            with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \\
+            with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \
                     patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32):
                 private.main()
             muted = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
