@@ -763,16 +763,20 @@ class MultimodalOrchestrator:
                     # Camera feed can be 4 FPS while cheap motion sampling is
                     # at most 2 FPS. No frame means no model work; no queue
                     # grows while Mac inference is busy.
-                    if received - self._last_stream_sample[robot_id] < 0.5:
+                    now = time.monotonic()
+                    local_speech = self.hub.user_active(robot_id, now)
+                    # Another robot's human voice has priority for inference
+                    # and the speaker, NOT a license to blind this robot.
+                    # Continue lighter passive observation across the fleet.
+                    sample_gap = (
+                        1.0 if self._any_human_active(now) and not local_speech
+                        else 0.5
+                    )
+                    if received - self._last_stream_sample[robot_id] < sample_gap:
                         metrics["stream_frames_skipped"] += 1
                         continue
                     self._last_stream_sample[robot_id] = received
-                    now = time.monotonic()
-                    if self._any_human_active(now) and not self.hub.user_active(robot_id, now):
-                        metrics["stream_frames_skipped"] += 1
-                        continue
-                    source = ("speech" if self.hub.user_active(robot_id, now)
-                              else "proactive")
+                    source = "speech" if local_speech else "proactive"
                     turn = self._turn_epoch[robot_id]
                     generation = self.hub._generation[robot_id]
                     try:
@@ -784,9 +788,8 @@ class MultimodalOrchestrator:
                         continue
                     if (self._closed or turn != self._turn_epoch[robot_id]
                             or generation != self.hub._generation[robot_id]
-                            or (source == "proactive" and (
-                                self._any_human_active(time.monotonic())
-                                or received <= self._last_fleet_human_turn_at))):
+                            or (source == "proactive"
+                                and received <= self._last_fleet_human_turn_at)):
                         metrics["stream_frames_skipped"] += 1
                         continue
                     try:
