@@ -3,7 +3,9 @@
 namespace desk_robot {
 bool AccessorySensors::mux(std::uint8_t address, std::uint8_t mask) {
   wire_->beginTransmission(address);
-  return wire_->write(mask) == 1 && wire_->endTransmission(true) == 0;
+  const bool wrote = wire_->write(mask) == 1;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return wrote && acknowledged; // Always release failed partial writes.
 }
 bool AccessorySensors::verified_mux(std::uint8_t address, std::uint8_t mask) {
   // TI TCA9548A SCPS207H: a write ACK is not a verified channel change.
