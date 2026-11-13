@@ -618,52 +618,89 @@ class NativeOmniSession:
                 self._readonly_seen.clear()
             self._readonly_seen.add(item)
 
-    async def _readonly_tool_worker(self) -> None:
-        """Reuse the pinned Xiaozhi read-only Mac bridge, not a new executor.
+    async def _run_readonly_batch(
+        self, entries: list[tuple[str, dict, int, int]],
+    ) -> None:
+        """Bounded concurrent reads; a slow VLM cannot block battery status.
 
-        MiniCPM has no native function-call contract: the received Mac
-        result grounds the next duplex turn via the existing context refresh.
-        A slow vision call is cancellable; urgent STOP remains independent.
+        The existing authenticated Mac tool adapter remains the only
+        executor and receipts owner. A cancelled batch cancels each child.
+        Results are admitted independently as soon as their HTTP completes.
         """
-        while not self.closed:
-            route, payload, epoch, request_turn = await self._readonly_queue.get()
-            if (epoch != self._generation or request_turn != self._readonly_turn
-                    or not self.connected):
-                continue
-            try:
-                from plugins_func.functions.desk_robot_tools import call
-                pending = asyncio.create_task(asyncio.wait_for(
-                    call(self.conn, route, payload), timeout=24
-                ))
-                self._readonly_inflight = pending
-                result = await pending
-                # Even a successful local HTTP status response is untrusted
-                # until its identity matches the authenticated speaking head.
-                # Never add a different pet's receipt to this model session.
-                if (not isinstance(result, dict)
-                        or result.get("robot_id") != self.robot
-                        or result.get("motor_authorized") is True
-                        or result.get("charging_authorized") is True):
+        from plugins_func.functions.desk_robot_tools import call
+
+        tasks = [
+            asyncio.create_task(asyncio.wait_for(
+                call(self.conn, route, payload), timeout=24,
+            )) for route, payload, _, _ in entries
+        ]
+        epoch, request_turn = entries[0][2:]
+        try:
+            for completed in asyncio.as_completed(tasks):
+                try:
+                    result = await completed
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
                     self.native_readonly_tools_dropped += 1
                     continue
-                if (not self.closed and self.connected
-                        and self._generation == epoch
-                        and self._readonly_turn == request_turn
-                        and isinstance(result, dict)
-                        and not result.get("error")
-                        and not result.get("_desk_robot_turn_superseded")):
-                    self.native_readonly_tools_completed += 1
-                    # The Mac tool adapter recorded provenance into the SAME
-                    # hub; refresh existing model context for the NEXT turn.
-                    self._context_wakeup.set()
+                if (self.closed or not self.connected
+                        or self._generation != epoch
+                        or self._readonly_turn != request_turn):
+                    continue
+                # Even an HTTP 200 is not trustworthy if it belongs to
+                # another pet or advertises physical action authority.
+                if (not isinstance(result, dict)
+                        or result.get("robot_id") != self.robot
+                        or ("motor_authorized" in result
+                            and result["motor_authorized"] is not False)
+                        or ("charging_authorized" in result
+                            and result["charging_authorized"] is not False)
+                        or result.get("error")
+                        or result.get("_desk_robot_turn_superseded")):
+                    self.native_readonly_tools_dropped += 1
+                    continue
+                self.native_readonly_tools_completed += 1
+                self._context_wakeup.set()
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _readonly_tool_worker(self) -> None:
+        """One bounded fleet-safe executor for native read-only questions."""
+        while not self.closed:
+            first = await self._readonly_queue.get()
+            epoch, request_turn = first[2:]
+            if (epoch != self._generation
+                    or request_turn != self._readonly_turn
+                    or not self.connected):
+                continue
+            batch = [first]
+            # A completed ASR event enqueues all of its clauses without
+            # yielding the loop. Drain at most two more bounded requests.
+            for _ in range(2):
+                try:
+                    next_item = self._readonly_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if next_item[2:] == (epoch, request_turn):
+                    batch.append(next_item)
+                else:
+                    self.native_readonly_tools_dropped += 1
+            pending = asyncio.create_task(self._run_readonly_batch(batch))
+            self._readonly_inflight = pending
+            try:
+                await pending
             except asyncio.CancelledError:
                 if asyncio.current_task().cancelling():
                     raise
-                continue  # A new human started speaking; do not publish.
-            except Exception:
-                self.native_readonly_tools_dropped += 1
+                # The VAD/interrupt owner cancelled an old tool batch,
+                # not the permanent native audio or camera worker.
+                continue
             finally:
-                if self._readonly_inflight is not None:
+                if self._readonly_inflight is pending:
                     self._readonly_inflight = None
 
     async def _camera(self, http: aiohttp.ClientSession) -> None:
