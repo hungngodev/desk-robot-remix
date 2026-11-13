@@ -67,6 +67,11 @@ class Runtime:
         """Bridge Xiaozhi's real voice interruption into Mac speech cancellation."""
         if self.settings.mode != "hardware" or self._voice_task is not None:
             return
+        # Visual consent enables a persistent feed independently of voice
+        # activity or pet autostart. One Mac stream consumer per real head.
+        # The pet still needs its separate opt-in to speak proactively.
+        if self.multimodal is not None:
+            self.multimodal.start_streams()
         if not any(robot.device_id for robot in self.settings.robots):
             return
         self.voice_events = VoiceEventListener(
