@@ -1204,6 +1204,144 @@ async def test_native_batch_refuses_malformed_authority_and_cross_pet(
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_ambiguous_completed_asr_uses_existing_mac_planner_then_two_real_tools(
+    native, monkeypatch,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    question = "Could you tell me whether the object is still there?"
+    calls = []
+
+    async def call(current, route, payload):
+        assert current is conn
+        calls.append((route, payload))
+        if route == "plan-readonly":
+            assert payload["transcript"] == question
+            return {
+                "robot_id": "robot-01",
+                "source": "existing_mac_ollama_readonly_route_selection",
+                "untrusted_model_selection": True,
+                "model_can_arm_motors": False,
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "tools": [
+                    {"route": "look", "payload": {"question": question}},
+                    {"route": "status", "payload": {}},
+                ],
+            }
+        await asyncio.sleep(0)
+        return {
+            "robot_id": "robot-01",
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    session._queue_readonly_tool({
+        "item_id": "ambiguous_real_utterance",
+        "transcript": question,
+    })
+    assert session._readonly_queue.qsize() == 1
+    assert session._readonly_queue._queue[0][0] == "plan-readonly"
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        async with asyncio.timeout(1):
+            while session.native_readonly_tools_completed < 2:
+                await asyncio.sleep(.005)
+        assert [route for route, _ in calls].count("plan-readonly") == 1
+        assert {route for route, _ in calls} == {
+            "plan-readonly", "look", "status",
+        }
+        assert len(calls) == 3
+        assert session._context_wakeup.is_set()
+        assert session.native_readonly_tools_dropped == 0
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_semantic_planner_cannot_queue_model_proposed_motor_actions(
+    native, monkeypatch,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    calls = []
+
+    async def call(current, route, payload):
+        calls.append(route)
+        if route == "plan-readonly":
+            return {
+                "robot_id": "robot-01",
+                "source": "existing_mac_ollama_readonly_route_selection",
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "tools": [
+                    {"route": "move", "payload": {"command": "drive 40 40 250"}},
+                    {"route": "charge", "payload": {"enabled": True}},
+                    {"route": "status", "payload": {}},
+                ],
+            }
+        return {"robot_id": "robot-01", "motor_authorized": False}
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    session._queue_readonly_tool({
+        "item_id": "ambiguous_model_hallucination",
+        "transcript": "Could you tell me whether the object is still there?",
+    })
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        async with asyncio.timeout(1):
+            while session.native_readonly_tools_completed < 1:
+                await asyncio.sleep(.005)
+        assert calls == ["plan-readonly", "status"]
+        assert "move" not in calls and "charge" not in calls
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_speech_tool_old_result_cannot_enter_next_human_turn(
     native, monkeypatch,
 ):
