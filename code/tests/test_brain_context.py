@@ -56,6 +56,18 @@ def test_context_provenance_and_source_types_are_not_interchangeable():
     assert len(result.interaction) <= 400
 
 
+
+def test_peer_utterance_cannot_become_firsthand_visual_evidence():
+    # Even an incorrectly marked witnessed peer message must not be
+    # promoted into a camera observation by the prompt composer.
+    peer = episode("robot-01", "peer-witness-1", "peer_utterance",
+                   "There is a key on the desk", source="robot-02",
+                   witnessed=True)
+    context = compose_brain_context([peer], [], [])
+    assert "robot-02 said (peer report, not my sighting)" in context.recent
+    assert "I observed" not in context.recent
+    assert "I heard robot-02 say" not in context.recent
+
 def test_context_budget_is_constant_even_with_many_long_model_outputs():
     memory = [
         episode("robot-01", f"event{i}", "object", "x" * 300)
