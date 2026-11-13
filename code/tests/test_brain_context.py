@@ -646,3 +646,26 @@ def test_dense_camera_receipts_do_not_evict_earlier_tool_and_touch():
     assert "Physical sensor edge: touch_tap" in result
     assert result.count("XIAO frame received") == 1
     assert len(result) <= 400
+
+
+def test_two_recent_asr_clauses_prioritize_both_distinct_tool_receipts():
+    # A completed question can arrive as separate ASR chunks. An earlier
+    # visual request must not lose priority to the latest battery question.
+    timeline = [
+        {"channel": "tool", "kind": "visual_look",
+         "content": "Possibly a blue key"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Please look at my key"},
+        {"channel": "tool", "kind": "robot_status",
+         "content": "Battery reading 72 percent"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Check your battery"},
+        {"channel": "tool", "kind": "memory_recall",
+         "content": "Unrelated private story " + "x" * 100},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Possibly a blue key" in result
+    assert "Battery reading 72 percent" in result
+    assert "Recent model ASR guess" in result
+    assert len(result) <= 400
