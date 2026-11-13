@@ -462,6 +462,80 @@ async def test_server_overlay_routes_actual_double_talk_audio_to_guard(bridge):
     ).read_text()
 
 
+async def test_installed_pinned_audio_function_delivers_vad_before_native_pcm(
+    monkeypatch,
+):
+    """Execute the real overlaid upstream audio handler, not a mock copy."""
+    import ast
+    import types
+
+    spec = importlib.util.spec_from_file_location(
+        "real_upstream_audio_overlay", ROOT / "laptop/server/install_overlay.py"
+    )
+    overlay = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(overlay)
+    files = overlay.files(
+        ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+    )
+    tree = ast.parse(files["core/handle/receiveAudioHandle.py"])
+    handler = next(
+        node for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "handleAudioMessage"
+    )
+    calls = []
+    native_enabled = [True]
+
+    async def interrupt_user(conn, voice):
+        calls.append("group_stop")
+
+    async def interrupt_normal(conn, voice):
+        calls.append("head_stop")
+
+    def observe_idle(conn, voice):
+        calls.append("authenticated_vad")
+
+    def native_route(conn, pcm, voice):
+        calls.append("native_pcm")
+        return native_enabled[0]
+
+    async def no_voice(conn, voice):
+        calls.append("legacy_idle")
+
+    class ASR:
+        async def receive_audio(self, conn, pcm, voice):
+            calls.append("legacy_asr")
+
+    monkeypatch.setitem(sys.modules, "desk_robot_bridge", types.SimpleNamespace(
+        interrupt_for_user_voice=interrupt_user,
+        interrupt_for_normal_voice=interrupt_normal,
+        observe_idle_human_voice=observe_idle,
+    ))
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni",
+                        types.SimpleNamespace(route_audio=native_route))
+    namespace = {
+        "asyncio": asyncio,
+        "no_voice_close_connect": no_voice,
+    }
+    isolated = ast.Module(body=[handler], type_ignores=[])
+    exec(compile(isolated, "actual_pinned_audio_handler.py", "exec"), namespace)
+    conn = types.SimpleNamespace(
+        vad=types.SimpleNamespace(is_vad=lambda conn, pcm: True),
+        client_aec=False, just_woken_up=False, asr=ASR(),
+    )
+    await namespace["handleAudioMessage"](conn, b"actual_decoded_pcm")
+    assert calls == [
+        "group_stop", "head_stop", "authenticated_vad", "native_pcm"
+    ]
+    calls.clear()
+    native_enabled[0] = False
+    await namespace["handleAudioMessage"](conn, b"actual_decoded_pcm")
+    assert calls == [
+        "group_stop", "head_stop", "authenticated_vad",
+        "native_pcm", "legacy_idle", "legacy_asr"
+    ]
+
+
 async def test_stop_during_group_playback_marks_urgent_flush(bridge, monkeypatch):
     sent = []
 
