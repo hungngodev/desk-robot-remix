@@ -642,7 +642,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 )},
             ]), timeout=3.0)
             parsed = json.loads(model_text)
-        except (Exception, asyncio.TimeoutError):
+        except Exception:
+            # An unavailable or malformed optional Ollama plan must never
+            # become a guessed physical action or stall live microphone I/O.
             parsed = {}
         choices = parsed.get("tools") if isinstance(parsed, dict) else None
         allowed = {
