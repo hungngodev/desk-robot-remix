@@ -1,3 +1,9 @@
+## November 13 independent QA: MPU6050 device identity gate
+
+Starting review reconciled 35 issue comments, 35 combined discussion entries, zero submitted reviews and zero inline review threads. Current `raw_mpu6050` checked family, freshness, boot/sample identity and signed axes, but accepted a wrong or malformed `gyro_id` as a real MPU6050. Source commit `b0031f0` now requires the MPU6050 WHO_AM_I identity `0x68` with strict integer typing before Mac handling calibration. Regression commit `80f365c` checks absent, boolean, alternate address, and string identities and permits a valid fresh sample. This is a read-only handling evidence fence, not motion authority. No new sensor owner or charger change.
+
+**Execution:** Python pytest exists locally, but GitHub clone fails `Could not resolve host: github.com`; full exact checkout was unavailable. The new regression and firmware builds were NOT executed, and no physical MPU6050 measurements were taken. Next action: run `cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_handling.py tests/test_handling_integration.py` on exact current head, and verify WROOM firmware reports WHO_AM_I consistently. Revisit dock cached GPIO and terminal IR physical acceptance only after source tests. PR #17 remains draft.
+
 ## November 13 implementation: equal-clock tool completion ordering
 
 Starting PR #17 head `cbeebc2a6f80d891074c11206b2a8c3fa27fbbf1`; fetched all 35 issue comments, merged discussion entries, zero submitted reviews and zero review threads. Current Mac `CameraFrameHub.remember_tool` rejected older same-kind completions but allowed an equal-timestamp duplicate to overwrite the first completed receipt. Source commit `8bff219` retains the first receipt at equal Mac acquisition time; test commit `98a51cc` checks equal-time duplicate rejection and newer replacement. This is timestamp tie hygiene, not authenticated turn identity. No new broker, motor permission or charger change.
