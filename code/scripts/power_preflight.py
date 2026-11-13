@@ -40,6 +40,9 @@ def size_5v_supply(
         if rating is not None and (type(rating) not in (int, float)
                                    or not math.isfinite(rating) or rating <= 0):
             raise ValueError("Rated board current must be positive and finite")
+    if (boost_max_input_a is not None and boost_continuous_input_a is not None
+            and boost_continuous_input_a > boost_max_input_a):
+        raise ValueError("Continuous boost input rating exceeds maximum input rating")
     # Decimal input values avoid floating point false equality at a rating
     # boundary. Report required amperes rounded UP, never below actual need.
     required_5v_peak = Decimal(str(measured_peak_5v_a)) * Decimal(str(margin))
