@@ -15,6 +15,7 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <atomic>
 #include <mutex>
 #include <string_view>
 #include <driver/i2c_master.h>
@@ -35,6 +36,12 @@ private:
     desk_robot::Bridge* body_bridge_ = nullptr;  // existing single UART owner
     bool body_fault_active_ = true;  // offline or unchecked body is not a healthy pet
     TaskHandle_t face_task_ = nullptr;
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    // The operator can stop mic streaming with BOOT. Do not silently
+    // restart listening after that explicit human action.
+    std::atomic<bool> audio_operator_touched_{false};
+    bool continuous_audio_started_ = false;
+#endif
 
     static const char* MoodName(stackchan::behavior::Mood mood) {
         using stackchan::behavior::Mood;
@@ -81,7 +88,23 @@ private:
                     board->body_fault_active_ = true;
                 }
             }
-            const auto device_state = Application::GetInstance().GetDeviceState();
+            auto& app = Application::GetInstance();
+            const auto device_state = app.GetDeviceState();
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            // Upstream Xiaozhi normally streams mic PCM only AFTER wake.
+            // With explicit audio consent, reuse its existing full-duplex
+            // realtime AEC transport. No new mic task, codec or WebSocket.
+            // One boot attempt only: failed networking and deliberate BOOT
+            // mute must never create a covert reconnect loop.
+            if (!board->continuous_audio_started_
+                    && !board->audio_operator_touched_.load()
+                    && now_ms >= 10000
+                    && device_state == kDeviceStateIdle
+                    && app.GetAecMode() == kAecOnDeviceSide) {
+                board->continuous_audio_started_ = true;
+                app.ToggleChatState();  // existing Xiaozhi realtime listen
+            }
+#endif
             const bool speaking = device_state == kDeviceStateSpeaking;
             if (speaking && !board->face_was_speaking_) {
                 board->face_behavior_.pushEvent(Event(EventType::kSpeakRequest, ""));
@@ -190,6 +213,9 @@ public:
         InitializeDisplay();
         InitializeCamera();
         boot_button_.OnClick([this]() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            audio_operator_touched_.store(true);
+#endif
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
