@@ -1205,3 +1205,21 @@ async def test_new_human_voice_resets_prior_interpretation_across_fleet():
         visual.voice_ended("robot-02")
     finally:
         await visual.close()
+
+
+def test_qwen_style_quiet_window_silences_only_optional_fleet_remarks():
+    """Human owns conversation for 800ms after real speech_end, not motors."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-02", "human_voice", 100.0)
+    assert hub.spontaneous_floor_busy(100.5)
+    hub.speech_ended("robot-02", 101.0)
+    assert hub.spontaneous_floor_busy(101.79)
+    assert not hub.spontaneous_floor_busy(101.81)
+    # Camera sampling remains independently available in that short pause.
+    assert hub.due("robot-01", 101.2)
+    hub.notify("robot-01", "human_voice", 102.0)
+    assert hub.spontaneous_floor_busy(103.0)
+    hub.clear("robot-01")
+    assert not hub.spontaneous_floor_busy(103.0)
+    with pytest.raises(ValueError):
+        hub.spontaneous_floor_busy(float("nan"))
