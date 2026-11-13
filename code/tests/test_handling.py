@@ -270,3 +270,34 @@ def test_implausible_acceleration_preserves_last_conversion_replay_fence():
     assert gate.startup_samples == []
     assert qualified(gate, sample(sample_ms=502), 100.3, new_sample=False) == ()
     assert len(gate.startup_samples) == 1
+
+
+def test_same_boot_timestamp_regression_cannot_reseed_calibration():
+    gate = HandlingGate()
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=1000 + i),
+                         100.0 + i * .1, new_sample=False) == ()
+    assert gate.reference is not None
+    # A delayed old packet has the same boot identity but a lower timestamp.
+    assert qualified(gate, sample(sample_ms=1002), 100.9,
+                     new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_sample_ms == 1007
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=1002),
+                         101.0 + i * .1, new_sample=False) == ()
+    assert gate.startup_samples == []
+    # A genuinely newer conversion may begin a new baseline.
+    assert qualified(gate, sample(sample_ms=1008), 101.9,
+                     new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
+
+
+def test_near_uint32_wrap_still_requires_new_stationary_baseline():
+    gate = HandlingGate()
+    assert qualified(gate, sample(sample_ms=0xfffffffe), 100.0,
+                     new_sample=False) == ()
+    assert qualified(gate, sample(sample_ms=2), 100.1,
+                     new_sample=False) == ()
+    assert gate.last_sample_ms == 2
+    assert len(gate.startup_samples) == 1
