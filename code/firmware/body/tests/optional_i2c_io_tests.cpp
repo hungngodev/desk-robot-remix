@@ -146,6 +146,35 @@ int main() {
     CHECK(!slow.valid && slow.sample_seq == last);
     CHECK(optional_accessories.readings().dock.valid);
     CHECK(optional_accessories.readings().dock.sample_seq > 0U);
+    // A mux can ACK while leaving its old control register selected.
+    // A missing PN532 or jammed optional lane must never preserve a cached
+    // MCP dock status as current valid physical evidence.
+    TwoWire stuck_wire;
+    stuck_wire.nfc_connected = true;
+    desk_robot::AccessorySensors stuck_accessories;
+    CHECK(stuck_accessories.begin(stuck_wire));
+    for (std::uint32_t ms = 0; ms < 600; ms += 12)
+      stuck_accessories.poll(ms);
+    CHECK(stuck_accessories.readings().dock.valid);
+    const auto before_mux_fault = stuck_accessories.readings().dock.sample_seq;
+    stuck_wire.optional_mux_stuck = true; // ACK but lane remains at zero
+    stuck_wire.extras = 0;
+    stuck_accessories.poll(600);
+    CHECK(!stuck_accessories.readings().dock.valid);
+    CHECK(stuck_accessories.readings().dock.sample_seq == before_mux_fault);
+    CHECK(stuck_wire.ranges == 0 && stuck_wire.extras == 0);
+    stuck_wire.optional_mux_stuck = false;
+    for (std::uint32_t ms = 612; ms < 1100; ms += 12)
+      stuck_accessories.poll(ms);
+    CHECK(stuck_accessories.readings().dock.valid);
+    CHECK(stuck_accessories.readings().dock.sample_seq > before_mux_fault);
+    const auto before_range_fault = stuck_accessories.readings().dock.sample_seq;
+    stuck_wire.ranges = 1; // 0x70 still selects a critical ToF lane
+    stuck_wire.range_mux_stuck = true;
+    stuck_accessories.poll(1104);
+    CHECK(!stuck_accessories.readings().dock.valid);
+    CHECK(stuck_accessories.readings().dock.sample_seq == before_range_fault);
+    CHECK(!stuck_wire.unsafe_parallel_mux);
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
