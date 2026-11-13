@@ -1,3 +1,7 @@
+## November 13 architecture voice-boundary regression, unexecuted
+
+`769c591` adds `test_new_voice_without_completed_asr_cannot_reuse_prior_question`; `3a6e001` removes the `heard_count` prerequisite from the newest-first `human_voice` boundary fence in `brain_context.py`. This fixes the no-new-ASR case without altering motion, charging, audio transport, or tool dispatch. **No test executed**: `git ls-remote https://github.com/hungngodev/desk-robot-remix.git HEAD` failed `Could not resolve host: github.com`. Existing full suite status is unchanged. Required executable check: `cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_brain_context.py`, plus the two existing boundary regressions, on the exact current PR head.
+
 ## November 13 architecture regression awaiting execution
 
 Starting branch commit `9bec190fbbefc3c43c29dd54782c3bdbb91bd2de`. `brain_context.py` commit `988bb226` now recognizes independent tool requests across both recent completed ASR fragments rather than stopping after one recognized request. Test commit `ed3ed09` adds a deterministic mixed visual question, battery question, unrelated memory tool and touch case. **No tests executed in this iteration.** No physical, firmware or audio evidence. Next run `cd code && python -m pytest -q tests/test_brain_context.py` against current exact blobs and record exit code; verify context remains within 400 characters. This is a prompt salience change only, never a motor or charging authorization.\n\n# Verification and physical trials
