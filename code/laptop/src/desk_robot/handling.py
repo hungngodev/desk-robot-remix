@@ -102,7 +102,12 @@ class HandlingGate:
             self.last_boot_id, self.last_sample_ms = previous
         sample = raw_mpu6050(body)
         if sample is None:
+            # Bad telemetry invalidates pose, not the last trusted acquisition.
+            # Otherwise replaying that conversion after a malformed status
+            # could seed a fresh calibration with stale sensor data.
+            previous = (self.last_boot_id, self.last_sample_ms)
             self.reset()
+            self.last_boot_id, self.last_sample_ms = previous
             return ()
         boot_id = body["imu"]["boot_id"]
         sample_ms = body["imu"]["sample_ms"]
