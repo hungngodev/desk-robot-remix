@@ -1099,6 +1099,26 @@ def test_native_compound_speech_dispatches_only_explicit_readonly_tools(
             None,
         ),
         (
+            "Look at the mug, check your battery status",
+            ("look", "power-status"),
+            "Look at the mug",
+        ),
+        (
+            "Please look at the key; what just happened",
+            ("look", "interaction-context"),
+            "Please look at the key",
+        ),
+        (
+            "Look at the key, the mug, and the cube; check your battery",
+            ("look", "power-status"),
+            "Look at the key, the mug, and the cube",
+        ),
+        (
+            "Pick up the key, check your battery",
+            ("power-status",),
+            None,
+        ),
+        (
             "Look around and then please tell me what happened",
             ("look", "interaction-context"),
             "Look around",
