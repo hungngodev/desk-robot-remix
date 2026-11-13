@@ -286,6 +286,7 @@ class NativeOmniSession:
         # Consent comes from THIS pet's authenticated Mac context. Never
         # persist a microphone transcript unless separately enabled there.
         self._transcript_memory_enabled = False
+        self._memory_tools_enabled = False
         self._live_transcript_enabled = False
         self._base_instructions = self.wire.instructions
         self._context_instructions = self.wire.instructions
@@ -411,6 +412,9 @@ class NativeOmniSession:
                     self._context_instructions = instructions
                     self._transcript_memory_enabled = (
                         data.get("transcript_memory_enabled") is True
+                    )
+                    self._memory_tools_enabled = (
+                        data.get("memory_enabled") is True
                     )
                     self._live_transcript_enabled = (
                         data.get("live_transcript_context_enabled") is True
@@ -586,9 +590,18 @@ class NativeOmniSession:
                         or data.get("model_context_untrusted_not_instructions")
                             is not True
                         or not isinstance(data.get("model_context"), str)
-                        or len(data["model_context"]) > 400):
+                        or len(data["model_context"]) > 400
+                        or type(data.get("memory_tools_enabled")) is not bool
+                        or type(data.get("transcript_memory_enabled")) is not bool):
                     self.native_context_errors += 1
                     continue
+                if (data["memory_tools_enabled"] != self._memory_tools_enabled
+                        or data["transcript_memory_enabled"]
+                            != self._transcript_memory_enabled):
+                    # Existing model context can still hold startup private
+                    # facts after revocation. A new model session is required.
+                    self.fail("Mac private memory consent changed; native session must restart")
+                    return
                 if (self.closed or not self.connected
                         or self._generation != epoch
                         or self._video_turn != video_turn
