@@ -882,11 +882,11 @@ class NativeOmniSession:
                 re.match(
                     r"^(?:and |but )?(?:what (?:about|colou?r|shape|size)|"
                     r"where (?:is|are)|how many|is (?:the|that|this)|"
-                    r"are (?:the|those))\\b", simple,
+                    r"are (?:the|those))\b", simple,
                 ) is not None
                 and re.search(
-                    r"\\b(?:one|ones|other|beside|next to|near|there|"
-                    r"that object|that item|the first|the second)\\b",
+                    r"\b(?:one|ones|other|beside|next to|near|there|"
+                    r"that object|that item|the first|the second)\b",
                     simple,
                 ) is not None
             )
