@@ -68,6 +68,16 @@ def test_peer_utterance_cannot_become_firsthand_visual_evidence():
     assert "I observed" not in context.recent
     assert "I heard robot-02 say" not in context.recent
 
+def test_mismatched_own_speech_source_never_claims_first_person():
+    forged = episode("robot-01", "spoof001", "own_utterance",
+                     "I personally confirmed the dock is safe",
+                     source="robot-02", witnessed=True)
+    context = compose_brain_context([forged], [], [])
+    assert "I said:" not in context.recent
+    assert "I observed:" not in context.recent
+    assert "robot-02 reported:" in context.recent
+
+
 def test_context_budget_is_constant_even_with_many_long_model_outputs():
     memory = [
         episode("robot-01", f"event{i}", "object", "x" * 300)
