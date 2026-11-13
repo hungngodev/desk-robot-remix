@@ -96,3 +96,16 @@ def test_sustained_input_thermal_limit_rejects_peak_capable_boost():
 def test_invalid_sustained_input_rating_is_rejected(rating):
     with pytest.raises(ValueError):
         tool(1, .6, boost_continuous_input_a=rating)
+
+
+def test_sub_milliamp_rating_does_not_bypass_published_conservative_minimum():
+    # 5 * 1.3 * 1.8 / (3 * .85) = 4.588235... A continuously.
+    # The reported 4.589 A is the qualification threshold, not 4.5885 A.
+    ratings = dict(boost_max_input_a=9, boost_continuous_output_a=4,
+                   protected_cell_continuous_a=9)
+    insufficient = tool(3, 1.8, boost_continuous_input_a=4.5885, **ratings)
+    assert insufficient["minimum_continuous_cell_input_a"] == 4.589
+    assert insufficient["candidate_electrically_sufficient_on_paper"] is False
+    sufficient = tool(3, 1.8, boost_continuous_input_a=4.589, **ratings)
+    assert sufficient["candidate_electrically_sufficient_on_paper"] is True
+    assert sufficient["candidate_physically_qualified"] is False
