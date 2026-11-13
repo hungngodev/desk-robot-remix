@@ -1523,6 +1523,60 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
     assert await session._current_tool_scene(Http(), 0, 0) == ""
 
 
+@pytest.mark.parametrize("facts,audio_enqueued", [
+    (False, False), (True, False), (True, True),
+])
+async def test_native_tool_worker_releases_speaker_if_no_audio_was_queued(
+    native, facts, audio_enqueued,
+):
+    """A failed read-only tool/model must not strand the future speaker lease."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    session._tool_question = "Look at the mug"
+    spoken = asyncio.Event()
+
+    async def read(batch):
+        return [{"source": "authenticated_xiao_camera_and_local_vlm",
+                 "observed": "blue mug"}] if facts else []
+
+    async def say(http, transcript, results, epoch, turn):
+        assert results and transcript == "Look at the mug"
+        if audio_enqueued:
+            session._tool_audio_response_id = "tool_actual_audio"
+        spoken.set()
+
+    session._run_readonly_batch = read
+    session._speak_tool_results = say
+    session._readonly_queue.put_nowait(("look", {}, 0, 0))
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        if facts:
+            await asyncio.wait_for(spoken.wait(), timeout=2)
+        else:
+            async with asyncio.timeout(2):
+                while session._tool_speech_turn is not None:
+                    await asyncio.sleep(.005)
+        # Worker cleanup runs synchronously after successful audio queuing.
+        await asyncio.sleep(.02)
+        if audio_enqueued:
+            assert session._tool_speech_turn == (0, 0)
+            assert session._tool_audio_response_id == "tool_actual_audio"
+        else:
+            assert session._tool_speech_turn is None
+            assert session._tool_question == ""
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_stale_response_done_does_not_split_new_grounded_tool_speech(
     native, monkeypatch,
 ):
