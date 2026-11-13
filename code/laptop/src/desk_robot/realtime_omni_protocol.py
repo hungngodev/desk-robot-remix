@@ -156,6 +156,12 @@ class OmniDuplexWire:
         }
         if self._needs_new_input:
             self._input_after_interrupt = True
+            if (not speech and self.input_ms >= self._video_resume_audio_ms):
+                # A quiet room must not permanently disable native proactive
+                # output after a brief interruption. Re-enable only after one
+                # full NEW unit of authenticated PCM; during actual speech,
+                # retain the existing commit/turn-end barrier.
+                self._needs_new_input = False
         # The upstream MiniCPM-o duplex prefill groups one FULL second of
         # audio with the chosen frame. Never strand a JPEG on a partial unit.
         # Live video is NOT contingent on human speech. MiniCPM-o is a
