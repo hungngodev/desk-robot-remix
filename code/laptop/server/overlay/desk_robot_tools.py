@@ -188,8 +188,8 @@ async def call(conn, route, payload=None):
             not isinstance(tool, dict)
             or not isinstance(tool.get("route"), str)
             or tool.get("route") not in {
-                "look", "status", "power-status", "latest-pickup",
-                "interaction-context", "voice-context",
+                "look", "status", "power-status", "aux-status",
+                "latest-pickup", "interaction-context", "voice-context",
             }
             or not isinstance(tool.get("payload"), dict)
             for tool in result["tools"]
