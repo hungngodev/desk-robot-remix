@@ -1413,6 +1413,110 @@ async def test_second_asr_clause_same_human_turn_survives_native_audio_fence(
     })
 
 
+async def test_native_asr_camera_and_battery_clauses_are_spoken_together(
+    native, monkeypatch,
+):
+    """A delayed camera lookup must not cause two disconnected replies."""
+    import io
+    import wave
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    session._tool_question = "Look at the mug and check your battery"
+    waiting, release = asyncio.Event(), asyncio.Event()
+    requests = []
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(bytes(48000))
+    encoded = base64.b64encode(audio.getvalue()).decode()
+
+    async def call(current, route, payload):
+        if route == "look":
+            waiting.set()
+            await release.wait()
+            return {
+                "robot_id": "robot-01",
+                "source": "authenticated_xiao_camera_and_local_vlm",
+                "answer": "Probably a BLUE_MUG", "frames_used": 1,
+                "motor_authorized": False, "charging_authorized": False,
+            }
+        assert route == "power-status"
+        return {
+            "robot_id": "robot-01",
+            "source": "wroom_aux_fuel_gauge_raw_unqualified",
+            "gauge_available": True, "reported_soc_centi": 5200,
+            "reported_cell_mv": 3670, "charging_authorized": False,
+            "motor_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for name, mod in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    class Response:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+        async def json(self):
+            return {"choices": [
+                {"message": {"content": "The mug looks blue, battery about 52%"}},
+                {"message": {"audio": {"data": encoded}}},
+            ]}
+
+    class Http:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+        def post(self, url, *, json, timeout):
+            requests.append(json)
+            return Response()
+
+    monkeypatch.setattr(module.aiohttp, "ClientSession", Http)
+    session._readonly_queue.put_nowait(("look", {}, 0, 0))
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        await asyncio.wait_for(waiting.wait(), timeout=1)
+        session._readonly_queue.put_nowait(("power-status", {}, 0, 0))
+        release.set()
+        async with asyncio.timeout(3):
+            while not session.native_tool_audio_queued:
+                await asyncio.sleep(.01)
+        assert len(requests) == 1
+        message = requests[0]["messages"][1]["content"]
+        assert "BLUE_MUG" in message
+        assert "52" in message
+        assert session.native_readonly_tools_completed == 2
+        assert session.native_tool_audio_queued == 1
+    finally:
+        session.closed = True
+        release.set()
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native):
     import io
     import wave
