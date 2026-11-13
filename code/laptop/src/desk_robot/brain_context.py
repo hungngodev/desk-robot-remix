@@ -8,7 +8,9 @@ short-term vs long-term context and Qwen Live Harness's silent tool receipts.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Sequence
+import re
 
 from .memory import CoreFact, Memory
 
@@ -90,3 +92,32 @@ def compose_brain_context(
                 )
     interaction = _clean("; ".join(cue_parts), limit=400)
     return ContextBundle(recent_text, core_text, interaction)
+
+
+
+def repeated_spontaneous_line(text: str, recent: Sequence[Memory],
+                              *, now_wall: float) -> bool:
+    """Suppress a pet repeating itself without running another agent model.
+
+    Only the pet's OWN actually transmitted, recent text matters. Another
+    robot's speech or an uncertain user ASR transcript cannot count as this
+    pet's previous line. The caller invokes this for unsolicited remarks,
+    never for a direct human question or emergency status.
+    """
+    if not isinstance(text, str):
+        return False
+    normalized = re.sub(r"\W+", " ", text.casefold()).strip()
+    if not normalized:
+        return False
+    for item in recent:
+        if (item.kind != "own_utterance" or not item.witnessed
+                or item.source_robot != item.robot_id
+                or not 0 <= now_wall - item.observed_at <= 3600):
+            continue
+        past = re.sub(r"\W+", " ", item.summary.casefold()).strip()
+        if normalized == past:
+            return True
+        if (len(normalized.split()) >= 6 and len(past.split()) >= 6
+                and SequenceMatcher(None, normalized, past).ratio() >= 0.91):
+            return True
+    return False
