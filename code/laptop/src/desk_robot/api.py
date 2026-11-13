@@ -421,6 +421,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         return {
             "robot_id": robot_id,
             "instructions": prefix[:2000],
+            # Distinct operator configured voice style only. Private episodes
+            # and opt-in memory remain in their own untrusted context field.
+            "persona": robot.persona[:900],
             "memory_enabled": settings.voice_memory_tools_enabled,
             "transcript_memory_enabled": settings.voice_transcript_memory_enabled,
             "live_transcript_context_enabled": settings.voice_vision_tools_enabled,
