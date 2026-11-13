@@ -128,7 +128,8 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
                 polite,
             )
             and not re.match(
-                r"^(?:what (?:is|does) (?:a |an )?|how (?:does|do) )",
+                r"^(?:what is (?:a|an) |what does .{1,45} mean\b|"
+                r"how (?:does|do) )",
                 polite,
             )):
         return "aux-status", {}
