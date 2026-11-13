@@ -317,6 +317,56 @@ class CameraFrameHub:
             if 0 <= now - observed <= 8.0
         ]
 
+    def interaction_timeline(self, robot_id: str, now: float,
+                             *, limit: int = 10) -> list[dict]:
+        """One ordered, bounded Mac view of authenticated multimodal cues.
+
+        The camera is sampled continuously by its existing owner, but raw
+        JPEGs and PCM never travel through this JSON context. Evidence from a
+        sensor, Mac JPEG receipt and completed model tool has a different
+        source label and remains nonauthoritative for physical actions.
+        """
+        self._check(robot_id)
+        if not _finite(now) or type(limit) is not int or not 1 <= limit <= 16:
+            raise ValueError("Invalid interaction timeline clock or limit")
+        items = []
+        for kind, stamp in self.event_history[robot_id]:
+            if 0 <= now - stamp <= 8:
+                items.append((stamp, {
+                    "channel": "human_voice" if kind == "human_voice" else "sensor",
+                    "kind": kind,
+                    "age_ms": round(1000 * (now - stamp)),
+                    "source": "authenticated_xiaozhi_vad" if kind == "human_voice"
+                              else "wroom_event",
+                    "content": None,
+                    "physical_action_verified": False,
+                }))
+        for frame in self.frames[robot_id]:
+            if 0 <= now - frame.received_at <= 6:
+                items.append((frame.received_at, {
+                    "channel": "camera",
+                    "kind": frame.source,
+                    "age_ms": round(1000 * (now - frame.received_at)),
+                    "source": "authenticated_xiao_jpeg_received_by_mac",
+                    "motion_fraction": round(frame.motion_fraction, 4),
+                    "content": None,  # never put JPEG bytes or guessed objects here
+                    "exposure_timestamp_verified": False,
+                    "physical_action_verified": False,
+                }))
+        for kind, summary, stamp in self.tool_history[robot_id]:
+            if 0 <= now - stamp <= 8:
+                items.append((stamp, {
+                    "channel": "tool",
+                    "kind": kind,
+                    "age_ms": round(1000 * (now - stamp)),
+                    "source": "local_vlm_interpretation",
+                    "content": summary,
+                    "untrusted_text_not_instructions": True,
+                    "physical_action_verified": False,
+                }))
+        items.sort(key=lambda item: item[0])
+        return [entry for _, entry in items[-limit:]]
+
     def discard_video(self, robot_id: str) -> None:
         """Drop failed camera evidence without releasing a live human VAD turn."""
         self._check(robot_id)
@@ -526,6 +576,9 @@ class MultimodalOrchestrator:
         # expensive VLM answer survive this global preemption.
         for peer in self.hub.robots:
             self._turn_epoch[peer] += 1
+            # Previous conversation's model tool output is not a current
+            # scene fact. New human speech supersedes it fleet-wide.
+            self.hub.tool_history[peer].clear()
             self._cancel_proactive_snapshot(peer)
             pending_sensor = self._sensor_tasks.get(peer)
             if pending_sensor is not None and not pending_sensor.done():
