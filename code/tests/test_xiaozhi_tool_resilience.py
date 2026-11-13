@@ -41,6 +41,7 @@ def bridge_tools(monkeypatch):
     spec.loader.exec_module(module)
     monkeypatch.setenv("DESK_ROBOT_TOOL_TOKEN", "s" * 40)
     module.registered_head = registered
+    module.bridge = bridge
     return module
 
 
@@ -329,3 +330,71 @@ async def test_memory_tool_result_dropped_after_new_human_turn(
     )
     assert "superseded" in result.result["error"]
     assert "memories" not in result.result
+
+
+async def test_live_human_vad_cancels_hung_visual_tool_without_speaking_old_result(
+    bridge_tools, monkeypatch,
+):
+    import asyncio
+
+    registered = bridge_tools.registered_head
+    event = asyncio.Event()
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    bridge_tools.bridge.tool_turn_cancel_event = lambda device: event
+    # The existing tool bridge, not a new camera agent, owns the HTTP request.
+    original = httpx.AsyncClient
+
+    async def handler(request):
+        assert request.url.path == "/v1/pet/robot-01/look"
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        return httpx.Response(200, json={"answer": "stale camera answer"})
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    task = asyncio.create_task(bridge_tools.call(
+        registered, "look", {"question": "What moved?"}
+    ))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    event.set()  # Real bridge sets this on authenticated human speech.
+    outcome = await asyncio.wait_for(task, timeout=1)
+    assert "superseded" in outcome["error"]
+    assert outcome["retried"] is False
+    assert cancelled.is_set()
+    assert "answer" not in outcome
+
+
+async def test_voice_cancel_does_not_abort_required_robot_stop_request(
+    bridge_tools, monkeypatch,
+):
+    import asyncio
+
+    event = asyncio.Event()
+    entered, release = asyncio.Event(), asyncio.Event()
+    bridge_tools.bridge.tool_turn_cancel_event = lambda device: event
+    original = httpx.AsyncClient
+
+    async def handler(request):
+        assert request.url.path == "/v1/robots/robot-01/stop"
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, json={"stopped": True})
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    task = asyncio.create_task(bridge_tools.call(
+        bridge_tools.registered_head, "stop"
+    ))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    event.set()  # STOP is a safety request, not a speculative read-only tool.
+    await asyncio.sleep(0)
+    assert not task.done()
+    release.set()
+    assert await asyncio.wait_for(task, timeout=1) == {"stopped": True}
