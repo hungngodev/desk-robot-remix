@@ -112,6 +112,31 @@ def test_recent_speech_tail_can_pair_actual_frame_with_completed_native_model_un
     assert wire.frames_sent == 1
 
 
+def test_proactive_quiet_audio_rearms_after_barge_without_new_human_speech():
+    wire = OmniDuplexWire()
+    jpeg = b"\xff\xd8" + b"silent-room-video" + b"\xff\xd9"
+    wire.interrupt()
+    assert wire._needs_new_input
+    for index in range(10):
+        packet = wire.append_audio(
+            b"\0" * 3200, speech=False,
+            jpeg=jpeg, camera_age_ms=10, frame_receipt_us=61001,
+        )
+        if index < 9:
+            assert "video_frames" not in packet
+            assert wire._needs_new_input
+    assert "video_frames" in packet
+    assert not wire._needs_new_input
+    assert wire.frames_sent == 1
+    wire.handle_event({
+        "type": "response.created",
+        "response_id": "quiet_proactive_new",
+        "response": {"metadata": {"duplex_event": {"epoch": 2}}},
+    })
+    assert wire.response_id == "quiet_proactive_new"
+    assert wire.accept_output
+
+
 def test_barge_in_drops_obsolete_visual_tail_until_new_authentic_speech():
     wire = OmniDuplexWire()
     jpeg = b"\xff\xd8" + b"x" * 20 + b"\xff\xd9"
