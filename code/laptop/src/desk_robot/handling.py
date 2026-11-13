@@ -112,8 +112,18 @@ class HandlingGate:
         boot_id = body["imu"]["boot_id"]
         sample_ms = body["imu"]["sample_ms"]
         if self.last_boot_id is not None:
-            if boot_id != self.last_boot_id or sample_ms < self.last_sample_ms:
-                self.reset()  # real WROOM reboot, timestamp rollover, or regression
+            if boot_id != self.last_boot_id:
+                self.reset()  # new WROOM boot identity requires fresh calibration
+            elif sample_ms < self.last_sample_ms:
+                # Only a near-uint32 wrap can legitimately restart the clock.
+                # A backward sample from the same boot must not be treated as
+                # a new conversion or become the new calibration baseline.
+                if not (self.last_sample_ms >= 0xffff0000 and sample_ms <= 0xffff):
+                    previous = (self.last_boot_id, self.last_sample_ms)
+                    self.reset()
+                    self.last_boot_id, self.last_sample_ms = previous
+                    return ()
+                self.reset()
             elif sample_ms == self.last_sample_ms:
                 return ()  # same physical conversion; do not update last_at
         self.last_boot_id = boot_id
