@@ -111,6 +111,20 @@ def test_mismatched_own_speech_source_never_claims_first_person():
     assert "robot-02 reported:" in context.recent
 
 
+def test_sensor_trigger_labels_camera_receipt_without_claiming_object_recognition():
+    timeline = [{
+        "channel": "camera",
+        "kind": "sensor",
+        "trigger_kind": "petting_zone",
+        "content": None,
+    }]
+    text = compose_brain_context([], [], timeline).interaction
+    assert "XIAO frame received" in text
+    assert "scheduled after petting_zone sensor edge" in text
+    assert "not proof of visual contents" in text
+    assert "I observed" not in text
+
+
 def test_live_asr_is_bounded_uncertain_and_keeps_visual_tool_provenance():
     now = time.monotonic()
     hub = CameraFrameHub(["robot-01", "robot-02"])
