@@ -687,12 +687,19 @@ def create_app():
         # generation, not merely issue one STOP while a MiniCPM stream keeps
         # sending 60ms Opus packets afterwards. Reuse its existing urgent
         # physical decoder flush and remote cancellation.
-        native = _native_adapter()
         stopped_native = False
-        if native is not None:
-            suspend = getattr(native, "suspend_proactive_for_operator", None)
-            if callable(suspend):
-                stopped_native = await suspend(connection)
+        try:
+            native = _native_adapter()
+            if native is not None:
+                suspend = getattr(native, "suspend_proactive_for_operator", None)
+                if callable(suspend):
+                    stopped_native = await suspend(connection)
+        except Exception:
+            # An unavailable native module, broken model connection or
+            # failed remote cancel is NEVER allowed to suppress the physical
+            # XIAO STOP fallback. Sending STOP twice is safer than sending
+            # none; its decoder flush is an idempotent safety action.
+            stopped_native = False
         if not stopped_native:
             # Normal Mac Kokoro playback, still through the same XIAO
             # decoder. The actual Sense overlay handles decoder/DMA reset.
