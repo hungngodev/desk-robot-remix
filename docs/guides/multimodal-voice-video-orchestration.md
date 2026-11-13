@@ -50,14 +50,28 @@ operator permit. Every new authenticated human VAD clears earlier tool
 interpretations, including from another robot; subsequent fresh calls
 may refill the correct pet's context.
 
-The existing `Conversation.run` group owner now consumes each invited
-pet's **own** `interaction_timeline()` through the same bounded
-`compose_brain_context()` as proactive speech. Its own completed ASR,
+When **fleet text sharing is explicitly enabled**, the existing
+`Conversation.run` group owner can consume each invited pet's **own**
+`interaction_timeline()` through the same bounded
+`compose_brain_context()` as proactive speech. Its completed ASR,
 sensor events, tool receipts and JPEG scheduling causes can inform a
-natural response. The peer does not inherit that evidence as eyewitness
-history, and the group retains its current single Xiaozhi speaker lease,
-separate SQLite memories and opt-in text-sharing policy. No second
-microphone, camera, tool executor, or agent graph has been added.
+natural response. Without that separate consent, the user can still
+request group conversation around the supplied topic, but private live
+cues are omitted from those prompts. A peer never inherits these cues
+as eyewitness history. One Xiaozhi speaker lease, separate SQLite
+memories and the established operator motion permits remain unchanged.
+No second microphone, camera, tool executor or agent graph exists.
+
+**Live priority and recovery:** A direct `desk_robot_look` request
+now cancels only the optional in-flight pet scene comparison before
+waiting for the shared VLM lock; it never cancels the permanent observer
+or emits a motor request. Authenticated Xiaozhi voice stream loss also
+invalidates the transient native ASR receipts, which must not silently
+survive a head reconnect as if their provenance were continuous.
+Repeated ordinary Mac status tool polls replace the prior receipt of
+that kind rather than evicting an independent pickup or visual result.
+All these source paths have focused tests but no successful full-CI
+head pass yet.
 
 **Two source paths remain intentionally distinct:** Legacy Xiaozhi exposes
 the real `desk_robot_look`, `desk_robot_situation` and
