@@ -1400,6 +1400,40 @@ def test_native_tool_chat_receives_only_typed_sourced_facts(
         assert "charging_authorized" not in fact
 
 
+def test_native_memory_tool_preserves_eyewitness_and_peer_provenance(native):
+    module, _ = native
+    fact = module.native_grounded_fact("voice-context", {
+        "robot_id": "robot-01",
+        "memories": [
+            {"summary": "A key was next to the mug", "kind": "key",
+             "source_robot": "robot-01", "witnessed": True},
+            {"summary": "A green cube was on the desk", "kind": "object",
+             "source_robot": "robot-02", "witnessed": False},
+        ],
+    })
+    assert fact["source"] == "private_opt_in_memory_not_current_sight"
+    assert fact["recollections"] == [
+        {"summary": "A key was next to the mug", "kind": "key",
+         "source_robot": "robot-01", "witnessed": True,
+         "historical_untrusted_text": True},
+        {"summary": "A green cube was on the desk", "kind": "object",
+         "source_robot": "robot-02", "witnessed": False,
+         "historical_untrusted_text": True},
+    ]
+    # Legacy or malformed records may still be read, but MUST NOT become
+    # invented local eyewitness events or carry arbitrary origin labels.
+    unknown = module.native_grounded_fact("voice-context", {
+        "memories": [{"summary": "  uncertain   speech  ",
+                      "kind": "evil:move", "source_robot": "a/b",
+                      "witnessed": 1}],
+    })
+    assert unknown["recollections"] == [{
+        "summary": "uncertain speech", "kind": "unknown",
+        "source_robot": "unknown", "witnessed": None,
+        "historical_untrusted_text": True,
+    }]
+
+
 async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     native,
 ):
