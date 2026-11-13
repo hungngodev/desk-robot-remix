@@ -535,18 +535,21 @@ class CameraFrameHub:
             selected.add(index)
         return [items[index][1] for index in sorted(selected)]
 
-    def discard_video(self, robot_id: str) -> None:
-        """Drop failed camera evidence without releasing a live human VAD turn."""
+    def discard_visual_tools(self, robot_id: str) -> None:
+        """Expire visual guesses without erasing independent read-only facts."""
         self._check(robot_id)
-        self._generation[robot_id] += 1
-        self.frames[robot_id].clear()
-        # Camera outages invalidate visual guesses, not authenticated
-        # status, pickup, sensor or private memory tool receipts.
         tools = self.tool_history[robot_id]
         self.tool_history[robot_id] = deque(
             (entry for entry in tools if entry[0] != "visual_look"),
             maxlen=tools.maxlen,
         )
+
+    def discard_video(self, robot_id: str) -> None:
+        """Drop failed camera evidence without releasing a live human VAD turn."""
+        self._check(robot_id)
+        self._generation[robot_id] += 1
+        self.frames[robot_id].clear()
+        self.discard_visual_tools(robot_id)
         # An image/voice-monitor outage invalidates camera interpretations,
         # not an actual line already transmitted by the Mac speaker owner.
         # Spoken text retains its own 30s TTL and is not playback proof.
@@ -967,9 +970,13 @@ class MultimodalOrchestrator:
         # expensive VLM answer survive this global preemption.
         for peer in self.hub.robots:
             self._turn_epoch[peer] += 1
-            # Previous conversation's model tool output is not a current
-            # scene fact. New human speech supersedes it fleet-wide.
-            self.hub.tool_history[peer].clear()
+            # Invalidate stale camera interpretations across the fleet.
+            # A human speaking to another pet must not erase this pet's
+            # independent completed pickup, status or private memory facts.
+            if peer == robot_id:
+                self.hub.tool_history[peer].clear()
+            else:
+                self.hub.discard_visual_tools(peer)
             self._cancel_proactive_snapshot(peer)
             pending_sensor = self._sensor_tasks.get(peer)
             if pending_sensor is not None and not pending_sensor.done():

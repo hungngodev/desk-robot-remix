@@ -1770,3 +1770,27 @@ async def test_native_stream_subscriber_ignores_interleaved_sensor_snapshot():
             await asyncio.gather(task, return_exceptions=True)
         await reader.aclose()
         await visual.close()
+
+
+async def test_other_pets_new_human_turn_preserves_my_completed_nonvisual_tools():
+    """One robot's voice cannot silently erase another pet's tool history."""
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        now = time.monotonic()
+        for kind in ("robot_status", "pickup_status", "memory_recall"):
+            visual.hub.remember_tool("robot-01", kind, kind, now)
+        visual.hub.remember_tool("robot-01", "visual_look", "old scene", now)
+        visual.hub.remember_tool("robot-02", "robot_status", "old turn", now)
+        visual.voice_started("robot-02")
+        assert {entry["kind"] for entry in visual.hub.recent_tool_context(
+            "robot-01", time.monotonic()
+        )} == {"robot_status", "pickup_status", "memory_recall"}
+        assert visual.hub.recent_tool_context(
+            "robot-02", time.monotonic()
+        ) == []  # The speaking pet has actually started a new tool turn.
+        visual.voice_ended("robot-02")
+    finally:
+        await visual.close()
