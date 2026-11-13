@@ -225,12 +225,12 @@ def compose_brain_context(
             r"(?:what (?:can|do) you see|what am i holding|"
             r"look (?:at|around|for)|do you see|describe what you see|"
             r"what (?:colou?r|shape|size) (?:is|are)|"
-            r"does (?:the|this|that|my) (?:screen|display|label)\\b|"
+            r"does (?:the|this|that|my) (?:screen|display|label)\b|"
             r"(?:how many|count) .{1,65} (?:on (?:my|the) "
-            r"(?:desk|table)|in (?:the|this|your) (?:image|photo|frame))\\b|"
+            r"(?:desk|table)|in (?:the|this|your) (?:image|photo|frame))\b|"
             r"(?:is|are) (?:there|this|that|the|my) .{1,65} "
             r"(?:next to|beside|behind|on (?:my|the) "
-            r"(?:desk|table))\\b)",
+            r"(?:desk|table))\b)",
             heard,
         ):
             requested_tool = "visual_look"
