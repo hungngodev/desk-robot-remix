@@ -1426,3 +1426,41 @@ async def test_operator_interrupt_reuses_native_generation_flush_not_duplicate_s
     }]
     assert bridge.interrupt_generation["mac-01"] == 1
     assert first.client_abort is True
+
+
+async def test_broken_native_voice_cannot_block_operator_physical_speaker_stop(
+    bridge, monkeypatch,
+):
+    """If native model cancellation raises, issue real XIAO STOP anyway."""
+    sent = []
+    first = conn("mac-01")
+    first.session_id = "physical-private-01"
+
+    class WebSocket:
+        async def send(self, frame):
+            sent.append(json.loads(frame))
+
+    first.websocket = WebSocket()
+    bridge.register(first)
+
+    async def broken_native(_conn):
+        raise RuntimeError("Native model cancellation service is broken")
+
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni", SimpleNamespace(
+        suspend_proactive_for_operator=broken_native,
+    ))
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        response = await client.post(
+            "/interrupt", headers=headers, json={"device_id": "mac-01"}
+        )
+        assert response.status == 200
+        body = await response.json()
+        assert body["head_flush_requested"] is True
+        assert body["head_flush_acknowledged"] is False
+    assert sent == [{
+        "type": "tts", "state": "stop",
+        "session_id": "physical-private-01", "flush": True,
+    }]
+    assert bridge.interrupt_generation["mac-01"] == 1
+    assert first.client_abort is True
