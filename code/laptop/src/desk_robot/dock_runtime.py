@@ -60,7 +60,8 @@ async def detect_bounded(jpeg: bytes, calibration: DockCameraCalibration, *,
         work = _DETECTOR_POOL.submit(
             detect_apriltag, jpeg, calibration, captured_at=captured_at
         )
-    except (RuntimeError, OSError):
+    except Exception:
+        # Executor submission may fail before a Future owns the slot.
         _DETECTOR_SLOT.release()
         raise
 
