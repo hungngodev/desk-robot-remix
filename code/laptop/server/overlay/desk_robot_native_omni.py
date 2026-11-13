@@ -1464,7 +1464,7 @@ class NativeOmniSession:
                 if (isinstance(response_id, str)
                         and response_id == self.wire.response_id
                         and self.wire.accept_output
-                        and isinstance(delta, str) and "\\x00" not in delta
+                        and isinstance(delta, str) and "\x00" not in delta
                         and 1 <= len(delta) <= 280):
                     if response_id not in self._native_output_words:
                         if len(self._native_output_words) >= 4:
@@ -1483,7 +1483,7 @@ class NativeOmniSession:
             elif kind == "conversation.item.input_audio_transcription.completed":
                 if self._accept_current_audio_item(event):
                     raw_heard = event.get("transcript")
-                    if isinstance(raw_heard, str) and "\\x00" not in raw_heard:
+                    if isinstance(raw_heard, str) and "\x00" not in raw_heard:
                         self._last_human_transcript = " ".join(raw_heard.split())[:180]
                     self._accept_heard_transcript(event)
                     if self._queue_readonly_tool(event):
