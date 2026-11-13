@@ -663,7 +663,9 @@ class NativeOmniSession:
         requests = native_readonly_requests(event.get("transcript"))
         if not requests:
             transcript = event.get("transcript")
-            if not isinstance(transcript, str):
+            if (not isinstance(transcript, str)
+                    or not 3 <= len(transcript.strip()) <= 280
+                    or "\x00" in transcript):
                 return
             # Only ambiguous OBSERVATIONAL speech needs semantic selection.
             # Ordinary social talk and actuator requests never open another
