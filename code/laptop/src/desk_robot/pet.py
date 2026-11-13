@@ -1121,6 +1121,16 @@ class PetController:
                         and (state.last_scene_frame_at is None
                              or frame.received_at > state.last_scene_frame_at)
                     ]
+                    if not candidates:
+                        # Continuous head video populates the shared ring.
+                        # The pet must CONSUME the feed, not start periodic
+                        # physical JPEG requests while its stream owns capture.
+                        owns_stream = getattr(
+                            self.multimodal, "stream_owns_camera", None
+                        )
+                        if callable(owns_stream) and owns_stream(robot_id):
+                            await asyncio.sleep(self.interval)
+                            continue
                     if not candidates and hub.due(robot_id, time.monotonic()):
                         # The same XIAO cannot serve a sensor confirmation
                         # burst and an unrelated low-priority sampler. Wait
