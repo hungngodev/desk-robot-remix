@@ -100,6 +100,42 @@ def connection():
     return conn, sent
 
 
+def test_native_audiovisual_readiness_requires_live_mic_and_fresh_selected_video(
+    native,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = session
+    try:
+        first = module.status("mac-01")
+        assert first["continuous_av_input_receiving"] is False
+        assert first["microphone_last_frame_age_ms"] is None
+        session.connected = True
+        session._camera_stream_connected = True
+        session.wire.frames_sent = 1
+        session._last_video_selected_at = module.time.monotonic()
+        assert module.status("mac-01")["continuous_av_input_receiving"] is False
+        session.queue_mic(b"\0" * 3200, False)  # actual quiet-room PCM
+        ready = module.status("mac-01")
+        assert ready["continuous_av_input_receiving"] is True
+        assert 0 <= ready["microphone_last_frame_age_ms"] <= 200
+        session._last_mic_received_at -= 3
+        assert module.status("mac-01")["continuous_av_input_receiving"] is False
+        session._last_mic_received_at = module.time.monotonic()
+        session._last_video_selected_at -= 5
+        assert module.status("mac-01")["continuous_av_input_receiving"] is False
+        session._last_video_selected_at = module.time.monotonic()
+        session._camera_stream_connected = False
+        assert module.status("mac-01")["continuous_av_input_receiving"] is False
+    finally:
+        session.closed = True
+
+
 def test_native_backend_has_explicit_opt_in_and_tls_only_for_remote_audio(native, monkeypatch):
     module, bridge = native
     conn, sent = connection()
