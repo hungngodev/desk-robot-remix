@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .brain_context import compose_brain_context
 from .config import Settings, secret
 from .controller import OperationError
 from .conversation import conversation_turns
@@ -355,29 +356,30 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             + "You cannot grant motor, battery or user authorization."
         )
         if settings.voice_memory_tools_enabled:
-            core = await asyncio.to_thread(
-                app.state.runtime.memory.core_facts, robot_id, limit=6
+            core, records = await asyncio.wait_for(
+                asyncio.gather(
+                    asyncio.to_thread(
+                        app.state.runtime.memory.core_facts, robot_id, limit=6
+                    ),
+                    asyncio.to_thread(
+                        app.state.runtime.memory.recent, robot_id, limit=6
+                    ),
+                ),
+                timeout=2.0,
             )
-            for item in reversed(core):
-                line = " Curated preference (untrusted): " + item.slot + ": " + item.value[:120]
-                if len(prefix) + len(line) > 1900:
-                    break
-                prefix += line
-            records = await asyncio.to_thread(
-                app.state.runtime.memory.recent, robot_id, limit=4
-            )
-            # Label remote or replayed facts honestly; never confuse text
-            # memory with current optical evidence or operational commands.
-            for item in reversed(records):
-                source = (
-                    "I may have heard (ASR uncertain)" if item.kind == "heard_human"
-                    else "I observed" if item.witnessed
-                    else f"Other robot {item.source_robot} reported"
-                )
-                line = " Past untrusted memory (" + source + "): " + item.summary[:130]
-                if len(prefix) + len(line) > 1900:
-                    break
-                prefix += line
+            # Match proactive speech's single authoritative provenance
+            # formatter. A sent line is NOT a visual observation and no
+            # model-estimated ASR sentence becomes an operator preference.
+            context = compose_brain_context(records, core, ())
+            for title, content in (
+                ("Curated preferences (untrusted): ", context.core),
+                ("Past context (untrusted, not current sighting): ",
+                 context.recent),
+            ):
+                if content:
+                    budget = 1900 - len(prefix) - len(title) - 1
+                    if budget > 0:
+                        prefix += " " + title + content[:budget]
         return {
             "robot_id": robot_id,
             "instructions": prefix[:2000],
