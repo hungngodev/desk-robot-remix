@@ -264,3 +264,14 @@ This table describes the **single canonical PR #17**. It separates real source c
 
 **Physical acceptance remains open.** The source level PN532 adapter has portable parser tests plus deterministic I2C slot tests, but was not compiled on GitHub Actions or exercised with the real PN532 carrier. Its vendor BSD protocol framing is adapted to avoid the upstream blocking poll that would delay WROOM cliff sensing. The UID game token uses FNV and is cloneable; never use it for access control or identity.
 
+
+
+### November 13 PN532 shared bus timeout qualification
+
+Research checkpoint at PR #17 head `c2f3e32ccd0c0412081a16f39ec370f361f1d0c6`. This is a source review, not a measured fault or hardware acceptance.
+
+NXP PN532 UM0701-02 section 6.3.3 and Figure 66 documents SCL stretching on I2C wake from power down (normally below 2 ms with appropriate quartz and layout): https://www.nxp.com/docs/en/user-guide/141520.pdf . The existing bounded PN532 frame adaptation is derived from Seeed's PN532 protocol library (verify the exact vendored BSD notices in docs/ATTRIBUTION.md), rather than adding a blocking reader: https://github.com/Seeed-Studio/PN532 . Espressif Arduino ESP32 documents `Wire.setTimeOut` (50 ms default): https://github.com/espressif/arduino-esp32/blob/master/docs/en/api/i2c.rst . **Do not assume the configured 15 ms always bounds a stuck transfer:** an older ESP32 driver issue reports an effective one second lower wait in some IDF versions, which requires testing against this project's exact pinned PlatformIO/Arduino core, not extrapolating from current upstream: https://github.com/espressif/arduino-esp32/issues/8056 .
+
+Current source: `TofBus::begin` configures `wire_.setTimeOut(15)`; `AccessorySensors::poll` reads MCP23017 GPIOA before optional PN532 on shared mux 0x71 lane 5; `AccessorySensors::invalidate_cached` clears cached dock validity on mux errors; `BodyControl::set_accessories` rejects expired or provenance-mutated dock records and retains the contact lockout. These safeguards do **not** prove that a blocked `Wire.requestFrom` returns before local motor deadlines. The safety critical test is the elapsed wall clock of a real blocked transaction while motors are armed, including watchdog execution and GPIOA age; a mocked NACK is insufficient to simulate SCL held low.
+
+Next owner action: inspect the pinned Arduino Wire implementation and the WROOM main loop scheduling; add an injectable fake Wire stall regression to `guarded_body_tests` or the accessory bus tests proving no rearm on stale dock GPIO, plus a real logic analyzer SCL/SDA/IRQ capture with PN532 powered down, disconnected and wedged. If the real driver can block longer than the motor safety deadline, implement a fail closed scheduling or independent hardware stop mechanism before approving the shared wiring. Do not add a second I2C master or bypass MCP23017 freshness. Charging electronics and physical docking remain unqualified.
