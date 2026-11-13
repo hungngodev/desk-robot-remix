@@ -2357,3 +2357,142 @@ async def test_pet_drops_old_robot_frame_after_brief_peer_voice_turn(
         await asyncio.gather(worker, return_exceptions=True)
         await pet.close()
         await visual.close()
+
+
+async def test_proactive_brain_can_choose_to_stay_silent_without_tts(fleet, tmp_path):
+    class DecisionChat:
+        def __init__(self):
+            self.histories = []
+
+        async def proactive_decision(self, history):
+            self.histories.append(json.loads(json.dumps(history)))
+            return {"action": "silence", "text": "", "tool": "none"}
+
+        async def reply(self, history):
+            raise AssertionError("Legacy always-speak path must not run")
+
+    chat = DecisionChat()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 41
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A new key appeared", 0.97), 41,
+        )
+        await wait_for(lambda: pet._speech_task is None)
+        assert len(chat.histories) == 1
+        assert state.last_initiative_suppression == "model_chose_silence"
+        assert state.spoken == 0
+        assert speaker.spoken == []
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_proactive_ollama_tool_round_trip_is_bounded_and_grounded(
+    fleet, tmp_path,
+):
+    class Head:
+        def __init__(self):
+            self.status_reads = 0
+
+        async def status(self):
+            self.status_reads += 1
+            return {"robot_id": "robot-01", "battery": {"percent": 48},
+                    "data": {"docked": False}}
+
+        async def command(self, *_):
+            raise AssertionError("No autonomous motor tool may be invoked")
+
+    class DecisionChat:
+        def __init__(self):
+            self.histories = []
+
+        async def proactive_decision(self, history):
+            self.histories.append(json.loads(json.dumps(history)))
+            if len(self.histories) == 1:
+                return {"action": "inspect", "text": "", "tool": "status"}
+            return {"action": "speak", "text": "My battery reads 48 percent.",
+                    "tool": "none"}
+
+        async def reply(self, history):
+            raise AssertionError("Only schema governed model path can run")
+
+    head, chat = Head(), DecisionChat()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": head},
+        Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 44
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("battery_low", "Battery seems low", 1.0), 44
+        )
+        await wait_for(lambda: pet._speech_task is None)
+        assert head.status_reads == 1
+        assert len(chat.histories) == 2
+        second = chat.histories[1]
+        assert second[-2]["role"] == "assistant"
+        assert second[-2]["tool_calls"][0]["function"]["name"] == "status"
+        assert second[-1]["role"] == "tool"
+        assert second[-1]["tool_name"] == "status"
+        receipt = json.loads(second[-1]["content"])
+        assert receipt["robot_id"] == "robot-01"
+        assert receipt["data"]["battery"]["percent"] == 48
+        assert receipt["verified_motion"] is False
+        assert receipt["verified_charging"] is False
+        assert speaker.spoken == [("robot-01", "My battery reads 48 percent.")]
+        assert state.spoken == 1
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_proactive_inspection_rejects_cross_pet_receipts_and_tool_loops(
+    fleet, tmp_path,
+):
+    class WrongHead:
+        async def status(self):
+            return {"robot_id": "robot-02", "battery": {"percent": 55}}
+
+    class DecisionChat:
+        def __init__(self):
+            self.calls = 0
+
+        async def proactive_decision(self, history):
+            self.calls += 1
+            return {"action": "inspect", "text": "", "tool": "status"}
+
+    chat = DecisionChat()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": WrongHead()},
+        Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 45
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("battery_low", "Power changed", 1.0), 45
+        )
+        await wait_for(lambda: pet._speech_task is None)
+        assert chat.calls == 1
+        assert state.last_initiative_suppression == "read_only_tool_unavailable"
+        assert speaker.spoken == []
+    finally:
+        state.enabled = False
+        await pet.close()
