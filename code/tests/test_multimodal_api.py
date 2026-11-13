@@ -475,6 +475,72 @@ def test_native_omni_frame_requires_consent_real_hardware_and_tool_token(setting
         assert client.get(url, headers=tool).status_code == 403
 
 
+
+def test_native_model_receives_continuous_visual_evidence_without_request_or_vad(
+    settings, tokens,
+):
+    import base64
+    import json
+    import time
+    from types import SimpleNamespace
+
+    class LiveVideo:
+        def __init__(self):
+            self.subscriptions = 0
+
+        async def native_live_frames(self, robot_id):
+            assert robot_id == "robot-01"
+            self.subscriptions += 1
+            now = time.monotonic()
+            yield SimpleNamespace(
+                jpeg=b"\xff\xd8" + b"quiet desk" + b"\xff\xd9",
+                received_at=now - 0.9, motion_fraction=0.0,
+                source="proactive",
+            )
+            yield SimpleNamespace(
+                jpeg=b"\xff\xd8" + b"object moved" + b"\xff\xd9",
+                received_at=now, motion_fraction=0.04,
+                source="proactive",
+            )
+
+    class Runtime:
+        coordinator = SimpleNamespace(robot=lambda rid: (
+            settings.robot(rid)
+        ))
+        multimodal = LiveVideo()
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    runtime = Runtime()
+    path = "/v1/pet/robot-01/omni-stream"
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        assert client.get(path).status_code == 401
+        response = client.get(path, headers=headers)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/x-ndjson")
+        lines = [json.loads(x) for x in response.text.splitlines()]
+        assert len(lines) == 2
+        assert [x["source"] for x in lines] == ["proactive", "proactive"]
+        assert [base64.b64decode(x["jpeg_base64"]) for x in lines] == [
+            b"\xff\xd8quiet desk\xff\xd9",
+            b"\xff\xd8object moved\xff\xd9",
+        ]
+        assert all(x["motor_authorized"] is False and
+                   x["charging_authorized"] is False for x in lines)
+        assert lines[0]["camera_receipt_us"] < lines[1]["camera_receipt_us"]
+    assert runtime.multimodal.subscriptions == 1
+    settings.voice_vision_tools_enabled = False
+    with TestClient(create_app(settings, runtime=Runtime())) as client:
+        assert client.get(path, headers=headers).status_code == 403
+
+
 def test_native_model_instructions_contain_only_own_pet_persona_without_unapproved_memory(
     settings, tokens,
 ):
