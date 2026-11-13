@@ -50,22 +50,51 @@ def compose_brain_context(
     local VLM answer != a new eyewitness truth, human text != instructions.
     The LLM may use context for language but may not grant motion/charging.
     """
+    # MemoryStore.recent returns newest first, while a topical merge from
+    # PetController arrives oldest first. Select by source timestamps rather
+    # than the input list's order; a long chat must not drop NEW memories.
     seen: set[str] = set()
-    memory_parts = []
-    for entry in reversed(recent[-6:]):
+    memory_parts: list[str] = []
+    memory_used = 0
+    for entry in sorted(
+        recent, key=lambda item: (item.observed_at, item.event_id),
+        reverse=True,
+    ):
         if entry.event_id in seen:
             continue
         seen.add(entry.event_id)
-        memory_parts.append(
-            f"{_memory_label(entry)}: {_clean(entry.summary, limit=110)}"
-        )
-    recent_text = _clean("; ".join(memory_parts), limit=600)
+        phrase = f"{_memory_label(entry)}: {_clean(entry.summary, limit=110)}"
+        cost = len(phrase) + (2 if memory_parts else 0)
+        if memory_used + cost > 600:
+            continue
+        memory_parts.append(phrase)
+        memory_used += cost
+        if len(memory_parts) == 6:
+            break
+    # Older to newer for conversational flow, but NEVER at the expense of
+    # the newest memory in a fixed prompt budget.
+    recent_text = "; ".join(reversed(memory_parts))
 
-    core_parts = [
-        f"{_clean(item.slot, limit=40)}: {_clean(item.value, limit=120)}"
-        for item in core[-6:]
-    ]
-    core_text = _clean("; ".join(core_parts), limit=500)
+    # The core store also returns newest first; the previous [-6:] omitted
+    # the most recently curated operator facts when more than six existed.
+    seen_slots: set[str] = set()
+    core_parts: list[str] = []
+    core_used = 0
+    for item in sorted(
+        core, key=lambda fact: (fact.updated_at, fact.slot), reverse=True,
+    ):
+        if item.slot in seen_slots:
+            continue
+        seen_slots.add(item.slot)
+        phrase = f"{_clean(item.slot, limit=40)}: {_clean(item.value, limit=120)}"
+        cost = len(phrase) + (2 if core_parts else 0)
+        if core_used + cost > 500:
+            continue
+        core_parts.append(phrase)
+        core_used += cost
+        if len(core_parts) == 6:
+            break
+    core_text = "; ".join(reversed(core_parts))
 
     # A speaking head can contribute several JPEG receipts in seconds.
     # Repeating the same cue crowds out touch, completed tool context and
