@@ -1719,11 +1719,20 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "model_reply_not_concise"
                 return
-            # Human-like initiative includes knowing when NOT to repeat the
-            # last unsolicited line. Only this pet's own actual, recent
-            # speech counts; not other robots, camera guesses or user ASR.
+            # Native MiniCPM and Mac TTS share one current-robot timeline.
+            # Check it AGAIN after slow reasoning, since native speech may
+            # have finished while the proactive model was considering a reply.
+            sent_recently: list[str] = []
+            if self.multimodal is not None:
+                spoken = getattr(self.multimodal.hub, "spoken_history", {})
+                now = time.monotonic()
+                sent_recently = [
+                    item[0] for item in spoken.get(robot_id, ())
+                    if 0 <= now - item[1] <= 30
+                ]
             if repeated_spontaneous_line(
-                text, recent_memory, now_wall=time.time()
+                text, recent_memory, now_wall=time.time(),
+                recent_transmitted=sent_recently,
             ):
                 state.suppressed += 1
                 state.last_initiative_suppression = "repetitive_spontaneous_reply"

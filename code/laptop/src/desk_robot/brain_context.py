@@ -303,29 +303,35 @@ def compose_brain_context(
 
 
 
-def repeated_spontaneous_line(text: str, recent: Sequence[Memory],
-                              *, now_wall: float) -> bool:
-    """Suppress a pet repeating itself without running another agent model.
+def repeated_spontaneous_line(
+    text: str, recent: Sequence[Memory], *, now_wall: float,
+    recent_transmitted: Sequence[str] = (),
+) -> bool:
+    """Avoid repeating this pet's sent words from SQLite or live Mac context.
 
-    Only the pet's OWN actually transmitted, recent text matters. Another
-    robot's speech or an uncertain user ASR transcript cannot count as this
-    pet's previous line. The caller invokes this for unsolicited remarks,
-    never for a direct human question or emergency status.
+    Native Xiaozhi model text is not necessarily on disk, but a just-sent
+    native remark should not immediately be repeated by the Mac pet model.
+    Peer speech and uncertain user ASR never count as this pet's own words.
     """
     if not isinstance(text, str):
         return False
     normalized = re.sub(r"\W+", " ", text.casefold()).strip()
     if not normalized:
         return False
-    for item in recent:
-        if (item.kind != "own_utterance" or not item.witnessed
-                or item.source_robot != item.robot_id
-                or not 0 <= now_wall - item.observed_at <= 3600):
-            continue
-        past = re.sub(r"\W+", " ", item.summary.casefold()).strip()
-        if normalized == past:
-            return True
-        if (len(normalized.split()) >= 6 and len(past.split()) >= 6
-                and SequenceMatcher(None, normalized, past).ratio() >= 0.91):
-            return True
-    return False
+
+    def matches(previous: str) -> bool:
+        if not isinstance(previous, str):
+            return False
+        past = re.sub(r"\W+", " ", previous.casefold()).strip()
+        return (normalized == past or
+                (len(normalized.split()) >= 6 and len(past.split()) >= 6
+                 and SequenceMatcher(None, normalized, past).ratio() >= 0.91))
+
+    if any(matches(item) for item in recent_transmitted):
+        return True
+    return any(
+        matches(item.summary) for item in recent
+        if item.kind == "own_utterance" and item.witnessed
+        and item.source_robot == item.robot_id
+        and 0 <= now_wall - item.observed_at <= 3600
+    )

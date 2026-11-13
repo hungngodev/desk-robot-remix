@@ -417,6 +417,55 @@ def test_novelty_checks_use_only_recent_words_this_pet_actually_sent():
     )
 
 
+
+async def test_native_spoken_context_prevents_mac_repeating_same_line(
+    settings, tmp_path,
+):
+    """Only the same pet's recent sent Opus text suppresses Mac initiative."""
+    ids = [r.id for r in settings.robots]
+    hub = CameraFrameHub(ids)
+    spoken = "That little key looks interesting! Want to play a guessing game?"
+    now = time.monotonic()
+    assert hub.remember_native_spoken(
+        "robot-01", "omni_sent_" + "a" * 12 + "_" + "b" * 20,
+        spoken, now,
+    )
+    own = [entry[0] for entry in hub.spoken_history["robot-01"]]
+    assert repeated_spontaneous_line(
+        spoken, [], now_wall=time.time(), recent_transmitted=own,
+    )
+    assert not repeated_spontaneous_line(
+        spoken, [], now_wall=time.time(),
+        recent_transmitted=[
+            entry[0] for entry in hub.spoken_history["robot-02"]
+        ],
+    )
+
+    memory = MemoryStore(tmp_path, ids)
+    class RepeatChat:
+        async def reply(self, history):
+            return spoken
+
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, RepeatChat(), speaker, memory=memory)
+    pet = PetController(settings, {}, conversation, memory, scene=None)
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.states["robot-01"].enabled = True
+    try:
+        await pet._speak(
+            "robot-01", SceneChange("key", "A key appeared", 0.95),
+            pet.states["robot-01"].generation, offered_at=time.monotonic(),
+        )
+        assert speaker.spoken == []
+        assert pet.states["robot-01"].last_initiative_suppression == (
+            "repetitive_spontaneous_reply"
+        )
+        assert memory.count("robot-01") == 0
+        assert memory.count("robot-02") == 0
+    finally:
+        await pet.close()
+
+
 async def test_repeating_an_old_spontaneous_line_is_silently_suppressed(
     settings, tmp_path
 ):
