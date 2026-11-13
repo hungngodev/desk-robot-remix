@@ -644,6 +644,72 @@ async def test_mac_proactive_tts_claims_and_releases_native_speaker_owner(
     assert not sent
 
 
+@pytest.mark.parametrize("vad_mode", ["generation", "fleet_floor"])
+async def test_human_vad_during_native_speaker_handoff_cannot_restart_old_tts(
+    bridge, monkeypatch, vad_mode,
+):
+    """An awaited speaker lease must not reset a human interruption."""
+    import types
+
+    sent_states, packets, leases = [], [], []
+    async def send_tts_message(current, state, message=None):
+        sent_states.append(state)
+
+    pkg = types.ModuleType("core")
+    pkg.__path__ = []
+    handle = types.ModuleType("core.handle")
+    handle.__path__ = []
+    audio = types.ModuleType("core.handle.sendAudioHandle")
+    audio.send_tts_message = send_tts_message
+    for key, mod in (
+        ("core", pkg), ("core.handle", handle),
+        ("core.handle.sendAudioHandle", audio),
+    ):
+        monkeypatch.setitem(sys.modules, key, mod)
+
+    class Socket:
+        async def send(self, data):
+            packets.append(data)
+
+    current = SimpleNamespace(
+        device_id="mac-01", conn_from_mqtt_gateway=False,
+        client_abort=False, client_is_speaking=False,
+        websocket=Socket(), session_id="current-head",
+        clearSpeakStatus=lambda: None,
+    )
+    bridge.register(current)
+    bridge.interrupt_generation[current.device_id] = 0
+    bridge.lease_ids = frozenset({current.device_id})
+    bridge.lease_until = time.monotonic() + 10
+
+    class Native:
+        async def begin_external_speech(self, owner):
+            assert owner is current
+            leases.append("acquired")
+            # Simulate a live VAD event while the bridge awaits this lease.
+            if vad_mode == "generation":
+                bridge.interrupt_generation[owner.device_id] += 1
+                current.client_abort = True
+            else:
+                bridge.human_vad_until[owner.device_id] = (
+                    time.monotonic() + 1.0
+                )
+            return True
+
+        async def end_external_speech(self, owner):
+            assert owner is current
+            leases.append("released")
+
+    native = Native()
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: native)
+    with pytest.raises(RuntimeError, match="Speech interrupted"):
+        await bridge.transmit(current, "Stale proactive announcement", [b"opus"])
+    assert leases == ["acquired", "released"]
+    assert sent_states == []
+    assert packets == []
+    assert not current.client_is_speaking
+
+
 async def test_normal_xiaozhi_realtime_listening_barges_into_its_own_tts(bridge):
     sent, cleared = [], []
 
