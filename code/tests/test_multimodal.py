@@ -377,18 +377,16 @@ async def test_human_vad_cancels_pending_sensor_camera_before_speech_frames():
 
 def test_sensor_camera_trigger_cannot_be_forged_on_voice_or_idle_capture():
     hub = CameraFrameHub(["robot-01"])
-    prepared = image()
+    prepared = _prepare(image())
     with pytest.raises(ValueError, match="Only a real sensor burst"):
         hub.offer_prepared(
-            "robot-01",
-            __import__("desk_robot.multimodal", fromlist=["_prepare"])._prepare(prepared),
-            100.0, source="speech", trigger_kind="touch_tap",
+            "robot-01", prepared, 100.0,
+            source="speech", trigger_kind="touch_tap",
         )
     with pytest.raises(ValueError, match="Only a real sensor burst"):
         hub.offer_prepared(
-            "robot-01",
-            __import__("desk_robot.multimodal", fromlist=["_prepare"])._prepare(prepared),
-            100.0, source="sensor", trigger_kind="nonexistent_vision",
+            "robot-01", prepared, 100.0,
+            source="sensor", trigger_kind="nonexistent_vision",
         )
 
 
