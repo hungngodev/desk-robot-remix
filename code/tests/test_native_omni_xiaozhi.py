@@ -1737,6 +1737,132 @@ async def test_stale_response_done_does_not_split_new_grounded_tool_speech(
         await asyncio.gather(worker, return_exceptions=True)
 
 
+
+async def test_new_native_response_stops_old_decoder_before_next_start(
+    native, monkeypatch,
+):
+    """Two valid response IDs must never overlap at the physical XIAO."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session.wire.response_id = "native_prior"
+    session._native_output_words["native_prior"] = {
+        "spoken": "Old interrupted answer",
+    }
+    session._tool_speech_turn = (0, 0)
+    session._tool_audio_response_id = "tool_next"
+    session._tool_reply_pending["tool_next"] = (
+        0, "What is on the desk?", "A blue mug appears on the desk.",
+    )
+
+    class Encoder:
+        def __init__(self, *args):
+            pass
+
+        def encode(self, pcm, frame_size):
+            assert len(pcm) == 1920 and frame_size == 960
+            return b"opus"
+
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    states, encoded = [], []
+
+    async def send_state(state, generation):
+        states.append((state, generation))
+        return True
+
+    async def send_opus(packet, generation):
+        encoded.append((packet, generation))
+
+    session._send_device_state = send_state
+    session._send_device_opus = send_opus
+    session.outgoing.put_nowait(("native_prior", bytes(9600)))
+    session.outgoing.put_nowait(("tool_next", bytes(9600)))
+    session.outgoing.put_nowait(("native_prior", None))
+    session.outgoing.put_nowait(("tool_next", None))
+    worker = asyncio.create_task(session._play())
+    try:
+        async with asyncio.timeout(1):
+            while len(states) < 4:
+                await asyncio.sleep(0.005)
+        assert [state for state, _ in states] == [
+            "start", "stop", "start", "stop",
+        ]
+        assert encoded
+        assert session.native_tool_audio_sent == 1
+        assert "native_prior" not in session._native_output_words
+        assert len(session._tool_dialogue) == 1
+        assert session._tool_dialogue[-1][2] == (
+            "A blue mug appears on the desk."
+        )
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_new_native_response_refuses_start_when_prior_stop_failed(
+    native, monkeypatch,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session.wire.response_id = "native_prior"
+    session._tool_audio_response_id = "tool_next"
+    session._tool_reply_pending["tool_next"] = (
+        0, "What color is it?", "Probably blue.",
+    )
+
+    class Encoder:
+        def __init__(self, *args):
+            pass
+        def encode(self, pcm, frame_size):
+            return b"opus"
+
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    states, encoded = [], []
+
+    async def send_state(state, generation):
+        states.append(state)
+        return state != "stop"
+
+    async def send_opus(packet, generation):
+        encoded.append(packet)
+
+    session._send_device_state = send_state
+    session._send_device_opus = send_opus
+    session.outgoing.put_nowait(("native_prior", bytes(9600)))
+    session.outgoing.put_nowait(("tool_next", bytes(9600)))
+    session.outgoing.put_nowait(("tool_next", None))
+    worker = asyncio.create_task(session._play())
+    try:
+        async with asyncio.timeout(1):
+            while len(states) < 2:
+                await asyncio.sleep(0.005)
+        await asyncio.sleep(0)
+        assert states == ["start", "stop"]
+        assert session.native_tool_audio_sent == 0
+        assert not session._tool_dialogue
+        assert session._tool_audio_response_id == "tool_next"
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_tool_dialogue_only_remembers_sent_uninterrupted_audio(
     native, monkeypatch,
 ):
