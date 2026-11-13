@@ -1217,7 +1217,8 @@ class NativeOmniSession:
             # after handshake. Even older ACKs did not change Stage 0 KV.
             # Continue polling Mac consent, but do not pretend live history
             # reached the duplex thinker. Tool chat uses an explicit turn.
-            self._context_update_unsupported = True
+            if self.wire.model == "openbmb/MiniCPM-o-4_5":
+                self._context_update_unsupported = True
             was_talking = self._user_was_talking
             if packet.speech:
                 self._user_was_talking = True
