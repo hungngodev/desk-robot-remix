@@ -96,6 +96,7 @@ async def test_hardware_group_memory_respects_fleet_sharing_consent(
 ):
     settings.mode = "hardware"
     settings.fleet_text_sharing_enabled = False
+    settings.voice_memory_tools_enabled = True
     ids = ["robot-01", "robot-02"]
     store = MemoryStore(tmp_path, ids)
     store.remember(
@@ -108,6 +109,11 @@ async def test_hardware_group_memory_respects_fleet_sharing_consent(
     assert "sensitive private" not in str(agent.histories)
     assert "private_preference" not in str(agent.histories)
     settings.fleet_text_sharing_enabled = True
+    settings.voice_memory_tools_enabled = False
+    await agent.run(ids, "Talk about a toy game", 2)
+    assert "sensitive private" not in str(agent.histories)
+    assert "private_preference" not in str(agent.histories)
+    settings.voice_memory_tools_enabled = True
     await agent.run(ids, "Talk about the sensitive private detail", 2)
     assert "private_preference" in agent.histories["robot-01"][0]["content"]
 
