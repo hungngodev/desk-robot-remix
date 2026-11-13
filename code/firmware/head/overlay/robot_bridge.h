@@ -42,6 +42,7 @@ private:
     RealTouchEdges head_touch_edges_{};
     RealTouchEdges body_cap_edges_{};
     static void CameraTask(void* context);
+    static void CameraStreamTask(void* context);
     Reply Transact(const std::string& command, bool operator_control);
     bool Authorize(httpd_req_t* req);
     esp_err_t Handle(httpd_req_t* req);
