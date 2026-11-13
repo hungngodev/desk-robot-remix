@@ -796,3 +796,28 @@ def test_tool_receipt_after_current_voice_can_still_be_prioritized():
     result = compose_brain_context([], [], timeline).interaction
     assert "Current visual result is a blue mug" in result
     assert len(result) <= 400
+
+
+def test_sensor_tool_receipt_is_grounded_not_a_camera_claim_or_command():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.remember_heard(
+        "robot-01", "sensor_request_01",
+        "What is your temperature and humidity?", now - .01,
+    )
+    hub.remember_tool(
+        "robot-01", "sensor_telemetry",
+        "SHT41 local temp_centi=2150, humidity_centi=4700; raw local probe, not calibrated",
+        now,
+    )
+    timeline = hub.interaction_timeline("robot-01", now, limit=10)
+    context = compose_brain_context([], [], timeline)
+    assert "Recent validated raw WROOM accessory read" in context.interaction
+    assert "temp_centi=2150" in context.interaction
+    assert "not calibrated" in context.interaction
+    assert "XIAO frame received" not in context.interaction
+    assert len(context.interaction) <= 400
+    peer = compose_brain_context(
+        [], [], hub.interaction_timeline("robot-02", now)
+    )
+    assert "temp_centi=2150" not in peer.interaction
