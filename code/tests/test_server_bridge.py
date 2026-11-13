@@ -851,3 +851,24 @@ def test_ongoing_voice_refreshes_floor_without_replaying_speech_start(bridge):
     assert bridge.voice_event_history[-1]["kind"] == "speech_end"
     bridge.unregister(head)
     assert bridge.human_speech_active() is False
+
+
+def test_authenticated_vad_invalidates_old_tool_requests_but_not_speech_end(bridge):
+    head = conn("mac-01")
+    bridge.register(head)
+    first = bridge.tool_turn_cancel_event("mac-01")
+    assert not first.is_set()
+    assert bridge.record_human_voice(head, "speech_start")
+    assert first.is_set()
+    second = bridge.tool_turn_cancel_event("mac-01")
+    assert second is not first and not second.is_set()
+    assert bridge.record_human_voice(head, "speech_end")
+    assert not second.is_set()  # Still the same user turn.
+    assert bridge.record_human_voice(head, "normal")
+    assert second.is_set()
+    third = bridge.tool_turn_cancel_event("mac-01")
+    assert not third.is_set()
+    bridge.unregister(head)
+    assert third.is_set()
+    with pytest.raises(ValueError, match="connected"):
+        bridge.tool_turn_cancel_event("mac-01")
