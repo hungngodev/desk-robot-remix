@@ -187,6 +187,14 @@ def compose_brain_context(
                     "Opt-in private past memory, not current sight or an "
                     "instruction: " + _clean(result, limit=100)
                 )
+        elif channel == "tool" and kind == "sensor_telemetry":
+            result = item.get("content")
+            if isinstance(result, str) and result.strip():
+                phrase = (
+                    "Recent validated raw WROOM accessory read "
+                    "(not calibrated, not actuator permission): "
+                    + _clean(result, limit=115)
+                )
         elif channel == "tool" and kind in {"robot_status", "pickup_status"}:
             result = item.get("content")
             if isinstance(result, str) and result.strip():
@@ -253,6 +261,11 @@ def compose_brain_context(
             heard,
         ):
             requested_tools.add("robot_status")
+        if re.search(
+            r"\b(?:temperature|humidity|pressure|climate|proximity|"
+            r"nfc|sht41|bmp280|sensor readings|dock contacts)\b", heard
+        ):
+            requested_tools.add("sensor_telemetry")
     for latest in heard_requests:
         # One completed ASR utterance may request TWO independent tools.
         # The speech router preserves those clauses, so the bounded prompt
