@@ -276,6 +276,12 @@ async def test_proactive_mac_and_native_voice_share_one_interruptible_speaker_le
         session._tool_speech_turn = (0, 0)
         assert not await module.begin_external_speech(conn)
         session._tool_speech_turn = None
+        session._pending_audio_commits.append((0, 0))
+        assert not await module.begin_external_speech(conn)
+        session._pending_audio_commits.clear()
+        session._asr_item_turns["live_human_question"] = (0, 0)
+        assert not await module.begin_external_speech(conn)
+        session._asr_item_turns.clear()
         assert await module.begin_external_speech(conn)
         assert session._external_speech_active
         assert module._external_speaker_owner == "mac-01"
