@@ -575,6 +575,12 @@ class MultimodalOrchestrator:
         self._capture_tasks: dict[str, asyncio.Task] = {}
         # One persistent XIAO JPEG feed per head; no second camera or model.
         self._stream_tasks: dict[str, asyncio.Task] = {}
+        # Model subscribers observe selected images without polling Mac HTTP
+        # or opening another camera capture. Condition has no media history.
+        self._model_frame_conditions = {
+            r.id: asyncio.Condition() for r in settings.robots
+        }
+        self._model_frame_versions = {r.id: 0 for r in settings.robots}
         self._last_stream_sample = {r.id: -math.inf for r in settings.robots}
         self._sensor_tasks: dict[str, asyncio.Task] = {}
         # Own only the optional HTTP snapshot, not its permanent pet loop.
@@ -653,6 +659,36 @@ class MultimodalOrchestrator:
         task = self._stream_tasks.get(robot_id)
         return task is not None and not task.done()
 
+    async def native_live_frames(self, robot_id: str):
+        """Push real selected JPEGs to one authorized proactive model reader.
+
+        Stream selection belongs to Mac and Xiaozhi. The model subscriber
+        never opens a physical capture, and no raw frames are retained beyond
+        the existing bounded in-memory hub. A slow subscriber skips frames.
+        """
+        self.hub._check(robot_id)
+        condition = self._model_frame_conditions[robot_id]
+        version = self._model_frame_versions[robot_id]
+        while not self._closed and self.settings.voice_vision_tools_enabled:
+            async with condition:
+                try:
+                    await asyncio.wait_for(condition.wait_for(
+                        lambda: (self._model_frame_versions[robot_id] > version
+                                 or self._closed
+                                 or not self.settings.voice_vision_tools_enabled)
+                    ), timeout=3)
+                except TimeoutError:
+                    continue
+                if self._closed or not self.settings.voice_vision_tools_enabled:
+                    return
+                version = self._model_frame_versions[robot_id]
+            frames = self.hub.frames[robot_id]
+            if not frames:
+                continue
+            frame = frames[-1]
+            if 0 <= time.monotonic() - frame.received_at <= 1:
+                yield frame
+
     def start_streams(self) -> None:
         """Own the one persistent visual feed whenever camera consent is on.
 
@@ -730,6 +766,9 @@ class MultimodalOrchestrator:
                         metrics["stream_frames_skipped"] += 1
                     else:
                         metrics["stream_frames_selected"] += 1
+                        async with self._model_frame_conditions[robot_id]:
+                            self._model_frame_versions[robot_id] += 1
+                            self._model_frame_conditions[robot_id].notify_all()
                 if self._closed:
                     break
                 raise RuntimeError("XIAO camera stream ended")
