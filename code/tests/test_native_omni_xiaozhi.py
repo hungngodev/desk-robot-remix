@@ -1275,6 +1275,123 @@ async def test_native_tool_reservation_fences_model_pcm_without_dropping_tools(
     assert sent == []  # no speaker was active; not a fake playback ack
 
 
+async def test_native_completed_audio_tool_result_reaches_same_model_audio_queue(
+    native, monkeypatch,
+):
+    """Actual ASR receipt -> Mac look -> chat audio; old native PCM discarded."""
+    import io
+    import wave
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._pending_audio_commits.append((0, 0))
+    session.outgoing.put_nowait(("stale_native_audio", b"old PCM"))
+    seen = []
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(bytes(48000))
+    wav64 = base64.b64encode(audio.getvalue()).decode()
+
+    class ChatResult:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+        async def json(self):
+            return {"choices": [{"message": {"audio": {"data": wav64}}}]}
+
+    class ChatHttp:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+        def post(self, url, *, json, timeout):
+            seen.append((url, json))
+            return ChatResult()
+
+    monkeypatch.setattr(module.aiohttp, "ClientSession", ChatHttp)
+    async def call(current, route, payload):
+        assert current is conn and route == "look"
+        return {"robot_id": "robot-01",
+                "source": "authenticated_xiao_camera_and_local_vlm",
+                "answer": "Possibly a blue cup in this camera frame",
+                "frames_used": 1, "motor_authorized": False,
+                "charging_authorized": False}
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for name, mod in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, name, mod)
+    events = [
+        {"type": "input_audio_buffer.committed", "item_id": "heard_item",
+         "event": {"turn_id": 0}},
+        {"type": "conversation.item.input_audio_transcription.completed",
+         "item_id": "heard_item", "transcript": "What color is the cup?"},
+        {"type": "response.created", "response_id": "stale_model",
+         "response": {"id": "stale_model",
+                      "metadata": {"duplex_event": {"epoch": 0}}}},
+    ]
+
+    class ModelSocket:
+        async def send_json(self, event):
+            seen.append(("model_event", event))
+        def __aiter__(self):
+            async def iterator():
+                for event in events:
+                    yield SimpleNamespace(
+                        type=module.aiohttp.WSMsgType.TEXT,
+                        data=json.dumps(event),
+                    )
+            return iterator()
+
+    session._socket = ModelSocket()
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        await session._receive_model()
+        async with asyncio.timeout(2):
+            while not session.native_tool_audio_queued:
+                await asyncio.sleep(.005)
+        assert session._generation == 1
+        assert session._tool_speech_turn == (1, 0)
+        assert session.native_readonly_tools_completed == 1
+        assert seen and any("/v1/chat/completions" in str(x[0])
+                            for x in seen)
+        packets = list(session.outgoing._queue)
+        assert packets[-1] is None
+        assert packets[0][0].startswith("tool_")
+        assert b"old PCM" not in [packet[1] for packet in packets[:-1]]
+        assert session.wire.response_id != "stale_model"
+        assert session.head_packets == 0  # no physical playback claim
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        for task in list(session._pending_cancels):
+            task.cancel()
+        await asyncio.gather(*session._pending_cancels,
+                             return_exceptions=True)
+
+
 async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
     native, monkeypatch,
 ):
