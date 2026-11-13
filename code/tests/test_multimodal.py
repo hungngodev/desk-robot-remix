@@ -1223,3 +1223,53 @@ def test_qwen_style_quiet_window_silences_only_optional_fleet_remarks():
     assert not hub.spontaneous_floor_busy(103.0)
     with pytest.raises(ValueError):
         hub.spontaneous_floor_busy(float("nan"))
+
+
+async def test_recent_pet_words_survive_next_vad_but_not_acoustic_hardware_claim():
+    """Human reply can refer to the pet's offer, even without memory consent."""
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        now = time.monotonic()
+        visual.hub.remember_spoken(
+            "robot-01", "Want to play a little guessing game?", now
+        )
+        visual.hub.remember_tool(
+            "robot-01", "visual_look", "Old uncertain camera guess", now
+        )
+        visual.voice_started("robot-01")
+        timeline = visual.hub.interaction_timeline("robot-01", time.monotonic())
+        words = [entry for entry in timeline
+                 if entry["channel"] == "robot_speech"]
+        assert len(words) == 1
+        assert "guessing game" in words[0]["content"]
+        assert words[0]["playback_verified"] is False
+        assert words[0]["source"] == (
+            "mac_tts_transmitted_not_speaker_playback_ack"
+        )
+        assert not [entry for entry in timeline
+                    if entry["channel"] == "tool"]
+        assert not [entry for entry in visual.hub.interaction_timeline(
+            "robot-02", time.monotonic()
+        ) if entry["channel"] == "robot_speech"]
+        visual.voice_ended("robot-01")
+        assert not [entry for entry in visual.hub.interaction_timeline(
+            "robot-01", now + 31
+        ) if entry["channel"] == "robot_speech"]
+        visual.voice_transport_unavailable()
+        assert not visual.hub.spoken_history["robot-01"]
+    finally:
+        await visual.close()
+
+
+def test_spoken_receipt_requires_actual_bounded_transmitted_text():
+    hub = CameraFrameHub(["robot-01"])
+    for value, when in (
+        ("", 2.0), ("x" * 281, 2.0), ("said", float("nan")),
+    ):
+        with pytest.raises(ValueError):
+            hub.remember_spoken("robot-01", value, when)
+    with pytest.raises(ValueError):
+        hub.remember_spoken("robot-02", "not my pet", 2.0)
