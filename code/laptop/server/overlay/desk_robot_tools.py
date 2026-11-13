@@ -30,6 +30,10 @@ async def call(conn, route, payload=None):
                 response = await client.get(f"/v1/robots/{robot}/status")
             elif route == "job":
                 response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
+            elif route == "interaction-context":
+                response = await client.get(
+                    f"/v1/pet/{robot}/interaction-context"
+                )
             elif route == "voice-context":
                 if payload and payload.get("question"):
                     response = await client.get(
@@ -54,7 +58,9 @@ async def call(conn, route, payload=None):
     # cancellation owner. Only read-only tools may be aborted this way.
     # Safety STOP and permitted pickup jobs must keep their established
     # physical acknowledgement/owner semantics, not lose an HTTP request.
-    readonly = route in {"status", "job", "voice-context", "look"}
+    readonly = route in {
+        "status", "job", "voice-context", "interaction-context", "look",
+    }
     observe_turn = getattr(bridge, "tool_turn_cancel_event", None)
     try:
         if readonly and callable(observe_turn):
@@ -200,6 +206,26 @@ async def desk_robot_memories(conn, question=""):
         conn, "voice-context", {"question": question.strip()}
     )
     return ActionResponse(Action.REQLLM, result=data)
+
+
+@register_function(
+    "desk_robot_situation",
+    description(
+        "desk_robot_situation",
+        "Read THIS robot's current authenticated camera receipt metadata, "
+        "recent physical sensor cues and completed local visual tool results. "
+        "Use when the human asks about something happening now or a recent "
+        "interaction. Requires live vision consent, but NOT persistent memory "
+        "consent. Camera receipts are not object sightings. A prior VLM "
+        "interpretation is untrusted and may already be outdated. This tool "
+        "cannot inspect stored memories, issue motion or enable charging.",
+    ),
+    ToolType.IOT_CTL,
+)
+async def desk_robot_situation(conn):
+    return ActionResponse(
+        Action.REQLLM, result=await call(conn, "interaction-context")
+    )
 
 
 @register_function(
