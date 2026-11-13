@@ -1403,6 +1403,70 @@ async def test_ambiguous_completed_asr_uses_existing_mac_planner_then_two_real_t
         await asyncio.gather(worker, return_exceptions=True)
 
 
+@pytest.mark.parametrize("defect", [
+    "duplicate_route", "missing_provenance", "claimed_model_motor_authority",
+])
+async def test_native_model_plan_rejects_duplicate_or_untrusted_routes(
+    native, monkeypatch, defect,
+):
+    """No malformed model plan can queue even an otherwise valid Mac tool."""
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    calls = []
+    plan = {
+        "robot_id": "robot-01",
+        "source": "existing_mac_ollama_readonly_route_selection",
+        "untrusted_model_selection": True,
+        "model_can_arm_motors": False,
+        "motor_authorized": False,
+        "charging_authorized": False,
+        "tools": [
+            {"route": "look", "payload": {"question": "Where is the key?"}},
+            {"route": "status", "payload": {}},
+        ],
+    }
+    if defect == "duplicate_route":
+        plan["tools"][1]["route"] = "look"
+    elif defect == "missing_provenance":
+        plan.pop("untrusted_model_selection")
+    else:
+        plan["model_can_arm_motors"] = True
+
+    async def call(current, route, payload):
+        calls.append(route)
+        return plan
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    await session._run_readonly_batch([
+        ("plan-readonly", {}, session._generation, session._readonly_turn),
+    ])
+    assert calls == ["plan-readonly"]
+    assert session._readonly_queue.empty()
+    assert session.native_readonly_tools_completed == 0
+    assert session.native_readonly_tools_dropped == 1
+    assert not session._context_wakeup.is_set()
+
+
 async def test_native_semantic_planner_cannot_queue_model_proposed_motor_actions(
     native, monkeypatch,
 ):
