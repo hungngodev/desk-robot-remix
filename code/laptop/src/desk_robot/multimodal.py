@@ -503,6 +503,7 @@ class MultimodalOrchestrator:
         }
         self._turn_epoch = {r.id: 0 for r in settings.robots}
         self._voice_turn_at = {r.id: -math.inf for r in settings.robots}
+        self._last_fleet_human_turn_at = -math.inf
         self._question_epoch = {r.id: 0 for r in settings.robots}
         # Only a fresh authenticated VAD snapshot may restart a sampler
         # cancelled during a server event gap, never an arbitrary timer.
@@ -636,6 +637,7 @@ class MultimodalOrchestrator:
     def _voice_activity(self, robot_id: str, *, end_expected: bool) -> None:
         now = time.monotonic()
         self._voice_turn_at[robot_id] = now
+        self._last_fleet_human_turn_at = now
         if end_expected:
             self.hub.notify(robot_id, "human_voice", now)
         else:
@@ -817,6 +819,10 @@ class MultimodalOrchestrator:
                 metrics["camera_errors"] += 1
                 raise
 
+    def latest_fleet_human_turn_at(self) -> float:
+        """When the last authenticated human started speaking to ANY pet."""
+        return self._last_fleet_human_turn_at
+
     async def native_frame(self, robot_id: str) -> CameraEvidence:
         """Share the actual VAD JPEG under the same physical camera lock.
 
@@ -838,7 +844,7 @@ class MultimodalOrchestrator:
         if (self._any_human_active(time.monotonic())
                 or self._turn_epoch[robot_id] != turn
                 or self._question_epoch[robot_id] != question
-                or now < self._voice_turn_at[robot_id]):
+                or now < self._last_fleet_human_turn_at):
             # External pet capture may finish just as an entire human VAD
             # episode begins and ends. Receipt and generation both matter.
             return
