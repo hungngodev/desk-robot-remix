@@ -7,10 +7,10 @@ short-term vs long-term context and Qwen Live Harness's silent tool receipts.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Sequence
-import re
 
 from .memory import CoreFact, Memory
 
