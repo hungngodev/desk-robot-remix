@@ -369,6 +369,13 @@ class NativeOmniSession:
                     headers={"Authorization": f"Bearer {self.token}"},
                     timeout=aiohttp.ClientTimeout(total=1.5),
                 ) as reply:
+                    if reply.status in (401, 403):
+                        # A revoked live-media permit or rotated Mac tool
+                        # token must end this duplex session. Its model may
+                        # still hold older instructions and history, so merely
+                        # skipping future context would not revoke access.
+                        self.fail("Mac live context permission revoked")
+                        return
                     if reply.status != 200:
                         self.native_context_errors += 1
                         continue
