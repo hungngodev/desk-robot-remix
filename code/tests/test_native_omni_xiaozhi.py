@@ -258,6 +258,43 @@ async def test_fleet_native_speaker_claim_flushes_old_pet_before_second_pet_talk
     assert newer.conn.client_is_speaking is False
 
 
+async def test_proactive_mac_and_native_voice_share_one_interruptible_speaker_lease(
+    native,
+):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    module._sessions["mac-01"] = session
+    events = []
+    session._schedule_remote_cancel = lambda batch: events.extend(batch)
+    try:
+        session._tool_speech_turn = (0, 0)
+        assert not await module.begin_external_speech(conn)
+        session._tool_speech_turn = None
+        assert await module.begin_external_speech(conn)
+        assert session._external_speech_active
+        assert module._external_speaker_owner == "mac-01"
+        assert not await module.claim_speaker(session)
+        assert events and events[0]["type"] == "response.cancel"
+        assert not await module.begin_external_speech(conn)
+        # Native output cannot invalidate the current Mac TTS decoder.
+        await session._send_device_state("start", session._generation)
+        assert not sent
+        await module.end_external_speech(conn)
+        assert not session._external_speech_active
+        assert module._external_speaker_owner is None
+        assert await module.claim_speaker(session)
+    finally:
+        await module.end_external_speech(conn)
+        module._sessions.clear()
+        module._output_owner = None
+
+
 async def test_native_cutover_flushes_pending_xiaozhi_legacy_speech_first(native):
     from queue import Queue
 
