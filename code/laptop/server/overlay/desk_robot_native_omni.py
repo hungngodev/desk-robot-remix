@@ -1530,15 +1530,18 @@ class NativeOmniSession:
         resample_state = None
         current_response: str | None = None
         generation = -1
+        dropped_response_id: str | None = None
         while not self.closed:
             item = await self.outgoing.get()
             if item is None:
+                dropped_response_id = None
                 if current_response is not None and generation == self._generation:
                     if pending:
                         tail = bytes(pending).ljust(1920, b"\0")
                         await self._send_device_opus(encoder.encode(tail, 960), generation)
-                    await self._send_device_state("stop", generation)
-                    if generation == self._generation and current_response:
+                    stop_sent = await self._send_device_state("stop", generation)
+                    if (stop_sent is not False and generation == self._generation
+                            and current_response):
                         self._tool_audio_sent(current_response, generation)
                         self._native_audio_sent(current_response, generation)
                         if current_response == self._tool_audio_response_id:
@@ -1552,6 +1555,8 @@ class NativeOmniSession:
                 current_response = None
                 continue
             response_id, chunk24k = item
+            if response_id == dropped_response_id:
+                continue  # Refused native reply cannot restart mid sentence.
             if (self.wire.response_id != response_id
                     and self._tool_audio_response_id != response_id) or self.closed:
                 continue
@@ -1560,7 +1565,13 @@ class NativeOmniSession:
                 resample_state = None
                 current_response = response_id
                 generation = self._generation
-                await self._send_device_state("start", generation)
+                started = await self._send_device_state("start", generation)
+                if started is False:
+                    dropped_response_id = response_id
+                    current_response = None
+                    pending.clear()
+                    resample_state = None
+                    continue
             pcm16k, resample_state = audioop.ratecv(
                 chunk24k, 2, 1, 24000, 16000, resample_state
             )
