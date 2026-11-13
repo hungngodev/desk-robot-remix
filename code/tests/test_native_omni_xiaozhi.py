@@ -310,7 +310,7 @@ async def test_native_audio_refused_by_mac_speaker_never_sends_stop_or_records_h
     ))
     session.outgoing.put_nowait(("tool_unclaimed", bytes(9600)))
     session.outgoing.put_nowait(("tool_unclaimed", bytes(9600)))
-    session.outgoing.put_nowait(None)
+    session.outgoing.put_nowait(("tool_unclaimed", None))
     playback = asyncio.create_task(session._play())
     try:
         async with asyncio.timeout(1):
@@ -404,7 +404,7 @@ async def test_native_output_refuses_external_mac_speaker_without_pcm_or_deliver
         Encoder=Encoder, APPLICATION_AUDIO="audio",
     ))
     session.outgoing.put_nowait(("tool_refused", bytes(9600)))
-    session.outgoing.put_nowait(None)
+    session.outgoing.put_nowait(("tool_refused", None))
     player = None
     try:
         assert await session._send_device_state("start", 0) is False
@@ -1519,6 +1519,74 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
     assert await session._current_tool_scene(Http(), 0, 0) == ""
 
 
+async def test_stale_response_done_does_not_split_new_grounded_tool_speech(
+    native, monkeypatch,
+):
+    """Tool response B can continue across a delayed native A completion.
+
+    A previous response.done used a global None sentinel, and falsely
+    stopped whichever response happened to own the physical speaker.
+    """
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    session._tool_audio_response_id = "tool_new"
+    session._tool_reply_pending["tool_new"] = (
+        0, "What color is the mug?", "The mug appears blue.",
+    )
+
+    class Encoder:
+        def __init__(self, *args):
+            pass
+
+        def encode(self, pcm, frame_size):
+            assert len(pcm) == 1920 and frame_size == 960
+            return b"opus"
+
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    states, encoded = [], []
+    done = asyncio.Event()
+
+    async def send_state(state, generation):
+        states.append(state)
+        if state == "stop":
+            done.set()
+        return True
+
+    async def send_opus(packet, generation):
+        encoded.append(packet)
+
+    session._send_device_state = send_state
+    session._send_device_opus = send_opus
+
+    session.outgoing.put_nowait(("tool_new", bytes(9600)))
+    session.outgoing.put_nowait(("native_old", None))
+    session.outgoing.put_nowait(("tool_new", bytes(9600)))
+    session.outgoing.put_nowait(("tool_new", None))
+    worker = asyncio.create_task(session._play())
+    try:
+        await asyncio.wait_for(done.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert states == ["start", "stop"]
+        assert encoded and len(encoded) >= 4
+        assert session.native_tool_audio_sent == 1
+        assert len(session._tool_dialogue) == 1
+        assert "mug appears blue" in session._tool_dialogue[-1][2]
+        assert not sent  # Fake head transport was never used.
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_tool_dialogue_only_remembers_sent_uninterrupted_audio(
     native, monkeypatch,
 ):
@@ -1554,7 +1622,7 @@ async def test_native_tool_dialogue_only_remembers_sent_uninterrupted_audio(
     session._send_device_state = state
     session._send_device_opus = opus
     session.outgoing.put_nowait(("tool_verified_send", bytes(9600)))
-    session.outgoing.put_nowait(None)
+    session.outgoing.put_nowait(("tool_verified_send", None))
     play = asyncio.create_task(session._play())
     try:
         async with asyncio.timeout(1):
