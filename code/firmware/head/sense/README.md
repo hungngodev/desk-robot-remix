@@ -63,15 +63,27 @@ always leaves actual acoustic interruption, sensor exposure synchronization,
 charging and assembly acceptance FALSE. Run an independent sound recording
 and real interrupt trials for those separate release gates.
 
-The Mac still owns the only camera transport, frame motion scoring, small
-RAM-only frame ring, user VAD priority and selective forwarding to the
-native duplex model. This is **selected JPEG video over repeated snapshots**
-at bounded cadence, not a new MJPEG server and not 30 FPS ESP32 streaming.
-Mic AEC, Opus and urgent speech flush continue through the Xiaozhi audio
-stack. One frame buffer is deliberate until tests on the physical shipped
-OV3660/OV5640 board establish PSRAM headroom, camera throughput, frame age,
-acoustic interruption and heat during simultaneous work. Do not raise
-`fb_count` or enable continuous capture from a static source assertion.
+The head now exposes one authenticated, long-lived
+`GET /api/camera.mjpg` multipart JPEG stream, adapting Espressif's
+`esp32-camera` CameraWebServer pattern using the **existing pinned Xiaozhi
+`SnapshotJpeg` camera owner**. The selected camera can emit up to four native
+VGA JPEG frames per second; the Mac consumes them on one persistent connection,
+checks boot/sequence/completion identity and frame integrity, and samples at
+most two frames per second for lightweight change detection. The existing
+proactive pet, VAD, direct look, image selection and local VLM reuse the same
+three-frame RAM ring. No additional camera/model/motor service is created.
+
+In hardware mode, `voice_vision_tools_enabled=true` starts the real stream.
+For automatic visible-scene reactions also set `pet_autostart_enabled=true`
+and configure an installed local `vision_model`. These settings are existing
+operator camera consent gates, not defaults. If the stream is disconnected,
+visual mode reports the outage and refuses a silent fallback to
+`/api/camera.jpg`; the Mac reconnects with bounded delay. Standalone
+non-stream camera bench tools may still use the original snapshot endpoint
+when no stream is active. Mic AEC, Opus and emergency speech interruption
+remain with pinned Xiaozhi. Four FPS is a software ceiling, NOT physically
+measured performance. One PSRAM frame buffer is deliberate pending real
+simultaneous camera, microphone, heat, JPEG age and WiFi measurements.
 
 ## Pin source and allocation
 
