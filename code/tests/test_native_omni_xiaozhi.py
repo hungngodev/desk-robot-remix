@@ -718,6 +718,25 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         await asyncio.gather(worker, return_exceptions=True)
 
 
+def test_native_status_discloses_live_memory_delivery_and_missing_tool_calls(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    session.heard_live_delivered = 2
+    module._sessions["mac-01"] = session
+    state = module.status("mac-01")
+    assert state["heard_live_delivered"] == 2
+    assert state["live_transcript_context_enabled"] is True
+    assert state["transcript_memory_enabled"] is False
+    assert state["native_tool_calls_supported"] is False
+    assert state["audio_video_latency_physically_measured"] is False
+
+
 async def test_native_persona_negotiates_live_asr_without_disk_permission(native):
     module, bridge = native
     conn, _ = connection()
