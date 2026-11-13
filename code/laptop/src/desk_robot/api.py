@@ -63,7 +63,7 @@ class NativeSpokenRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event_id: str = Field(pattern=r"^omni_sent_[0-9a-f]{12}_[0-9a-f]{20}$")
     model_text: str = Field(min_length=1, max_length=200)
-    sent_at_us: int = Field(gt=0, strict=True)
+    sent_at_us: int = Field(gt=0, le=9_223_372_036_854_775_807, strict=True)
 
 
 class PeerShareRequest(BaseModel):

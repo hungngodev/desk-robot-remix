@@ -1217,6 +1217,12 @@ def test_native_model_speech_text_enters_shared_mac_context_without_disk_storage
         assert client.post(
             url, headers=auth, json={**payload, "sent_at_us": 1}
         ).status_code == 400
+        assert client.post(
+            url, headers=auth, json={**payload, "sent_at_us": 10 ** 20}
+        ).status_code == 422
+        assert client.post(
+            url, headers=auth, json={**payload, "model_text": "bad\x00text"}
+        ).status_code == 400
         settings.voice_vision_tools_enabled = False
         assert client.post(url, headers=auth, json=payload).status_code == 403
     assert not hub.interaction_timeline(ids[1], time.monotonic())

@@ -1594,6 +1594,7 @@ def test_spoken_receipt_requires_actual_bounded_transmitted_text():
     hub = CameraFrameHub(["robot-01"])
     for value, when in (
         ("", 2.0), ("x" * 281, 2.0), ("said", float("nan")),
+        ("bad\x00text", 2.0),
     ):
         with pytest.raises(ValueError):
             hub.remember_spoken("robot-01", value, when)
