@@ -152,6 +152,23 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 robot_id, kind, summary, time.monotonic()
             )
 
+    def native_pet_speech_policy(robot_id: str) -> dict:
+        """One Mac operator policy owner; missing pet state fails closed.
+
+        Minimal connector/HTTP test runtimes can lack autonomous pet state.
+        More importantly, an unavailable Mac pet owner must NEVER imply
+        permission for model-initiated physical speaker output.
+        """
+        pet = getattr(app.state.runtime, "pet", None)
+        states = getattr(pet, "states", None)
+        state = states.get(robot_id) if isinstance(states, dict) else None
+        if state is None:
+            return {"pet_autonomy_enabled": False, "pet_quiet": True}
+        return {
+            "pet_autonomy_enabled": state.enabled is True,
+            "pet_quiet": state.quiet is True,
+        }
+
     @app.get("/v1/robots", dependencies=[Depends(authorize)])
     async def robots():
         return {
@@ -478,8 +495,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "live_transcript_context_enabled": settings.voice_vision_tools_enabled,
             # The same Mac pet state must govern the native model speaker:
             # a camera/voice consent flag alone never authorizes initiative.
-            "pet_autonomy_enabled": app.state.runtime.pet.states[robot_id].enabled,
-            "pet_quiet": app.state.runtime.pet.states[robot_id].quiet,
+            **native_pet_speech_policy(robot_id),
             "untrusted_historical_text": True,
             "model_can_arm_motors": False,
             "camera_exposure_sync_verified": False,
@@ -728,8 +744,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "current_interaction_timeline": timeline,
             "model_context": model_context,
             "model_context_untrusted_not_instructions": True,
-            "pet_autonomy_enabled": app.state.runtime.pet.states[robot_id].enabled,
-            "pet_quiet": app.state.runtime.pet.states[robot_id].quiet,
+            **native_pet_speech_policy(robot_id),
             # Live revocation of model-private memory access must also
             # invalidate an older native startup persona containing facts.
             "memory_tools_enabled": settings.voice_memory_tools_enabled,
