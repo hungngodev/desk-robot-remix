@@ -199,3 +199,55 @@ async def test_repeating_an_old_spontaneous_line_is_silently_suppressed(
         )
     finally:
         await pet.close()
+
+
+def test_modalities_survive_dense_camera_sensor_timeline():
+    from desk_robot.multimodal import CameraEvidence
+
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01"])
+    hub.remember_tool("robot-01", "visual_look", "A red key, perhaps", now - 5)
+    hub.remember_spoken("robot-01", "I asked about the key", now - 4)
+    hub.notify("robot-01", "human_voice", now - 2.5)
+    for index, kind in enumerate((
+        "touch", "touch_tap", "touch_double", "petting_zone",
+        "hand_wave", "bumper", "magnet", "pir", "nearby_object",
+        "side_object", "nfc_tag",
+    )):
+        hub.notify("robot-01", kind, now - 2.2 + index * 0.1)
+    for index in range(3):
+        hub.frames["robot-01"].append(CameraEvidence(
+            b"jpeg", now - 0.9 + index * 0.1, 0.12, "speech"
+        ))
+    timeline = hub.interaction_timeline("robot-01", now, limit=5)
+    channels = [cue["channel"] for cue in timeline]
+    assert len(timeline) == 5
+    assert set(channels) == {
+        "camera", "sensor", "human_voice", "tool", "robot_speech"
+    }
+    assert timeline == sorted(timeline, key=lambda item: -item["age_ms"])
+    result = compose_brain_context([], [], timeline)
+    assert "Physical sensor edge" in result.interaction
+    assert "Authenticated human voice" in result.interaction
+    assert "Earlier local VLM guess" in result.interaction
+    assert "playback unverified" in result.interaction
+    assert "XIAO frame received" in result.interaction
+    assert len(result.interaction) <= 400
+
+
+def test_prompt_deduplicates_repetitive_camera_receipts_and_keeps_tool_results():
+    timeline = [
+        {"channel": "tool", "kind": "visual_look", "content": "The cup moved"},
+        {"channel": "robot_speech", "kind": "own_utterance",
+         "content": "I asked about your cup"},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ] + [
+        {"channel": "camera", "kind": "speech"}
+        for _ in range(13)
+    ]
+    result = compose_brain_context([], [], timeline)
+    assert result.interaction.count("XIAO frame received") == 1
+    assert result.interaction.count("Earlier local VLM guess") == 1
+    assert result.interaction.count("playback unverified") == 1
+    assert "Physical sensor edge: touch_tap" in result.interaction
+    assert len(result.interaction) <= 400
