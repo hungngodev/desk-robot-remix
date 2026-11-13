@@ -96,7 +96,10 @@ class HandlingGate:
             self.reset()
             return ()
         if self.last_at is not None and (now <= self.last_at or now - self.last_at > 1.0):
-            self.reset()  # stale host stream or reconnect -> new upright baseline
+            # Host reconnect invalidates calibration, not source identity.
+            previous = (self.last_boot_id, self.last_sample_ms)
+            self.reset()
+            self.last_boot_id, self.last_sample_ms = previous
         sample = raw_mpu6050(body)
         if sample is None:
             self.reset()
