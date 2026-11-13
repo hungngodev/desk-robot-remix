@@ -209,9 +209,15 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
             return ()
         transcript = tail
     whole = native_readonly_request(transcript)
+    # Split only at a new spoken request. Splitting every "and" loses
+    # object names in "look at the key and the mug and check the battery".
     clauses = re.split(
-        r"\s+(?:and(?:\s+then)?|then|also)\s+", transcript,
-        maxsplit=2, flags=re.IGNORECASE,
+        r"\s+(?:and(?:\s+then)?|then|also)\s+"
+        r"(?=(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?"
+        r"(?:what|where|how|is|are|did|do|does|have|has|"
+        r"check|look|tell|show|describe|inspect|remember|recall|"
+        r"remind|pick|drive|move|start)\b)",
+        transcript, maxsplit=2, flags=re.IGNORECASE,
     )
     candidates = [native_readonly_request(part) for part in clauses]
     found: list[tuple[str, dict]] = []
