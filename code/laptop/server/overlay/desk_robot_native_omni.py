@@ -682,7 +682,9 @@ class NativeOmniSession:
         ]
         return " ".join(
             f"Earlier user question (model ASR): {question[:100]}. "
-            f"My earlier audio was sent (playback unverified): {said[:135]}."
+            + (f"My earlier audio was sent (playback unverified): {said[:135]}."
+               if said else
+               "Audio was sent, but no matching spoken transcript was returned.")
             for question, said in items[-2:]
         )[:490]
 
@@ -808,10 +810,14 @@ class NativeOmniSession:
                 return
             response_id = "tool_" + uuid.uuid4().hex
             self._tool_audio_response_id = response_id
-            if generated_text and 1 <= len(generated_text) <= 280:
-                self._tool_reply_pending[response_id] = (
-                    epoch, transcript[:180], " ".join(generated_text.split())[:200]
-                )
+            # Keep the user's preceding real question even when the model
+            # returns valid audio but omits a text choice. Never fabricate
+            # a spoken transcript from a WAV payload.
+            self._tool_reply_pending[response_id] = (
+                epoch, transcript[:180],
+                " ".join(generated_text.split())[:200]
+                if 1 <= len(generated_text) <= 280 else "",
+            )
             for offset in range(0, len(pcm), 9600):
                 if self._tool_speech_turn != (epoch, request_turn):
                     return
@@ -864,6 +870,41 @@ class NativeOmniSession:
                 or not item.isascii() or item in self._readonly_seen):
             return False
         requests = native_readonly_requests(event.get("transcript"))
+        if not requests:
+            # Follow a nearby visual object across questions without
+            # inventing its location or pretending native MiniCPM consumed
+            # the previous Mac tool result. The previous sight question must
+            # have an actually transmitted tool reply in this pet's RAM.
+            transcript = event.get("transcript")
+            simple = (" ".join(transcript.casefold().split()).strip(" ?!.,")
+                      if isinstance(transcript, str) else "")
+            visual_followup = (
+                re.match(
+                    r"^(?:and |but )?(?:what (?:about|colou?r|shape|size)|"
+                    r"where (?:is|are)|how many|is (?:the|that|this)|"
+                    r"are (?:the|those))\\b", simple,
+                ) is not None
+                and re.search(
+                    r"\\b(?:one|ones|other|beside|next to|near|there|"
+                    r"that object|that item|the first|the second)\\b",
+                    simple,
+                ) is not None
+            )
+            if visual_followup:
+                now = time.monotonic()
+                previous_question = next((
+                    question for stamp, question, _said
+                    in reversed(self._tool_dialogue)
+                    if 0 <= now - stamp <= 45
+                    and (native_readonly_request(question) or (None,))[0]
+                        == "look"
+                ), "")
+                if previous_question:
+                    requests = (("look", {"question": (
+                        "Prior completed user visual question: "
+                        + previous_question[:105]
+                        + ". Current visual follow-up: " + transcript[:145]
+                    )[:280]}),)
         if not requests:
             transcript = event.get("transcript")
             if (not isinstance(transcript, str)
