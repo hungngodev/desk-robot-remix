@@ -130,9 +130,11 @@ async def call(conn, route, payload=None):
     try:
         result = response.json()
     except ValueError:
-        return {"error": "Malformed robot Mac tool response", "retried": False}
+        return ({"_desk_robot_turn_superseded": True} if turn_superseded
+                else {"error": "Malformed robot Mac tool response", "retried": False})
     if not isinstance(result, dict):
-        return {"error": "Unexpected robot Mac tool response", "retried": False}
+        return ({"_desk_robot_turn_superseded": True} if turn_superseded
+                else {"error": "Unexpected robot Mac tool response", "retried": False})
     if turn_superseded:
         return {**result, "_desk_robot_turn_superseded": True}
     return result
