@@ -2,6 +2,7 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -277,3 +278,67 @@ async def test_cancelled_stream_keeps_only_completed_sends_for_speaker_owner(
     assert len(saved) == 1 and "suggest a game" in saved[0].summary
     assert "Never spoken" not in saved[0].summary
     assert memory.recent("robot-02") == []
+
+
+async def test_ollama_proactive_uses_real_json_schema_and_one_model_call():
+    captured = []
+
+    def handle(request: httpx.Request):
+        payload = json.loads(request.content)
+        captured.append(payload)
+        return httpx.Response(200, json={
+            "message": {"role": "assistant", "content": json.dumps({
+                "action": "inspect", "text": "", "tool": "status"
+            })}
+        })
+
+    settings = SimpleNamespace(
+        ollama_url="http://ollama.local:11434",
+        ollama_model="local",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handle)
+    ) as client:
+        result = await OllamaChat(settings, client).proactive_decision([
+            {"role": "system", "content": "Private pet initiative policy"},
+            {"role": "user", "content": "Fresh authenticated sensor change"},
+        ])
+    assert result == {"action": "inspect", "text": "", "tool": "status"}
+    assert len(captured) == 1
+    query = captured[0]
+    assert query["format"]["properties"]["tool"]["enum"] == [
+        "none", "status", "aux_status"
+    ]
+    assert "drive" not in str(query["format"])
+    assert query["stream"] is False
+    assert query["think"] is False
+    assert query["messages"][0]["role"] == "system"
+    assert query["messages"][1]["role"] == "user"
+
+
+@pytest.mark.parametrize("output", [
+    {"action": "inspect", "text": "Run motor!", "tool": "status"},
+    {"action": "inspect", "text": "", "tool": "drive"},
+    {"action": "speak", "text": "", "tool": "none"},
+    {"action": "silence", "text": "Something!", "tool": "none"},
+    {"action": "speak", "text": "Okay", "tool": "aux_status"},
+    {"action": "silence", "text": "", "tool": "drive"},
+    {"action": "speak", "text": "X" * 201, "tool": "none"},
+])
+async def test_ollama_proactive_refuses_invalid_actions_and_tool_requests(output):
+    def handle(request):
+        return httpx.Response(200, json={
+            "message": {"content": json.dumps(output)}
+        })
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handle)
+    ) as client:
+        chat = OllamaChat(SimpleNamespace(
+            ollama_url="http://ollama.local:11434",
+            ollama_model="local",
+        ), client)
+        with pytest.raises(RuntimeError, match="Invalid proactive model decision"):
+            await chat.proactive_decision([
+                {"role": "user", "content": "A genuine visual change"}
+            ])
