@@ -33,6 +33,8 @@ def main():
     p.add_argument("--board", choices=["cores3", "modular", "sense", "waveshare"], default="cores3")
     p.add_argument("--aec-delay-ms", type=int, default=90,
                    help="Sense-only measured acoustic reference alignment (0..250ms)")
+    p.add_argument("--continuous-audio", action="store_true",
+                   help="Explicit opt in to Sense realtime microphone after boot; BOOT stops it")
     p.add_argument(
         "--server-ip", required=True, help="Mac LAN IPv4 address, reachable from the head"
     )
@@ -48,6 +50,8 @@ def main():
         p.error("Sense AEC delay must be within 0..250 ms")
     if args.board != "sense" and args.aec_delay_ms != 90:
         p.error("Custom AEC reference delay is for the Sense board only")
+    if args.continuous_audio and args.board != "sense":
+        p.error("Continuous real-time microphone is qualified only for the Sense audio path")
     values = dict(
         line.split("=", 1)
         for line in (args.secrets.read_text().splitlines() if args.secrets.exists() else [])
@@ -79,11 +83,16 @@ def main():
     if args.board == "sense":
         config["builds"][0]["sdkconfig_append"] = [
             item for item in config["builds"][0]["sdkconfig_append"]
-            if not item.startswith("CONFIG_DESK_ROBOT_AEC_DELAY_MS=")
+            if not item.startswith((
+                "CONFIG_DESK_ROBOT_AEC_DELAY_MS=",
+                "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=",
+            ))
         ]
-        config["builds"][0]["sdkconfig_append"].append(
-            f"CONFIG_DESK_ROBOT_AEC_DELAY_MS={args.aec_delay_ms}"
-        )
+        config["builds"][0]["sdkconfig_append"].extend([
+            f"CONFIG_DESK_ROBOT_AEC_DELAY_MS={args.aec_delay_ms}",
+            "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED="
+            + ("y" if args.continuous_audio else "n"),
+        ])
     target = board / "config.private.json"
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as stream:
