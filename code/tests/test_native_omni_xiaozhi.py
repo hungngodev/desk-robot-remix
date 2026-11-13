@@ -4687,3 +4687,32 @@ async def test_native_model_connection_never_opens_without_current_mac_consent(
     assert session.closed and not session.connected
     assert "Mac permission required" in session.last_error
     assert not any(isinstance(item, bytes) for item in sent)
+
+
+async def test_operator_quiet_never_blocks_emergency_native_stop(native):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = session
+    session._pet_quiet = True
+    conn.client_is_speaking = True
+    module._output_owner = "mac-01"
+    try:
+        assert await session._send_device_state("start", 0) is False
+        assert await session._send_device_state("stop", 0) is True
+        assert conn.client_is_speaking is False
+        assert module._output_owner is None
+        assert sent == [json.dumps({
+            "type": "tts", "state": "stop",
+            "session_id": conn.session_id,
+        })]
+        await session._send_device_opus(b"do_not_play", 0)
+        assert not any(isinstance(data, bytes) for data in sent)
+    finally:
+        session.closed = True
+        module._sessions.clear()
+        module._output_owner = None
