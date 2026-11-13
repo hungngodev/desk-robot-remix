@@ -468,3 +468,33 @@ async def test_real_snapshot_deadline_cancels_stalled_capture_without_motion(tmp
     assert not result["motor_authorized"] and not result["charging_authorized"]
     assert not result["physical_acceptance_pass"]
     assert head.commands == []
+
+
+@pytest.mark.parametrize("payload", [
+    b"", b"not jpeg", b"\\xff\\xd8truncated", b"\\xff\\xd8" + b"x" * (512 * 1024) + b"\\xff\\xd9",
+    "not bytes",
+])
+async def test_invalid_dock_snapshot_never_starts_native_detector(tmp_path, monkeypatch, payload):
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 408, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    head = Head()
+
+    async def snapshot():
+        return payload
+
+    def detector(*args, **kwargs):
+        pytest.fail("Malformed camera data reached native AprilTag detector")
+
+    monkeypatch.setattr(head, "snapshot", snapshot)
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", detector)
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=path)
+    )
+    assert result["phase"] == "hold"
+    assert result["source"] == "head_snapshot_invalid"
+    assert result["pose"] is None
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert not result["physical_acceptance_pass"] and not head.commands
