@@ -672,7 +672,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             'Return ONLY a JSON object {"tools":[{"route":"look"},'
             '{"route":"status"}]}. Choose 0 to 2 distinct tools for an '
             'EXPLICIT user request. Allowed read-only names: look for actual '
-            'camera sight, status for battery/telemetry, latest-pickup for '
+            'camera sight, power-status for raw battery gauge estimates, '
+            'status for body/safety telemetry, latest-pickup for '
             'existing grasp job status, interaction-context for recent '
             'touch/sensor events, voice-context for previously remembered '
             'facts. For ordinary conversation or movement/charging requests '
@@ -695,8 +696,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             parsed = {}
         choices = parsed.get("tools") if isinstance(parsed, dict) else None
         allowed = {
-            "look", "status", "latest-pickup", "interaction-context",
-            "voice-context",
+            "look", "status", "power-status", "latest-pickup",
+            "interaction-context", "voice-context",
         }
         picked = []
         for item in choices[:3] if isinstance(choices, list) else []:
