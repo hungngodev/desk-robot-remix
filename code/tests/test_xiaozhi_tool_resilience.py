@@ -23,10 +23,10 @@ def bridge_tools(monkeypatch):
     registered = SimpleNamespace(device_id="mac-head-01")
     bridge.connections = {"mac-head-01": registered}
     registry = ModuleType("plugins_func.register")
-    registry.Action = SimpleNamespace(REQLLM=3)
+    registry.Action = SimpleNamespace(REQLLM=3, NONE=1)
     registry.ToolType = SimpleNamespace(IOT_CTL=5)
-    registry.ActionResponse = lambda action, result: SimpleNamespace(
-        action=action, result=result
+    registry.ActionResponse = lambda action, result=None, response=None: SimpleNamespace(
+        action=action, result=result, response=response
     )
     registry.register_function = lambda *args, **kwargs: lambda fn: fn
     monkeypatch.setitem(sys.modules, "desk_robot_bridge", bridge)
@@ -429,3 +429,50 @@ async def test_xiaozhi_situation_tool_gets_only_current_pets_ephemeral_cues(
     assert len(seen) == 1
     assert result.result["persistent_memory_included"] is False
     assert result.result["current_interaction_timeline"][0]["kind"] == "touch_tap"
+
+
+@pytest.mark.parametrize("tool_name,arguments", [
+    ("desk_robot_look", ("What is on the desk?",)),
+    ("desk_robot_memories", ("Where are my keys?",)),
+    ("desk_robot_situation", ()),
+    ("desk_robot_job", ()),
+])
+async def test_superseded_readonly_result_is_silent_not_asked_to_speak(
+    bridge_tools, monkeypatch, tool_name, arguments,
+):
+    """Pinned Xiaozhi would speak ANY nonempty REQLLM result after a barge."""
+    old_reply = {
+        "error": "Robot tool result superseded by new speech or reconnect",
+        "retried": False,
+    }
+    invoked = []
+
+    async def obsolete(*args, **kwargs):
+        invoked.append((args, kwargs))
+        return dict(old_reply)
+
+    monkeypatch.setattr(bridge_tools, "call", obsolete)
+    bridge_tools.registered_head.desk_robot_last_job = "job-old"
+    response = await getattr(bridge_tools, tool_name)(
+        bridge_tools.registered_head, *arguments
+    )
+    assert invoked
+    assert response.action == 1
+    assert response.result is None
+    assert response.response is None
+
+
+async def test_valid_readonly_tool_still_requests_model_reply_and_safety_stop_does_not_change(
+    bridge_tools, monkeypatch,
+):
+    async def current(*args, **kwargs):
+        return {"robot_id": "robot-01", "answer": "Probably a key"}
+
+    monkeypatch.setattr(bridge_tools, "call", current)
+    ready = await bridge_tools.desk_robot_look(
+        bridge_tools.registered_head, "Can you see my key?"
+    )
+    assert ready.action == 3 and ready.result["answer"] == "Probably a key"
+    stop = await bridge_tools.desk_robot_stop(bridge_tools.registered_head)
+    assert stop.action == 3
+    assert stop.result["robot_id"] == "robot-01"
