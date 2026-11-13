@@ -227,6 +227,7 @@ def test_consent_based_private_memory_tool_is_not_camera_sighting():
         ("Does the screen say READY?", "visual_look"),
         ("Is the pickup job done?", "pickup_status"),
         ("Check your battery status", "robot_status"),
+        ("What\x27s your battery level?", "robot_status"),
     ],
 )
 def test_spoken_intent_fits_the_relevant_completed_tool_into_small_brain_budget(
