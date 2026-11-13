@@ -501,13 +501,16 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         # Keep historical text and current transient cues separate so a
         # model cannot reinterpret yesterday's memory as today's sighting.
         visual = getattr(app.state.runtime, "multimodal", None)
-        sensor_cues, tool_cues = [], []
+        sensor_cues, tool_cues, timeline = [], [], []
         if settings.voice_vision_tools_enabled and visual is not None:
             clock = time.monotonic()
             sensor_cues = visual.hub.recent_events(robot_id, clock)
             recent_tools = getattr(visual.hub, "recent_tool_context", None)
             if callable(recent_tools):
                 tool_cues = recent_tools(robot_id, clock)
+            ordered = getattr(visual.hub, "interaction_timeline", None)
+            if callable(ordered):
+                timeline = ordered(robot_id, clock, limit=10)
         core = await asyncio.to_thread(
             app.state.runtime.memory.core_facts, robot_id, limit=8
         )
@@ -523,6 +526,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "no_new_motion_permission": True,
             "live_sensor_cues": sensor_cues,
             "recent_tool_interpretations": tool_cues,
+            "current_interaction_timeline": timeline,
+            "timeline_contains_no_raw_camera_or_microphone": True,
             "sensor_cues_are_not_physical_action_confirmation": True,
             "memories": [
                 {
