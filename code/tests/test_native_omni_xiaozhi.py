@@ -27,6 +27,9 @@ def native(monkeypatch):
         human_speech_active=lambda: False,
     )
     monkeypatch.setitem(sys.modules, "desk_robot_bridge", fake_bridge)
+    # Match the pinned installer layout: the pure read-only intent parser
+    # sits beside the native transport adapter, not in the Mac package.
+    monkeypatch.syspath_prepend(str(ROOT / "laptop/server/overlay"))
     spec = importlib.util.spec_from_file_location(
         "desk_robot_native_omni",
         ROOT / "laptop/server/overlay/desk_robot_native_omni.py",
