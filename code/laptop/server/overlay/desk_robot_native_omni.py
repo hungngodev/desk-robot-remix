@@ -1021,7 +1021,7 @@ class NativeOmniSession:
                     self._video_turn += 1
                     self._readonly_turn += 1
                     self._readonly_requests.clear()
-        self._discard_queued_readonly()
+                    self._discard_queued_readonly()
                     self.latest_jpeg = None
                     self._latest_frame_receipt_us = None
                     self._last_video_sent_receipt_us = None
