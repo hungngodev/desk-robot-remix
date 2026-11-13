@@ -737,6 +737,97 @@ async def test_native_voice_sends_one_video_frame_per_camera_receipt(native):
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_native_proactive_model_sees_video_while_microphone_reports_no_speech(
+    native,
+):
+    """One persistent Mac media subscription + real silent PCM unit.
+
+    The test fails if either native video or the MiniCPM append gate still
+    depends on _user_was_talking or VAD-positive microphone frames.
+    """
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    observed = []
+
+    class ModelSocket:
+        async def send_json(self, packet):
+            observed.append(packet)
+
+    jpeg = b"\xff\xd8" + b"new mug on the desk" + b"\xff\xd9"
+    payload = (json.dumps({
+        "robot_id": "robot-01", "source": "proactive",
+        "camera_age_ms": 2, "camera_receipt_us": 50001,
+        "motion_ppm": 30000,
+        "jpeg_base64": base64.b64encode(jpeg).decode("ascii"),
+        "motor_authorized": False, "charging_authorized": False,
+    }) + "\n").encode("ascii")
+
+    class Chunks:
+        async def iter_chunked(self, count):
+            assert count >= 1024
+            for chunk in (payload[:5], payload[5:37], payload[37:]):
+                yield chunk
+
+    class StreamReply:
+        status = 200
+        headers = {
+            "X-Desk-Robot-Id": "robot-01",
+            "Content-Type": "application/x-ndjson",
+        }
+        content = Chunks()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class MacHTTP:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, address, **kwargs):
+            self.calls += 1
+            assert address.endswith("/v1/pet/robot-01/omni-stream")
+            assert kwargs["headers"]["Authorization"] == "Bearer " + "p" * 32
+            return StreamReply()
+
+    service._socket = ModelSocket()
+    mac = MacHTTP()
+    video = asyncio.create_task(service._camera_stream(mac))
+    mic = asyncio.create_task(service._send_mic())
+    try:
+        async with asyncio.timeout(1):
+            while service.video_frames_selected < 1:
+                await asyncio.sleep(.001)
+        assert not service._user_was_talking
+        for _ in range(10):
+            service.queue_mic(b"\0" * 3200, False)
+        async with asyncio.timeout(1):
+            while len([e for e in observed
+                       if e["type"] == "input_audio_buffer.append"]) < 10:
+                await asyncio.sleep(.001)
+        appends = [e for e in observed
+                   if e["type"] == "input_audio_buffer.append"]
+        video_packets = [e for e in appends if e.get("video_frames")]
+        assert len(video_packets) == 1
+        assert video_packets[0]["is_speech"] is False
+        assert base64.b64decode(video_packets[0]["video_frames"][0]) == jpeg
+        assert service.wire.frames_sent == 1
+        assert not service._user_was_talking
+        assert mac.calls == 1  # No repeated /omni-frame GET requests.
+    finally:
+        service.closed = True
+        for task in (video, mic):
+            task.cancel()
+        await asyncio.gather(video, mic, return_exceptions=True)
+
+
 async def test_native_camera_selects_keyframe_motion_and_static_refresh(native):
     """Use the Mac motion estimate; do not decode JPEG again on the server."""
     module, bridge = native
