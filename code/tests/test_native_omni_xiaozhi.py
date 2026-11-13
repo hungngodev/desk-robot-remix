@@ -790,6 +790,71 @@ def test_native_memory_request_chooses_recent_or_topic_query(
     assert payload == expected
 
 
+@pytest.mark.parametrize(
+    ("spoken", "routes"),
+    [
+        (
+            "Can you look around and check your battery status?",
+            ("look", "status"),
+        ),
+        (
+            "What do you see and did you pick up the key already?",
+            ("look", "latest-pickup"),
+        ),
+        (
+            "Do you remember the key and the mug?",
+            ("voice-context",),
+        ),
+        (
+            "Please pick up the key and look around",
+            ("look",),
+        ),
+        (
+            "Drive forward and start charging",
+            (),
+        ),
+        (
+            "Look at the desk then check your battery status also what just happened?",
+            ("look", "status", "interaction-context"),
+        ),
+    ],
+)
+def test_native_compound_speech_dispatches_only_explicit_readonly_tools(
+    native, spoken, routes,
+):
+    module, _ = native
+    selected = module.native_readonly_requests(spoken)
+    assert tuple(route for route, _ in selected) == routes
+    assert len(selected) <= 3
+    assert all(route not in ("pickup", "stop", "move", "charge") for route in routes)
+
+
+def test_native_compound_asr_queues_distinct_tools_once_per_real_audio_item(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    original = {
+        "item_id": "compound_1",
+        "transcript": "Look at the desk and check your battery status",
+    }
+    session._queue_readonly_tool(original)
+    session._queue_readonly_tool(original)
+    session._queue_readonly_tool({
+        "item_id": "compound_2", "transcript": original["transcript"],
+    })
+    assert session._readonly_queue.qsize() == 2
+    first = session._readonly_queue.get_nowait()
+    second = session._readonly_queue.get_nowait()
+    assert (first[0], second[0]) == ("look", "status")
+    assert first[2:] == second[2:]
+    assert first[3] == session._readonly_turn
+
+
 async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
     native, monkeypatch,
 ):
