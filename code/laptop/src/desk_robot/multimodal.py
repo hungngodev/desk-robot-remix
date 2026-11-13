@@ -889,16 +889,19 @@ class MultimodalOrchestrator:
                 # decoding/resizing this JPEG, after the proactive network
                 # task has already disappeared from its cancellation map.
                 # Never publish obsolete low-priority sensor/idle images.
-                if source in ("proactive", "sensor") and (
-                    self._any_human_active(time.monotonic())
-                    or self._turn_epoch[robot_id] != turn
-                    or self._question_epoch[robot_id] != question
-                ):
-                    # A short VAD or direct visual question can start AND
-                    # finish before the Pillow worker returns. Live speaker
-                    # state alone cannot prove this old JPEG is current.
+                # A native speech JPEG is also an asynchronous tool result.
+                # Its API request is not owned by _capture_tasks, so cancelling
+                # that sampler on reconnect or a newer VAD is insufficient:
+                # old HTTP/decode work must never repopulate the emptied hub.
+                if (self._turn_epoch[robot_id] != turn
+                        or self._question_epoch[robot_id] != question):
                     raise RuntimeError(
-                        "Newer conversation turn superseded autonomous camera preprocessing"
+                        "Camera capture superseded by newer conversation turn"
+                    )
+                if (source in ("proactive", "sensor")
+                        and self._any_human_active(time.monotonic())):
+                    raise RuntimeError(
+                        "Human speech preempts autonomous camera preprocessing"
                     )
                 evidence = self.hub.offer_prepared(
                     robot_id, prepared, received, source=source,
