@@ -134,7 +134,7 @@ def compose_brain_context(
         # interaction. Keeping only the newest can omit the first clause of
         # a natural question. Retain at most two, with the earlier one behind
         # the actual sensor and visual tool evidence in the prompt budget.
-        if channel == "human_voice" and heard_count:
+        if channel == "human_voice":
             crossed_voice_boundary = True
         if channel == "human_transcript":
             if heard_count >= 2 or crossed_voice_boundary:
