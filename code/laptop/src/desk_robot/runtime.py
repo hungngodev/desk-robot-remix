@@ -52,6 +52,7 @@ class Runtime:
                 settings, heads, scene, self.pet._vision_lock
             )
             self.pet.multimodal = self.multimodal
+            self.conversation.multimodal = self.multimodal
         self.voice_events: VoiceEventListener | None = None
         self._voice_task: asyncio.Task | None = None
 
