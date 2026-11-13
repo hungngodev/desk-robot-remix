@@ -1339,6 +1339,14 @@ class PetController:
     ) -> None:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
+
+        def newer_human_turn() -> bool:
+            # A short VAD can start AND finish during slow model/memory work.
+            # An idle speech flag and 800ms quiet period alone cannot fence
+            # the obsolete observation. Reuse the existing fleet epoch owner.
+            latest = getattr(self.multimodal, "latest_fleet_human_turn_at", None)
+            return callable(latest) and latest() > offered_at
+
         try:
             # LangGraph-style short-term + relevant long-term selection
             # using this robot's *existing* local SQLite store. An old key
@@ -1395,6 +1403,7 @@ class PetController:
                         or peer.generation != social_peer_generation
                         or not self.voice_monitor_ready
                         or self._human_active_in_fleet(time.monotonic())
+                        or newer_human_turn()
                         or time.monotonic() - offered_at > self.max_observation_age):
                     state.suppressed += 1
                     state.last_initiative_suppression = "social_peer_or_event_unavailable"
@@ -1489,6 +1498,7 @@ class PetController:
             if (not state.enabled or state.quiet
                     or state.generation != generation
                     or self._human_active_in_fleet(time.monotonic())
+                    or newer_human_turn()
                     or self.conversation.active is not None):
                 state.suppressed += 1
                 state.last_initiative_suppression = "human_started_during_reasoning"
