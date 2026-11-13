@@ -117,6 +117,7 @@ def status(device: str) -> dict:
         "mic_frames_forwarded": s.audio_frames,
         "jpeg_frames_forwarded": s.wire.frames_sent,
         "camera_frames_selected": s.video_frames_selected,
+        "native_proactive_camera_subscription_connected": s._camera_stream_connected,
         "camera_frames_skipped_static": s.video_frames_skipped_static,
         "camera_frames_skipped_duplicate": s.video_frames_skipped_duplicate,
         "heard_memories_stored": s.heard_memories_stored,
@@ -251,6 +252,7 @@ class NativeOmniSession:
         # outgoing audio unit. A new VAD turn invalidates old JPEGs.
         self._video_turn = 0
         self._camera_wakeup = asyncio.Event()
+        self._camera_stream_connected = False
         self._latest_frame_receipt_us: int | None = None
         self._last_video_sent_receipt_us: int | None = None
         self._last_video_selected_at = float("-inf")
@@ -1179,6 +1181,7 @@ class NativeOmniSession:
                         self._latest_frame_receipt_us = None
                         await asyncio.sleep(2)
                         continue
+                    self._camera_stream_connected = True
                     buffer = bytearray()
                     async for chunk in response.content.iter_chunked(65536):
                         if self.closed:
@@ -1236,12 +1239,14 @@ class NativeOmniSession:
                             else:
                                 self.video_frames_skipped_static += 1
                 # An ended subscription is NOT a valid last scene.
+                self._camera_stream_connected = False
                 self.latest_jpeg = None
                 self._latest_frame_receipt_us = None
             except asyncio.CancelledError:
                 raise
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError,
                     json.JSONDecodeError, base64.binascii.Error):
+                self._camera_stream_connected = False
                 self.latest_jpeg = None
                 self._latest_frame_receipt_us = None
             await asyncio.sleep(1)  # bounded reconnect, no camera HTTP polling
