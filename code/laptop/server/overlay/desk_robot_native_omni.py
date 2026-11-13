@@ -1652,6 +1652,26 @@ async def preempt_others_for_human(source_device: str) -> None:
     The shared speaker claim clears only after its own abort succeeds.
     """
     global _output_owner
+    import desk_robot_bridge as bridge
+
+    # Native audio cancellation alone does NOT stop the Mac's proactive
+    # Opus sender. It checks bridge.interrupt_generation/client_abort, so
+    # advance both BEFORE any async speaker flush. A human at robot A must
+    # also interrupt Mac speech on robot B, not just its native model.
+    async with _output_owner_lock:
+        external = _external_speaker_connection
+        external_device = _external_speaker_owner
+        if (external_device is not None and external is not None
+                and getattr(external, "device_id", None) == external_device
+                and bridge.connections.get(external_device) is external):
+            bridge.interrupt_generation[external_device] = (
+                bridge.interrupt_generation.get(external_device, 0) + 1
+            )
+            external.client_abort = True
+        else:
+            external = None
+            external_device = None
+
     peers = [
         (device, session) for device, session in list(_sessions.items())
         if device != source_device and not session.closed
@@ -1666,6 +1686,20 @@ async def preempt_others_for_human(source_device: str) -> None:
             continue  # Unacknowledged STOP cannot free another audio owner.
         safely_invalidated.add(device)
         session._schedule_remote_cancel(result)
+
+    # If no live native session owns this Mac speaker, no native session
+    # invalidation could have flushed its physical head. Still send urgent
+    # STOP. A failed STOP does NOT release the external lease or imply that
+    # the speaker was physically silenced.
+    if external is not None and external_device not in safely_invalidated:
+        try:
+            await external.websocket.send(json.dumps({
+                "type": "tts", "state": "stop", "flush": True,
+                "session_id": external.session_id,
+            }))
+            external.client_is_speaking = False
+        except Exception:
+            pass
     async with _output_owner_lock:
         if _output_owner in safely_invalidated:
             _output_owner = None
