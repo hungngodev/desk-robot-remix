@@ -772,6 +772,8 @@ async def test_native_proactive_model_sees_video_while_microphone_reports_no_spe
             assert count >= 1024
             for chunk in (payload[:5], payload[5:37], payload[37:]):
                 yield chunk
+            # A genuine persistent feed stays open between camera frames.
+            await asyncio.Event().wait()
 
     class StreamReply:
         status = 200
