@@ -1154,6 +1154,16 @@ class PetController:
                             and received <= state.last_scene_frame_at):
                         continue
                     state.last_scene_frame_at = received
+                    # A brief human turn can begin and finish before this
+                    # permanent observer reaches the frame. The current VAD
+                    # flag alone would wrongly treat an old image as fresh.
+                    voice_started_at = getattr(
+                        self.multimodal, "latest_fleet_human_turn_at", None
+                    )
+                    if (callable(voice_started_at)
+                            and received <= voice_started_at()):
+                        state.stale_camera_events += 1
+                        continue
                     if time.monotonic() - received > self.max_observation_age:
                         state.stale_camera_events += 1
                         continue
@@ -1162,6 +1172,10 @@ class PetController:
                     if self._human_active_in_fleet(time.monotonic()):
                         continue
                     previous = await asyncio.to_thread(state.gate.observe, jpeg)
+                    if (callable(voice_started_at)
+                            and received <= voice_started_at()):
+                        state.stale_camera_events += 1
+                        continue
                     if previous is None:
                         continue
                     async with self._vision_lock:
@@ -1198,7 +1212,9 @@ class PetController:
                         finally:
                             if self._vision_inflight is inference:
                                 self._vision_inflight = None
-                    if time.monotonic() - received > self.max_observation_age:
+                    if (time.monotonic() - received > self.max_observation_age
+                            or (callable(voice_started_at)
+                                and received <= voice_started_at())):
                         state.stale_camera_events += 1
                         continue
                     if (change is not None and state.enabled
