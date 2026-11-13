@@ -301,10 +301,25 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         return app.state.runtime.pet.start(robot_id)
 
+    async def stop_native_pet_speech(robot_id: str):
+        """One existing Xiaozhi speaker is also used by native MiniCPM.
+
+        Pet quiet/pause revokes its unsolicited output promptly instead of
+        waiting for a five-second model context refresh.
+        """
+        if settings.mode != "hardware":
+            return
+        speaker = getattr(app.state.runtime.conversation, "speaker", None)
+        interrupt = getattr(speaker, "interrupt", None)
+        robot = settings.robot(robot_id)
+        if callable(interrupt) and robot.device_id:
+            await asyncio.wait_for(interrupt(robot), timeout=2.5)
+
     @app.post("/v1/pet/{robot_id}/pause", dependencies=[Depends(authorize)])
     async def pet_pause(robot_id: str):
         coordinator().robot(robot_id)
         result = await app.state.runtime.pet.pause(robot_id)
+        await stop_native_pet_speech(robot_id)
         await coordinator().stop(robot_id)
         return result
 
@@ -313,6 +328,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         result = await app.state.runtime.pet.set_quiet(robot_id, request.quiet)
         if request.quiet:
+            await stop_native_pet_speech(robot_id)
             await coordinator().stop(robot_id)
         return result
 
