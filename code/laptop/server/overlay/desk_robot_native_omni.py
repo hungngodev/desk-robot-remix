@@ -17,6 +17,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -54,6 +55,45 @@ def approved_backend_url(url: str) -> str:
             except ValueError as exc:
                 raise ValueError("Mic traffic requires loopback ws or secure wss") from exc
     return url
+
+
+def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
+    """Select only explicit, consented observational Mac tools from native ASR.
+
+    MiniCPM does not emit function calls. This deterministic adapter never
+    guesses that a vague remark permits an actuator, charger or job. Results
+    enter the existing Mac tool history for the NEXT conversational turn.
+    """
+    if not isinstance(transcript, str):
+        return None
+    text = " ".join(transcript.split())
+    if not 3 <= len(text) <= 280:
+        return None
+    lowered = text.casefold()
+    # Require an actual direct request, not a quoted tool name in a story.
+    lowered = re.sub(r"^hey (?:robot|pip|dot)[, ]+", "", lowered)
+    if re.match(
+        r"^(?:please |can you |could you |would you )?"
+        r"(?:look (?:at|around)|what (?:can|do) you see|"
+        r"what(?:'s| is) (?:this|that|in front of you)|"
+        r"what am i holding|do you see )",
+        lowered,
+    ):
+        return "look", {"question": text}
+    if (re.match(r"^(?:is|did|check|what|has)\b", lowered)
+            and re.search(r"\b(?:pickup|pick up|grasp)\b", lowered)
+            and re.search(r"\b(?:done|finished|succeed|status|complete|job)\b", lowered)):
+        return "latest-pickup", {}
+    if (re.match(r"^(?:check|what|how|is|are|tell)\b", lowered)
+            and re.search(r"\b(?:robot status|your status|battery|safety status)\b",
+                          lowered)):
+        return "status", {}
+    if re.match(
+        r"^(?:what (?:just )?happened|did (?:i|someone) (?:touch|tap) you)",
+        lowered,
+    ):
+        return "interaction-context", {}
+    return None
 
 
 def opted_in(conn) -> bool:
