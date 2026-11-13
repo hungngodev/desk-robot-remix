@@ -88,7 +88,7 @@ class OmniDuplexWire:
         # Real Mac reception identity, not the position in an audio byte
         # counter. The same JPEG cannot be forwarded twice as fresh video.
         self._last_video_receipt_us = 0
-        self._last_speech_audio_ms = -1000
+        self._video_resume_audio_ms = 0  # one complete fresh unit after interruption
         self._needs_new_input = False
         self._input_after_interrupt = False
         self._server_response_epoch: int | None = None
@@ -145,8 +145,6 @@ class OmniDuplexWire:
             raise ValueError("Only fresh bounded JPEG from current head allowed")
         previous_ms = self.input_ms
         self.input_ms += duration
-        if speech:
-            self._last_speech_audio_ms = self.input_ms
         event = {
             "type": "input_audio_buffer.append",
             "audio": base64.b64encode(pcm16).decode("ascii"),
@@ -160,11 +158,13 @@ class OmniDuplexWire:
             self._input_after_interrupt = True
         # The upstream MiniCPM-o duplex prefill groups one FULL second of
         # audio with the chosen frame. Never strand a JPEG on a partial unit.
-        # Within that constraint, dedupe real Mac receipt identities and
-        # allow the brief post-speech audio tail to complete the same unit.
+        # Live video is NOT contingent on human speech. MiniCPM-o is a
+        # proactive full-duplex audio/video model; it must see real quiet-room
+        # visual changes alongside continuous silent/background PCM. After
+        # a barge, first complete a fresh audio unit before sending images.
         if (jpeg is not None
                 and self.input_ms // 1000 > previous_ms // 1000
-                and self.input_ms - self._last_speech_audio_ms <= 1000
+                and self.input_ms >= self._video_resume_audio_ms
                 and frame_receipt_us > self._last_video_receipt_us):
             event["video_frames"] = [base64.b64encode(jpeg).decode("ascii")]
             self._last_video_receipt_us = frame_receipt_us
@@ -200,9 +200,10 @@ class OmniDuplexWire:
         self.played_ms = 0
         self._needs_new_input = True
         self._input_after_interrupt = False
-        # No JPEG in the old voice tail may be paired with new silence after
-        # an urgent barge-in. Only fresh authenticated speech opens that gate.
-        self._last_speech_audio_ms = -1000
+        # An interrupted fractional audio unit cannot borrow a prior JPEG.
+        # Resume proactive vision after one entire new model audio unit,
+        # regardless of whether anyone is speaking.
+        self._video_resume_audio_ms = self.input_ms + 1000
         self._server_response_epoch = None
         return (
             {"type": "response.cancel"},
