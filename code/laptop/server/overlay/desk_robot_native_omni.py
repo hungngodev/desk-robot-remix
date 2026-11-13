@@ -2104,6 +2104,21 @@ async def on_barge(conn) -> None:
         await session.barge()
 
 
+async def suspend_proactive_for_operator(conn) -> bool:
+    """Synchronously revoke native initiative before a physical STOP.
+
+    The Mac then refreshes the exact persisted quiet/pause policy through
+    its existing authenticated context endpoint. No model instructions
+    or untrusted tool output can override this immediate source gate.
+    """
+    session = _sessions.get(getattr(conn, "device_id", None))
+    if session is None or session.conn is not conn or session.closed:
+        return False
+    session._pet_autonomy_enabled = False
+    await session.barge()
+    return True
+
+
 def unregister(conn) -> None:
     session = _sessions.get(getattr(conn, "device_id", None))
     if session is not None and session.conn is conn:
