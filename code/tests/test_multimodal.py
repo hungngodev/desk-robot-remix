@@ -1517,3 +1517,15 @@ async def test_external_pet_photo_received_before_brief_voice_is_never_replayed(
         assert service.hub.frames["robot-02"][-1].received_at == fresh
     finally:
         await service.close()
+
+
+def test_equal_timestamp_tool_receipt_cannot_overwrite_first_result():
+    """Same-clock duplicate completion must not replace authenticated evidence."""
+    hub = CameraFrameHub(["robot-01"])
+    hub.remember_tool("robot-01", "visual_look", "first completed frame", 10.0)
+    hub.remember_tool("robot-01", "visual_look", "late duplicate", 10.0)
+    receipts = hub.recent_tool_context("robot-01", 11.0)
+    assert len(receipts) == 1
+    assert receipts[0]["summary"] == "first completed frame"
+    hub.remember_tool("robot-01", "visual_look", "new frame", 10.1)
+    assert hub.recent_tool_context("robot-01", 11.0)[0]["summary"] == "new frame"
