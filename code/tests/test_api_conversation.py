@@ -140,6 +140,33 @@ async def test_group_chat_never_exposes_live_asr_without_fleet_text_consent(sett
     )
 
 
+async def test_group_chat_does_not_expose_revoked_private_memory_tool_result(
+    settings,
+):
+    import time
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.remember_tool(
+        "robot-01", "memory_recall",
+        "The user's private key location is under the green mug",
+        time.monotonic(),
+    )
+    agent = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    agent.multimodal = SimpleNamespace(hub=hub)
+    await agent.run(["robot-01", "robot-02"], "Tell a harmless riddle", 2)
+    assert "green mug" not in str(agent.histories)
+    settings.voice_memory_tools_enabled = True
+    await agent.run(["robot-01", "robot-02"], "Tell a harmless riddle", 2)
+    assert "green mug" in str(agent.histories["robot-01"])
+    assert "green mug" not in str(agent.histories["robot-02"][0])
+
+
 async def test_unknown_robot_does_not_poison_future_conversation(settings):
     c = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
     with pytest.raises(KeyError):
