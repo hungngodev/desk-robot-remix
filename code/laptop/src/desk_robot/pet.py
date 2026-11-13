@@ -185,6 +185,7 @@ class PetController:
         # A queued background camera comparison does not yet have an
         # inference task to cancel. Generation fences queued VLM waiters too.
         self._vision_preemption_epoch = 0
+        self._direct_vision_requests = 0
         self.multimodal = None  # Hardware runtime attaches the ONE camera hub.
         # No unsolicited physical speaker output before Xiaozhi VAD has
         # authenticated a healthy live event stream. Simulation stays usable.
@@ -348,6 +349,17 @@ class PetController:
         pending = self._vision_inflight
         if pending is not None and not pending.done():
             pending.cancel()
+
+    def begin_direct_vision(self) -> None:
+        """Reserve expensive fleet vision for the full human look operation."""
+        self._direct_vision_requests += 1
+        self.preempt_background_vision()
+
+    def end_direct_vision(self) -> None:
+        """Release only our actual reservation, including on cancellation."""
+        if self._direct_vision_requests <= 0:
+            raise RuntimeError("Direct vision reservation released twice")
+        self._direct_vision_requests -= 1
 
     async def _cancel_speech(self, robot_id: str) -> None:
         task = self._speech_task
@@ -1192,7 +1204,8 @@ class PetController:
                         # existing comparator. All older background waiters
                         # must yield, even if they lacked an inference task
                         # when the explicit question called preempt().
-                        if preemption_epoch != self._vision_preemption_epoch:
+                        if (preemption_epoch != self._vision_preemption_epoch
+                                or self._direct_vision_requests):
                             state.stale_camera_events += 1
                             continue
                         if self._human_active_in_fleet(time.monotonic()):
