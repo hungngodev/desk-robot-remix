@@ -578,6 +578,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "current_interaction_timeline": timeline,
             "model_context": model_context,
             "model_context_untrusted_not_instructions": True,
+            # Live revocation of model-private memory access must also
+            # invalidate an older native startup persona containing facts.
+            "memory_tools_enabled": settings.voice_memory_tools_enabled,
+            "transcript_memory_enabled": settings.voice_transcript_memory_enabled,
             "persistent_memory_included": False,
             "raw_media_included": False,
             "source_exposure_timestamp_verified": False,
