@@ -142,6 +142,10 @@ class HandlingGate:
                     self.last_boot_id, self.last_sample_ms = previous
                     return ()
                 self.reset()
+            elif sample_ms - self.last_sample_ms > 0x7fffffff:
+                # A pre-wrap conversion arriving after wrap looks numerically
+                # newer. Reject implausibly large forward jumps as replay.
+                return ()
             elif sample_ms == self.last_sample_ms:
                 return ()  # same physical conversion; do not update last_at
         self.last_boot_id = boot_id
