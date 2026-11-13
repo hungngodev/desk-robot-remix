@@ -389,7 +389,7 @@ class NativeOmniSession:
                         self._last_authenticated_mac_at = time.monotonic()
                     # Startup private Mac state is trusted only when the
                     # response identifies the current authenticated pet.
-                    self._pet_quiet = data.get("pet_quiet") is True
+                    self._pet_quiet = data.get("pet_quiet", True) is True
                     self._pet_autonomy_enabled = (
                         data.get("pet_autonomy_enabled") is True
                     )
