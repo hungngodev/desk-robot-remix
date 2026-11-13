@@ -1,6 +1,42 @@
 # Verification and physical trials
 
 
+## November 12 scoped robot brain and context integration source audit
+
+**Only PR #17, no other branch.** Live GitHub blob readback after commits
+`99a2b140`, `b086d061`, `1760bb09`, `0fc4d241`, `923021f0`,
+`7d429340`, `a3f30a1f`, `415621e2`, `0c46d487` and `a28fba8c`
+confirmed **10 source/test contract checks**: (1) completed stream segments
+persist only to speaking pet with transmission-only provenance after an
+abort; (2) failed second chunk and (3) cancelled stream regression tests
+exist; (4) voice/tool/sensor/spoken/camera fairness and (5) crowded-frame
+regressions exist; (6) camera/monitor outage preserves bounded transmitted
+speech, (7) deliberate full reset clears it, (8) repeated camera receipts
+are collapsed in a 400-character interaction budget, (9) native Omni and
+proactive speech both use `compose_brain_context` with per-pet consent, and
+(10) its API regression verifies no cross-pet leakage or ASR eyewitness
+promotion. These are **exact source readback assertions, NOT pytest
+executions**. Full Python 3.11 and ESP-IDF/PlatformIO builds are still
+blocked by GitHub Actions pre-step failures, with no valid build logs.
+Reproduce using `cd code && uv run --no-sync pytest -q
+tests/test_streamed_ollama.py tests/test_brain_context.py
+tests/test_multimodal_api.py` once an actual checkout/runner works.
+
+**Research and architecture decision:** one Mac event and conversation owner,
+Xiaozhi audio VAD and speaker, existing Mac image sampler, per-robot
+SQLite, WROOM motor safety. Adopt turn/interrupt frames from LiveKit and
+Pipecat, expression ownership from Reachy Mini, small stable identity versus
+episodes from Letta/Mem0, persistent checkpoints only where truly needed
+from LangGraph, and observation versus action separation from LeRobot/Nav2.
+This is not a claim to have copied or executed any of those projects.
+See `docs/guides/multimodal-voice-video-orchestration.md`.
+No physical speaker playback acknowledgement or demonstrated model tools
+in optional MiniCPM native audio; do not upgrade a model capability claim.
+Likewise no actual protected battery/charger, fitted complete CAD assembly,
+physical grasp, live AEC, dock or five-pet acceptance has passed.
+
+
+
 ## November 12 current Mac brain orchestration, exact evidence boundary
 
 **Scope:** all modifications on existing draft PR #17. The current source
