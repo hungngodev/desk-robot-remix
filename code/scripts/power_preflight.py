@@ -19,6 +19,7 @@ def size_5v_supply(
     measured_boost_efficiency: float = 0.85,
     margin: float = 1.3,
     boost_max_input_a: float | None = None,
+    boost_continuous_input_a: float | None = None,
     boost_continuous_output_a: float | None = None,
     protected_cell_continuous_a: float | None = None,
 ) -> dict:
@@ -34,7 +35,7 @@ def size_5v_supply(
         raise ValueError("Single-cell low voltage must be measured/qualified")
     if not 0.5 <= measured_boost_efficiency <= 0.99 or not 1 <= margin <= 2:
         raise ValueError("Qualified boost efficiency and current margin required")
-    ratings = (boost_max_input_a, boost_continuous_output_a, protected_cell_continuous_a)
+    ratings = (boost_max_input_a, boost_continuous_input_a, boost_continuous_output_a, protected_cell_continuous_a)
     for rating in ratings:
         if rating is not None and (type(rating) not in (int, float)
                                    or not math.isfinite(rating) or rating <= 0):
@@ -68,6 +69,7 @@ def size_5v_supply(
     if all(rating is not None for rating in ratings):
         requirements["candidate_electrically_sufficient_on_paper"] = (
             Decimal(str(boost_max_input_a)) >= required_cell_peak
+            and Decimal(str(boost_continuous_input_a)) >= required_cell_cont
             and Decimal(str(boost_continuous_output_a)) >= required_5v_peak
             and Decimal(str(protected_cell_continuous_a)) >= required_cell_peak
         )
@@ -85,6 +87,7 @@ def main() -> None:
     parser.add_argument("--low-cell-v", type=float, default=3.0)
     parser.add_argument("--measured-efficiency", type=float, default=0.85)
     parser.add_argument("--boost-max-input-a", type=float)
+    parser.add_argument("--boost-continuous-input-a", type=float)
     parser.add_argument("--boost-continuous-output-a", type=float)
     parser.add_argument("--protected-cell-continuous-a", type=float)
     args = parser.parse_args()
@@ -93,6 +96,7 @@ def main() -> None:
         cell_low_v=args.low_cell_v,
         measured_boost_efficiency=args.measured_efficiency,
         boost_max_input_a=args.boost_max_input_a,
+        boost_continuous_input_a=args.boost_continuous_input_a,
         boost_continuous_output_a=args.boost_continuous_output_a,
         protected_cell_continuous_a=args.protected_cell_continuous_a,
     )
