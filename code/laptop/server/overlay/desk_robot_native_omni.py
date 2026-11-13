@@ -1213,6 +1213,11 @@ class NativeOmniSession:
         while not self.closed:
             packet = await self.incoming.get()
             self.audio_frames += 1
+            # Upstream vLLM-Omni PR #6318 rejects MiniCPM instruction edits
+            # after handshake. Even older ACKs did not change Stage 0 KV.
+            # Continue polling Mac consent, but do not pretend live history
+            # reached the duplex thinker. Tool chat uses an explicit turn.
+            self._context_update_unsupported = True
             was_talking = self._user_was_talking
             if packet.speech:
                 self._user_was_talking = True
