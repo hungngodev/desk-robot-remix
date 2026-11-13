@@ -973,6 +973,66 @@ async def test_native_voice_tool_rejects_wrong_pet_and_action_permissions(
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_compound_native_tool_worker_executes_two_existing_mac_readonly_routes(
+    native, monkeypatch,
+):
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    received = []
+
+    async def call(current, route, payload):
+        assert current is conn
+        received.append((route, payload))
+        await asyncio.sleep(0)
+        return {
+            "robot_id": "robot-01", "motor_authorized": False,
+            "charging_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+    transcript = {
+        "item_id": "two_tools_one_turn",
+        "transcript": "Can you look around and check your battery status?",
+    }
+    session._queue_readonly_tool(transcript)
+    session._queue_readonly_tool({
+        "item_id": "two_tools_duplicate", "transcript": transcript["transcript"],
+    })
+    assert session._readonly_queue.qsize() == 2
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        async with asyncio.timeout(1):
+            while session.native_readonly_tools_completed < 2:
+                await asyncio.sleep(.005)
+        assert [route for route, _ in received] == ["look", "status"]
+        assert session._context_wakeup.is_set()
+        assert session.native_readonly_tools_dropped == 0
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_speech_tool_old_result_cannot_enter_next_human_turn(
     native, monkeypatch,
 ):
