@@ -1254,6 +1254,122 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     assert session.outgoing.empty()
 
 
+async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
+    native,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    requests = []
+
+    class Reply:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "raw_media_included": False,
+                "persistent_memory_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
+                "model_context": (
+                    "Physical sensor edge: touch_tap; "
+                    "Earlier local VLM guess, not fresh sighting: a blue mug; "
+                    "I previously sent this spoken line (playback unverified)"
+                ),
+            }
+
+    class Http:
+        def get(self, url, *, headers, timeout):
+            requests.append((url, headers))
+            return Reply()
+
+    scene = await session._current_tool_scene(Http(), 0, 0)
+    assert "touch_tap" in scene and "blue mug" in scene
+    assert "playback unverified" in scene
+    assert requests[0][0].endswith("/v1/pet/robot-01/interaction-context")
+    assert requests[0][1] == {"Authorization": "Bearer " + "p" * 32}
+    session._memory_tools_enabled = True  # no consent on server side
+    assert await session._current_tool_scene(Http(), 0, 0) == ""
+    session._tool_speech_turn = None  # interrupted while Mac is polled
+    assert await session._current_tool_scene(Http(), 0, 0) == ""
+
+
+async def test_native_tool_dialogue_only_remembers_sent_uninterrupted_audio(
+    native, monkeypatch,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    class Encoder:
+        def __init__(self, rate, channels, mode):
+            assert (rate, channels, mode) == (16000, 1, "audio")
+        def encode(self, data, frame_size):
+            assert len(data) == 1920 and frame_size == 960
+            return b"fake_opus"
+
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    session._tool_audio_response_id = "tool_verified_send"
+    session._tool_reply_pending["tool_verified_send"] = (
+        0, "Where is the blue mug?", "I think it is beside the key.",
+    )
+    sent_states = []
+    opus_sent = []
+
+    async def state(name, gen):
+        sent_states.append((name, gen))
+    async def opus(data, gen):
+        opus_sent.append((data, gen))
+
+    session._send_device_state = state
+    session._send_device_opus = opus
+    session.outgoing.put_nowait(("tool_verified_send", bytes(9600)))
+    session.outgoing.put_nowait(None)
+    play = asyncio.create_task(session._play())
+    try:
+        async with asyncio.timeout(1):
+            while not session._tool_dialogue:
+                await asyncio.sleep(.005)
+        assert sent_states == [("start", 0), ("stop", 0)]
+        assert opus_sent
+        assert "Where is the blue mug?" in session._tool_dialogue_context(
+            module.time.monotonic()
+        )
+        assert "playback unverified" in session._tool_dialogue_context(
+            module.time.monotonic()
+        )
+    finally:
+        session.closed = True
+        play.cancel()
+        await asyncio.gather(play, return_exceptions=True)
+
+    # A pending reply interrupted before its TTS STOP cannot become history.
+    session._tool_reply_pending["tool_interrupted"] = (
+        0, "What happened?", "I saw something.",
+    )
+    session._generation += 1
+    session._tool_audio_sent("tool_interrupted", 0)
+    assert len(session._tool_dialogue) == 1
+
+
 async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native):
     import io
     import wave
