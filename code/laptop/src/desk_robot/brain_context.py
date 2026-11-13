@@ -242,7 +242,7 @@ def compose_brain_context(
             requested_tools.add("pickup_status")
         if re.match(
             r"^(?:hey [a-z]+[, ]+|please )*"
-            r"(?:check your battery|what is your (?:battery|status)|"
+            r"(?:check your battery|what(?: is|\x27s) your (?:battery|status)|"
             r"how much battery|how are your sensors)",
             heard,
         ):
