@@ -1,6 +1,54 @@
 # Verification and physical trials
 
 
+## November 12 evening: executable brain recall and cross-robot camera epoch fence
+
+**Canonical PR #17 source changes:** `0ec93dc` fixes the previously reversed
+memory slice in `compose_brain_context` that omitted **newest** SQLite
+episodes and operator-curated facts when more than six were available.
+Latest context now selects the newest distinct six by timestamp independent
+of which ordering the caller supplied, prioritizes fresh entries within
+the 600/500 character budgets, and then presents them chronologically.
+`07f994aa` adds tests for both input orders, duplicate revisions and
+budget behavior.
+
+**Actually executed local Python 3.13.5:** The exact **current GitHub blob**
+`code/laptop/src/desk_robot/brain_context.py`
+`83706aea3a6aeb5f8e3e9b581a2fd9debce1a219` was reproduced and
+`git hash-object` matched. With isolated `Memory` and `CoreFact`
+dataclasses matching the repository shapes, **five focused pytest tests
+passed** (`5 passed in 0.04s`): input-order equivalence, duplicate
+revision recency, bounded multimodal source labels, novelty provenance,
+and empty-context safety. This is exact pure module execution using
+a local dependency stub, **not** the repository's full pytest suite or
+proof that all PR tests pass.
+
+**Actual camera/observer code, source/test checks only:** `5dd00c8` adds
+turn/question epoch checks to low-priority XIAO camera CPU preprocessing,
+so a human interruption that starts and ends before JPEG preprocessing
+completes cannot publish an obsolete frame. `904ddac` adds test cases for
+direct optional capture, sensor capture and external pet offer.
+`0eeeb38` extends fleet-wide human turn time to camera receipts that
+were acquired before another pet's voice but offered after speech ended.
+`800d3f2` guards `PetController._observe` before and after its
+asynchronous scene-model work to prevent this stale photo from initiating
+playful speech or a false firsthand memory. `690d11f` adds the cross-pet
+observer regression. Live GitHub file readback confirmed ten source/test
+contract checks, but **none of the newly added camera or PetController
+regressions executed** here. They require full repository Python deps.
+
+**CI qualification still missing:** GitHub Actions run
+[43353820010](https://github.com/hungngodev/desk-robot-remix/actions/runs/43353820010)
+reports all four jobs failed with `steps=null`; no compiler/test
+diagnostic can safely be inferred. Run `cd code && uv run --no-sync
+pytest -q tests/test_brain_context.py tests/test_multimodal.py
+tests/test_pet.py` on an actual provisioned runner, preserving
+source SHA and failure output. This checkpoint does not qualify the
+physical Sense camera exposure clock, audio echo cancellation, battery
+charger, fitted print assembly, grasp, dock or five-robot acoustics.
+
+
+
 ## November 12 next robot brain source checkpoint: intent epoch and physical job continuity
 
 **Real source code committed in PR #17**: `1946af90` installs a pinned
