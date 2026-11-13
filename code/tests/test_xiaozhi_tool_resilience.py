@@ -1014,3 +1014,62 @@ async def test_stop_never_replays_previous_turn_after_new_speech(
     response = await bridge_tools.desk_robot_stop(bridge_tools.registered_head)
     assert submitted == ["/v1/robots/robot-01/stop"]
     assert response.action == 1 and response.result is None
+
+
+async def test_native_aux_sensor_tool_uses_existing_authenticated_readonly_bridge(
+    bridge_tools, monkeypatch,
+):
+    """Actual voice tool never opens arbitrary actuator routes or a new server."""
+    requests = []
+    original = httpx.AsyncClient
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "climate": {"valid": True, "temp_centi": 2150,
+                        "rh_centi": 4500},
+            "power": {"fuel_valid": False},
+            "motor_authorized": False,
+            "charging_authorized": False,
+        })
+
+    def factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", factory)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "aux-status",
+    )
+    assert [request.url.path for request in requests] == [
+        "/v1/robots/robot-01/aux",
+    ]
+    assert requests[0].method == "GET"
+    assert requests[0].headers["authorization"] == "Bearer " + "s" * 40
+    assert requests[0].headers["x-desk-robot-tool-receipt"] == "1"
+    assert result["robot_id"] == "robot-01"
+    assert result["climate"]["temp_centi"] == 2150
+    assert result["motor_authorized"] is False
+
+
+async def test_native_aux_sensor_tool_rejects_foreign_robot_result(
+    bridge_tools, monkeypatch,
+):
+    original = httpx.AsyncClient
+
+    def handler(request):
+        return httpx.Response(200, json={
+            "robot_id": "robot-02", "climate": {"valid": True},
+        })
+
+    def factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", factory)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "aux-status",
+    )
+    assert result == {
+        "error": "Robot Mac tool identity or authority invalid",
+        "retried": False,
+    }
