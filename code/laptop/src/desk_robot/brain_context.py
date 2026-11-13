@@ -109,7 +109,7 @@ def compose_brain_context(
     # Repeating the same cue crowds out touch, completed tool context and
     # conversational continuity. Keep the latest per kind, then budget
     # independent modalities rather than truncating a large camera list.
-    cue_parts: list[tuple[int, str, str | None]] = []
+    cue_parts: list[tuple[int, str, str | None, bool]] = []
     seen_cues: set[tuple[str, str]] = set()
     heard_count = 0
     heard_requests: list[str] = []
@@ -209,7 +209,8 @@ def compose_brain_context(
             if channel == "human_transcript":
                 priority = 0 if heard_count == 0 else 5
                 heard_count += 1
-            cue_parts.append((priority, phrase, kind if channel == "tool" else None))
+            cue_parts.append((priority, phrase, kind if channel == "tool" else None,
+                              not crossed_voice_boundary))
     # Completed tool receipts may coexist with several newer status polls
     # and sensor edges. Under the fixed 400-character budget, prioritize
     # the one relevant to the latest actual spoken question, rather than
@@ -270,11 +271,12 @@ def compose_brain_context(
         ):
             requested_tools.add("robot_status")
     cue_parts.sort(key=lambda candidate: (
-        0.5 if candidate[2] in requested_tools else candidate[0]
+        0.5 if candidate[3] and candidate[2] in requested_tools
+        else candidate[0]
     ))
     selected: list[str] = []
     remaining = 400
-    for _, phrase, _ in cue_parts:
+    for _, phrase, _, _ in cue_parts:
         cost = len(phrase) + (2 if selected else 0)
         if cost <= remaining:
             selected.append(phrase)
