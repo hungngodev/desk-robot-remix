@@ -329,6 +329,51 @@ async def test_one_human_cancels_only_own_visual_tool_not_four_other_pets(
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
 
+@pytest.mark.parametrize("planned_route,accepted", [
+    ("power-status", True),
+    ("move", False),
+    ("charger/enable", False),
+])
+async def test_mac_model_planned_wroom_power_route_passes_existing_xiaozhi_bridge(
+    bridge_tools, monkeypatch, planned_route, accepted,
+):
+    """Mac plan, native worker and Xiaozhi HTTP bridge share one route set."""
+    original = httpx.AsyncClient
+    sent = []
+    def handler(request):
+        sent.append(request)
+        assert request.url.path == "/v1/pet/robot-01/plan-readonly"
+        assert request.method == "POST"
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "source": "existing_mac_ollama_readonly_route_selection",
+            "untrusted_model_selection": True,
+            "model_can_arm_motors": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+            "tools": [
+                {"route": planned_route, "payload": {}},
+            ],
+        })
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "plan-readonly",
+        {"transcript": "How much charge is left?"},
+    )
+    assert len(sent) == 1
+    if accepted:
+        assert result["tools"] == [
+            {"route": "power-status", "payload": {}},
+        ]
+        assert result["model_can_arm_motors"] is False
+    else:
+        assert result == {
+            "error": "Invalid read-only Mac intent plan", "retried": False,
+        }
+
+
 async def test_voice_battery_tool_uses_actual_unqualified_wroom_power_source(
     bridge_tools, monkeypatch,
 ):
