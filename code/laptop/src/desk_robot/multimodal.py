@@ -327,8 +327,9 @@ class CameraFrameHub:
         """Accept only completed current-turn read-only tool interpretations.
 
         Failed/cancelled tool outputs must never enter the next interaction.
-        Tool text is model-generated *opinion*, not a witnessed physical fact,
-        instruction or actuator permit. It expires from RAM in eight seconds.
+        Visual answers are model guesses; status/job receipts are read-only
+        Mac observations. None proves physical acceptance or grants motion.
+        Visual guesses expire after eight seconds; status after thirty.
         """
         self._check(robot_id)
         if (kind not in {"visual_look", "robot_status", "pickup_status"}
