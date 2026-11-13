@@ -3690,6 +3690,34 @@ async def test_first_human_camera_wake_does_not_double_fetch_on_esp32(native):
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_fleet_vad_aborts_mac_speaker_before_waiting_on_output_lock(
+    native,
+):
+    """The human's STOP priority cannot depend on a held shared audio lock."""
+    module, bridge = native
+    conn, _ = connection()
+    conn.device_id = "mac-02"
+    bridge.connections["mac-02"] = conn
+    bridge.interrupt_generation = {"mac-02": 4}
+    module._external_speaker_owner = "mac-02"
+    module._external_speaker_connection = conn
+    conn.client_is_speaking = True
+
+    await module._output_owner_lock.acquire()
+    preempt = asyncio.create_task(module.preempt_others_for_human("mac-01"))
+    try:
+        async with asyncio.timeout(1):
+            while not conn.client_abort:
+                await asyncio.sleep(.005)
+        assert bridge.interrupt_generation["mac-02"] == 5
+        assert not preempt.done()  # owner lock still held
+    finally:
+        module._output_owner_lock.release()
+        await asyncio.wait_for(preempt, timeout=1)
+        module._external_speaker_owner = None
+        module._external_speaker_connection = None
+
+
 async def test_delayed_mac_opus_is_serialized_before_fleet_human_stop(native):
     """No asynchronous Mac Opus send may complete AFTER a human STOP."""
     module, bridge = native
