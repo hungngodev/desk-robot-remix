@@ -26,6 +26,7 @@ def raw_mpu6050(body: dict) -> tuple[tuple[float, ...], float] | None:
     if not isinstance(imu, dict):
         return None
     if (type(imu.get("family")) is not int or imu["family"] != 4
+            or type(imu.get("gyro_id")) is not int or imu["gyro_id"] != 0x68
             or imu.get("valid") is not True
             or type(imu.get("age_ms")) is not int
             or not 0 <= imu["age_ms"] <= 200
