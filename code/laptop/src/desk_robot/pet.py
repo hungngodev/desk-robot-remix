@@ -1413,6 +1413,12 @@ class PetController:
                 ordered = getattr(hub, "interaction_timeline", None)
                 if callable(ordered):
                     timeline = ordered(robot_id, now, limit=10)
+                    if not self.settings.voice_memory_tools_enabled:
+                        timeline = [
+                            item for item in timeline
+                            if not (item.get("channel") == "tool"
+                                    and item.get("kind") == "memory_recall")
+                        ]
                 else:
                     hints = hub.recent_events(robot_id, now)
                     timeline = [
