@@ -337,8 +337,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     async def pet_pause(robot_id: str):
         coordinator().robot(robot_id)
         result = await app.state.runtime.pet.pause(robot_id)
-        await stop_native_pet_speech(robot_id)
+        # A dead audio bridge cannot delay or skip a physical WROOM stop.
         await coordinator().stop(robot_id)
+        await stop_native_pet_speech(robot_id)
         return result
 
     @app.post("/v1/pet/{robot_id}/quiet", dependencies=[Depends(operator)])
@@ -346,8 +347,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         result = await app.state.runtime.pet.set_quiet(robot_id, request.quiet)
         if request.quiet:
-            await stop_native_pet_speech(robot_id)
+            # Motor stop is always earlier than optional native voice I/O.
             await coordinator().stop(robot_id)
+            await stop_native_pet_speech(robot_id)
         return result
 
     @app.get("/v1/pet/{robot_id}/memories", dependencies=[Depends(operator)])
