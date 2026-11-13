@@ -1837,6 +1837,113 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     assert session.outgoing.empty()
 
 
+
+async def test_native_completed_head_audio_enqueues_only_source_labeled_sent_text(native):
+    """Neither queued WAV nor model ASR is a Mac spoken receipt."""
+    import re
+    import time
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    session._tool_reply_pending["tool_1"] = (
+        0, "What can you see?", "I can see a mug",
+    )
+    assert session._spoken_queue.empty()
+    session._tool_audio_sent("tool_1", 1)  # Unsent old generation
+    assert session._spoken_queue.empty()
+    session._tool_reply_pending["tool_2"] = (
+        0, "What can you see?", "I can see a mug",
+    )
+    session._tool_audio_sent("tool_2", 0)  # Caller does this after STOP
+    event_id, text, stamp_us = session._spoken_queue.get_nowait()
+    assert re.fullmatch(r"omni_sent_[0-9a-f]{12}_[0-9a-f]{20}", event_id)
+    assert text == "I can see a mug"
+    assert 0 <= time.monotonic_ns() // 1000 - stamp_us < 1_000_000
+    assert len(session._tool_dialogue) == 1
+
+    session._native_output_words["native_1"] = {
+        "spoken": "Do you want to play a game?"
+    }
+    session._native_audio_sent("native_1", 0)
+    _, native_text, _ = session._spoken_queue.get_nowait()
+    assert native_text == "Do you want to play a game?"
+    assert len(session._tool_dialogue) == 2
+    session._native_output_words["old_native"] = {"text": "obsolete"}
+    session._native_audio_sent("old_native", 1)
+    assert session._spoken_queue.empty()
+
+
+@pytest.mark.parametrize("status", [200, 403])
+async def test_native_sent_speech_worker_uses_same_authenticated_mac_context(
+    native, status,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    requests = []
+
+    class Reply:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "source": "native_model_text_opus_sent_playback_unverified",
+                "retained_on_disk": False,
+                "audio_playback_verified": False,
+                "ephemeral_context_added": True,
+            }
+
+    class Mac:
+        def post(self, url, *, headers, json, timeout):
+            requests.append((url, headers, json))
+            reply = Reply()
+            reply.status = status
+            return reply
+
+    session._queue_sent_text("response_01", "A friendly greeting")
+    worker = asyncio.create_task(session._persist_spoken(Mac()))
+    try:
+        async with asyncio.timeout(1):
+            while not requests or (status == 200 and
+                    session.native_spoken_context_delivered == 0):
+                await asyncio.sleep(.01)
+        url, headers, body = requests[0]
+        assert url.endswith("/v1/pet/robot-01/omni-spoken")
+        assert headers == {"Authorization": "Bearer " + "p" * 32}
+        assert body["model_text"] == "A friendly greeting"
+        assert body["event_id"].startswith("omni_sent_")
+        assert type(body["sent_at_us"]) is int
+        if status == 200:
+            assert session.native_spoken_context_delivered == 1
+            assert not session.closed
+        else:
+            await asyncio.wait_for(worker, timeout=1)
+            assert session.closed
+            assert session.last_error == (
+                "Mac native spoken context permission revoked"
+            )
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
     native,
 ):

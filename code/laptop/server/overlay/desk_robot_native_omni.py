@@ -274,6 +274,13 @@ class NativeOmniSession:
         self.native_tool_speech_errors = 0
         self._heard_session = uuid.uuid4().hex[:12]
         self._heard_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=12)
+        # Native replies share Mac's existing live timeline only AFTER Opus
+        # and TTS STOP were sent. Never persist model text as heard speech.
+        self._spoken_queue: asyncio.Queue[tuple[str, str, int]] = (
+            asyncio.Queue(maxsize=8)
+        )
+        self.native_spoken_context_delivered = 0
+        self.native_spoken_context_dropped = 0
         self._heard_seen: set[str] = set()
         self.heard_memories_stored = 0
         self.heard_memories_dropped = 0
@@ -512,6 +519,56 @@ class NativeOmniSession:
             # No retry of uncertain memory HTTP writes; SQLite is idempotent
             # if a later retransmission of this exact backend item occurs.
             self.heard_memories_dropped += 1
+
+    def _queue_sent_text(self, response_id: str, text: str) -> None:
+        """Publish text estimates only for an already completed head send."""
+        if not self._live_transcript_enabled or not isinstance(text, str):
+            return
+        cleaned = " ".join(text.split())[:200]
+        if not cleaned or "\x00" in cleaned:
+            return
+        event_id = (
+            "omni_sent_" + self._heard_session + "_"
+            + hashlib.sha256(response_id.encode("utf-8")).hexdigest()[:20]
+        )
+        try:
+            self._spoken_queue.put_nowait(
+                (event_id, cleaned, time.monotonic_ns() // 1000)
+            )
+        except asyncio.QueueFull:
+            self.native_spoken_context_dropped += 1
+
+    async def _persist_spoken(self, http: aiohttp.ClientSession) -> None:
+        """Share no PCM, only recent native model text tied to sent head Opus."""
+        url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-spoken"
+        while not self.closed:
+            event_id, text, sent_at_us = await self._spoken_queue.get()
+            try:
+                async with http.post(
+                    url, headers={"Authorization": f"Bearer {self.token}"},
+                    json={"event_id": event_id, "model_text": text,
+                          "sent_at_us": sent_at_us},
+                    timeout=aiohttp.ClientTimeout(total=2),
+                ) as response:
+                    if response.status in (401, 403):
+                        self.fail("Mac native spoken context permission revoked")
+                        return
+                    if response.status == 200:
+                        data = await response.json()
+                        if (isinstance(data, dict)
+                                and data.get("robot_id") == self.robot
+                                and data.get("source") ==
+                                "native_model_text_opus_sent_playback_unverified"
+                                and data.get("retained_on_disk") is False
+                                and data.get("audio_playback_verified") is False):
+                            self.native_spoken_context_delivered += 1
+                            self._context_wakeup.set()
+                            continue
+            except asyncio.CancelledError:
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                pass
+            self.native_spoken_context_dropped += 1
 
     def _ack_context_update(self, event: dict) -> None:
         """A WebSocket send is not proof the backend accepted model context."""
@@ -803,10 +860,11 @@ class NativeOmniSession:
             return
         spoken = data.get("spoken") or data.get("text", "")
         if isinstance(spoken, str) and spoken.strip():
+            text = " ".join(spoken.split())[:200]
             self._tool_dialogue.append((
-                time.monotonic(), self._last_human_transcript[:180],
-                " ".join(spoken.split())[:200],
+                time.monotonic(), self._last_human_transcript[:180], text,
             ))
+            self._queue_sent_text(response_id, text)
 
     def _tool_audio_sent(self, response_id: str, generation: int) -> None:
         """Track conversational continuity, NEVER an acoustic playback ACK."""
@@ -818,6 +876,7 @@ class NativeOmniSession:
             self._tool_dialogue.append(
                 (time.monotonic(), question[:180], spoken_text[:200])
             )
+            self._queue_sent_text(response_id, spoken_text)
 
     async def _speak_tool_results(
         self, http: aiohttp.ClientSession, transcript: str,
@@ -1906,6 +1965,9 @@ class NativeOmniSession:
                             self._persist_heard(http)
                         ))
                     if self._live_transcript_enabled:
+                        self._tasks.append(asyncio.create_task(
+                            self._persist_spoken(http)
+                        ))
                         self._tasks.append(asyncio.create_task(
                             self._refresh_live_context(http)
                         ))
