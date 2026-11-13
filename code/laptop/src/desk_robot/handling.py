@@ -94,7 +94,11 @@ class HandlingGate:
                 or not 25 <= tilt_threshold_deg <= 75):
             raise ValueError("Physically qualified MPU6050 thresholds required")
         if not qualified:
+            # Revoking qualification clears pose, never trusted source identity.
+            # Otherwise an old conversion can seed calibration when reenabled.
+            previous = (self.last_boot_id, self.last_sample_ms)
             self.reset()
+            self.last_boot_id, self.last_sample_ms = previous
             return ()
         if self.last_at is not None and (now <= self.last_at or now - self.last_at > 1.0):
             # Host reconnect invalidates calibration, not source identity.
