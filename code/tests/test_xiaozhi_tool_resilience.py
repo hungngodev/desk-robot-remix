@@ -476,3 +476,59 @@ async def test_valid_readonly_tool_still_requests_model_reply_and_safety_stop_do
     stop = await bridge_tools.desk_robot_stop(bridge_tools.registered_head)
     assert stop.action == 3
     assert stop.result["robot_id"] == "robot-01"
+
+
+def test_pinned_multitool_combine_preserves_structured_results_and_silent_cancellation():
+    """Exercise the patched REAL upstream method, not a new tool broker."""
+    import json
+    from types import SimpleNamespace
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "desk_multi_overlay", root / "laptop/server/install_overlay.py"
+    )
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    pinned = (
+        root / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+        / "core/providers/tools/unified_tool_handler.py"
+    )
+    source = installer.patch_unified_tool_handler(pinned.read_text())
+    assert "if response.content:" not in source
+    assert "getattr(response, 'result', None)" in source
+    compile(source, str(pinned), "exec")
+
+    # Importing the whole pinned server would also start its providers.
+    # Execute its exact isolated method with only its ActionResponse contract.
+    begin = source.index("    def _combine_responses(")
+    end = source.index("    async def register_iot_tools(", begin)
+    actor = SimpleNamespace(NONE=1, RESPONSE=2, REQLLM=3, ERROR=-1)
+    def response(action, result=None, response=None):
+        return SimpleNamespace(action=action, result=result, response=response)
+    namespace = {"Action": actor, "ActionResponse": response, "json": json,
+                 "List": list}
+    exec("from __future__ import annotations\nclass PinnedTools:\n"
+         + source[begin:end], namespace)
+    merge = namespace["PinnedTools"]()._combine_responses
+
+    camera = response(actor.REQLLM, result={"answer": "silver key"})
+    memory = response(actor.REQLLM, result={"history": "seen yesterday"})
+    combined = merge([camera, memory])
+    assert combined.action == actor.REQLLM
+    assert combined.response is None
+    assert [json.loads(item) for item in combined.result.split("; ")] == [
+        {"answer": "silver key"}, {"history": "seen yesterday"}
+    ]
+
+    # A superseded tool result must contain NO text. On this pinned
+    # intent handler a NONE action with response text would still be spoken.
+    dropped = response(actor.NONE)
+    silent = merge([dropped, dropped])
+    assert silent.action == actor.RESPONSE
+    assert silent.result is None and silent.response is None
+    mixed = merge([dropped, camera])
+    assert mixed.action == actor.REQLLM
+    assert json.loads(mixed.result) == {"answer": "silver key"}
+    assert merge([response(actor.ERROR, response="fail"), camera]).action == (
+        actor.ERROR
+    )
