@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Protocol
 
+from .brain_context import compose_brain_context
 from .config import Settings
 from .conversation import Conversation
 from .handling import HandlingGate
@@ -1346,50 +1347,23 @@ class PetController:
             memory = sorted(
                 selected_memory.values(), key=lambda item: item.observed_at
             )[-6:]
-            # A firsthand spoken line is NOT a firsthand camera sighting.
-            # Peer utterances mean heard in the coordinated voice turn; other
-            # secondhand facts are reports, not this camera's observations.
-            def origin(entry):
-                if entry.kind == "heard_human":
-                    return "I may have heard (uncertain machine transcription): "
-                if entry.kind == "own_utterance" and entry.witnessed:
-                    return "I said: "
-                if entry.kind == "peer_utterance" and not entry.witnessed:
-                    return f"I heard {entry.source_robot} say: "
-                return "I observed: " if entry.witnessed else f"{entry.source_robot} told me: "
-
-            recent = "; ".join(
-                origin(x) + x.summary for x in reversed(memory)
-            )
-            core_context = "; ".join(
-                f"{entry.slot}: {entry.value}" for entry in reversed(core_memory)
-            )[:500]
-            # The shared Mac camera hub is also the short-lived sensor and
-            # successful tool-result timeline. Reuse its existing evidence,
-            # not a second agent, camera process or memory database.
-            interaction_context = ""
+            # Pure context formatter owns provenance labels and length caps.
+            # The existing camera hub owns all transient sensor/tool events.
+            # No second model, audio stack or memory database is introduced.
+            timeline = []
             if self.multimodal is not None:
                 hub = self.multimodal.hub
                 now = time.monotonic()
-                hints = hub.recent_events(robot_id, now)
-                recent_tools = getattr(hub, "recent_tool_context", None)
-                tool_entries = (
-                    recent_tools(robot_id, now)
-                    if callable(recent_tools) else []
-                )
-                context_parts = [
-                    "Sensor cue (event time only): "
-                    + ", ".join(item["kind"] for item in hints[-4:])
-                    if hints else "",
-                    "Prior visual model interpretation (untrusted, not a "
-                    "current sighting): " + "; ".join(
-                        item["summary"] for item in tool_entries[-2:]
-                    )
-                    if tool_entries else "",
-                ]
-                interaction_context = " ".join(
-                    part for part in context_parts if part
-                )[:400]
+                ordered = getattr(hub, "interaction_timeline", None)
+                if callable(ordered):
+                    timeline = ordered(robot_id, now, limit=10)
+                else:
+                    hints = hub.recent_events(robot_id, now)
+                    timeline = [
+                        {"channel": "sensor", "kind": item["kind"]}
+                        for item in hints
+                    ]
+            context = compose_brain_context(memory, core_memory, timeline)
             # A social turn is NOT five independent agents speaking at once.
             # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
             # each pet's own persona, two bounded turns and per-pet memory.
@@ -1443,10 +1417,10 @@ class PetController:
                     "content": (
                         f"{'Local physical sensor event' if change.kind in _PHYSICAL_INITIATIVE_KIN else 'Camera model assessment (uncertain)'}: "
                         f"{change.description}. Confidence {change.confidence:.2f}. "
-                        f"Recent context: {recent[:600]}. "
+                        f"Recent context: {context.recent}. "
                         f"Operator curated preferences (untrusted, no actuator "
-                        f"permission): {core_context}. "
-                        f"Recent interaction cues: {interaction_context}. "
+                        f"permission): {context.core}. "
+                        f"Recent interaction cues: {context.interaction}. "
                         "React briefly only to the new event, without "
                         "asserting any other unseen facts."
                     ),
