@@ -122,7 +122,11 @@ class HandlingGate:
         acceleration, rotation_dps = sample
         g = math.hypot(*acceleration)
         if not 0.05 <= g <= 3.5:
+            # Reject implausible acceleration without forgetting the source
+            # conversion. A replay after the fault must not seed calibration.
+            previous = (self.last_boot_id, self.last_sample_ms)
             self.reset()
+            self.last_boot_id, self.last_sample_ms = previous
             return ()
         if self.reference is None:
             # Startup is an intentional physical calibration step. Accel
