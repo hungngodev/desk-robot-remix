@@ -37,6 +37,17 @@ def native(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "desk_robot_native_omni", module)
     spec.loader.exec_module(module)
+    # Existing media/speaker unit tests simulate a pet whose operator
+    # explicitly enabled autonomy. Production defaults remain fail closed
+    # until Mac's authenticated pet policy is fetched.
+    actual_session = module.NativeOmniSession
+
+    class ConsentfulFakeSession(actual_session):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._pet_autonomy_enabled = True
+
+    module.NativeOmniSession = ConsentfulFakeSession
     return module, fake_bridge
 
 
@@ -4539,3 +4550,69 @@ async def test_human_fleet_failed_head_flush_keeps_audio_owner_blocked(native):
     await module.preempt_others_for_human("mac-01")
     assert invalidated == ["queued model cancelled"]
     assert module._output_owner == "mac-02"
+
+
+async def test_native_respects_operator_quiet_and_paused_direct_human_voice(native):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    module._sessions["mac-01"] = session
+    try:
+        session._pet_quiet = True
+        assert await session._send_device_state("start", session._generation) is False
+        assert not sent
+
+        session._pet_quiet = False
+        session._pet_autonomy_enabled = False
+        assert await session._send_device_state("start", session._generation) is False
+        assert not sent  # Paused pet cannot initiate by itself.
+
+        # Direct authenticated human speech is still answerable in pause,
+        # provided quiet mode was not selected by the operator.
+        session._last_human_speech_at = module.time.monotonic()
+        assert await session._send_device_state("start", session._generation)
+        assert any(isinstance(message, str) and '"state": "start"' in message
+                   for message in sent)
+        await session._send_device_state("stop", session._generation)
+        session._pet_quiet = True
+        assert await session._send_device_state("start", session._generation) is False
+    finally:
+        session.closed = True
+        module._sessions.clear()
+        module._output_owner = None
+
+
+async def test_native_operator_stop_revokes_model_and_flushes_real_head(native):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    module._sessions["mac-01"] = session
+    conn.client_is_speaking = True
+    session._last_human_speech_at = module.time.monotonic()
+    commands = []
+    session._schedule_remote_cancel = lambda events: commands.extend(
+        event["type"] for event in events
+    )
+    try:
+        assert await module.suspend_proactive_for_operator(conn) is True
+        assert session._pet_quiet is True
+        assert session._pet_autonomy_enabled is False
+        assert session._generation == 1
+        assert conn.client_is_speaking is False
+        assert any(isinstance(message, str) and '"flush": true' in message
+                   for message in sent)
+        assert commands and "response.cancel" in commands
+        assert await session._send_device_state("start", session._generation) is False
+    finally:
+        session.closed = True
+        module._sessions.clear()
