@@ -1863,6 +1863,67 @@ async def test_new_native_response_refuses_start_when_prior_stop_failed(
         await asyncio.gather(worker, return_exceptions=True)
 
 
+
+async def test_brief_human_barge_during_old_stop_cannot_restart_stale_tool_audio(
+    native, monkeypatch,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session.wire.response_id = "native_prior"
+    session._tool_audio_response_id = "tool_obsolete"
+
+    class Encoder:
+        def __init__(self, *args):
+            pass
+
+        def encode(self, pcm, frame_size):
+            assert len(pcm) == 1920 and frame_size == 960
+            return b"opus"
+
+    monkeypatch.setitem(sys.modules, "opuslib_next", SimpleNamespace(
+        Encoder=Encoder, APPLICATION_AUDIO="audio",
+    ))
+    states, encoded = [], []
+
+    async def send_state(state, generation):
+        states.append((state, generation))
+        if state == "stop":
+            # The human spoke and stopped again within the awaited send.
+            # An obsolete tool answer still has a queued PCM chunk.
+            session._generation += 1
+            session._tool_audio_response_id = None
+        return True
+
+    async def send_opus(packet, generation):
+        encoded.append((packet, generation))
+
+    session._send_device_state = send_state
+    session._send_device_opus = send_opus
+    session.outgoing.put_nowait(("native_prior", bytes(9600)))
+    session.outgoing.put_nowait(("tool_obsolete", bytes(9600)))
+    session.outgoing.put_nowait(("tool_obsolete", None))
+    worker = asyncio.create_task(session._play())
+    try:
+        async with asyncio.timeout(1):
+            while len(states) < 2:
+                await asyncio.sleep(0.005)
+        await asyncio.sleep(0)
+        assert [state for state, _ in states] == ["start", "stop"]
+        assert session.native_tool_audio_sent == 0
+        assert not session._tool_dialogue
+        assert not [p for p, gen in encoded if gen == session._generation]
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_tool_dialogue_only_remembers_sent_uninterrupted_audio(
     native, monkeypatch,
 ):
