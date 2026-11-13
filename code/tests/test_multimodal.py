@@ -292,6 +292,12 @@ async def test_sensor_two_frame_burst_is_bounded_and_camera_serial():
                 await asyncio.sleep(.01)
         frames = list(visual.hub.frames["robot-01"])
         assert frames[0].source == frames[1].source == "sensor"
+        assert frames[0].trigger_kind == frames[1].trigger_kind == "paw_contact"
+        timeline = visual.hub.interaction_timeline("robot-01", time.monotonic())
+        camera = [cue for cue in timeline if cue["channel"] == "camera"]
+        assert len(camera) == 2
+        assert all(cue["trigger_kind"] == "paw_contact" for cue in camera)
+        assert all(cue["exposure_timestamp_verified"] is False for cue in camera)
         assert frames[0].received_at < frames[1].received_at
         assert head.captures == 2
         assert visual._metrics["robot-01"]["camera_successes"] == 2
@@ -367,6 +373,23 @@ async def test_human_vad_cancels_pending_sensor_camera_before_speech_frames():
         visual.voice_ended("robot-01")
     finally:
         await visual.close()
+
+
+def test_sensor_camera_trigger_cannot_be_forged_on_voice_or_idle_capture():
+    hub = CameraFrameHub(["robot-01"])
+    prepared = image()
+    with pytest.raises(ValueError, match="Only a real sensor burst"):
+        hub.offer_prepared(
+            "robot-01",
+            __import__("desk_robot.multimodal", fromlist=["_prepare"])._prepare(prepared),
+            100.0, source="speech", trigger_kind="touch_tap",
+        )
+    with pytest.raises(ValueError, match="Only a real sensor burst"):
+        hub.offer_prepared(
+            "robot-01",
+            __import__("desk_robot.multimodal", fromlist=["_prepare"])._prepare(prepared),
+            100.0, source="sensor", trigger_kind="nonexistent_vision",
+        )
 
 
 def test_frame_hub_speech_adaptive_priority_and_identity():
