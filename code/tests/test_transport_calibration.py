@@ -85,21 +85,50 @@ async def test_camera_completion_sequence_and_boot_id_protect_five_pet_capture(s
         return httpx.Response(200, headers=dict(zip(
             ("X-Desk-Camera-Boot", "X-Desk-Camera-Sequence",
              "X-Desk-Camera-Complete-Us"), frames[index], strict=True,
-        )), content=b"\xff\xd8frame")
+        )), content=b"\xff\xd8frame\xff\xd9")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(settings.robots[0], client, strict_capture=True)
-        assert await head.snapshot() == b"\xff\xd8frame"
-        assert await head.snapshot() == b"\xff\xd8frame"
+        assert await head.snapshot() == b"\xff\xd8frame\xff\xd9"
+        assert await head.snapshot() == b"\xff\xd8frame\xff\xd9"
         with pytest.raises(HeadError, match="stale or replayed"):
             await head.snapshot()
-        assert await head.snapshot() == b"\xff\xd8frame"
+        assert await head.snapshot() == b"\xff\xd8frame\xff\xd9"
         assert calls == 4
+
+
+
+async def test_truncated_camera_jpeg_does_not_consume_source_sequence(settings, tokens):
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        assert request.url.path == "/api/camera.jpg"
+        return httpx.Response(
+            200,
+            headers={
+                "X-Desk-Camera-Boot": "51",
+                "X-Desk-Camera-Sequence": "1",
+                "X-Desk-Camera-Complete-Us": "10000",
+            },
+            content=(b"\xff\xd8frame" if calls == 1
+                     else b"\xff\xd8frame\xff\xd9"),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        with pytest.raises(HeadError, match="complete JPEG"):
+            await head.snapshot()
+        # Same authentic source sequence is valid on retry because a
+        # truncated response must not be accepted as a camera observation.
+        assert await head.snapshot() == b"\xff\xd8frame\xff\xd9"
+        assert calls == 2
 
 
 async def test_hardware_camera_requires_true_capture_metadata(settings, tokens):
     async def handler(request):
-        return httpx.Response(200, content=b"\xff\xd8unmarked")
+        return httpx.Response(200, content=b"\xff\xd8unmarked\xff\xd9")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(settings.robots[0], client, strict_capture=True)
