@@ -1,4 +1,6 @@
-# Verification and physical trials
+## November 13 architecture regression awaiting execution
+
+Starting branch commit `9bec190fbbefc3c43c29dd54782c3bdbb91bd2de`. `brain_context.py` commit `988bb226` now recognizes independent tool requests across both recent completed ASR fragments rather than stopping after one recognized request. Test commit `ed3ed09` adds a deterministic mixed visual question, battery question, unrelated memory tool and touch case. **No tests executed in this iteration.** No physical, firmware or audio evidence. Next run `cd code && python -m pytest -q tests/test_brain_context.py` against current exact blobs and record exit code; verify context remains within 400 characters. This is a prompt salience change only, never a motor or charging authorization.\n\n# Verification and physical trials
 
 
 ## November 12 evening: executable brain recall and cross-robot camera epoch fence
