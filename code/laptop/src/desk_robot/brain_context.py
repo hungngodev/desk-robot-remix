@@ -30,7 +30,8 @@ def _clean(value: str, *, limit: int) -> str:
 def _memory_label(entry: Memory) -> str:
     if entry.kind == "heard_human":
         return "I may have heard (uncertain transcription)"
-    if entry.kind == "own_utterance" and entry.witnessed:
+    if (entry.kind == "own_utterance" and entry.witnessed
+            and entry.source_robot == entry.robot_id):
         return "I said"
     if entry.kind == "peer_utterance":
         # A peer's words never establish this pet's firsthand observation.
