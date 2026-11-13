@@ -87,6 +87,29 @@ def patch_plugin_executor(source: str) -> str:
     return once(source, old, new)
 
 
+def patch_unified_tool_handler(source: str) -> str:
+    """Backport the pinned multi-tool ActionResponse result contract.
+
+    The upstream _combine_responses reads response.content, but its actual
+    ActionResponse defines result, response and action only. Preserve data
+    from each valid tool call while dropping silent cancelled tool results.
+    Do not change upstream tool actions or replay old audio.
+    """
+    old = (
+        "            if response.content:\n"
+        "                contents.append(response.content)\n"
+    )
+    new = (
+        "            # The pinned ActionResponse has .result, not .content.\n"
+        "            # Action.NONE with no payload must remain truly silent.\n"
+        "            value = getattr(response, 'result', None)\n"
+        "            if response.action != Action.NONE and value is not None:\n"
+        "                contents.append(value if isinstance(value, str)\n"
+        "                                else json.dumps(value, ensure_ascii=False, default=str))\n"
+    )
+    return once(source, old, new)
+
+
 def files(root):
     changes = {}
     path = "core/connection.py"
@@ -160,6 +183,8 @@ def files(root):
     ).read_text()
     path = "core/providers/tools/server_plugins/plugin_executor.py"
     changes[path] = patch_plugin_executor((root / path).read_text())
+    path = "core/providers/tools/unified_tool_handler.py"
+    changes[path] = patch_unified_tool_handler((root / path).read_text())
     # Verify syntax before modifying any build source.
     for name, source in changes.items():
         compile(source, name, "exec")
