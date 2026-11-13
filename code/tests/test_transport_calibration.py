@@ -208,6 +208,24 @@ async def test_persistent_mjpeg_video_feeds_existing_snapshot_callers(settings, 
         assert not head._stream_connected
 
 
+
+async def test_visual_stream_outage_never_silently_falls_back_to_jpeg_polls(
+    settings, tokens,
+):
+    calls = []
+
+    async def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, content=b"\xff\xd8fallback\xff\xd9")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        head.require_stream()
+        with pytest.raises(HeadError, match="stream is not connected"):
+            await head.snapshot()
+        assert calls == []  # No hidden /api/camera.jpg polling.
+
+
 async def test_mjpeg_duplicate_camera_identity_cannot_replay_frame(settings, tokens):
     async def handler(request):
         return httpx.Response(
