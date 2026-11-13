@@ -728,7 +728,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             key in transcript.casefold()
             for key in ("battery", "charge level", "power level", "cell voltage")
         )
-        for item in choices[:3] if isinstance(choices, list) else []:
+        # Ignore a few malformed or forbidden model suggestions without
+        # losing a later legitimate second observation. The scan is bounded,
+        # and at most two approved read-only routes are ever returned.
+        for item in choices[:8] if isinstance(choices, list) else []:
             route = item.get("route") if isinstance(item, dict) else None
             if route == "status" and battery_question:
                 # Ollama can choose a general read-only status tool, but a
