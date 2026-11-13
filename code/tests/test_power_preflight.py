@@ -42,13 +42,13 @@ def test_candidate_never_approved_by_rounding_down_current_requirement():
     # Actual input need is 1.529411... A, so the displayed minimum is
     # conservatively rounded UP to 1.530 rather than a misleading 1.529.
     low = tool(
-        0.6, 0.4, boost_max_input_a=1.529, boost_continuous_input_a=2,
+        0.6, 0.4, boost_max_input_a=1.529, boost_continuous_input_a=1.529,
         boost_continuous_output_a=1, protected_cell_continuous_a=2,
     )
     assert low["minimum_rated_cell_and_boost_input_a"] == 1.53
     assert low["candidate_electrically_sufficient_on_paper"] is False
     enough = tool(
-        0.6, 0.4, boost_max_input_a=1.53, boost_continuous_input_a=2,
+        0.6, 0.4, boost_max_input_a=1.53, boost_continuous_input_a=1.53,
         boost_continuous_output_a=1, protected_cell_continuous_a=2,
     )
     assert enough["candidate_electrically_sufficient_on_paper"] is True
