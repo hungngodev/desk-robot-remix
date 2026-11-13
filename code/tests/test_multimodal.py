@@ -134,6 +134,50 @@ async def test_native_subscriber_gets_quiet_room_frames_from_live_stream_not_vad
         await visual.close()
 
 
+async def test_proactive_pet_can_wake_on_pushed_frame_without_camera_poll():
+    """A native selected stream frame wakes perception without waiting 1.2s."""
+    allow_next = asyncio.Event()
+
+    class LiveHead(Head):
+        async def stream_frames(self):
+            yield image(), time.monotonic()
+            await allow_next.wait()
+            yield image(square=True), time.monotonic()
+            await asyncio.Event().wait()
+
+    head = LiveHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        async with asyncio.timeout(2):
+            while not visual.hub.frames["robot-01"]:
+                await asyncio.sleep(.005)
+        previous = visual.hub.frames["robot-01"][-1].received_at
+        wake = asyncio.create_task(
+            visual.wait_for_proactive_frame(
+                "robot-01", previous, timeout_s=1.2
+            )
+        )
+        await asyncio.sleep(.55)  # actual 2 FPS stream sample gate
+        assert not wake.done()
+        allow_next.set()
+        assert await asyncio.wait_for(wake, timeout=.45)
+        latest = visual.hub.frames["robot-01"][-1]
+        assert latest.received_at > previous
+        assert latest.source == "proactive"
+        assert head.captures == 0
+        # Another already consumed frame may not generate a fake event.
+        assert not await visual.wait_for_proactive_frame(
+            "robot-01", latest.received_at, timeout_s=.04
+        )
+    finally:
+        allow_next.set()
+        await visual.close()
+
+
 async def test_continuous_camera_stream_supplies_voice_frames_without_new_poller():
     class LiveHead(Head):
         async def stream_frames(self):
