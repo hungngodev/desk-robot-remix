@@ -100,6 +100,8 @@ def status(device: str) -> dict:
     if s is None:
         return {"native_omni_enabled": device in _terminal_errors,
                 "native_backend_connected": False,
+                "continuous_av_input_receiving": False,
+                "microphone_last_frame_age_ms": None,
                 "retry_delay_seconds": round(max(
                     0.0, _retry_after.get(device, 0) - time.monotonic()), 2),
                 "last_error": _terminal_errors.get(device),
@@ -115,6 +117,17 @@ def status(device: str) -> dict:
         "native_tool_calls_supported": False,
         "live_transcript_context_enabled": s._live_transcript_enabled,
         "mic_frames_forwarded": s.audio_frames,
+        "microphone_last_frame_age_ms": (
+            round((time.monotonic() - s._last_mic_received_at) * 1000)
+            if s._last_mic_received_at is not None else None
+        ),
+        "continuous_av_input_receiving": (
+            s.connected and not s.closed
+            and s._camera_stream_connected
+            and s._last_mic_received_at is not None
+            and 0 <= time.monotonic() - s._last_mic_received_at < 1.5
+            and s.wire.frames_sent > 0
+        ),
         "jpeg_frames_forwarded": s.wire.frames_sent,
         "camera_frames_selected": s.video_frames_selected,
         "native_proactive_camera_subscription_connected": s._camera_stream_connected,
@@ -177,6 +190,7 @@ class NativeOmniSession:
         self.closed = False
         self.last_error: str | None = None
         self.audio_frames = 0
+        self._last_mic_received_at: float | None = None
         self.model_chunks = 0
         self.head_packets = 0
         self.latest_jpeg: bytes | None = None
@@ -274,6 +288,7 @@ class NativeOmniSession:
             return
         try:
             self.incoming.put_nowait(MicFrame(pcm, speech))
+            self._last_mic_received_at = time.monotonic()
         except asyncio.QueueFull:
             # Never quietly drop a block of live speech and then hallucinate
             # that the model heard the complete utterance.
