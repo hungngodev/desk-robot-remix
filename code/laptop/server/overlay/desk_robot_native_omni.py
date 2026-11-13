@@ -120,6 +120,7 @@ def status(device: str) -> dict:
         "native_proactive_camera_subscription_connected": s._camera_stream_connected,
         "camera_frames_skipped_static": s.video_frames_skipped_static,
         "camera_frames_skipped_duplicate": s.video_frames_skipped_duplicate,
+        "camera_frames_skipped_stale": s.video_frames_skipped_stale,
         "heard_memories_stored": s.heard_memories_stored,
         "heard_memories_dropped": s.heard_memories_dropped,
         "heard_live_delivered": s.heard_live_delivered,
@@ -259,6 +260,7 @@ class NativeOmniSession:
         self.video_frames_selected = 0
         self.video_frames_skipped_static = 0
         self.video_frames_skipped_duplicate = 0
+        self.video_frames_skipped_stale = 0
 
     def queue_mic(self, pcm: bytes, speech: bool) -> None:
         """Return immediately to the upstream VAD/audio callback."""
@@ -1233,6 +1235,14 @@ class NativeOmniSession:
                             # Read-only image input belongs to the selected
                             # model even if no one is currently talking.
                             now = time.monotonic()
+                            # Both processes run on the same Mac monotonic
+                            # clock. The producer's age is measured BEFORE
+                            # network delivery; trust its original receipt,
+                            # never reinterpret a delayed frame as fresh.
+                            live_age_ms = (now * 1_000_000 - receipt) / 1000
+                            if not 0 <= live_age_ms <= 1000:
+                                self.video_frames_skipped_stale += 1
+                                continue
                             if (self._latest_frame_receipt_us is not None
                                     and receipt <= self._latest_frame_receipt_us):
                                 # A reordered network packet is not a new
@@ -1242,7 +1252,7 @@ class NativeOmniSession:
                                   or motion >= 15_000
                                   or now - self._last_video_selected_at >= 0.95):
                                 self.latest_jpeg = jpeg
-                                self.latest_frame_time = now - age / 1000
+                                self.latest_frame_time = receipt / 1_000_000
                                 self._latest_frame_receipt_us = receipt
                                 self._last_video_selected_at = now
                                 self.video_frames_selected += 1
