@@ -1956,6 +1956,66 @@ async def test_native_tool_chat_revoked_consent_cannot_speak_prefetched_private_
     assert session.native_tool_audio_queued == 0
 
 
+
+@pytest.mark.parametrize("failure", ["service_unavailable", "wrong_robot"])
+async def test_native_private_tool_needs_fresh_consent_when_mac_context_unavailable(
+    native, failure,
+):
+    """An old private result must not be voiced when Mac cannot reauthorize it."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (2, 5)
+    session._memory_tools_enabled = True
+
+    class Reply:
+        status = 503 if failure == "service_unavailable" else 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-02",  # Not this robot's authority
+                "model_context": "",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "memory_tools_enabled": True,
+                "transcript_memory_enabled": False,
+            }
+
+    class Mac:
+        def get(self, *_args, **_kwargs):
+            return Reply()
+
+        def post(self, *_args, **_kwargs):
+            raise AssertionError("Private facts leaked to MiniCPM speech backend")
+
+    await session._speak_tool_results(
+        Mac(), "What do you remember?", [
+            {"source": "private_opt_in_memory_not_current_sight",
+             "recollections": [{"summary": "past private detail"}]},
+        ], 2, 5,
+    )
+    assert session.closed
+    assert session.last_error == (
+        "Cannot revalidate Mac private memory consent for tool speech"
+    )
+    assert session.outgoing.empty()
+    assert session.native_tool_audio_queued == 0
+
+
 def test_native_turn_cleanup_preserves_dialogue_but_clears_old_tool_claims(
     native,
 ):
@@ -2663,7 +2723,7 @@ async def test_failed_tool_speech_releases_native_floor_without_duplicate(
     session.connected = True
     session._live_transcript_enabled = True
     session._tool_speech_turn = (0, 0)
-    async def scene(http, epoch, turn):
+    async def scene(http, epoch, turn, **_kwargs):
         return "One uncertain touch event"
     session._current_tool_scene = scene
 

@@ -718,6 +718,7 @@ class NativeOmniSession:
 
     async def _current_tool_scene(
         self, http: aiohttp.ClientSession, epoch: int, request_turn: int,
+        *, require_private_consent: bool = False,
     ) -> str:
         """Read real transient sensor, speech and vision context from Mac.
 
@@ -725,6 +726,13 @@ class NativeOmniSession:
         A camera JPEG receipt alone cannot authorize a visual claim. Never
         request persistent memory through this endpoint.
         """
+        def unverified() -> str:
+            # Normal sensor context is optional. A PRIVATE memory receipt,
+            # however, cannot be spoken without a fresh Mac consent check.
+            if require_private_consent and not self.closed:
+                self.fail("Cannot revalidate Mac private memory consent for tool speech")
+            return ""
+
         if (self.closed or not self.connected
                 or self._tool_speech_turn != (epoch, request_turn)):
             return ""
@@ -738,7 +746,7 @@ class NativeOmniSession:
                     self.fail("Mac live context permission revoked")
                     return ""
                 if response.status != 200:
-                    return ""
+                    return unverified()
                 info = await response.json()
             if (not isinstance(info, dict)
                     or info.get("robot_id") != self.robot
@@ -747,7 +755,7 @@ class NativeOmniSession:
                     or info.get("model_context_untrusted_not_instructions") is not True
                     or info.get("motor_authorized") is not False
                     or info.get("charging_authorized") is not False):
-                return ""
+                return unverified()
             # A completed memory lookup may outlive permission revocation.
             # Returning empty context here would still allow the already
             # fetched PRIVATE facts to reach the speech model. Retire the
@@ -763,16 +771,16 @@ class NativeOmniSession:
                 return ""
             context = info.get("model_context")
             if (self.closed or not self.connected
-                    or self._tool_speech_turn != (epoch, request_turn)
-                    or not isinstance(context, str)
-                    or len(context) > 400):
+                    or self._tool_speech_turn != (epoch, request_turn)):
                 return ""
+            if not isinstance(context, str) or len(context) > 400:
+                return unverified()
             return " ".join(context.split())
         except (AttributeError, aiohttp.ClientError, asyncio.TimeoutError,
                 ValueError, TypeError):
-            # The already validated read-only tool result remains usable.
-            # A failed optional context poll must not block speech.
-            return ""
+            # Nonprivate sensor facts may survive a missing optional poll.
+            # Previously fetched private memories require current consent.
+            return unverified()
 
     def _tool_dialogue_context(self, now: float) -> str:
         """Only genuinely transmitted previous output from this session."""
@@ -834,8 +842,13 @@ class NativeOmniSession:
         )
         # Keep current physical sensor and camera-tool cues alongside the
         # human question; don't force the next model to invent continuity.
+        private_facts = any(
+            isinstance(fact, dict)
+            and fact.get("source") == "private_opt_in_memory_not_current_sight"
+            for fact in facts
+        )
         live_scene = await self._current_tool_scene(
-            http, epoch, request_turn,
+            http, epoch, request_turn, require_private_consent=private_facts,
         )
         if self.closed or self._tool_speech_turn != (epoch, request_turn):
             return
