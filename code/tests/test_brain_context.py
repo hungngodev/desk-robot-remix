@@ -744,3 +744,19 @@ def test_two_asr_chunks_within_one_voice_turn_remain_available():
     result = compose_brain_context([], [], timeline).interaction
     assert "Recent model ASR guess" in result
     assert "Earlier model ASR guess" in result
+
+
+def test_new_voice_without_completed_asr_cannot_reuse_prior_question():
+    # A fresh VAD may arrive before its ASR. Old completed words belong to
+    # the previous human turn and must not enter the new prompt.
+    timeline = [
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Check your battery"},
+        {"channel": "human_voice", "kind": "voice_start"},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ]
+    output = compose_brain_context([], [], timeline).interaction
+    assert "Authenticated human voice turn" in output
+    assert "Physical sensor edge: touch_tap" in output
+    assert "Check your battery" not in output
+    assert "model ASR guess" not in output
