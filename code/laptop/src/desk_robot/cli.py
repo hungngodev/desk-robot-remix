@@ -200,7 +200,7 @@ async def request(args, settings):
             result = await client.get(f"/v1/robots/{args.robot}/status")
         elif args.action == "job":
             result = await client.get(f"/v1/jobs/{args.job}")
-        elif args.action in ("look", "situation", "vision"):
+        elif args.action in ("look", "situation", "vision", "power"):
             if settings.mode != "hardware":
                 raise ValueError("Live camera tools require a physical XIAO head")
             settings.robot(args.robot)  # Validate configured robot identity.
@@ -217,6 +217,10 @@ async def request(args, settings):
             elif args.action == "situation":
                 result = await client.get(
                     f"/v1/pet/{args.robot}/interaction-context", timeout=8,
+                )
+            elif args.action == "power":
+                result = await client.get(
+                    f"/v1/pet/{args.robot}/power-status", timeout=8,
                 )
             else:
                 result = await client.get(
@@ -271,12 +275,14 @@ def main():
             part.add_argument("command", help='One bounded command, e.g. "drive 15 15 100"')
         if action == "pickup":
             part.add_argument("target", choices=["key", "candy"])
-    for action in ("look", "situation", "vision"):
+    for action in ("look", "situation", "vision", "power"):
         part = sub.add_parser(action, help=(
             "Ask the real XIAO camera and local vision model"
             if action == "look" else
             "Inspect recent private transient sensor, tool and voice context"
             if action == "situation" else
+            "Read raw WROOM fuel gauge data, never verified charging"
+            if action == "power" else
             "Read actual Mac camera and model diagnostics"
         ))
         part.add_argument("robot")
