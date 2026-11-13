@@ -214,3 +214,18 @@ def test_repeated_shake_sample_does_not_reconfirm_gesture():
     assert qualified(gate, sample(acc=(0, 0, 26000), gyro=(16500, 0, 0),
                                   sample_ms=200001),
                      102.5, new_sample=False) == ("handling_shake",)
+
+
+def test_reconnect_cannot_reuse_same_imu_conversion_as_new_baseline():
+    gate = HandlingGate()
+    frame = sample(sample_ms=9000)
+    assert qualified(gate, frame, 100.0, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
+    # A reconnect with falsely refreshed age_ms is not a new conversion.
+    assert qualified(gate, frame, 102.0, new_sample=False) == ()
+    assert gate.reference is None and gate.startup_samples == []
+    assert qualified(gate, frame, 102.1, new_sample=False) == ()
+    assert gate.startup_samples == []
+    # A genuinely new conversion may start a new stationary calibration.
+    assert qualified(gate, sample(sample_ms=9001), 102.2, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
