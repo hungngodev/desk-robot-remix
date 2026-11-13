@@ -1416,7 +1416,9 @@ async def test_operator_interrupt_reuses_native_generation_flush_not_duplicate_s
     headers = {"Authorization": "Bearer " + "s" * 40}
     async with TestClient(TestServer(bridge.create_app())) as client:
         response = await client.post(
-            "/interrupt", headers=headers, json={"device_id": "mac-01"}
+            "/interrupt", headers=headers, json={
+                "device_id": "mac-01", "revoke_initiative": True,
+            }
         )
     assert response.status == 200
     assert (await response.json())["interrupted"] is True
@@ -1452,7 +1454,9 @@ async def test_broken_native_voice_cannot_block_operator_physical_speaker_stop(
     headers = {"Authorization": "Bearer " + "s" * 40}
     async with TestClient(TestServer(bridge.create_app())) as client:
         response = await client.post(
-            "/interrupt", headers=headers, json={"device_id": "mac-01"}
+            "/interrupt", headers=headers, json={
+                "device_id": "mac-01", "revoke_initiative": True,
+            }
         )
         assert response.status == 200
         body = await response.json()
@@ -1462,5 +1466,45 @@ async def test_broken_native_voice_cannot_block_operator_physical_speaker_stop(
         "type": "tts", "state": "stop",
         "session_id": "physical-private-01", "flush": True,
     }]
+    assert bridge.interrupt_generation["mac-01"] == 1
+    assert first.client_abort is True
+
+
+async def test_normal_human_barge_cancels_native_reply_without_muting_pet(
+    bridge, monkeypatch,
+):
+    """Normal human interruptions may never call operator quiet/revoke."""
+    events = []
+    first = conn("mac-01")
+    first.session_id = "direct-voice"
+    bridge.register(first)
+
+    async def ordinary_barge(current):
+        assert current is first
+        events.append("cancel_this_generation")
+        return True
+
+    async def forbidden_operator_revoke(_current):
+        raise AssertionError("Normal speech must not change operator policy")
+
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni", SimpleNamespace(
+        on_barge=ordinary_barge,
+        suspend_proactive_for_operator=forbidden_operator_revoke,
+    ))
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        result = await client.post(
+            "/interrupt", headers=headers, json={"device_id": "mac-01"}
+        )
+        assert result.status == 200
+        # A malformed permission flag cannot silently become an operator
+        # authorization to change future proactive behavior.
+        invalid = await client.post(
+            "/interrupt", headers=headers, json={
+                "device_id": "mac-01", "revoke_initiative": "yes",
+            },
+        )
+        assert invalid.status == 400
+    assert events == ["cancel_this_generation"]
     assert bridge.interrupt_generation["mac-01"] == 1
     assert first.client_abort is True
