@@ -283,6 +283,9 @@ def files(root):
     changes["desk_robot_native_omni.py"] = (
         HERE / "overlay/desk_robot_native_omni.py"
     ).read_text()
+    changes["desk_robot_voice_intents.py"] = (
+        HERE / "overlay/desk_robot_voice_intents.py"
+    ).read_text()
     # Reuse the same vLLM Omni protocol from the Mac package.
     changes["desk_robot_omni_wire.py"] = (
         HERE.parent / "src/desk_robot/realtime_omni_protocol.py"
