@@ -211,6 +211,9 @@ class NativeOmniSession:
         self._context_last_sync_at = float("-inf")
         self.native_context_updates = 0
         self.native_context_errors = 0
+        # Tool identity advances on the next HUMAN request, not on the end
+        # of the current utterance. Video turns also advance at speech_end.
+        self._readonly_turn = 0
         self._readonly_queue: asyncio.Queue[tuple[str, dict, int, int]] = (
             asyncio.Queue(maxsize=3)
         )
@@ -487,7 +490,7 @@ class NativeOmniSession:
         self._readonly_seen.add(item)
         try:
             self._readonly_queue.put_nowait(
-                (*request, self._generation, self._video_turn)
+                (*request, self._generation, self._readonly_turn)
             )
         except asyncio.QueueFull:
             self.native_readonly_tools_dropped += 1
@@ -500,8 +503,8 @@ class NativeOmniSession:
         A slow vision call is cancellable; urgent STOP remains independent.
         """
         while not self.closed:
-            route, payload, epoch, video_turn = await self._readonly_queue.get()
-            if (epoch != self._generation or video_turn != self._video_turn
+            route, payload, epoch, request_turn = await self._readonly_queue.get()
+            if (epoch != self._generation or request_turn != self._readonly_turn
                     or not self.connected):
                 continue
             try:
@@ -513,7 +516,7 @@ class NativeOmniSession:
                 result = await pending
                 if (not self.closed and self.connected
                         and self._generation == epoch
-                        and self._video_turn == video_turn
+                        and self._readonly_turn == request_turn
                         and isinstance(result, dict)
                         and not result.get("error")
                         and not result.get("_desk_robot_turn_superseded")):
@@ -610,6 +613,7 @@ class NativeOmniSession:
                     # No image from the preceding spoken turn may be sent
                     # with this voice. Wake the camera without HTTP in VAD.
                     self._video_turn += 1
+                    self._readonly_turn += 1
                     self.latest_jpeg = None
                     self._latest_frame_receipt_us = None
                     self._last_video_sent_receipt_us = None
@@ -800,6 +804,7 @@ class NativeOmniSession:
     async def _invalidate_head_first(self) -> tuple[dict, ...]:
         """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
+        self._readonly_turn += 1
         # A barge-in invalidates both obsolete robot audio and visual
         # context. A camera fetch already in flight must not reintroduce
         # old-turn JPEGs after the head's audio has been flushed.
