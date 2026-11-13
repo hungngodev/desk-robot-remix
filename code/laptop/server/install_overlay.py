@@ -110,6 +110,103 @@ def patch_unified_tool_handler(source: str) -> str:
     return once(source, old, new)
 
 
+def patch_intent_speech_guard(source: str) -> str:
+    """Fence late pinned intent/tool results to the original desk-robot VAD turn.
+
+    The upstream process_function_call worker may outlive a later human speech
+    event. The existing tool HTTP generation guard alone cannot fence the
+    intent model's replyResult or the final synchronous speak_txt enqueue.
+    Only registered desk robot heads are changed.
+    """
+    source = once(
+        source,
+        'async def handle_user_intent(conn: "ConnectionHandler", text):\n',
+        'async def handle_user_intent(conn: "ConnectionHandler", text):\n'
+        '    import desk_robot_bridge as _desk_turn\n'
+        '    _desk_device = getattr(conn, "device_id", None)\n'
+        '    _desk_registered = _desk_turn.robot_for_device(_desk_device) is not None\n'
+        '    _desk_generation = (\n'
+        '        _desk_turn.voice_turn_generation.get(_desk_device, 0)\n'
+        '        if _desk_registered else None\n'
+        '    )\n',
+    )
+    source = once(
+        source, "    return await process_intent_result(conn, intent_result, text)\n",
+        "    return await process_intent_result(\n"
+        "        conn, intent_result, text, expected_generation=_desk_generation\n"
+        "    )\n",
+    )
+    source = once(
+        source,
+        'async def process_intent_result(\n'
+        '    conn: "ConnectionHandler", intent_result, original_text\n'
+        '):\n'
+        '    """处理意图识别结果"""\n',
+        'async def process_intent_result(\n'
+        '    conn: "ConnectionHandler", intent_result, original_text,\n'
+        '    expected_generation=None,\n'
+        '):\n'
+        '    """处理意图识别结果"""\n'
+        '    import desk_robot_bridge as _desk_turn\n'
+        '    def current_utterance():\n'
+        '        return expected_generation is None or (\n'
+        '            _desk_turn.connections.get(conn.device_id) is conn\n'
+        '            and _desk_turn.voice_turn_generation.get(conn.device_id, 0)\n'
+        '                == expected_generation\n'
+        '        )\n'
+        '    if not current_utterance():\n'
+        '        return True  # A newer human turn already owns audio.\n',
+    )
+    source = once(
+        source,
+        '                def process_context_result():\n'
+        '                    conn.dialogue.put(Message(role="user", content=original_text))',
+        '                def process_context_result():\n'
+        '                    if not current_utterance():\n'
+        '                        return\n'
+        '                    conn.dialogue.put(Message(role="user", content=original_text))',
+    )
+    source = once(
+        source,
+        '                    if response:\n'
+        '                        speak_txt(conn, response)\n',
+        '                    if response and current_utterance():\n'
+        '                        speak_txt(conn, response)\n',
+    )
+    source = once(
+        source,
+        '            def process_function_call():\n'
+        '                conn.dialogue.put(Message(role="user", content=original_text))',
+        '            def process_function_call():\n'
+        '                if not current_utterance():\n'
+        '                    return\n'
+        '                if expected_generation is None:\n'
+        '                    conn.dialogue.put(Message(role="user", content=original_text))',
+    )
+    source = once(
+        source,
+        '                # 上报工具调用结果\n'
+        '                if result:\n',
+        '                # The new voice owner must not receive an old tool result,\n'
+        '                # TTS or dialogue history even if replyResult is still busy.\n'
+        '                if not current_utterance():\n'
+        '                    return\n'
+        '                if expected_generation is not None:\n'
+        '                    conn.dialogue.put(Message(role="user", content=original_text))\n'
+        '                # 上报工具调用结果\n'
+        '                if result:\n',
+    )
+    source = once(
+        source,
+        '                        speak_txt(conn, llm_result)\n',
+        '                        if current_utterance():\n'
+        '                            speak_txt(conn, llm_result)\n',
+    )
+    # Synchronous result branches have no await once the turn is checked;
+    # only the possibly slow nested replyResult requires a second fence.
+    return source
+
+
 def files(root):
     changes = {}
     path = "core/connection.py"
@@ -185,6 +282,8 @@ def files(root):
     changes[path] = patch_plugin_executor((root / path).read_text())
     path = "core/providers/tools/unified_tool_handler.py"
     changes[path] = patch_unified_tool_handler((root / path).read_text())
+    path = "core/handle/intentHandler.py"
+    changes[path] = patch_intent_speech_guard((root / path).read_text())
     # Verify syntax before modifying any build source.
     for name, source in changes.items():
         compile(source, name, "exec")
