@@ -103,6 +103,17 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         or polite.startswith(("did you pick up", "have you picked up"))
     ):
         return "latest-pickup", {}
+    # A physical battery estimate comes from the real WROOM auxiliary fuel
+    # gauge, not from generic motor status. An absent/unqualified gauge must
+    # return unavailable rather than a fabricated percentage.
+    if (re.match(r"^(?:check|what|how|is|are|tell|show)\b", polite)
+            and re.search(r"\b(?:battery|charge level|power level|"
+                          r"battery voltage|cell voltage)\b", polite)):
+        return "power-status", {}
+    if re.match(
+        r"^(?:how much (?:battery|power) (?:is )?left)\b", polite
+    ):
+        return "power-status", {}
     if (
         re.match(r"^(?:check|what|how|is|are|tell)\b", polite)
         and re.search(
@@ -757,7 +768,7 @@ class NativeOmniSession:
                     # fences. Never present planner guesses as scene facts.
                     intents = result.get("tools")
                     allowed = {
-                        "look", "status", "latest-pickup",
+                        "look", "status", "power-status", "latest-pickup",
                         "interaction-context", "voice-context",
                     }
                     if (not isinstance(intents, list) or len(intents) > 2
