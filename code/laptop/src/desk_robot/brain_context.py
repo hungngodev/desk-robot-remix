@@ -251,9 +251,27 @@ def compose_brain_context(
         ):
             requested_tool = "robot_status"
             break
+    requested_tools = {requested_tool} if requested_tool is not None else set()
+    if heard_requests:
+        # One completed ASR utterance may request TWO independent tools.
+        # The speech router preserves those clauses, so the bounded prompt
+        # must not preferentially omit the second result.
+        latest = heard_requests[0]
+        if re.search(
+            r"\\b(?:(?:can|could|would) you (?:please )?look|"
+            r"(?:and|then|also) (?:can you |please )?look)\\b", latest,
+        ):
+            requested_tools.add("visual_look")
+        if re.search(
+            r"\\b(?:(?:can|could|would) you (?:please )?check "
+            r"(?:your |the )?battery|"
+            r"(?:and|then|also) (?:please )?(?:check (?:your |the )?"
+            r"battery|how much battery|what(?:'s| is) your battery))\\b",
+            latest,
+        ):
+            requested_tools.add("robot_status")
     cue_parts.sort(key=lambda candidate: (
-        0.5 if requested_tool is not None and candidate[2] == requested_tool
-        else candidate[0]
+        0.5 if candidate[2] in requested_tools else candidate[0]
     ))
     selected: list[str] = []
     remaining = 400
