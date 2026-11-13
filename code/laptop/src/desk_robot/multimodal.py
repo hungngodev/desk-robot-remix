@@ -498,6 +498,29 @@ class CameraFrameHub:
                 if items[index][1]["channel"] == channel:
                     required.add(index)
                     break
+        # A fleet pet can finish a memory lookup, camera question and
+        # status tool within one short human utterance. Reserving only the
+        # latest generic "tool" would erase the other completed results
+        # during a sensor burst before the brain can format them.
+        if limit > len(modalities):
+            seen_tools = {
+                items[i][1].get("kind") for i in required
+                if items[i][1]["channel"] == "tool"
+            }
+            heard = sum(
+                items[i][1]["channel"] == "human_transcript"
+                for i in required
+            )
+            for index in range(len(items) - 1, -1, -1):
+                if len(required) >= limit:
+                    break
+                entry = items[index][1]
+                if entry["channel"] == "human_transcript" and heard < 2:
+                    required.add(index)
+                    heard += 1
+                elif entry["channel"] == "tool" and entry.get("kind") not in seen_tools:
+                    required.add(index)
+                    seen_tools.add(entry.get("kind"))
         selected = set(required)
         for index in range(len(items) - 1, -1, -1):
             if len(selected) >= limit:
