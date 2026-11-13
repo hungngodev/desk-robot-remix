@@ -20,6 +20,7 @@ import os
 import re
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -297,6 +298,12 @@ class NativeOmniSession:
         # Tool identity advances on the next HUMAN request, not on the end
         # of the current utterance. Video turns also advance at speech_end.
         self._readonly_turn = 0
+        # Bind model-estimated ASR to its actual committed audio item. The
+        # backend can deliver an OLD transcript after a NEW VAD turn starts.
+        # Never infer a transcript's owner from receive time alone.
+        self._pending_audio_commits: deque[tuple[int, int]] = deque()
+        self._asr_item_turns: dict[str, tuple[int, int]] = {}
+        self._server_input_turn_id: int | None = None
         self._readonly_queue: asyncio.Queue[tuple[str, dict, int, int]] = (
             asyncio.Queue(maxsize=3)
         )
@@ -410,6 +417,50 @@ class NativeOmniSession:
                     )
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             return
+
+    def _bind_native_audio_commit(self, event: dict) -> None:
+        """Pair a server committed item ID with its local VAD/interrupt epoch.
+
+        vLLM-Omni sends input_audio_buffer.committed before the related
+        conversation.item.input_audio_transcription.completed. Pair commits
+        in one ordered WebSocket with the bounded local commit FIFO.
+        """
+        item = event.get("item_id")
+        native = event.get("event")
+        turn_id = native.get("turn_id") if isinstance(native, dict) else None
+        if (not isinstance(item, str) or not 1 <= len(item) <= 128
+                or not item.isascii() or type(turn_id) is not int
+                or turn_id < 0 or item in self._asr_item_turns):
+            self.native_readonly_tools_dropped += 1
+            return
+        if (self._server_input_turn_id is not None
+                and turn_id != self._server_input_turn_id + 1):
+            # Missing, reordered or replayed server commits cannot safely
+            # bind an item to this real human. Fail closed, not misattribute.
+            self.fail("Native model audio commit sequence inconsistent")
+            return
+        if not self._pending_audio_commits:
+            self.native_readonly_tools_dropped += 1
+            return
+        self._server_input_turn_id = turn_id
+        if len(self._asr_item_turns) >= 32:
+            self._asr_item_turns.pop(next(iter(self._asr_item_turns)))
+        self._asr_item_turns[item] = self._pending_audio_commits.popleft()
+
+    def _accept_current_audio_item(self, event: dict) -> bool:
+        """Consume this exact completed ASR item only in its original turn."""
+        item = event.get("item_id")
+        if not isinstance(item, str):
+            return False
+        original = self._asr_item_turns.pop(item, None)
+        accepted = (
+            original == (self._generation, self._readonly_turn)
+            and not self.closed and self.connected
+            and not self._user_was_talking
+        )
+        if not accepted:
+            self.native_readonly_tools_dropped += 1
+        return accepted
 
     def _accept_heard_transcript(self, event: dict) -> None:
         """Queue optional completed ASR without ever blocking mic or Opus."""
@@ -867,6 +918,12 @@ class NativeOmniSession:
             elif was_talking:
                 self._silent_frames += 1
                 if self._silent_frames >= 3:
+                    if len(self._pending_audio_commits) >= 16:
+                        self.fail("Native model input commit acknowledgements stalled")
+                        return
+                    self._pending_audio_commits.append((
+                        self._generation, self._readonly_turn,
+                    ))
                     await self._send(self.wire.commit(final=True))
                     self._silent_frames = 0
                     self._user_was_talking = False
@@ -889,9 +946,12 @@ class NativeOmniSession:
             # A model response may be interrupted at any time. Use a bounded
             # FIFO and response identity, never detached unbounded audio tasks.
             pcm = self.wire.handle_event(event)
-            if kind == "conversation.item.input_audio_transcription.completed":
-                self._accept_heard_transcript(event)
-                self._queue_readonly_tool(event)
+            if kind == "input_audio_buffer.committed":
+                self._bind_native_audio_commit(event)
+            elif kind == "conversation.item.input_audio_transcription.completed":
+                if self._accept_current_audio_item(event):
+                    self._accept_heard_transcript(event)
+                    self._queue_readonly_tool(event)
             elif kind == "response.done" and self._live_transcript_enabled:
                 # Refresh the next model turn from the same Mac evidence
                 # owner. Never await tool/context HTTP in audio reception.
