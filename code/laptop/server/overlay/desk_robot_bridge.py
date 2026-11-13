@@ -683,12 +683,23 @@ def create_app():
             raise RuntimeError("Robot is offline")
         interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
         connection.client_abort = True
-        # Device firmware expects a stop with flush=True, not PR #7's earlier
-        # abort frame. The actual Sense overlay handles the decoder/DMA reset.
-        await connection.websocket.send(json.dumps({
-            "type": "tts", "state": "stop",
-            "session_id": connection.session_id, "flush": True,
-        }))
+        # Operator quiet and pause must also invalidate the native output
+        # generation, not merely issue one STOP while a MiniCPM stream keeps
+        # sending 60ms Opus packets afterwards. Reuse its existing urgent
+        # physical decoder flush and remote cancellation.
+        native = _native_adapter()
+        stopped_native = False
+        if native is not None:
+            suspend = getattr(native, "suspend_proactive_for_operator", None)
+            if callable(suspend):
+                stopped_native = await suspend(connection)
+        if not stopped_native:
+            # Normal Mac Kokoro playback, still through the same XIAO
+            # decoder. The actual Sense overlay handles decoder/DMA reset.
+            await connection.websocket.send(json.dumps({
+                "type": "tts", "state": "stop",
+                "session_id": connection.session_id, "flush": True,
+            }))
         return web.json_response({
             "interrupted": True,
             "device_id": device,
