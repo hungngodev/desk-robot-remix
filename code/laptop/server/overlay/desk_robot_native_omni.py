@@ -93,6 +93,33 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
     )
     if re.match(r"^(?:" + look + r")", polite):
         return "look", {"question": text}
+    # A person can ask about a visible attribute or spatial relationship
+    # without saying "look" or "see". Keep this limited to explicit visual
+    # questions; do not turn statements, memories or motor requests into tools.
+    visual_attribute = re.match(
+        r"^what (?:colou?r|shape|size) (?:is|are)\b", polite,
+    )
+    scene_location = re.search(
+        r"\b(?:on (?:my|the) (?:desk|table)|"
+        r"in (?:the|this|your) (?:photo|picture|image|frame|camera)|"
+        r"in front of (?:me|you)|next to|beside|behind|visible)\b",
+        polite,
+    )
+    visual_count = re.match(r"^(?:how many|can you count)\b", polite)
+    visual_relation = re.match(
+        r"^(?:is|are) (?:there\b|(?:this|that|the|my) [a-z0-9-]+\b)",
+        polite,
+    )
+    visible_text = (
+        re.match(
+            r"^does (?:this|that|the|my) (?:screen|display|label)\b",
+            polite,
+        )
+        and re.search(r"\b(?:say|read|show)\b", polite)
+    )
+    if (visual_attribute or (scene_location and (visual_count or visual_relation))
+            or visible_text):
+        return "look", {"question": text}
     # A status query must ASK about an existing action. Merely saying
     # "pick up the key" must NEVER be interpreted as a job submission.
     if re.match(
