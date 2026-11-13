@@ -486,6 +486,37 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # answer. Return an explicit conflict, never old model text.
             raise OperationError(str(exc)) from exc
 
+    @app.get("/v1/pet/{robot_id}/interaction-context",
+             dependencies=[Depends(authorize)])
+    async def pet_live_situation(robot_id: str):
+        """Live context is distinct from durable history permission.
+
+        A person may opt into present camera/sensor interaction without
+        granting the model permission to inspect persistent SQLite memories.
+        No raw JPEG/PCM, camera exposure claim or actuator permit is returned.
+        """
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
+        if not settings.voice_vision_tools_enabled:
+            raise HTTPException(403, "Opt in to live camera/sensor context first")
+        visual = getattr(app.state.runtime, "multimodal", None)
+        if visual is None:
+            raise OperationError("No current multimodal camera/sensor owner")
+        now = time.monotonic()
+        return {
+            "robot_id": robot_id,
+            "current_interaction_timeline": visual.hub.interaction_timeline(
+                robot_id, now, limit=10
+            ),
+            "persistent_memory_included": False,
+            "raw_media_included": False,
+            "source_exposure_timestamp_verified": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+
     @app.get("/v1/pet/{robot_id}/voice-context", dependencies=[Depends(authorize)])
     async def pet_voice_context(
         robot_id: str, query: str | None = Query(default=None, max_length=240),
