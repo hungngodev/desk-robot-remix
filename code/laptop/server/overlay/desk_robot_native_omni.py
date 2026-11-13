@@ -772,12 +772,15 @@ class NativeOmniSession:
                         "interaction-context", "voice-context",
                     }
                     if (not isinstance(intents, list) or len(intents) > 2
+                            or result.get("untrusted_model_selection") is not True
+                            or result.get("model_can_arm_motors") is not False
                             or any(
                                 not isinstance(planned, dict)
                                 or planned.get("route") not in allowed
                                 or not isinstance(planned.get("payload"), dict)
                                 for planned in intents
-                            )):
+                            )
+                            or len({p["route"] for p in intents}) != len(intents)):
                         # Never partially accept a malformed agent plan,
                         # even if another layer already validates it.
                         self.native_readonly_tools_dropped += 1
