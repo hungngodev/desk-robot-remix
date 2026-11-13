@@ -131,6 +131,18 @@ def patch_intent_speech_guard(source: str) -> str:
         '    )\n',
     )
     source = once(
+        source,
+        '    if conn.intent_type == "function_call":\n',
+        '    if _desk_registered:\n'
+        '        await _desk_turn.inject_live_context_into_legacy_llm(conn)\n'
+        '        # Live context HTTP must not delay a now-obsolete human turn.\n'
+        '        if (_desk_turn.connections.get(_desk_device) is not conn\n'
+        '                or _desk_turn.voice_turn_generation.get(_desk_device, 0)\n'
+        '                    != _desk_generation):\n'
+        '            return True\n'
+        '    if conn.intent_type == "function_call":\n',
+    )
+    source = once(
         source, "    return await process_intent_result(conn, intent_result, text)\n",
         "    return await process_intent_result(\n"
         "        conn, intent_result, text, expected_generation=_desk_generation\n"
