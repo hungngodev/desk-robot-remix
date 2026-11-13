@@ -112,8 +112,8 @@ def compose_brain_context(
     cue_parts: list[tuple[int, str]] = []
     seen_cues: set[tuple[str, str]] = set()
     priorities = {
-        "tool": 0, "sensor": 1, "human_voice": 2,
-        "robot_speech": 3, "camera": 4,
+        "human_transcript": 0, "tool": 1, "sensor": 2,
+        "human_voice": 3, "robot_speech": 4, "camera": 5,
     }
     for item in reversed(timeline[-16:]):
         if not isinstance(item, dict):
@@ -132,6 +132,13 @@ def compose_brain_context(
             phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
         elif channel == "human_voice":
             phrase = "Authenticated human voice turn"
+        elif channel == "human_transcript" and kind == "model_asr_completed":
+            value = item.get("content")
+            if isinstance(value, str) and value.strip():
+                phrase = (
+                    "Recent model ASR guess, not a verified command: "
+                    + _clean(value, limit=105)
+                )
         elif channel == "camera":
             phrase = "XIAO frame received (contents not inferred)"
         elif channel == "tool" and kind == "visual_look":
