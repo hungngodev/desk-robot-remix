@@ -1107,7 +1107,7 @@ class NativeOmniSession:
 
     async def _run_readonly_batch(
         self, entries: list[tuple[str, dict, int, int]],
-    ) -> None:
+    ) -> list[dict]:
         """Bounded concurrent reads; a slow VLM cannot block battery status.
 
         The existing authenticated Mac tool adapter remains the only
@@ -1203,12 +1203,7 @@ class NativeOmniSession:
                 fact = native_grounded_fact(route, result)
                 if fact is not None:
                     facts.append(fact)
-            if facts and self._tool_speech_turn == (epoch, request_turn):
-                async with aiohttp.ClientSession() as chat_http:
-                    await self._speak_tool_results(
-                        chat_http, self._tool_question, facts,
-                        epoch, request_turn,
-                    )
+            return facts
         finally:
             for task in tasks:
                 if not task.done():
@@ -1216,39 +1211,64 @@ class NativeOmniSession:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _readonly_tool_worker(self) -> None:
-        """One bounded fleet-safe executor for native read-only questions."""
+        """Coalesce related ASR clauses and semantic planner tools before speech.
+
+        A slow camera result must not produce an incomplete answer while a
+        battery/memory clause is still queued. The 250ms quiet grace is
+        bounded; no motor action or image capture is executed by this worker.
+        """
+        carry = None
         while not self.closed:
-            first = await self._readonly_queue.get()
+            first = carry if carry is not None else await self._readonly_queue.get()
+            carry = None
             epoch, request_turn = first[2:]
             if (epoch != self._generation
                     or request_turn != self._readonly_turn
                     or not self.connected):
                 continue
-            batch = [first]
-            # A completed ASR event enqueues all of its clauses without
-            # yielding the loop. Drain at most two more bounded requests.
-            for _ in range(2):
+            collected: list[dict] = []
+            while not self.closed:
+                batch = [first]
+                for _ in range(2):
+                    try:
+                        item = self._readonly_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if item[2:] == (epoch, request_turn):
+                        batch.append(item)
+                    else:
+                        self.native_readonly_tools_dropped += 1
+                pending = asyncio.create_task(self._run_readonly_batch(batch))
+                self._readonly_inflight = pending
                 try:
-                    next_item = self._readonly_queue.get_nowait()
-                except asyncio.QueueEmpty:
+                    collected.extend(await pending)
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling():
+                        raise
+                    # A new human turn invalidated this optional batch.
                     break
-                if next_item[2:] == (epoch, request_turn):
-                    batch.append(next_item)
-                else:
-                    self.native_readonly_tools_dropped += 1
-            pending = asyncio.create_task(self._run_readonly_batch(batch))
-            self._readonly_inflight = pending
-            try:
-                await pending
-            except asyncio.CancelledError:
-                if asyncio.current_task().cancelling():
-                    raise
-                # The VAD/interrupt owner cancelled an old tool batch,
-                # not the permanent native audio or camera worker.
-                continue
-            finally:
-                if self._readonly_inflight is pending:
-                    self._readonly_inflight = None
+                finally:
+                    if self._readonly_inflight is pending:
+                        self._readonly_inflight = None
+                if (self.closed or epoch != self._generation
+                        or request_turn != self._readonly_turn):
+                    break
+                try:
+                    first = await asyncio.wait_for(
+                        self._readonly_queue.get(), timeout=0.25,
+                    )
+                except TimeoutError:
+                    break
+                if first[2:] != (epoch, request_turn):
+                    carry = first
+                    break
+            if (collected and self.connected and not self.closed
+                    and self._tool_speech_turn == (epoch, request_turn)):
+                async with aiohttp.ClientSession() as chat_http:
+                    await self._speak_tool_results(
+                        chat_http, self._tool_question,
+                        collected[:3], epoch, request_turn,
+                    )
 
     async def _camera(self, http: aiohttp.ClientSession) -> None:
         """Select real JPEG receipts independently from realtime microphone I/O.
