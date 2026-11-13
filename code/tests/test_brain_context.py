@@ -218,6 +218,11 @@ def test_consent_based_private_memory_tool_is_not_camera_sighting():
     [
         ("What do you remember about my green mug?", "memory_recall"),
         ("What do you see on my desk?", "visual_look"),
+        ("What color is the mug?", "visual_look"),
+        ("What shape is the key?", "visual_look"),
+        ("How many keys are on my desk?", "visual_look"),
+        ("Is the key beside the mug?", "visual_look"),
+        ("Does the screen say READY?", "visual_look"),
         ("Is the pickup job done?", "pickup_status"),
         ("Check your battery status", "robot_status"),
     ],
