@@ -322,6 +322,9 @@ def status(device: str) -> dict:
         "native_readonly_tools_completed": s.native_readonly_tools_completed,
         "native_readonly_tools_dropped": s.native_readonly_tools_dropped,
         "native_tool_audio_queued": s.native_tool_audio_queued,
+        "native_tool_audio_transmitted_not_acknowledged": s.native_tool_audio_sent,
+        "native_recent_dialogue_turns": len(s._tool_dialogue),
+        "mac_proactive_speech_lease_active": s._external_speech_active,
         "native_tool_speech_errors": s.native_tool_speech_errors,
         "tool_audio_playback_acknowledged": False,
         "tool_results_ingested_by_native_duplex_kv": False,
@@ -480,6 +483,7 @@ class NativeOmniSession:
         self._native_output_words: dict[str, dict[str, str]] = {}
         self._last_human_transcript = ""
         self.native_tool_audio_queued = 0
+        self.native_tool_audio_sent = 0
         self.native_tool_speech_errors = 0
         self._heard_session = uuid.uuid4().hex[:12]
         self._heard_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=12)
@@ -1537,6 +1541,8 @@ class NativeOmniSession:
                     if generation == self._generation and current_response:
                         self._tool_audio_sent(current_response, generation)
                         self._native_audio_sent(current_response, generation)
+                        if current_response == self._tool_audio_response_id:
+                            self.native_tool_audio_sent += 1
                         # Native output can yield to Mac proactive comments
                         # after the complete current human tool response.
                         if current_response == self._tool_audio_response_id:
