@@ -1,6 +1,64 @@
 # Native Xiaozhi + adaptive live video: full desk pet orchestration
 
 
+## November 12 integrated Mac brain building blocks
+
+This is **one existing robot architecture**, not a new LangGraph/Pipecat
+runtime, tool broker or second audio/camera service. Each device retains its
+Xiaozhi microphone, AEC, speaker and expression owner; the Mac retains one
+`MultimodalOrchestrator` for bounded XIAO JPEG selection and one
+`Conversation` speech lease. WROOM alone owns physically safe actuation.
+
+| Stage | Real code owner and evidence |
+| --- | --- |
+| **Immediate** authenticated speech and barge | `server/overlay/desk_robot_bridge.py` increments `voice_turn_generation` and signals `tool_turn_cancel_event` for that head. `desk_robot_tools.call` races only read-only Mac HTTP against that cancellation signal. Old camera/episodic memory requests are cancelled; actual STOP and permitted jobs keep their independent safety acknowledgments. |
+| **Continuous source sampling** | The XIAO camera owns real JPEG capture; Mac `CameraFrameHub` retains at most three processed JPEGs per pet, source receipt timestamps and triggered sensor edges. Idle ~0.3 FPS, human speech ~1 FPS, a bounded two-frame physical sensor confirmation. This is **not** guaranteed hardware frame cadence. |
+| **Ephemeral multimodal context** | The SAME `CameraFrameHub` exposes `interaction_timeline()`, sorted by Mac monotonic receipt and limited to 10 entries by default: human VAD, physical sensor edge, JPEG receipt metadata, and *completed* local VLM tool interpretation. No JPEG/PCM bytes, guessed exposure timestamps or motor permissions in the JSON. The onset of a NEW human turn clears old tool interpretations fleet-wide. |
+| **Relevant episodic recall** | Each `MemoryStore` holds at most 250 text events in that pet's SQLite, marked firsthand or secondhand with confidence. `search()` is a **local lexical** ranked fallback, not a vector model or semantic understanding claim. Xiaozhi `desk_robot_memories` passes a bounded question through the same turn-fenced, opt-in API. No matching text means no claimed recollection. |
+| **Stable personality memory** | Separate `core_facts` table holds at most 24 concise operator-curated preferences per robot, with operator-only set/get/delete and explicit per-pet episodic forget. No voice tool or LLM can edit core policy, create hardware permits or read a neighbor's private store. Native Omni gets it only with voice-memory consent. |
+| **One prompt composer** | Pure `desk_robot/brain_context.py` composes memories, preferences and ephemeral time-ordered evidence into three small independently capped sections with source labels. `PetController` reuses it rather than building an alternate agent or a hidden parallel LLM. |
+| **Playful speech and yield** | Human speech and confirmed tool results take precedence; after a real VAD speech end, unsolicited pet remarks wait **800 milliseconds** in the `spontaneous_floor_busy()` gate, adapted from Qwen Live Harness. Explicit camera tools still run. This does **not** claim acoustic speaker playback completed. |
+| **Response and tool boundary** | Existing local Xiaozhi registered tools can inspect authorized memory/current camera and request guarded jobs. Optional MiniCPM-o native duplex handles bounded audio/video but published capability table does **not** support function calling. Do not claim the two backend paths equivalent or silently synthesize tool events. |
+
+### Example of a grounded playful follow-up
+
+Someone asks Pip where a previously seen key went. The current Xiaozhi
+voice turn takes priority, requests relevant memories only from Pip's SQLite,
+and may request `desk_robot_look` for a *new* image. Historical memory is
+labeled as what Pip saw before, the JPEG's receipt is not mistaken for its
+exposure timestamp, and the VLM's answer is labeled as a model
+interpretation. A physical pickup requires the separate operator-enabled job,
+measured grip evidence and independently authoritative WROOM interlocks.
+If the person interrupts while looking, the VAD signal cancels the old
+read-only HTTP work and old model answer; a new question starts a new
+generation. If a separate robot comments, its own SQLite and speaking identity
+remain distinct. No speech may imply that an unmeasured grasp or dock succeeded.
+
+### Why these sources, rather than adding another framework?
+
+* [Qwen Live Harness original injector](https://github.com/QwenLM/Qwen-Live-Harness/blob/main/packages/qwen-live-harness/src/orchestrator/injector.ts) closes result injection while human VAD, model response or host speaker playback is active. We reused its explicit turn cancellation and short post-VAD quiet principle. **Our XIAO still lacks measured physical playback completion**, so an equivalent host receipt cannot yet be claimed.
+* [Reachy Mini conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) demonstrates one media/speech owner and coordinated expression instead of competing device agents.
+* [LangGraph persistence](https://langchain-ai.github.io/langgraph/concepts/persistence/) separates short-lived turn state from durable memory. Our existing per-pet SQLite remains the real durable source.
+* [Letta Agent File](https://github.com/letta-ai/agent-file) distinguishes compact editable core personality/user facts from episodic history. Only an explicitly authorized operator may curate such facts here.
+* [Pipecat](https://github.com/pipecat-ai/pipecat) propagates interruption as a pipeline signal, avoiding delayed speech after old tool work. The actual implementation remains the pinned Xiaozhi tool bridge plus Mac context owners.
+* [vLLM Omni official realtime duplex specification](https://github.com/vllm-project/vllm-omni/blob/main/docs/serving/realtime_duplex_api.md) documents model-specific one-second JPEG/audio append boundaries and capability restrictions.
+
+**Verification:** Exact GitHub `brain_context.py` object
+`15fa703a98979b8269a486feb9244970caab0dbd`
+was executed in a local isolated Python test with source labels, dedup,
+no raw image data and three bounded text budgets: PASS. Exact `memory.py`
+object `09907bdb8ae6927a623e0e5472fdd83837c9de37`
+was exercised with five private SQLite stores, relevant recall, 250 events,
+24 core slots, input validation and local deletion: PASS. Those are scoped
+checks, **not** a full FastAPI/Xiaozhi integration run or Python 3.11
+lockfile acceptance. Targeted new tests are in `test_brain_*.py`,
+`test_multimodal.py`, `test_server_bridge.py` and
+`test_xiaozhi_tool_resilience.py`; broad CI still fails before steps.
+Physical natural conversation, accurate playback, camera/AEC timing, gripper,
+charger and full fitted printable assembly remain unqualified.
+
+
+
 ## November 12 Qwen Live Harness source comparison, no cloud default
 
 Verified actual official upstream
