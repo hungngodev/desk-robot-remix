@@ -1400,10 +1400,14 @@ class PetController:
                     now = time.monotonic()
                     self._group_last_spoken = now
                     if self.multimodal is not None:
-                        for turn in turns:
-                            self.multimodal.hub.remember_spoken(
-                                turn["robot_id"], turn["text"], now
-                            )
+                        remember_spoken = getattr(
+                            self.multimodal.hub, "remember_spoken", None
+                        )
+                        if callable(remember_spoken):
+                            for turn in turns:
+                                remember_spoken(
+                                    turn["robot_id"], turn["text"], now
+                                )
                 return
             text = await self.conversation.chat.reply([
                 {
@@ -1469,7 +1473,11 @@ class PetController:
                 self._group_last_spoken = now
                 state.spoken += 1
                 if self.multimodal is not None:
-                    self.multimodal.hub.remember_spoken(robot_id, text, now)
+                    remember_spoken = getattr(
+                        self.multimodal.hub, "remember_spoken", None
+                    )
+                    if callable(remember_spoken):
+                        remember_spoken(robot_id, text, now)
                 await asyncio.to_thread(
                     self.memory.remember, robot_id, uuid.uuid4().hex, text[:300],
                     kind="own_utterance", source_robot=robot_id, witnessed=True,
