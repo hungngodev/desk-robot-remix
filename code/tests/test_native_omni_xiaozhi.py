@@ -2037,6 +2037,71 @@ async def test_failed_tool_speech_releases_native_floor_without_duplicate(
         module._sessions.clear()
 
 
+@pytest.mark.parametrize(
+    "previous_question,seconds_old,expected",
+    [
+        ("Look at the mug on my desk", 5, True),
+        ("Look at the mug on my desk", 60, False),
+        ("Check your battery", 5, False),
+        ("", 0, False),
+    ],
+)
+def test_native_visual_followup_uses_only_prior_real_sent_visual_question(
+    native, previous_question, seconds_old, expected,
+):
+    """Resolve object anaphora only through the current pet's recent speech."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    if previous_question:
+        session._tool_dialogue.append((
+            module.time.monotonic() - seconds_old,
+            previous_question, "",  # valid audio sent, no returned text
+        ))
+    event = {
+        "item_id": "fresh_second_turn",
+        "transcript": "What about the one beside it?",
+    }
+    assert session._queue_readonly_tool(event) is expected
+    if expected:
+        route, payload, epoch, turn = session._readonly_queue.get_nowait()
+        assert route == "look"
+        assert "Prior completed user visual question:" in payload["question"]
+        assert "Look at the mug" in payload["question"]
+        assert "What about the one beside it?" in payload["question"]
+        assert epoch == session._generation and turn == session._readonly_turn
+        assert len(payload["question"]) <= 280
+    else:
+        assert session._readonly_queue.empty()
+
+
+def test_audio_only_tool_reply_retains_question_without_faking_spoken_words(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._tool_reply_pending["tool_audio_only"] = (
+        0, "Look at the blue mug", "",
+    )
+    session._tool_audio_sent("tool_audio_only", 0)
+    context = session._tool_dialogue_context(module.time.monotonic())
+    assert "Look at the blue mug" in context
+    assert "no matching spoken transcript" in context
+    assert len(session._tool_dialogue) == 1
+    assert session._tool_dialogue[0][2] == ""
+    session._tool_audio_sent("tool_audio_only", 0)
+    assert len(session._tool_dialogue) == 1
+
+
 async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native):
     import io
     import wave
