@@ -58,6 +58,26 @@ def approved_backend_url(url: str) -> str:
     return url
 
 
+def _advice_only_request(text: str) -> bool:
+    """Keep how-to advice in natural conversation, not sensor/tool routing."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(text.casefold().split()).strip(" ?!.,")
+    normalized = re.sub(r"^hey (?:robot|pip|dot)[, ]+", "", normalized)
+    normalized = re.sub(r"^please\s+", "", normalized)
+    normalized = re.sub(
+        r"^(?:can|could|would|will) you (?:please )?", "", normalized,
+    )
+    normalized = re.sub(r"^(?:tell|show) me ", "", normalized)
+    return bool(re.match(
+        r"^(?:(?:is|are) there (?:a |an |any )?"
+        r"(?:way|method|reason|chance|plan)\b|"
+        r"how (?:do|can|should) (?:i|we|you)\b|"
+        r"what(?:'s| is) (?:the |a )?(?:best )?way to\b)",
+        normalized,
+    ))
+
+
 def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
     """Route explicit natural questions to existing read-only Mac authorities.
 
@@ -77,16 +97,7 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
     polite = re.sub(
         r"^(?:can|could|would|will) you (?:please )?", "", spoken,
     )
-    # Requests for advice about a battery or dock are not read-only sensor
-    # measurements, even if their text contains "battery" or "on the desk".
-    # Apply this before BOTH the camera and fuel-gauge matchers.
-    if re.match(
-        r"^(?:(?:is|are) there (?:a |an |any )?"
-        r"(?:way|method|reason|chance|plan)\b|"
-        r"how (?:do|can|should) (?:i|we|you)\b|"
-        r"what(?:'s| is) (?:the |a )?(?:best )?way to\b)",
-        polite,
-    ):
+    if _advice_only_request(text):
         return None
     look = (
         r"(?:look (?:at|around|over|toward|for)\b|"
@@ -740,7 +751,8 @@ class NativeOmniSession:
             transcript = event.get("transcript")
             if (not isinstance(transcript, str)
                     or not 3 <= len(transcript.strip()) <= 280
-                    or "\x00" in transcript):
+                    or "\x00" in transcript
+                    or _advice_only_request(transcript)):
                 return
             # Only ambiguous OBSERVATIONAL speech needs semantic selection.
             # Ordinary social talk and actuator requests never open another
