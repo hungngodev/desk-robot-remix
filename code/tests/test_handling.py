@@ -229,3 +229,28 @@ def test_reconnect_cannot_reuse_same_imu_conversion_as_new_baseline():
     # A genuinely new conversion may start a new stationary calibration.
     assert qualified(gate, sample(sample_ms=9001), 102.2, new_sample=False) == ()
     assert len(gate.startup_samples) == 1
+
+
+def test_malformed_status_cannot_erase_last_imu_conversion_identity():
+    gate = HandlingGate()
+    first = sample(sample_ms=9000)
+    assert qualified(gate, first, 100.0, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
+    # A dropped status must clear pose calibration, but not allow a replay.
+    assert qualified(gate, sample(sample_ms=9000, age=201),
+                     100.1, new_sample=False) == ()
+    assert gate.reference is None and gate.startup_samples == []
+    assert qualified(gate, first, 100.2, new_sample=False) == ()
+    assert gate.startup_samples == []
+    assert qualified(gate, sample(sample_ms=9001),
+                     100.3, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
+    # A stopped motor report must not erase the same source replay fence.
+    assert qualified(gate, sample(sample_ms=9001, left=1),
+                     100.4, new_sample=False) == ()
+    assert qualified(gate, sample(sample_ms=9001),
+                     100.5, new_sample=False) == ()
+    assert gate.startup_samples == []
+    assert qualified(gate, sample(sample_ms=9002),
+                     100.6, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1
