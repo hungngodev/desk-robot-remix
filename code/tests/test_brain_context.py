@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from desk_robot.brain_context import compose_brain_context
+from desk_robot.brain_context import compose_brain_context, repeated_spontaneous_line
 from desk_robot.conversation import Conversation
 from desk_robot.memory import CoreFact, Memory, MemoryStore
 from desk_robot.multimodal import CameraFrameHub
@@ -121,5 +121,69 @@ async def test_pet_brain_uses_same_timeline_without_a_second_media_owner(
         assert "hiding game" in spoken[0]["content"]
         assert spoken[0]["playback_verified"] is False
         assert memory.count("robot-02") == 0
+    finally:
+        await pet.close()
+
+
+def test_novelty_checks_use_only_recent_words_this_pet_actually_sent():
+    now = time.time()
+    our_line = episode(
+        "robot-01", "spoken1", "own_utterance",
+        "Want to try guessing where the silver key is hiding?"
+    )
+    old_line = Memory(
+        "robot-01", "spoken0", "robot-01", True, "own_utterance",
+        "Let's count the stars together", now - 7200, .9,
+    )
+    peer_line = episode(
+        "robot-01", "spokenpeer", "peer_utterance",
+        "Want to try guessing where the silver key is hiding?",
+        source="robot-02", witnessed=False,
+    )
+    assert repeated_spontaneous_line(
+        "Want to try guessing where the silver key is hiding!",
+        [our_line], now_wall=now,
+    )
+    assert not repeated_spontaneous_line(
+        "Want to try guessing where the silver key is hiding?",
+        [peer_line], now_wall=now,
+    )
+    assert not repeated_spontaneous_line(
+        "Let's count the stars together", [old_line], now_wall=now,
+    )
+    assert not repeated_spontaneous_line(
+        "Shall we invent a new tiny game?", [our_line], now_wall=now,
+    )
+
+
+async def test_repeating_an_old_spontaneous_line_is_silently_suppressed(
+    settings, tmp_path
+):
+    ids = [robot.id for robot in settings.robots]
+    memory = MemoryStore(tmp_path, ids)
+    said = "That key looks familiar! Want to play a tiny guessing game?"
+    memory.remember(
+        "robot-01", "already_spoken", said,
+        kind="own_utterance", source_robot="robot-01", witnessed=True,
+    )
+
+    class RepetitiveChat:
+        async def reply(self, history):
+            return said
+
+    speaker = SimulatedSpeaker()
+    agent = Conversation(settings, RepetitiveChat(), speaker, memory=memory)
+    pet = PetController(settings, {}, agent, memory, scene=None)
+    pet.states["robot-01"].enabled = True
+    try:
+        await pet._speak(
+            "robot-01", SceneChange("key", "A key appeared", 0.94),
+            pet.states["robot-01"].generation,
+            offered_at=time.monotonic(),
+        )
+        assert speaker.spoken == []
+        assert pet.states["robot-01"].last_initiative_suppression == (
+            "repetitive_spontaneous_reply"
+        )
     finally:
         await pet.close()
