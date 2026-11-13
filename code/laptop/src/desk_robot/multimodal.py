@@ -409,7 +409,26 @@ class CameraFrameHub:
                     "physical_action_verified": False,
                 }))
         items.sort(key=lambda item: item[0])
-        return [entry for _, entry in items[-limit:]]
+        if len(items) <= limit:
+            return [entry for _, entry in items]
+        # The camera can submit six frames during a human turn. Selecting
+        # only the last N events would silently erase a real touch, a
+        # completed vision tool result or the pet's last spoken line.
+        # Retain each present modality's LATEST event, then use remaining
+        # capacity for recent detail. Never turn a frame into a sighting.
+        modalities = ("human_voice", "sensor", "tool", "robot_speech", "camera")
+        required: set[int] = set()
+        for channel in modalities:
+            for index in range(len(items) - 1, -1, -1):
+                if items[index][1]["channel"] == channel:
+                    required.add(index)
+                    break
+        selected = set(required)
+        for index in range(len(items) - 1, -1, -1):
+            if len(selected) >= limit:
+                break
+            selected.add(index)
+        return [items[index][1] for index in sorted(selected)]
 
     def discard_video(self, robot_id: str) -> None:
         """Drop failed camera evidence without releasing a live human VAD turn."""
