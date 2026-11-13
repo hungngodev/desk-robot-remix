@@ -332,7 +332,10 @@ class CameraFrameHub:
         Visual guesses expire after eight seconds; status after thirty.
         """
         self._check(robot_id)
-        if (kind not in {"visual_look", "robot_status", "pickup_status", "memory_recall"}
+        if (kind not in {
+                "visual_look", "robot_status", "pickup_status",
+                "sensor_telemetry", "memory_recall",
+            }
                 or not isinstance(summary, str)
                 or not 1 <= len(summary.strip()) <= 2000
                 or not _finite(received_at)):
