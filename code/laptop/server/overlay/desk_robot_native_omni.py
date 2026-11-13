@@ -1533,6 +1533,8 @@ class NativeOmniSession:
             # Source-authenticated human VAD has priority even if this model
             # response was already queued. Never speak over another pet's user.
             if not await claim_speaker(self):
+                if self._external_speech_active or _external_speaker_owner is not None:
+                    return  # Do not flush the Mac voice that already owns it.
                 events = await self._invalidate_head_first()
                 self._schedule_remote_cancel(events)
                 return
@@ -1540,7 +1542,8 @@ class NativeOmniSession:
                 return
         speech_raced = False
         async with self._device_send_lock:
-            if self.closed or generation != self._generation:
+            if (self.closed or generation != self._generation
+                    or self._external_speech_active):
                 return
             # VAD may start between claim_speaker and acquiring the device
             # send lock. Suppress the TTS START packet in that case.
