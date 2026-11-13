@@ -3291,6 +3291,78 @@ async def test_first_human_camera_wake_does_not_double_fetch_on_esp32(native):
         await asyncio.gather(worker, return_exceptions=True)
 
 
+@pytest.mark.parametrize("has_native_session", [False, True])
+async def test_human_on_one_robot_interrupts_other_mac_proactive_sender(
+    native, has_native_session,
+):
+    """A physical STOP alone cannot stop the Mac's subsequent Opus packets.
+
+    An authenticated human VAD on A must invalidate B's generation before
+    flushing B, even when B's external Mac TTS holds the speaker lease and
+    B's optional native model is absent.
+    """
+    module, bridge = native
+    head_a, _ = connection()
+    head_b, sent = connection()
+    head_b.device_id = "mac-02"
+    bridge.connections.update({"mac-01": head_a, "mac-02": head_b})
+    bridge.interrupt_generation = {"mac-01": 0, "mac-02": 5}
+    module._external_speaker_owner = "mac-02"
+    module._external_speaker_connection = head_b
+    head_b.client_is_speaking = True
+    if has_native_session:
+        class Session:
+            closed = False
+            async def _invalidate_head_first(self):
+                await head_b.websocket.send(json.dumps({
+                    "type": "tts", "state": "stop", "flush": True,
+                    "session_id": head_b.session_id,
+                }))
+                return ({"type": "response.cancel"},)
+            def _schedule_remote_cancel(self, events):
+                assert events[0]["type"] == "response.cancel"
+        module._sessions["mac-02"] = Session()
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def previous_mac_utterance():
+        generation = bridge.interrupt_generation["mac-02"]
+        for index in range(4):
+            if (head_b.client_abort
+                    or generation != bridge.interrupt_generation["mac-02"]):
+                return
+            await head_b.websocket.send(b"opus")
+            if index == 0:
+                started.set()
+                await release.wait()
+
+    mac = asyncio.create_task(previous_mac_utterance())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await module.preempt_others_for_human("mac-01")
+        release.set()
+        await asyncio.wait_for(mac, timeout=1)
+        assert head_b.client_abort is True
+        assert bridge.interrupt_generation["mac-02"] == 6
+        assert sent.count(b"opus") == 1
+        assert any(
+            isinstance(message, str)
+            and json.loads(message).get("type") == "tts"
+            and json.loads(message).get("flush") is True
+            for message in sent
+        )
+        # Do not release the lease before the Mac transmitter's own finally.
+        assert module._external_speaker_owner == "mac-02"
+    finally:
+        release.set()
+        mac.cancel()
+        await asyncio.gather(mac, return_exceptions=True)
+        module._external_speaker_owner = None
+        module._external_speaker_connection = None
+        module._sessions.clear()
+
+
 async def test_human_fleet_preemption_cancels_idle_queued_audio_while_peer_head_hangs(
     native,
 ):
