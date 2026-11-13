@@ -379,3 +379,23 @@ def test_malformed_retired_boot_packet_cannot_erase_new_boot_calibration():
     # A malformed packet from the CURRENT boot must still fail closed.
     assert qualified(gate, sample(boot_id=2, valid=False), 105.1) == ()
     assert gate.reference is None
+
+
+def test_pre_wrap_delayed_packet_cannot_reseed_after_clock_wrap():
+    gate = HandlingGate()
+    assert qualified(gate, sample(sample_ms=0xfffffffe), 100,
+                     new_sample=False) == ()
+    assert qualified(gate, sample(sample_ms=2), 100.1,
+                     new_sample=False) == ()
+    assert gate.last_sample_ms == 2
+    assert len(gate.startup_samples) == 1
+    # This is older in acquisition order but numerically larger.
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=0xffffffff),
+                         100.2 + i * .1, new_sample=False) == ()
+    assert gate.last_sample_ms == 2
+    assert len(gate.startup_samples) == 1
+    assert qualified(gate, sample(sample_ms=3), 101.1,
+                     new_sample=False) == ()
+    assert gate.last_sample_ms == 3
+    assert len(gate.startup_samples) == 2
