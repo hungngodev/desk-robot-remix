@@ -101,6 +101,37 @@ async def test_real_xiaozhi_tool_failure_returns_bounded_no_retry_error(
     assert "private host" not in str(result)
 
 
+@pytest.mark.parametrize("unsafe", [
+    {"robot_id": "robot-02", "answer": "other pet private data"},
+    {"answer": "missing authenticated identity"},
+    {"robot_id": "robot-01", "motor_authorized": True},
+    {"robot_id": "robot-01", "charging_authorized": True},
+])
+async def test_legacy_and_native_shared_tool_bridge_rejects_wrong_pet_receipt(
+    bridge_tools, monkeypatch, unsafe,
+):
+    original = httpx.AsyncClient
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        return httpx.Response(200, json=unsafe)
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "status"
+    )
+    assert len(seen) == 1
+    assert result == {
+        "error": "Robot Mac tool identity or authority invalid",
+        "retried": False,
+    }
+    assert "other pet" not in str(result)
+
+
 async def test_unknown_xiaozhi_head_cannot_borrow_another_robots_mac_tool(
     bridge_tools, monkeypatch,
 ):
@@ -572,6 +603,7 @@ async def test_pickup_accepted_after_new_speech_remains_queryable_after_reconnec
             })
         assert request.url.path == "/v1/robots/robot-01/jobs/latest-pickup"
         return httpx.Response(200, json={
+            "robot_id": "robot-01",
             "id": "physical-job-83", "state": "running",
             "physical_grasp_verified": False,
         })
