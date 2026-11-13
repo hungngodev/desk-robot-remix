@@ -1097,5 +1097,5 @@ def test_pet_quiet_and_pause_stop_motors_before_unavailable_voice_bridge(
             result = client.post(path, headers=headers, json=payload)
             assert result.status_code >= 500  # report the audio outage
             assert events == [
-                expected, "wroom_stop", "voice_bridge_attempt",
+                "wroom_stop", expected, "voice_bridge_attempt",
             ]
