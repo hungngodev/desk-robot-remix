@@ -1526,6 +1526,44 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
 @pytest.mark.parametrize("facts,audio_enqueued", [
     (False, False), (True, False), (True, True),
 ])
+def test_native_turn_cleanup_preserves_dialogue_but_clears_old_tool_claims(
+    native,
+):
+    """Shared VAD/barge cleanup must not erase private sent speech history."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    prior = (module.time.monotonic(), "What is on the desk?", "A mug.")
+    session._tool_dialogue.append(prior)
+    session._readonly_requests.add(("look", "What is on the desk?"))
+    session._readonly_queue.put_nowait(("look", {}, 0, 0))
+    session._tool_speech_turn = (0, 0)
+    session._tool_answer_started_turn = (0, 0)
+    session._tool_audio_response_id = "tool_previous"
+    session._tool_reply_pending["tool_previous"] = (0, "Q", "A")
+    session._native_output_words["native_previous"] = {"spoken": "A mug."}
+    session._last_human_transcript = "What is on the desk?"
+    session._tool_question = "What is on the desk?"
+    session.latest_jpeg = b"existing_frame"
+    session._clear_obsolete_tool_turn()
+    assert session._tool_speech_turn is None
+    assert session._tool_answer_started_turn is None
+    assert session._tool_audio_response_id is None
+    assert session._readonly_queue.empty()
+    assert not session._readonly_requests
+    assert not session._tool_reply_pending
+    assert not session._native_output_words
+    assert session._last_human_transcript == ""
+    assert session._tool_question == ""
+    assert list(session._tool_dialogue) == [prior]
+    # Camera invalidation belongs to each VAD/video callsite, not this helper.
+    assert session.latest_jpeg == b"existing_frame"
+
+
 async def test_native_tool_worker_releases_speaker_if_no_audio_was_queued(
     native, facts, audio_enqueued,
 ):
