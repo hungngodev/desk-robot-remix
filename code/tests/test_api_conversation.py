@@ -91,6 +91,27 @@ async def test_group_chat_uses_each_pet_own_live_audio_sensor_and_tool_context(s
     assert "not physical action permits" in peer
 
 
+async def test_hardware_group_memory_respects_fleet_sharing_consent(
+    settings, tmp_path,
+):
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = False
+    ids = ["robot-01", "robot-02"]
+    store = MemoryStore(tmp_path, ids)
+    store.remember(
+        "robot-01", "private_event", "A sensitive private remembered detail",
+        kind="object", source_robot="robot-01", witnessed=True,
+    )
+    store.set_core_fact("robot-01", "private_preference", "private value")
+    agent = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=store)
+    await agent.run(ids, "Talk about a toy game", 2)
+    assert "sensitive private" not in str(agent.histories)
+    assert "private_preference" not in str(agent.histories)
+    settings.fleet_text_sharing_enabled = True
+    await agent.run(ids, "Talk about the sensitive private detail", 2)
+    assert "private_preference" in agent.histories["robot-01"][0]["content"]
+
+
 async def test_group_chat_never_exposes_live_asr_without_fleet_text_consent(settings):
     import time
     from types import SimpleNamespace
