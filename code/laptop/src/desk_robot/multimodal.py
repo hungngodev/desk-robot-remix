@@ -438,7 +438,9 @@ class CameraFrameHub:
         self._generation[robot_id] += 1
         self.frames[robot_id].clear()
         self.tool_history[robot_id].clear()
-        self.spoken_history[robot_id].clear()
+        # An image/voice-monitor outage invalidates camera interpretations,
+        # not an actual line already transmitted by the Mac speaker owner.
+        # Spoken text retains its own 30s TTL and is not playback proof.
         self.previous_gray.pop(robot_id, None)
         self.last_capture[robot_id] = -math.inf
         self.changed_streak[robot_id] = 0
@@ -446,6 +448,7 @@ class CameraFrameHub:
 
     def clear(self, robot_id: str) -> None:
         self.discard_video(robot_id)
+        self.spoken_history[robot_id].clear()
         self.event_history[robot_id].clear()
         self.voice_until[robot_id] = -math.inf
         self.quiet_until[robot_id] = -math.inf
