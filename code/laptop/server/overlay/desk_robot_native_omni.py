@@ -230,6 +230,8 @@ class NativeOmniSession:
         self._live_transcript_enabled = False
         self._base_instructions = self.wire.instructions
         self._context_instructions = self.wire.instructions
+        self._context_pending: str | None = None
+        self._context_ack = asyncio.Event()
         self._context_wakeup = asyncio.Event()
         self._context_last_sync_at = float("-inf")
         self.native_context_updates = 0
@@ -420,6 +422,15 @@ class NativeOmniSession:
             # if a later retransmission of this exact backend item occurs.
             self.heard_memories_dropped += 1
 
+    def _ack_context_update(self, event: dict) -> None:
+        """A WebSocket send is not proof the backend accepted model context."""
+        session = event.get("session")
+        if (event.get("type") == "session.updated"
+                and isinstance(session, dict)
+                and self._context_pending is not None
+                and session.get("instructions") == self._context_pending):
+            self._context_ack.set()
+
     async def _refresh_live_context(self, http: aiohttp.ClientSession) -> None:
         """Update the existing duplex model from actual Mac tool/sensor cues.
 
@@ -486,10 +497,26 @@ class NativeOmniSession:
                         + live
                     )[:2000]
                 if instructions != self._context_instructions:
-                    await asyncio.wait_for(self._send({
-                        "type": "session.update",
-                        "session": {"instructions": instructions},
-                    }), timeout=0.7)
+                    self._context_pending = instructions
+                    self._context_ack.clear()
+                    try:
+                        await asyncio.wait_for(self._send({
+                            "type": "session.update",
+                            "session": {"instructions": instructions},
+                        }), timeout=0.7)
+                        # The backend may accept a WebSocket send but reject
+                        # or ignore its session update. Count only the exact
+                        # matching session.updated acknowledgement.
+                        await asyncio.wait_for(
+                            self._context_ack.wait(), timeout=1.2
+                        )
+                    finally:
+                        self._context_pending = None
+                    if (self.closed or not self.connected
+                            or self._generation != epoch
+                            or self._video_turn != video_turn
+                            or self._user_was_talking):
+                        continue
                     self._context_instructions = instructions
                     self.native_context_updates += 1
                 self._context_last_sync_at = time.monotonic()
@@ -705,6 +732,8 @@ class NativeOmniSession:
                 raise RuntimeError("Unexpected native omni media frame")
             event = json.loads(message.data)
             kind = event.get("type")
+            if kind == "session.updated":
+                self._ack_context_update(event)
             # A model response may be interrupted at any time. Use a bounded
             # FIFO and response identity, never detached unbounded audio tasks.
             pcm = self.wire.handle_event(event)
