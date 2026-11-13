@@ -715,6 +715,7 @@ class NativeOmniSession:
                 or self._tool_answer_started_turn == (epoch, request_turn)):
             return
         self._tool_answer_started_turn = (epoch, request_turn)
+        audio_queued = False
         url = urlsplit(self.url)
         endpoint = (
             ("https" if url.scheme == "wss" else "http")
@@ -807,11 +808,20 @@ class NativeOmniSession:
                 await self.outgoing.put((response_id, pcm[offset:offset + 9600]))
             await self.outgoing.put(None)
             self.native_tool_audio_queued += 1
+            audio_queued = True
         except asyncio.CancelledError:
             raise
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError,
                 RuntimeError, wave.Error):
             self.native_tool_speech_errors += 1
+        finally:
+            # A failed backend text+audio request must not retain the
+            # speaker floor forever. Preserve the one-answer-per-human-turn
+            # fence; never retry stale tools or claim phantom audio.
+            if (not audio_queued
+                    and self._tool_speech_turn == (epoch, request_turn)):
+                self._tool_speech_turn = None
+                self._tool_audio_response_id = None
 
     def _discard_queued_readonly(self) -> None:
         """New human speech must not wait behind stale optional Mac tools.
