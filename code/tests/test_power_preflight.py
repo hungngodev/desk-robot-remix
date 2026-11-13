@@ -63,3 +63,10 @@ def test_exact_decimal_sizing_boundary_is_accepted_without_float_error():
     )
     assert result["minimum_rated_5v_output_a"] == 3.9
     assert result["candidate_electrically_sufficient_on_paper"] is True
+
+
+def test_continuous_cell_input_is_reported_separately_from_peak():
+    report = tool(3, 1.8, cell_low_v=3.0, measured_boost_efficiency=0.85)
+    assert report["minimum_continuous_cell_input_a"] == 4.589
+    assert report["minimum_rated_cell_and_boost_input_a"] > report["minimum_continuous_cell_input_a"]
+    assert report["thermal_and_brownout_verified"] is False
