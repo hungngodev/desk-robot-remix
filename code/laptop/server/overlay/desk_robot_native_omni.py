@@ -169,7 +169,10 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
         if len(found) >= 3:
             break
     if len(found) < 2:
-        return (whole,) if whole is not None else ()
+        # Preserve the entire spoken memory/visual question where possible.
+        # If the first clause was an unsupported physical command, still
+        # permit an explicitly requested independent READ-ONLY second clause.
+        return (whole,) if whole is not None else tuple(found)
     return tuple(found)
 
 
