@@ -155,6 +155,15 @@ def compose_brain_context(
                     "Earlier local VLM guess, not fresh sighting: "
                     + _clean(result, limit=90)
                 )
+        elif channel == "tool" and kind in {"robot_status", "pickup_status"}:
+            result = item.get("content")
+            if isinstance(result, str) and result.strip():
+                label = (
+                    "Recent head telemetry, not physical acceptance: "
+                    if kind == "robot_status"
+                    else "Mac pickup job receipt, not verified grasp: "
+                )
+                phrase = label + _clean(result, limit=85)
         elif channel == "robot_speech" and kind == "own_utterance":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
