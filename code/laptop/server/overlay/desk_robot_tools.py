@@ -102,14 +102,26 @@ async def call(conn, route, payload=None):
         # diagnostics in the text returned to the language model.
         return {"error": "Robot Mac connection unavailable", "retried": False}
     if (connections.get(conn.device_id) is not conn
-            or robot_for_device(conn.device_id) != robot
-            or getattr(bridge, "voice_turn_generation", {}).get(
-                conn.device_id, 0
-            ) != generation):
+            or robot_for_device(conn.device_id) != robot):
         return {
             "error": "Robot tool result superseded by new speech or reconnect",
             "retried": False,
         }
+    turn_superseded = (
+        getattr(bridge, "voice_turn_generation", {}).get(
+            conn.device_id, 0
+        ) != generation
+    )
+    if turn_superseded and readonly:
+        return {
+            "error": "Robot tool result superseded by new speech or reconnect",
+            "retried": False,
+        }
+    # An accepted pickup/STOP is NOT undone by newer speech. Preserve
+    # the authenticated Mac job receipt for the next turn, but never send
+    # the old response back to the speaking model.
+    if turn_superseded and response.status_code >= 400:
+        return {"_desk_robot_turn_superseded": True}
     if response.status_code >= 400:
         return {
             "error": f"Robot Mac rejected request ({response.status_code})",
@@ -121,19 +133,22 @@ async def call(conn, route, payload=None):
         return {"error": "Malformed robot Mac tool response", "retried": False}
     if not isinstance(result, dict):
         return {"error": "Unexpected robot Mac tool response", "retried": False}
+    if turn_superseded:
+        return {**result, "_desk_robot_turn_superseded": True}
     return result
 
 
 def read_only_response(result: dict) -> ActionResponse:
-    """Superseded tool output must never restart the previous human turn.
+    """Never narrate an obsolete turn, even when a physical job was accepted.
 
-    Pinned Xiaozhi's Action.NONE is silent ONLY with no response/result:
-    its intent handler otherwise speaks a backward-compatibility fallback.
-    Preserve normal REQLLM for current read-only results and errors.
+    Pinned Xiaozhi's Action.NONE is silent ONLY without response/result.
+    Both read-only cancellation and the internal mutating-job receipt fence
+    must return an empty NONE; accepted jobs remain queryable by job ID.
     """
-    if (result.get("error") ==
-            "Robot tool result superseded by new speech or reconnect"
-            and result.get("retried") is False):
+    if (result.get("_desk_robot_turn_superseded") is True or (
+            result.get("error") ==
+                "Robot tool result superseded by new speech or reconnect"
+            and result.get("retried") is False)):
         return ActionResponse(Action.NONE)
     return ActionResponse(Action.REQLLM, result=result)
 
@@ -168,9 +183,9 @@ async def desk_robot_pickup(conn, target):
     if target not in {"key", "candy"}:
         return ActionResponse(Action.REQLLM, result={"error": "Target must be key or candy"})
     result = await call(conn, "pickup", {"target": target})
-    if "id" in result:
+    if isinstance(result.get("id"), str) and result["id"]:
         conn.desk_robot_last_job = result["id"]
-    return ActionResponse(Action.REQLLM, result=result)
+    return read_only_response(result)
 
 
 @register_function(
@@ -179,7 +194,7 @@ async def desk_robot_pickup(conn, target):
     ToolType.IOT_CTL,
 )
 async def desk_robot_stop(conn):
-    return ActionResponse(Action.REQLLM, result=await call(conn, "stop"))
+    return read_only_response(await call(conn, "stop"))
 
 
 @register_function(
