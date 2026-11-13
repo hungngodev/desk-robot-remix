@@ -1196,6 +1196,13 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         ("Could you check your battery status?", "power-status"),
         ("How much battery is left?", "power-status"),
         ("What's your power level?", "power-status"),
+        ("Check your temperature", "aux-status"),
+        ("What is your humidity reading?", "aux-status"),
+        ("Show sensor readings", "aux-status"),
+        ("Read your BMP280 pressure", "aux-status"),
+        ("What is the NFC sensor reading?", "aux-status"),
+        ("What is a temperature sensor?", None),
+        ("How does a proximity sensor work?", None),
         ("Is the pickup job done?", "latest-pickup"),
         ("Did you pick up the key already?", "latest-pickup"),
         ("Can you check the pickup job status?", "latest-pickup"),
@@ -1224,8 +1231,8 @@ def test_native_speech_tools_allow_only_explicit_readonly_requests(
     assert (request[0] if request else None) == route
     if request:
         assert request[0] in {
-            "look", "status", "power-status", "latest-pickup",
-            "interaction-context", "voice-context",
+            "look", "status", "power-status", "aux-status",
+            "latest-pickup", "interaction-context", "voice-context",
         }
 
 
@@ -1649,6 +1656,14 @@ async def test_native_barge_drops_old_queued_tools_without_physical_retry(native
         ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
                           "gauge_available": True, "reported_soc_centi": "99",
                           "reported_cell_mv": 3700}, None),
+        ("aux-status", {"robot_id": "robot-01", "climate": {
+            "valid": True, "temp_centi": 2150, "rh_centi": 4400
+        }, "power": {"fuel_valid": False}}, "validated_wroom_raw_aux_not_calibrated"),
+        ("aux-status", {"robot_id": "robot-01", "available": False},
+         "wroom_aux"),
+        ("aux-status", {"robot_id": "robot-01", "climate": {
+            "valid": True, "temp_centi": 2150
+        }}, None),
         ("interaction-context", {"persistent_memory_included": True,
                                  "raw_media_included": False,
                                  "model_context": "private information"}, None),
