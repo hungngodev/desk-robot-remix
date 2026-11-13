@@ -1112,7 +1112,7 @@ async def test_new_human_voice_clears_stale_native_tool_queue_before_new_questio
     session._socket = ModelSocket()
     worker = asyncio.create_task(session._send_mic())
     try:
-        session.queue_mic(b"\\x00" * 3200, True)
+        session.queue_mic(b"\x00" * 3200, True)
         async with asyncio.timeout(1):
             while session._readonly_turn == 0:
                 await asyncio.sleep(.005)
