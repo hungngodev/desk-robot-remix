@@ -127,8 +127,8 @@ class HttpHead:
         async with self.capture_lock:
             response = await self._request("GET", "/api/camera.jpg")
             if not (4 <= len(response.content) <= 4_000_000
-                    and response.content.startswith(b"\\xff\\xd8")
-                    and response.content.endswith(b"\\xff\\xd9")):
+                    and response.content.startswith(b"\xff\xd8")
+                    and response.content.endswith(b"\xff\xd9")):
                 # A camera HTTP response with only a valid SOI can be
                 # truncated during capture/transport. Refuse it BEFORE
                 # advancing boot/sequence evidence or sending it to a VLM,
