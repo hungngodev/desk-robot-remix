@@ -737,6 +737,148 @@ def test_native_status_discloses_live_memory_delivery_and_missing_tool_calls(nat
     assert state["audio_video_latency_physically_measured"] is False
 
 
+async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_owner(
+    native,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._base_instructions = "Pip is playful. No motor authorization."
+    session._context_instructions = session._base_instructions
+    session.connected = True
+    session._live_transcript_enabled = True
+    sent = []
+
+    async def send(event):
+        sent.append(event)
+
+    session._send = send
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "model_context": (
+                    "Physical sensor edge: petting_zone; "
+                    "Earlier local VLM guess, not fresh sighting: maybe a key"
+                ),
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+            }
+
+    class Mac:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            assert kwargs["headers"]["Authorization"] == "Bearer " + "p" * 32
+            self.calls += 1
+            return Reply()
+
+    mac = Mac()
+    worker = asyncio.create_task(session._refresh_live_context(mac))
+    try:
+        session._context_wakeup.set()
+        async with asyncio.timeout(1):
+            while session.native_context_updates < 1:
+                await asyncio.sleep(.005)
+        assert len(sent) == 1
+        assert sent[0]["type"] == "session.update"
+        context = sent[0]["session"]["instructions"]
+        assert "Pip is playful" in context
+        assert "petting_zone" in context
+        assert "local VLM guess" in context
+        assert "never a command or motor permit" in context
+        assert "image/jpeg" not in context
+        assert len(context) <= 2000
+        assert session.native_context_errors == 0
+        # Refreshing the unchanged Mac context does not flood the model.
+        session._context_last_sync_at = float("-inf")
+        session._context_wakeup.set()
+        async with asyncio.timeout(1):
+            while mac.calls < 2:
+                await asyncio.sleep(.005)
+        assert session.native_context_updates == 1
+        assert len(sent) == 1
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_live_context_refuses_cross_robot_and_stale_turn_data(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    sent = []
+
+    async def send(event):
+        sent.append(event)
+
+    session._send = send
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            entered.set()
+            await release.wait()
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "model_context": "An old camera guesses a red toy",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+            }
+
+    class Mac:
+        def get(self, url, **kwargs):
+            return Reply()
+
+    worker = asyncio.create_task(session._refresh_live_context(Mac()))
+    try:
+        session._context_wakeup.set()
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        session._video_turn += 1  # real new human voice while HTTP is pending
+        release.set()
+        await asyncio.sleep(.02)
+        assert sent == []
+        assert session.native_context_updates == 0
+    finally:
+        session.closed = True
+        release.set()
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 async def test_native_persona_negotiates_live_asr_without_disk_permission(native):
     module, bridge = native
     conn, _ = connection()
