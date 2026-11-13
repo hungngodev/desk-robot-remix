@@ -744,7 +744,10 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         ("Can you pick up this key?", None),
         ("Please start charging now", None),
         ("Stop your motors now", None),
-        ("Do you remember yesterday?", None),
+        ("Do you remember yesterday?", "voice-context"),
+        ("What did I tell you about my key?", "voice-context"),
+        ("Can you recall what we discussed?", "voice-context"),
+        ("Have we talked about the keyboard?", "voice-context"),
     ],
 )
 def test_native_speech_tools_allow_only_explicit_readonly_requests(
@@ -755,7 +758,8 @@ def test_native_speech_tools_allow_only_explicit_readonly_requests(
     assert (request[0] if request else None) == route
     if request:
         assert request[0] in {
-            "look", "status", "latest-pickup", "interaction-context"
+            "look", "status", "latest-pickup", "interaction-context",
+            "voice-context",
         }
 
 
