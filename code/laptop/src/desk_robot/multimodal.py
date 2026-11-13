@@ -655,6 +655,11 @@ class MultimodalOrchestrator:
         for robot_id, head in self.heads.items():
             if not callable(getattr(head, "stream_frames", None)):
                 continue
+            # Hardware visual consent requires a real running feed. Never
+            # quietly turn an outage into the old periodic snapshot design.
+            require_stream = getattr(head, "require_stream", None)
+            if callable(require_stream):
+                require_stream()
             task = self._stream_tasks.get(robot_id)
             if task is None or task.done():
                 self._stream_tasks[robot_id] = asyncio.create_task(
