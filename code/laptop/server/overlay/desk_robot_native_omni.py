@@ -1809,7 +1809,12 @@ async def begin_external_speech(conn) -> bool:
                 or bridge.human_speech_active()
                 or (session is not None and not session.closed
                     and (session._user_was_talking
-                         or session._tool_speech_turn is not None))):
+                         or session._tool_speech_turn is not None
+                         or session._pending_audio_commits
+                         or session._asr_item_turns
+                         or not session._readonly_queue.empty()
+                         or (session._readonly_inflight is not None
+                             and not session._readonly_inflight.done())))):
             return False
         _external_speaker_owner = conn.device_id
         _external_speaker_connection = conn
