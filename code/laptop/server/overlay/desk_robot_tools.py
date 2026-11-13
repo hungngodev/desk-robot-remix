@@ -24,7 +24,13 @@ async def call(conn, route, payload=None):
     async def request_mac():
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:8765", timeout=5,
-            headers={"Authorization": f"Bearer {token}"}
+            headers={
+                "Authorization": f"Bearer {token}",
+                # Mac records only explicitly requested read-only tool
+                # receipts. Normal operator or background status polling
+                # must never crowd out an actual conversation.
+                "X-Desk-Robot-Tool-Receipt": "1",
+            }
         ) as client:
             if route == "status":
                 response = await client.get(f"/v1/robots/{robot}/status")
