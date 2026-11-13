@@ -298,6 +298,76 @@ async def test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner(
         await pet.close()
 
 
+async def test_continuous_stream_changes_reach_real_pet_scene_memory_without_polls(
+    fleet, tmp_path,
+):
+    """A stream alone, without sensor/voice requests, reaches the pet VLM gate."""
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.vision_model = "local-vision"
+
+    class StreamingHead:
+        def __init__(self):
+            self.snapshot_calls = 0
+            self.emitted = 0
+
+        async def snapshot(self):
+            self.snapshot_calls += 1
+            raise AssertionError("Proactive pet must not poll a live camera stream")
+
+        async def stream_frames(self):
+            for frame in (WHITE, WHITE, WHITE, RED, RED, RED, RED, RED):
+                self.emitted += 1
+                yield frame, time.monotonic()
+                await asyncio.sleep(0.29)
+
+    class StreamingScene:
+        def __init__(self):
+            self.calls = 0
+
+        async def compare(self, before, after):
+            self.calls += 1
+            return SceneChange("key", "A real key appeared by the mug", 0.96)
+
+    head, scene = StreamingHead(), StreamingScene()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+    )
+    pet = PetController(
+        fleet, {"robot-01": head}, conversation, memory, scene,
+        interval=0.035,
+    )
+    visual = MultimodalOrchestrator(
+        fleet, {"robot-01": head}, scene, pet._vision_lock,
+    )
+    pet.multimodal = visual
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 17, True
+    visual.start_streams()
+    observer = asyncio.create_task(pet._observe("robot-01", 17))
+    try:
+        await wait_for(lambda: scene.calls >= 1, timeout=5)
+        assert state.events == 1
+        assert head.snapshot_calls == 0
+        assert memory.count("robot-01") == 1
+        remembered = memory.recent("robot-01")[0]
+        assert remembered.kind == "key" and remembered.witnessed
+        assert remembered.source_robot == "robot-01"
+        assert memory.count("robot-02") == 0
+        assert not state.last_error
+    finally:
+        state.enabled = False
+        observer.cancel()
+        await asyncio.gather(observer, return_exceptions=True)
+        await visual.close()
+        await pet.close()
+
+
+
+
 async def test_one_real_change_initiates_one_grounded_speech_and_memory(fleet, tmp_path):
     camera, chat, speaker, scene = ChangingCamera(), GroundedChat(), SimulatedSpeaker(), KeyScene()
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
