@@ -1836,6 +1836,12 @@ async def begin_external_speech(conn) -> bool:
         try:
             events = await session._invalidate_head_first()
             session._schedule_remote_cancel(events)
+        except asyncio.CancelledError:
+            # A task cancelled during the async native cutover has already
+            # claimed the fleet speaker lease. Releasing it is mandatory,
+            # otherwise every future Mac proactive utterance is locked out.
+            await end_external_speech(conn)
+            raise
         except Exception:
             await end_external_speech(conn)
             return False
