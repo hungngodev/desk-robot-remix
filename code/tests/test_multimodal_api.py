@@ -1035,3 +1035,67 @@ def test_native_live_policy_respects_real_mac_pet_quiet_and_pause(
         assert fail_closed.status_code == 200
         assert fail_closed.json()["pet_autonomy_enabled"] is False
         assert fail_closed.json()["pet_quiet"] is True
+
+
+def test_pet_quiet_and_pause_stop_motors_before_unavailable_voice_bridge(
+    settings, tokens,
+):
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    robot = settings.robots[0]
+    events = []
+
+    class Pet:
+        states = {robot.id: SimpleNamespace(enabled=True, quiet=False)}
+
+        async def set_quiet(self, rid, quiet):
+            events.append("pet_quiet")
+            self.states[rid].quiet = quiet
+            return {"robot_id": rid, "enabled": True, "quiet": quiet}
+
+        async def pause(self, rid):
+            events.append("pet_pause")
+            self.states[rid].enabled = False
+            return {"robot_id": rid, "enabled": False, "quiet": False}
+
+    class Speaker:
+        async def interrupt(self, selected):
+            assert selected.id == robot.id
+            events.append("voice_bridge_attempt")
+            raise RuntimeError("Voice bridge unavailable")
+
+    class Coordinator:
+        def robot(self, rid):
+            return settings.robot(rid)
+
+        async def stop(self, rid):
+            assert rid == robot.id
+            events.append("wroom_stop")
+            return {"stopped": True}
+
+    class Runtime:
+        pet = Pet()
+        coordinator = Coordinator()
+        conversation = SimpleNamespace(speaker=Speaker())
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    with TestClient(
+        create_app(settings, runtime=Runtime()), raise_server_exceptions=False
+    ) as client:
+        for path, payload, expected in (
+            (f"/v1/pet/{robot.id}/quiet", {"quiet": True}, "pet_quiet"),
+            (f"/v1/pet/{robot.id}/pause", None, "pet_pause"),
+        ):
+            events.clear()
+            result = client.post(path, headers=headers, json=payload)
+            assert result.status_code >= 500  # report the audio outage
+            assert events == [
+                expected, "wroom_stop", "voice_bridge_attempt",
+            ]
