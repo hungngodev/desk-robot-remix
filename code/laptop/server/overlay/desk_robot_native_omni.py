@@ -475,6 +475,10 @@ class NativeOmniSession:
         # Saved only after the existing XIAO path successfully transmits audio.
         self._tool_dialogue: deque[tuple[float, str, str]] = deque(maxlen=4)
         self._tool_reply_pending: dict[str, tuple[int, str, str]] = {}
+        # Also retain native duplex model text only after corresponding Opus
+        # leaves the XIAO transport. Never claim the speaker actually played.
+        self._native_output_words: dict[str, dict[str, str]] = {}
+        self._last_human_transcript = ""
         self.native_tool_audio_queued = 0
         self.native_tool_speech_errors = 0
         self._heard_session = uuid.uuid4().hex[:12]
@@ -912,6 +916,17 @@ class NativeOmniSession:
             f"My earlier audio was sent (playback unverified): {said[:135]}."
             for question, said in items[-2:]
         )[:490]
+
+    def _native_audio_sent(self, response_id: str, generation: int) -> None:
+        data = self._native_output_words.pop(response_id, None)
+        if data is None or self.closed or generation != self._generation:
+            return
+        spoken = data.get("spoken") or data.get("text", "")
+        if isinstance(spoken, str) and spoken.strip():
+            self._tool_dialogue.append((
+                time.monotonic(), self._last_human_transcript[:180],
+                " ".join(spoken.split())[:200],
+            ))
 
     def _tool_audio_sent(self, response_id: str, generation: int) -> None:
         """Track conversational continuity, NEVER an acoustic playback ACK."""
@@ -1366,6 +1381,8 @@ class NativeOmniSession:
                     self._tool_answer_started_turn = None
                     self._tool_audio_response_id = None
                     self._tool_reply_pending.clear()
+                    self._native_output_words.clear()
+                    self._last_human_transcript = ""
                     self._tool_question = ""
                     self.latest_jpeg = None
                     self._latest_frame_receipt_us = None
@@ -1438,10 +1455,36 @@ class NativeOmniSession:
             # A model response may be interrupted at any time. Use a bounded
             # FIFO and response identity, never detached unbounded audio tasks.
             pcm = self.wire.handle_event(event)
+            # Reuse official vLLM-Omni text / audio-transcript events. They
+            # are model estimates, not audible speaker acknowledgement.
+            if kind in ("response.output_audio_transcript.delta",
+                        "response.output_text.delta"):
+                response_id = event.get("response_id")
+                delta = event.get("delta")
+                if (isinstance(response_id, str)
+                        and response_id == self.wire.response_id
+                        and self.wire.accept_output
+                        and isinstance(delta, str) and "\\x00" not in delta
+                        and 1 <= len(delta) <= 280):
+                    if response_id not in self._native_output_words:
+                        if len(self._native_output_words) >= 4:
+                            self._native_output_words.pop(
+                                next(iter(self._native_output_words))
+                            )
+                        self._native_output_words[response_id] = {}
+                    key = ("spoken" if kind ==
+                           "response.output_audio_transcript.delta" else "text")
+                    prior = self._native_output_words[response_id].get(key, "")
+                    self._native_output_words[response_id][key] = (
+                        prior + delta
+                    )[:280]
             if kind == "input_audio_buffer.committed":
                 self._bind_native_audio_commit(event)
             elif kind == "conversation.item.input_audio_transcription.completed":
                 if self._accept_current_audio_item(event):
+                    raw_heard = event.get("transcript")
+                    if isinstance(raw_heard, str) and "\\x00" not in raw_heard:
+                        self._last_human_transcript = " ".join(raw_heard.split())[:180]
                     self._accept_heard_transcript(event)
                     if self._queue_readonly_tool(event):
                         self._tool_question = str(event.get("transcript", ""))[:280]
@@ -1493,6 +1536,7 @@ class NativeOmniSession:
                     await self._send_device_state("stop", generation)
                     if generation == self._generation and current_response:
                         self._tool_audio_sent(current_response, generation)
+                        self._native_audio_sent(current_response, generation)
                         # Native output can yield to Mac proactive comments
                         # after the complete current human tool response.
                         if current_response == self._tool_audio_response_id:
@@ -1610,6 +1654,8 @@ class NativeOmniSession:
         self._tool_answer_started_turn = None
         self._tool_audio_response_id = None
         self._tool_reply_pending.clear()
+        self._native_output_words.clear()
+        self._last_human_transcript = ""
         self._tool_question = ""
         # A barge-in invalidates both obsolete robot audio and visual
         # context. A camera fetch already in flight must not reintroduce
