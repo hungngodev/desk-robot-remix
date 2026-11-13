@@ -707,3 +707,40 @@ def test_delayed_tool_completion_cannot_replace_newer_same_kind_receipt():
     ).interaction
     hub.remember_tool("robot-01", "visual_look", "New mug", now - .5)
     assert hub.recent_tool_context("robot-01", now)[0]["summary"] == "New mug"
+
+
+def test_new_authenticated_voice_turn_does_not_inherit_older_asr_intent():
+    # Old ASR can survive the short hub timeline after a new human VAD.
+    # It must not promote an unrelated old battery receipt above the new
+    # human's requested visual result in the tight context budget.
+    timeline = [
+        {"channel": "tool", "kind": "robot_status",
+         "content": "Old battery " + "x" * 80},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Check your battery"},
+        {"channel": "human_voice", "kind": "voice_start"},
+        {"channel": "tool", "kind": "visual_look",
+         "content": "Current cup beside the keyboard"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Please look at the cup"},
+        {"channel": "tool", "kind": "memory_recall",
+         "content": "Long unrelated memory " + "m" * 100},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Current cup beside the keyboard" in result
+    assert "Earlier model ASR guess" not in result
+    assert len(result) <= 400
+
+
+def test_two_asr_chunks_within_one_voice_turn_remain_available():
+    timeline = [
+        {"channel": "human_voice", "kind": "voice_start"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Please look at the cup"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "And check your battery"},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Recent model ASR guess" in result
+    assert "Earlier model ASR guess" in result
