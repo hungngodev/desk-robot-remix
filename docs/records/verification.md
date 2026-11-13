@@ -1,3 +1,7 @@
+## November 13 current turn tool receipt priority, not executed
+
+Source commit `b66269e` and regression commit `46578b2` prevent a read-only tool receipt before the latest authenticated human voice from receiving current ASR request priority in `compose_brain_context`. Old evidence remains explicitly historical and available when budget allows. This does not prove request identity or playback. Local `git ls-remote` failed DNS resolution of github.com; pytest, native C++, PlatformIO, ESP-IDF and physical tests were **not executed**. Required check on exact current head: `cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_brain_context.py`. Follow with an authenticated robot/turn epoch regression through the existing Xiaozhi and Mac tool dispatcher.
+
 ## November 13 architecture voice-boundary regression, unexecuted
 
 `769c591` adds `test_new_voice_without_completed_asr_cannot_reuse_prior_question`; `3a6e001` removes the `heard_count` prerequisite from the newest-first `human_voice` boundary fence in `brain_context.py`. This fixes the no-new-ASR case without altering motion, charging, audio transport, or tool dispatch. **No test executed**: `git ls-remote https://github.com/hungngodev/desk-robot-remix.git HEAD` failed `Could not resolve host: github.com`. Existing full suite status is unchanged. Required executable check: `cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_brain_context.py`, plus the two existing boundary regressions, on the exact current PR head.
