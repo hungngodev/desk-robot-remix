@@ -118,9 +118,18 @@ class Runtime:
             and visual.hub.voice_until[robot_id] == float("inf")
         ]
         if missing_starts:
+            prepare = getattr(visual, "prepare_human_turn", None)
+            # Mark authenticated VAD NOW. A slow Xiaozhi STOP cannot keep
+            # old camera or VLM activity alive during speaker teardown.
+            if callable(prepare):
+                for robot_id in sorted(missing_starts):
+                    prepare(robot_id, end_expected=True)
             await self._preempt_audio_floor()
             for robot_id in sorted(missing_starts):
-                visual.voice_started(robot_id)
+                if callable(prepare):
+                    visual.start_speech_frames(robot_id)
+                else:
+                    visual.voice_started(robot_id)
         # A lost speech_end must stop that head's optional 1 FPS sampler,
         # not just clear the speaker lease in the hub.
         for robot_id in sorted(missing_ends):
@@ -162,17 +171,24 @@ class Runtime:
             if visual is not None:
                 visual.voice_ended(robot_id)
             return
+        visual = getattr(self, "multimodal", None)
+        prepare = getattr(visual, "prepare_human_turn", None)
+        # The VAD producer is authenticated already. Fence old camera/tool
+        # work synchronously BEFORE awaiting slow audio STOP. This does not
+        # launch another camera HTTP request, inference, or audio owner.
+        if callable(prepare) and kind in ("speech_start", "normal", "group"):
+            prepare(robot_id, end_expected=kind == "speech_start")
         # Human speech cancels one shared five-pet speech floor once.
         await self._preempt_audio_floor()
-        # VAD event is a signal, never a blocking image request. Schedule
-        # camera sampling AFTER the urgent audio cancellation path.
-        visual = getattr(self, "multimodal", None)
+        # Only after the urgent speaker cleanup may the optional JPEG
+        # sampler start. Preserve smaller test adapters' prior interface.
         if visual is not None:
-            if kind == "speech_start":
+            if callable(prepare):
+                if kind in ("speech_start", "normal", "group"):
+                    visual.start_speech_frames(robot_id)
+            elif kind == "speech_start":
                 visual.voice_started(robot_id)
             elif kind in ("normal", "group"):
-                # AEC barge-in can be real without an idle speech_end event;
-                # never leave an indefinite speech-start visual lease for it.
                 visual.voice_interrupted(robot_id)
 
     async def close(self):
