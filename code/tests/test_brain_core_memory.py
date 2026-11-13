@@ -61,6 +61,13 @@ def test_only_operator_can_edit_and_models_need_opt_in_to_read_core(
     with TestClient(create_app(settings)) as client:
         assert client.put(url, headers=tool, json={"value": "checkers"}).status_code == 403
         assert client.delete(url, headers=tool).status_code == 403
+        assert client.get(
+            "/v1/pet/unconfigured/core-memory", headers=operator,
+        ).status_code == 404
+        assert client.put(
+            "/v1/pet/unconfigured/core-memory/favorite_game",
+            headers=operator, json={"value": "checkers"},
+        ).status_code == 404
         created = client.put(url, headers=operator, json={"value": "checkers"})
         assert created.status_code == 200 and created.json()["changed"]
         listed = client.get("/v1/pet/robot-01/core-memory", headers=operator)
