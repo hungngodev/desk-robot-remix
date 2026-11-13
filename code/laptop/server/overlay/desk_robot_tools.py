@@ -10,6 +10,13 @@ from plugins_func.register import Action, ActionResponse, ToolType, register_fun
 
 
 async def call(conn, route, payload=None):
+    # Only the pinned registered tools may reach the Mac. Never forward
+    # arbitrary model-supplied paths, even to a separately protected API.
+    if route not in {
+        "status", "latest-pickup", "interaction-context", "voice-context",
+        "look", "pickup", "stop",
+    }:
+        return {"error": "Unsupported robot tool route", "retried": False}
     robot = robot_for_device(conn.device_id)
     token = os.environ.get("DESK_ROBOT_TOOL_TOKEN", "")
     if (robot is None or connections.get(conn.device_id) is not conn
