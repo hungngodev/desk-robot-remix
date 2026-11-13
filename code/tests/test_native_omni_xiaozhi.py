@@ -2611,6 +2611,70 @@ async def test_compound_native_tool_worker_executes_two_existing_mac_readonly_ro
         await asyncio.gather(worker, return_exceptions=True)
 
 
+async def test_native_parallel_tool_results_keep_human_clause_order(native, monkeypatch):
+    """The faster battery receipt must not reorder 'look, then check battery'."""
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    camera_started, battery_done, release_camera = (
+        asyncio.Event(), asyncio.Event(), asyncio.Event()
+    )
+
+    async def call(current, route, payload):
+        assert current is conn
+        if route == "look":
+            camera_started.set()
+            await release_camera.wait()
+            return {"robot_id": "robot-01",
+                    "source": "authenticated_xiao_camera_and_local_vlm",
+                    "answer": "Possibly a red key", "motor_authorized": False}
+        assert route == "power-status"
+        battery_done.set()
+        return {"robot_id": "robot-01",
+                "source": "wroom_aux_fuel_gauge_raw_unqualified",
+                "gauge_available": False, "motor_authorized": False}
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+
+    pending = asyncio.create_task(session._run_readonly_batch([
+        ("look", {"question": "Look at my desk"}, 0, 0),
+        ("power-status", {}, 0, 0),
+    ]))
+    try:
+        await asyncio.wait_for(camera_started.wait(), timeout=1)
+        await asyncio.wait_for(battery_done.wait(), timeout=1)
+        assert not pending.done()  # independent concurrent battery finished
+        release_camera.set()
+        facts = await asyncio.wait_for(pending, timeout=1)
+        assert [fact["source"] for fact in facts] == [
+            "local_camera_model_guess", "wroom_fuel_gauge",
+        ]
+        assert session.native_readonly_tools_completed == 2
+    finally:
+        release_camera.set()
+        if not pending.done():
+            pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+
+
 async def test_native_fast_battery_context_before_slow_vision_completes(
     native, monkeypatch,
 ):
