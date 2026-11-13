@@ -293,3 +293,63 @@ def test_interaction_timeline_respects_every_small_limit_under_sensor_flood():
         assert chosen[0]["channel"] == "human_voice"
         if count >= 2:
             assert any(cue["channel"] == "tool" for cue in chosen)
+
+
+def test_freshest_memory_and_curated_facts_win_regardless_of_input_order():
+    """SQLite is newest-first; topical merges are oldest-first."""
+    base = time.time() - 100
+    records = [
+        Memory(
+            "robot-01", f"episode{i:02}", "robot-01", True, "object",
+            f"item number {i:02}", base + i, 0.9,
+        )
+        for i in range(12)
+    ]
+    facts = [
+        CoreFact("robot-01", f"pref{i:02}", f"value{i:02}", base + i)
+        for i in range(12)
+    ]
+    oldest_first = compose_brain_context(records, facts, ())
+    newest_first = compose_brain_context(
+        list(reversed(records)), list(reversed(facts)), ()
+    )
+    assert oldest_first == newest_first
+    assert "item number 11" in oldest_first.recent
+    assert "item number 06" in oldest_first.recent
+    assert "item number 05" not in oldest_first.recent
+    assert "item number 00" not in oldest_first.recent
+    assert "pref11: value11" in oldest_first.core
+    assert "pref06: value06" in oldest_first.core
+    assert "pref05: value05" not in oldest_first.core
+    assert "pref00: value00" not in oldest_first.core
+    assert oldest_first.recent.index("item number 06") < (
+        oldest_first.recent.index("item number 11")
+    )
+    assert len(oldest_first.recent) <= 600
+    assert len(oldest_first.core) <= 500
+
+
+def test_brain_budget_keeps_newest_evidence_and_deduplicates_late_updates():
+    base = time.time() - 100
+    records = [
+        Memory(
+            "robot-01", f"old{i}", "robot-01", True, "object",
+            "older long observation " + "x" * 280, base + i, 0.75,
+        )
+        for i in range(20)
+    ]
+    records.extend([
+        Memory("robot-01", "same", "robot-01", True, "object",
+               "stale key location", base + 18, .7),
+        Memory("robot-01", "same", "robot-01", True, "object",
+               "new location is the green box", base + 30, .9),
+    ])
+    facts = [
+        CoreFact("robot-01", "same_slot", "old value", base + 1),
+        CoreFact("robot-01", "same_slot", "new value", base + 30),
+    ]
+    composed = compose_brain_context(records, facts, [])
+    assert "new location is the green box" in composed.recent
+    assert "stale key location" not in composed.recent
+    assert "new value" in composed.core and "old value" not in composed.core
+    assert len(composed.recent) <= 600 and len(composed.core) <= 500
