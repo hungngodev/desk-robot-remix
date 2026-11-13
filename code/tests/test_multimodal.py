@@ -64,6 +64,45 @@ def config(enabled=True):
     )
 
 
+
+async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_polls():
+    """Streaming perception runs independently of VAD and single-shot pulls."""
+    class LiveHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.emitted = 0
+
+        async def stream_frames(self):
+            for index in range(7):
+                self.emitted += 1
+                yield image(square=index > 2), time.monotonic()
+                await asyncio.sleep(0.26)
+
+    head, vision = LiveHead(), Vision()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        vision, asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        async with asyncio.timeout(3):
+            while head.emitted < 7:
+                await asyncio.sleep(0.02)
+        metrics = visual.status("robot-01")["software_timings"]
+        assert metrics["stream_frames_received"] >= 7
+        assert 2 <= metrics["stream_frames_selected"] < 7
+        assert metrics["stream_frames_skipped"] >= 1
+        assert len(visual.hub.frames["robot-01"]) >= 2
+        assert all(frame.source == "proactive"
+                   for frame in visual.hub.frames["robot-01"])
+        assert head.captures == 0  # No calls to /api/camera.jpg
+        assert vision.calls == []  # No expensive VLM per streaming JPEG
+    finally:
+        await visual.close()
+    assert not visual._stream_tasks
+
+
+
 def test_all_new_physical_interactions_trigger_camera_without_extra_sensor_drivers():
     hub = CameraFrameHub(["robot-01", "robot-02"], idle_fps=0.3)
     hub.offer("robot-01", image(), 100.0, source="proactive")
