@@ -1556,6 +1556,40 @@ class NativeOmniSession:
                     _output_owner = None
 
 
+# A native session and its Mac proactive speaker must serialize bytes and
+# STOP on the same head. Only one Mac speaker lease exists fleet-wide; the
+# fallback lock covers its device even before the native model connects.
+_external_opus_send_lock = asyncio.Lock()
+
+
+def _external_device_send_lock(conn) -> asyncio.Lock:
+    session = _sessions.get(conn.device_id)
+    if (session is not None and session.conn is conn and not session.closed):
+        return session._device_send_lock
+    return _external_opus_send_lock
+
+
+async def send_external_opus(conn, packet: bytes, generation: int) -> None:
+    """Send existing Mac Opus through the native head's actual send lock.
+
+    Both the packet and peer human VAD STOP use this same lock. A packet
+    already being sent may finish before STOP, but can NEVER follow STOP.
+    The caller owns the speech lease and its generation, not this function.
+    """
+    import desk_robot_bridge as bridge
+    if not isinstance(packet, bytes) or len(packet) == 0:
+        raise ValueError("Expected a nonempty existing Mac Opus packet")
+    async with _external_device_send_lock(conn):
+        if (bridge.connections.get(conn.device_id) is not conn
+                or _external_speaker_owner != conn.device_id
+                or _external_speaker_connection is not conn
+                or conn.client_abort
+                or generation != bridge.interrupt_generation.get(conn.device_id, 0)
+                or bridge.human_speech_active()):
+            raise RuntimeError("Mac speech interrupted before device Opus send")
+        await conn.websocket.send(packet)
+
+
 async def begin_external_speech(conn) -> bool:
     """Lease the ONE Xiaozhi decoder for existing Mac proactive/group speech.
 
@@ -1693,11 +1727,12 @@ async def preempt_others_for_human(source_device: str) -> None:
     # the speaker was physically silenced.
     if external is not None and external_device not in safely_invalidated:
         try:
-            await external.websocket.send(json.dumps({
-                "type": "tts", "state": "stop", "flush": True,
-                "session_id": external.session_id,
-            }))
-            external.client_is_speaking = False
+            async with _external_device_send_lock(external):
+                await external.websocket.send(json.dumps({
+                    "type": "tts", "state": "stop", "flush": True,
+                    "session_id": external.session_id,
+                }))
+                external.client_is_speaking = False
         except Exception:
             pass
     async with _output_owner_lock:
