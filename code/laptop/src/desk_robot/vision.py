@@ -90,7 +90,16 @@ class VisualChangeGate:
 
     def observe(self, jpeg: bytes) -> bytes | None:
         """Return prior baseline JPEG once meaningful pixel difference persists."""
-        current = self._reduced(jpeg)
+        return self.observe_reduced(jpeg, self._reduced(jpeg))
+
+    def observe_reduced(self, jpeg: bytes, current: bytes) -> bytes | None:
+        """Commit a predecoded image on the event loop after VAD fencing.
+
+        The slow grayscale conversion may run in a native thread. The filter
+        state must not be changed by that thread after human preemption.
+        """
+        if not isinstance(current, bytes) or len(current) != 64 * 48:
+            raise ValueError("Expected bounded 64x48 grayscale image")
         if self._pixel_baseline is None:
             self._pixel_baseline, self._baseline = current, jpeg
             return None
