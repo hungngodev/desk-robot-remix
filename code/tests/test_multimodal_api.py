@@ -103,6 +103,46 @@ def test_mac_semantic_tool_plan_fail_closed_without_ollama_or_memory_consent(
         }).status_code == 422
 
 
+async def test_existing_ollama_semantic_planner_uses_strict_json_schema(
+    settings,
+):
+    import json
+    import httpx
+    from desk_robot.conversation import OllamaChat
+
+    captured = []
+
+    def reply(request):
+        captured.append(request)
+        return httpx.Response(200, json={
+            "message": {"role": "assistant", "content":
+                        '{"tools":[{"route":"look"},{"route":"status"}]}'},
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as http:
+        planner = OllamaChat(settings, http)
+        result = await planner.readonly_tool_plan([
+            {"role": "system", "content": "Choose only read-only tools."},
+            {"role": "user", "content": "Can you check the camera and battery?"},
+        ])
+    assert json.loads(result)["tools"] == [
+        {"route": "look"}, {"route": "status"},
+    ]
+    assert len(captured) == 1
+    data = json.loads(captured[0].content)
+    assert data["stream"] is False
+    assert data["think"] is False
+    assert data["options"]["temperature"] == 0
+    assert data["format"]["type"] == "object"
+    assert data["format"]["properties"]["tools"]["maxItems"] == 2
+    routes = data["format"]["properties"]["tools"]["items"]["properties"]["route"]["enum"]
+    assert set(routes) == {
+        "look", "status", "latest-pickup", "interaction-context",
+        "voice-context",
+    }
+    assert not {"move", "stop", "pickup", "enable", "charge"} & set(routes)
+
+
 def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
     settings, tokens,
 ):
