@@ -28,8 +28,10 @@ async def call(conn, route, payload=None):
         ) as client:
             if route == "status":
                 response = await client.get(f"/v1/robots/{robot}/status")
-            elif route == "job":
-                response = await client.get(f"/v1/jobs/{conn.desk_robot_last_job}")
+            elif route == "latest-pickup":
+                response = await client.get(
+                    f"/v1/robots/{robot}/jobs/latest-pickup"
+                )
             elif route == "interaction-context":
                 response = await client.get(
                     f"/v1/pet/{robot}/interaction-context"
@@ -59,7 +61,7 @@ async def call(conn, route, payload=None):
     # Safety STOP and permitted pickup jobs must keep their established
     # physical acknowledgement/owner semantics, not lose an HTTP request.
     readonly = route in {
-        "status", "job", "voice-context", "interaction-context", "look",
+        "status", "latest-pickup", "voice-context", "interaction-context", "look",
     }
     observe_turn = getattr(bridge, "tool_turn_cancel_event", None)
     try:
@@ -185,8 +187,8 @@ async def desk_robot_pickup(conn, target):
     if target not in {"key", "candy"}:
         return ActionResponse(Action.REQLLM, result={"error": "Target must be key or candy"})
     result = await call(conn, "pickup", {"target": target})
-    if isinstance(result.get("id"), str) and result["id"]:
-        conn.desk_robot_last_job = result["id"]
+    # The Mac Coordinator owns job identities and progress. A WebSocket
+    # connection may vanish while the accepted job continues.
     return read_only_response(result)
 
 
@@ -202,17 +204,14 @@ async def desk_robot_stop(conn):
 @register_function(
     "desk_robot_job",
     description(
-        "desk_robot_job", "Read the last pickup job; do not infer success from servo commands."
+        "desk_robot_job",
+        "Read THIS robot's latest Mac-owned pickup job even after a head reconnect. "
+        "A queued or running job is not a verified physical grasp."
     ),
     ToolType.IOT_CTL,
 )
 async def desk_robot_job(conn):
-    result = (
-        await call(conn, "job")
-        if getattr(conn, "desk_robot_last_job", None)
-        else {"error": "No job requested"}
-    )
-    return read_only_response(result)
+    return read_only_response(await call(conn, "latest-pickup"))
 
 @register_function(
     "desk_robot_memories",
