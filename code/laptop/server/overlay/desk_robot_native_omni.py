@@ -116,9 +116,9 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
         r"^(?:do you (?:remember|recall)|what do you remember|"
         r"what did i (?:tell|say)|what did we (?:discuss|talk about)|"
         r"have we (?:talked|discussed)|tell me what you remember|"
-        r"remind me (?:of|about))\\b", spoken,
+        r"remind me (?:of|about))\b", spoken,
     ) or re.match(
-        r"^(?:remember|recall) (?:what|when|where|who|the)\\b", polite,
+        r"^(?:remember|recall) (?:what|when|where|who|the)\b", polite,
     ):
         return "voice-context", {"question": text[:240]}
     if re.match(
