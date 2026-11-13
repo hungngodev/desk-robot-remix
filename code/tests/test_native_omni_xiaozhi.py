@@ -766,6 +766,30 @@ def test_native_speech_tools_allow_only_explicit_readonly_requests(
         }
 
 
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("Do you remember anything?", {}),
+        ("Do you remember yesterday?", {}),
+        ("What do you remember?", {}),
+        ("Tell me what you remember", {}),
+        ("What did I tell you about the green mug?", {
+            "question": "What did I tell you about the green mug?",
+        }),
+        ("Remind me about my key", {
+            "question": "Remind me about my key",
+        }),
+    ],
+)
+def test_native_memory_request_chooses_recent_or_topic_query(
+    native, spoken, expected,
+):
+    module, _ = native
+    route, payload = module.native_readonly_request(spoken)
+    assert route == "voice-context"
+    assert payload == expected
+
+
 async def test_native_speech_tool_uses_pinned_mac_bridge_once_per_asr_item(
     native, monkeypatch,
 ):
