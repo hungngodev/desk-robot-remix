@@ -200,6 +200,28 @@ async def request(args, settings):
             result = await client.get(f"/v1/robots/{args.robot}/status")
         elif args.action == "job":
             result = await client.get(f"/v1/jobs/{args.job}")
+        elif args.action in ("look", "situation", "vision"):
+            if settings.mode != "hardware":
+                raise ValueError("Live camera tools require a physical XIAO head")
+            settings.robot(args.robot)  # Validate configured robot identity.
+            if args.action in ("look", "situation") and not settings.voice_vision_tools_enabled:
+                raise ValueError("Live vision consent is disabled in local configuration")
+            if args.action == "look":
+                question = args.question.strip()
+                if not 3 <= len(question) <= 280:
+                    raise ValueError("Visual question must have 3 to 280 characters")
+                result = await client.post(
+                    f"/v1/pet/{args.robot}/look",
+                    json={"question": question}, timeout=23,
+                )
+            elif args.action == "situation":
+                result = await client.get(
+                    f"/v1/pet/{args.robot}/interaction-context", timeout=8,
+                )
+            else:
+                result = await client.get(
+                    f"/v1/pet/{args.robot}/vision-status", timeout=8,
+                )
         elif args.action == "chat":
             turns = conversation_turns(args.robots, args.turns)
             result = await client.post(
@@ -249,6 +271,17 @@ def main():
             part.add_argument("command", help='One bounded command, e.g. "drive 15 15 100"')
         if action == "pickup":
             part.add_argument("target", choices=["key", "candy"])
+    for action in ("look", "situation", "vision"):
+        part = sub.add_parser(action, help=(
+            "Ask the real XIAO camera and local vision model"
+            if action == "look" else
+            "Inspect recent private transient sensor, tool and voice context"
+            if action == "situation" else
+            "Read actual Mac camera and model diagnostics"
+        ))
+        part.add_argument("robot")
+        if action == "look":
+            part.add_argument("question")
     job = sub.add_parser("job")
     job.add_argument("job")
     chat = sub.add_parser("chat")
