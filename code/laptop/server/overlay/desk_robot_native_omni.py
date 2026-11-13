@@ -155,11 +155,13 @@ class NativeOmniSession:
         # Consent comes from THIS pet's authenticated Mac context. Never
         # persist a microphone transcript unless separately enabled there.
         self._transcript_memory_enabled = False
+        self._live_transcript_enabled = False
         self._heard_session = uuid.uuid4().hex[:12]
         self._heard_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=12)
         self._heard_seen: set[str] = set()
         self.heard_memories_stored = 0
         self.heard_memories_dropped = 0
+        self.heard_live_delivered = 0
         # One selected frame per real camera receipt, not one copy per
         # outgoing audio unit. A new VAD turn invalidates old JPEGs.
         self._video_turn = 0
@@ -250,12 +252,16 @@ class NativeOmniSession:
                     self._transcript_memory_enabled = (
                         data.get("transcript_memory_enabled") is True
                     )
+                    self._live_transcript_enabled = (
+                        data.get("live_transcript_context_enabled") is True
+                    )
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             return
 
     def _accept_heard_transcript(self, event: dict) -> None:
         """Queue optional completed ASR without ever blocking mic or Opus."""
-        if not self._transcript_memory_enabled:
+        if not (self._live_transcript_enabled
+                or self._transcript_memory_enabled):
             return
         item_id, transcript = event.get("item_id"), event.get("transcript")
         if (not isinstance(item_id, str) or not 1 <= len(item_id) <= 128
@@ -291,7 +297,7 @@ class NativeOmniSession:
                 self.heard_memories_dropped += 1
 
     async def _persist_heard(self, http: aiohttp.ClientSession) -> None:
-        """Only current robot's explicit memory opt-in authorizes text write."""
+        """Deliver uncertain ASR for live RAM context or opt-in disk memory."""
         url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-heard"
         while not self.closed:
             event_id, transcript = await self._heard_queue.get()
@@ -311,6 +317,8 @@ class NativeOmniSession:
                                 and type(data.get("stored")) is bool):
                             if data["stored"]:
                                 self.heard_memories_stored += 1
+                            if data.get("ephemeral_context_added") is True:
+                                self.heard_live_delivered += 1
                             continue
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                 pass
@@ -645,7 +653,8 @@ class NativeOmniSession:
                         asyncio.create_task(self._play()),
                         asyncio.create_task(self._camera(http)),
                     ]
-                    if self._transcript_memory_enabled:
+                    if (self._live_transcript_enabled
+                            or self._transcript_memory_enabled):
                         self._tasks.append(asyncio.create_task(
                             self._persist_heard(http)
                         ))
