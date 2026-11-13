@@ -1117,6 +1117,7 @@ async def test_new_human_voice_clears_stale_native_tool_queue_before_new_questio
             while session._readonly_turn == 0:
                 await asyncio.sleep(.005)
         assert session._readonly_queue.empty()
+        assert session._context_update_unsupported is True
         assert session.native_readonly_tools_dropped == 3
         session._queue_readonly_tool({
             "item_id": "fresh_human_vision",
