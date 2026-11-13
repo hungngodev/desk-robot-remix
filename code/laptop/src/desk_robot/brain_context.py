@@ -140,7 +140,14 @@ def compose_brain_context(
                     + _clean(value, limit=105)
                 )
         elif channel == "camera":
+            trigger = item.get("trigger_kind")
             phrase = "XIAO frame received (contents not inferred)"
+            if (isinstance(trigger, str)
+                    and re.fullmatch(r"[a-z_]{1,40}", trigger)):
+                phrase += (
+                    "; scheduled after " + trigger
+                    + " sensor edge, not proof of visual contents"
+                )
         elif channel == "tool" and kind == "visual_look":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
