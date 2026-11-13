@@ -13,12 +13,34 @@ Xiaozhi microphone, AEC, speaker and expression owner; the Mac retains one
 | --- | --- |
 | **Immediate** authenticated speech and barge | `server/overlay/desk_robot_bridge.py` increments `voice_turn_generation` and signals `tool_turn_cancel_event` for that head. `desk_robot_tools.call` races only read-only Mac HTTP against that cancellation signal. Old camera/episodic memory requests are cancelled; actual STOP and permitted jobs keep their independent safety acknowledgments. |
 | **Continuous source sampling** | The XIAO camera owns real JPEG capture; Mac `CameraFrameHub` retains at most three processed JPEGs per pet, source receipt timestamps and triggered sensor edges. Idle ~0.3 FPS, human speech ~1 FPS, a bounded two-frame physical sensor confirmation. This is **not** guaranteed hardware frame cadence. |
-| **Ephemeral multimodal context** | The SAME `CameraFrameHub` exposes `interaction_timeline()`, sorted by Mac monotonic receipt and limited to 10 entries by default: human VAD, physical sensor edge, JPEG receipt metadata, and *completed* local VLM tool interpretation. No JPEG/PCM bytes, guessed exposure timestamps or motor permissions in the JSON. The onset of a NEW human turn clears old tool interpretations fleet-wide. |
+| **Ephemeral multimodal context** | The SAME `CameraFrameHub` exposes `interaction_timeline()`, sorted by Mac monotonic receipt and limited to 10 entries by default: human VAD, physical sensor edge, JPEG receipt metadata, *completed* local VLM interpretation, and this pet's recent transmitted text. No JPEG/PCM bytes, guessed exposure timestamps or motor permissions. A NEW human turn clears old VLM guesses fleet-wide but preserves the preceding pet remark for a follow-up. Actual speaker playback remains **unverified**. |
 | **Relevant episodic recall** | Each `MemoryStore` holds at most 250 text events in that pet's SQLite, marked firsthand or secondhand with confidence. `search()` is a **local lexical** ranked fallback, not a vector model or semantic understanding claim. Xiaozhi `desk_robot_memories` passes a bounded question through the same turn-fenced, opt-in API. No matching text means no claimed recollection. |
 | **Stable personality memory** | Separate `core_facts` table holds at most 24 concise operator-curated preferences per robot, with operator-only set/get/delete and explicit per-pet episodic forget. No voice tool or LLM can edit core policy, create hardware permits or read a neighbor's private store. Native Omni gets it only with voice-memory consent. |
 | **One prompt composer** | Pure `desk_robot/brain_context.py` composes memories, preferences and ephemeral time-ordered evidence into three small independently capped sections with source labels. `PetController` reuses it rather than building an alternate agent or a hidden parallel LLM. |
-| **Playful speech and yield** | Human speech and confirmed tool results take precedence; after a real VAD speech end, unsolicited pet remarks wait **800 milliseconds** in the `spontaneous_floor_busy()` gate, adapted from Qwen Live Harness. Explicit camera tools still run. This does **not** claim acoustic speaker playback completed. |
+| **Playful speech and yield** | Human speech and confirmed tool results take precedence; after a real VAD speech end, unsolicited pet remarks wait **800 milliseconds** in the `spontaneous_floor_busy()` gate, adapted from Qwen Live Harness. Recent *own* utterances suppress repetitive unsolicited lines using a simple similarity check; direct human requests remain unsuppressed. Explicit camera tools still run. This does **not** claim acoustic speaker playback completed. |
 | **Response and tool boundary** | Existing local Xiaozhi registered tools can inspect authorized memory/current camera and request guarded jobs. Optional MiniCPM-o native duplex handles bounded audio/video but published capability table does **not** support function calling. Do not claim the two backend paths equivalent or silently synthesize tool events. |
+
+### Independent consent and turn continuity
+
+There are now **two separate, read-only Xiaozhi tools**. The
+`desk_robot_situation` tool requires *live vision consent*, returns only this
+pet's short-lived timeline and explicitly excludes SQLite; it can answer a
+follow-up about what the robot just said or what a sensor reported without
+granting persistent memory access. The `desk_robot_memories` tool requires
+*durable memory consent*, uses the same authenticated VAD-fenced Mac HTTP
+request, and retrieves relevant historical observations and operator-curated
+preferences. Both are cancelled on a newer human speech edge; physical STOP
+is deliberately excluded from this speculative cancellation. The two
+permissions must never be silently coupled.
+
+`CameraFrameHub.spoken_history` keeps at most three actual transmitted Mac
+pet lines per robot for at most 30 seconds. That is **not** confirmation that
+a physical speaker played, that the human heard them, or that a separate
+robot spoke them. A new VAD keeps this one limited context type while
+discarding obsolete local VLM guesses. The pure context formatter selects
+bounded source-aware evidence and rejects a near-duplicate spontaneous
+remark if it resembles this pet's own utterance within the preceding hour.
+These are experience-quality building blocks, not an autonomous motor policy.
 
 ### Example of a grounded playful follow-up
 
