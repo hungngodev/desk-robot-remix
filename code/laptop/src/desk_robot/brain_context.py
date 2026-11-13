@@ -37,7 +37,7 @@ def _memory_label(entry: Memory) -> str:
         return "I said"
     if entry.kind == "peer_utterance":
         # A peer's words never establish this pet's firsthand observation.
-        return (f"I heard {entry.source_robot} say" if not entry.witnessed
+        return (f"I heard {entry.source_robot} say" if entry.witnessed
                 else f"{entry.source_robot} said (peer report, not my sighting)")
     return ("I observed" if entry.witnessed and entry.source_robot == entry.robot_id
             else f"{entry.source_robot} reported")
