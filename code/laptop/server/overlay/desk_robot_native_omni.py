@@ -217,6 +217,8 @@ class NativeOmniSession:
         # Consent comes from THIS pet's authenticated Mac context. Never
         # persist a microphone transcript unless separately enabled there.
         self._transcript_memory_enabled = False
+        self._mac_context_verified = False
+        self._last_authenticated_mac_at = float("-inf")
         self._memory_tools_enabled = False
         self._live_transcript_enabled = False
         self._base_instructions = self.wire.instructions
@@ -346,8 +348,8 @@ class NativeOmniSession:
         """Ask the existing Mac authority for THIS robot's voice style.
 
         Old memories are only included when the operator separately enabled
-        voice memory tools in local.toml. Backend failure keeps a safe generic
-        persona and does not change the native/legacy audio route.
+        voice memory tools in local.toml. An unreachable or rejecting Mac
+        authority is NOT a valid grant to stream private audio to a model.
         """
         url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-context"
         try:
@@ -382,6 +384,9 @@ class NativeOmniSession:
                     self._live_transcript_enabled = (
                         data.get("live_transcript_context_enabled") is True
                     )
+                    self._mac_context_verified = self._live_transcript_enabled
+                    if self._mac_context_verified:
+                        self._last_authenticated_mac_at = time.monotonic()
                     # Startup private Mac state is trusted only when the
                     # response identifies the current authenticated pet.
                     self._pet_quiet = data.get("pet_quiet") is True
@@ -531,6 +536,12 @@ class NativeOmniSession:
             self._context_wakeup.clear()
             if not self.connected or not self._live_transcript_enabled:
                 continue
+            if (time.monotonic() -
+                    self._last_authenticated_mac_at > 9.0):
+                # A dead Mac cannot continue granting unlimited camera/mic
+                # access from an earlier successful consent check.
+                self.fail("Mac live voice and vision authorization expired")
+                return
             delay = 1.5 - (time.monotonic() - self._context_last_sync_at)
             if delay > 0:
                 await asyncio.sleep(delay)
@@ -566,6 +577,7 @@ class NativeOmniSession:
                         or type(data.get("pet_autonomy_enabled")) is not bool):
                     self.native_context_errors += 1
                     continue
+                self._last_authenticated_mac_at = time.monotonic()
                 old_quiet = self._pet_quiet
                 old_autonomy = self._pet_autonomy_enabled
                 self._pet_quiet = data["pet_quiet"]
@@ -1801,6 +1813,10 @@ class NativeOmniSession:
             await self._retire_legacy_audio()
             async with aiohttp.ClientSession() as http:
                 await self._load_private_persona(http)
+                if not self._mac_context_verified:
+                    raise RuntimeError(
+                        "Current Mac permission required for native live media"
+                    )
                 async with http.ws_connect(
                     self.url, heartbeat=20, max_msg_size=2_000_000,
                     timeout=8,
