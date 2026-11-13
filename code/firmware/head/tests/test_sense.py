@@ -163,6 +163,24 @@ class SenseSelectionTests(unittest.TestCase):
         # Overlay is generated into an isolated pinned Xiaozhi copy.
         self.assertIn('(HERE / "modular_snapshot.inc").read_text()', installer)
 
+    def test_authenticated_stream_reuses_single_camera_and_keeps_http_control_live(self):
+        bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+        header = (HEAD / "overlay/robot_bridge.h").read_text()
+        assert '"/api/camera.mjpg", HTTP_GET' in bridge
+        assert "if (!Authorize(req))" in bridge
+        assert 'multipart/x-mixed-replace; boundary=deskrobotframe' in bridge
+        assert "httpd_req_async_handler_begin(req, &async_req)" in bridge
+        assert "httpd_req_async_handler_complete(req)" in bridge
+        assert "CameraStreamTask" in bridge and "CameraStreamTask" in header
+        assert bridge.count("camera_->SnapshotJpeg()") == 2
+        assert "camera_busy_.exchange(true)" in bridge
+        assert "camera_busy_.store(false)" in bridge
+        assert "vTaskDelay(pdMS_TO_TICKS(250))" in bridge
+        assert "httpd_resp_send_chunk(req" in bridge
+        assert "X-Desk-Camera-Sequence: %u" in bridge
+        assert "X-Desk-Camera-Complete-Us: %lld" in bridge
+        assert "config.max_uri_handlers = 6;" in bridge
+
     def test_vendor_stackchan_behavior_compiles_without_motor_framework(self):
         compiler = shutil.which("c++")
         self.assertIsNotNone(compiler, "Native C++20 compiler required")
