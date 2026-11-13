@@ -1712,6 +1712,10 @@ class NativeOmniSession:
         speech_raced = False
         refused_after_claim = False
         async with self._device_send_lock:
+            # Quiet/autonomy can change AFTER the first policy check while
+            # claim_speaker waits for the physical send lock. Never trust a
+            # pre-await snapshot for speaker authorization.
+            direct_required = self._pet_quiet or not self._pet_autonomy_enabled
             if (self.closed or generation != self._generation
                     or self._external_speech_active
                     or (state == "start" and direct_required and not (
