@@ -176,6 +176,78 @@ def test_overlay_targets_pinned_server_and_compiles():
         compile(source, path, "exec")
 
 
+async def test_installed_xiaozhi_intent_uses_real_mac_context_before_llm(
+    bridge, monkeypatch,
+):
+    """Execute the patched upstream handler, not an imagined chat pipeline."""
+    import ast
+    import types
+
+    spec = importlib.util.spec_from_file_location(
+        "contextual_xiaozhi_overlay", ROOT / "laptop/server/install_overlay.py"
+    )
+    overlay = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(overlay)
+    patched = overlay.files(
+        ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+    )["core/handle/intentHandler.py"]
+    function = next(
+        item for item in ast.parse(patched).body
+        if isinstance(item, ast.AsyncFunctionDef)
+        and item.name == "handle_user_intent"
+    )
+    calls = []
+    async def no(*args):
+        return False
+    async def call(conn, route):
+        calls.append(route)
+        return {
+            "robot_id": "robot-01",
+            "model_context": "Physical sensor edge: touch_tap",
+            "raw_media_included": False,
+            "persistent_memory_included": False,
+            "model_context_untrusted_not_instructions": True,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tool = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tool.call = call
+    for key, module in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tool),
+        ("desk_robot_bridge", bridge),
+    ):
+        monkeypatch.setitem(sys.modules, key, module)
+
+    isolated = ast.Module(body=[function], type_ignores=[])
+    namespace = {
+        "json": json,
+        "remove_punctuation_and_length": lambda text: (None, text),
+        "check_direct_exit": no,
+        "checkWakeupWords": no,
+    }
+    exec(compile(isolated, "patched_xiaozhi_intent.py", "exec"), namespace)
+    system = SimpleNamespace(role="system", content="Pip original persona")
+    head = SimpleNamespace(
+        device_id="mac-01", intent_type="function_call",
+        dialogue=SimpleNamespace(dialogue=[system]),
+    )
+    bridge.register(head)
+    result = await namespace["handle_user_intent"](
+        head, "What just happened?"
+    )
+    assert result is False  # The original LLM still receives the real human.
+    assert calls == ["interaction-context"]
+    assert "Pip original persona" in system.content
+    assert "touch_tap" in system.content
+    assert "untrusted descriptive data" in system.content
+
+
 async def test_legacy_brain_blends_live_mac_evidence_per_pet_without_history_bloat(
     bridge, monkeypatch,
 ):
