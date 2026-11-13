@@ -193,6 +193,26 @@ def test_context_keeps_two_recent_spoken_clauses_without_evicting_tools():
     assert "Please look for my red key" not in newer
 
 
+def test_consent_based_private_memory_tool_is_not_camera_sighting():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.remember_tool(
+        "robot-01", "memory_recall",
+        "own observed event: I saw a blue key yesterday", now,
+    )
+    timeline = hub.interaction_timeline("robot-01", now, limit=10)
+    assert timeline[-1]["kind"] == "memory_recall"
+    assert timeline[-1]["source"] == "private_opt_in_memory_tool_receipt"
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Opt-in private past memory" in result
+    assert "not current sight" in result
+    assert "blue key yesterday" in result
+    assert "blue key" not in compose_brain_context(
+        [], [], hub.interaction_timeline("robot-02", now, limit=10)
+    ).interaction
+    assert not hub.recent_tool_context("robot-01", now + 31)
+
+
 def test_context_budget_is_constant_even_with_many_long_model_outputs():
     memory = [
         episode("robot-01", f"event{i}", "object", "x" * 300)
