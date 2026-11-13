@@ -4,6 +4,74 @@ from fastapi.testclient import TestClient
 from desk_robot.api import create_app
 
 
+def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
+    settings, tokens,
+):
+    import time
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.brain_context import compose_brain_context
+
+    ids = [robot.id for robot in settings.robots]
+    hub = CameraFrameHub(ids)
+
+    class Head:
+        async def status(self):
+            return {
+                "robot_id": ids[0], "backend": "stepper_28byj48",
+                "armed": False, "safety": {"fault": "none"},
+            }
+
+    job = SimpleNamespace(
+        id="pickup123", robot_id=ids[0], kind="pickup", state="running",
+        data=lambda: {
+            "id": "pickup123", "robot_id": ids[0],
+            "kind": "pickup", "state": "running",
+            "physical_grasp_verified": False,
+        },
+    )
+    coord = SimpleNamespace(
+        robot=lambda rid: settings.robot(rid),
+        heads={ids[0]: Head()},
+        jobs={"pickup123": job},
+    )
+    runtime = SimpleNamespace(
+        coordinator=coord,
+        multimodal=SimpleNamespace(hub=hub, _turn_epoch={rid: 0 for rid in ids}),
+    )
+
+    async def start():
+        pass
+
+    async def close():
+        pass
+
+    runtime.start, runtime.close = start, close
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    marked = {**tool, "X-Desk-Robot-Tool-Receipt": "1"}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        status_url = f"/v1/robots/{ids[0]}/status"
+        job_url = f"/v1/robots/{ids[0]}/jobs/latest-pickup"
+        assert client.get(status_url, headers=tool).status_code == 200
+        assert hub.recent_tool_context(ids[0], time.monotonic()) == []
+        assert client.get(status_url, headers=marked).status_code == 200
+        result = client.get(job_url, headers=marked)
+        assert result.status_code == 200
+        assert result.json()["state"] == "running"
+        cues = hub.recent_tool_context(ids[0], time.monotonic())
+        assert {x["kind"] for x in cues} == {"robot_status", "pickup_status"}
+        assert all(x["motor_authorized"] is False for x in cues)
+        context = compose_brain_context(
+            [], [], hub.interaction_timeline(ids[0], time.monotonic())
+        )
+        assert "Recent head telemetry" in context.interaction
+        assert "Mac pickup job receipt, not verified grasp" in context.interaction
+        assert hub.recent_tool_context(ids[1], time.monotonic()) == []
+        assert client.post(
+            f"/v1/robots/{ids[0]}/enable", headers=tool
+        ).status_code == 403
+
+
 def test_tool_token_can_request_visual_evidence_but_not_enable_motors(settings, tokens):
     app = create_app(settings)
     with TestClient(app) as client:
