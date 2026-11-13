@@ -1,6 +1,62 @@
 # Verification and physical trials
 
 
+## November 12 current Mac brain orchestration, exact evidence boundary
+
+**Scope:** all modifications on existing draft PR #17. The current source
+reuses Xiaozhi's current socket and VAD generation, the existing Mac camera
+hub, one `Conversation` speaker lease and five separate SQLite files.
+No second agent runtime, memory server, camera process or motor authority.
+
+**Actually executed locally:**
+
+* Exact GitHub `code/laptop/src/desk_robot/memory.py` blob
+  `09907bdb8ae6927a623e0e5472fdd83837c9de37`, verified with
+  `git hash-object`, passed direct Python assertions for lexical relevant
+  episode recall, plural normalization, five distinct private SQLite
+  stores, eyewitness vs peer report labels, bounded 250 episodes, capped
+  24 operator-curated core facts, invalid input rejection, idempotent
+  updates and per-pet deletion.
+* Exact GitHub `code/laptop/src/desk_robot/brain_context.py` blob
+  `53533ecbbe9f6918ff4ce7aff1ec16fc9edd8a19`, verified with
+  `git hash-object`, passed direct Python assertions for context source
+  labels, duplicate removal, exclusion of raw camera bytes, independent
+  600/500/400-character budgets, context of the pet's preceding
+  transmitted remark **without false playback ACK**, and suppression
+  of redundant unsolicited lines from the same pet but not peers/old words.
+* Independently re-read 13 current GitHub code and test files together:
+  **20/20 static integration assertions passed** for private memories,
+  curated preferences, current tool cancellation signals, status/STOP
+  isolation, chronological media/tool timeline, 800ms post-VAD initiative
+  pause, controlled API permissions and actual committed regression sources.
+
+**Committed but NOT yet executed in the full application test environment:**
+`test_brain_context.py`, `test_brain_core_memory.py`,
+`test_brain_memory_retrieval.py`, newly expanded
+`test_multimodal.py`, `test_server_bridge.py` and
+`test_xiaozhi_tool_resilience.py`. The current connected GitHub Actions
+jobs still fail before usable steps; no pinned Python 3.11/whole
+dependency suite, ESP-IDF, PlatformIO, complete native C++ sanitizers,
+actual XIAO AEC/camera timings or five live robots have been qualified.
+
+**Implementation detail:** A real Xiaozhi VAD edge sets the old
+`tool_turn_cancel_event` so obsolete read-only VLM/memory/status
+HTTP requests are cancelled promptly. The existing MAC tool socket and
+voice generation check still rejects late responses. Actual STOP and
+guarded motion jobs do **not** use speculative cancellation. The live
+`desk_robot_situation` tool is independent of durable memory consent;
+`desk_robot_memories` remains opt-in. Recent transmitted pet words
+may survive a new human VAD for a brief follow-up, but old VLM guesses
+are cleared and no physical speaker playback is falsely certified.
+
+**Still open** for product acceptance: full CI execution, source-verified
+power path and charging, all board/breakout revisions, fitted printable
+Fusion assembly, real simultaneous microphone/camera interruption,
+calibrated gripper and terminal docking, licensed commercial mechanics
+and five physical robot trials. No build-ready or charging claim.
+
+
+
 ## November 12 executed targeted native speech and printable prototype checks
 
 **This record is for canonical PR #17 source only.** Executed in an isolated local mirror of exact GitHub blobs, not a full repository checkout. Git object SHA matching was confirmed before running:
