@@ -463,6 +463,7 @@ class NativeOmniSession:
         self.native_readonly_tools_completed = 0
         self.native_readonly_tools_dropped = 0
         self._tool_speech_turn: tuple[int, int] | None = None
+        self._tool_answer_started_turn: tuple[int, int] | None = None
         self._tool_question = ""
         self._tool_audio_response_id: str | None = None
         self.native_tool_audio_queued = 0
@@ -817,6 +818,7 @@ class NativeOmniSession:
         old = (self._generation, self._readonly_turn)
         self._generation += 1  # invalidates already queued native PCM
         self._tool_speech_turn = (self._generation, self._readonly_turn)
+        self._tool_answer_started_turn = None
         self._tool_audio_response_id = None
         pending = self._readonly_inflight
         if pending is not None and not pending.done():
@@ -847,8 +849,10 @@ class NativeOmniSession:
         shared physical XIAO speaker and all original VAD cancellation fences.
         """
         if (not facts or self.closed or not self.connected or
-                self._tool_speech_turn != (epoch, request_turn)):
+                self._tool_speech_turn != (epoch, request_turn)
+                or self._tool_answer_started_turn == (epoch, request_turn)):
             return
+        self._tool_answer_started_turn = (epoch, request_turn)
         url = urlsplit(self.url)
         endpoint = (
             ("https" if url.scheme == "wss" else "http")
@@ -1220,6 +1224,7 @@ class NativeOmniSession:
                     self._readonly_requests.clear()
                     self._discard_queued_readonly()
                     self._tool_speech_turn = None
+                    self._tool_answer_started_turn = None
                     self._tool_audio_response_id = None
                     self._tool_question = ""
                     self.latest_jpeg = None
@@ -1449,6 +1454,7 @@ class NativeOmniSession:
         self._readonly_requests.clear()
         self._discard_queued_readonly()
         self._tool_speech_turn = None
+        self._tool_answer_started_turn = None
         self._tool_audio_response_id = None
         self._tool_question = ""
         # A barge-in invalidates both obsolete robot audio and visual
