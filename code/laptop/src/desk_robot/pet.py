@@ -1201,14 +1201,25 @@ class PetController:
                     # is speaking; Xiaozhi controls that private camera turn.
                     if self._human_active_in_fleet(time.monotonic()):
                         continue
-                    previous = await asyncio.to_thread(state.gate.observe, jpeg)
-                    if (callable(voice_started_at)
-                            and received <= voice_started_at()):
+                    # Only Pillow runs off-thread. Never allow a late native
+                    # image decode to mutate the scene baseline after a human
+                    # VAD, explicit question or pause. The actual gate update
+                    # occurs synchronously on the event-loop owner.
+                    preemption_epoch = self._vision_preemption_epoch
+                    gray = await asyncio.to_thread(state.gate._reduced, jpeg)
+                    if (not state.enabled or state.generation != generation
+                            or self._closed
+                            or self._vision_preemption_epoch != preemption_epoch
+                            or self._direct_vision_requests
+                            or self._human_active_in_fleet(time.monotonic())
+                            or (callable(voice_started_at)
+                                and received <= voice_started_at())
+                            or time.monotonic() - received > self.max_observation_age):
                         state.stale_camera_events += 1
                         continue
+                    previous = state.gate.observe_reduced(jpeg, gray)
                     if previous is None:
                         continue
-                    preemption_epoch = self._vision_preemption_epoch
                     async with self._vision_lock:
                         # A direct human visual question may queue behind an
                         # existing comparator. All older background waiters
