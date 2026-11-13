@@ -165,7 +165,11 @@ class NativeOmniSession:
         self.token = token
         self.wire = OmniDuplexWire(model=model)
         self.incoming: asyncio.Queue[MicFrame] = asyncio.Queue(maxsize=50)
-        self.outgoing: asyncio.Queue[tuple[str, bytes] | None] = asyncio.Queue(maxsize=40)
+        # PCM chunks and terminal markers carry their own response ID.
+        # A legacy None has no power to close another reply's speech.
+        self.outgoing: asyncio.Queue[tuple[str, bytes | None] | None] = (
+            asyncio.Queue(maxsize=40)
+        )
         self.started: asyncio.Task | None = None
         self.connected = False
         self.closed = False
