@@ -452,7 +452,6 @@ async def test_superseded_readonly_result_is_silent_not_asked_to_speak(
         return dict(old_reply)
 
     monkeypatch.setattr(bridge_tools, "call", obsolete)
-    bridge_tools.registered_head.desk_robot_last_job = "job-old"
     response = await getattr(bridge_tools, tool_name)(
         bridge_tools.registered_head, *arguments
     )
@@ -534,10 +533,10 @@ def test_pinned_multitool_combine_preserves_structured_results_and_silent_cancel
     )
 
 
-async def test_pickup_accepted_after_new_speech_remains_queryable_without_old_reply(
+async def test_pickup_accepted_after_new_speech_remains_queryable_after_reconnect(
     bridge_tools, monkeypatch,
 ):
-    """Turn cancellation must not erase an already accepted physical job ID."""
+    """An accepted job remains in the Mac registry, not the old head socket."""
     bridge = bridge_tools.bridge
     bridge.voice_turn_generation = {"mac-head-01": 7}
     original = httpx.AsyncClient
@@ -551,7 +550,7 @@ async def test_pickup_accepted_after_new_speech_remains_queryable_without_old_re
             return httpx.Response(202, json={
                 "id": "physical-job-83", "state": "pending",
             })
-        assert request.url.path == "/v1/jobs/physical-job-83"
+        assert request.url.path == "/v1/robots/robot-01/jobs/latest-pickup"
         return httpx.Response(200, json={
             "id": "physical-job-83", "state": "running",
             "physical_grasp_verified": False,
@@ -564,14 +563,17 @@ async def test_pickup_accepted_after_new_speech_remains_queryable_without_old_re
     head = bridge_tools.registered_head
     result = await bridge_tools.desk_robot_pickup(head, "key")
     assert result.action == 1 and result.result is None
-    assert getattr(head, "desk_robot_last_job") == "physical-job-83"
-    status = await bridge_tools.desk_robot_job(head)
+    assert not hasattr(head, "desk_robot_last_job")
+    replacement = SimpleNamespace(device_id="mac-head-01")
+    bridge.connections["mac-head-01"] = replacement
+    bridge.voice_turn_generation["mac-head-01"] = 9
+    status = await bridge_tools.desk_robot_job(replacement)
     assert status.action == 3
     assert status.result["state"] == "running"
     assert status.result["physical_grasp_verified"] is False
     assert seen == [
         ("POST", "/v1/robots/robot-01/pickup"),
-        ("GET", "/v1/jobs/physical-job-83"),
+        ("GET", "/v1/robots/robot-01/jobs/latest-pickup"),
     ]
 
 
