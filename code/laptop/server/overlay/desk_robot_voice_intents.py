@@ -255,12 +255,27 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
         records = result.get("memories")
         if not isinstance(records, list):
             return None
+        recollections = []
+        for item in records[:2]:
+            if not isinstance(item, dict) or not isinstance(item.get("summary"), str):
+                continue
+            summary = " ".join(item["summary"].split())[:155]
+            if not summary:
+                continue
+            kind, source_robot = item.get("kind"), item.get("source_robot")
+            witnessed = item.get("witnessed")
+            recollections.append({
+                "summary": summary,
+                "kind": kind if isinstance(kind, str) and
+                        re.fullmatch(r"[a-z][a-z0-9_]{0,39}", kind) else "unknown",
+                "source_robot": source_robot if isinstance(source_robot, str)
+                        and re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", source_robot)
+                        else "unknown",
+                "witnessed": witnessed if type(witnessed) is bool else None,
+                "historical_untrusted_text": True,
+            })
         return {"source": "private_opt_in_memory_not_current_sight",
-                "recollections": [
-                    " ".join(item["summary"].split())[:155]
-                    for item in records[:2] if isinstance(item, dict)
-                    and isinstance(item.get("summary"), str)
-                ]}
+                "recollections": recollections}
     return None
 
 
