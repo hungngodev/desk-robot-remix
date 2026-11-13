@@ -676,6 +676,9 @@ def create_app():
         """
         body = await request.json()
         device = body.get("device_id") if isinstance(body, dict) else None
+        revoke = body.get("revoke_initiative", False) if isinstance(body, dict) else False
+        if type(revoke) is not bool:
+            raise ValueError("Native initiative revoke must be an explicit boolean")
         if not isinstance(device, str) or device not in device_map().values():
             raise ValueError("Known device_id required")
         connection = connections.get(device)
@@ -683,17 +686,20 @@ def create_app():
             raise RuntimeError("Robot is offline")
         interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
         connection.client_abort = True
-        # Operator quiet and pause must also invalidate the native output
-        # generation, not merely issue one STOP while a MiniCPM stream keeps
-        # sending 60ms Opus packets afterwards. Reuse its existing urgent
-        # physical decoder flush and remote cancellation.
+        # A normal VAD barge cancels just this response generation. An
+        # operator explicitly revokes future unsolicited initiative. These
+        # intents must never share a hidden quiet-mode side effect.
         stopped_native = False
         try:
             native = _native_adapter()
             if native is not None:
-                suspend = getattr(native, "suspend_proactive_for_operator", None)
-                if callable(suspend):
-                    stopped_native = await suspend(connection)
+                action = getattr(
+                    native,
+                    "suspend_proactive_for_operator" if revoke else "on_barge",
+                    None,
+                )
+                if callable(action):
+                    stopped_native = await action(connection) is True
         except Exception:
             # An unavailable native module, broken model connection or
             # failed remote cancel is NEVER allowed to suppress the physical
