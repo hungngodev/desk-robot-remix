@@ -610,7 +610,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise HTTPException(400, "Invalid completed model ASR")
         conversation = getattr(app.state.runtime, "conversation", None)
         model = getattr(conversation, "chat", None)
-        reply = getattr(model, "reply", None)
+        reply = getattr(model, "readonly_tool_plan", None)
+        if not callable(reply):
+            reply = getattr(model, "reply", None)
         if not callable(reply):
             raise OperationError("Existing Mac language model unavailable")
         # One robot's source-tagged, bounded live context, never raw media.
