@@ -233,6 +233,19 @@ class KokoroHeadSpeaker:
         """
         return await self._bridge("/interrupt", {"device_id": robot.device_id})
 
+    async def operator_stop(self, robot: RobotConfig):
+        """Explicit operator quiet/pause, distinct from an ordinary barge.
+
+        A human voice interrupt cancels the current reply; it must NEVER
+        secretly change the pet's autonomy policy for subsequent turns.
+        """
+        return await self._bridge(
+            "/interrupt", {
+                "device_id": robot.device_id,
+                "revoke_initiative": True,
+            },
+        )
+
     async def say(self, robot: RobotConfig, text: str):
         response = await self.client.post(
             self.settings.kokoro_url.rstrip("/") + "/v1/audio/speech",
