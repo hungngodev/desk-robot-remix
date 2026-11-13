@@ -103,6 +103,42 @@ async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_p
 
 
 
+
+async def test_continuous_camera_stream_supplies_voice_frames_without_new_poller():
+    class LiveHead(Head):
+        async def stream_frames(self):
+            for index in range(10):
+                yield image(square=index > 5), time.monotonic()
+                await asyncio.sleep(0.25)
+
+    head = LiveHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        async with asyncio.timeout(3):
+            while visual.status("robot-01")["software_timings"][
+                "stream_frames_selected"
+            ] == 0:
+                await asyncio.sleep(0.02)
+        visual.voice_started("robot-01")
+        assert "robot-01" not in visual._capture_tasks
+        async with asyncio.timeout(3):
+            while not any(
+                frame.source == "speech"
+                for frame in visual.hub.frames["robot-01"]
+            ):
+                await asyncio.sleep(0.02)
+        assert head.captures == 0
+        visual.voice_ended("robot-01")
+        assert "robot-01" not in visual._capture_tasks
+    finally:
+        await visual.close()
+
+
+
 def test_all_new_physical_interactions_trigger_camera_without_extra_sensor_drivers():
     hub = CameraFrameHub(["robot-01", "robot-02"], idle_fps=0.3)
     hub.offer("robot-01", image(), 100.0, source="proactive")
