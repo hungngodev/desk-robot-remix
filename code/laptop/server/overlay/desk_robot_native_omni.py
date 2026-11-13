@@ -163,8 +163,19 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
     Preserve one complete question for ordinary single-intent ASR. Split
     only when multiple independent natural requests are actually recognized.
     """
-    if not isinstance(transcript, str) or len(transcript) > 280:
+    if (not isinstance(transcript, str)
+            or not 3 <= len(transcript) <= 2400 or "\x00" in transcript):
         return ()
+    if len(transcript) > 280:
+        # Human ASR often contains a long introduction followed by one
+        # direct question. Route ONLY a separately punctuated short final
+        # question, never a guessed mid-sentence motor instruction.
+        clauses_by_sentence = re.split(r"(?<=[.!?])\s+", transcript.strip())
+        tail = clauses_by_sentence[-1].strip()
+        if (len(clauses_by_sentence) < 2 or not tail.endswith("?")
+                or not 3 <= len(tail) <= 280):
+            return ()
+        transcript = tail
     whole = native_readonly_request(transcript)
     clauses = re.split(
         r"\s+(?:and(?:\s+then)?|then|also)\s+", transcript,
