@@ -213,7 +213,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 5;
+    config.max_uri_handlers = 6;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -223,7 +223,8 @@ void Bridge::Start() {
     for (const auto& entry : std::vector<std::pair<const char*, httpd_method_t>>{
              {"/api/status", HTTP_GET}, {"/api/aux", HTTP_GET},
              {"/api/ir", HTTP_GET},
-             {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET}}) {
+             {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET},
+             {"/api/camera.mjpg", HTTP_GET}}) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
         uri.method = entry.second;
@@ -388,8 +389,87 @@ void Bridge::CameraTask(void* context) {
     vTaskDelete(nullptr);
 }
 
+
+void Bridge::CameraStreamTask(void* context) {
+    // Adapted from Espressif esp32-camera's official multipart MJPEG example.
+    // One authenticated long-lived client owns the same native JPEG camera
+    // used by /api/camera.jpg. Never allocate an RGB intermediary or block
+    // the HTTP server's command/UART handler while waiting for camera frames.
+    auto* req = static_cast<httpd_req_t*>(context);
+    auto* bridge = static_cast<Bridge*>(req->user_ctx);
+    constexpr char kBoundary[] = "--deskrobotframe\\r\\n";
+    constexpr std::size_t kMaxJpegBytes = 512 * 1024;
+    esp_err_t status = httpd_resp_set_type(
+        req, "multipart/x-mixed-replace; boundary=deskrobotframe");
+    if (status == ESP_OK)
+        status = httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    if (status == ESP_OK)
+        status = httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    while (status == ESP_OK) {
+        {
+            auto jpeg = bridge->camera_->SnapshotJpeg();
+            if (!jpeg || jpeg->size() < 4 || jpeg->size() > kMaxJpegBytes ||
+                jpeg->data()[0] != 0xff || jpeg->data()[1] != 0xd8 ||
+                jpeg->data()[jpeg->size() - 2] != 0xff ||
+                jpeg->data()[jpeg->size() - 1] != 0xd9) {
+                status = ESP_FAIL; // Never stream a partial camera frame.
+            } else {
+                // Per-part provenance is the same trusted monotonic camera
+                // completion metadata as the established snapshot endpoint.
+                const auto seq = ++bridge->camera_sequence_;
+                const auto completed = esp_timer_get_time();
+                char headers[224] = {};
+                const int n = snprintf(
+                    headers, sizeof(headers),
+                    "Content-Type: image/jpeg\\r\\n"
+                    "Content-Length: %zu\\r\\n"
+                    "X-Desk-Camera-Boot: %u\\r\\n"
+                    "X-Desk-Camera-Sequence: %u\\r\\n"
+                    "X-Desk-Camera-Complete-Us: %lld\\r\\n\\r\\n",
+                    jpeg->size(), static_cast<unsigned>(bridge->boot_nonce_),
+                    static_cast<unsigned>(seq), static_cast<long long>(completed));
+                if (n < 0 || static_cast<std::size_t>(n) >= sizeof(headers)) {
+                    status = ESP_FAIL;
+                } else {
+                    status = httpd_resp_send_chunk(
+                        req, kBoundary, sizeof(kBoundary) - 1);
+                    if (status == ESP_OK)
+                        status = httpd_resp_send_chunk(req, headers, n);
+                    if (status == ESP_OK)
+                        status = httpd_resp_send_chunk(
+                            req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
+                    if (status == ESP_OK)
+                        status = httpd_resp_send_chunk(req, "\\r\\n", 2);
+                }
+            }
+        } // Release the pinned Xiaozhi JPEG before yielding to audio/other tasks.
+        if (status != ESP_OK) break; // Client disconnect closes stream.
+        vTaskDelay(pdMS_TO_TICKS(250)); // Max 4 FPS, not 4 VLM inferences/s.
+    }
+    bridge->camera_busy_.store(false);
+    httpd_req_async_handler_complete(req);
+    vTaskDelete(nullptr);
+}
+
 esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
+    if (strcmp(req->uri, "/api/camera.mjpg") == 0) {
+        if (!camera_) return Json(req, 503, Envelope(false, "camera unavailable"));
+        if (camera_busy_.exchange(true))
+            return Json(req, 503, Envelope(false, "camera busy"));
+        httpd_req_t* async_req = nullptr;
+        if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+            camera_busy_.store(false);
+            return Json(req, 503, Envelope(false, "stream worker unavailable"));
+        }
+        if (xTaskCreate(CameraStreamTask, "robot_stream", 8192, async_req,
+                        3, nullptr) != pdPASS) {
+            Json(async_req, 503, Envelope(false, "stream task unavailable"));
+            httpd_req_async_handler_complete(async_req);
+            camera_busy_.store(false);
+        }
+        return ESP_OK;
+    }
     if (strcmp(req->uri, "/api/camera.jpg") == 0) {
         if (!camera_) return Json(req, 503, Envelope(false, "camera unavailable"));
         if (camera_busy_.exchange(true)) return Json(req, 503, Envelope(false, "camera busy"));
