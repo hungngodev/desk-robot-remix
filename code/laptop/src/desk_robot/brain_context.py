@@ -247,11 +247,10 @@ def compose_brain_context(
             heard,
         ):
             requested_tools.add("robot_status")
-    if heard_requests:
+    for latest in heard_requests:
         # One completed ASR utterance may request TWO independent tools.
         # The speech router preserves those clauses, so the bounded prompt
         # must not preferentially omit the second result.
-        latest = heard_requests[0]
         if re.search(
             r"\b(?:(?:can|could|would) you (?:please )?look|"
             r"(?:and|then|also) (?:can you |please )?look)\b", latest,
