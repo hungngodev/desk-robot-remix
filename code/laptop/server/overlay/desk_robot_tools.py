@@ -13,7 +13,7 @@ async def call(conn, route, payload=None):
     # Only the pinned registered tools may reach the Mac. Never forward
     # arbitrary model-supplied paths, even to a separately protected API.
     if route not in {
-        "status", "power-status", "latest-pickup",
+        "status", "power-status", "aux-status", "latest-pickup",
         "interaction-context", "voice-context",
         "look", "pickup", "stop", "plan-readonly",
     }:
@@ -44,6 +44,10 @@ async def call(conn, route, payload=None):
                 response = await client.get(f"/v1/robots/{robot}/status")
             elif route == "power-status":
                 response = await client.get(f"/v1/pet/{robot}/power-status")
+            elif route == "aux-status":
+                # Reuse the existing authenticated and validated WROOM sensor
+                # adapter; never accept an arbitrary model-selected URL.
+                response = await client.get(f"/v1/robots/{robot}/aux")
             elif route == "latest-pickup":
                 response = await client.get(
                     f"/v1/robots/{robot}/jobs/latest-pickup"
@@ -82,7 +86,7 @@ async def call(conn, route, payload=None):
     # Safety STOP and permitted pickup jobs must keep their established
     # physical acknowledgement/owner semantics, not lose an HTTP request.
     readonly = route in {
-        "status", "power-status", "latest-pickup", "voice-context",
+        "status", "power-status", "aux-status", "latest-pickup", "voice-context",
         "interaction-context", "look", "plan-readonly",
     }
     observe_turn = getattr(bridge, "tool_turn_cancel_event", None)
