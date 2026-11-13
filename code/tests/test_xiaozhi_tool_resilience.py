@@ -398,3 +398,34 @@ async def test_voice_cancel_does_not_abort_required_robot_stop_request(
     assert not task.done()
     release.set()
     assert await asyncio.wait_for(task, timeout=1) == {"stopped": True}
+
+
+async def test_xiaozhi_situation_tool_gets_only_current_pets_ephemeral_cues(
+    bridge_tools, monkeypatch,
+):
+    """Live sensor tool is a read-only, scoped Mac request without SQLite."""
+    original = httpx.AsyncClient
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        assert request.method == "GET"
+        assert request.url.path == "/v1/pet/robot-01/interaction-context"
+        return httpx.Response(200, json={
+            "robot_id": "robot-01", "persistent_memory_included": False,
+            "current_interaction_timeline": [{
+                "channel": "sensor", "kind": "touch_tap",
+                "physical_action_verified": False,
+            }],
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.desk_robot_situation(
+        bridge_tools.registered_head
+    )
+    assert len(seen) == 1
+    assert result.result["persistent_memory_included"] is False
+    assert result.result["current_interaction_timeline"][0]["kind"] == "touch_tap"
