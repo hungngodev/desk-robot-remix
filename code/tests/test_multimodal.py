@@ -104,6 +104,36 @@ async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_p
 
 
 
+async def test_native_subscriber_gets_quiet_room_frames_from_live_stream_not_vad():
+    class ContinuousHead(Head):
+        async def stream_frames(self):
+            for index in range(10):
+                yield image(square=index >= 3), time.monotonic()
+                await asyncio.sleep(0.26)
+
+    head = ContinuousHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    frames = visual.native_live_frames("robot-01")
+    try:
+        first = await asyncio.wait_for(anext(frames), timeout=2)
+        second = await asyncio.wait_for(anext(frames), timeout=2)
+        assert first.source == second.source == "proactive"
+        assert first.received_at < second.received_at
+        assert first.jpeg.startswith(b"\xff\xd8")
+        assert second.jpeg.endswith(b"\xff\xd9")
+        assert head.captures == 0
+        assert visual.status("robot-01")["software_timings"][
+            "stream_frames_received"
+        ] > 1
+    finally:
+        await frames.aclose()
+        await visual.close()
+
+
 async def test_continuous_camera_stream_supplies_voice_frames_without_new_poller():
     class LiveHead(Head):
         async def stream_frames(self):
