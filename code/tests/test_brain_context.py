@@ -4,6 +4,8 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from desk_robot.brain_context import compose_brain_context, repeated_spontaneous_line
 from desk_robot.conversation import Conversation
 from desk_robot.memory import CoreFact, Memory, MemoryStore
@@ -260,6 +262,40 @@ def test_spoken_intent_fits_the_relevant_completed_tool_into_small_brain_budget(
     assert "Recent model ASR guess" in text
     assert len(text) <= 400
     assert "motor authorized" not in text.casefold()
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected_tool_labels"),
+    [
+        ("Can you look around and check your battery status?",
+         ("Earlier local VLM guess", "Recent head telemetry")),
+        ("Check your battery and look at the mug",
+         ("Earlier local VLM guess", "Recent head telemetry")),
+        ("What did I say yesterday and can you look at the mug?",
+         ("Opt-in private past memory", "Earlier local VLM guess")),
+    ],
+)
+def test_compound_spoken_intent_preserves_both_requested_tool_results(
+    spoken, expected_tool_labels,
+):
+    # The two requested results must survive ahead of unrelated high-volume
+    # tool receipts, while never claiming camera or physical verification.
+    timeline = [
+        {"channel": "tool", "kind": "visual_look",
+         "content": "BLUE_MUG is possibly visible"},
+        {"channel": "tool", "kind": "robot_status",
+         "content": "BATTERY_UNKNOWN: live gauge unqualified"},
+        {"channel": "tool", "kind": "pickup_status",
+         "content": "UNRELATED_PICKUP " + "x" * 70},
+        {"channel": "tool", "kind": "memory_recall",
+         "content": "OLD_MEMORY " + "y" * 75},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": spoken},
+    ]
+    output = compose_brain_context([], [], timeline).interaction
+    assert all(label in output for label in expected_tool_labels)
+    assert "Recent model ASR guess" in output
+    assert len(output) <= 400
 
 
 def test_unrelated_human_asr_does_not_reprioritize_non_tool_modalities():
