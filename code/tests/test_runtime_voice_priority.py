@@ -550,3 +550,55 @@ async def test_voice_outage_invalidates_camera_before_concurrent_audio_abort():
         ("audio", "robot-01"),
         ("audio", "group"),
     ]
+
+async def test_authenticated_vad_snapshot_upgrades_finite_aec_barge_hold():
+    """A short AEC lease must not hide a genuine missed VAD start."""
+    from desk_robot.multimodal import CameraFrameHub
+
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01"])
+    hub.barge_in("robot-01", now)
+    assert hub.user_active("robot-01", now)
+    assert hub.voice_until["robot-01"] != float("inf")
+
+    events = []
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            events.append(("pet", robot_id))
+
+    class Conversation:
+        async def stop(self):
+            events.append(("speaker", "stop"))
+
+    class Visual:
+        def __init__(self):
+            self.hub = hub
+
+        def voice_started(self, robot_id):
+            events.append(("camera", "start"))
+            hub.notify(robot_id, "human_voice", time.monotonic())
+
+        def voice_ended(self, robot_id):
+            events.append(("camera", "end"))
+            hub.speech_ended(robot_id, time.monotonic())
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")],
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+
+    await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+    assert events == [
+        ("pet", "robot-01"), ("speaker", "stop"),
+        ("camera", "start"),
+    ]
+    assert hub.voice_until["robot-01"] == float("inf")
+    await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+    assert len(events) == 3
+    await runtime._on_voice_snapshot(frozenset())
+    assert events[-1] == ("camera", "end")
+    assert not hub.user_active("robot-01", time.monotonic())
