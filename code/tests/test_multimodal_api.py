@@ -979,3 +979,59 @@ def test_ollama_sensor_tool_route_requires_real_sensor_question_and_no_movement(
         assert unrelated.json()["tools"] == []
         assert live.json()["motor_authorized"] is False
         assert live.json()["charging_authorized"] is False
+
+
+def test_native_live_policy_respects_real_mac_pet_quiet_and_pause(
+    settings, tokens,
+):
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+    state = SimpleNamespace(enabled=True, quiet=False)
+    hub = CameraFrameHub([r.id for r in settings.robots])
+
+    class Runtime:
+        coordinator = SimpleNamespace(robot=settings.robot)
+        pet = SimpleNamespace(states={robot: state})
+        multimodal = SimpleNamespace(hub=hub)
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=Runtime())) as client:
+        persona_url = f"/v1/pet/{robot}/omni-context"
+        live_url = f"/v1/pet/{robot}/interaction-context"
+        start = client.get(persona_url, headers=auth).json()
+        assert start["pet_autonomy_enabled"] is True
+        assert start["pet_quiet"] is False
+        state.quiet = True
+        quiet = client.get(live_url, headers=auth).json()
+        assert quiet["pet_quiet"] is True
+        state.quiet = False
+        state.enabled = False
+        pause = client.get(live_url, headers=auth).json()
+        assert pause["pet_autonomy_enabled"] is False
+        assert pause["pet_quiet"] is False
+
+    # An unavailable runtime policy never becomes an implicit permit.
+    class NoPetRuntime:
+        coordinator = SimpleNamespace(robot=settings.robot)
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    with TestClient(create_app(settings, runtime=NoPetRuntime())) as client:
+        fail_closed = client.get(persona_url, headers=auth)
+        assert fail_closed.status_code == 200
+        assert fail_closed.json()["pet_autonomy_enabled"] is False
+        assert fail_closed.json()["pet_quiet"] is True
