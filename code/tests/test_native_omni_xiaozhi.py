@@ -6123,3 +6123,78 @@ async def test_cancelled_head_stop_preserves_fleet_decoder_uncertainty(
     assert not await module.begin_external_speech(conn)
 
 
+@pytest.mark.parametrize("mode", ["sent", "socket_error", "stall", "replaced"])
+async def test_urgent_native_barge_head_stop_owns_fleet_lease_by_real_send(
+    native, mode,
+):
+    """Interrupt is bounded; only a current authenticated STOP clears lease."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._output_owner = conn.device_id
+
+    class Socket:
+        async def send(self, payload):
+            if mode == "socket_error":
+                raise ConnectionError("XIAO STOP lost")
+            if mode == "stall":
+                await asyncio.Event().wait()
+            sent.append(payload)
+            if mode == "replaced":
+                replacement, _ = connection()
+                replacement.session_id = "new authenticated head"
+                bridge.connections[conn.device_id] = replacement
+
+    conn.websocket = Socket()
+    if mode == "sent":
+        await asyncio.wait_for(session.barge(), timeout=0.7)
+        assert len(sent) == 1
+        assert json.loads(sent[0])["state"] == "stop"
+        assert module._output_owner is None
+        assert module._output_owner_unverified is None
+        assert conn.client_is_speaking is False
+    else:
+        with pytest.raises((
+            ConnectionError, asyncio.TimeoutError, RuntimeError,
+        )):
+            await asyncio.wait_for(session.barge(), timeout=0.7)
+        assert module._output_owner == conn.device_id
+        assert module._output_owner_unverified == conn.device_id
+        assert conn.client_is_speaking is True
+
+
+async def test_urgent_native_barge_cancellation_retains_uncertain_speaker(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    entered = asyncio.Event()
+
+    class Socket:
+        async def send(self, _):
+            entered.set()
+            await asyncio.Event().wait()
+
+    conn.websocket = Socket()
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._output_owner = conn.device_id
+    task = asyncio.create_task(session.barge())
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert module._output_owner == conn.device_id
+    assert module._output_owner_unverified == conn.device_id
+    assert conn.client_is_speaking is True
+
+
