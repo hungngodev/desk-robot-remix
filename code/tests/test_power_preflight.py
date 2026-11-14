@@ -315,3 +315,17 @@ def test_lower_cell_voltage_and_efficiency_cannot_improve_power_qualification():
     for report in (nominal, worst):
         assert report["candidate_physically_qualified"] is False
         assert report["charger_and_load_sharing_verified"] is False
+
+
+def test_bq25798_otg_current_limit_cannot_qualify_full_robot_peak():
+    # TI BQ25798 permits up to 3.32 A OTG current regulation; its 5 A
+    # battery charge rating is not a 5 V robot supply rating. These are
+    # chip limits, not measured carrier-board or load-sharing evidence.
+    report = tool(3.0, 1.8, boost_max_input_a=10.0,
+                  boost_continuous_input_a=10.0,
+                  boost_continuous_output_a=3.32,
+                  protected_cell_continuous_a=10.0)
+    assert report["minimum_rated_5v_output_a"] == 3.9
+    assert report["candidate_electrically_sufficient_on_paper"] is False
+    assert report["candidate_physically_qualified"] is False
+    assert report["charger_and_load_sharing_verified"] is False
