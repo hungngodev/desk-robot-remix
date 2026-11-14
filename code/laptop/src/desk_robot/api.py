@@ -651,6 +651,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             async for frame in visual.native_live_frames(robot_id):
                 if await request.is_disconnected():
                     return
+                # A live frame can arrive just before the operator revokes
+                # vision consent, then wait here on the client socket.
+                # Recheck after that await and before any JPEG is emitted.
+                if (settings.mode != "hardware"
+                        or not settings.voice_vision_tools_enabled):
+                    return
                 now = time.monotonic()
                 age_ms = round((now - frame.received_at) * 1000)
                 if (not 0 <= age_ms <= 1000
