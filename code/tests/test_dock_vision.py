@@ -252,3 +252,35 @@ def test_corrupt_or_off_frame_tag_corners_cannot_reach_pnp(monkeypatch, bad_corn
     decision = assess_dock(None, now=5.1, target_distance_mm=120)
     assert decision.phase == "hold"
     assert not decision.motor_authorized and not decision.charging_authorized
+
+
+@pytest.mark.parametrize("bad_points", [
+    [], [[1.0, 2.0]] * 3, [[1.0, 2.0]] * 5,
+    [[1.0, 2.0, 3.0]] * 4,
+    [[1.0, 2.0]] * 2 + [["not-a-number", 3.0]] + [[1.0, 2.0]],
+    [[10 ** 1000, 2.0]] * 4,
+])
+def test_malformed_detector_corner_shape_never_reaches_pnp(monkeypatch, bad_points):
+    """A damaged native detector result must not crash or authorize docking."""
+    import cv2
+    import numpy as np
+
+    class MalformedDetector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [bad_points], np.array([[12]]), []
+
+    def forbidden_pnp(*args, **kwargs):
+        pytest.fail("Malformed detector corners reached solvePnP")
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", MalformedDetector)
+    monkeypatch.setattr(cv2, "solvePnP", forbidden_pnp)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), calibration(), captured_at=5)
+    assert pose is None
+    decision = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized and not decision.charging_authorized
