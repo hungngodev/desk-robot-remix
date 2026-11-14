@@ -157,3 +157,17 @@ def test_boolean_values_never_masquerade_as_measured_power_or_ratings(field):
 def test_boolean_load_telemetry_is_not_a_current_measurement(peak, continuous):
     with pytest.raises(ValueError):
         tool(peak, continuous)
+
+
+def test_low_cell_voltage_and_efficiency_cannot_improve_input_current_requirement():
+    # A converter's advertised 5V output rating alone cannot qualify a 1S
+    # supply. Worse measured efficiency or a lower cell voltage increases the
+    # required battery and converter input current for the same 5V load.
+    nominal = tool(2, 1.2, cell_low_v=3.5, measured_boost_efficiency=0.9)
+    low_cell = tool(2, 1.2, cell_low_v=3.0, measured_boost_efficiency=0.9)
+    low_efficiency = tool(2, 1.2, cell_low_v=3.5, measured_boost_efficiency=0.7)
+    for degraded in (low_cell, low_efficiency):
+        assert degraded["minimum_rated_cell_and_boost_input_a"] > nominal["minimum_rated_cell_and_boost_input_a"]
+        assert degraded["minimum_continuous_cell_input_a"] > nominal["minimum_continuous_cell_input_a"]
+        assert degraded["candidate_physically_qualified"] is False
+        assert degraded["charger_and_load_sharing_verified"] is False
