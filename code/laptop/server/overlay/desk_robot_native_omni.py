@@ -2037,6 +2037,7 @@ class NativeOmniSession:
         await self._cancel_remote(events)
 
     async def run(self) -> None:
+        global _output_owner, _output_owner_unverified
         try:
             await self._retire_legacy_audio()
             async with aiohttp.ClientSession() as http:
@@ -2127,7 +2128,6 @@ class NativeOmniSession:
                     self.last_error or "Native model session ended without clean shutdown"
                 )[:140]
                 _retry_after[self.device] = time.monotonic() + 15.0
-            global _output_owner, _output_owner_unverified
             async with _output_owner_lock:
                 if _output_owner == self.device:
                     if stop_confirmed:
