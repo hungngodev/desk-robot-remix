@@ -179,7 +179,10 @@ class Runtime:
         # Reuse the bridge's existing ordinary interrupt, never the operator
         # quiet/revoke endpoint. Bound these independent physical STOP
         # requests to the listener's urgent half-second abort window.
-        stop = getattr(getattr(self.conversation, "speaker", None), "interrupt", None)
+        speaker = getattr(self.conversation, "speaker", None)
+        stop = getattr(speaker, "monitor_lost", None)
+        if not callable(stop):
+            stop = getattr(speaker, "interrupt", None)
         native_stops = (
             [asyncio.wait_for(stop(robot), timeout=0.35)
              for robot in self.settings.robots if getattr(robot, "device_id", None)]
