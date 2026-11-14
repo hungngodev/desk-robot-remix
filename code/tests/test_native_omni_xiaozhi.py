@@ -1244,6 +1244,7 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         async def json(self):
             return {
                 "robot_id": "robot-01", "stored": True,
+                "retained_on_disk": True,
                 "source": "model_estimated_xiaozhi_audio_transcription",
             }
 
@@ -1270,6 +1271,90 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         service.closed = True
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+@pytest.mark.parametrize(("mac_status", "retained", "expected_error"), [
+    (403, True, "Mac native transcript permission revoked"),
+    (401, True, "Mac native transcript permission revoked"),
+    (200, False, "Mac transcript memory consent changed"),
+])
+async def test_native_asr_writer_retires_on_consent_revoke_before_next_chunk(
+    native, mac_status, retained, expected_error,
+):
+    """Queued uncertain human ASR must not cross a revoked private consent."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._transcript_memory_enabled = True
+    session._heard_queue.put_nowait(("omni_" + "a" * 12 + "_" + "b" * 20, "private first"))
+    session._heard_queue.put_nowait(("omni_" + "a" * 12 + "_" + "c" * 20, "private second"))
+    calls = []
+
+    class Reply:
+        status = mac_status
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return False
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "stored": False,
+                "retained_on_disk": retained,
+                "source": "model_estimated_xiaozhi_audio_transcription",
+            }
+
+    class Mac:
+        def post(self, url, **kwargs):
+            calls.append(kwargs["json"]["event_id"])
+            assert url.endswith("/v1/pet/robot-01/omni-heard")
+            return Reply()
+
+    await asyncio.wait_for(session._persist_heard(Mac()), timeout=1)
+    assert session.closed
+    assert session.last_error == expected_error
+    assert len(calls) == 1
+    assert session._heard_queue.qsize() == 1
+    assert session.heard_memories_stored == 0
+
+
+async def test_native_asr_writer_detects_unexpected_new_storage_opt_in(native):
+    """Old live-only session must not silently write ASR to new private storage."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    session._heard_queue.put_nowait(("omni_" + "a" * 12 + "_" + "b" * 20, "test speech"))
+
+    class Reply:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return False
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "stored": True,
+                "retained_on_disk": True,
+                "source": "model_estimated_xiaozhi_audio_transcription",
+            }
+
+    class Mac:
+        def post(self, *_args, **_kwargs):
+            return Reply()
+
+    await asyncio.wait_for(session._persist_heard(Mac()), timeout=1)
+    assert session.closed
+    assert session.last_error == "Mac transcript memory consent changed"
+    assert session.heard_memories_stored == 0
 
 
 @pytest.mark.parametrize(
@@ -4684,6 +4769,7 @@ async def test_native_asr_live_only_context_does_not_count_as_saved_memory(nativ
         async def json(self):
             return {
                 "robot_id": "robot-01", "stored": False,
+                "retained_on_disk": False,
                 "ephemeral_context_added": True,
                 "source": "model_estimated_xiaozhi_audio_transcription",
             }

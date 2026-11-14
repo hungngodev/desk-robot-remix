@@ -501,6 +501,12 @@ class NativeOmniSession:
                     json={"event_id": event_id, "transcript": transcript},
                     timeout=aiohttp.ClientTimeout(total=2),
                 ) as response:
+                    if response.status in (401, 403):
+                        # A token rotation or explicit Mac transcript denial
+                        # revokes the entire previously authorized live stream.
+                        # Do not forward the next queued ASR segment.
+                        self.fail("Mac native transcript permission revoked")
+                        return
                     if response.status == 200:
                         data = await response.json()
                         if (isinstance(data, dict)
@@ -508,6 +514,13 @@ class NativeOmniSession:
                                 and data.get("source")
                                 == "model_estimated_xiaozhi_audio_transcription"
                                 and type(data.get("stored")) is bool):
+                            if (type(data.get("retained_on_disk")) is not bool
+                                    or data["retained_on_disk"]
+                                    != self._transcript_memory_enabled):
+                                # A consent change during queued speech must
+                                # retire the old private native model session.
+                                self.fail("Mac transcript memory consent changed")
+                                return
                             if data["stored"]:
                                 self.heard_memories_stored += 1
                             if data.get("ephemeral_context_added") is True:
