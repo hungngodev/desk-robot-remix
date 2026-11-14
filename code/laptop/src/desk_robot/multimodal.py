@@ -1326,6 +1326,10 @@ class MultimodalOrchestrator:
                     ) from exc
             if not current_turn():
                 raise RuntimeError("Visual answer superseded by new speech")
+            if not self.settings.voice_vision_tools_enabled:
+                # Revoking consent during the slow model call must not
+                # publish a private scene guess into Mac memory or a reply.
+                raise RuntimeError("Camera consent revoked during visual analysis")
             if time.monotonic() - chosen[-1].received_at > 16:
                 raise RuntimeError("Camera observation expired during visual analysis")
             metrics["visual_answers"] += 1
