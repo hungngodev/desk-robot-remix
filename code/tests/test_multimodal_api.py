@@ -1342,7 +1342,7 @@ def test_native_live_policy_respects_real_mac_pet_quiet_and_pause(
 
     class Runtime:
         coordinator = SimpleNamespace(robot=settings.robot)
-        pet = SimpleNamespace(states={robot: state})
+        pet = SimpleNamespace(states={robot: state}, voice_monitor_ready=True)
         multimodal = SimpleNamespace(hub=hub)
 
         async def start(self):
@@ -1358,6 +1358,13 @@ def test_native_live_policy_respects_real_mac_pet_quiet_and_pause(
         start = client.get(persona_url, headers=auth).json()
         assert start["pet_autonomy_enabled"] is True
         assert start["pet_quiet"] is False
+        Runtime.pet.voice_monitor_ready = False
+        lost = client.get(live_url, headers=auth).json()
+        assert lost["pet_autonomy_enabled"] is False
+        assert lost["pet_quiet"] is False  # Monitor loss is not operator quiet.
+        Runtime.pet.voice_monitor_ready = True
+        restored = client.get(live_url, headers=auth).json()
+        assert restored["pet_autonomy_enabled"] is True
         state.quiet = True
         quiet = client.get(live_url, headers=auth).json()
         assert quiet["pet_quiet"] is True
