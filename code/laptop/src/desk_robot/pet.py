@@ -1855,8 +1855,11 @@ class PetController:
                 state.last_initiative_suppression = "memory_consent_revoked"
                 return
             def audio_still_permitted() -> bool:
+                # Kokoro synthesis can outlive the authenticated VAD monitor.
+                # A lost listener cannot certify that a human has not barged.
                 return (
-                    state.enabled and not state.quiet
+                    not self._closed and self.voice_monitor_ready
+                    and state.enabled and not state.quiet
                     and state.generation == generation
                     and (not private_memory_allowed
                          or self.settings.voice_memory_tools_enabled)
