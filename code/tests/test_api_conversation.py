@@ -293,6 +293,44 @@ async def test_hardware_group_conversation_does_not_persist_peer_speech_without_
                if item.kind == "peer_utterance")
 
 
+
+async def test_group_peer_memory_revoked_inside_sqlite_write_is_compensated(
+    settings, tmp_path, monkeypatch,
+):
+    """A completed peer INSERT during opt out must not survive in SQLite."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    ids = ["robot-01", "robot-02"]
+    memory = MemoryStore(tmp_path, ids)
+    original = memory.remember
+    peer_writes = []
+
+    def revoke_during_peer_write(robot_id, event_id, summary, **kwargs):
+        inserted = original(robot_id, event_id, summary, **kwargs)
+        if kwargs["kind"] == "peer_utterance":
+            peer_writes.append((robot_id, event_id, inserted))
+            settings.fleet_text_sharing_enabled = False
+        return inserted
+
+    monkeypatch.setattr(memory, "remember", revoke_during_peer_write)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(
+        settings, SimulatedChat(), speaker, memory=memory,
+    )
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(ids, "A simple pet greeting", 2)
+    assert len(peer_writes) == 1
+    assert peer_writes[0][0] == "robot-02"
+    assert peer_writes[0][2] is True
+    own = memory.recent("robot-01")
+    assert len(own) == 1
+    assert own[0].kind == "own_utterance"
+    assert own[0].source_robot == "robot-01"
+    assert memory.count("robot-02") == 0
+    assert conversation.active is None
+
+
+
 async def test_hardware_group_memory_respects_fleet_sharing_consent(
     settings, tmp_path,
 ):
