@@ -138,6 +138,8 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 # Pacing is deliberate. This is not a device microphone.
                 padded = pcm + b"\0" * (-len(pcm) % 32)
                 for index in range(0, len(padded), 3200):
+                    if listener.done():
+                        await listener  # Surface an early backend failure now.
                     chunk = padded[index:index + 3200]
                     packet = wire.append_audio(
                         chunk, speech=True,
@@ -147,6 +149,8 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                     )
                     await socket.send_json(packet)
                     await asyncio.sleep(packet["duration_ms"] / 1000)
+                    if listener.done():
+                        await listener
                 await socket.send_json(wire.commit())
                 # Wait on the actual reader task: a model error, rejected
                 # frame, early socket close or failed response must propagate
