@@ -67,3 +67,17 @@ def test_dock_vision_rejects_nonnumeric_timing_without_loading_cv2():
         with pytest.raises(ValueError):
             detect_apriltag(b"jpeg", calibration(), captured_at=1,
                             max_reprojection_error_px=value)
+
+
+def test_distortion_coefficients_are_validated_without_motion_authority():
+    from dataclasses import replace
+
+    base = calibration()
+    assert replace(base, distortion_coeffs=(0.1, -0.05, 0.001, 0.002, 0.0)).distortion_coeffs[0] == 0.1
+    for invalid in ((1.0,), (0.0, 0.0, float("nan"), 0.0),
+                    (0.0, 0.0, True, 0.0), [0.0] * 5):
+        with pytest.raises(ValueError):
+            replace(base, distortion_coeffs=invalid)
+    assessment = assess_dock(DockPose(0, 0, 300, 0.5, 1),
+                             now=1.1, target_distance_mm=120)
+    assert not assessment.motor_authorized and not assessment.charging_authorized
