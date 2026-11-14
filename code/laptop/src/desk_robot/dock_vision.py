@@ -136,7 +136,15 @@ def detect_apriltag(
                   if int(marker) == calibration.marker_id]
     if len(candidates) != 1:
         return None
+    # A detector can return corrupt or off-frame corners. Never feed them to
+    # native PnP or treat the resulting pose as an approach observation.
     image_points = np.asarray(corners[candidates[0]], dtype=np.float64).reshape(4, 2)
+    if (not np.isfinite(image_points).all()
+            or np.any(image_points[:, 0] < 0)
+            or np.any(image_points[:, 0] >= frame.shape[1])
+            or np.any(image_points[:, 1] < 0)
+            or np.any(image_points[:, 1] >= frame.shape[0])):
+        return None
     side = calibration.tag_side_mm / 2
     object_points = np.array([
         [-side, side, 0], [side, side, 0],
