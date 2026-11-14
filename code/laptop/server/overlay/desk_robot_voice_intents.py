@@ -306,16 +306,24 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
                 "estimated_percent": round(soc / 100, 1),
                 "cell_mv": mv, "charging_verified": False}
     if route == "latest-pickup":
+        # Actual Coordinator.Job states are a small closed set. An HTTP
+        # source field must not turn model-visible tool evidence into a
+        # free-form instruction or an invented successful grasp.
         state = result.get("state")
+        if state not in ("queued", "running", "succeeded", "failed", "cancelled"):
+            state = "unknown"
         return {"source": "mac_pickup_job",
-                "state": str(state)[:45] if result.get("available") else "none",
+                "state": state if result.get("available") is True else "none",
                 "physical_grasp_verified": False}
     if route == "status":
         safety = result.get("safety")
         if not isinstance(safety, dict):
             return None
-        return {"source": "wroom_status", "safety_fault":
-                str(safety.get("fault", "unknown"))[:65],
+        fault = safety.get("fault")
+        if (not isinstance(fault, str)
+                or re.fullmatch(r"[a-z][a-z0-9_]{0,47}", fault) is None):
+            fault = "unknown"
+        return {"source": "wroom_status", "safety_fault": fault,
                 "physical_acceptance_verified": False}
     if route == "interaction-context":
         summary = result.get("model_context")
