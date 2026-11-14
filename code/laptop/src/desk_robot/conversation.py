@@ -339,6 +339,24 @@ class Conversation:
         if self.active is not None and not self.active.done():
             raise RuntimeError("A conversation is already active")
         robots = [self.settings.robot(i) for i in robot_ids]
+        # Historical context and peer sharing are independently opt-in.
+        # Check their original permissions even AFTER slow memory/model work.
+        sharing_at_start = (
+            self.settings.mode == "hardware"
+            and self.settings.fleet_text_sharing_enabled
+        )
+        private_at_start = (
+            sharing_at_start and self.settings.voice_memory_tools_enabled
+        )
+
+        def consent_still_valid() -> bool:
+            return (
+                (not sharing_at_start
+                 or self.settings.fleet_text_sharing_enabled)
+                and (not private_at_start
+                     or self.settings.voice_memory_tools_enabled)
+            )
+
         self.active = asyncio.current_task()
         transcript = []
         current_robot = None
@@ -419,6 +437,8 @@ class Conversation:
                     robots, personas, topical, strict=True
                 )
             }
+            if not consent_still_valid():
+                raise RuntimeError("Group conversation consent revoked")
             async with asyncio.timeout(300):
                 async with self.session_lock, self.speaker.session(robots):
                     try:
@@ -427,6 +447,8 @@ class Conversation:
                         # treated as an acknowledged transmission.
                         completed_segments: list[str] = []
                         for index in range(turns):
+                            if not consent_still_valid():
+                                raise RuntimeError("Group conversation consent revoked")
                             completed_segments = []
                             robot = robots[index % len(robots)]
                             current_robot = robot
@@ -438,6 +460,10 @@ class Conversation:
                                     async for segment in stream_reply(
                                         list(self.histories[robot.id])
                                     ):
+                                        if not consent_still_valid():
+                                            raise RuntimeError(
+                                                "Group conversation consent revoked"
+                                            )
                                         await self.speaker.say(robot, segment)
                                         completed_segments.append(segment)
                                     if not completed_segments:
@@ -452,7 +478,13 @@ class Conversation:
                                     text = await self.chat.reply(
                                         list(self.histories[robot.id])
                                     )
+                                    if not consent_still_valid():
+                                        raise RuntimeError(
+                                            "Group conversation consent revoked"
+                                        )
                                     await self.speaker.say(robot, text)
+                            if not consent_still_valid():
+                                raise RuntimeError("Group conversation consent revoked")
                             await self._persist_spoken_turn(robot, text, robots)
                             self.histories[robot.id].append({"role": "assistant", "content": text})
                             for peer in robots:

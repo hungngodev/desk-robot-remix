@@ -77,6 +77,101 @@ async def test_empty_ollama_stream_never_creates_phantom_social_speech(
     )
 
 
+
+@pytest.mark.parametrize("permission", ["voice_memory", "fleet_sharing"])
+async def test_private_group_consent_revoked_while_model_thinks_sends_no_audio(
+    settings, tmp_path, permission,
+):
+    """Loaded memories cannot outlive consent through a slow peer model turn."""
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    memory.remember(
+        "robot-01", "saved_key_001",
+        "Secret cobalt key seen earlier this week",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SlowChat:
+        prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(history)
+            entered.set()
+            await release.wait()
+            return "I remember the owner's private cobalt key."
+
+    chat = SlowChat()
+    speaker = SimulatedSpeaker()
+    c = Conversation(settings, chat, speaker, memory=memory)
+    task = asyncio.create_task(c.run(
+        ["robot-01", "robot-02"], "What do you remember?", 2,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        assert "Secret cobalt key" in str(chat.prompts)
+        if permission == "voice_memory":
+            settings.voice_memory_tools_enabled = False
+        else:
+            settings.fleet_text_sharing_enabled = False
+        release.set()
+        with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+            await asyncio.wait_for(task, timeout=3)
+        assert c.active is None
+        assert speaker.spoken == []
+        assert memory.count("robot-01") == 1
+        assert memory.count("robot-02") == 0
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_group_stream_revocation_stops_next_segment_and_never_shares_partial(
+    settings, tmp_path,
+):
+    """Only already sent words stay private; peers never inherit a partial reply."""
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SlowStream:
+        async def stream_reply(self, history):
+            yield "The first phrase."
+            entered.set()
+            await release.wait()
+            yield "A private second phrase."
+
+    speaker = SimulatedSpeaker()
+    c = Conversation(settings, SlowStream(), speaker, memory=memory)
+    task = asyncio.create_task(c.run(
+        ["robot-01", "robot-02"], "Say something", 2,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        assert speaker.spoken == [("robot-01", "The first phrase.")]
+        settings.fleet_text_sharing_enabled = False
+        release.set()
+        with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+            await asyncio.wait_for(task, timeout=3)
+        assert c.active is None
+        assert speaker.spoken == [("robot-01", "The first phrase.")]
+        assert memory.count("robot-02") == 0
+        own = memory.recent("robot-01")
+        assert len(own) == 1
+        assert "playback unverified" in own[0].summary
+        assert "The first phrase." in own[0].summary
+        assert "A private second phrase." not in str(own)
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_conversation_six_total_alternating_independent_histories(settings):
     speaker = SimulatedSpeaker()
     c = Conversation(settings, SimulatedChat(), speaker)
