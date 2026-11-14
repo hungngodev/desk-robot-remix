@@ -551,6 +551,42 @@ async def test_stop_during_encoding_does_not_start_transmission(bridge, monkeypa
     assert not bridge.lease_ids
 
 
+
+async def test_mac_stop_send_failure_reports_uncertain_physical_speaker_lease(
+    bridge, monkeypatch,
+):
+    """Bridge cleanup must not tell the fleet a failed STOP was delivered."""
+    released = []
+
+    async def begin(_):
+        return True
+
+    async def end(_, *, stop_confirmed=True):
+        released.append(stop_confirmed)
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        begin_external_speech=begin, end_external_speech=end,
+    ))
+
+    async def send_tts(_conn, state, _text=None):
+        if state == "stop":
+            raise ConnectionError("head STOP failed")
+
+    monkeypatch.setitem(sys.modules, "core.handle.sendAudioHandle",
+                        SimpleNamespace(send_tts_message=send_tts))
+    current = conn("mac-01")
+    current.conn_from_mqtt_gateway = False
+    current.session_id = "real-session"
+    current.clearSpeakStatus = lambda: None
+    bridge.lease_ids = frozenset({"mac-01"})
+    bridge.lease_until = time.monotonic() + 10
+
+    with pytest.raises(ConnectionError, match="head STOP failed"):
+        await bridge.transmit(current, "Hello", [])
+    assert released == [False]
+
+
+
 async def test_transmit_clears_speaking_status_when_final_stop_fails(bridge, monkeypatch):
     async def send(connection, state, text=None):
         if state == "stop":
