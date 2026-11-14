@@ -5341,7 +5341,7 @@ async def test_human_preemption_bounds_wedged_peer_without_faking_stop_ack(nativ
         module.preempt_others_for_human("mac-01"), timeout=1.2,
     )
     assert healthy_stopped.is_set()
-    assert cancelled.is_set()
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
     # The unresponsive head did NOT physically acknowledge the STOP.
     assert module._output_owner == "mac-02"
 
