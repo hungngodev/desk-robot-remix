@@ -11,6 +11,16 @@ import json
 import math
 
 
+def _finite_number(value: object) -> bool:
+    """Reject invalid and unrepresentably large telemetry without overflow."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def size_5v_supply(
     measured_peak_5v_a: float,
     measured_continuous_5v_a: float,
@@ -27,7 +37,7 @@ def size_5v_supply(
         measured_peak_5v_a, measured_continuous_5v_a,
         cell_low_v, measured_boost_efficiency, margin,
     ]
-    if any(type(v) not in (int, float) or not math.isfinite(v) for v in values):
+    if any(not _finite_number(v) for v in values):
         raise ValueError("All current, efficiency and voltage inputs must be finite")
     if not 0 < measured_continuous_5v_a <= measured_peak_5v_a <= 20:
         raise ValueError("Peak/continuous load missing or invalid")
@@ -37,8 +47,7 @@ def size_5v_supply(
         raise ValueError("Qualified boost efficiency and current margin required")
     ratings = (boost_max_input_a, boost_continuous_input_a, boost_continuous_output_a, protected_cell_continuous_a)
     for rating in ratings:
-        if rating is not None and (type(rating) not in (int, float)
-                                   or not math.isfinite(rating) or rating <= 0):
+        if rating is not None and (not _finite_number(rating) or rating <= 0):
             raise ValueError("Rated board current must be positive and finite")
     if (boost_max_input_a is not None and boost_continuous_input_a is not None
             and boost_continuous_input_a > boost_max_input_a):
