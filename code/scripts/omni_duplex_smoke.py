@@ -74,6 +74,10 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
     }
     first_audio_at = None
     started_at = time.monotonic()
+    # This is a prerecorded operator-supplied test JPEG, NOT a live
+    # XIAO exposure timestamp. Use its one local receipt identity for the
+    # entire probe so the real wire never duplicates a single test frame.
+    test_frame_receipt_us = time.monotonic_ns() // 1000 if jpeg else None
     response_complete = asyncio.Event()
 
     async with aiohttp.ClientSession() as client:
@@ -118,6 +122,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                         chunk, speech=True,
                         jpeg=jpeg,
                         camera_age_ms=0 if jpeg is not None else None,
+                        frame_receipt_us=test_frame_receipt_us,
                     )
                     await socket.send_json(packet)
                     await asyncio.sleep(packet["duration_ms"] / 1000)
