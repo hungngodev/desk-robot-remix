@@ -193,7 +193,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         context = requested_tool_context(request, robot_id)
         data = await coordinator().heads[robot_id].status()
-        if isinstance(data, dict):
+        if isinstance(data, dict) and data.get("robot_id") == robot_id:
             safety = data.get("safety")
             safety = safety if isinstance(safety, dict) else {}
             summary = (
@@ -218,7 +218,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         # Only an authenticated, explicit head tool request may add a short
         # physical sensor receipt to the shared multimodal brain timeline.
         # Dashboard polling and failed/invalid measurements never inject it.
-        if owner is not None and isinstance(data, dict):
+        if (owner is not None and isinstance(data, dict)
+                and data.get("robot_id") == robot_id):
             cues = []
             climate = data.get("climate")
             if isinstance(climate, dict) and climate.get("valid") is True:
