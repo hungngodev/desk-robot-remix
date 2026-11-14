@@ -402,6 +402,13 @@ class Coordinator:
             camera, target_mm = load_real_dock_calibration(robot.dock_calibration)
         except (OSError, ValueError, TypeError) as exc:
             raise OperationError(f"Dock calibration required: {exc}") from exc
+        # Read-only AprilTag diagnostics may retain legacy zero-distortion
+        # assumptions. Physically permitted docking must not assume that
+        # an unmeasured XIAO lens has zero distortion.
+        if camera.distortion_coeffs is None:
+            raise OperationError(
+                "Dock motion requires measured camera lens distortion"
+            )
         return self._submit(
             robot_id, "dock_approach",
             lambda job: self._dock_approach(

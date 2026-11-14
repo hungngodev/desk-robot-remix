@@ -160,6 +160,36 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
         await controller.close()
 
 
+
+
+async def test_dock_motion_refuses_unmeasured_lens_distortion_before_permit(
+    settings, tmp_path,
+):
+    """A read-only zero distortion fallback never grants physical docking."""
+    import time
+    settings.mode = "hardware"
+    robot = settings.robots[0]
+    robot.motion_enabled = True
+    robot.dock_motion_qualified = True
+    robot.dock_turn_sign = 1
+    robot.dock_forward_sign = 1
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
+    }))
+    robot.dock_calibration = path
+    controller, head = make(settings)
+    try:
+        controller.permits["robot-01"] = time.monotonic() + 10
+        with pytest.raises(OperationError, match="measured camera lens distortion"):
+            controller.dock("robot-01")
+        assert controller.permits["robot-01"] > time.monotonic()
+        assert not controller.jobs
+        assert head.commands == []
+    finally:
+        await controller.close()
+
 async def test_dock_approach_requires_operator_permit_after_qualification(settings, tmp_path):
     settings.mode = "hardware"
     robot = settings.robots[0]
@@ -170,6 +200,7 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
     path.write_text(json.dumps({
         "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
+        "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
     }))
     robot.dock_calibration = path
     controller, head = make(settings)
