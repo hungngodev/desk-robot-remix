@@ -217,3 +217,38 @@ def test_measured_dock_optical_center_must_be_inside_capture(cx, cy):
     assessment = assess_dock(None, now=1, target_distance_mm=120)
     assert assessment.phase == "hold"
     assert not assessment.motor_authorized and not assessment.charging_authorized
+
+
+@pytest.mark.parametrize("bad_corner", [
+    (float("nan"), 120.0), (float("inf"), 120.0),
+    (-1.0, 120.0), (640.0, 120.0),
+    (100.0, -1.0), (100.0, 480.0),
+])
+def test_corrupt_or_off_frame_tag_corners_cannot_reach_pnp(monkeypatch, bad_corner):
+    """Reject a detector's invalid geometry before native pose estimation."""
+    import cv2
+    import numpy as np
+
+    class BadDetector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            points = np.array([[
+                [100.0, 100.0], [140.0, 100.0],
+                [140.0, 140.0], [100.0, 140.0],
+            ]], dtype=np.float64)
+            points[0, 0] = bad_corner
+            return [points], np.array([[12]]), []
+
+    def forbidden_pnp(*args, **kwargs):
+        pytest.fail("Invalid corners reached native solvePnP")
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", BadDetector)
+    monkeypatch.setattr(cv2, "solvePnP", forbidden_pnp)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    assert detect_apriltag(jpeg.tobytes(), calibration(), captured_at=5) is None
+    decision = assess_dock(None, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized and not decision.charging_authorized
