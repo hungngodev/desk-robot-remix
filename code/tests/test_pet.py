@@ -1941,10 +1941,11 @@ async def test_uncertain_visual_event_is_not_spoken_and_does_not_consume_cooldow
 
 
 
+@pytest.mark.parametrize("revocation", ["private_memory", "vad_monitor"])
 async def test_proactive_private_wav_revoked_during_kokoro_never_reaches_head(
-    fleet, tmp_path, monkeypatch,
+    fleet, tmp_path, monkeypatch, revocation,
 ):
-    """Private proactive thought may finish synthesis after Mac opt out."""
+    """Neither memory opt out nor lost human VAD monitoring may reach TTS."""
     fleet.mode = "hardware"
     fleet.voice_memory_tools_enabled = True
     fleet.robots[0].device_id = "mac-01"
@@ -1970,7 +1971,10 @@ async def test_proactive_private_wav_revoked_during_kokoro_never_reaches_head(
         async def post(self, url, **kwargs):
             calls.append(url)
             if url.endswith("/v1/audio/speech"):
-                fleet.voice_memory_tools_enabled = False
+                if revocation == "private_memory":
+                    fleet.voice_memory_tools_enabled = False
+                else:
+                    pet.set_voice_monitor_ready(False)
                 return Response(b"RIFFsynthetic-wav-fixture")
             if url.endswith("/speak"):
                 raise AssertionError("Revoked proactive reply reached head")
