@@ -174,7 +174,25 @@ class Runtime:
         invalidate = getattr(visual, "voice_transport_unavailable", None)
         if callable(invalidate):
             invalidate()  # Sync cancellation; no camera/network await here.
-        await self._preempt_audio_floor()
+        # The Mac's pet/group task cancellation does not itself flush an
+        # autonomous native MiniCPM response already on the Xiaozhi head.
+        # Reuse the bridge's existing ordinary interrupt, never the operator
+        # quiet/revoke endpoint. Bound these independent physical STOP
+        # requests to the listener's urgent half-second abort window.
+        stop = getattr(getattr(self.conversation, "speaker", None), "interrupt", None)
+        native_stops = (
+            [asyncio.wait_for(stop(robot), timeout=0.35)
+             for robot in self.settings.robots if getattr(robot, "device_id", None)]
+            if getattr(self.settings, "mode", None) == "hardware"
+            and callable(stop) else []
+        )
+        outcomes = await asyncio.gather(
+            self._preempt_audio_floor(), *native_stops, return_exceptions=True,
+        )
+        failures = [result for result in outcomes
+                    if isinstance(result, BaseException)]
+        if failures:
+            raise RuntimeError("Voice monitor lost; physical speaker stop unconfirmed") from failures[0]
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
         if robot_id not in {robot.id for robot in self.settings.robots}:
