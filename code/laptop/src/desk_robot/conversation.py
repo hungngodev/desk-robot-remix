@@ -233,6 +233,18 @@ class KokoroHeadSpeaker:
         """
         return await self._bridge("/interrupt", {"device_id": robot.device_id})
 
+    async def monitor_lost(self, robot: RobotConfig):
+        """Stop native output until Mac VAD monitoring is authenticated again.
+
+        This does NOT alter the operator's persistent quiet or pause choice.
+        """
+        return await self._bridge(
+            "/interrupt", {
+                "device_id": robot.device_id,
+                "monitor_unavailable": True,
+            },
+        )
+
     async def operator_stop(self, robot: RobotConfig):
         """Explicit operator quiet/pause, distinct from an ordinary barge.
 
