@@ -2428,8 +2428,39 @@ async def preempt_others_for_human(source_device: str) -> None:
                 external.client_is_speaking = False
         except Exception:
             pass
+    # An earlier Mac/native STOP may have failed after its owner released
+    # Python state. Human VAD must still try to silence that uncertain head
+    # even with no active model session or external Mac speaker lease.
+    # Only the CURRENT authenticated connection may clear the marker, and
+    # only after an actual bounded STOP transport send succeeds.
+    uncertain_id = _output_owner_unverified
+    if uncertain_id is not None:
+        current = bridge.connections.get(uncertain_id)
+        if current is not None:
+            try:
+                async with _external_device_send_lock(current):
+                    if bridge.connections.get(uncertain_id) is not current:
+                        raise RuntimeError("Uncertain speaker connection replaced")
+                    await asyncio.wait_for(
+                        current.websocket.send(json.dumps({
+                            "type": "tts", "state": "stop", "flush": True,
+                            "session_id": current.session_id,
+                        })), timeout=0.4,
+                    )
+            except Exception:
+                # A stalled send, disconnect or reconnect is not a decoder
+                # acknowledgement. Keep the entire fleet floor blocked.
+                pass
+            else:
+                current.client_is_speaking = False
+                async with _output_owner_lock:
+                    if _output_owner_unverified == uncertain_id:
+                        if _output_owner == uncertain_id:
+                            _output_owner = None
+                        _output_owner_unverified = None
     async with _output_owner_lock:
-        if _output_owner in safely_invalidated:
+        if (_output_owner in safely_invalidated
+                and _output_owner_unverified != _output_owner):
             _output_owner = None
 
 
