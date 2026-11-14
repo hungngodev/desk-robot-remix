@@ -770,6 +770,30 @@ async def test_voice_vision_tool_gets_real_authenticated_head_frames_without_act
         await service.close()
 
 
+
+async def test_visual_model_revoke_during_inference_cannot_publish_answer_or_receipt():
+    policy = config()
+
+    class RevokingVision:
+        async def answer(self, question, frames):
+            assert frames and question == "What is on the desk?"
+            policy.voice_vision_tools_enabled = False
+            return "private visual scene"
+
+    service = MultimodalOrchestrator(
+        policy, {"robot-01": Head(), "robot-02": Head()},
+        RevokingVision(), asyncio.Lock(),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="consent revoked"):
+            await service.look("robot-01", "What is on the desk?")
+        assert not service.hub.tool_history["robot-01"]
+        assert service._metrics["robot-01"]["visual_answers"] == 0
+    finally:
+        await service.close()
+
+
+
 async def test_actual_human_vad_schedules_camera_without_awaiting_jpeg():
     head = Head()
     service = MultimodalOrchestrator(
