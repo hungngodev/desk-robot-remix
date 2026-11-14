@@ -217,6 +217,9 @@ class NativeOmniSession:
         # may still respond to direct human speech but cannot initiate.
         self._pet_quiet = False
         self._pet_autonomy_enabled = False
+        # Distinct from operator quiet: a lost fleet VAD channel cannot
+        # permit even a direct native reply until Mac health is restored.
+        self._monitor_lost = False
         self._last_human_speech_at = float("-inf")
         # A quiet or paused pet gets at most one reply per verified local
         # human VAD turn. Audio packet receipt is not a speech permit.
@@ -423,6 +426,9 @@ class NativeOmniSession:
                     self._pet_quiet = data.get("pet_quiet", True) is True
                     self._pet_autonomy_enabled = (
                         data.get("pet_autonomy_enabled") is True
+                    )
+                    self._monitor_lost = (
+                        data.get("voice_monitor_ready") is not True
                     )
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             return
@@ -674,22 +680,27 @@ class NativeOmniSession:
                         or (data.get("pet_quiet") is not None
                             and type(data["pet_quiet"]) is not bool)
                         or (data.get("pet_autonomy_enabled") is not None
-                            and type(data["pet_autonomy_enabled"]) is not bool)):
+                            and type(data["pet_autonomy_enabled"]) is not bool)
+                        or type(data.get("voice_monitor_ready")) is not bool):
                     self.native_context_errors += 1
                     continue
                 self._last_authenticated_mac_at = time.monotonic()
                 old_quiet = self._pet_quiet
+                old_monitor_lost = self._monitor_lost
                 old_autonomy = self._pet_autonomy_enabled
                 # Older read-only test adapters may omit policy, but that
                 # omission can NEVER grant speech permission.
                 self._pet_quiet = data.get("pet_quiet", True)
-                self._pet_autonomy_enabled = data.get(
-                    "pet_autonomy_enabled", False
+                self._monitor_lost = not data["voice_monitor_ready"]
+                self._pet_autonomy_enabled = (
+                    data.get("pet_autonomy_enabled", False)
+                    and not self._monitor_lost
                 )
                 # Model instruction updates may be impossible; the audio
                 # permissions must still change in the existing Python
                 # speaker, independent of Stage 0 KV support.
-                if ((self._pet_quiet and not old_quiet)
+                if ((self._monitor_lost and not old_monitor_lost)
+                        or (self._pet_quiet and not old_quiet)
                         or (old_autonomy and not self._pet_autonomy_enabled
                             and time.monotonic() -
                                 self._last_human_speech_at > 12)):
