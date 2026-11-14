@@ -1938,6 +1938,57 @@ async def test_uncertain_visual_event_is_not_spoken_and_does_not_consume_cooldow
         await pet.close()
 
 
+
+@pytest.mark.parametrize("opt_in", [False, True])
+async def test_proactive_hardware_voice_never_reads_private_history_without_opt_in(
+    fleet, tmp_path, opt_in,
+):
+    """Current sensor events cannot silently unlock old SQLite memories."""
+    fleet.mode = "hardware"
+    fleet.voice_memory_tools_enabled = opt_in
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    memory.remember(
+        "robot-01", "private_event_01",
+        "A private cobalt key belongs under the secret drawer",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    memory.set_core_fact(
+        "robot-01", "owner_secret", "Private preference for violet tea",
+    )
+    if not opt_in:
+        def denied(*_args, **_kwargs):
+            raise AssertionError("Proactive model fetched opted-out memories")
+        memory.recent = denied
+        memory.search = denied
+        memory.core_facts = denied
+
+    chat = GroundedChat()
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 57
+    try:
+        await pet._speak(
+            "robot-01", SceneChange("key", "A cobalt key moved", 0.96),
+            57, offered_at=time.monotonic(),
+        )
+        assert state.last_error is None
+        assert len(chat.prompts) == 1
+        prompt = str(chat.prompts[0])
+        assert ("secret drawer" in prompt) is opt_in
+        assert ("violet tea" in prompt) is opt_in
+        assert speaker.spoken == [
+            ("robot-01", "A new object! That looks interesting.")
+        ]
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_proactive_source_prompt_does_not_claim_sensor_is_camera(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     chat = GroundedChat()

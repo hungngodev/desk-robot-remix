@@ -1519,18 +1519,25 @@ class PetController:
             # using this robot's *existing* local SQLite store. An old key
             # event may be useful even when four newer touch events occurred.
             # Both reads run off the audio/VAD event loop, with a deadline.
-            recent_memory, relevant_memory, core_memory = await asyncio.wait_for(
-                asyncio.gather(
-                    asyncio.to_thread(self.memory.recent, robot_id, limit=12),
-                    asyncio.to_thread(
-                        self.memory.search, robot_id, change.description, limit=3
+            if (self.settings.mode == "hardware"
+                    and not self.settings.voice_memory_tools_enabled):
+                # Live camera/sensor consent is NOT consent to retrieve
+                # past SQLite episodes or curated private preferences for
+                # unsolicited TTS. Keep the same contract as Conversation.
+                recent_memory, relevant_memory, core_memory = [], [], []
+            else:
+                recent_memory, relevant_memory, core_memory = await asyncio.wait_for(
+                    asyncio.gather(
+                        asyncio.to_thread(self.memory.recent, robot_id, limit=12),
+                        asyncio.to_thread(
+                            self.memory.search, robot_id, change.description, limit=3
+                        ),
+                        asyncio.to_thread(
+                            self.memory.core_facts, robot_id, limit=6
+                        ),
                     ),
-                    asyncio.to_thread(
-                        self.memory.core_facts, robot_id, limit=6
-                    ),
-                ),
-                timeout=2.0,
-            )
+                    timeout=2.0,
+                )
             selected_memory = {
                 item.event_id: item
                 # Keep the last three events and up to three topical
