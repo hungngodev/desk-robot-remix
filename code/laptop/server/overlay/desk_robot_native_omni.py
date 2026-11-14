@@ -2086,6 +2086,7 @@ class NativeOmniSession:
                     *self._tasks, *self._pending_cancels,
                     return_exceptions=True,
                 )
+            stop_confirmed = not self.conn.client_is_speaking
             try:
                 if (self.conn.client_is_speaking
                         and not self._external_speech_active):
@@ -2096,8 +2097,12 @@ class NativeOmniSession:
                         "session_id": self.conn.session_id, "flush": True,
                     }))
                     self.conn.client_is_speaking = False
+                    stop_confirmed = True
             except Exception:
-                pass
+                # A failed WebSocket STOP is not a physical decoder reset.
+                # Preserve the fleet owner lease until reconnect/explicit
+                # preemption, rather than letting another robot overlap it.
+                stop_confirmed = False
             if _sessions.get(self.device) is self:
                 _sessions.pop(self.device, None)
                 _terminal_errors[self.device] = (
@@ -2106,7 +2111,7 @@ class NativeOmniSession:
                 _retry_after[self.device] = time.monotonic() + 15.0
             global _output_owner
             async with _output_owner_lock:
-                if _output_owner == self.device:
+                if _output_owner == self.device and stop_confirmed:
                     _output_owner = None
 
 
