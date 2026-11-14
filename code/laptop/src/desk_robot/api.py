@@ -173,7 +173,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if state is None:
             return {"pet_autonomy_enabled": False, "pet_quiet": True}
         return {
-            "pet_autonomy_enabled": state.enabled is True,
+            # A healthy authenticated fleet VAD monitor is required for any
+            # unsolicited native response. Consent and an enabled observer
+            # alone do not prove that a human barge can be detected.
+            "pet_autonomy_enabled": (
+                state.enabled is True
+                and (settings.mode != "hardware"
+                     or getattr(pet, "voice_monitor_ready", False) is True)
+            ),
             "pet_quiet": state.quiet is True,
         }
 
