@@ -6349,6 +6349,69 @@ async def test_urgent_native_barge_head_stop_owns_fleet_lease_by_real_send(
 
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["native_opus", "mac_opus", "native_tts_stop"])
+async def test_stalled_head_packets_release_device_lock_for_urgent_human_stop(
+    native, kind,
+):
+    """No producer may hold a device transport lock indefinitely."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    conn.client_is_speaking = True
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._output_owner = conn.device_id
+    bridge.interrupt_generation = {conn.device_id: 0}
+    if kind == "mac_opus":
+        module._external_speaker_owner = conn.device_id
+        module._external_speaker_connection = conn
+
+    class Stalled:
+        async def send(self, _):
+            await asyncio.Event().wait()
+
+    conn.websocket = Stalled()
+    with pytest.raises(asyncio.TimeoutError):
+        if kind == "native_opus":
+            await asyncio.wait_for(
+                session._send_device_opus(b"opus", session._generation),
+                timeout=0.7,
+            )
+        elif kind == "mac_opus":
+            await asyncio.wait_for(
+                module.send_external_opus(conn, b"opus", 0), timeout=0.7,
+            )
+        else:
+            await asyncio.wait_for(
+                session._send_device_state("stop", session._generation),
+                timeout=0.7,
+            )
+    assert not session._device_send_lock.locked()
+    assert module._output_owner == conn.device_id
+    assert conn.client_is_speaking is True
+
+    # The authenticated head recovers. A later urgent STOP can now acquire
+    # the lock and reach its decoder rather than waiting behind old Opus.
+    sent = []
+
+    class Recovered:
+        async def send(self, packet):
+            sent.append(packet)
+
+    conn.websocket = Recovered()
+    await asyncio.wait_for(module.flush_head(session), timeout=0.7)
+    assert len(sent) == 1
+    assert json.loads(sent[0])["state"] == "stop"
+    assert module._output_owner is None
+    assert conn.client_is_speaking is False
+
+
+
 async def test_urgent_native_head_stop_times_out_while_opus_lock_is_stalled(native):
     """An outgoing Opus lock cannot indefinitely block a new human barge."""
     module, bridge = native
