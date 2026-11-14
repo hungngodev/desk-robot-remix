@@ -884,6 +884,50 @@ async def test_native_proactive_model_sees_video_while_microphone_reports_no_spe
 
 
 
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_revoked_mac_camera_permission_ends_native_mic_session_immediately(
+    native, status,
+):
+    """A camera 403 must not leave quiet room microphone open for a heartbeat."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session.latest_jpeg = b"old"
+    session._latest_frame_receipt_us = 100
+    session._camera_stream_connected = True
+
+    class Response:
+        async def __aenter__(self):
+            self.status = status
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class Mac:
+        calls = 0
+
+        def get(self, address, **kwargs):
+            self.calls += 1
+            assert address.endswith("/v1/pet/robot-01/omni-stream")
+            assert kwargs["headers"]["Authorization"] == "Bearer " + "p" * 32
+            return Response()
+
+    mac = Mac()
+    await asyncio.wait_for(session._camera_stream(mac), timeout=1)
+    assert mac.calls == 1
+    assert session.closed
+    assert session.last_error == "Mac continuous camera permission revoked"
+    assert session.latest_jpeg is None
+    assert session._latest_frame_receipt_us is None
+    assert session._camera_stream_connected is False
+
 async def test_native_proactive_stream_rejects_delayed_and_future_receipts(native):
     """Mac and Xiaozhi share a monotonic clock, not producer-side age trust."""
     module, bridge = native

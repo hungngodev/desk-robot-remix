@@ -1336,6 +1336,15 @@ class NativeOmniSession:
                         total=None, sock_connect=3, sock_read=8
                     ),
                 ) as response:
+                    if response.status in (401, 403):
+                        # Camera consent may be revoked while the context
+                        # heartbeat is asleep. Stop the whole native session
+                        # immediately, including microphone forwarding.
+                        self._camera_stream_connected = False
+                        self.latest_jpeg = None
+                        self._latest_frame_receipt_us = None
+                        self.fail("Mac continuous camera permission revoked")
+                        return
                     if (response.status != 200
                             or response.headers.get("X-Desk-Robot-Id") != self.robot
                             or not response.headers.get(
