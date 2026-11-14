@@ -234,7 +234,7 @@ def test_power_report_retains_both_original_load_measurements_for_audit():
 def test_larger_safety_margin_cannot_turn_undersized_supply_into_qualified_candidate():
     # A board that clears a smaller arithmetic reserve must fail when the
     # required reserve grows; no charging or physical verdict follows either.
-    ratings = dict(boost_max_input_a=6.0, boost_continuous_input_a=4.0,
+    ratings = dict(boost_max_input_a=5.0, boost_continuous_input_a=4.0,
                    boost_continuous_output_a=3.0, protected_cell_continuous_a=6.0)
     smaller = tool(2.0, 1.2, margin=1.0, **ratings)
     larger = tool(2.0, 1.2, margin=1.5, **ratings)
