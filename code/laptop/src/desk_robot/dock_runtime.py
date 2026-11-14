@@ -112,7 +112,10 @@ async def observe_actual_dock(head, robot) -> dict:
             robot.id, reason="Dock marker detector still busy",
             source="apriltag_detector_busy",
         )
-    except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
+    except Exception as exc:
+        # Native OpenCV raises cv2.error (not RuntimeError) on malformed
+        # calibration/decoder state. An observation failure never grants rights.
+        # Do not catch BaseException: cancellation must still propagate.
         return _hold(
             robot.id,
             reason=f"Dock marker detection unavailable: {type(exc).__name__}",
