@@ -35,6 +35,34 @@ async def test_one_human_interrupt_preempts_other_pet_audio_too():
     ]
 
 
+async def test_hardware_monitor_loss_cancels_pending_pet_or_group_speech():
+    """One lost VAD stream must retire an in-flight optional speech task."""
+    import asyncio
+    from desk_robot.pet import PetController
+
+    started, cleaned = asyncio.Event(), asyncio.Event()
+
+    async def optional_speech():
+        started.set()
+        try:
+            await asyncio.Event().wait()  # A slow model or TTS generation.
+        finally:
+            cleaned.set()
+
+    pet = PetController.__new__(PetController)
+    pet.settings = SimpleNamespace(mode="hardware")
+    pet.voice_monitor_ready = True
+    pet._speech_task = asyncio.create_task(optional_speech())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    pet.set_voice_monitor_ready(False)
+    assert pet._speech_task.cancelling()
+    await asyncio.gather(pet._speech_task, return_exceptions=True)
+    assert cleaned.is_set()
+    # Repeated loss notifications cannot restart or repeatedly cancel speech.
+    pet.set_voice_monitor_ready(False)
+    assert pet._speech_task.cancelled()
+
+
 async def test_slow_pet_abort_does_not_delay_group_audio_stop():
     import asyncio
 
