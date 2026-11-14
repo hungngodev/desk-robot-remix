@@ -2352,6 +2352,7 @@ def test_native_aux_sensor_facts_are_only_bounded_typed_physical_values(native):
         "proximity": {"valid": True, "raw": 12, "gesture": 3},
         "dock": {
             "present": True, "valid": True, "charging_verified": False,
+            "seq": 19, "age_ms": 85,
             "left_seated": True, "right_seated": True,
             "input_good": True, "charge_indicated": True,
         },
@@ -2362,6 +2363,24 @@ def test_native_aux_sensor_facts_are_only_bounded_typed_physical_values(native):
     assert clean["apds9960"]["gesture"] == 3
     assert clean["fuel_gauge"]["reported_soc_centi"] == 5100
     assert clean["dock_pins"]["charging_verified"] is False
+    for stale in (
+        {"seq": 0}, {"seq": "19"}, {"age_ms": 500},
+        {"age_ms": "85"}, {"input_good": False},
+    ):
+        source = {
+            "robot_id": "robot-01",
+            "climate": {"valid": False},
+            "power": {"fuel_valid": False},
+            "dock": {**{
+                "present": True, "valid": True,
+                "charging_verified": False, "seq": 19, "age_ms": 85,
+                "left_seated": True, "right_seated": True,
+                "input_good": True, "charge_indicated": True,
+            }, **stale},
+        }
+        assert "dock_pins" not in module.native_grounded_fact(
+            "aux-status", source,
+        )
     assert clean["nfc"]["events"] == 7
     assert clean["physical_acceptance_verified"] is False
 
