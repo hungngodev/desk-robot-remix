@@ -371,11 +371,24 @@ class NativeOmniSession:
             clear = getattr(self.conn, "clear_queues", None)
             if callable(clear):
                 clear()
-            async with self._device_send_lock:
-                await self.conn.websocket.send(json.dumps({
-                    "type": "tts", "state": "stop", "flush": True,
-                    "session_id": self.conn.session_id,
-                }))
+            try:
+                async with self._device_send_lock:
+                    await asyncio.wait_for(
+                        self.conn.websocket.send(json.dumps({
+                            "type": "tts", "state": "stop", "flush": True,
+                            "session_id": self.conn.session_id,
+                        })), timeout=0.4,
+                    )
+            except Exception:
+                # Even a queued legacy welcome can still be inside XIAO
+                # decoder buffers when client_is_speaking is false. A failed
+                # startup STOP must block all fleet speech until head reset.
+                async with _output_owner_lock:
+                    if _output_owner_unverified in (None, self.device):
+                        if _output_owner is None:
+                            _output_owner = self.device
+                        _output_owner_unverified = self.device
+                raise
             self.conn.client_is_speaking = False
             if uncertain:
                 # Recover a stale physical speaker lease only AFTER the new
