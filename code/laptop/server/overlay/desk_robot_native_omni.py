@@ -373,12 +373,16 @@ class NativeOmniSession:
                 clear()
             try:
                 async with self._device_send_lock:
+                    if bridge.connections.get(self.device) is not self.conn:
+                        raise RuntimeError("Head identity changed before legacy STOP")
                     await asyncio.wait_for(
                         self.conn.websocket.send(json.dumps({
                             "type": "tts", "state": "stop", "flush": True,
                             "session_id": self.conn.session_id,
                         })), timeout=0.4,
                     )
+                    if bridge.connections.get(self.device) is not self.conn:
+                        raise RuntimeError("Head identity changed during legacy STOP")
             except Exception:
                 # Even a queued legacy welcome can still be inside XIAO
                 # decoder buffers when client_is_speaking is false. A failed
@@ -2149,6 +2153,9 @@ class NativeOmniSession:
                     # Native model shutdown cannot stop a Mac proactive
                     # utterance that currently owns the same decoder.
                     async with self._device_send_lock:
+                        import desk_robot_bridge as bridge
+                        if bridge.connections.get(self.device) is not self.conn:
+                            raise RuntimeError("Old head cannot confirm native STOP")
                         await asyncio.wait_for(
                             self.conn.websocket.send(json.dumps({
                                 "type": "tts", "state": "stop",
@@ -2156,6 +2163,8 @@ class NativeOmniSession:
                                 "flush": True,
                             })), timeout=0.4,
                         )
+                        if bridge.connections.get(self.device) is not self.conn:
+                            raise RuntimeError("Head replaced during native STOP")
                     self.conn.client_is_speaking = False
                     stop_confirmed = True
             except Exception:
@@ -2247,6 +2256,8 @@ async def begin_external_speech(conn) -> bool:
                                 "session_id": conn.session_id,
                             })), timeout=0.4,
                         )
+                        if bridge.connections.get(conn.device_id) is not conn:
+                            raise RuntimeError("Head replaced during decoder recovery")
                 except Exception:
                     return False
                 conn.client_is_speaking = False
@@ -2470,6 +2481,8 @@ async def preempt_others_for_human(source_device: str) -> None:
                             "session_id": current.session_id,
                         })), timeout=0.4,
                     )
+                    if bridge.connections.get(uncertain_id) is not current:
+                        raise RuntimeError("Head replaced during fleet STOP")
             except Exception:
                 # A stalled send, disconnect or reconnect is not a decoder
                 # acknowledgement. Keep the entire fleet floor blocked.
