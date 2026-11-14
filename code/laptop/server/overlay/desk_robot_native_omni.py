@@ -2202,9 +2202,34 @@ async def begin_external_speech(conn) -> bool:
     Never let two robots narrate at once or give the Mac a second audio owner.
     """
     global _external_speaker_owner, _external_speaker_connection
+    global _output_owner, _output_owner_unverified
     import desk_robot_bridge as bridge
     if bridge.connections.get(getattr(conn, "device_id", None)) is not conn:
         return False
+    if _output_owner_unverified == conn.device_id:
+        # A prior Mac TTS STOP failed. Clearing a Python lease, or merely
+        # reconnecting the same device ID, cannot silence its decoder. Reuse
+        # the existing head send lock to require a fresh authenticated STOP
+        # before granting this or any other pet a new audio lease.
+        async with _speaker_handoff_lock:
+            if _output_owner_unverified == conn.device_id:
+                try:
+                    async with _external_device_send_lock(conn):
+                        if (bridge.connections.get(conn.device_id) is not conn
+                                or bridge.human_speech_active()):
+                            return False
+                        await conn.websocket.send(json.dumps({
+                            "type": "tts", "state": "stop", "flush": True,
+                            "session_id": conn.session_id,
+                        }))
+                except Exception:
+                    return False
+                conn.client_is_speaking = False
+                async with _output_owner_lock:
+                    if _output_owner_unverified == conn.device_id:
+                        if _output_owner == conn.device_id:
+                            _output_owner = None
+                        _output_owner_unverified = None
     session = _sessions.get(conn.device_id)
     async with _output_owner_lock:
         if (_external_speaker_owner is not None or _output_owner is not None
@@ -2238,9 +2263,12 @@ async def begin_external_speech(conn) -> bool:
     return True
 
 
-async def end_external_speech(conn) -> None:
-    """Release only the exact authenticated Mac speaker lease holder."""
+async def end_external_speech(
+    conn, *, stop_confirmed: bool = True,
+) -> None:
+    """Release a Mac lease only when decoder STOP reached the head transport."""
     global _external_speaker_owner, _external_speaker_connection
+    global _output_owner, _output_owner_unverified
     async with _output_owner_lock:
         if (_external_speaker_owner != getattr(conn, "device_id", None)
                 or _external_speaker_connection is not conn):
@@ -2250,6 +2278,12 @@ async def end_external_speech(conn) -> None:
         session = _sessions.get(conn.device_id)
         if session is not None and session.conn is conn:
             session._external_speech_active = False
+        if not stop_confirmed:
+            # An unsuccessful Mac STOP has exactly the same uncertain
+            # physical speaker state as a failed native model STOP. Hold
+            # the fleet floor until a real head transport reset succeeds.
+            _output_owner = conn.device_id
+            _output_owner_unverified = conn.device_id
 
 
 async def claim_speaker(session: NativeOmniSession) -> bool:
