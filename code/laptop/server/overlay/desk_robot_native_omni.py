@@ -1980,9 +1980,12 @@ class NativeOmniSession:
                 if state == "start":
                     self.conn.client_abort = False
                     self.conn.client_is_speaking = True
-                await self.conn.websocket.send(json.dumps({
-                    "type": "tts", "state": state, "session_id": self.conn.session_id,
-                }))
+                await asyncio.wait_for(
+                    self.conn.websocket.send(json.dumps({
+                        "type": "tts", "state": state,
+                        "session_id": self.conn.session_id,
+                    })), timeout=0.4,
+                )
                 if state == "start" and direct_required:
                     self._direct_reply_available = False
                     self._direct_reply_active = True
@@ -2034,7 +2037,12 @@ class NativeOmniSession:
             if bridge.human_speech_active():
                 blocked_by_human = True
             else:
-                await self.conn.websocket.send(packet)
+                # A slow/broken head transport must release the device lock
+                # so urgent human STOP can acquire it. Unsent Opus is never
+                # a delivered PCM or a playback acknowledgement.
+                await asyncio.wait_for(
+                    self.conn.websocket.send(packet), timeout=0.4,
+                )
                 self.head_packets += 1
         if blocked_by_human:
             events = await self._invalidate_head_first()
@@ -2256,7 +2264,11 @@ async def send_external_opus(conn, packet: bytes, generation: int) -> None:
                 or generation != bridge.interrupt_generation.get(conn.device_id, 0)
                 or bridge.human_speech_active()):
             raise RuntimeError("Mac speech interrupted before device Opus send")
-        await conn.websocket.send(packet)
+        # This Mac voice shares the same physical decoder lock as native
+        # speech. Bound each packet so an urgent STOP never waits forever.
+        await asyncio.wait_for(
+            conn.websocket.send(packet), timeout=0.4,
+        )
 
 
 async def begin_external_speech(conn) -> bool:
