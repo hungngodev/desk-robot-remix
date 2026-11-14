@@ -90,6 +90,8 @@ def main() -> None:
     parser.add_argument("--continuous-5v-a", required=True, type=float)
     parser.add_argument("--low-cell-v", type=float, default=3.0)
     parser.add_argument("--measured-efficiency", type=float, default=0.85)
+    parser.add_argument("--margin", type=float, default=1.3,
+                        help="Conservative current reserve multiplier (1.0 to 2.0)")
     parser.add_argument("--boost-max-input-a", type=float)
     parser.add_argument("--boost-continuous-input-a", type=float)
     parser.add_argument("--boost-continuous-output-a", type=float)
@@ -99,6 +101,7 @@ def main() -> None:
         args.peak_5v_a, args.continuous_5v_a,
         cell_low_v=args.low_cell_v,
         measured_boost_efficiency=args.measured_efficiency,
+        margin=args.margin,
         boost_max_input_a=args.boost_max_input_a,
         boost_continuous_input_a=args.boost_continuous_input_a,
         boost_continuous_output_a=args.boost_continuous_output_a,
