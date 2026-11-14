@@ -36,7 +36,7 @@ def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
         image_height_px=data.get("image_height_px"),
     )
     target = data.get("target_distance_mm")
-    if type(target) not in (float, int) or not math.isfinite(target) or not 50 <= target <= 500:
+    if type(target) not in (float, int) or not 50 <= target <= 500 or not math.isfinite(target):
         raise ValueError("Dock stopping distance is not calibrated")
     return calibration, float(target)
 
