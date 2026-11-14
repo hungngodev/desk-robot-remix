@@ -171,3 +171,22 @@ def test_low_cell_voltage_and_efficiency_cannot_improve_input_current_requiremen
         assert degraded["minimum_continuous_cell_input_a"] > nominal["minimum_continuous_cell_input_a"]
         assert degraded["candidate_physically_qualified"] is False
         assert degraded["charger_and_load_sharing_verified"] is False
+
+
+@pytest.mark.parametrize("undersized,limit", [
+    ("boost_max_input_a", 7.0),
+    ("boost_continuous_input_a", 4.0),
+    ("boost_continuous_output_a", 3.0),
+    ("protected_cell_continuous_a", 7.0),
+])
+def test_each_independent_supply_rating_must_cover_simultaneous_load(undersized, limit):
+    # A generous rating on the other three components must never mask a
+    # bottleneck in the boost input, output or protected cell discharge path.
+    ratings = dict(boost_max_input_a=9.0, boost_continuous_input_a=5.0,
+                   boost_continuous_output_a=4.0, protected_cell_continuous_a=9.0)
+    ratings[undersized] = limit
+    report = tool(3.0, 1.8, **ratings)
+    assert report["candidate_electrically_sufficient_on_paper"] is False
+    assert report["candidate_physically_qualified"] is False
+    assert report["charger_and_load_sharing_verified"] is False
+    assert report["thermal_and_brownout_verified"] is False
