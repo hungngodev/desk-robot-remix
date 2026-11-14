@@ -219,6 +219,53 @@ def test_semantic_planner_memory_consent_does_not_authorize_unrelated_recall(
             }]
 
 
+
+def test_semantic_planner_does_not_expand_user_request_into_other_hardware_reads(
+    settings, tokens,
+):
+    """Ollama's tool suggestion is not permission to capture unrelated sensors."""
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class OvereagerModel:
+        async def reply(self, history):
+            return json.dumps({"tools": [
+                {"route": "look"}, {"route": "power-status"},
+                {"route": "aux-status"},
+            ]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=OvereagerModel()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        cases = (
+            ("What is your temperature reading?", ["aux-status"]),
+            ("What do you see in the camera?", ["look"]),
+            ("What is your battery level?", ["power-status"]),
+            ("Show your sensor readings", ["aux-status"]),
+            ("What is on the desk and my battery level?",
+             ["look", "power-status"]),
+        )
+        for transcript, expected in cases:
+            reply = client.post(
+                url, headers=headers, json={"transcript": transcript},
+            )
+            assert reply.status_code == 200
+            assert [x["route"] for x in reply.json()["tools"]] == expected
+            assert reply.json()["motor_authorized"] is False
+            assert reply.json()["charging_authorized"] is False
+
+
 async def test_existing_ollama_semantic_planner_uses_strict_json_schema(
     settings,
 ):

@@ -921,6 +921,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 utterance,
             ) is not None
         )
+        visual_question = any(cue in utterance for cue in (
+            "see", "look", "inspect", "camera", "picture", "photo",
+            "image", "visible", "on the desk", "on my desk",
+            "on the table", "object", "in front of", "what color",
+            "what colour", "what shape", "what size", "how many",
+        ))
         # Ignore a few malformed or forbidden model suggestions without
         # losing a later legitimate second observation. The scan is bounded,
         # and at most two approved read-only routes are ever returned.
@@ -933,6 +939,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             if not isinstance(route, str) or route not in allowed or route in picked:
                 continue
             if recall_only and route != "voice-context":
+                continue
+            if route == "look" and not visual_question:
+                continue
+            if route == "power-status" and not battery_question:
                 continue
             if route == "aux-status" and not any(
                 cue in utterance for cue in (
