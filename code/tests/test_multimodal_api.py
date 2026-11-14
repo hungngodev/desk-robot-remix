@@ -1178,6 +1178,93 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
             assert not hub.tool_history[other.id]
 
 
+def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
+    settings, tokens, tmp_path,
+):
+    """Old async WROOM and SQLite results may not pollute the next VAD turn."""
+    import asyncio
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
+
+    robot = settings.robots[0].id
+    ids = [r.id for r in settings.robots]
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    memory = MemoryStore(tmp_path / "turn_receipts", ids)
+    memory.remember(
+        robot, "recall_001", "A blue key on my desk",
+        kind="object", source_robot=robot, witnessed=True,
+    )
+    hub = CameraFrameHub(ids)
+    visual = SimpleNamespace(hub=hub, _turn_epoch={rid: 7 for rid in ids})
+
+    async def noop():
+        pass
+
+    for route in ("aux", "voice-context"):
+        entered, release = threading.Event(), threading.Event()
+
+        class Head:
+            async def aux_status(self):
+                if route == "aux":
+                    entered.set()
+                    if not await asyncio.to_thread(release.wait, 3):
+                        raise RuntimeError("Timed out waiting for fresh human turn")
+                return {
+                    "robot_id": robot,
+                    "climate": {"valid": True, "temp_centi": 2210,
+                                "rh_centi": 5400},
+                }
+
+        original_search = MemoryStore.search
+
+        def delayed_search(self, *args, **kwargs):
+            if route == "voice-context":
+                entered.set()
+                if not release.wait(3):
+                    raise RuntimeError("Timed out waiting for fresh human turn")
+            return original_search(self, *args, **kwargs)
+
+        # This tests a genuine awaited SQLite search in its own worker,
+        # not a pre-completed fake result.
+        memory.search = delayed_search.__get__(memory, MemoryStore)
+        runtime = SimpleNamespace(
+            coordinator=SimpleNamespace(
+                robot=lambda rid: settings.robot(rid),
+                heads={robot: Head()},
+            ),
+            memory=memory, multimodal=visual, start=noop, close=noop,
+        )
+        url = (f"/v1/robots/{robot}/aux" if route == "aux"
+               else f"/v1/pet/{robot}/voice-context?query=blue%20key")
+        headers = {
+            "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
+            "X-Desk-Robot-Tool-Receipt": "1",
+        }
+        with TestClient(create_app(settings, runtime=runtime)) as client:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                pending = executor.submit(client.get, url, headers=headers)
+                try:
+                    assert entered.wait(2), "Slow real tool read did not start"
+                    visual._turn_epoch[robot] += 1  # New authenticated VAD.
+                finally:
+                    release.set()
+                assert pending.result(timeout=4).status_code == 200
+            assert not hub.tool_history[robot]
+            # A genuinely NEW tool request in that turn is still recorded.
+            assert client.get(url, headers=headers).status_code == 200
+            expected = ("sensor_telemetry" if route == "aux"
+                        else "memory_recall")
+            assert [entry[0] for entry in hub.tool_history[robot]] == [expected]
+            hub.tool_history[robot].clear()
+            assert not any(hub.tool_history[rid] for rid in ids[1:])
+
+
 def test_ollama_sensor_tool_route_requires_real_sensor_question_and_no_movement(
     settings, tokens,
 ):
