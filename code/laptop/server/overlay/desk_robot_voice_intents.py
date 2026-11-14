@@ -250,48 +250,71 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
         power = result.get("power")
         if not isinstance(climate, dict) or not isinstance(power, dict):
             return None  # Never infer real measurements from a partial payload.
+
+        # The Mac validates WROOM telemetry first. This LAST model-facing
+        # boundary must also reject arbitrary nested strings, booleans as
+        # integers, and out-of-range fields instead of forwarding them into
+        # a generated spoken response as supposed physical observations.
+        def measured(value, low, high):
+            return type(value) is int and low <= value <= high
+
         observed = {
             "source": "validated_wroom_raw_aux_not_calibrated",
             "physical_acceptance_verified": False,
         }
+        temp, humidity = climate.get("temp_centi"), climate.get("rh_centi")
         if (climate.get("valid") is True
-                and type(climate.get("temp_centi")) is int
-                and type(climate.get("rh_centi")) is int):
-            observed["sht41"] = {
-                "temp_centi": climate["temp_centi"],
-                "humidity_centi": climate["rh_centi"],
-                "age_ms": climate.get("age_ms"),
-            }
+                and measured(temp, -4500, 13000)
+                and measured(humidity, 0, 10000)):
+            reading = {"temp_centi": temp, "humidity_centi": humidity}
+            age = climate.get("age_ms")
+            if measured(age, 0, 999):
+                reading["age_ms"] = age
+            observed["sht41"] = reading
         bmp = result.get("bmp280")
-        if isinstance(bmp, dict) and bmp.get("valid") is True:
+        if (isinstance(bmp, dict) and bmp.get("valid") is True
+                and measured(bmp.get("pressure_pa"), 30000, 120000)
+                and measured(bmp.get("temp_centi"), -4000, 8500)):
             observed["bmp280"] = {
-                "pressure_pa": bmp.get("pressure_pa"),
-                "temp_centi": bmp.get("temp_centi"),
+                "pressure_pa": bmp["pressure_pa"],
+                "temp_centi": bmp["temp_centi"],
                 "physically_verified": False,
             }
         prox = result.get("proximity")
-        if isinstance(prox, dict) and prox.get("valid") is True:
+        if (isinstance(prox, dict) and prox.get("valid") is True
+                and measured(prox.get("raw"), 0, 255)
+                and measured(prox.get("gesture"), 0, 4)):
             observed["apds9960"] = {
-                "raw": prox.get("raw"), "gesture": prox.get("gesture"),
+                "raw": prox["raw"], "gesture": prox["gesture"],
                 "physically_qualified": False,
             }
-        if power.get("fuel_valid") is True:
+        if (power.get("fuel_valid") is True
+                and measured(power.get("soc_centi"), 0, 10000)
+                and measured(power.get("cell_mv"), 0, 4500)):
             observed["fuel_gauge"] = {
-                "reported_soc_centi": power.get("soc_centi"),
-                "reported_cell_mv": power.get("cell_mv"),
+                "reported_soc_centi": power["soc_centi"],
+                "reported_cell_mv": power["cell_mv"],
                 "qualified": False,
             }
         dock = result.get("dock")
-        if isinstance(dock, dict) and dock.get("valid") is True:
+        if (isinstance(dock, dict) and dock.get("present") is True
+                and dock.get("valid") is True
+                and dock.get("charging_verified") is False
+                and all(type(dock.get(field)) is bool for field in (
+                    "left_seated", "right_seated", "input_good",
+                    "charge_indicated",
+                ))
+                and (not dock["charge_indicated"] or dock["input_good"])):
             observed["dock_pins"] = {
-                "left_seated": dock.get("left_seated"),
-                "right_seated": dock.get("right_seated"),
-                "charge_indicated": dock.get("charge_indicated"),
+                "left_seated": dock["left_seated"],
+                "right_seated": dock["right_seated"],
+                "charge_indicated": dock["charge_indicated"],
                 "charging_verified": False,
             }
         nfc = result.get("nfc")
-        if isinstance(nfc, dict) and nfc.get("v") is True:
-            observed["nfc"] = {"events": nfc.get("e")}
+        if (isinstance(nfc, dict) and nfc.get("v") is True
+                and measured(nfc.get("e"), 0, 0xffffffff)):
+            observed["nfc"] = {"events": nfc["e"]}
         return observed
     if route == "power-status":
         if result.get("source") != "wroom_aux_fuel_gauge_raw_unqualified":
