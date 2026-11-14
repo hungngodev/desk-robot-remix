@@ -132,8 +132,14 @@ def detect_apriltag(
     corners, ids, _rejected = detector.detectMarkers(frame)
     if ids is None:
         return None
-    candidates = [i for i, marker in enumerate(ids.flatten())
-                  if int(marker) == calibration.marker_id]
+    # Native detector IDs must be a one-column integer array matching corners.
+    # Never truncate floats, accept booleans, or index with a corrupt ID list.
+    if (not isinstance(ids, np.ndarray) or ids.ndim != 2
+            or ids.shape != (len(corners), 1)
+            or ids.dtype.kind not in ("i", "u")):
+        return None
+    candidates = [i for i, marker in enumerate(ids[:, 0])
+                  if marker == calibration.marker_id]
     if len(candidates) != 1:
         return None
     # A detector can return corrupt or off-frame corners. Never feed them to
