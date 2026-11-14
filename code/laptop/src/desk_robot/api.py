@@ -582,6 +582,13 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 kind="heard_human", source_robot=robot_id, witnessed=True,
                 confidence=0.6,
             )
+        # A newly completed ASR can also be in the short-lived Mac timeline
+        # before SQLite I/O finishes. Live context consent is separate from
+        # durable transcript consent: retract only THIS newly accepted item
+        # if the operator disabled live observation during the awaited write.
+        if ephemeral and not settings.voice_vision_tools_enabled:
+            visual.hub.discard_heard(robot_id, request.event_id)
+            ephemeral = False
         # A private SQLite write may take longer than the operator's
         # opt-out. Remove ONLY this request's newly inserted episode if
         # permission changed during I/O; never delete an older duplicate.
