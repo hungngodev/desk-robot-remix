@@ -2612,6 +2612,53 @@ async def test_proactive_inspection_rejects_cross_pet_receipts_and_tool_loops(
         await pet.close()
 
 
+
+
+@pytest.mark.parametrize("bad", [
+    {"charge_indicated": True, "input_good": False},
+    {"age_ms": 500},
+    {"seq": 0},
+    {"charging_verified": True},
+    {"present": False},
+])
+async def test_proactive_mac_does_not_claim_invalid_dock_charger_evidence(
+    fleet, tmp_path, bad,
+):
+    """No out of date or contradictory optional pins enter model tool results."""
+    dock = {
+        "present": True, "valid": True, "left_seated": True,
+        "right_seated": True, "input_good": True,
+        "charge_indicated": True, "charging_verified": False,
+        "seq": 9, "age_ms": 15,
+    }
+    dock.update(bad)
+
+    class Head:
+        async def aux_status(self):
+            return {
+                "robot_id": "robot-01",
+                "dock": dock,
+                "power": {"fuel_valid": True, "cell_mv": 3720,
+                          "soc_centi": 5200},
+            }
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = GroundedChat()
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, chat, SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    try:
+        receipt = await pet._proactive_tool_receipt("robot-01", "aux_status")
+        assert receipt["source"] == "authenticated_wroom_read_only_aux_status"
+        assert receipt["verified_charging"] is False
+        assert "dock_contacts" not in receipt["data"]
+        assert receipt["data"]["fuel_gauge"]["qualified"] is False
+    finally:
+        await pet.close()
+
+
 async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fields(
     fleet, tmp_path,
 ):
@@ -2627,8 +2674,10 @@ async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fiel
                 "proximity": {"valid": True, "gesture": 2},
                 "nfc": {"v": True, "e": 4},
                 "dock": {
-                    "valid": True, "left_seated": True,
-                    "right_seated": True, "charge_indicated": True,
+                    "present": True, "valid": True,
+                    "left_seated": True, "right_seated": True,
+                    "input_good": True, "charge_indicated": True,
+                    "charging_verified": False, "seq": 8, "age_ms": 30,
                 },
                 "power": {
                     "fuel_valid": True, "soc_centi": 6320,
@@ -2678,6 +2727,7 @@ async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fiel
         assert receipt["data"]["bmp280"]["pressure_pa"] == 100927
         assert receipt["data"]["fuel_gauge"]["qualified"] is False
         assert receipt["data"]["dock_contacts"]["charging_verified"] is False
+        assert receipt["data"]["dock_contacts"]["input_good"] is True
         assert "credentials" not in chat.history[-1][-1]["content"]
         assert speaker.spoken == []
         assert state.last_initiative_suppression == "model_chose_silence"

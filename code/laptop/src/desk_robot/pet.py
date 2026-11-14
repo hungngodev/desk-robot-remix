@@ -1470,16 +1470,26 @@ class PetController:
                 if type(nfc.get("e")) is int:
                     selected["nfc"] = {"event_count": nfc["e"]}
             dock = result.get("dock")
-            if isinstance(dock, dict) and dock.get("valid") is True:
-                if all(type(dock.get(field)) is bool for field in (
-                    "left_seated", "right_seated", "charge_indicated",
-                )):
-                    selected["dock_contacts"] = {
-                        "left_seated": dock["left_seated"],
-                        "right_seated": dock["right_seated"],
-                        "charge_indicated": dock["charge_indicated"],
-                        "charging_verified": False,
-                    }
+            if (isinstance(dock, dict)
+                    and dock.get("present") is True
+                    and dock.get("valid") is True
+                    and dock.get("charging_verified") is False
+                    and type(dock.get("seq")) is int
+                    and 0 < dock["seq"] <= 0xffffffff
+                    and type(dock.get("age_ms")) is int
+                    and 0 <= dock["age_ms"] < 500
+                    and all(type(dock.get(field)) is bool for field in (
+                        "left_seated", "right_seated", "input_good",
+                        "charge_indicated",
+                    ))
+                    and (not dock["charge_indicated"] or dock["input_good"])):
+                selected["dock_contacts"] = {
+                    "left_seated": dock["left_seated"],
+                    "right_seated": dock["right_seated"],
+                    "input_good": dock["input_good"],
+                    "charge_indicated": dock["charge_indicated"],
+                    "charging_verified": False,
+                }
         else:
             selected = {
                 key: result[key] for key in (
