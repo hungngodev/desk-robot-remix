@@ -203,3 +203,80 @@ async def test_native_video_probe_refuses_partial_audio_unit_before_network():
         )
 
 
+
+@pytest.mark.asyncio
+async def test_five_pet_backend_preflight_opens_all_sessions_before_streaming(
+    monkeypatch,
+):
+    """Every real probe waits for all five authenticated model sessions."""
+    import asyncio
+
+    smoke = smoke_module()
+    entered = set()
+    completed = []
+
+    async def admitted_probe(url, model, pcm, jpeg, *, deadline, barrier):
+        number = len(entered)
+        entered.add(number)
+        assert barrier.parties == 5
+        await asyncio.wait_for(barrier.wait(), timeout=1)
+        assert len(entered) == 5
+        completed.append(number)
+        return b"opus_conversion_candidate", {
+            "native_backend_protocol_only": True,
+            "head_speaker_connected": False,
+        }
+
+    monkeypatch.setattr(smoke, "probe", admitted_probe)
+    responses = await asyncio.wait_for(smoke.probe_fleet(
+        "ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        "openbmb/MiniCPM-o-4_5", b"pcm", None,
+        deadline=5, count=5,
+    ), timeout=2)
+    assert len(responses) == 5
+    assert sorted(completed) == list(range(5))
+    assert all(audio for audio, _ in responses)
+    for count in (0, 6, True):
+        with pytest.raises(ValueError, match="one to five"):
+            await smoke.probe_fleet(
+                "ws://127.0.0.1:8099/v1/realtime?duplex=1",
+                "openbmb/MiniCPM-o-4_5", b"pcm", None,
+                deadline=5, count=count,
+            )
+
+
+@pytest.mark.asyncio
+async def test_failed_five_pet_backend_preflight_cancels_other_live_sessions(
+    monkeypatch,
+):
+    import asyncio
+
+    smoke = smoke_module()
+    release = asyncio.Event()
+    cancelled = []
+
+    async def failing_probe(url, model, pcm, jpeg, *, deadline, barrier):
+        await barrier.wait()
+        if asyncio.current_task().get_name() == "Task-does-not-exist":
+            raise AssertionError("unreachable")
+        # One real model refuses a session while other models are still
+        # producing audio. The fleet smoke must cancel remaining sessions.
+        if not release.is_set():
+            release.set()
+            raise RuntimeError("backend session admission failed")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    monkeypatch.setattr(smoke, "probe", failing_probe)
+    with pytest.raises(RuntimeError, match="admission failed"):
+        await asyncio.wait_for(smoke.probe_fleet(
+            "ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            "openbmb/MiniCPM-o-4_5", b"pcm", None,
+            deadline=5, count=5,
+        ), timeout=2)
+    assert cancelled
+
+
