@@ -355,6 +355,25 @@ def test_cli_rejects_nonfinite_power_telemetry_and_ratings(monkeypatch, capsys, 
     assert capsys.readouterr().out == ""
 
 
+
+@pytest.mark.parametrize("field", [
+    "peak", "continuous", "cell_low_v", "measured_boost_efficiency",
+    "margin", "boost_max_input_a", "boost_continuous_input_a",
+    "boost_continuous_output_a", "protected_cell_continuous_a",
+])
+@pytest.mark.parametrize("bad", [True, False, "1.0"])
+def test_power_api_rejects_untyped_or_boolean_sensor_readings(field, bad):
+    # JSON booleans are Python integers, but cannot certify a measured current,
+    # voltage, efficiency, margin or manufacturer current rating.
+    if field == "peak":
+        args, kwargs = (bad, 0.6), {}
+    elif field == "continuous":
+        args, kwargs = (1, bad), {}
+    else:
+        args, kwargs = (1, 0.6), {field: bad}
+    with pytest.raises(ValueError):
+        tool(*args, **kwargs)
+
 @pytest.mark.parametrize("field", [
     "peak", "continuous", "cell_low_v", "measured_boost_efficiency",
     "margin", "boost_max_input_a", "boost_continuous_input_a",
