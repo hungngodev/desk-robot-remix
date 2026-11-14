@@ -820,3 +820,8 @@ g++ -std=c++11 -Wall -Wextra -Wpedantic -Werror \
 ## November 13: implausible IMU gravity replay, source only
 
 PR #17 source `4a8b5e9` preserves `boot_id` and `sample_ms` when a structurally valid MPU6050 frame has physically implausible gravity, while clearing the relative pose baseline. Regression `dab426a` checks that the same conversion cannot restart calibration after a corrected retransmission and a newer conversion can. **No test executed for these commits**: local `git ls-remote` failed DNS resolution for github.com. The GitHub file update was accepted, but this does not prove pytest, firmware or physical behavior. Execute `tests/test_handling.py` and `tests/test_handling_integration.py` on an exact branch checkout before upgrading verification status.
+
+
+### November 14 ASR whitespace and requested tool priority: unexecuted
+
+Starting PR #17 head `e3d3837262595b465df1dcd32c9e3bc3d2937f43`. Source commit `cac1ba6db71c33615a4ec83daf3718d1ffa354b6`, regression commit `69ae5f67990c089cc5258955428bd662a4e3c1ef`. Human ASR text now uses the same single-line bounded normalization for request matching and prompt display. Regression adds a multiline/leading-space battery request with competing tool receipts to `code/tests/test_brain_context.py`. **Tests not executed**: local container cannot resolve github.com for repository checkout; connector write/readback is not an executable test. QA command: `cd code && python -m pytest -q tests/test_brain_context.py` on the current integration head. No physical verification, battery/charging approval, measured latency or native spoken tool-result proof.
