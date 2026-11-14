@@ -479,9 +479,11 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
     hub = CameraFrameHub(ids)
 
     class Head:
+        reported_id = ids[0]
+
         async def status(self):
             return {
-                "robot_id": ids[0], "backend": "stepper_28byj48",
+                "robot_id": self.reported_id, "backend": "stepper_28byj48",
                 "armed": False, "safety": {"fault": "none"},
             }
 
@@ -493,9 +495,10 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
             "physical_grasp_verified": False,
         },
     )
+    head = Head()
     coord = SimpleNamespace(
         robot=lambda rid: settings.robot(rid),
-        heads={ids[0]: Head()},
+        heads={ids[0]: head},
         jobs={"pickup123": job},
     )
     runtime = SimpleNamespace(
@@ -528,6 +531,10 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
             [], [], hub.interaction_timeline(ids[0], time.monotonic())
         )
         assert "Recent head telemetry" in context.interaction
+        hub.tool_history[ids[0]].clear()
+        head.reported_id = ids[1]
+        assert client.get(status_url, headers=marked).status_code == 200
+        assert not hub.tool_history[ids[0]]  # Foreign head is never evidence.
         assert "Mac pickup job receipt, not verified grasp" in context.interaction
         assert hub.recent_tool_context(ids[1], time.monotonic()) == []
         assert client.post(
@@ -1138,9 +1145,11 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
     )
 
     class CurrentHead:
+        reported_id = robot
+
         async def aux_status(self):
             return {
-                "robot_id": robot,
+                "robot_id": self.reported_id,
                 "climate": {"valid": True, "temp_centi": 2210,
                             "rh_centi": 5400},
                 "bmp280": {"valid": True, "pressure_pa": 101312},
@@ -1149,10 +1158,11 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
     async def noop():
         pass
 
+    head = CurrentHead()
     runtime = SimpleNamespace(
         coordinator=SimpleNamespace(
             robot=lambda rid: settings.robot(rid),
-            heads={robot: CurrentHead()},
+            heads={robot: head},
         ),
         multimodal=visual,
         start=noop, close=noop,
@@ -1176,6 +1186,12 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
         assert 0 <= time.monotonic() - when <= 2
         for other in settings.robots[1:]:
             assert not hub.tool_history[other.id]
+        hub.tool_history[robot].clear()
+        head.reported_id = settings.robots[1].id
+        assert client.get(url, headers={
+            **token, "X-Desk-Robot-Tool-Receipt": "1",
+        }).status_code == 200
+        assert not hub.tool_history[robot]  # Foreign AUX cannot become a fact.
 
 
 def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
