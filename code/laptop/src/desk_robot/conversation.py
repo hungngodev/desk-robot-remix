@@ -328,6 +328,13 @@ class Conversation:
             return
         event_id = uuid.uuid4().hex
         for peer in participants:
+            if (peer.id != speaker.id
+                    and self.settings.mode == "hardware"
+                    and not self.settings.fleet_text_sharing_enabled):
+                # Hearing an operator-requested group conversation is not
+                # consent for a second pet to durably retain that speaker's
+                # words. Each pet may still retain its own sent speech.
+                continue
             await asyncio.to_thread(
                 self.memory.remember,
                 peer.id,

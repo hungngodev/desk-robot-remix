@@ -264,6 +264,35 @@ async def test_group_chat_uses_each_pet_own_live_audio_sensor_and_tool_context(s
     assert "not physical action permits" in peer
 
 
+
+async def test_hardware_group_conversation_does_not_persist_peer_speech_without_sharing(
+    settings, tmp_path,
+):
+    """A shared speaker floor does not grant cross-pet SQLite retention."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = False
+    ids = ["robot-01", "robot-02"]
+    memory = MemoryStore(tmp_path, ids)
+    agent = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=memory)
+    await agent.run(ids, "Two robots talking aloud", 2)
+    first = memory.recent("robot-01")
+    second = memory.recent("robot-02")
+    assert len(first) == len(second) == 1
+    assert all(item.kind == "own_utterance" for item in first + second)
+    assert all(item.source_robot == "robot-01" for item in first)
+    assert all(item.source_robot == "robot-02" for item in second)
+
+    settings.fleet_text_sharing_enabled = True
+    await agent.run(ids, "Now sharing is permitted", 2)
+    first = memory.recent("robot-01")
+    second = memory.recent("robot-02")
+    assert len(first) == len(second) == 3
+    assert sum(item.kind == "peer_utterance" for item in first) == 1
+    assert sum(item.kind == "peer_utterance" for item in second) == 1
+    assert all(not item.witnessed for item in first + second
+               if item.kind == "peer_utterance")
+
+
 async def test_hardware_group_memory_respects_fleet_sharing_consent(
     settings, tmp_path,
 ):
