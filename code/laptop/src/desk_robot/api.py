@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -905,6 +906,21 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             key in transcript.casefold()
             for key in ("battery", "charge level", "power level", "cell voltage")
         )
+        # A general opt-in allows memory access, but the semantic model
+        # cannot silently browse private history for a live camera, status
+        # or social question that never asked about the past. Explicit
+        # read-only recall is still available via the existing voice route.
+        memory_question = (
+            any(cue in utterance for cue in (
+                "remember", "recall", "memory", "memories", "past chats",
+                "earlier conversation", "previous conversation",
+                "we talked about", "we discussed",
+            ))
+            or re.search(
+                r"\bwhat did (?:i|we|you) (?:say|tell|talk about|discuss)\b",
+                utterance,
+            ) is not None
+        )
         # Ignore a few malformed or forbidden model suggestions without
         # losing a later legitimate second observation. The scan is bounded,
         # and at most two approved read-only routes are ever returned.
@@ -926,7 +942,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 )
             ):
                 continue
-            if route == "voice-context" and not settings.voice_memory_tools_enabled:
+            if route == "voice-context" and (
+                not settings.voice_memory_tools_enabled or not memory_question
+            ):
                 continue
             picked.append(route)
             if len(picked) == 2:

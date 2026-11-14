@@ -166,6 +166,59 @@ def test_mac_semantic_tool_plan_fail_closed_without_ollama_or_memory_consent(
         }).status_code == 422
 
 
+
+def test_semantic_planner_memory_consent_does_not_authorize_unrelated_recall(
+    settings, tokens,
+):
+    """Opted-in private history still needs an actual user recall request."""
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class OvereagerModel:
+        async def reply(self, history):
+            return json.dumps({"tools": [{"route": "voice-context"}]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=OvereagerModel()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        for question in (
+            "Can you check how your battery is doing?",
+            "What happened just now on your desk?",
+            "How are your sensors?",
+            "What is in your camera right now?",
+        ):
+            reply = client.post(
+                url, headers=headers, json={"transcript": question},
+            )
+            assert reply.status_code == 200
+            assert reply.json()["tools"] == []
+            assert reply.json()["motor_authorized"] is False
+        for question in (
+            "What did I tell you about that key?",
+            "Can you recall what we discussed?",
+            "Tell me about our previous conversation",
+        ):
+            reply = client.post(
+                url, headers=headers, json={"transcript": question},
+            )
+            assert reply.status_code == 200
+            assert reply.json()["tools"] == [{
+                "route": "voice-context", "payload": {"question": question}
+            }]
+
+
 async def test_existing_ollama_semantic_planner_uses_strict_json_schema(
     settings,
 ):
