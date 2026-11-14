@@ -121,3 +121,21 @@ def test_contradictory_boost_input_ratings_are_rejected():
                   boost_continuous_output_a=3, protected_cell_continuous_a=5)
     assert report["candidate_electrically_sufficient_on_paper"] is True
     assert report["candidate_physically_qualified"] is False
+
+
+@pytest.mark.parametrize("missing", [
+    "boost_max_input_a",
+    "boost_continuous_input_a",
+    "boost_continuous_output_a",
+    "protected_cell_continuous_a",
+])
+def test_each_missing_component_rating_blocks_paper_qualification(missing):
+    # An incomplete published board/cell specification is not evidence of
+    # simultaneous peak and continuous supply capability.
+    ratings = dict(boost_max_input_a=9, boost_continuous_input_a=5,
+                   boost_continuous_output_a=4, protected_cell_continuous_a=9)
+    ratings.pop(missing)
+    report = tool(3, 1.8, **ratings)
+    assert report["candidate_electrically_sufficient_on_paper"] is None
+    assert report["candidate_physically_qualified"] is False
+    assert report["charger_and_load_sharing_verified"] is False
