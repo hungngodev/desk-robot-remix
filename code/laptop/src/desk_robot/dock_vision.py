@@ -24,6 +24,7 @@ class DockCameraCalibration:
     cy: float
     tag_side_mm: float
     marker_id: int
+    distortion_coeffs: tuple[float, ...] | None = None
 
     def __post_init__(self):
         for name in ("fx", "fy", "cx", "cy", "tag_side_mm"):
@@ -36,6 +37,12 @@ class DockCameraCalibration:
             raise ValueError("Camera focal lengths and physical tag size are invalid")
         if self.cx < 0 or self.cy < 0:
             raise ValueError("Camera optical center must be nonnegative")
+        if self.distortion_coeffs is not None:
+            if (not isinstance(self.distortion_coeffs, tuple)
+                    or len(self.distortion_coeffs) not in (4, 5, 8, 12, 14)
+                    or any(type(v) not in (int, float) or not math.isfinite(v)
+                           for v in self.distortion_coeffs)):
+                raise ValueError("Invalid measured camera distortion coefficients")
         if type(self.marker_id) is not int or not 0 <= self.marker_id < 587:
             raise ValueError("AprilTag 36h11 marker ID out of range")
 
@@ -108,7 +115,12 @@ def detect_apriltag(
         [0, calibration.fy, calibration.cy],
         [0, 0, 1],
     ], dtype=np.float64)
-    distortion = np.zeros((5, 1), dtype=np.float64)
+    # Legacy unqualified observations retain zero distortion; measured optics
+    # can be supplied without introducing a second detector or motion owner.
+    distortion = np.asarray(
+        calibration.distortion_coeffs if calibration.distortion_coeffs is not None
+        else (0.0,) * 5, dtype=np.float64,
+    ).reshape(-1, 1)
     success, rvec, tvec = cv2.solvePnP(
         object_points, image_points, intrinsics, distortion,
         flags=cv2.SOLVEPNP_IPPE_SQUARE,
