@@ -284,3 +284,37 @@ def test_malformed_detector_corner_shape_never_reaches_pnp(monkeypatch, bad_poin
     decision = assess_dock(pose, now=5.1, target_distance_mm=120)
     assert decision.phase == "hold"
     assert not decision.motor_authorized and not decision.charging_authorized
+
+
+@pytest.mark.parametrize("bad_ids", [
+    [[12.0]], [[True]], [[12, 12]], [[12], [12]],
+    [[float("nan")]], [["12"]], [12], [],
+])
+def test_malformed_detector_ids_cannot_select_dock_pose(monkeypatch, bad_ids):
+    """Corrupt native marker IDs must not reach pose estimation or authority."""
+    import cv2
+    import numpy as np
+
+    class BadIdsDetector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            corners = [np.array([[
+                [100.0, 100.0], [140.0, 100.0],
+                [140.0, 140.0], [100.0, 140.0],
+            ]], dtype=np.float32)]
+            return corners, np.asarray(bad_ids), []
+
+    def forbidden_pnp(*args, **kwargs):
+        pytest.fail("Corrupt detector IDs reached solvePnP")
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", BadIdsDetector)
+    monkeypatch.setattr(cv2, "solvePnP", forbidden_pnp)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), calibration(), captured_at=5)
+    assert pose is None
+    decision = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized and not decision.charging_authorized
