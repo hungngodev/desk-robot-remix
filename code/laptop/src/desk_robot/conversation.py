@@ -6,7 +6,7 @@ import json
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Protocol
+from typing import Callable, Protocol
 
 import httpx
 
@@ -246,7 +246,10 @@ class KokoroHeadSpeaker:
             },
         )
 
-    async def say(self, robot: RobotConfig, text: str):
+    async def say(
+        self, robot: RobotConfig, text: str,
+        *, permission_check: Callable[[], bool] | None = None,
+    ):
         response = await self.client.post(
             self.settings.kokoro_url.rstrip("/") + "/v1/audio/speech",
             json={
@@ -262,6 +265,10 @@ class KokoroHeadSpeaker:
         response.raise_for_status()
         if not response.content.startswith(b"RIFF") or len(response.content) > 10_000_000:
             raise RuntimeError("Kokoro did not return bounded WAV audio")
+        # Kokoro synthesis can take 60 seconds. An opt-out during synthesis
+        # must not become a private utterance when the WAV is finally ready.
+        if permission_check is not None and not permission_check():
+            raise RuntimeError("Speech permission revoked during synthesis")
         result = await self._bridge(
             "/speak",
             {
@@ -356,6 +363,14 @@ class Conversation:
                 and (not private_at_start
                      or self.settings.voice_memory_tools_enabled)
             )
+
+        async def say_group(robot: RobotConfig, text: str) -> None:
+            if isinstance(self.speaker, KokoroHeadSpeaker):
+                await self.speaker.say(
+                    robot, text, permission_check=consent_still_valid,
+                )
+            else:
+                await self.speaker.say(robot, text)
 
         self.active = asyncio.current_task()
         transcript = []
@@ -464,7 +479,7 @@ class Conversation:
                                             raise RuntimeError(
                                                 "Group conversation consent revoked"
                                             )
-                                        await self.speaker.say(robot, segment)
+                                        await say_group(robot, segment)
                                         completed_segments.append(segment)
                                     if not completed_segments:
                                         # A successful HTTP stream with zero
@@ -482,7 +497,7 @@ class Conversation:
                                         raise RuntimeError(
                                             "Group conversation consent revoked"
                                         )
-                                    await self.speaker.say(robot, text)
+                                    await say_group(robot, text)
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
                             await self._persist_spoken_turn(robot, text, robots)
@@ -527,7 +542,10 @@ class Conversation:
         finally:
             self.active = None
 
-    async def say_proactive(self, robot: RobotConfig, text: str) -> bool:
+    async def say_proactive(
+        self, robot: RobotConfig, text: str, *,
+        permission_check: Callable[[], bool] | None = None,
+    ) -> bool:
         """Reuse exactly one speaker/session owner for optional autonomous remarks.
 
         The caller owns cancellation on quiet/user speech. This method deliberately
@@ -542,7 +560,12 @@ class Conversation:
             async with self.speaker.session([robot]):
                 async with self.speaker_lock:
                     try:
-                        await self.speaker.say(robot, text)
+                        if isinstance(self.speaker, KokoroHeadSpeaker):
+                            await self.speaker.say(
+                                robot, text, permission_check=permission_check,
+                            )
+                        else:
+                            await self.speaker.say(robot, text)
                     except BaseException:
                         # A failed WAV/Opus transfer, not just cancellation,
                         # can leave already queued audio in the XIAO decoder.

@@ -1792,7 +1792,19 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "memory_consent_revoked"
                 return
-            transmitted = await self.conversation.say_proactive(robot, text)
+            def audio_still_permitted() -> bool:
+                return (
+                    state.enabled and not state.quiet
+                    and state.generation == generation
+                    and (not private_memory_allowed
+                         or self.settings.voice_memory_tools_enabled)
+                    and not self._human_active_in_fleet(time.monotonic())
+                    and not newer_human_turn()
+                )
+
+            transmitted = await self.conversation.say_proactive(
+                robot, text, permission_check=audio_still_permitted,
+            )
             if transmitted and state.enabled and not state.quiet and state.generation == generation:
                 now = time.monotonic()
                 self._group_last_spoken = now

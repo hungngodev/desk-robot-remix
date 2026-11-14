@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 from desk_robot.api import create_app
-from desk_robot.conversation import Conversation
+from desk_robot.conversation import Conversation, KokoroHeadSpeaker
 from desk_robot.memory import MemoryStore
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 from fastapi.testclient import TestClient
@@ -48,6 +48,56 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
             == 422
         )
 
+
+
+
+
+async def test_kokoro_wav_generated_after_group_memory_revoke_never_reaches_xiaozhi(
+    settings, monkeypatch,
+):
+    """A long Kokoro HTTP response is not authorization to transmit old secrets."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_memory_tools_enabled = True
+    for index, robot in enumerate(settings.robots[:2]):
+        robot.device_id = f"mac-0{index + 1}"
+    monkeypatch.setenv(settings.speech_bridge_token_env, "p" * 32)
+    calls = []
+
+    class Response:
+        def __init__(self, content=b""):
+            self.content = content
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {}
+
+    class Client:
+        async def post(self, url, **kwargs):
+            calls.append(url)
+            if url.endswith("/v1/audio/speech"):
+                settings.voice_memory_tools_enabled = False
+                return Response(b"RIFFsynthetic-wav-fixture")
+            if url.endswith("/speak"):
+                raise AssertionError("Revoked group memory reached Xiaozhi")
+            return Response()
+
+    class Chat:
+        async def reply(self, history):
+            return "The model had prepared a private spoken sentence"
+
+    speaker = KokoroHeadSpeaker(settings, Client())
+    conversation = Conversation(settings, Chat(), speaker)
+    with pytest.raises(RuntimeError, match="Speech permission revoked during synthesis"):
+        await conversation.run(
+            ["robot-01", "robot-02"], "Talk about a private memory", 2,
+        )
+    assert conversation.active is None
+    assert sum(url.endswith("/v1/audio/speech") for url in calls) == 1
+    assert not any(url.endswith("/speak") for url in calls)
+    assert any(url.endswith("/interrupt") for url in calls)
 
 
 async def test_empty_ollama_stream_never_creates_phantom_social_speech(

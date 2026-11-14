@@ -11,7 +11,7 @@ import httpx
 import pytest
 from desk_robot.api import create_app
 from desk_robot.config import load_settings
-from desk_robot.conversation import Conversation
+from desk_robot.conversation import Conversation, KokoroHeadSpeaker
 from desk_robot.memory import MemoryStore
 from desk_robot.multimodal import CameraFrameHub
 from desk_robot.pet import PetController, _initiative_evidence
@@ -1938,6 +1938,67 @@ async def test_uncertain_visual_event_is_not_spoken_and_does_not_consume_cooldow
         await pet.close()
 
 
+
+
+
+async def test_proactive_private_wav_revoked_during_kokoro_never_reaches_head(
+    fleet, tmp_path, monkeypatch,
+):
+    """Private proactive thought may finish synthesis after Mac opt out."""
+    fleet.mode = "hardware"
+    fleet.voice_memory_tools_enabled = True
+    fleet.robots[0].device_id = "mac-01"
+    monkeypatch.setenv(fleet.speech_bridge_token_env, "p" * 32)
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    memory.remember(
+        "robot-01", "old_private_001", "A private old desk object",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    calls = []
+
+    class Response:
+        def __init__(self, content=b""):
+            self.content = content
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {}
+
+    class Client:
+        async def post(self, url, **kwargs):
+            calls.append(url)
+            if url.endswith("/v1/audio/speech"):
+                fleet.voice_memory_tools_enabled = False
+                return Response(b"RIFFsynthetic-wav-fixture")
+            if url.endswith("/speak"):
+                raise AssertionError("Revoked proactive reply reached head")
+            return Response()
+
+    speaker = KokoroHeadSpeaker(fleet, Client())
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 61
+    try:
+        await pet._speak(
+            "robot-01", SceneChange("key", "A key appeared", .96),
+            61, offered_at=time.monotonic(),
+        )
+        assert state.spoken == 0
+        assert "Speech permission revoked during synthesis" in state.last_error
+        assert memory.count("robot-01") == 1
+        assert sum(url.endswith("/v1/audio/speech") for url in calls) == 1
+        assert not any(url.endswith("/speak") for url in calls)
+        assert any(url.endswith("/interrupt") for url in calls)
+    finally:
+        state.enabled = False
+        await pet.close()
 
 
 @pytest.mark.parametrize("stage", ["memory_read", "model_reasoning"])
