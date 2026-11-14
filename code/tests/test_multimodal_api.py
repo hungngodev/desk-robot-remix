@@ -677,6 +677,48 @@ def test_native_model_instructions_contain_only_own_pet_persona_without_unapprov
         assert client.get(f"/v1/pet/{pet.id}/omni-context").status_code == 401
 
 
+
+def test_native_private_memory_revoke_during_sqlite_read_returns_no_secret(
+    settings, tokens,
+):
+    """Startup persona and history tool both recheck consent after awaited I/O."""
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class RevokingMemory:
+        def recent(self, robot_id, *, limit):
+            assert robot_id == robot
+            settings.voice_memory_tools_enabled = False
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            assert robot_id == robot
+            return []
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot),
+        memory=RevokingMemory(), multimodal=None,
+        start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        for endpoint in ("omni-context", "voice-context"):
+            settings.voice_memory_tools_enabled = True
+            response = client.get(
+                f"/v1/pet/{robot}/{endpoint}", headers=headers,
+            )
+            assert response.status_code == 403
+            assert "instructions" not in response.text
+            assert "core_facts" not in response.text
+            assert settings.voice_memory_tools_enabled is False
+
+
 def test_native_asr_memory_requires_independent_consent_and_deduplicates(
     settings, tokens, tmp_path,
 ):

@@ -501,6 +501,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 ),
                 timeout=2.0,
             )
+            # Private consent can change WHILE SQLite is reading. Never
+            # return historical text in a native startup persona after an
+            # opt-out, even if the camera permit remains enabled.
+            if not settings.voice_memory_tools_enabled:
+                raise HTTPException(403, "Native memory consent revoked during read")
             # Match proactive speech's single authoritative provenance
             # formatter. A sent line is NOT a visual observation and no
             # model-estimated ASR sentence becomes an operator preference.
@@ -1015,6 +1020,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         core = await asyncio.to_thread(
             app.state.runtime.memory.core_facts, robot_id, limit=8
         )
+        # Each SQLite operation yields to the event loop. A local opt-out
+        # during that read invalidates the entire current private tool reply.
+        if not settings.voice_memory_tools_enabled:
+            raise HTTPException(403, "Voice memory consent revoked during read")
         if settings.voice_vision_tools_enabled and visual is not None:
             # Only the explicit authenticated voice-tool lookup may supply a
             # short-lived memory receipt to the native speech model.
