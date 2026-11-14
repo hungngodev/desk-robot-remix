@@ -206,6 +206,19 @@ def test_bq25895_otg_output_limit_cannot_be_confused_with_charge_current():
     assert report["charger_and_load_sharing_verified"] is False
 
 
+def test_bq25672_otg_limit_is_not_its_three_amp_charge_rating():
+    # TI BQ25672 supports up to 3 A charging, but its OTG current
+    # regulation is limited to 2 A. Neither figure qualifies the board.
+    report = tool(3.0, 1.8, boost_max_input_a=9.0,
+                  boost_continuous_input_a=5.0,
+                  boost_continuous_output_a=2.0,
+                  protected_cell_continuous_a=9.0)
+    assert report["minimum_rated_5v_output_a"] == 3.9
+    assert report["candidate_electrically_sufficient_on_paper"] is False
+    assert report["candidate_physically_qualified"] is False
+    assert report["charger_and_load_sharing_verified"] is False
+
+
 def test_power_report_retains_both_original_load_measurements_for_audit():
     # Peak and sustained measurements must remain distinguishable from
     # derated minimum component ratings in a downstream shopping audit.
