@@ -48,6 +48,24 @@ async def test_non_utf8_dock_calibration_fails_closed(tmp_path, payload):
     assert not head.captures and not head.commands
 
 
+def test_measured_distortion_survives_json_loader_and_invalid_values_fail_closed(tmp_path):
+    path = tmp_path / "dock.json"
+    payload = {
+        "measured": True, "fx": 410, "fy": 408, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+        "distortion_coeffs": [0.18, -0.07, 0.003, -0.002, 0.01],
+    }
+    path.write_text(json.dumps(payload))
+    camera, target = dock_runtime.load_real_dock_calibration(path)
+    assert camera.distortion_coeffs == tuple(payload["distortion_coeffs"])
+    assert target == 120
+    for invalid in ([0.1], [0.0, 0.0, True, 0.0], "invalid"):
+        payload["distortion_coeffs"] = invalid
+        path.write_text(json.dumps(payload))
+        with pytest.raises(ValueError):
+            dock_runtime.load_real_dock_calibration(path)
+
+
 async def test_measured_marker_pose_does_not_energize_contact_or_drive(tmp_path, monkeypatch):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
