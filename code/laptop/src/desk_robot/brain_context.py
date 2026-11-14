@@ -153,7 +153,7 @@ def compose_brain_context(
         elif channel == "human_transcript" and kind == "model_asr_completed":
             value = item.get("content")
             if isinstance(value, str) and value.strip():
-                heard_requests.append(value.casefold()[:180])
+                heard_requests.append(_clean(value, limit=180).casefold())
                 if heard_count == 0:
                     phrase = (
                         "Recent model ASR guess, not a verified command: "
