@@ -2528,18 +2528,21 @@ async def preempt_others_for_human(source_device: str) -> None:
             and _external_speaker_owner == external_device
             and _external_speaker_connection is external):
         try:
-            async with _external_device_send_lock(external):
-                if bridge.connections.get(external_device) is not external:
-                    raise RuntimeError("Mac speaker head replaced before STOP")
-                await asyncio.wait_for(
-                    external.websocket.send(json.dumps({
+            async def stop_external_head():
+                async with _external_device_send_lock(external):
+                    if bridge.connections.get(external_device) is not external:
+                        raise RuntimeError("Mac speaker head replaced before STOP")
+                    await external.websocket.send(json.dumps({
                         "type": "tts", "state": "stop", "flush": True,
                         "session_id": external.session_id,
-                    })), timeout=0.4,
-                )
-                if bridge.connections.get(external_device) is not external:
-                    raise RuntimeError("Mac speaker head replaced during STOP")
-                external.client_is_speaking = False
+                    }))
+                    if bridge.connections.get(external_device) is not external:
+                        raise RuntimeError("Mac speaker head replaced during STOP")
+                    external.client_is_speaking = False
+
+            # A hung Opus writer could hold this same send lock. Bound lock
+            # admission AND STOP transport as one urgent operation.
+            await asyncio.wait_for(stop_external_head(), timeout=0.4)
         except (Exception, asyncio.CancelledError) as exc:
             external_stop_failed = True
             # Human VAD must not wait for a wedged Mac speaker transport.
@@ -2562,17 +2565,18 @@ async def preempt_others_for_human(source_device: str) -> None:
         current = bridge.connections.get(uncertain_id)
         if current is not None:
             try:
-                async with _external_device_send_lock(current):
-                    if bridge.connections.get(uncertain_id) is not current:
-                        raise RuntimeError("Uncertain speaker connection replaced")
-                    await asyncio.wait_for(
-                        current.websocket.send(json.dumps({
+                async def stop_uncertain_head():
+                    async with _external_device_send_lock(current):
+                        if bridge.connections.get(uncertain_id) is not current:
+                            raise RuntimeError("Uncertain speaker connection replaced")
+                        await current.websocket.send(json.dumps({
                             "type": "tts", "state": "stop", "flush": True,
                             "session_id": current.session_id,
-                        })), timeout=0.4,
-                    )
-                    if bridge.connections.get(uncertain_id) is not current:
-                        raise RuntimeError("Head replaced during fleet STOP")
+                        }))
+                        if bridge.connections.get(uncertain_id) is not current:
+                            raise RuntimeError("Head replaced during fleet STOP")
+
+                await asyncio.wait_for(stop_uncertain_head(), timeout=0.4)
             except Exception:
                 # A stalled send, disconnect or reconnect is not a decoder
                 # acknowledgement. Keep the entire fleet floor blocked.
