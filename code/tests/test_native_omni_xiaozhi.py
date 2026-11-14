@@ -6031,3 +6031,50 @@ async def test_native_failed_startup_cleanup_without_claim_keeps_uncertain_speak
     assert not await module.claim_speaker(session)
 
 
+@pytest.mark.parametrize("route", ["mac", "human_vad", "legacy", "shutdown"])
+async def test_decoder_stop_from_replaced_xiao_socket_never_clears_owner(
+    native, route,
+):
+    """A send on an old connection is not proof the new head was stopped."""
+    module, bridge = native
+    old, _ = connection()
+    fresh, _ = connection()
+    fresh.session_id = "new-authenticated-head"
+    bridge.connections["mac-01"] = old
+    module._output_owner = "mac-01"
+    module._output_owner_unverified = "mac-01"
+
+    class ReplacedSocket:
+        async def send(self, _packet):
+            bridge.connections["mac-01"] = fresh
+
+    old.websocket = ReplacedSocket()
+    if route == "mac":
+        assert not await module.begin_external_speech(old)
+    elif route == "human_vad":
+        await module.preempt_others_for_human("mac-02")
+    else:
+        session = module.NativeOmniSession(
+            old, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+        )
+        if route == "legacy":
+            with pytest.raises(RuntimeError, match="Head identity changed"):
+                await session._retire_legacy_audio()
+        else:
+            old.client_is_speaking = True
+            module._sessions["mac-01"] = session
+
+            async def fail_start():
+                raise RuntimeError("backend unavailable")
+
+            session._retire_legacy_audio = fail_start
+            await session.run()
+            assert session.closed
+
+    assert bridge.connections["mac-01"] is fresh
+    assert module._output_owner == "mac-01"
+    assert module._output_owner_unverified == "mac-01"
+    assert not await module.begin_external_speech(fresh)
+
+
