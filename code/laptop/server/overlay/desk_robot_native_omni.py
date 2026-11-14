@@ -113,6 +113,7 @@ def status(device: str) -> dict:
                     _output_owner_unverified == device
                 ),
                 "microphone_last_frame_age_ms": None,
+                "microphone_last_forwarded_age_ms": None,
                 "retry_delay_seconds": round(max(
                     0.0, _retry_after.get(device, 0) - time.monotonic()), 2),
                 "last_error": _terminal_errors.get(device),
@@ -129,6 +130,10 @@ def status(device: str) -> dict:
         "live_transcript_context_enabled": s._live_transcript_enabled,
         "mic_frames_forwarded": s.audio_frames,
         "native_quiet_pcm_frames_forwarded": s.quiet_pcm_frames,
+        "microphone_last_forwarded_age_ms": (
+            round((time.monotonic() - s._last_mic_forwarded_at) * 1000)
+            if s._last_mic_forwarded_at is not None else None
+        ),
         "native_model_listen_decisions": s.native_listen_decisions,
         "microphone_last_frame_age_ms": (
             round((time.monotonic() - s._last_mic_received_at) * 1000)
@@ -137,12 +142,12 @@ def status(device: str) -> dict:
         "continuous_av_input_receiving": (
             s.connected and not s.closed
             and s._camera_stream_connected
-            and s._last_mic_received_at is not None
-            and 0 <= time.monotonic() - s._last_mic_received_at < 1.5
+            and s._last_mic_forwarded_at is not None
+            and 0 <= time.monotonic() - s._last_mic_forwarded_at < 1.5
             and 0 <= time.monotonic() - s._last_video_selected_at < 2.5
-            and s.wire.frames_sent > 0
+            and s.video_frames_forwarded > 0
         ),
-        "jpeg_frames_forwarded": s.wire.frames_sent,
+        "jpeg_frames_forwarded": s.video_frames_forwarded,
         "camera_frames_selected": s.video_frames_selected,
         "native_proactive_camera_subscription_connected": s._camera_stream_connected,
         "camera_frames_skipped_static": s.video_frames_skipped_static,
@@ -213,7 +218,9 @@ class NativeOmniSession:
         self.audio_frames = 0
         self.quiet_pcm_frames = 0
         self.native_listen_decisions = 0
+        self.video_frames_forwarded = 0
         self._last_mic_received_at: float | None = None
+        self._last_mic_forwarded_at: float | None = None
         self.model_chunks = 0
         self.head_packets = 0
         self.latest_jpeg: bytes | None = None
@@ -1661,6 +1668,7 @@ class NativeOmniSession:
             # of stale voice input. An unsent PCM append is not a forwarded
             # microphone frame; the session supervisor handles the timeout.
             await asyncio.wait_for(self._send(event), timeout=1.5)
+            self._last_mic_forwarded_at = time.monotonic()
             self.audio_frames += 1
             if not packet.speech:
                 # Count only PCM successfully submitted to the model, not
@@ -1670,6 +1678,7 @@ class NativeOmniSession:
             # one-second audio unit; do not offer the same receipt again.
             if event.get("video_frames"):
                 self._last_video_sent_receipt_us = receipt
+                self.video_frames_forwarded += 1
             if packet.speech:
                 self._silent_frames = 0
             elif was_talking:
