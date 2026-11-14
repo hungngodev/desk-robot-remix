@@ -132,16 +132,19 @@ def test_native_audiovisual_readiness_requires_live_mic_and_fresh_selected_video
         assert first["microphone_last_frame_age_ms"] is None
         session.connected = True
         session._camera_stream_connected = True
-        session.wire.frames_sent = 1
+        session.video_frames_forwarded = 1
         session._last_video_selected_at = module.time.monotonic()
         assert module.status("mac-01")["continuous_av_input_receiving"] is False
         session.queue_mic(b"\0" * 3200, False)  # actual quiet-room PCM
+        # Queue receipt alone must NEVER claim the native socket was healthy.
+        assert module.status("mac-01")["continuous_av_input_receiving"] is False
+        session._last_mic_forwarded_at = module.time.monotonic()
         ready = module.status("mac-01")
         assert ready["continuous_av_input_receiving"] is True
-        assert 0 <= ready["microphone_last_frame_age_ms"] <= 200
-        session._last_mic_received_at -= 3
+        assert 0 <= ready["microphone_last_forwarded_age_ms"] <= 200
+        session._last_mic_forwarded_at -= 3
         assert module.status("mac-01")["continuous_av_input_receiving"] is False
-        session._last_mic_received_at = module.time.monotonic()
+        session._last_mic_forwarded_at = module.time.monotonic()
         session._last_video_selected_at -= 5
         assert module.status("mac-01")["continuous_av_input_receiving"] is False
         session._last_video_selected_at = module.time.monotonic()
