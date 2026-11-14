@@ -161,3 +161,43 @@ def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
     assert assessment.phase == "approach"
     assert assessment.motor_authorized is False
     assert assessment.charging_authorized is False
+
+
+@pytest.mark.parametrize("field", [
+    "fx", "fy", "cx", "cy", "tag_side_mm", "distortion_coeffs",
+])
+def test_unrepresentable_measured_camera_number_is_rejected(field):
+    from dataclasses import replace
+    huge = 10 ** 1000
+    change = {field: (0.0, 0.0, huge, 0.0) if field == "distortion_coeffs" else huge}
+    with pytest.raises(ValueError):
+        replace(calibration(), **change)
+
+
+@pytest.mark.parametrize("field", [
+    "x_mm", "y_mm", "z_mm", "reprojection_error_px", "captured_at",
+])
+def test_unrepresentable_pose_number_is_rejected(field):
+    from dataclasses import replace
+    pose = DockPose(0, 0, 300, 0.5, 1)
+    with pytest.raises(ValueError):
+        replace(pose, **{field: 10 ** 1000})
+
+
+@pytest.mark.parametrize("field", [
+    "now", "target_distance_mm", "max_age_seconds", "lateral_tolerance_mm",
+])
+def test_unrepresentable_assessment_number_never_grants_motion(field):
+    options = dict(now=1.1, target_distance_mm=120,
+                   max_age_seconds=0.2, lateral_tolerance_mm=15)
+    options[field] = 10 ** 1000
+    with pytest.raises(ValueError):
+        assess_dock(DockPose(0, 0, 300, 0.5, 1), **options)
+
+
+@pytest.mark.parametrize("field", ["captured_at", "max_reprojection_error_px"])
+def test_unrepresentable_detector_timing_rejected_before_cv2(field):
+    options = dict(captured_at=1, max_reprojection_error_px=3)
+    options[field] = 10 ** 1000
+    with pytest.raises(ValueError):
+        detect_apriltag(b"jpeg", calibration(), **options)
