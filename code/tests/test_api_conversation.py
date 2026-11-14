@@ -49,6 +49,34 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
         )
 
 
+
+async def test_empty_ollama_stream_never_creates_phantom_social_speech(
+    settings, tmp_path,
+):
+    """An empty stream is a failed turn, not a peer statement or memory."""
+    class EmptyStream:
+        async def stream_reply(self, history):
+            if False:
+                yield "Not actually sent"
+
+    memory = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, EmptyStream(), speaker, memory=memory)
+    with pytest.raises(RuntimeError, match="without spoken segments"):
+        await conversation.run(
+            ["robot-01", "robot-02"], "Describe a recent toy", utterances=2
+        )
+    assert speaker.spoken == []
+    assert conversation.active is None
+    assert memory.count("robot-01") == 0
+    assert memory.count("robot-02") == 0
+    assert not any(
+        item["role"] == "assistant"
+        for history in conversation.histories.values()
+        for item in history
+    )
+
+
 async def test_conversation_six_total_alternating_independent_histories(settings):
     speaker = SimulatedSpeaker()
     c = Conversation(settings, SimulatedChat(), speaker)

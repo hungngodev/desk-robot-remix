@@ -440,6 +440,13 @@ class Conversation:
                                     ):
                                         await self.speaker.say(robot, segment)
                                         completed_segments.append(segment)
+                                    if not completed_segments:
+                                        # A successful HTTP stream with zero
+                                        # spoken segments is not a completed
+                                        # reply for this robot or its peers.
+                                        raise RuntimeError(
+                                            "Ollama ended without spoken segments"
+                                        )
                                     text = " ".join(completed_segments)
                                 else:
                                     text = await self.chat.reply(
