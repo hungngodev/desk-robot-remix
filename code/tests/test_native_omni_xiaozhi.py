@@ -5437,3 +5437,63 @@ async def test_quiet_mode_answers_one_authenticated_human_turn_but_never_chats_a
         session.closed = True
         module._sessions.clear()
         module._output_owner = None
+
+
+@pytest.mark.parametrize("route", ["heard", "spoken"])
+async def test_native_context_writer_retires_on_foreign_robot_reply(
+    native, route,
+):
+    """One bad authenticated Mac identity must not leak the next robot's text."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._transcript_memory_enabled = True
+    session._live_transcript_enabled = True
+    calls = []
+
+    if route == "heard":
+        session._heard_queue.put_nowait(("omni_" + "a" * 12 + "_" + "b" * 20, "first"))
+        session._heard_queue.put_nowait(("omni_" + "a" * 12 + "_" + "c" * 20, "second"))
+    else:
+        session._spoken_queue.put_nowait((
+            "omni_sent_" + "a" * 12 + "_" + "b" * 20, "first", 1,
+        ))
+        session._spoken_queue.put_nowait((
+            "omni_sent_" + "a" * 12 + "_" + "c" * 20, "second", 2,
+        ))
+
+    class Reply:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return False
+        async def json(self):
+            return {"robot_id": "robot-02", "stored": True}
+
+    class Mac:
+        def post(self, url, **kwargs):
+            calls.append(kwargs["json"])
+            assert url.endswith("/omni-" + route)
+            return Reply()
+
+    if route == "heard":
+        await asyncio.wait_for(session._persist_heard(Mac()), timeout=1)
+    else:
+        await asyncio.wait_for(session._persist_spoken(Mac()), timeout=1)
+    assert session.closed
+    assert session.last_error == (
+        "Mac native ASR response robot identity mismatch"
+        if route == "heard" else
+        "Mac native sent speech robot identity mismatch"
+    )
+    assert len(calls) == 1
+    assert (session._heard_queue.qsize() if route == "heard"
+            else session._spoken_queue.qsize()) == 1
+
+

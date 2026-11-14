@@ -512,9 +512,11 @@ class NativeOmniSession:
                         return
                     if response.status == 200:
                         data = await response.json()
-                        if (isinstance(data, dict)
-                                and data.get("robot_id") == self.robot
-                                and data.get("source")
+                        if (not isinstance(data, dict)
+                                or data.get("robot_id") != self.robot):
+                            self.fail("Mac native ASR response robot identity mismatch")
+                            return
+                        if (data.get("source")
                                 == "model_estimated_xiaozhi_audio_transcription"
                                 and type(data.get("stored")) is bool):
                             if (type(data.get("retained_on_disk")) is not bool
@@ -571,9 +573,11 @@ class NativeOmniSession:
                         return
                     if response.status == 200:
                         data = await response.json()
-                        if (isinstance(data, dict)
-                                and data.get("robot_id") == self.robot
-                                and data.get("source") ==
+                        if (not isinstance(data, dict)
+                                or data.get("robot_id") != self.robot):
+                            self.fail("Mac native sent speech robot identity mismatch")
+                            return
+                        if (data.get("source") ==
                                 "native_model_text_opus_sent_playback_unverified"
                                 and data.get("retained_on_disk") is False
                                 and data.get("audio_playback_verified") is False):
