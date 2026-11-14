@@ -2290,16 +2290,36 @@ async def preempt_others_for_human(source_device: str) -> None:
         (device, session) for device, session in list(_sessions.items())
         if device != source_device and not session.closed
     ]
-    results = await asyncio.gather(
-        *(session._invalidate_head_first() for _, session in peers),
-        return_exceptions=True,
-    )
+    # A disconnected head can hang inside its physical STOP send. Bound the
+    # whole fleet wait instead of holding the human's interrupt callback
+    # indefinitely. Timed-out peers retain their speaker lease: cancellation
+    # of a Python task is never proof that a decoder stopped.
+    attempts = [
+        asyncio.create_task(session._invalidate_head_first())
+        for _, session in peers
+    ]
+    done: set[asyncio.Task] = set()
+    try:
+        if attempts:
+            done, _ = await asyncio.wait(attempts, timeout=0.4)
+    finally:
+        for task in attempts:
+            if not task.done():
+                task.cancel()
+                task.add_done_callback(
+                    lambda completed: None if completed.cancelled()
+                    else completed.exception()
+                )
     safely_invalidated: set[str] = set()
-    for (device, session), result in zip(peers, results):
-        if isinstance(result, BaseException):
-            continue  # Unacknowledged STOP cannot free another audio owner.
+    for (device, session), task in zip(peers, attempts):
+        if task not in done or task.cancelled():
+            continue  # A failed or timed-out STOP is not physical acceptance.
+        try:
+            events = task.result()
+        except Exception:
+            continue
         safely_invalidated.add(device)
-        session._schedule_remote_cancel(result)
+        session._schedule_remote_cancel(events)
 
     # If no live native session owns this Mac speaker, no native session
     # invalidation could have flushed its physical head. Still send urgent
