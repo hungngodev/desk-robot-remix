@@ -6348,6 +6348,28 @@ async def test_urgent_native_barge_head_stop_owns_fleet_lease_by_real_send(
         assert conn.client_is_speaking is True
 
 
+
+async def test_urgent_native_head_stop_times_out_while_opus_lock_is_stalled(native):
+    """An outgoing Opus lock cannot indefinitely block a new human barge."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    conn.client_is_speaking = True
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._output_owner = conn.device_id
+    async with session._device_send_lock:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(module.flush_head(session), timeout=0.7)
+        assert not sent  # STOP could not jump an already occupied socket lock.
+        assert conn.client_is_speaking is True
+        assert module._output_owner == conn.device_id
+        assert module._output_owner_unverified == conn.device_id
+
+
+
 async def test_urgent_native_barge_cancellation_retains_uncertain_speaker(native):
     module, bridge = native
     conn, _ = connection()
