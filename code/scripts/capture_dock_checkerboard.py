@@ -83,9 +83,10 @@ async def main() -> None:
     args = parser.parse_args()
     if not args.consent_to_save_private_jpegs:
         parser.error("Explicit local camera image recording consent required")
+    import httpx
+
     from desk_robot.config import load_settings
     from desk_robot.transport import HttpHead
-    import httpx
 
     settings = load_settings(args.config)
     if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
