@@ -1519,8 +1519,12 @@ class PetController:
             # using this robot's *existing* local SQLite store. An old key
             # event may be useful even when four newer touch events occurred.
             # Both reads run off the audio/VAD event loop, with a deadline.
+            private_memory_allowed = (
+                self.settings.mode == "hardware"
+                and self.settings.voice_memory_tools_enabled
+            )
             if (self.settings.mode == "hardware"
-                    and not self.settings.voice_memory_tools_enabled):
+                    and not private_memory_allowed):
                 # Live camera/sensor consent is NOT consent to retrieve
                 # past SQLite episodes or curated private preferences for
                 # unsolicited TTS. Keep the same contract as Conversation.
@@ -1538,6 +1542,13 @@ class PetController:
                     ),
                     timeout=2.0,
                 )
+            if (private_memory_allowed
+                    and not self.settings.voice_memory_tools_enabled):
+                # Permission can change during the off-thread SQLite read.
+                # Do not submit stale private text to the model after revoke.
+                state.suppressed += 1
+                state.last_initiative_suppression = "memory_consent_revoked"
+                return
             selected_memory = {
                 item.event_id: item
                 # Keep the last three events and up to three topical
@@ -1764,6 +1775,13 @@ class PetController:
                 return
             # Human VAD may begin during the LLM's slow thought. Only the
             # current turn generation can hand the line to the same speaker.
+            if (private_memory_allowed
+                    and not self.settings.voice_memory_tools_enabled):
+                # A slow local model may finish after private-memory consent
+                # was withdrawn. Never send its already grounded reply to TTS.
+                state.suppressed += 1
+                state.last_initiative_suppression = "memory_consent_revoked"
+                return
             transmitted = await self.conversation.say_proactive(robot, text)
             if transmitted and state.enabled and not state.quiet and state.generation == generation:
                 now = time.monotonic()

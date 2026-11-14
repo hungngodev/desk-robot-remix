@@ -1939,6 +1939,69 @@ async def test_uncertain_visual_event_is_not_spoken_and_does_not_consume_cooldow
 
 
 
+
+@pytest.mark.parametrize("stage", ["memory_read", "model_reasoning"])
+async def test_proactive_private_consent_revocation_never_reaches_speaker(
+    fleet, tmp_path, stage,
+):
+    """A concurrent opt out fences slow SQLite and already started reasoning."""
+    import threading
+
+    fleet.mode = "hardware"
+    fleet.voice_memory_tools_enabled = True
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    memory.remember(
+        "robot-01", "confidential_episode_01",
+        "Private archived observation that should not be spoken after opt out",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    entered, release = threading.Event(), threading.Event()
+    if stage == "memory_read":
+        original = memory.recent
+        def blocked_recent(*args, **kwargs):
+            entered.set()
+            assert release.wait(timeout=3)
+            return original(*args, **kwargs)
+        memory.recent = blocked_recent
+
+    class Chat:
+        async def reply(self, history):
+            if stage == "memory_read":
+                raise AssertionError("Revoked historical text reached the model")
+            entered.set()
+            assert await asyncio.to_thread(release.wait, 3)
+            return "A playful idea I might have said"
+
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, Chat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 59
+    task = asyncio.create_task(pet._speak(
+        "robot-01", SceneChange("key", "The key moved", 0.96),
+        59, offered_at=time.monotonic(),
+    ))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        fleet.voice_memory_tools_enabled = False
+        release.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert state.last_error is None
+        assert state.last_initiative_suppression == "memory_consent_revoked"
+        assert state.spoken == 0
+        assert speaker.spoken == []
+        assert memory.count("robot-01") == 1
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
 @pytest.mark.parametrize("opt_in", [False, True])
 async def test_proactive_hardware_voice_never_reads_private_history_without_opt_in(
     fleet, tmp_path, opt_in,
