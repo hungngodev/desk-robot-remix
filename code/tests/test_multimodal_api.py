@@ -707,7 +707,7 @@ def test_native_visual_stream_cannot_emit_frame_after_consent_revoke_during_sock
         async def native_live_frames(self, robot_id):
             assert robot_id == "robot-01"
             yield SimpleNamespace(
-                jpeg=b"\\xff\\xd8" + b"private desk image" + b"\\xff\\xd9",
+                jpeg=b"\xff\xd8" + b"private desk image" + b"\xff\xd9",
                 received_at=time.monotonic(), motion_fraction=0.1,
                 source="proactive",
             )
