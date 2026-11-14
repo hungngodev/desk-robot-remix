@@ -81,3 +81,54 @@ def test_distortion_coefficients_are_validated_without_motion_authority():
     assessment = assess_dock(DockPose(0, 0, 300, 0.5, 1),
                              now=1.1, target_distance_mm=120)
     assert not assessment.motor_authorized and not assessment.charging_authorized
+
+
+def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
+    """Exercise the real OpenCV PnP path with projected distorted corners.
+
+    This is synthetic geometry, not a calibrated XIAO camera or dock trial.
+    """
+    import cv2
+    import numpy as np
+
+    distortion = (0.18, -0.07, 0.003, -0.002, 0.01)
+    camera = DockCameraCalibration(
+        fx=410, fy=410, cx=320, cy=240, tag_side_mm=60,
+        marker_id=12, distortion_coeffs=distortion,
+    )
+    half = camera.tag_side_mm / 2
+    object_points = np.array([
+        [-half, half, 0], [half, half, 0],
+        [half, -half, 0], [-half, -half, 0],
+    ], dtype=np.float64)
+    intrinsics = np.array([
+        [camera.fx, 0, camera.cx], [0, camera.fy, camera.cy],
+        [0, 0, 1],
+    ], dtype=np.float64)
+    rotation = np.array([[0.08], [-0.04], [0.03]])
+    translation = np.array([[14.0], [-8.0], [380.0]])
+    corners, _ = cv2.projectPoints(
+        object_points, rotation, translation, intrinsics,
+        np.asarray(distortion, dtype=np.float64),
+    )
+
+    class SyntheticDetector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [corners.astype(np.float32).reshape(1, 4, 2)], np.array([[12]]), []
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", SyntheticDetector)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), camera, captured_at=5.0)
+    assert pose is not None
+    assert abs(pose.x_mm - 14.0) < 0.1
+    assert abs(pose.y_mm + 8.0) < 0.1
+    assert abs(pose.z_mm - 380.0) < 0.5
+    assert pose.reprojection_error_px < 0.1
+    assessment = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert assessment.phase == "approach"
+    assert assessment.motor_authorized is False
+    assert assessment.charging_authorized is False
