@@ -280,3 +280,64 @@ async def test_failed_five_pet_backend_preflight_cancels_other_live_sessions(
     assert cancelled
 
 
+
+@pytest.mark.asyncio
+async def test_native_av_smoke_propagates_backend_error_during_input_pacing():
+    """A bad backend must not consume a minute of prerecorded microphone PCM."""
+    import asyncio
+    import json
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    smoke = smoke_module()
+    appends = []
+
+    async def fail_socket(request):
+        socket = web.WebSocketResponse()
+        await socket.prepare(request)
+        async for message in socket:
+            event = json.loads(message.data)
+            if event["type"] == "session.update":
+                await socket.send_json({
+                    "type": "session.created",
+                    "session": {
+                        "model": "openbmb/MiniCPM-o-4_5",
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "audio": {
+                            "input": {"sample_rate_hz": 16000},
+                            "output": {"format": {
+                                "type": "audio/pcm", "rate": 24000,
+                            }},
+                        },
+                        "capabilities": {
+                            "implementation_level": "model_native_duplex",
+                            "supports_input_append": True,
+                            "supports_barge_in": True,
+                            "chunk_period_ms": 1000,
+                        },
+                    },
+                })
+            if event["type"] == "input_audio_buffer.append":
+                appends.append(event)
+                await socket.send_json({
+                    "type": "error",
+                    "error": {"type": "server_error", "code": "test_failure"},
+                })
+        return socket
+
+    app = web.Application()
+    app.router.add_get("/v1/realtime", fail_socket)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/v1/realtime?duplex=1")).replace(
+            "http://", "ws://"
+        )
+        with pytest.raises(RuntimeError, match="protocol error"):
+            await asyncio.wait_for(
+                smoke.probe(url, "openbmb/MiniCPM-o-4_5",
+                            b"\0" * (32000 * 20), None, deadline=5),
+                timeout=2,
+            )
+    assert 1 <= len(appends) <= 3
+
+
