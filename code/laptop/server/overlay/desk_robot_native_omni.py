@@ -370,9 +370,9 @@ class NativeOmniSession:
                 # Recover a stale physical speaker lease only AFTER the new
                 # authenticated connection has sent its own decoder STOP.
                 async with _output_owner_lock:
-                    if (_output_owner == self.device
-                            and _output_owner_unverified == self.device):
-                        _output_owner = None
+                    if _output_owner_unverified == self.device:
+                        if _output_owner == self.device:
+                            _output_owner = None
                         _output_owner_unverified = None
 
     async def _load_private_persona(self, http: aiohttp.ClientSession) -> None:
