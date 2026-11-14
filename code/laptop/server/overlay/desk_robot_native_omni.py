@@ -2409,18 +2409,22 @@ async def flush_head(session: NativeOmniSession) -> None:
         return
     import desk_robot_bridge as bridge
     try:
-        async with session._device_send_lock:
-            if bridge.connections.get(session.device) is not session.conn:
-                raise RuntimeError("Physical head replaced before urgent STOP")
-            await asyncio.wait_for(
-                session.conn.websocket.send(json.dumps({
+        async def stop_under_device_lock():
+            async with session._device_send_lock:
+                if bridge.connections.get(session.device) is not session.conn:
+                    raise RuntimeError("Physical head replaced before urgent STOP")
+                await session.conn.websocket.send(json.dumps({
                     "type": "tts", "state": "stop", "flush": True,
                     "session_id": session.conn.session_id,
-                })), timeout=0.4,
-            )
-            if bridge.connections.get(session.device) is not session.conn:
-                raise RuntimeError("Physical head replaced during urgent STOP")
-            session.conn.client_is_speaking = False
+                }))
+                if bridge.connections.get(session.device) is not session.conn:
+                    raise RuntimeError("Physical head replaced during urgent STOP")
+                session.conn.client_is_speaking = False
+
+        # Bound BOTH waiting on a prior Opus packet's send lock and the STOP
+        # send itself. A hung packet must never stall the higher-priority
+        # human barge forever while the decoder lease looks recoverable.
+        await asyncio.wait_for(stop_under_device_lock(), timeout=0.4)
         async with _output_owner_lock:
             if _output_owner == session.device:
                 _output_owner = None
