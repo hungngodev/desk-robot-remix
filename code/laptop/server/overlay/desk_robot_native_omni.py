@@ -2380,14 +2380,34 @@ async def claim_speaker(session: NativeOmniSession) -> bool:
 
 
 async def flush_head(session: NativeOmniSession) -> None:
-    """Urgent decoder reset request, NOT an acoustic DMA completion ACK."""
-    if session.conn.client_is_speaking:
+    """Bound urgent XIAO STOP; preserve fleet ownership on uncertain delivery."""
+    global _output_owner, _output_owner_unverified
+    if not session.conn.client_is_speaking:
+        return
+    import desk_robot_bridge as bridge
+    try:
         async with session._device_send_lock:
-            await session.conn.websocket.send(json.dumps({
-                "type": "tts", "state": "stop", "flush": True,
-                "session_id": session.conn.session_id,
-            }))
+            if bridge.connections.get(session.device) is not session.conn:
+                raise RuntimeError("Physical head replaced before urgent STOP")
+            await asyncio.wait_for(
+                session.conn.websocket.send(json.dumps({
+                    "type": "tts", "state": "stop", "flush": True,
+                    "session_id": session.conn.session_id,
+                })), timeout=0.4,
+            )
+            if bridge.connections.get(session.device) is not session.conn:
+                raise RuntimeError("Physical head replaced during urgent STOP")
             session.conn.client_is_speaking = False
+    except (Exception, asyncio.CancelledError):
+        # Barge cancellation, socket failure or timeout is never proof that
+        # the existing XIAO decoder stopped. Block all future pet speech
+        # until an authenticated replacement sends a fresh actual STOP.
+        async with _output_owner_lock:
+            if (_output_owner in (None, session.device)
+                    and _output_owner_unverified in (None, session.device)):
+                _output_owner = session.device
+                _output_owner_unverified = session.device
+        raise
 
 
 async def preempt_others_for_human(source_device: str) -> None:
