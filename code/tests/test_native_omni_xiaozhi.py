@@ -5377,6 +5377,7 @@ async def test_reconnect_failed_stop_does_not_erase_old_uncertain_owner(native):
     assert session.closed
     assert module._output_owner == conn.device_id
     assert module._output_owner_unverified == conn.device_id
+    assert module.status(conn.device_id)["native_speaker_stop_unverified"] is True
 
 
 async def test_reconnected_same_head_requires_fresh_stop_for_uncertain_lease(native):
@@ -5469,6 +5470,7 @@ async def test_native_monitor_loss_blocks_even_direct_audio_until_mac_rechecks(n
     try:
         assert await module.suspend_proactive_for_monitor_loss(conn)
         assert session._monitor_lost is True
+        assert module.status("mac-01")["native_monitor_lost"] is True
         assert session._pet_quiet is False
         assert session._pet_autonomy_enabled is False
         assert remote_cancel == ["response.cancel", "output_audio_buffer.clear"]
@@ -5518,6 +5520,7 @@ async def test_native_monitor_loss_blocks_even_direct_audio_until_mac_rechecks(n
                     break
                 await asyncio.sleep(.01)
             assert session._monitor_lost is False
+            assert module.status("mac-01")["native_monitor_lost"] is False
             assert session._pet_autonomy_enabled is True
             assert session._pet_quiet is False
         finally:
