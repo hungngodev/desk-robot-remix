@@ -301,7 +301,7 @@ def test_increased_sustained_load_cannot_pass_unchanged_continuous_input_rating(
 def test_lower_cell_voltage_and_efficiency_cannot_improve_power_qualification():
     # Simultaneous worst case assumptions must increase required cell current,
     # even though the 5 V output load and the published ratings are unchanged.
-    ratings = dict(boost_max_input_a=6.0, boost_continuous_input_a=3.0,
+    ratings = dict(boost_max_input_a=6.0, boost_continuous_input_a=4.0,
                    boost_continuous_output_a=4.0, protected_cell_continuous_a=6.0)
     nominal = tool(3.0, 1.8, cell_low_v=3.7,
                    measured_boost_efficiency=0.9, **ratings)
