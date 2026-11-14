@@ -317,9 +317,13 @@ async def test_voice_monitor_outage_flushes_native_xiaozhi_without_operator_quie
             events.append(("pet", robot_id))
 
     class Speaker:
-        async def interrupt(self, robot):
-            # Existing bridge /interrupt does NOT revoke future initiative.
+        async def monitor_lost(self, robot):
+            # Dedicated bridge route suspends initiative without changing
+            # the operator's saved quiet and pause choices.
             events.append(("native_stop", robot.device_id))
+
+        async def interrupt(self, robot):
+            raise AssertionError("Outage must use the native monitor route")
 
     class Conversation:
         speaker = Speaker()
