@@ -106,6 +106,10 @@ def status(device: str) -> dict:
         return {"native_omni_enabled": device in _terminal_errors,
                 "native_backend_connected": False,
                 "continuous_av_input_receiving": False,
+                "native_monitor_lost": None,
+                "native_speaker_stop_unverified": (
+                    _output_owner_unverified == device
+                ),
                 "microphone_last_frame_age_ms": None,
                 "retry_delay_seconds": round(max(
                     0.0, _retry_after.get(device, 0) - time.monotonic()), 2),
@@ -155,6 +159,10 @@ def status(device: str) -> dict:
         "mac_proactive_speech_lease_active": s._external_speech_active,
         "mac_operator_pet_quiet": s._pet_quiet,
         "mac_operator_pet_autonomy_enabled": s._pet_autonomy_enabled,
+        "native_monitor_lost": s._monitor_lost,
+        "native_speaker_stop_unverified": (
+            _output_owner_unverified == device
+        ),
         "native_tool_speech_errors": s.native_tool_speech_errors,
         "tool_audio_playback_acknowledged": False,
         "tool_results_ingested_by_native_duplex_kv": False,
