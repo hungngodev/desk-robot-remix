@@ -151,6 +151,84 @@ def test_native_audiovisual_readiness_requires_live_mic_and_fresh_selected_video
         session.closed = True
 
 
+
+@pytest.mark.asyncio
+async def test_native_status_counts_only_actual_quiet_mic_transport_and_listen(native):
+    """Real quiet PCM transport and native model silence are distinct facts."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = session
+    sent = []
+    ready = asyncio.Event()
+
+    async def transport(event):
+        sent.append(event)
+        if len(sent) == 2:
+            ready.set()
+
+    session._send = transport
+    task = asyncio.create_task(session._send_mic())
+    try:
+        session.queue_mic(bytes(3200), False)
+        session.queue_mic(bytes(3200), True)
+        await asyncio.wait_for(ready.wait(), timeout=1)
+        info = module.status("mac-01")
+        assert info["mic_frames_forwarded"] == 2
+        assert info["native_quiet_pcm_frames_forwarded"] == 1
+        assert info["native_model_listen_decisions"] == 0
+        assert [packet["is_speech"] for packet in sent] == [False, True]
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    from aiohttp import WSMsgType
+
+    class Model:
+        async def __aiter__(self):
+            yield SimpleNamespace(
+                type=WSMsgType.TEXT,
+                data=json.dumps({
+                    "type": "response.listen", "epoch": 0,
+                    "response": {"status": "listening"},
+                }),
+            )
+
+    session._socket = Model()
+    await session._receive_model()
+    info = module.status("mac-01")
+    assert info["native_model_listen_decisions"] == 1
+    assert info["model_pcm_chunks_received"] == 0
+    assert info["head_audio_playback_acknowledged"] is False
+
+
+@pytest.mark.asyncio
+async def test_failed_native_quiet_pcm_send_never_counts_as_model_input(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = session
+
+    async def disconnected(_):
+        raise ConnectionError("native model disconnected before PCM append")
+
+    session._send = disconnected
+    session.queue_mic(bytes(3200), False)
+    with pytest.raises(ConnectionError, match="before PCM"):
+        await asyncio.wait_for(session._send_mic(), timeout=1)
+    assert module.status("mac-01")["native_quiet_pcm_frames_forwarded"] == 0
+    assert module.status("mac-01")["mic_frames_forwarded"] == 0
+
+
+
 def test_native_backend_has_explicit_opt_in_and_tls_only_for_remote_audio(native, monkeypatch):
     module, bridge = native
     conn, sent = connection()
