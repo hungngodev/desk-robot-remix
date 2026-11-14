@@ -5345,6 +5345,29 @@ async def test_native_shutdown_preserves_speaker_lease_until_head_stop_sent(
         assert not packets
 
 
+async def test_reconnect_failed_stop_does_not_erase_old_uncertain_owner(native):
+    """A failed recovery attempt must not free the old acoustic floor."""
+    module, bridge = native
+    conn, _sent = connection()
+    bridge.connections[conn.device_id] = conn
+    module._output_owner = conn.device_id
+    module._output_owner_unverified = conn.device_id
+
+    async def disconnected(_packet):
+        raise OSError("New socket cannot send decoder STOP")
+
+    conn.websocket.send = disconnected
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    await session.run()
+    assert session.closed
+    assert module._output_owner == conn.device_id
+    assert module._output_owner_unverified == conn.device_id
+
+
 async def test_reconnected_same_head_requires_fresh_stop_for_uncertain_lease(native):
     """Device ID reuse alone cannot certify a previous decoder stopped."""
     module, bridge = native
