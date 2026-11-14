@@ -296,8 +296,6 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 
-@pytest.mark.parametrize("owner_present", [False, True])
-
 async def test_failed_mac_stop_blocks_fleet_until_fresh_authenticated_head_stop(native):
     """A Mac TTS transport failure must not release the physical decoder."""
     module, bridge = native
@@ -347,6 +345,7 @@ async def test_failed_mac_stop_blocks_fleet_until_fresh_authenticated_head_stop(
     assert module._external_speaker_owner is None
 
 
+@pytest.mark.parametrize("owner_present", [False, True])
 async def test_native_speaker_refuses_orphan_or_closed_prior_owner(
     native, owner_present,
 ):
