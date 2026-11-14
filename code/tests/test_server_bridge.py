@@ -913,6 +913,44 @@ async def test_group_human_barge_failed_head_stop_keeps_voice_and_aborts_mac(
 
 
 
+
+async def test_missing_native_model_cannot_block_authenticated_physical_barge(
+    bridge, monkeypatch,
+):
+    """Human STOP and live VAD are independent of optional model install."""
+    def missing_native():
+        raise ModuleNotFoundError("configured optional native model missing")
+
+    monkeypatch.setattr(bridge, "_native_adapter", missing_native)
+    first = conn("mac-01")
+    first.client_is_speaking = True
+    first.client_listen_mode = "realtime"
+    first.session_id = "physical-stop-first"
+    frames = []
+    first.clear_queues = lambda: None
+    first.clearSpeakStatus = lambda: setattr(
+        first, "client_is_speaking", False,
+    )
+
+    class Head:
+        async def send(self, frame):
+            frames.append(json.loads(frame))
+
+    first.websocket = Head()
+    bridge.register(first)
+    assert not await bridge.interrupt_for_normal_voice(first, True)
+    assert await bridge.interrupt_for_normal_voice(first, True)
+    assert frames == [{
+        "type": "tts", "state": "stop", "flush": True,
+        "session_id": "physical-stop-first",
+    }]
+    assert bridge.voice_event_cursor == 1
+    assert bridge.voice_event_history[-1]["kind"] == "normal"
+    assert not first.client_is_speaking
+    assert first.client_abort
+
+
+
 def test_sustained_voice_resets_after_gap_and_silence(bridge, monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(bridge.time, "monotonic", lambda: clock[0])
