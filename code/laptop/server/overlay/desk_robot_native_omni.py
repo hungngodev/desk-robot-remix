@@ -2148,10 +2148,14 @@ class NativeOmniSession:
                         and not self._external_speech_active):
                     # Native model shutdown cannot stop a Mac proactive
                     # utterance that currently owns the same decoder.
-                    await self.conn.websocket.send(json.dumps({
-                        "type": "tts", "state": "stop",
-                        "session_id": self.conn.session_id, "flush": True,
-                    }))
+                    async with self._device_send_lock:
+                        await asyncio.wait_for(
+                            self.conn.websocket.send(json.dumps({
+                                "type": "tts", "state": "stop",
+                                "session_id": self.conn.session_id,
+                                "flush": True,
+                            })), timeout=0.4,
+                        )
                     self.conn.client_is_speaking = False
                     stop_confirmed = True
             except Exception:
@@ -2166,12 +2170,18 @@ class NativeOmniSession:
                 )[:140]
                 _retry_after[self.device] = time.monotonic() + 15.0
             async with _output_owner_lock:
-                if _output_owner == self.device:
-                    if stop_confirmed:
+                if stop_confirmed:
+                    if _output_owner == self.device:
                         _output_owner = None
+                    if _output_owner_unverified == self.device:
                         _output_owner_unverified = None
-                    else:
-                        _output_owner_unverified = self.device
+                elif _output_owner_unverified in (None, self.device):
+                    # A native startup can fail to flush legacy head PCM
+                    # BEFORE claim_speaker ever assigned a lease. Keep the
+                    # unknown decoder state blocking every other pet too.
+                    if _output_owner is None:
+                        _output_owner = self.device
+                    _output_owner_unverified = self.device
 
 
 # A native session and its Mac proactive speaker must serialize bytes and
