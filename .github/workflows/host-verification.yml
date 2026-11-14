@@ -24,6 +24,12 @@ jobs:
         run: |
           uv python install 3.11
           uv sync --extra dev --python 3.11 --locked
+      - name: Install pinned headless OpenCV for dock geometry tests
+        working-directory: code
+        run: uv pip install --python .venv/bin/python opencv-python-headless==4.13.0.92
+      - name: Test real OpenCV calibration and dock perception
+        working-directory: code
+        run: uv run --no-sync pytest -q tests/test_calibrate_dock_camera.py tests/test_dock_vision.py
       - name: Restore pinned Xiaozhi server fixture
         working-directory: code
         run: |
