@@ -870,3 +870,24 @@ def test_sensor_tool_receipt_is_grounded_not_a_camera_claim_or_command():
         [], [], hub.interaction_timeline("robot-02", now)
     )
     assert "temp_centi=2150" not in peer.interaction
+
+
+def test_asr_whitespace_normalization_preserves_requested_tool_priority():
+    # Speech transcripts can begin with spaces or contain newlines. The
+    # displayed words and request matching must use the same cleaned text.
+    timeline = [
+        {"channel": "human_voice", "kind": "voice_start"},
+        {"channel": "tool", "kind": "robot_status",
+         "content": "Battery 24 percent"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "  Please\ncheck your battery  "},
+        {"channel": "tool", "kind": "visual_look",
+         "content": "Unrelated camera description " + "v" * 75},
+        {"channel": "tool", "kind": "memory_recall",
+         "content": "Unrelated memory " + "m" * 90},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Battery 24 percent" in result
+    assert "Please check your battery" in result
+    assert len(result) <= 400
