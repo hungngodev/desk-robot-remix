@@ -553,6 +553,7 @@ async def transmit(conn, text, frames):
         if conn.client_abort or generation != interrupt_generation.get(conn.device_id, 0):
             raise RuntimeError("Speech interrupted during playback tail")
     finally:
+        stop_confirmed = False
         try:
             if (conn.client_abort
                     or generation != interrupt_generation.get(conn.device_id, 0)):
@@ -563,6 +564,9 @@ async def transmit(conn, text, frames):
                 }))
             else:
                 await send_tts_message(conn, "stop")
+            # A sent transport command is not an acoustic playback ACK,
+            # but a failed send must never release the five-pet speaker.
+            stop_confirmed = True
         finally:
             try:
                 conn.clearSpeakStatus()
@@ -570,7 +574,12 @@ async def transmit(conn, text, frames):
                 if active_device_id == conn.device_id:
                     active_device_id = None
                 if leased:
-                    await native.end_external_speech(conn)
+                    if stop_confirmed:
+                        await native.end_external_speech(conn)
+                    else:
+                        await native.end_external_speech(
+                            conn, stop_confirmed=False,
+                        )
 
 
 def create_app():
