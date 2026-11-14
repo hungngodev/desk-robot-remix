@@ -165,7 +165,10 @@ async def test_snapshot_failure_holds_without_motion(tmp_path, monkeypatch, fail
     assert head.commands == []
 
 
-@pytest.mark.parametrize("failure", [RuntimeError("decoder failed"), TimeoutError()])
+@pytest.mark.parametrize("failure", [
+    RuntimeError("decoder failed"), TimeoutError(),
+    Exception("native OpenCV detector failure"),
+])
 async def test_detector_failure_holds_without_motion(tmp_path, monkeypatch, failure):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
