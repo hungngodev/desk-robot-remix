@@ -66,6 +66,25 @@ def test_opencv_recovers_synthetic_distorted_camera_but_cannot_approve_dock():
     assert len(candidate["distortion_coeffs"]) == 5
 
 
+
+
+def test_rejects_low_rms_with_unreliable_lens_parameter_uncertainty(monkeypatch):
+    """A tiny residual is insufficient proof of observable distortion."""
+    cv2 = pytest.importorskip("cv2")
+    original = cv2.calibrateCameraExtended
+
+    def weak_lens_fit(*args, **kwargs):
+        data = list(original(*args, **kwargs))
+        uncertainty = data[5].copy()
+        uncertainty[8, 0] = 0.9  # wildly unconstrained radial k3
+        data[5] = uncertainty
+        return tuple(data)
+
+    monkeypatch.setattr(cv2, "calibrateCameraExtended", weak_lens_fit)
+    with pytest.raises(ValueError, match="parameter uncertainty"):
+        fit(projected_views(cv2))
+
+
 def test_fitter_refuses_fewer_than_twelve_checkerboard_views():
     cv2 = pytest.importorskip("cv2")
     with pytest.raises(ValueError, match="12"):

@@ -59,10 +59,21 @@ def fit_corners(
         raise ValueError("Checkerboard views do not cover enough of the real sensor")
     if min(board_areas) <= 1 or max(board_areas) / min(board_areas) < 1.15:
         raise ValueError("Checkerboard views need varied distance and board scale")
-    rms, camera, dist, _, _ = cv2.calibrateCamera(
+    rms, camera, dist, _, _, intrinsic_std, _, _ = cv2.calibrateCameraExtended(
         [object_grid] * len(image_points), image_points, (width, height),
         None, None,
     )
+    # Low pixel reprojection error alone can conceal unobservable focal
+    # length or lens distortion. OpenCV estimates their uncertainty using
+    # the same detected corners; reject an underconstrained candidate.
+    sigma = intrinsic_std.reshape(-1)
+    if (len(sigma) < 9 or not np.isfinite(sigma).all()
+            or sigma[0] > .03 * camera[0, 0]
+            or sigma[1] > .03 * camera[1, 1]
+            or sigma[2] > .04 * width or sigma[3] > .04 * height
+            or sigma[4] > .15 or sigma[5] > .4
+            or sigma[6] > .03 or sigma[7] > .03 or sigma[8] > .5):
+        raise ValueError("Camera parameter uncertainty exceeds conservative fit limit")
     fx, fy = float(camera[0, 0]), float(camera[1, 1])
     cx, cy = float(camera[0, 2]), float(camera[1, 2])
     distortion = tuple(float(v) for v in dist.reshape(-1))
