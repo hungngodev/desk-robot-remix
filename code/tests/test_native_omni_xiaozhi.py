@@ -847,6 +847,37 @@ async def test_native_voice_sends_one_video_frame_per_camera_receipt(native):
 
 
 
+
+@pytest.mark.parametrize("failure", ["socket_error", "send_stall"])
+async def test_native_mic_counts_only_confirmed_backend_sends_and_bounds_stalls(
+    native, failure,
+):
+    """No phantom forwarded microphone frames if model WebSocket never sends."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+
+    class ModelSocket:
+        async def send_json(self, event):
+            assert event["type"] == "input_audio_buffer.append"
+            if failure == "socket_error":
+                raise RuntimeError("Disconnected native model")
+            await asyncio.Event().wait()
+
+    session._socket = ModelSocket()
+    session.queue_mic(b"\x00" * 3200, False)
+    failure_type = RuntimeError if failure == "socket_error" else TimeoutError
+    with pytest.raises(failure_type):
+        await asyncio.wait_for(session._send_mic(), timeout=2.5)
+    assert session.audio_frames == 0
+    assert session._last_video_sent_receipt_us is None
+    assert session._silent_frames == 0
+
+
 @pytest.mark.parametrize("offset_seconds", [-3.0, 3.0])
 async def test_native_microphone_refuses_queued_stale_or_future_audio(
     native, offset_seconds,

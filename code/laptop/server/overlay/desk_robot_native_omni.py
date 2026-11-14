@@ -1553,7 +1553,6 @@ class NativeOmniSession:
             if not 0 <= time.monotonic() - packet.received_at <= 1.5:
                 self.fail("Native microphone packet expired in input queue")
                 return
-            self.audio_frames += 1
             # Upstream vLLM-Omni PR #6318 rejects MiniCPM instruction edits
             # after handshake. Even older ACKs did not change Stage 0 KV.
             # Continue polling Mac consent, but do not pretend live history
@@ -1600,7 +1599,11 @@ class NativeOmniSession:
                 packet.pcm16k, speech=packet.speech, jpeg=jpeg,
                 camera_age_ms=age, frame_receipt_us=receipt,
             )
-            await self._send(event)
+            # A wedged model WebSocket cannot accumulate several seconds
+            # of stale voice input. An unsent PCM append is not a forwarded
+            # microphone frame; the session supervisor handles the timeout.
+            await asyncio.wait_for(self._send(event), timeout=1.5)
+            self.audio_frames += 1
             # The pinned duplex wire selects at most one JPEG on each
             # one-second audio unit; do not offer the same receipt again.
             if event.get("video_frames"):
@@ -1616,7 +1619,9 @@ class NativeOmniSession:
                     self._pending_audio_commits.append((
                         self._input_generation, self._readonly_turn,
                     ))
-                    await self._send(self.wire.commit(final=True))
+                    await asyncio.wait_for(
+                        self._send(self.wire.commit(final=True)), timeout=1.5,
+                    )
                     self._silent_frames = 0
                     self._user_was_talking = False
                     self._video_turn += 1
