@@ -347,7 +347,7 @@ class Conversation:
                 # consent for a second pet to durably retain that speaker's
                 # words. Each pet may still retain its own sent speech.
                 continue
-            await asyncio.to_thread(
+            inserted = await asyncio.to_thread(
                 self.memory.remember,
                 peer.id,
                 event_id,
@@ -357,6 +357,15 @@ class Conversation:
                 witnessed=(peer.id == speaker.id),
                 confidence=1.0,
             )
+            if (inserted and peer.id != speaker.id
+                    and self.settings.mode == "hardware"
+                    and not self.settings.fleet_text_sharing_enabled):
+                # Revocation can land while SQLite is writing. Retract only
+                # this newly inserted secondhand copy, not the speaker's
+                # own legitimately sent words or an older idempotent event.
+                await asyncio.to_thread(
+                    self.memory.forget_episode, peer.id, event_id,
+                )
 
     async def run(
         self, robot_ids: list[str], topic: str, utterances: int | None = None
