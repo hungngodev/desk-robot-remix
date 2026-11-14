@@ -279,3 +279,20 @@ def test_tps61088_ten_amp_switch_rating_is_not_a_five_volt_output_rating():
     assert limited["candidate_electrically_sufficient_on_paper"] is False
     assert limited["candidate_physically_qualified"] is False
     assert limited["charger_and_load_sharing_verified"] is False
+
+
+def test_increased_sustained_load_cannot_pass_unchanged_continuous_input_rating():
+    # Keep the same peak, low-cell voltage, efficiency and published ratings.
+    # Only sustained simultaneous load grows; peak-capable hardware must
+    # still fail when its continuous input thermal rating is insufficient.
+    ratings = dict(boost_max_input_a=9.0, boost_continuous_input_a=3.0,
+                   boost_continuous_output_a=4.0, protected_cell_continuous_a=9.0)
+    lower = tool(3.0, 1.0, **ratings)
+    higher = tool(3.0, 1.8, **ratings)
+    assert lower["candidate_electrically_sufficient_on_paper"] is True
+    assert higher["candidate_electrically_sufficient_on_paper"] is False
+    assert higher["minimum_continuous_cell_input_a"] > lower["minimum_continuous_cell_input_a"]
+    assert higher["minimum_rated_cell_and_boost_input_a"] == lower["minimum_rated_cell_and_boost_input_a"]
+    for report in (lower, higher):
+        assert report["candidate_physically_qualified"] is False
+        assert report["charger_and_load_sharing_verified"] is False
