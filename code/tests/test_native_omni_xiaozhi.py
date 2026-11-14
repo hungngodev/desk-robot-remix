@@ -6480,6 +6480,44 @@ async def test_stalled_head_packets_release_device_lock_for_urgent_human_stop(
 
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mac_lease_active", [False, True])
+async def test_human_fleet_preemption_bounds_mac_or_uncertain_stop_lock_wait(
+    native, mac_lease_active,
+):
+    """An orphan decoder or Mac Opus packet must not stall fleet human VAD."""
+    module, bridge = native
+    human, _ = connection()
+    peer, sent = connection()
+    peer.device_id = "mac-02"
+    peer.session_id = "peer-head"
+    peer.client_is_speaking = True
+    bridge.connections.update({"mac-01": human, "mac-02": peer})
+    bridge.interrupt_generation = {"mac-01": 0, "mac-02": 4}
+    module._output_owner = "mac-02"
+    if mac_lease_active:
+        module._external_speaker_owner = "mac-02"
+        module._external_speaker_connection = peer
+    else:
+        module._output_owner_unverified = "mac-02"
+
+    # Without a native session both cases share the real fallback lock.
+    # This is exactly the lock an old Mac Opus sender may still hold.
+    async with module._external_opus_send_lock:
+        await asyncio.wait_for(
+            module.preempt_others_for_human("mac-01"), timeout=0.7,
+        )
+        assert sent == []
+        assert module._output_owner == "mac-02"
+        assert module._output_owner_unverified == "mac-02"
+        assert peer.client_is_speaking is True
+    if mac_lease_active:
+        assert bridge.interrupt_generation["mac-02"] == 5
+        assert peer.client_abort is True
+
+
+
 async def test_urgent_native_head_stop_times_out_while_opus_lock_is_stalled(native):
     """An outgoing Opus lock cannot indefinitely block a new human barge."""
     module, bridge = native
