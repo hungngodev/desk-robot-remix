@@ -61,7 +61,8 @@ def read_jpeg(path: Path | None) -> bytes | None:
 
 
 async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
-                *, deadline: float) -> tuple[bytes, dict]:
+                *, deadline: float,
+                barrier: asyncio.Barrier | None = None) -> tuple[bytes, dict]:
     if not 5 <= deadline <= 180:
         raise ValueError("Probe deadline must be between 5 and 180 seconds")
     wire = OmniDuplexWire(model=model)
@@ -94,6 +95,13 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
             greeting = await socket.receive_json(timeout=10)
             verify_native_server(greeting, wire.model)
             wire.handle_event(greeting)
+            if barrier is not None:
+                # Hold every authenticated backend session open BEFORE
+                # sending a single audio unit. Serial one-at-a-time probes
+                # cannot qualify a five-pet session admission ceiling.
+                await asyncio.wait_for(
+                    barrier.wait(), timeout=min(10.0, deadline),
+                )
 
             async def reader():
                 nonlocal first_audio_at
