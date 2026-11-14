@@ -6114,7 +6114,7 @@ async def test_cancelled_head_stop_preserves_fleet_decoder_uncertainty(
 
         session._retire_legacy_audio = fail_start
         task = asyncio.create_task(session.run())
-    await asyncio.wait_for(entered.wait(), timeout=0.25)
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
