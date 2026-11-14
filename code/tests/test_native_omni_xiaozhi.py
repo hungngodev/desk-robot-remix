@@ -331,6 +331,64 @@ async def test_fleet_native_speaker_claim_flushes_old_pet_before_second_pet_talk
     assert newer.conn.client_is_speaking is False
 
 
+
+async def test_native_handoff_slow_old_stop_does_not_block_human_fleet_floor(
+    native, monkeypatch,
+):
+    """VAD wins while the old robot's physical STOP is still pending."""
+    module, bridge = native
+    first, _ = connection()
+    bridge.connections["mac-01"] = first
+    second = SimpleNamespace(
+        device_id="mac-02", conn_from_mqtt_gateway=False,
+        client_listen_mode="realtime", client_is_speaking=False,
+        client_abort=False, session_id="second-session",
+        websocket=first.websocket,
+    )
+    bridge.connections["mac-02"] = second
+    bridge.robot_for_device = lambda device: {
+        "mac-01": "robot-01", "mac-02": "robot-02",
+    }.get(device)
+    old = module.NativeOmniSession(
+        first, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    new = module.NativeOmniSession(
+        second, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions.update({"mac-01": old, "mac-02": new})
+    module._output_owner = "mac-01"
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def stopped_old():
+        entered.set()
+        await release.wait()
+        return ()
+
+    old._invalidate_head_first = stopped_old
+    old._schedule_remote_cancel = lambda _events: None
+    handoff = asyncio.create_task(module.claim_speaker(new))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert module._output_owner == "mac-01"
+        # Preemption must be able to take the fleet lock now, not after the
+        # old head's possibly wedged websocket STOP has completed.
+        async with asyncio.timeout(.2):
+            async with module._output_owner_lock:
+                monkeypatch.setattr(bridge, "human_speech_active", lambda: True)
+                module._output_owner = None
+        release.set()
+        assert await asyncio.wait_for(handoff, timeout=1) is False
+        assert module._output_owner is None
+    finally:
+        release.set()
+        handoff.cancel()
+        await asyncio.gather(handoff, return_exceptions=True)
+        module._sessions.clear()
+        module._output_owner = None
+
+
 async def test_native_audio_refused_by_mac_speaker_never_sends_stop_or_records_history(
     native, monkeypatch,
 ):

@@ -48,6 +48,9 @@ _output_owner: str | None = None
 _external_speaker_owner: str | None = None
 _external_speaker_connection = None
 _output_owner_lock = asyncio.Lock()
+# Serialize native speaker handoffs, but NEVER hold the fleet floor lock
+# across a slow physical STOP or model cancellation await.
+_speaker_handoff_lock = asyncio.Lock()
 # Keep only bounded error diagnostics, never PCM/video or recovered transcripts.
 _terminal_errors: dict[str, str] = {}
 _retry_after: dict[str, float] = {}
@@ -2182,22 +2185,41 @@ async def end_external_speech(conn) -> None:
 
 
 async def claim_speaker(session: NativeOmniSession) -> bool:
-    """One native speaker owner, and NO new reply during human speech."""
+    """One native speaker owner; a stalled old STOP cannot block human VAD."""
     global _output_owner
     import desk_robot_bridge as bridge
-    async with _output_owner_lock:
-        if bridge.human_speech_active() or _external_speaker_owner is not None:
-            return False
-        other_id = _output_owner
-        if other_id is not None and other_id != session.device:
-            previous = _sessions.get(other_id)
-            if previous is not None and not previous.closed:
-                # Do not hold the shared five-pet speaker lock while the
-                # previous robot's remote model is slow to cancel.
-                events = await previous._invalidate_head_first()
+    async with _speaker_handoff_lock:
+        async with _output_owner_lock:
+            if bridge.human_speech_active() or _external_speaker_owner is not None:
+                return False
+            other_id = _output_owner
+            previous = (
+                _sessions.get(other_id)
+                if other_id is not None and other_id != session.device else None
+            )
+        if previous is not None and not previous.closed:
+            # This may await a wedged websocket STOP. Human preemption MUST
+            # still acquire the shared fleet lock while we are waiting.
+            try:
+                events = await asyncio.wait_for(
+                    previous._invalidate_head_first(), timeout=1.0,
+                )
                 previous._schedule_remote_cancel(events)
-        _output_owner = session.device
-        return True
+            except (asyncio.TimeoutError, RuntimeError, OSError):
+                # Old physical audio is not confirmed stopped. Never grant a
+                # new speaker just because the previous stop failed.
+                return False
+        async with _output_owner_lock:
+            # Human VAD or a Mac group speaker may have claimed the floor
+            # while the old head was flushing. No stale grant survives.
+            if (bridge.human_speech_active()
+                    or _external_speaker_owner is not None
+                    or _output_owner not in (
+                        None, other_id, session.device
+                    )):
+                return False
+            _output_owner = session.device
+            return True
 
 
 async def flush_head(session: NativeOmniSession) -> None:
