@@ -885,6 +885,63 @@ async def test_native_proactive_model_sees_video_while_microphone_reports_no_spe
 
 
 
+
+@pytest.mark.parametrize("mismatch", ["header", "frame"])
+async def test_cross_pet_camera_identity_mismatch_retires_native_mic(
+    native, mismatch,
+):
+    """A wrong Mac robot identity is fatal, not a quiet-video reconnect."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session.latest_jpeg = b"previously selected private frame"
+    session._latest_frame_receipt_us = 500
+    session._camera_stream_connected = True
+
+    class Chunks:
+        async def iter_chunked(self, _):
+            yield (json.dumps({"robot_id": "robot-02"}) + "\n").encode()
+
+    class Reply:
+        status = 200
+        headers = {
+            "X-Desk-Robot-Id": "robot-02" if mismatch == "header" else "robot-01",
+            "Content-Type": "application/x-ndjson",
+        }
+        content = Chunks()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class Mac:
+        calls = 0
+
+        def get(self, url, **kwargs):
+            self.calls += 1
+            assert url.endswith("/v1/pet/robot-01/omni-stream")
+            return Reply()
+
+    mac = Mac()
+    await asyncio.wait_for(session._camera_stream(mac), timeout=1)
+    assert mac.calls == 1
+    assert session.closed
+    assert session.last_error == (
+        "Mac continuous camera robot identity mismatch" if mismatch == "header"
+        else "Mac continuous camera frame identity mismatch"
+    )
+    assert session.latest_jpeg is None
+    assert session._latest_frame_receipt_us is None
+    assert session._camera_stream_connected is False
+
+
 @pytest.mark.parametrize("status", [401, 403])
 async def test_revoked_mac_camera_permission_ends_native_mic_session_immediately(
     native, status,

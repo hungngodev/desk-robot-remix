@@ -1365,6 +1365,14 @@ class NativeOmniSession:
                         self._latest_frame_receipt_us = None
                         self.fail("Mac continuous camera permission revoked")
                         return
+                    if (response.status == 200
+                            and response.headers.get("X-Desk-Robot-Id")
+                                != self.robot):
+                        self._camera_stream_connected = False
+                        self.latest_jpeg = None
+                        self._latest_frame_receipt_us = None
+                        self.fail("Mac continuous camera robot identity mismatch")
+                        return
                     if (response.status != 200
                             or response.headers.get("X-Desk-Robot-Id") != self.robot
                             or not response.headers.get(
@@ -1388,8 +1396,14 @@ class NativeOmniSession:
                             if not 0 < len(line) <= 1_500_000:
                                 raise ValueError("Invalid Mac video event size")
                             data = json.loads(line)
+                            if (isinstance(data, dict)
+                                    and data.get("robot_id") != self.robot):
+                                self._camera_stream_connected = False
+                                self.latest_jpeg = None
+                                self._latest_frame_receipt_us = None
+                                self.fail("Mac continuous camera frame identity mismatch")
+                                return
                             if (not isinstance(data, dict)
-                                    or data.get("robot_id") != self.robot
                                     or data.get("source") not in (
                                         "speech", "proactive"
                                     )
