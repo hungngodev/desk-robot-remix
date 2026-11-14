@@ -129,7 +129,7 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
                     "type": "response.output_audio.delta",
                     "response_id": "real-turn-1",
                     "format": "pcm16", "sample_rate_hz": 24000,
-                    "delta": base64.b64encode(b"\\0" * 4800).decode("ascii"),
+                    "delta": base64.b64encode(b"\0" * 4800).decode("ascii"),
                     "metadata": {"epoch": 0},
                 })
                 await socket.send_json({
@@ -139,7 +139,7 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
 
     app = web.Application()
     app.router.add_get("/v1/realtime", model_socket)
-    jpeg = b"\\xff\\xd8" + b"camera frame" + b"\\xff\\xd9"
+    jpeg = b"\xff\xd8" + b"camera frame" + b"\xff\xd9"
     async with TestServer(app) as server:
         url = str(server.make_url("/v1/realtime?duplex=1")).replace(
             "http://", "ws://"
@@ -147,7 +147,7 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
         output, report = await asyncio.wait_for(
             smoke.probe(
                 url, "openbmb/MiniCPM-o-4_5",
-                b"\\0" * 32000, jpeg, deadline=5,
+                b"\0" * 32000, jpeg, deadline=5,
             ), timeout=8,
         )
     appends = [
