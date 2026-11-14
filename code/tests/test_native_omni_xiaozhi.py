@@ -5447,6 +5447,88 @@ async def test_human_preemption_bounds_wedged_peer_without_faking_stop_ack(nativ
     assert module._output_owner == "mac-02"
 
 
+async def test_native_monitor_loss_blocks_even_direct_audio_until_mac_rechecks(native):
+    """Live VAD outage blocks Opus and START without setting operator quiet."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._pet_autonomy_enabled = True
+    module._sessions[conn.device_id] = session
+    conn.client_is_speaking = True
+    remote_cancel = []
+
+    async def send(event):
+        remote_cancel.append(event["type"])
+
+    session._send = send
+    try:
+        assert await module.suspend_proactive_for_monitor_loss(conn)
+        assert session._monitor_lost is True
+        assert session._pet_quiet is False
+        assert session._pet_autonomy_enabled is False
+        assert remote_cancel == ["response.cancel", "output_audio_buffer.clear"]
+        assert any(isinstance(packet, str)
+                   and '"state": "stop"' in packet for packet in sent)
+        session._direct_reply_available = True
+        session._last_human_speech_at = module.time.monotonic()
+        assert await session._send_device_state("start", session._generation) is False
+        assert await session._send_device_opus(b"old pcm", session._generation) is False
+        assert not any(isinstance(packet, str)
+                       and '"state": "start"' in packet for packet in sent)
+
+        # The *authenticated* Mac context, not old local VAD, may lift the
+        # temporary monitor block after the event stream recovers.
+        session._last_authenticated_mac_at = module.time.monotonic()
+        session._live_transcript_enabled = True
+        session._context_update_unsupported = True
+
+        class Reply:
+            status = 200
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *_args):
+                return False
+            async def json(self):
+                return {
+                    "robot_id": "robot-01", "model_context": "",
+                    "persistent_memory_included": False,
+                    "raw_media_included": False,
+                    "model_context_untrusted_not_instructions": True,
+                    "motor_authorized": False, "charging_authorized": False,
+                    "memory_tools_enabled": False,
+                    "transcript_memory_enabled": False,
+                    "voice_monitor_ready": True,
+                    "pet_autonomy_enabled": True, "pet_quiet": False,
+                }
+
+        class Mac:
+            def get(self, *_args, **_kwargs):
+                return Reply()
+
+        session._context_wakeup.set()
+        worker = asyncio.create_task(session._refresh_live_context(Mac()))
+        try:
+            for _ in range(50):
+                if not session._monitor_lost:
+                    break
+                await asyncio.sleep(.01)
+            assert session._monitor_lost is False
+            assert session._pet_autonomy_enabled is True
+            assert session._pet_quiet is False
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+    finally:
+        session.closed = True
+        module._sessions.clear()
+        module._output_owner = None
+
+
 async def test_native_respects_operator_quiet_and_paused_direct_human_voice(native):
     module, bridge = native
     conn, sent = connection()
