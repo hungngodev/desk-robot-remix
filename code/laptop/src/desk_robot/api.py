@@ -207,6 +207,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])
     async def aux(robot_id: str, request: Request):
         coordinator().robot(robot_id)
+        # Bind the requesting human turn before slow physical telemetry.
+        # A new VAD epoch must not inherit the older tool's receipt.
+        owner = requested_tool_context(request, robot_id)
         getter = getattr(coordinator().heads[robot_id], "aux_status", None)
         if not callable(getter):
             return {"robot_id": robot_id, "available": False,
@@ -215,7 +218,6 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         # Only an authenticated, explicit head tool request may add a short
         # physical sensor receipt to the shared multimodal brain timeline.
         # Dashboard polling and failed/invalid measurements never inject it.
-        owner = requested_tool_context(request, robot_id)
         if owner is not None and isinstance(data, dict):
             cues = []
             climate = data.get("climate")
@@ -1027,6 +1029,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise HTTPException(404, "Robot not found") from exc
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Opt in to voice memory retrieval first")
+        # Capture the current voice turn BEFORE off-thread SQLite lookups.
+        # A completed older lookup must not become a new turn's memory cue.
+        owner = requested_tool_context(request, robot_id)
         if query is None:
             records = await asyncio.to_thread(
                 app.state.runtime.memory.recent, robot_id, limit=6
@@ -1063,7 +1068,6 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # Only the explicit authenticated voice-tool lookup may supply a
             # short-lived memory receipt to the native speech model.
             # Operator/dashboard polling must not inject historical claims.
-            owner = requested_tool_context(request, robot_id)
             if owner is not None:
                 if records:
                     item = records[0]
