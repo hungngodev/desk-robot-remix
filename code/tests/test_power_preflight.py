@@ -391,3 +391,18 @@ def test_unrepresentably_large_integer_telemetry_fails_closed(field):
         args, kwargs = (1, 0.6), {field: huge}
     with pytest.raises(ValueError):
         tool(*args, **kwargs)
+
+
+def test_docked_electronics_budget_must_not_inherit_undocked_motor_peak():
+    # Separate hypothetical measured profiles; these are NOT dock or charger
+    # measurements. A lower docked electronics budget cannot qualify a charger,
+    # and must not overwrite the mobile motor and gripper supply requirement.
+    mobile = tool(3.0, 1.8)
+    docked_electronics = tool(0.8, 0.5)
+    assert mobile["minimum_rated_5v_output_a"] == 3.9
+    assert docked_electronics["minimum_rated_5v_output_a"] == 1.04
+    assert mobile["minimum_rated_cell_and_boost_input_a"] > docked_electronics["minimum_rated_cell_and_boost_input_a"]
+    for report in (mobile, docked_electronics):
+        assert report["charger_and_load_sharing_verified"] is False
+        assert report["candidate_physically_qualified"] is False
+        assert report["physical_load_verified"] is False
