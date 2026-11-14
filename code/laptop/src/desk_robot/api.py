@@ -193,7 +193,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         context = requested_tool_context(request, robot_id)
         data = await coordinator().heads[robot_id].status()
-        if isinstance(data, dict) and data.get("robot_id") == robot_id:
+        if not isinstance(data, dict) or data.get("robot_id") != robot_id:
+            raise OperationError("Head status robot identity mismatch")
+        if isinstance(data, dict):
             safety = data.get("safety")
             safety = safety if isinstance(safety, dict) else {}
             summary = (
@@ -215,11 +217,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             return {"robot_id": robot_id, "available": False,
                     "reason": "No physical accessory telemetry adapter"}
         data = await getter()
+        if not isinstance(data, dict) or data.get("robot_id") != robot_id:
+            raise OperationError("Auxiliary telemetry robot identity mismatch")
         # Only an authenticated, explicit head tool request may add a short
         # physical sensor receipt to the shared multimodal brain timeline.
         # Dashboard polling and failed/invalid measurements never inject it.
-        if (owner is not None and isinstance(data, dict)
-                and data.get("robot_id") == robot_id):
+        if owner is not None:
             cues = []
             climate = data.get("climate")
             if isinstance(climate, dict) and climate.get("valid") is True:
