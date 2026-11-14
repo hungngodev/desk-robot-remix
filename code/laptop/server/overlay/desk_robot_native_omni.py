@@ -2214,6 +2214,12 @@ async def claim_speaker(session: NativeOmniSession) -> bool:
                 _sessions.get(other_id)
                 if other_id is not None and other_id != session.device else None
             )
+            if (other_id is not None and other_id != session.device
+                    and (previous is None or previous.closed)):
+                # A stale owner with no live head STOP path is NOT evidence
+                # that the previous physical decoder has been silenced.
+                # Session cleanup or a human VAD must release this lease.
+                return False
         if previous is not None and not previous.closed:
             # This may await a wedged websocket STOP. Human preemption MUST
             # still acquire the shared fleet lock while we are waiting.

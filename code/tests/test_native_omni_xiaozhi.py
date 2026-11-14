@@ -295,6 +295,46 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
     assert module.status("mac-01")["head_audio_playback_acknowledged"] is False
 
 
+
+@pytest.mark.parametrize("owner_present", [False, True])
+async def test_native_speaker_refuses_orphan_or_closed_prior_owner(
+    native, owner_present,
+):
+    """An old lease is not an ACK that its physical XIAO stopped speaking."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    newest = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = newest
+    module._output_owner = "mac-02"
+    if owner_present:
+        bridge.robot_for_device = lambda device: {
+            "mac-01": "robot-01", "mac-02": "robot-02",
+        }.get(device)
+        other, _ = connection()
+        other.device_id = "mac-02"
+        other.session_id = "old-session"
+        bridge.connections["mac-02"] = other
+        old = module.NativeOmniSession(
+            other, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+        )
+        old.closed = True
+        module._sessions["mac-02"] = old
+    try:
+        assert await module.claim_speaker(newest) is False
+        assert module._output_owner == "mac-02"
+        module._output_owner = None  # Genuine cleanup released old lease.
+        assert await module.claim_speaker(newest) is True
+        assert module._output_owner == "mac-01"
+    finally:
+        module._output_owner = None
+        module._sessions.clear()
+
+
 async def test_fleet_native_speaker_claim_flushes_old_pet_before_second_pet_talks(native):
     module, bridge = native
     first, sent = connection()
