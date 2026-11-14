@@ -75,3 +75,91 @@ def test_legacy_hardware_example_does_not_contain_removed_unknown_flags():
     assert settings.mode == "hardware"
     assert settings.vision_model == ""
     assert not settings.voice_vision_tools_enabled
+
+
+
+@pytest.mark.asyncio
+async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
+    """Loopback MiniCPM wire exercises JPEG + 16k PCM before real GPU testing."""
+    import asyncio
+    import base64
+    import json
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    smoke = smoke_module()
+    received = []
+
+    async def model_socket(request):
+        socket = web.WebSocketResponse()
+        await socket.prepare(request)
+        async for message in socket:
+            event = json.loads(message.data)
+            received.append(event)
+            if event["type"] == "session.update":
+                await socket.send_json({
+                    "type": "session.created",
+                    "session": {
+                        "model": "openbmb/MiniCPM-o-4_5",
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "audio": {
+                            "input": {"sample_rate_hz": 16000},
+                            "output": {"format": {
+                                "type": "audio/pcm", "rate": 24000,
+                            }},
+                        },
+                        "capabilities": {
+                            "implementation_level": "model_native_duplex",
+                            "supports_input_append": True,
+                            "supports_barge_in": True,
+                            "chunk_period_ms": 1000,
+                        },
+                    },
+                })
+            elif event["type"] == "input_audio_buffer.commit":
+                await socket.send_json({
+                    "type": "response.created", "response_id": "real-turn-1",
+                    "response": {
+                        "id": "real-turn-1",
+                        "metadata": {"duplex_event": {"epoch": 0}},
+                    },
+                })
+                await socket.send_json({
+                    "type": "response.output_audio.delta",
+                    "response_id": "real-turn-1",
+                    "format": "pcm16", "sample_rate_hz": 24000,
+                    "delta": base64.b64encode(b"\\0" * 4800).decode("ascii"),
+                    "metadata": {"epoch": 0},
+                })
+                await socket.send_json({
+                    "type": "response.done", "response_id": "real-turn-1",
+                })
+        return socket
+
+    app = web.Application()
+    app.router.add_get("/v1/realtime", model_socket)
+    jpeg = b"\\xff\\xd8" + b"camera frame" + b"\\xff\\xd9"
+    async with TestServer(app) as server:
+        url = str(server.make_url("/v1/realtime?duplex=1")).replace(
+            "http://", "ws://"
+        )
+        output, report = await asyncio.wait_for(
+            smoke.probe(
+                url, "openbmb/MiniCPM-o-4_5",
+                b"\\0" * 32000, jpeg, deadline=5,
+            ), timeout=8,
+        )
+    appends = [
+        event for event in received
+        if event["type"] == "input_audio_buffer.append"
+    ]
+    assert len(appends) == 10
+    assert sum(len(event.get("video_frames", [])) for event in appends) == 1
+    assert base64.b64decode(appends[-1]["video_frames"][0]) == jpeg
+    assert report["video_frames_sent"] == 1
+    assert report["head_speaker_connected"] is False
+    assert report["actual_playback_acknowledged"] is False
+    assert len(output) == 4800
+
+
