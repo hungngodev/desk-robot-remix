@@ -6078,3 +6078,48 @@ async def test_decoder_stop_from_replaced_xiao_socket_never_clears_owner(
     assert not await module.begin_external_speech(fresh)
 
 
+@pytest.mark.parametrize("phase", ["legacy_start", "shutdown"])
+async def test_cancelled_head_stop_preserves_fleet_decoder_uncertainty(
+    native, phase,
+):
+    """Cancellation must not quietly release a decoder with queued PCM."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    entered = asyncio.Event()
+
+    class StalledHead:
+        async def send(self, _):
+            entered.set()
+            await asyncio.Event().wait()
+
+    conn.websocket = StalledHead()
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    if phase == "legacy_start":
+        conn.tts = SimpleNamespace(
+            tts_audio_queue=SimpleNamespace(empty=lambda: False),
+            tts_text_queue=SimpleNamespace(empty=lambda: True),
+        )
+        conn.clear_queues = lambda: None
+        task = asyncio.create_task(session._retire_legacy_audio())
+    else:
+        conn.client_is_speaking = True
+        module._sessions["mac-01"] = session
+
+        async def fail_start():
+            raise RuntimeError("backend unavailable")
+
+        session._retire_legacy_audio = fail_start
+        task = asyncio.create_task(session.run())
+    await asyncio.wait_for(entered.wait(), timeout=0.25)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert module._output_owner == "mac-01"
+    assert module._output_owner_unverified == "mac-01"
+    assert not await module.begin_external_speech(conn)
+
+
