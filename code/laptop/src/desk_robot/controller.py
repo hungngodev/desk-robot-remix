@@ -409,6 +409,10 @@ class Coordinator:
             raise OperationError(
                 "Dock motion requires measured camera lens distortion"
             )
+        if camera.image_width_px is None or camera.image_height_px is None:
+            raise OperationError(
+                "Dock motion requires calibrated camera frame resolution"
+            )
         return self._submit(
             robot_id, "dock_approach",
             lambda job: self._dock_approach(

@@ -83,6 +83,34 @@ def test_distortion_coefficients_are_validated_without_motion_authority():
     assert not assessment.motor_authorized and not assessment.charging_authorized
 
 
+
+
+@pytest.mark.parametrize(("width", "height"), [
+    (640, None), (None, 480), (True, 480),
+    (640, "480"), (79, 480), (640, 1600),
+])
+def test_dock_calibration_refuses_incomplete_or_invalid_image_mode(width, height):
+    from dataclasses import replace
+    with pytest.raises(ValueError):
+        replace(calibration(), image_width_px=width, image_height_px=height)
+
+
+def test_dock_detector_rejects_camera_mode_change_before_apriltag_pose():
+    """Matching distortion and focal lengths are invalid at another JPEG size."""
+    import cv2
+    import numpy as np
+    from dataclasses import replace
+
+    measured = replace(
+        calibration(), image_width_px=640, image_height_px=480,
+        distortion_coeffs=(0.18, -0.07, 0.003, -0.002, 0.01),
+    )
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((240, 320), dtype=np.uint8))
+    assert ok
+    with pytest.raises(ValueError, match="resolution differs"):
+        detect_apriltag(jpeg.tobytes(), measured, captured_at=5.0)
+
+
 def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
     """Exercise the real OpenCV PnP path with projected distorted corners.
 
@@ -95,6 +123,7 @@ def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
     camera = DockCameraCalibration(
         fx=410, fy=410, cx=320, cy=240, tag_side_mm=60,
         marker_id=12, distortion_coeffs=distortion,
+        image_width_px=640, image_height_px=480,
     )
     half = camera.tag_side_mm / 2
     object_points = np.array([

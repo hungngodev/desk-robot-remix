@@ -25,12 +25,16 @@ def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
     props = ("fx", "fy", "cx", "cy", "tag_side_mm", "marker_id")
     if any(key not in data for key in props):
         raise ValueError("Dock calibration lacks measured camera parameters")
-    calibration = DockCameraCalibration(**{key: data[key] for key in props},
-                                        distortion_coeffs=(
-                                            tuple(data["distortion_coeffs"])
-                                            if isinstance(data.get("distortion_coeffs"), list)
-                                            else data.get("distortion_coeffs")
-                                        ))
+    calibration = DockCameraCalibration(
+        **{key: data[key] for key in props},
+        distortion_coeffs=(
+            tuple(data["distortion_coeffs"])
+            if isinstance(data.get("distortion_coeffs"), list)
+            else data.get("distortion_coeffs")
+        ),
+        image_width_px=data.get("image_width_px"),
+        image_height_px=data.get("image_height_px"),
+    )
     target = data.get("target_distance_mm")
     if type(target) not in (float, int) or not math.isfinite(target) or not 50 <= target <= 500:
         raise ValueError("Dock stopping distance is not calibrated")

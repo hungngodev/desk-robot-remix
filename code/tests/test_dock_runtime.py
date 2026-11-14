@@ -54,10 +54,12 @@ def test_measured_distortion_survives_json_loader_and_invalid_values_fail_closed
         "measured": True, "fx": 410, "fy": 408, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
         "distortion_coeffs": [0.18, -0.07, 0.003, -0.002, 0.01],
+        "image_width_px": 640, "image_height_px": 480,
     }
     path.write_text(json.dumps(payload))
     camera, target = dock_runtime.load_real_dock_calibration(path)
     assert camera.distortion_coeffs == tuple(payload["distortion_coeffs"])
+    assert (camera.image_width_px, camera.image_height_px) == (640, 480)
     assert target == 120
     for invalid in ([0.1], [0.0, 0.0, True, 0.0], "invalid"):
         payload["distortion_coeffs"] = invalid

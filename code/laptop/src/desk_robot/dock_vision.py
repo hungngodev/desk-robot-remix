@@ -25,6 +25,8 @@ class DockCameraCalibration:
     tag_side_mm: float
     marker_id: int
     distortion_coeffs: tuple[float, ...] | None = None
+    image_width_px: int | None = None
+    image_height_px: int | None = None
 
     def __post_init__(self):
         for name in ("fx", "fy", "cx", "cy", "tag_side_mm"):
@@ -37,6 +39,16 @@ class DockCameraCalibration:
             raise ValueError("Camera focal lengths and physical tag size are invalid")
         if self.cx < 0 or self.cy < 0:
             raise ValueError("Camera optical center must be nonnegative")
+        if ((self.image_width_px is None) !=
+                (self.image_height_px is None)):
+            raise ValueError("Dock calibration must specify both image dimensions")
+        if self.image_width_px is not None and (
+            type(self.image_width_px) is not int
+            or type(self.image_height_px) is not int
+            or not 80 <= self.image_width_px <= 2048
+            or not 80 <= self.image_height_px <= 1536
+        ):
+            raise ValueError("Invalid measured dock camera image resolution")
         if self.distortion_coeffs is not None:
             if (not isinstance(self.distortion_coeffs, tuple)
                     or len(self.distortion_coeffs) not in (4, 5, 8, 12, 14)
@@ -95,6 +107,12 @@ def detect_apriltag(
     frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
     if frame is None or frame.size == 0:
         raise ValueError("Invalid JPEG frame")
+    # OpenCV intrinsics and distortion belong to one exact capture mode.
+    # Camera mode changes invalidate pose geometry, not just image quality.
+    if (calibration.image_width_px is not None
+            and (frame.shape[1], frame.shape[0]) !=
+                (calibration.image_width_px, calibration.image_height_px)):
+        raise ValueError("Dock JPEG resolution differs from measured intrinsics")
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
     detector = cv2.aruco.ArucoDetector(dictionary)
     corners, ids, _rejected = detector.detectMarkers(frame)
