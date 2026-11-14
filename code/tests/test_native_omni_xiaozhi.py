@@ -5303,6 +5303,45 @@ async def test_human_fleet_failed_head_flush_keeps_audio_owner_blocked(native):
     assert module._output_owner == "mac-02"
 
 
+@pytest.mark.parametrize("stop_delivered", [False, True])
+async def test_native_shutdown_preserves_speaker_lease_until_head_stop_sent(
+    native, stop_delivered,
+):
+    """A crashed model may not release a still-speaking XIAO decoder."""
+    module, bridge = native
+    conn, packets = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+
+    async def send(packet):
+        if not stop_delivered:
+            raise OSError("Head websocket disconnected before STOP")
+        packets.append(packet)
+
+    conn.websocket.send = send
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._output_owner = conn.device_id
+
+    async def fail_start():
+        raise RuntimeError("Native backend failed before audio handshake")
+
+    session._retire_legacy_audio = fail_start
+    await session.run()
+    assert session.closed
+    assert module._output_owner == (None if stop_delivered else conn.device_id)
+    assert conn.client_is_speaking is not stop_delivered
+    if stop_delivered:
+        assert json.loads(packets[-1])["state"] == "stop"
+    else:
+        # This must stay blocked until a new authenticated head STOP, not
+        # become a phantom flush merely because the Python session exited.
+        assert not packets
+
+
 async def test_human_preemption_bounds_wedged_peer_without_faking_stop_ack(native):
     """A dead XIAO must not indefinitely delay another head's urgent STOP."""
     module, _bridge = native
