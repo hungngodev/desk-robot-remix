@@ -630,6 +630,40 @@ def test_native_omni_frame_requires_consent_real_hardware_and_tool_token(setting
 
 
 
+
+def test_native_single_frame_rechecks_camera_consent_after_await(settings, tokens):
+    import time
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+
+    class Camera:
+        async def capture(self, robot_id, *, source):
+            assert robot_id == "robot-01" and source == "speech"
+            settings.voice_vision_tools_enabled = False
+            return SimpleNamespace(
+                jpeg=b"private frame", received_at=time.monotonic(),
+            )
+
+    class Runtime:
+        coordinator = SimpleNamespace(robot=lambda rid: settings.robot(rid))
+        multimodal = Camera()
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=Runtime())) as client:
+        response = client.get("/v1/pet/robot-01/omni-frame", headers=headers)
+    assert response.status_code == 403
+    assert b"private frame" not in response.content
+
+
+
 def test_native_model_receives_continuous_visual_evidence_without_request_or_vad(
     settings, tokens,
 ):
