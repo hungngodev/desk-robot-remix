@@ -345,6 +345,31 @@ async def test_failed_mac_stop_blocks_fleet_until_fresh_authenticated_head_stop(
     assert module._external_speaker_owner is None
 
 
+async def test_failed_mac_stop_recovery_timeout_cannot_release_fleet_owner(native):
+    module, bridge = native
+    old, _ = connection()
+    bridge.connections["mac-01"] = old
+    assert await module.begin_external_speech(old)
+    await module.end_external_speech(old, stop_confirmed=False)
+
+    new_head, _ = connection()
+    new_head.session_id = "reconnected"
+    bridge.connections["mac-01"] = new_head
+
+    class StalledSocket:
+        async def send(self, _):
+            await asyncio.Event().wait()
+
+    new_head.websocket = StalledSocket()
+    # The physical STOP may never return. No speech lease may be released
+    # just because a Python wait timeout cancelled the stalled send.
+    assert not await asyncio.wait_for(
+        module.begin_external_speech(new_head), timeout=0.65,
+    )
+    assert module._output_owner_unverified == "mac-01"
+    assert module._output_owner == "mac-01"
+
+
 @pytest.mark.parametrize("owner_present", [False, True])
 async def test_native_speaker_refuses_orphan_or_closed_prior_owner(
     native, owner_present,
