@@ -174,6 +174,38 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
     return bytes(output), results
 
 
+
+async def probe_fleet(url: str, model: str, pcm: bytes, jpeg: bytes | None,
+                      *, deadline: float, count: int = 5
+                      ) -> list[tuple[bytes, dict]]:
+    """Require N concurrent full AV turns, not N sequential lucky handshakes.
+
+    This only tests backend protocol session admission and generated sound.
+    It never proves Mac deployment, microphone AEC, a Xiaozhi speaker, battery,
+    or a physical five-robot fleet.
+    """
+    if type(count) is not int or not 1 <= count <= 5:
+        raise ValueError("Fleet duplex preflight requires one to five sessions")
+    barrier = asyncio.Barrier(count)
+    tasks = [
+        asyncio.create_task(probe(
+            url, model, pcm, jpeg, deadline=deadline, barrier=barrier,
+        ))
+        for _ in range(count)
+    ]
+    try:
+        results = await asyncio.gather(*tasks)
+        if any(not audio for audio, _ in results):
+            raise RuntimeError("A concurrent native session produced no audio")
+        return results
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="ws://127.0.0.1:8099/v1/realtime?duplex=1")
