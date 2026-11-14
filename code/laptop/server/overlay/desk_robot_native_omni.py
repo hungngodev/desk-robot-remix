@@ -2398,6 +2398,11 @@ async def flush_head(session: NativeOmniSession) -> None:
             if bridge.connections.get(session.device) is not session.conn:
                 raise RuntimeError("Physical head replaced during urgent STOP")
             session.conn.client_is_speaking = False
+        async with _output_owner_lock:
+            if _output_owner == session.device:
+                _output_owner = None
+            if _output_owner_unverified == session.device:
+                _output_owner_unverified = None
     except (Exception, asyncio.CancelledError):
         # Barge cancellation, socket failure or timeout is never proof that
         # the existing XIAO decoder stopped. Block all future pet speech
