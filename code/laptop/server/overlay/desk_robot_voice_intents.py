@@ -300,6 +300,8 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
         if (isinstance(dock, dict) and dock.get("present") is True
                 and dock.get("valid") is True
                 and dock.get("charging_verified") is False
+                and measured(dock.get("seq"), 1, 0xffffffff)
+                and measured(dock.get("age_ms"), 0, 499)
                 and all(type(dock.get(field)) is bool for field in (
                     "left_seated", "right_seated", "input_good",
                     "charge_indicated",
