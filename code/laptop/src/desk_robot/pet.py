@@ -207,6 +207,13 @@ class PetController:
         if type(ready) is not bool:
             raise ValueError("Voice monitor readiness must be boolean")
         self.voice_monitor_ready = ready
+        if not ready and self.settings.mode == "hardware":
+            # This task also owns an optional two-pet conversation. Cancel
+            # synthesis immediately rather than letting a delayed WAV start
+            # after the authenticated speech monitor went away.
+            task = self._speech_task
+            if task is not None and not task.done() and not task.cancelling():
+                task.cancel()
 
     def status(self, robot_id: str) -> dict:
         state = self.states[robot_id]
