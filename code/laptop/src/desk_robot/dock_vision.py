@@ -59,6 +59,10 @@ class DockCameraCalibration:
             or not 80 <= self.image_height_px <= 1536
         ):
             raise ValueError("Invalid measured dock camera image resolution")
+        if self.image_width_px is not None and (
+            self.cx >= self.image_width_px or self.cy >= self.image_height_px
+        ):
+            raise ValueError("Dock optical center lies outside measured image")
         if self.distortion_coeffs is not None:
             if (not isinstance(self.distortion_coeffs, tuple)
                     or len(self.distortion_coeffs) not in (4, 5, 8, 12, 14)
