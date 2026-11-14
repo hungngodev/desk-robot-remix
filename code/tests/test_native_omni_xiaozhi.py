@@ -232,6 +232,69 @@ async def test_failed_native_quiet_pcm_send_never_counts_as_model_input(native):
 
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_final_send", [False, True])
+async def test_actual_model_video_receipt_count_follows_successful_audio_send(
+    native, fail_final_send,
+):
+    """A generated wire JPEG is not necessarily forwarded over the model WS."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = session
+    session.connected = True
+    session._camera_stream_connected = True
+    session._last_video_selected_at = module.time.monotonic()
+    session.latest_frame_time = module.time.monotonic()
+    session._latest_frame_receipt_us = module.time.monotonic_ns() // 1000
+    jpeg = bytes((0xff, 0xd8)) + b"current desk" + bytes((0xff, 0xd9))
+    session.latest_jpeg = jpeg
+    delivered = []
+    ready = asyncio.Event()
+
+    async def transport(event):
+        if fail_final_send and len(delivered) == 9:
+            raise ConnectionError("model lost the AV boundary")
+        delivered.append(event)
+        if len(delivered) == 10:
+            ready.set()
+
+    session._send = transport
+    for _ in range(10):
+        session.queue_mic(bytes(3200), False)
+    task = asyncio.create_task(session._send_mic())
+    try:
+        if fail_final_send:
+            with pytest.raises(ConnectionError, match="AV boundary"):
+                await asyncio.wait_for(task, timeout=1)
+        else:
+            await asyncio.wait_for(ready.wait(), timeout=1)
+        stats = module.status("mac-01")
+        assert stats["native_quiet_pcm_frames_forwarded"] == (
+            9 if fail_final_send else 10
+        )
+        assert stats["mic_frames_forwarded"] == (
+            9 if fail_final_send else 10
+        )
+        assert session.wire.frames_sent == 1  # only wire-side selection
+        assert stats["jpeg_frames_forwarded"] == (
+            0 if fail_final_send else 1
+        )
+        assert stats["continuous_av_input_receiving"] is (not fail_final_send)
+        if not fail_final_send:
+            assert len(delivered[-1]["video_frames"]) == 1
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+
 def test_native_backend_has_explicit_opt_in_and_tls_only_for_remote_audio(native, monkeypatch):
     module, bridge = native
     conn, sent = connection()
