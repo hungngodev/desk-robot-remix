@@ -5303,6 +5303,49 @@ async def test_human_fleet_failed_head_flush_keeps_audio_owner_blocked(native):
     assert module._output_owner == "mac-02"
 
 
+async def test_human_preemption_bounds_wedged_peer_without_faking_stop_ack(native):
+    """A dead XIAO must not indefinitely delay another head's urgent STOP."""
+    module, _bridge = native
+    cancelled, healthy_stopped = asyncio.Event(), asyncio.Event()
+
+    class WedgedHead:
+        closed = False
+        conn = SimpleNamespace(client_is_speaking=True)
+
+        async def _invalidate_head_first(self):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        def _schedule_remote_cancel(self, events):
+            raise AssertionError("Unacknowledged STOP may not cancel model")
+
+    class HealthyHead:
+        closed = False
+        conn = SimpleNamespace(client_is_speaking=True)
+
+        async def _invalidate_head_first(self):
+            healthy_stopped.set()
+            return ({"type": "response.cancel"},)
+
+        def _schedule_remote_cancel(self, events):
+            assert events == ({"type": "response.cancel"},)
+
+    module._sessions = {
+        "mac-01": HealthyHead(), "mac-02": WedgedHead(),
+        "mac-03": HealthyHead(),
+    }
+    module._output_owner = "mac-02"
+    await asyncio.wait_for(
+        module.preempt_others_for_human("mac-01"), timeout=1.2,
+    )
+    assert healthy_stopped.is_set()
+    assert cancelled.is_set()
+    # The unresponsive head did NOT physically acknowledge the STOP.
+    assert module._output_owner == "mac-02"
+
+
 async def test_native_respects_operator_quiet_and_paused_direct_human_voice(native):
     module, bridge = native
     conn, sent = connection()
