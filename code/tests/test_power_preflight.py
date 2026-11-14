@@ -139,3 +139,21 @@ def test_each_missing_component_rating_blocks_paper_qualification(missing):
     assert report["candidate_electrically_sufficient_on_paper"] is None
     assert report["candidate_physically_qualified"] is False
     assert report["charger_and_load_sharing_verified"] is False
+
+
+@pytest.mark.parametrize("field", [
+    "cell_low_v", "measured_boost_efficiency", "margin",
+    "boost_max_input_a", "boost_continuous_input_a",
+    "boost_continuous_output_a", "protected_cell_continuous_a",
+])
+def test_boolean_values_never_masquerade_as_measured_power_or_ratings(field):
+    # Python bool is a subclass of int. A JSON true must not become a
+    # measured 1 A rating, 1 V threshold, or 100 percent efficiency.
+    with pytest.raises(ValueError):
+        tool(1, 0.6, **{field: True})
+
+
+@pytest.mark.parametrize("peak,continuous", [(True, 0.6), (1, True)])
+def test_boolean_load_telemetry_is_not_a_current_measurement(peak, continuous):
+    with pytest.raises(ValueError):
+        tool(peak, continuous)
