@@ -341,3 +341,100 @@ async def test_native_av_smoke_propagates_backend_error_during_input_pacing():
     assert 1 <= len(appends) <= 3
 
 
+
+@pytest.mark.asyncio
+async def test_real_five_concurrent_websocket_av_sessions_use_independent_receipts():
+    """Five actual protocol sockets, not five mocked Python probe calls."""
+    import asyncio
+    import base64
+    import json
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    smoke = smoke_module()
+    sessions = []
+    appends = []
+
+    async def realtime(request):
+        socket = web.WebSocketResponse()
+        await socket.prepare(request)
+        session_id = len(sessions)
+        sessions.append(session_id)
+        async for msg in socket:
+            event = json.loads(msg.data)
+            if event["type"] == "session.update":
+                await socket.send_json({
+                    "type": "session.created",
+                    "session": {
+                        "model": "openbmb/MiniCPM-o-4_5",
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "audio": {
+                            "input": {"sample_rate_hz": 16000},
+                            "output": {"format": {
+                                "type": "audio/pcm", "rate": 24000,
+                            }},
+                        },
+                        "capabilities": {
+                            "implementation_level": "model_native_duplex",
+                            "supports_input_append": True,
+                            "supports_barge_in": True,
+                            "chunk_period_ms": 1000,
+                        },
+                    },
+                })
+            elif event["type"] == "input_audio_buffer.append":
+                # The shared preflight barrier must open all five authenticated
+                # sessions before ANY model receives its first audio chunk.
+                assert len(sessions) == 5
+                appends.append((session_id, event))
+            elif event["type"] == "input_audio_buffer.commit":
+                response_id = f"resp_{session_id}"
+                await socket.send_json({
+                    "type": "response.created",
+                    "response_id": response_id,
+                    "response": {"id": response_id,
+                                 "metadata": {"duplex_event": {"epoch": 0}}},
+                })
+                await socket.send_json({
+                    "type": "response.output_audio.delta",
+                    "response_id": response_id,
+                    "format": "pcm16", "sample_rate_hz": 24000,
+                    "metadata": {"epoch": 0},
+                    "delta": base64.b64encode(bytes(4800)).decode("ascii"),
+                })
+                await socket.send_json({
+                    "type": "response.done",
+                    "response_id": response_id,
+                    "response": {"id": response_id, "status": "completed"},
+                })
+        return socket
+
+    app = web.Application()
+    app.router.add_get("/v1/realtime", realtime)
+    jpeg = bytes((0xff, 0xd8)) + b"one captured frame" + bytes((0xff, 0xd9))
+    async with TestServer(app) as server:
+        url = str(server.make_url("/v1/realtime?duplex=1")).replace(
+            "http://", "ws://",
+        )
+        result = await asyncio.wait_for(smoke.probe_fleet(
+            url, "openbmb/MiniCPM-o-4_5", bytes(32000), jpeg,
+            deadline=5, count=5,
+        ), timeout=8)
+    assert len(result) == 5
+    assert len(sessions) == 5
+    assert len(appends) == 50
+    for session_id in sessions:
+        events = [item for owner, item in appends if owner == session_id]
+        assert len(events) == 10
+        assert sum(len(item.get("video_frames", [])) for item in events) == 1
+        assert base64.b64decode(events[-1]["video_frames"][0]) == jpeg
+    assert all(len(audio) == 4800 for audio, _ in result)
+    assert all(stats["video_frames_sent"] == 1 for _, stats in result)
+    assert all(
+        stats["head_speaker_connected"] is False
+        and stats["actual_playback_acknowledged"] is False
+        for _, stats in result
+    )
+
+
