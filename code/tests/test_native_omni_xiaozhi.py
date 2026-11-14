@@ -846,6 +846,38 @@ async def test_native_voice_sends_one_video_frame_per_camera_receipt(native):
         await asyncio.gather(worker, return_exceptions=True)
 
 
+
+@pytest.mark.parametrize("offset_seconds", [-3.0, 3.0])
+async def test_native_microphone_refuses_queued_stale_or_future_audio(
+    native, offset_seconds,
+):
+    """A stalled socket may not replay old VAD as a fresh model input turn."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+
+    class ModelSocket:
+        async def send_json(self, packet):
+            raise AssertionError("Old microphone audio reached the model")
+
+    session._socket = ModelSocket()
+    session.incoming.put_nowait(module.MicFrame(
+        b"\x00" * 3200, True,
+        module.time.monotonic() + offset_seconds,
+    ))
+    await asyncio.wait_for(session._send_mic(), timeout=1)
+    assert session.closed
+    assert session.last_error == "Native microphone packet expired in input queue"
+    assert session.audio_frames == 0
+    assert session.wire.input_ms == 0
+    assert not session._user_was_talking
+    assert not session._direct_reply_available
+
+
 async def test_native_proactive_model_sees_video_while_microphone_reports_no_speech(
     native,
 ):

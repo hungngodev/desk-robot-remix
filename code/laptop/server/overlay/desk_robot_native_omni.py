@@ -167,6 +167,7 @@ def status(device: str) -> dict:
 class MicFrame:
     pcm16k: bytes
     speech: bool
+    received_at: float
 
 
 class NativeOmniSession:
@@ -312,8 +313,9 @@ class NativeOmniSession:
             self.fail("Unexpected 16k PCM shape from Xiaozhi Opus decoder")
             return
         try:
-            self.incoming.put_nowait(MicFrame(pcm, speech))
-            self._last_mic_received_at = time.monotonic()
+            received_at = time.monotonic()
+            self.incoming.put_nowait(MicFrame(pcm, speech, received_at))
+            self._last_mic_received_at = received_at
         except asyncio.QueueFull:
             # Never quietly drop a block of live speech and then hallucinate
             # that the model heard the complete utterance.
@@ -1545,6 +1547,12 @@ class NativeOmniSession:
     async def _send_mic(self) -> None:
         while not self.closed:
             packet = await self.incoming.get()
+            # If the realtime socket stalls, queued audio is historical,
+            # not a new human voice turn. Do not replay it as fresh speech
+            # to the duplex thinker after the connection recovers.
+            if not 0 <= time.monotonic() - packet.received_at <= 1.5:
+                self.fail("Native microphone packet expired in input queue")
+                return
             self.audio_frames += 1
             # Upstream vLLM-Omni PR #6318 rejects MiniCPM instruction edits
             # after handshake. Even older ACKs did not change Stage 0 KV.
