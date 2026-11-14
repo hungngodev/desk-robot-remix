@@ -1036,6 +1036,67 @@ def test_native_asr_write_revoked_during_sqlite_commit_rolls_back_only_new_event
             assert memory.count(settings.robots[1].id) == 0
 
 
+
+def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
+    settings, tokens, tmp_path, monkeypatch,
+):
+    """Durable transcript consent does not grant continuing live ASR access."""
+    import time
+    from types import SimpleNamespace
+    from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    robot = settings.robots[0].id
+    ids = [r.id for r in settings.robots]
+    memory = MemoryStore(tmp_path / "private", ids)
+    hub = CameraFrameHub(ids)
+    original = memory.remember
+
+    def revoke_live_during_write(*args, **kwargs):
+        inserted = original(*args, **kwargs)
+        settings.voice_vision_tools_enabled = False
+        return inserted
+
+    monkeypatch.setattr(memory, "remember", revoke_live_during_write)
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot),
+        memory=memory, multimodal=SimpleNamespace(hub=hub),
+        start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    event_id = "omni_" + "a" * 12 + "_" + "b" * 20
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        response = client.post(
+            f"/v1/pet/{robot}/omni-heard", headers=headers,
+            json={"event_id": event_id, "transcript": "My private key is here"},
+        )
+        assert response.status_code == 200
+        assert response.json()["stored"] is True
+        assert response.json()["ephemeral_context_added"] is False
+        assert settings.voice_vision_tools_enabled is False
+        settings.voice_vision_tools_enabled = True
+        situation = client.get(
+            f"/v1/pet/{robot}/interaction-context", headers=headers,
+        )
+        assert situation.status_code == 200
+        assert not any(
+            entry["channel"] == "human_transcript"
+            for entry in situation.json()["current_interaction_timeline"]
+        )
+    assert not hub.heard_history[robot]
+    assert not hub.heard_history[ids[1]]
+    assert memory.count(robot) == 1
+    assert memory.count(ids[1]) == 0
+
+
+
 def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
     settings, tokens, tmp_path,
 ):
