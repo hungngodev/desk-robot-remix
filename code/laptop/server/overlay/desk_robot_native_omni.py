@@ -1879,6 +1879,8 @@ class NativeOmniSession:
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
         if state == "start":
+            if self._monitor_lost:
+                return False  # Lost fleet VAD forbids all native audio.
             # Both quiet and pause prohibit unsolicited model speech, not
             # a single genuine reply to the next authenticated human VAD.
             # A recent timestamp alone was not sufficient: it previously
@@ -1914,6 +1916,7 @@ class NativeOmniSession:
             direct_required = self._pet_quiet or not self._pet_autonomy_enabled
             if (self.closed or generation != self._generation
                     or self._external_speech_active
+                    or (state == "start" and self._monitor_lost)
                     or (state == "start" and direct_required and not (
                         self._direct_reply_available
                         and 0 <= time.monotonic() -
@@ -1960,6 +1963,7 @@ class NativeOmniSession:
         if (self.closed
                 or generation != self._generation
                 or self._external_speech_active
+                or self._monitor_lost
                 or ((self._pet_quiet or not self._pet_autonomy_enabled)
                     and not self._direct_reply_active)):
             return False
@@ -1974,6 +1978,7 @@ class NativeOmniSession:
             if (self.closed
                     or generation != self._generation
                     or self._external_speech_active
+                    or self._monitor_lost
                     or ((self._pet_quiet or not self._pet_autonomy_enabled)
                         and not self._direct_reply_active)):
                 return False
@@ -2427,6 +2432,17 @@ async def on_barge(conn) -> bool:
     """Cancel just this output generation, never revoke pet autonomy."""
     session = _sessions.get(getattr(conn, "device_id", None))
     if session is not None and session.conn is conn and not session.closed:
+        await session.barge()
+        return True
+    return False
+
+
+async def suspend_proactive_for_monitor_loss(conn) -> bool:
+    """Block all native output until an authenticated Mac VAD recovery."""
+    session = _sessions.get(getattr(conn, "device_id", None))
+    if session is not None and session.conn is conn and not session.closed:
+        session._monitor_lost = True
+        session._pet_autonomy_enabled = False
         await session.barge()
         return True
     return False
