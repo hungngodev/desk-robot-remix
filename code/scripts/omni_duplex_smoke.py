@@ -62,9 +62,12 @@ def read_jpeg(path: Path | None) -> bytes | None:
 
 async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 *, deadline: float,
-                barrier: asyncio.Barrier | None = None) -> tuple[bytes, dict]:
+                barrier: asyncio.Barrier | None = None,
+                quiet_input: bool = False) -> tuple[bytes, dict]:
     if not 5 <= deadline <= 180:
         raise ValueError("Probe deadline must be between 5 and 180 seconds")
+    if type(quiet_input) is not bool:
+        raise ValueError("Quiet input must be an explicit boolean")
     wire = OmniDuplexWire(model=model)
     output = bytearray()
     transcript = []
@@ -76,6 +79,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
         "motion_authorized": False,
     }
     first_audio_at = None
+    model_decision = None
     started_at = time.monotonic()
     # This is a prerecorded operator-supplied test JPEG, NOT a live
     # XIAO exposure timestamp. Use its one local receipt identity for the
@@ -104,7 +108,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 )
 
             async def reader():
-                nonlocal first_audio_at
+                nonlocal first_audio_at, model_decision
                 async for msg in socket:
                     if msg.type != aiohttp.WSMsgType.TEXT:
                         raise RuntimeError("Non-JSON response from native backend")
@@ -115,6 +119,12 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                     ):
                         transcript.append(str(event.get("delta", ""))[:512])
                     packet = wire.handle_event(event)
+                    if event.get("type") == "response.listen" and quiet_input:
+                        # In true duplex a silent room may correctly yield a
+                        # model listen decision without response.created/done.
+                        # It is not generated audio, a playback ACK, or a fail.
+                        model_decision = "listen"
+                        return
                     if packet is not None:
                         if first_audio_at is None:
                             first_audio_at = time.monotonic()
@@ -129,6 +139,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                             raise RuntimeError(
                                 "Native duplex response failed, cancelled or malformed"
                             )
+                        model_decision = "speak"
                         return
                 raise RuntimeError("Native duplex socket ended before response.done")
 
@@ -139,10 +150,11 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 padded = pcm + b"\0" * (-len(pcm) % 32)
                 for index in range(0, len(padded), 3200):
                     if listener.done():
-                        await listener  # Surface an early backend failure now.
+                        await listener  # Propagate backend failure or early turn.
+                        break
                     chunk = padded[index:index + 3200]
                     packet = wire.append_audio(
-                        chunk, speech=True,
+                        chunk, speech=not quiet_input,
                         jpeg=jpeg,
                         camera_age_ms=0 if jpeg is not None else None,
                         frame_receipt_us=test_frame_receipt_us,
@@ -151,11 +163,13 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                     await asyncio.sleep(packet["duration_ms"] / 1000)
                     if listener.done():
                         await listener
-                await socket.send_json(wire.commit())
-                # Wait on the actual reader task: a model error, rejected
-                # frame, early socket close or failed response must propagate
-                # immediately, not hide behind a 90-second event timeout.
-                await asyncio.wait_for(listener, timeout=deadline)
+                        break
+                if not listener.done():
+                    await socket.send_json(wire.commit())
+                    # Propagate backend errors and interrupted turns promptly.
+                    await asyncio.wait_for(listener, timeout=deadline)
+                if jpeg is not None and wire.frames_sent == 0:
+                    raise RuntimeError("Native backend decided before receiving video")
             finally:
                 if not listener.done():
                     listener.cancel()
@@ -166,7 +180,9 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                     pass
 
     results.update({
-        "input_duration_ms": len(pcm) // 32,
+        "input_duration_ms": wire.input_ms,
+        "input_mode": "quiet_mic" if quiet_input else "human_speech",
+        "model_decision": model_decision,
         "video_frames_sent": wire.frames_sent,
         "generated_audio_ms": len(output) * 1000 // (24000 * 2),
         "first_audio_ms_since_connect": (
@@ -180,7 +196,8 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
 
 
 async def probe_fleet(url: str, model: str, pcm: bytes, jpeg: bytes | None,
-                      *, deadline: float, count: int = 5
+                      *, deadline: float, count: int = 5,
+                      quiet_input: bool = False
                       ) -> list[tuple[bytes, dict]]:
     """Require N concurrent full AV turns, not N sequential lucky handshakes.
 
@@ -194,13 +211,19 @@ async def probe_fleet(url: str, model: str, pcm: bytes, jpeg: bytes | None,
     tasks = [
         asyncio.create_task(probe(
             url, model, pcm, jpeg, deadline=deadline, barrier=barrier,
+            quiet_input=quiet_input,
         ))
         for _ in range(count)
     ]
     try:
         results = await asyncio.gather(*tasks)
-        if any(not audio for audio, _ in results):
-            raise RuntimeError("A concurrent native session produced no audio")
+        if any(
+            not audio and not (
+                quiet_input and stats.get("model_decision") == "listen"
+            )
+            for audio, stats in results
+        ):
+            raise RuntimeError("Native session produced neither speech nor intentional silence")
         return results
     finally:
         for task in tasks:
@@ -220,12 +243,14 @@ def main() -> None:
     parser.add_argument("--deadline-s", type=float, default=90.0)
     parser.add_argument("--fleet-sessions", type=int, choices=range(1, 6),
                         default=1)
+    parser.add_argument("--quiet-input", action="store_true",
+                        help="Feed actual quiet PCM as non-speech; allow model listen")
     args = parser.parse_args()
     pcm = read_wav(args.input_wav)
     jpeg = read_jpeg(args.frame_jpeg)
     results = asyncio.run(probe_fleet(
         args.url, args.model, pcm, jpeg, deadline=args.deadline_s,
-        count=args.fleet_sessions,
+        count=args.fleet_sessions, quiet_input=args.quiet_input,
     ))
     reports = []
     for index, (output, stats) in enumerate(results, 1):
@@ -236,13 +261,14 @@ def main() -> None:
                 f"{args.output_wav.stem}.pet{index:02d}{args.output_wav.suffix}"
             )
         )
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with wave.open(str(dest), "wb") as dst:
-            dst.setnchannels(1)
-            dst.setsampwidth(2)
-            dst.setframerate(24000)
-            dst.writeframes(output)
-        reports.append({**stats, "output_wav": str(dest)})
+        if output:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(dest), "wb") as dst:
+                dst.setnchannels(1)
+                dst.setsampwidth(2)
+                dst.setframerate(24000)
+                dst.writeframes(output)
+        reports.append({**stats, "output_wav": str(dest) if output else None})
     if args.fleet_sessions == 1:
         print(json.dumps(reports[0], indent=2))
     else:
