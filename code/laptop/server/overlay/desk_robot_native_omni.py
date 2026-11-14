@@ -2218,10 +2218,12 @@ async def begin_external_speech(conn) -> bool:
                         if (bridge.connections.get(conn.device_id) is not conn
                                 or bridge.human_speech_active()):
                             return False
-                        await conn.websocket.send(json.dumps({
-                            "type": "tts", "state": "stop", "flush": True,
-                            "session_id": conn.session_id,
-                        }))
+                        await asyncio.wait_for(
+                            conn.websocket.send(json.dumps({
+                                "type": "tts", "state": "stop", "flush": True,
+                                "session_id": conn.session_id,
+                            })), timeout=0.4,
+                        )
                 except Exception:
                     return False
                 conn.client_is_speaking = False
