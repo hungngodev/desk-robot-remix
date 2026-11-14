@@ -45,6 +45,8 @@ except ModuleNotFoundError:
 
 _sessions: dict[str, "NativeOmniSession"] = {}
 _output_owner: str | None = None
+# A failed final head STOP cannot be erased by reconnecting the same device ID.
+_output_owner_unverified: str | None = None
 _external_speaker_owner: str | None = None
 _external_speaker_connection = None
 _output_owner_lock = asyncio.Lock()
@@ -348,7 +350,11 @@ class NativeOmniSession:
                 queue = getattr(tts, name, None)
                 if queue is not None and callable(getattr(queue, "empty", None)):
                     pending = pending or not queue.empty()
-        if speaking or pending:
+        import desk_robot_bridge as bridge
+        if bridge.connections.get(self.device) is not self.conn:
+            raise RuntimeError("Only current authenticated head can reset decoder")
+        uncertain = _output_owner_unverified == self.device
+        if speaking or pending or uncertain:
             self.conn.client_abort = True
             clear = getattr(self.conn, "clear_queues", None)
             if callable(clear):
@@ -359,6 +365,15 @@ class NativeOmniSession:
                     "session_id": self.conn.session_id,
                 }))
             self.conn.client_is_speaking = False
+            if uncertain:
+                # Recover a stale physical speaker lease only AFTER the new
+                # authenticated connection has sent its own decoder STOP.
+                global _output_owner, _output_owner_unverified
+                async with _output_owner_lock:
+                    if (_output_owner == self.device
+                            and _output_owner_unverified == self.device):
+                        _output_owner = None
+                        _output_owner_unverified = None
 
     async def _load_private_persona(self, http: aiohttp.ClientSession) -> None:
         """Ask the existing Mac authority for THIS robot's voice style.
@@ -2109,10 +2124,14 @@ class NativeOmniSession:
                     self.last_error or "Native model session ended without clean shutdown"
                 )[:140]
                 _retry_after[self.device] = time.monotonic() + 15.0
-            global _output_owner
+            global _output_owner, _output_owner_unverified
             async with _output_owner_lock:
-                if _output_owner == self.device and stop_confirmed:
-                    _output_owner = None
+                if _output_owner == self.device:
+                    if stop_confirmed:
+                        _output_owner = None
+                        _output_owner_unverified = None
+                    else:
+                        _output_owner_unverified = self.device
 
 
 # A native session and its Mac proactive speaker must serialize bytes and
@@ -2212,6 +2231,10 @@ async def claim_speaker(session: NativeOmniSession) -> bool:
     import desk_robot_bridge as bridge
     async with _speaker_handoff_lock:
         async with _output_owner_lock:
+            if _output_owner_unverified is not None:
+                # Reusing the same device ID is not physical STOP evidence.
+                # The reconnect path must flush the new authenticated head.
+                return False
             if bridge.human_speech_active() or _external_speaker_owner is not None:
                 return False
             other_id = _output_owner
