@@ -214,22 +214,41 @@ def main() -> None:
     parser.add_argument("--frame-jpeg", type=Path)
     parser.add_argument("--output-wav", required=True, type=Path)
     parser.add_argument("--deadline-s", type=float, default=90.0)
+    parser.add_argument("--fleet-sessions", type=int, choices=range(1, 6),
+                        default=1)
     args = parser.parse_args()
     pcm = read_wav(args.input_wav)
     jpeg = read_jpeg(args.frame_jpeg)
-    output, stats = asyncio.run(probe(
+    results = asyncio.run(probe_fleet(
         args.url, args.model, pcm, jpeg, deadline=args.deadline_s,
+        count=args.fleet_sessions,
     ))
-    if output:
-        args.output_wav.parent.mkdir(parents=True, exist_ok=True)
-        with wave.open(str(args.output_wav), "wb") as dst:
+    reports = []
+    for index, (output, stats) in enumerate(results, 1):
+        # Never overwrite one pet's evidence with another's output WAV.
+        dest = (
+            args.output_wav if args.fleet_sessions == 1 else
+            args.output_wav.with_name(
+                f"{args.output_wav.stem}.pet{index:02d}{args.output_wav.suffix}"
+            )
+        )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(dest), "wb") as dst:
             dst.setnchannels(1)
             dst.setsampwidth(2)
             dst.setframerate(24000)
             dst.writeframes(output)
-    print(json.dumps(stats, indent=2))
-    if not output:
-        raise SystemExit("Model did not produce test audio; no physical playback claimed")
+        reports.append({**stats, "output_wav": str(dest)})
+    if args.fleet_sessions == 1:
+        print(json.dumps(reports[0], indent=2))
+    else:
+        print(json.dumps({
+            "concurrent_backend_sessions_tested": args.fleet_sessions,
+            "full_av_turns_completed": len(reports),
+            "five_physical_robots_verified": False,
+            "head_speaker_playback_verified": False,
+            "per_session": reports,
+        }, indent=2))
 
 
 if __name__ == "__main__":
