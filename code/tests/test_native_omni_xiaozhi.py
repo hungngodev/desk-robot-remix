@@ -5964,3 +5964,70 @@ async def test_human_preemption_never_clears_uncertain_disconnected_decoder(nati
     assert module._output_owner_unverified == "mac-01"
 
 
+@pytest.mark.parametrize("failure", ["disconnect", "stall"])
+async def test_native_pending_legacy_stop_failure_blocks_fleet_without_tts_flag(
+    native, failure,
+):
+    """Queued welcome PCM is uncertain even before client_is_speaking=true."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.tts = SimpleNamespace(
+        tts_audio_queue=SimpleNamespace(empty=lambda: False),
+        tts_text_queue=SimpleNamespace(empty=lambda: True),
+    )
+    conn.clear_queues = lambda: None
+
+    class Head:
+        async def send(self, _):
+            if failure == "disconnect":
+                raise ConnectionError("legacy STOP unavailable")
+            await asyncio.Event().wait()
+
+    conn.websocket = Head()
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    with pytest.raises((ConnectionError, asyncio.TimeoutError)):
+        await asyncio.wait_for(session._retire_legacy_audio(), timeout=0.7)
+    assert module._output_owner == "mac-01"
+    assert module._output_owner_unverified == "mac-01"
+    assert not conn.client_is_speaking
+    assert conn.client_abort
+
+
+@pytest.mark.parametrize("failure", ["disconnect", "stall"])
+async def test_native_failed_startup_cleanup_without_claim_keeps_uncertain_speaker(
+    native, failure,
+):
+    """A prior decoder need not have a native lease to block fleet speech."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+
+    class Head:
+        async def send(self, _):
+            if failure == "disconnect":
+                raise ConnectionError("decoder STOP unavailable")
+            await asyncio.Event().wait()
+
+    conn.websocket = Head()
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+
+    async def fail_before_claim():
+        raise RuntimeError("backend never started")
+
+    session._retire_legacy_audio = fail_before_claim
+    await asyncio.wait_for(session.run(), timeout=0.7)
+    assert session.closed
+    assert module._output_owner == conn.device_id
+    assert module._output_owner_unverified == conn.device_id
+    assert not await module.claim_speaker(session)
+
+
