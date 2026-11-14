@@ -353,3 +353,22 @@ def test_cli_rejects_nonfinite_power_telemetry_and_ratings(monkeypatch, capsys, 
     with pytest.raises(ValueError):
         runpy.run_path(str(script), run_name="__main__")
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("field", [
+    "peak", "continuous", "cell_low_v", "measured_boost_efficiency",
+    "margin", "boost_max_input_a", "boost_continuous_input_a",
+    "boost_continuous_output_a", "protected_cell_continuous_a",
+])
+def test_unrepresentably_large_integer_telemetry_fails_closed(field):
+    # math.isfinite(huge_int) itself raises OverflowError in CPython.
+    # The public sizing API must reject it consistently as invalid input.
+    huge = 10 ** 1000
+    if field == "peak":
+        args, kwargs = (huge, 0.6), {}
+    elif field == "continuous":
+        args, kwargs = (1, huge), {}
+    else:
+        args, kwargs = (1, 0.6), {field: huge}
+    with pytest.raises(ValueError):
+        tool(*args, **kwargs)
