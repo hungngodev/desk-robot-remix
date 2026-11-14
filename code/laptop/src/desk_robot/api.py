@@ -561,18 +561,29 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 ephemeral = remember(
                     robot_id, request.event_id, spoken[:240], time.monotonic()
                 )
+        memory_opt_in = settings.voice_transcript_memory_enabled
         inserted = False
-        if settings.voice_transcript_memory_enabled:
+        if memory_opt_in:
             inserted = await asyncio.to_thread(
                 app.state.runtime.memory.remember, robot_id, request.event_id,
                 "Someone spoke (uncertain ASR): " + spoken[:240],
                 kind="heard_human", source_robot=robot_id, witnessed=True,
                 confidence=0.6,
             )
+        # A private SQLite write may take longer than the operator's
+        # opt-out. Remove ONLY this request's newly inserted episode if
+        # permission changed during I/O; never delete an older duplicate.
+        if memory_opt_in != settings.voice_transcript_memory_enabled:
+            if inserted:
+                await asyncio.to_thread(
+                    app.state.runtime.memory.forget_episode,
+                    robot_id, request.event_id,
+                )
+            raise HTTPException(403, "Transcript storage consent changed during read")
         return {
             "robot_id": robot_id, "stored": inserted,
             "ephemeral_context_added": ephemeral,
-            "retained_on_disk": settings.voice_transcript_memory_enabled,
+            "retained_on_disk": memory_opt_in,
             "source": "model_estimated_xiaozhi_audio_transcription",
             "speaker_identity_verified": False,
             "audio_playback_verified": False,

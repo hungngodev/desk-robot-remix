@@ -850,6 +850,61 @@ def test_completed_native_asr_blends_with_live_camera_context_without_disk_conse
         assert hub.interaction_timeline(pet.id, time.monotonic()) == []
 
 
+
+def test_native_asr_write_revoked_during_sqlite_commit_rolls_back_only_new_event(
+    settings, tokens, tmp_path, monkeypatch,
+):
+    """Revoked consent retracts new ASR but keeps older idempotent history."""
+    from types import SimpleNamespace
+    from desk_robot.memory import MemoryStore
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    settings.voice_transcript_memory_enabled = True
+    robot = settings.robots[0].id
+    memory = MemoryStore(tmp_path / "private", [r.id for r in settings.robots])
+    original = memory.remember
+
+    def revoke_during_write(*args, **kwargs):
+        inserted = original(*args, **kwargs)
+        settings.voice_transcript_memory_enabled = False
+        return inserted
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot),
+        memory=memory, multimodal=None,
+        start=noop, close=noop,
+    )
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    url = f"/v1/pet/{robot}/omni-heard"
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        for index, seed_existing in enumerate((False, True)):
+            event_id = (
+                "omni_" + "a" * 12 + "_" + (str(index) * 20)
+            )
+            if seed_existing:
+                assert original(
+                    robot, event_id, "A previously consented transcript",
+                    kind="heard_human", source_robot=robot, witnessed=True,
+                )
+            before = memory.count(robot)
+            monkeypatch.setattr(memory, "remember", revoke_during_write)
+            settings.voice_transcript_memory_enabled = True
+            response = client.post(
+                url, headers=auth, json={
+                    "event_id": event_id,
+                    "transcript": "I left a key on the shelf",
+                },
+            )
+            assert response.status_code == 403
+            assert settings.voice_transcript_memory_enabled is False
+            assert memory.count(robot) == before
+            assert memory.count(settings.robots[1].id) == 0
+
+
 def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
     settings, tokens, tmp_path,
 ):
