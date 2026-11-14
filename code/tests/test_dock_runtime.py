@@ -96,6 +96,26 @@ async def test_measured_marker_pose_does_not_energize_contact_or_drive(tmp_path,
     {"measured": False}, {"fx": 0}, {"tag_side_mm": 500},
     {"target_distance_mm": 0},
 ])
+@pytest.mark.parametrize("target", [10 ** 1000, -(10 ** 1000), float("inf"), float("nan"), True])
+async def test_unrepresentable_dock_stop_target_holds_before_camera(tmp_path, target):
+    # A malformed calibration must never raise OverflowError or start a
+    # camera observation, and certainly cannot authorize docking motion.
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": target,
+    }))
+    head = Head()
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=path)
+    )
+    assert result["phase"] == "hold"
+    assert result["source"] == "not_calibrated"
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert not result["physical_acceptance_pass"]
+    assert head.captures == 0 and head.commands == []
+
+
 async def test_fake_or_bad_dock_calibration_never_looks_or_drives(tmp_path, change):
     data = {
         "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
