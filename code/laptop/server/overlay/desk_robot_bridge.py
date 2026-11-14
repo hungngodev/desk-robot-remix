@@ -135,7 +135,13 @@ def record_human_voice(conn, kind: str) -> bool:
     if kind in ("speech_start", "normal", "group"):
         voice_turn_generation[device] = voice_turn_generation.get(device, 0) + 1
         _invalidate_tool_turn(device)
-        native = _native_adapter()
+        try:
+            native = _native_adapter()
+        except ModuleNotFoundError:
+            # An explicitly selected but missing OPTIONAL model must never
+            # prevent the authenticated human VAD event or urgent head STOP.
+            # route_audio still rejects this misconfigured model separately.
+            native = None
         if native is not None:
             # Never block original AEC/VAD while silencing other native pets.
             # Synchronous test/diagnostic code has no running event loop.
@@ -427,7 +433,10 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
         # even when the first urgent STOP failed.
         voice_frames.pop(device, None)
         voice_last_frame_at.pop(device, None)
-        native = _native_adapter()
+        try:
+            native = _native_adapter()
+        except ModuleNotFoundError:
+            native = None  # Physical STOP never waits for optional inference.
         if native is not None:
             try:
                 await asyncio.wait_for(native.on_barge(conn), timeout=0.5)
