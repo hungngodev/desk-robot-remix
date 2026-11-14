@@ -7,12 +7,16 @@ import pytest
 from PIL import Image
 
 
-def capture_checkerboards(*args, **kwargs):
+def capture_module():
     source = Path(__file__).resolve().parents[1] / "scripts/capture_dock_checkerboard.py"
     spec = importlib.util.spec_from_file_location("desk_dock_capture", source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.capture_checkerboards(*args, **kwargs)
+    return module
+
+
+def capture_checkerboards(*args, **kwargs):
+    return capture_module().capture_checkerboards(*args, **kwargs)
 
 
 def jpeg(width=640, height=480):
@@ -94,3 +98,45 @@ async def test_existing_private_folder_is_never_overwritten(tmp_path):
     with pytest.raises(FileExistsError):
         await capture_checkerboards(object(), folder, count=12, prompt=prompt)
     assert (folder / "01.jpg").read_bytes() == b"original"
+
+
+@pytest.mark.asyncio
+async def test_disk_write_failure_cleans_partial_private_image(tmp_path, monkeypatch):
+    """Private raw JPEG must be removed even when its write fails mid-frame."""
+    import os
+
+    module = capture_module()
+
+    class FailedWrite:
+        def __init__(self, fd):
+            self.fd = fd
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            os.close(self.fd)
+
+        def write(self, _blob):
+            raise OSError("disk full")
+
+    monkeypatch.setattr(
+        module.os, "fdopen", lambda fd, *_args, **_kwargs: FailedWrite(fd)
+    )
+
+    class Head:
+        async def status(self):
+            return {"armed": False}
+
+        async def snapshot(self):
+            return jpeg()
+
+    async def prompt(_):
+        pass
+
+    folder = tmp_path / "private"
+    with pytest.raises(OSError, match="disk full"):
+        await module.capture_checkerboards(
+            Head(), folder, count=12, prompt=prompt
+        )
+    assert not folder.exists()

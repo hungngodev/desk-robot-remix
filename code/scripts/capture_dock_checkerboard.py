@@ -53,9 +53,9 @@ async def capture_checkerboards(
             size = frame_size
             target = folder / f"{index+1:02d}.jpg"
             fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            saved.append(target)  # Also remove a partially written private JPEG.
             with os.fdopen(fd, "wb") as file:
                 file.write(jpeg)
-            saved.append(target)
         success = True
         return {
             "images": len(saved), "image_width_px": size[0],
