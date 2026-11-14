@@ -204,3 +204,15 @@ def test_bq25895_otg_output_limit_cannot_be_confused_with_charge_current():
     assert report["candidate_electrically_sufficient_on_paper"] is False
     assert report["candidate_physically_qualified"] is False
     assert report["charger_and_load_sharing_verified"] is False
+
+
+def test_power_report_retains_both_original_load_measurements_for_audit():
+    # Peak and sustained measurements must remain distinguishable from
+    # derated minimum component ratings in a downstream shopping audit.
+    report = tool(3.0, 1.8)
+    assert report["measured_peak_5v_a"] == 3.0
+    assert report["measured_continuous_5v_a"] == 1.8
+    assert report["minimum_rated_5v_output_a"] > report["measured_peak_5v_a"]
+    assert report["minimum_rated_continuous_5v_a"] > report["measured_continuous_5v_a"]
+    assert report["candidate_physically_qualified"] is False
+    assert report["charger_and_load_sharing_verified"] is False
