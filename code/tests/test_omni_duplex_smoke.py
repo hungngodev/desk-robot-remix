@@ -215,7 +215,7 @@ async def test_five_pet_backend_preflight_opens_all_sessions_before_streaming(
     entered = set()
     completed = []
 
-    async def admitted_probe(url, model, pcm, jpeg, *, deadline, barrier):
+    async def admitted_probe(url, model, pcm, jpeg, *, deadline, barrier, quiet_input):
         number = len(entered)
         entered.add(number)
         assert barrier.parties == 5
@@ -255,7 +255,7 @@ async def test_failed_five_pet_backend_preflight_cancels_other_live_sessions(
     release = asyncio.Event()
     cancelled = []
 
-    async def failing_probe(url, model, pcm, jpeg, *, deadline, barrier):
+    async def failing_probe(url, model, pcm, jpeg, *, deadline, barrier, quiet_input):
         await barrier.wait()
         if asyncio.current_task().get_name() == "Task-does-not-exist":
             raise AssertionError("unreachable")
@@ -436,5 +436,103 @@ async def test_real_five_concurrent_websocket_av_sessions_use_independent_receip
         and stats["actual_playback_acknowledged"] is False
         for _, stats in result
     )
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["listen", "speak"])
+async def test_quiet_mic_video_unit_accepts_intentional_listen_or_real_speech(
+    decision,
+):
+    """Quiet PCM plus a real JPEG reaches native duplex without forged VAD."""
+    import asyncio
+    import base64
+    import json
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    smoke = smoke_module()
+    input_events = []
+    jpeg = bytes((0xff, 0xd8)) + b"quiet desk scene" + bytes((0xff, 0xd9))
+
+    async def model_socket(request):
+        socket = web.WebSocketResponse()
+        await socket.prepare(request)
+        async for message in socket:
+            event = json.loads(message.data)
+            if event["type"] == "session.update":
+                await socket.send_json({
+                    "type": "session.created",
+                    "session": {
+                        "model": "openbmb/MiniCPM-o-4_5",
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "audio": {
+                            "input": {"sample_rate_hz": 16000},
+                            "output": {"format": {
+                                "type": "audio/pcm", "rate": 24000,
+                            }},
+                        },
+                        "capabilities": {
+                            "implementation_level": "model_native_duplex",
+                            "supports_input_append": True,
+                            "supports_barge_in": True,
+                            "chunk_period_ms": 1000,
+                        },
+                    },
+                })
+            elif event["type"] == "input_audio_buffer.append":
+                input_events.append(event)
+                if event.get("video_frames"):
+                    if decision == "listen":
+                        await socket.send_json({
+                            "type": "response.listen",
+                            "session_id": "quiet_test",
+                            "epoch": 0,
+                            "response": {"status": "listening"},
+                        })
+                    else:
+                        await socket.send_json({
+                            "type": "response.created", "response_id": "q1",
+                            "response": {
+                                "id": "q1",
+                                "metadata": {"duplex_event": {"epoch": 0}},
+                            },
+                        })
+                        await socket.send_json({
+                            "type": "response.output_audio.delta",
+                            "response_id": "q1", "format": "pcm16",
+                            "sample_rate_hz": 24000,
+                            "metadata": {"epoch": 0},
+                            "delta": base64.b64encode(bytes(4800)).decode("ascii"),
+                        })
+                        await socket.send_json({
+                            "type": "response.done", "response_id": "q1",
+                            "response": {"id": "q1", "status": "completed"},
+                        })
+        return socket
+
+    app = web.Application()
+    app.router.add_get("/v1/realtime", model_socket)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/v1/realtime?duplex=1")).replace(
+            "http://", "ws://",
+        )
+        result = await asyncio.wait_for(smoke.probe_fleet(
+            url, "openbmb/MiniCPM-o-4_5", bytes(32000), jpeg,
+            deadline=5, count=1, quiet_input=True,
+        ), timeout=8)
+    assert len(input_events) == 10
+    assert all(item["is_speech"] is False for item in input_events)
+    assert input_events[-1]["video_frames"] == [
+        base64.b64encode(jpeg).decode("ascii")
+    ]
+    audio, stats = result[0]
+    assert stats["input_mode"] == "quiet_mic"
+    assert stats["input_duration_ms"] == 1000
+    assert stats["video_frames_sent"] == 1
+    assert stats["model_decision"] == decision
+    assert len(audio) == (0 if decision == "listen" else 4800)
+    assert stats["actual_playback_acknowledged"] is False
 
 
