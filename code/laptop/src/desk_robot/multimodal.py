@@ -441,6 +441,15 @@ class CameraFrameHub:
         )
         return True
 
+    def discard_heard(self, robot_id: str, event_id: str) -> None:
+        """Retract only a newly recorded ASR item after live consent revoke."""
+        self._check(robot_id)
+        entries = self.heard_history[robot_id]
+        self.heard_history[robot_id] = deque(
+            (item for item in entries if item[0] != event_id),
+            maxlen=entries.maxlen,
+        )
+
     def interaction_timeline(self, robot_id: str, now: float,
                              *, limit: int = 10) -> list[dict]:
         """One ordered, bounded Mac view of authenticated multimodal cues.
