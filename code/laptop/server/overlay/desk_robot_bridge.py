@@ -407,26 +407,32 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
     conn.client_abort = True
     conn.clear_queues()
     interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
+    # Record authenticated VAD before awaiting a possibly disconnected
+    # head, so Mac and other pets can preempt independently of this STOP.
+    record_human_voice(conn, "normal")
+    stop_sent = False
     try:
-        await conn.websocket.send(json.dumps({
-            "type": "tts", "state": "stop",
-            "session_id": conn.session_id, "flush": True,
-        }))
+        await asyncio.wait_for(
+            conn.websocket.send(json.dumps({
+                "type": "tts", "state": "stop",
+                "session_id": conn.session_id, "flush": True,
+            })), timeout=0.4,
+        )
+        stop_sent = True
     finally:
-        conn.clearSpeakStatus()
+        if stop_sent:
+            conn.clearSpeakStatus()
+        # Failure or cancellation must not pretend the decoder stopped.
+        # Native generation invalidation still happens on real user VAD,
+        # even when the first urgent STOP failed.
         voice_frames.pop(device, None)
         voice_last_frame_at.pop(device, None)
-    # Physical speaker flush above has highest priority; also invalidate
-    # the native model audio generator so late PCM cannot restart that turn.
-    native = _native_adapter()
-    if native is not None:
-        try:
-            await native.on_barge(conn)
-        except Exception:
-            # A failing OPTIONAL model endpoint must never prevent the
-            # already-confirmed human voice event reaching the Mac listener.
-            pass
-    record_human_voice(conn, "normal")
+        native = _native_adapter()
+        if native is not None:
+            try:
+                await asyncio.wait_for(native.on_barge(conn), timeout=0.5)
+            except (Exception, asyncio.CancelledError):
+                pass
     return True
 
 
@@ -454,11 +460,13 @@ async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
     _start_lease_cleanup()
     # A normal Xiaozhi 'tts stop' waits for its queued stream and does not
     # empty I2S DMA. This explicit stop extension is handled by Sense firmware.
-    await conn.websocket.send(json.dumps({
+    # The human VAD event and Mac sender-generation abort must survive a
+    # stalled physical STOP, not disappear behind a head WebSocket timeout.
+    record_human_voice(conn, "group")
+    await asyncio.wait_for(conn.websocket.send(json.dumps({
         "type": "tts", "state": "stop", "session_id": conn.session_id,
         "flush": True,
-    }))
-    record_human_voice(conn, "group")
+    })), timeout=0.4)
     return True
 
 
