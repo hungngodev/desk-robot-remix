@@ -260,3 +260,22 @@ def test_cli_margin_changes_paper_sizing(monkeypatch, capsys):
         assert report["minimum_rated_5v_output_a"] == expected
         assert report["candidate_physically_qualified"] is False
         assert report["charger_and_load_sharing_verified"] is False
+
+
+def test_tps61088_ten_amp_switch_rating_is_not_a_five_volt_output_rating():
+    # TI TPS61088's 10 A figure describes its internal switching path,
+    # not a verified 10 A continuous 5 V output from a particular board.
+    # A candidate with only that advertised switch rating has no complete
+    # published boost input/output and protected cell current specifications.
+    unknown = tool(3.0, 1.8)
+    assert unknown["minimum_rated_5v_output_a"] == 3.9
+    assert unknown["candidate_electrically_sufficient_on_paper"] is None
+    # Even a hypothetical board limited to 3 A continuous 5 V output fails
+    # the simultaneous full robot peak despite generous other ratings.
+    limited = tool(3.0, 1.8, boost_max_input_a=10,
+                   boost_continuous_input_a=10,
+                   boost_continuous_output_a=3,
+                   protected_cell_continuous_a=10)
+    assert limited["candidate_electrically_sufficient_on_paper"] is False
+    assert limited["candidate_physically_qualified"] is False
+    assert limited["charger_and_load_sharing_verified"] is False
