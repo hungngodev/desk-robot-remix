@@ -677,8 +677,9 @@ def create_app():
         body = await request.json()
         device = body.get("device_id") if isinstance(body, dict) else None
         revoke = body.get("revoke_initiative", False) if isinstance(body, dict) else False
-        if type(revoke) is not bool:
-            raise ValueError("Native initiative revoke must be an explicit boolean")
+        monitor_lost = body.get("monitor_unavailable", False) if isinstance(body, dict) else False
+        if type(revoke) is not bool or type(monitor_lost) is not bool or (revoke and monitor_lost):
+            raise ValueError("Exactly one valid operator or monitor interruption reason required")
         if not isinstance(device, str) or device not in device_map().values():
             raise ValueError("Known device_id required")
         connection = connections.get(device)
@@ -695,7 +696,9 @@ def create_app():
             if native is not None:
                 action = getattr(
                     native,
-                    "suspend_proactive_for_operator" if revoke else "on_barge",
+                    "suspend_proactive_for_operator" if revoke else
+                    "suspend_proactive_for_monitor_loss" if monitor_lost else
+                    "on_barge",
                     None,
                 )
                 if callable(action):
