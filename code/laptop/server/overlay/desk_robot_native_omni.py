@@ -2446,7 +2446,7 @@ async def preempt_others_for_human(source_device: str) -> None:
     WebSocket must not delay other pets' independent local flush requests.
     The shared speaker claim clears only after its own abort succeeds.
     """
-    global _output_owner
+    global _output_owner, _output_owner_unverified
     import desk_robot_bridge as bridge
 
     # Native audio cancellation alone does NOT stop the Mac's proactive
@@ -2507,25 +2507,42 @@ async def preempt_others_for_human(source_device: str) -> None:
     # invalidation could have flushed its physical head. Still send urgent
     # STOP. A failed STOP does NOT release the external lease or imply that
     # the speaker was physically silenced.
+    external_stop_failed = False
     if (external is not None and external_device not in safely_invalidated
             and _external_speaker_owner == external_device
             and _external_speaker_connection is external):
         try:
             async with _external_device_send_lock(external):
-                await external.websocket.send(json.dumps({
-                    "type": "tts", "state": "stop", "flush": True,
-                    "session_id": external.session_id,
-                }))
+                if bridge.connections.get(external_device) is not external:
+                    raise RuntimeError("Mac speaker head replaced before STOP")
+                await asyncio.wait_for(
+                    external.websocket.send(json.dumps({
+                        "type": "tts", "state": "stop", "flush": True,
+                        "session_id": external.session_id,
+                    })), timeout=0.4,
+                )
+                if bridge.connections.get(external_device) is not external:
+                    raise RuntimeError("Mac speaker head replaced during STOP")
                 external.client_is_speaking = False
-        except Exception:
-            pass
+        except (Exception, asyncio.CancelledError) as exc:
+            external_stop_failed = True
+            # Human VAD must not wait for a wedged Mac speaker transport.
+            # A failed send is also not a release of its physical decoder.
+            async with _output_owner_lock:
+                if (_output_owner in (None, external_device)
+                        and _output_owner_unverified in (None, external_device)):
+                    _output_owner = external_device
+                    _output_owner_unverified = external_device
+            if isinstance(exc, asyncio.CancelledError):
+                raise
     # An earlier Mac/native STOP may have failed after its owner released
     # Python state. Human VAD must still try to silence that uncertain head
     # even with no active model session or external Mac speaker lease.
     # Only the CURRENT authenticated connection may clear the marker, and
     # only after an actual bounded STOP transport send succeeds.
     uncertain_id = _output_owner_unverified
-    if uncertain_id is not None:
+    if uncertain_id is not None and (
+            not external_stop_failed or uncertain_id != external_device):
         current = bridge.connections.get(uncertain_id)
         if current is not None:
             try:
