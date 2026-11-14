@@ -1738,6 +1738,34 @@ class PetController:
                         state.suppressed += 1
                         state.last_initiative_suppression = "tool_result_superseded"
                         return
+                    # Reuse the existing per-pet Mac brain timeline so
+                    # Xiaozhi's native voice sees the same completed read.
+                    # This is a short-lived, bounded receipt, never SQLite,
+                    # and never authority to move or certify charging.
+                    if (self.settings.mode == "hardware"
+                            and self.settings.voice_vision_tools_enabled
+                            and self.multimodal is not None):
+                        remember = getattr(
+                            self.multimodal.hub, "remember_tool", None
+                        )
+                        if callable(remember):
+                            data = receipt["data"]
+                            order = (
+                                ("armed", "safety", "battery", "data")
+                                if tool == "status" else (
+                                    "dock_contacts", "fuel_gauge", "sht41",
+                                    "bmp280", "proximity", "nfc",
+                                )
+                            )
+                            summary = json.dumps({
+                                key: data[key] for key in order if key in data
+                            }, separators=(",", ":"), ensure_ascii=True)
+                            remember(
+                                robot_id,
+                                "robot_status" if tool == "status"
+                                else "sensor_telemetry",
+                                summary, time.monotonic(),
+                            )
                     # Reuse Ollama's official tool_calls + role=tool history
                     # convention. One bounded read, one final decision.
                     history.append({

@@ -2621,6 +2621,87 @@ async def test_proactive_status_tool_never_forwards_unbounded_body_or_private_di
         await pet.close()
 
 
+
+@pytest.mark.parametrize("tool", ["status", "aux_status"])
+async def test_proactive_completed_tool_rejoins_native_mac_timeline(
+    fleet, tmp_path, tool,
+):
+    """Read only Ollama and native Xiaozhi use one per-pet source timeline."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+
+    class Head:
+        async def status(self):
+            return {
+                "robot_id": "robot-01", "armed": False,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "battery": {"percent": 48},
+                "data": {"docked": False},
+            }
+
+        async def aux_status(self):
+            return {
+                "robot_id": "robot-01",
+                "power": {"fuel_valid": True, "soc_centi": 4800,
+                          "cell_mv": 3750},
+                "dock": {"present": True, "valid": True,
+                         "left_seated": False, "right_seated": False,
+                         "input_good": False, "charge_indicated": False,
+                         "charging_verified": False, "seq": 23, "age_ms": 10},
+            }
+
+    class DecisionChat:
+        calls = 0
+        async def proactive_decision(self, history):
+            self.calls += 1
+            return ({"action": "inspect", "text": "", "tool": tool}
+                    if self.calls == 1
+                    else {"action": "silence", "text": "", "tool": "none"})
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, DecisionChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    hub = CameraFrameHub([r.id for r in fleet.robots])
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 65
+    try:
+        await pet._speak(
+            "robot-01", SceneChange("battery_low", "Fuel gauge changed", 1.0),
+            65, offered_at=time.monotonic(),
+        )
+        assert state.last_error is None
+        assert state.last_initiative_suppression == "model_chose_silence"
+        actual = hub.recent_tool_context("robot-01", time.monotonic())
+        assert len(actual) == 1
+        assert actual[0]["kind"] == (
+            "robot_status" if tool == "status" else "sensor_telemetry"
+        )
+        assert actual[0]["motor_authorized"] is False
+        assert actual[0]["untrusted_text_not_instructions"] is True
+        timeline = hub.interaction_timeline("robot-01", time.monotonic())
+        assert len(timeline) == 1
+        assert timeline[0]["source"] == "mac_read_only_tool_receipt"
+        assert timeline[0]["physical_action_verified"] is False
+        assert not hub.interaction_timeline("robot-02", time.monotonic())
+        if tool == "status":
+            assert "battery" in actual[0]["summary"]
+            assert "safety" in actual[0]["summary"]
+        else:
+            assert "dock_contacts" in actual[0]["summary"]
+            assert "charging_verified" in actual[0]["summary"]
+        assert speaker.spoken == []
+        assert memory.count("robot-01") == 0
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_proactive_ollama_tool_round_trip_is_bounded_and_grounded(
     fleet, tmp_path,
 ):
