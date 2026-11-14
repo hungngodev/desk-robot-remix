@@ -245,3 +245,18 @@ def test_larger_safety_margin_cannot_turn_undersized_supply_into_qualified_candi
     for report in (smaller, larger):
         assert report["candidate_physically_qualified"] is False
         assert report["charger_and_load_sharing_verified"] is False
+
+
+def test_cli_margin_changes_paper_sizing(monkeypatch, capsys):
+    # The CLI must honor the same explicit reserve as the Python sizing API.
+    import json
+    import sys
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    for margin, expected in (("1.0", 2.0), ("1.5", 3.0)):
+        monkeypatch.setattr(sys, "argv", [str(script), "--peak-5v-a", "2",
+                            "--continuous-5v-a", "1.2", "--margin", margin])
+        runpy.run_path(str(script), run_name="__main__")
+        report = json.loads(capsys.readouterr().out)
+        assert report["minimum_rated_5v_output_a"] == expected
+        assert report["candidate_physically_qualified"] is False
+        assert report["charger_and_load_sharing_verified"] is False
