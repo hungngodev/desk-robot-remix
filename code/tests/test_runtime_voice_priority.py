@@ -305,6 +305,83 @@ async def test_lost_voice_transport_blocks_proactive_before_audio_cancel():
     assert events[-1] == ("monitor", True)
 
 
+async def test_voice_monitor_outage_flushes_native_xiaozhi_without_operator_quiet():
+    """A lost Mac VAD stream must stop the separate native head audio owner."""
+    events = []
+
+    class Pet:
+        def set_voice_monitor_ready(self, ready):
+            events.append(("monitor", ready))
+
+        async def interrupt(self, robot_id):
+            events.append(("pet", robot_id))
+
+    class Speaker:
+        async def interrupt(self, robot):
+            # Existing bridge /interrupt does NOT revoke future initiative.
+            events.append(("native_stop", robot.device_id))
+
+    class Conversation:
+        speaker = Speaker()
+
+        async def stop(self):
+            events.append(("group", "stop"))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        mode="hardware",
+        robots=[
+            SimpleNamespace(id="robot-01", device_id="mac-01"),
+            SimpleNamespace(id="robot-02", device_id="mac-02"),
+        ],
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    await runtime._on_voice_global("stream_unavailable")
+    assert events[0] == ("monitor", False)
+    assert set(events[1:]) == {
+        ("pet", "robot-01"), ("pet", "robot-02"),
+        ("group", "stop"), ("native_stop", "mac-01"),
+        ("native_stop", "mac-02"),
+    }
+
+
+async def test_voice_monitor_outage_reports_native_stop_failure_after_mac_abort():
+    """A failed head STOP cannot be marked as an acknowledged fleet flush."""
+    import pytest
+
+    events = []
+
+    class Pet:
+        def set_voice_monitor_ready(self, ready):
+            events.append(("monitor", ready))
+
+        async def interrupt(self, robot_id):
+            events.append(("pet", robot_id))
+
+    class Speaker:
+        async def interrupt(self, robot):
+            raise RuntimeError("XIAO refused STOP")
+
+    class Conversation:
+        speaker = Speaker()
+
+        async def stop(self):
+            events.append(("group", "stop"))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        mode="hardware",
+        robots=[SimpleNamespace(id="robot-01", device_id="mac-01")],
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    with pytest.raises(RuntimeError, match="physical speaker stop unconfirmed"):
+        await runtime._on_voice_global("stream_unavailable")
+    assert ("pet", "robot-01") in events
+    assert ("group", "stop") in events
+
+
 async def test_aec_barge_uses_bounded_video_lease_not_unended_speech_start():
     events = []
 
