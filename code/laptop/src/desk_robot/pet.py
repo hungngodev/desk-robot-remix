@@ -1491,12 +1491,46 @@ class PetController:
                     "charging_verified": False,
                 }
         else:
-            selected = {
-                key: result[key] for key in (
-                    "ok", "valid", "armed", "safety", "status", "battery",
-                    "power", "data", "body",
-                ) if key in result
-            }
+            # Head status contains nested firmware diagnostics that can
+            # evolve independently of the model. Never forward arbitrary
+            # data/body/status dictionaries or user-controlled strings.
+            selected = {}
+            for flag in ("armed",):
+                if type(result.get(flag)) is bool:
+                    selected[flag] = result[flag]
+            if result.get("backend") == "stepper_28byj48":
+                selected["backend"] = "stepper_28byj48"
+            watchdog = result.get("watchdog_ms")
+            if type(watchdog) is int and 0 <= watchdog <= 500:
+                selected["watchdog_ms"] = watchdog
+            safety = result.get("safety")
+            if isinstance(safety, dict):
+                safe = {}
+                for flag in ("required", "ready"):
+                    if type(safety.get(flag)) is bool:
+                        safe[flag] = safety[flag]
+                fault = safety.get("fault")
+                if (isinstance(fault, str) and 1 <= len(fault) <= 48
+                        and all(c in "abcdefghijklmnopqrstuvwxyz_" for c in fault)):
+                    safe["fault"] = fault
+                if safe:
+                    selected["safety"] = safe
+            battery = result.get("battery")
+            if isinstance(battery, dict):
+                percent = battery.get("percent")
+                if (type(percent) in (int, float)
+                        and math.isfinite(percent)
+                        and 0 <= percent <= 100):
+                    selected["battery"] = {
+                        "percent": percent, "physically_qualified": False,
+                    }
+            data = result.get("data")
+            if (isinstance(data, dict)
+                    and type(data.get("docked")) is bool):
+                selected["data"] = {
+                    "docked": data["docked"],
+                    "physical_contacts_verified": False,
+                }
         payload = json.dumps(selected, ensure_ascii=True)
         if not selected or len(payload) > 1400:
             raise RuntimeError("No bounded authenticated tool evidence")
