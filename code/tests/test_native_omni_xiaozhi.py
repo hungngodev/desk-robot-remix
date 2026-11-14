@@ -6377,3 +6377,73 @@ async def test_urgent_native_barge_cancellation_retains_uncertain_speaker(native
     assert conn.client_is_speaking is True
 
 
+@pytest.mark.parametrize("failure", ["socket", "stall", "reconnect"])
+async def test_human_vad_bounds_mac_proactive_head_stop_and_keeps_fleet_closed(
+    native, failure,
+):
+    """A stalled external Mac STOP cannot hang human VAD or clear its owner."""
+    module, bridge = native
+    source, _ = connection()
+    mac_head, _ = connection()
+    mac_head.device_id = "mac-02"
+    bridge.connections.update({"mac-01": source, "mac-02": mac_head})
+    bridge.interrupt_generation = {"mac-01": 0, "mac-02": 4}
+    module._external_speaker_owner = "mac-02"
+    module._external_speaker_connection = mac_head
+    mac_head.client_is_speaking = True
+    packets = []
+
+    class Transport:
+        async def send(self, packet):
+            if failure == "socket":
+                raise ConnectionError("head STOP disconnected")
+            if failure == "stall":
+                await asyncio.Event().wait()
+            packets.append(packet)
+            new_head, _ = connection()
+            new_head.device_id = "mac-02"
+            new_head.session_id = "replacement"
+            bridge.connections["mac-02"] = new_head
+
+    mac_head.websocket = Transport()
+    await asyncio.wait_for(
+        module.preempt_others_for_human("mac-01"), timeout=0.8,
+    )
+    assert mac_head.client_abort is True
+    assert mac_head.client_is_speaking is True
+    assert bridge.interrupt_generation["mac-02"] == 5
+    assert module._output_owner == "mac-02"
+    assert module._output_owner_unverified == "mac-02"
+    assert module._external_speaker_owner == "mac-02"
+    assert len(packets) == (1 if failure == "reconnect" else 0)
+
+
+async def test_cancelling_mac_fleet_human_stop_preserves_uncertain_head(native):
+    module, bridge = native
+    source, _ = connection()
+    mac_head, _ = connection()
+    mac_head.device_id = "mac-02"
+    bridge.connections.update({"mac-01": source, "mac-02": mac_head})
+    bridge.interrupt_generation = {"mac-01": 0, "mac-02": 0}
+    module._external_speaker_owner = "mac-02"
+    module._external_speaker_connection = mac_head
+    mac_head.client_is_speaking = True
+    entered = asyncio.Event()
+
+    class Hung:
+        async def send(self, _):
+            entered.set()
+            await asyncio.Event().wait()
+
+    mac_head.websocket = Hung()
+    task = asyncio.create_task(module.preempt_others_for_human("mac-01"))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert module._output_owner == "mac-02"
+    assert module._output_owner_unverified == "mac-02"
+    assert mac_head.client_abort
+    assert mac_head.client_is_speaking
+
+
