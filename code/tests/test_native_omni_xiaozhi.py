@@ -2042,6 +2042,101 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
 
 
 
+
+async def test_native_private_speech_rechecks_consent_after_slow_model_completion(
+    native,
+):
+    """Consent revoked DURING MiniCPM TTS prevents any Opus head enqueue."""
+    import io
+    import wave
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._memory_tools_enabled = True
+    session._transcript_memory_enabled = False
+    session._tool_speech_turn = (2, 5)
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(b"\x00" * 9600)
+    encoded = base64.b64encode(audio.getvalue()).decode()
+
+    class Mac:
+        gets = 0
+        posts = 0
+
+        def get(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            self.gets += 1
+            access_allowed = self.gets == 1
+
+            class Policy:
+                status = 200
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *_):
+                    return False
+
+                async def json(self):
+                    return {
+                        "robot_id": "robot-01", "model_context": "",
+                        "persistent_memory_included": False,
+                        "raw_media_included": False,
+                        "model_context_untrusted_not_instructions": True,
+                        "motor_authorized": False,
+                        "charging_authorized": False,
+                        "memory_tools_enabled": access_allowed,
+                        "transcript_memory_enabled": False,
+                    }
+            return Policy()
+
+        def post(self, url, *, json, timeout):
+            assert url.endswith("/v1/chat/completions")
+            self.posts += 1
+
+            class Speech:
+                status = 200
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *_):
+                    return False
+
+                async def json(self):
+                    return {"choices": [
+                        {"message": {"content": "An earlier private memory."}},
+                        {"message": {"audio": {"data": encoded}}},
+                    ]}
+            return Speech()
+
+    mac = Mac()
+    await session._speak_tool_results(
+        mac, "What did you remember about me?",
+        [{"source": "private_opt_in_memory_not_current_sight",
+          "recollections": [{"summary": "historical private memory"}]}],
+        2, 5,
+    )
+    assert mac.gets == 2 and mac.posts == 1
+    assert session.closed
+    assert session.last_error == (
+        "Mac private memory consent changed; native session must restart"
+    )
+    assert session.outgoing.empty()
+    assert session._tool_audio_response_id is None
+    assert session.native_tool_audio_queued == 0
+
+
 @pytest.mark.parametrize("changed", ["memory_tools_enabled", "transcript_memory_enabled"])
 async def test_native_tool_chat_revoked_consent_cannot_speak_prefetched_private_facts(
     native, changed,

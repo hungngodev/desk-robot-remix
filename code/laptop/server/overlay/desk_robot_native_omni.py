@@ -978,6 +978,13 @@ class NativeOmniSession:
                         or not 0 < wav.getnframes() <= 24_000 * 20):
                     raise ValueError("Expected 24 kHz mono PCM16 model WAV")
                 pcm = wav.readframes(wav.getnframes())
+            if private_facts:
+                # A 24s model generation may outlive the operator's memory
+                # consent. Check current Mac policy AGAIN before a single
+                # byte of private-context speech enters the head queue.
+                await self._current_tool_scene(
+                    http, epoch, request_turn, require_private_consent=True,
+                )
             if (self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
                 return
