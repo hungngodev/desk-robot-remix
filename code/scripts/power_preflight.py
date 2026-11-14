@@ -60,6 +60,7 @@ def size_5v_supply(
     cell_cont = float(required_cell_cont.quantize(milliamp, rounding=ROUND_CEILING))
     requirements = {
         "measured_peak_5v_a": measured_peak_5v_a,
+        "measured_continuous_5v_a": measured_continuous_5v_a,
         "minimum_rated_5v_output_a": boosted_peak,
         "minimum_rated_cell_and_boost_input_a": cell_peak,
         "minimum_rated_continuous_5v_a": boosted_cont,
