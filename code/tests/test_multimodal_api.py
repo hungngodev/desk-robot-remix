@@ -266,6 +266,53 @@ def test_semantic_planner_does_not_expand_user_request_into_other_hardware_reads
             assert reply.json()["charging_authorized"] is False
 
 
+
+def test_semantic_planner_requires_explicit_body_pickup_and_interaction_intent(
+    settings, tokens,
+):
+    """Read-only access is scoped to the user's actual requested evidence."""
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class Model:
+        async def reply(self, history):
+            return json.dumps({"tools": [
+                {"route": "latest-pickup"}, {"route": "interaction-context"},
+                {"route": "status"},
+            ]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    cases = (
+        ("How is your day?", []),
+        ("Can you pick up this key?", []),
+        ("What is your safety status?", ["status"]),
+        ("Is the pickup job done?", ["latest-pickup"]),
+        ("Did you pick up that key already?", ["latest-pickup"]),
+        ("What just happened?", ["interaction-context"]),
+        ("Did I touch you?", ["interaction-context"]),
+    )
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        for transcript, expected in cases:
+            answer = client.post(
+                f"/v1/pet/{robot}/plan-readonly", headers=headers,
+                json={"transcript": transcript},
+            )
+            assert answer.status_code == 200
+            assert [x["route"] for x in answer.json()["tools"]] == expected
+            assert answer.json()["motor_authorized"] is False
+
+
 async def test_existing_ollama_semantic_planner_uses_strict_json_schema(
     settings,
 ):

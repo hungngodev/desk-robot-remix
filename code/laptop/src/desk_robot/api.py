@@ -943,6 +943,24 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "on the table", "object", "in front of", "what color",
             "what colour", "what shape", "what size", "how many",
         ))
+        status_question = any(cue in utterance for cue in (
+            "status", "safety", "fault", "health", "are your sensors",
+            "are you armed", "robot state", "motors running",
+        ))
+        pickup_question = (
+            any(cue in utterance for cue in (
+                "pickup", "pick up", "picked up", "grasp", "grasped",
+            ))
+            and (any(cue in utterance for cue in (
+                "job", "status", "done", "finished", "complete", "already",
+                "yet", "succeed", "success",
+            )) or utterance.startswith(("did you ", "have you ", "has it ")))
+        )
+        interaction_question = any(cue in utterance for cue in (
+            "what happened", "what just happened", "what did you notice",
+            "what did you detect", "did i touch", "did someone touch",
+            "did i tap", "did someone tap", "what did you sense",
+        ))
         # Ignore a few malformed or forbidden model suggestions without
         # losing a later legitimate second observation. The scan is bounded,
         # and at most two approved read-only routes are ever returned.
@@ -959,6 +977,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             if route == "look" and not visual_question:
                 continue
             if route == "power-status" and not battery_question:
+                continue
+            if route == "status" and not status_question:
+                continue
+            if route == "latest-pickup" and not pickup_question:
+                continue
+            if route == "interaction-context" and not interaction_question:
                 continue
             if route == "aux-status" and not any(
                 cue in utterance for cue in (
