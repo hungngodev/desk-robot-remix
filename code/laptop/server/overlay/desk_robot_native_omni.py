@@ -106,6 +106,8 @@ def status(device: str) -> dict:
         return {"native_omni_enabled": device in _terminal_errors,
                 "native_backend_connected": False,
                 "continuous_av_input_receiving": False,
+                "native_quiet_pcm_frames_forwarded": 0,
+                "native_model_listen_decisions": 0,
                 "native_monitor_lost": None,
                 "native_speaker_stop_unverified": (
                     _output_owner_unverified == device
@@ -126,6 +128,8 @@ def status(device: str) -> dict:
         "native_tool_calls_supported": False,
         "live_transcript_context_enabled": s._live_transcript_enabled,
         "mic_frames_forwarded": s.audio_frames,
+        "native_quiet_pcm_frames_forwarded": s.quiet_pcm_frames,
+        "native_model_listen_decisions": s.native_listen_decisions,
         "microphone_last_frame_age_ms": (
             round((time.monotonic() - s._last_mic_received_at) * 1000)
             if s._last_mic_received_at is not None else None
@@ -207,6 +211,8 @@ class NativeOmniSession:
         self.closed = False
         self.last_error: str | None = None
         self.audio_frames = 0
+        self.quiet_pcm_frames = 0
+        self.native_listen_decisions = 0
         self._last_mic_received_at: float | None = None
         self.model_chunks = 0
         self.head_packets = 0
@@ -1656,6 +1662,10 @@ class NativeOmniSession:
             # microphone frame; the session supervisor handles the timeout.
             await asyncio.wait_for(self._send(event), timeout=1.5)
             self.audio_frames += 1
+            if not packet.speech:
+                # Count only PCM successfully submitted to the model, not
+                # background noise guessed from VAD or queued mic packets.
+                self.quiet_pcm_frames += 1
             # The pinned duplex wire selects at most one JPEG on each
             # one-second audio unit; do not offer the same receipt again.
             if event.get("video_frames"):
@@ -1706,6 +1716,10 @@ class NativeOmniSession:
             # A model response may be interrupted at any time. Use a bounded
             # FIFO and response identity, never detached unbounded audio tasks.
             pcm = self.wire.handle_event(event)
+            if kind == "response.listen":
+                # A deliberate model listen decision is an actual native
+                # duplex event, not a completed speech or playback receipt.
+                self.native_listen_decisions += 1
             # Reuse official vLLM-Omni text / audio-transcript events. They
             # are model estimates, not audible speaker acknowledgement.
             if kind in ("response.output_audio_transcript.delta",
