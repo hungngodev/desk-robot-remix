@@ -695,6 +695,49 @@ def test_native_model_receives_continuous_visual_evidence_without_request_or_vad
         assert client.get(path, headers=headers).status_code == 403
 
 
+
+def test_native_visual_stream_cannot_emit_frame_after_consent_revoke_during_socket_check(
+    settings, tokens, monkeypatch,
+):
+    import time
+    from types import SimpleNamespace
+    from starlette.requests import Request
+
+    class Video:
+        async def native_live_frames(self, robot_id):
+            assert robot_id == "robot-01"
+            yield SimpleNamespace(
+                jpeg=b"\\xff\\xd8" + b"private desk image" + b"\\xff\\xd9",
+                received_at=time.monotonic(), motion_fraction=0.1,
+                source="proactive",
+            )
+
+    class Runtime:
+        coordinator = SimpleNamespace(robot=lambda rid: settings.robot(rid))
+        multimodal = Video()
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    async def revoke_while_waiting_for_client(_request):
+        settings.voice_vision_tools_enabled = False
+        return False
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    monkeypatch.setattr(Request, "is_disconnected", revoke_while_waiting_for_client)
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=Runtime())) as client:
+        response = client.get("/v1/pet/robot-01/omni-stream", headers=headers)
+        assert response.status_code == 200
+        assert response.content == b""
+    assert settings.voice_vision_tools_enabled is False
+
+
+
 def test_native_model_instructions_contain_only_own_pet_persona_without_unapproved_memory(
     settings, tokens,
 ):
