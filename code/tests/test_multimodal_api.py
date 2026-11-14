@@ -1357,14 +1357,17 @@ def test_native_live_policy_respects_real_mac_pet_quiet_and_pause(
         live_url = f"/v1/pet/{robot}/interaction-context"
         start = client.get(persona_url, headers=auth).json()
         assert start["pet_autonomy_enabled"] is True
+        assert start["voice_monitor_ready"] is True
         assert start["pet_quiet"] is False
         Runtime.pet.voice_monitor_ready = False
         lost = client.get(live_url, headers=auth).json()
         assert lost["pet_autonomy_enabled"] is False
+        assert lost["voice_monitor_ready"] is False
         assert lost["pet_quiet"] is False  # Monitor loss is not operator quiet.
         Runtime.pet.voice_monitor_ready = True
         restored = client.get(live_url, headers=auth).json()
         assert restored["pet_autonomy_enabled"] is True
+        assert restored["voice_monitor_ready"] is True
         state.quiet = True
         quiet = client.get(live_url, headers=auth).json()
         assert quiet["pet_quiet"] is True
@@ -1388,6 +1391,7 @@ def test_native_live_policy_respects_real_mac_pet_quiet_and_pause(
         fail_closed = client.get(persona_url, headers=auth)
         assert fail_closed.status_code == 200
         assert fail_closed.json()["pet_autonomy_enabled"] is False
+        assert fail_closed.json()["voice_monitor_ready"] is False
         assert fail_closed.json()["pet_quiet"] is True
 
 
