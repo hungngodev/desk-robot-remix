@@ -79,7 +79,10 @@ def test_legacy_hardware_example_does_not_contain_removed_unknown_flags():
 
 
 @pytest.mark.asyncio
-async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
+@pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled", "closed"])
+async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt(
+    terminal,
+):
     """Loopback MiniCPM wire exercises JPEG + 16k PCM before real GPU testing."""
     import asyncio
     import base64
@@ -118,6 +121,9 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
                     },
                 })
             elif event["type"] == "input_audio_buffer.commit":
+                if terminal == "closed":
+                    await socket.close()
+                    continue
                 await socket.send_json({
                     "type": "response.created", "response_id": "real-turn-1",
                     "response": {
@@ -134,6 +140,9 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
                 })
                 await socket.send_json({
                     "type": "response.done", "response_id": "real-turn-1",
+                    "response": {
+                        "id": "real-turn-1", "status": terminal,
+                    },
                 })
         return socket
 
@@ -144,12 +153,19 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
         url = str(server.make_url("/v1/realtime?duplex=1")).replace(
             "http://", "ws://"
         )
-        output, report = await asyncio.wait_for(
-            smoke.probe(
-                url, "openbmb/MiniCPM-o-4_5",
-                b"\0" * 32000, jpeg, deadline=5,
-            ), timeout=8,
+        request = smoke.probe(
+            url, "openbmb/MiniCPM-o-4_5",
+            b"\0" * 32000, jpeg, deadline=5,
         )
+        if terminal == "completed":
+            output, report = await asyncio.wait_for(request, timeout=8)
+        else:
+            with pytest.raises(RuntimeError, match=(
+                "failed, cancelled or malformed"
+                if terminal != "closed" else "ended before response.done"
+            )):
+                await asyncio.wait_for(request, timeout=8)
+            output, report = None, None
     appends = [
         event for event in received
         if event["type"] == "input_audio_buffer.append"
@@ -157,9 +173,12 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt():
     assert len(appends) == 10
     assert sum(len(event.get("video_frames", [])) for event in appends) == 1
     assert base64.b64decode(appends[-1]["video_frames"][0]) == jpeg
-    assert report["video_frames_sent"] == 1
-    assert report["head_speaker_connected"] is False
-    assert report["actual_playback_acknowledged"] is False
-    assert len(output) == 4800
+    if terminal == "completed":
+        assert report["video_frames_sent"] == 1
+        assert report["head_speaker_connected"] is False
+        assert report["actual_playback_acknowledged"] is False
+        assert len(output) == 4800
+    else:
+        assert output is None and report is None
 
 
