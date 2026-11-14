@@ -2101,7 +2101,10 @@ class NativeOmniSession:
                     *self._tasks, *self._pending_cancels,
                     return_exceptions=True,
                 )
-            stop_confirmed = not self.conn.client_is_speaking
+            stop_confirmed = (
+                not self.conn.client_is_speaking
+                and _output_owner_unverified != self.device
+            )
             try:
                 if (self.conn.client_is_speaking
                         and not self._external_speech_active):
