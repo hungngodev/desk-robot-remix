@@ -138,7 +138,15 @@ def detect_apriltag(
         return None
     # A detector can return corrupt or off-frame corners. Never feed them to
     # native PnP or treat the resulting pose as an approach observation.
-    image_points = np.asarray(corners[candidates[0]], dtype=np.float64).reshape(4, 2)
+    # Native detectors may return a corrupt corner count or nonnumeric shape.
+    # Reject it before reshape or solvePnP; neither is a motion authority.
+    try:
+        raw_points = np.asarray(corners[candidates[0]], dtype=np.float64)
+    except (IndexError, TypeError, ValueError, OverflowError):
+        return None
+    if raw_points.size != 8 or raw_points.shape not in ((1, 4, 2), (4, 2)):
+        return None
+    image_points = raw_points.reshape(4, 2)
     if (not np.isfinite(image_points).all()
             or np.any(image_points[:, 0] < 0)
             or np.any(image_points[:, 0] >= frame.shape[1])
