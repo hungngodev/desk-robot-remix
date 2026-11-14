@@ -5903,3 +5903,64 @@ async def test_native_context_writer_retires_on_foreign_robot_reply(
             else session._spoken_queue.qsize()) == 1
 
 
+@pytest.mark.parametrize("failure", [None, "send_error", "stall"])
+async def test_human_preemption_recovers_only_confirmed_uncertain_mac_stop(
+    native, failure,
+):
+    """Native and Mac owners share one physical XIAO STOP recovery gate."""
+    module, bridge = native
+    old_head, _ = connection()
+    bridge.connections["mac-01"] = old_head
+    assert await module.begin_external_speech(old_head)
+    await module.end_external_speech(old_head, stop_confirmed=False)
+
+    head, sent = connection()
+    head.session_id = "authenticated-reconnect"
+    bridge.connections["mac-01"] = head
+
+    class Socket:
+        async def send(self, payload):
+            if failure == "send_error":
+                raise ConnectionError("STOP did not reach the head")
+            if failure == "stall":
+                await asyncio.Event().wait()
+            sent.append(payload)
+
+    head.websocket = Socket()
+    await asyncio.wait_for(
+        module.preempt_others_for_human("mac-02"), timeout=0.7,
+    )
+    if failure is None:
+        assert len(sent) == 1
+        assert json.loads(sent[0]) == {
+            "type": "tts", "state": "stop", "flush": True,
+            "session_id": "authenticated-reconnect",
+        }
+        assert module._output_owner is None
+        assert module._output_owner_unverified is None
+        assert await module.begin_external_speech(head)
+        await module.end_external_speech(head)
+    else:
+        assert sent == []
+        assert module._output_owner == "mac-01"
+        assert module._output_owner_unverified == "mac-01"
+        assert not await module.claim_speaker(
+            module.NativeOmniSession(
+                head, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+                model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+            ),
+        )
+
+
+async def test_human_preemption_never_clears_uncertain_disconnected_decoder(native):
+    module, bridge = native
+    head, _ = connection()
+    bridge.connections["mac-01"] = head
+    assert await module.begin_external_speech(head)
+    await module.end_external_speech(head, stop_confirmed=False)
+    bridge.connections.pop("mac-01")
+    await module.preempt_others_for_human("mac-02")
+    assert module._output_owner == "mac-01"
+    assert module._output_owner_unverified == "mac-01"
+
+
