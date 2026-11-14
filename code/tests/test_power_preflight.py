@@ -329,3 +329,24 @@ def test_bq25798_otg_current_limit_cannot_qualify_full_robot_peak():
     assert report["candidate_electrically_sufficient_on_paper"] is False
     assert report["candidate_physically_qualified"] is False
     assert report["charger_and_load_sharing_verified"] is False
+
+
+@pytest.mark.parametrize("flag,value", [
+    ("--peak-5v-a", "nan"),
+    ("--continuous-5v-a", "inf"),
+    ("--low-cell-v", "nan"),
+    ("--measured-efficiency", "inf"),
+    ("--boost-max-input-a", "nan"),
+    ("--protected-cell-continuous-a", "inf"),
+])
+def test_cli_rejects_nonfinite_power_telemetry_and_ratings(monkeypatch, capsys, flag, value):
+    # A malformed machine-generated CLI argument must never yield a plausible
+    # shopping qualification JSON report, including when a rating is optional.
+    import sys
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    argv = [str(script), "--peak-5v-a", "3", "--continuous-5v-a", "1.8",
+            flag, value]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(ValueError):
+        runpy.run_path(str(script), run_name="__main__")
+    assert capsys.readouterr().out == ""
