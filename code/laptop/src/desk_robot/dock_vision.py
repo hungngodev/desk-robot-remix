@@ -14,6 +14,16 @@ import math
 from dataclasses import dataclass
 
 
+def _finite_number(value: object) -> bool:
+    """Reject huge integers without leaking float conversion OverflowError."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 @dataclass(frozen=True)
 class DockCameraCalibration:
     """Real measured camera intrinsics and physical marker side length."""
@@ -33,7 +43,7 @@ class DockCameraCalibration:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"{name} must be a measured finite number")
-            if not math.isfinite(value):
+            if not _finite_number(value):
                 raise ValueError(f"{name} must be finite")
         if self.fx <= 0 or self.fy <= 0 or not 10 <= self.tag_side_mm <= 250:
             raise ValueError("Camera focal lengths and physical tag size are invalid")
@@ -52,7 +62,7 @@ class DockCameraCalibration:
         if self.distortion_coeffs is not None:
             if (not isinstance(self.distortion_coeffs, tuple)
                     or len(self.distortion_coeffs) not in (4, 5, 8, 12, 14)
-                    or any(type(v) not in (int, float) or not math.isfinite(v)
+                    or any(type(v) not in (int, float) or not _finite_number(v)
                            for v in self.distortion_coeffs)):
                 raise ValueError("Invalid measured camera distortion coefficients")
         if type(self.marker_id) is not int or not 0 <= self.marker_id < 587:
@@ -74,7 +84,7 @@ class DockPose:
                       self.reprojection_error_px, self.captured_at):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError("Dock pose contains nonnumeric values")
-            if not math.isfinite(value):
+            if not _finite_number(value):
                 raise ValueError("Dock pose must be finite")
         if self.z_mm <= 0 or self.reprojection_error_px < 0:
             raise ValueError("Dock pose must be physically meaningful")
@@ -95,7 +105,7 @@ def detect_apriltag(
     written to disk and no motors are touched.
     """
     if (not isinstance(jpeg, bytes) or not 0 < len(jpeg) <= 512000
-            or any(type(v) not in (int, float) or not math.isfinite(v)
+            or any(type(v) not in (int, float) or not _finite_number(v)
                    for v in (captured_at, max_reprojection_error_px))
             or not 0 < max_reprojection_error_px <= 10):
         raise ValueError("Invalid bounded camera frame or timing")
@@ -151,7 +161,7 @@ def detect_apriltag(
         (projected.reshape(4, 2) - image_points) ** 2, axis=1,
     ))))
     x_mm, y_mm, z_mm = [float(v) for v in tvec.reshape(3)]
-    if (not all(math.isfinite(v) for v in (x_mm, y_mm, z_mm, error))
+    if (not all(_finite_number(v) for v in (x_mm, y_mm, z_mm, error))
             or not 30 <= z_mm <= 2000 or error > max_reprojection_error_px):
         return None
     return DockPose(x_mm, y_mm, z_mm, error, captured_at)
@@ -181,7 +191,7 @@ def assess_dock(
     recommend an alignment phase, not issue a WROOM motor permit.
     """
     if any(isinstance(v, bool) or not isinstance(v, (int, float))
-           or not math.isfinite(v) for v in
+           or not _finite_number(v) for v in
            (now, target_distance_mm, max_age_seconds, lateral_tolerance_mm)):
         raise ValueError("Invalid dock assessment parameters")
     if not 50 <= target_distance_mm <= 500 or not 0 < max_age_seconds <= 1:
