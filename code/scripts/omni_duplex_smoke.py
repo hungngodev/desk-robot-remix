@@ -53,8 +53,10 @@ def read_jpeg(path: Path | None) -> bytes | None:
     if path is None:
         return None
     jpeg = path.read_bytes()
-    if not 10 <= len(jpeg) <= 1_000_000 or not jpeg.startswith(b"\xff\xd8"):
-        raise ValueError("A <=1MB actual JPEG image is required")
+    if (not 10 <= len(jpeg) <= 1_000_000
+            or not jpeg.startswith(b"\xff\xd8")
+            or not jpeg.endswith(b"\xff\xd9")):
+        raise ValueError("A complete <=1MB JPEG image is required")
     return jpeg
 
 
@@ -78,7 +80,11 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
     # XIAO exposure timestamp. Use its one local receipt identity for the
     # entire probe so the real wire never duplicates a single test frame.
     test_frame_receipt_us = time.monotonic_ns() // 1000 if jpeg else None
-    response_complete = asyncio.Event()
+    # The model only receives an attached JPEG on a completed 1 s audio
+    # unit. Reject too-short AV probes instead of silently testing audio
+    # alone while reporting that a frame was provided.
+    if jpeg is not None and len(pcm) < 32000:
+        raise ValueError("Audiovisual probe requires at least one second of PCM")
 
     async with aiohttp.ClientSession() as client:
         async with client.ws_connect(
@@ -108,8 +114,15 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                             raise RuntimeError("Native audio output exceeds 30s bound")
                         output.extend(packet.pcm24k)
                     if event.get("type") == "response.done":
-                        response_complete.set()
-                        break
+                        response = event.get("response")
+                        if (not isinstance(response, dict)
+                                or response.get("status") != "completed"
+                                or response.get("id") != event.get("response_id")):
+                            raise RuntimeError(
+                                "Native duplex response failed, cancelled or malformed"
+                            )
+                        return
+                raise RuntimeError("Native duplex socket ended before response.done")
 
             listener = asyncio.create_task(reader())
             try:
@@ -127,8 +140,10 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                     await socket.send_json(packet)
                     await asyncio.sleep(packet["duration_ms"] / 1000)
                 await socket.send_json(wire.commit())
-                await asyncio.wait_for(response_complete.wait(), timeout=deadline)
-                await listener
+                # Wait on the actual reader task: a model error, rejected
+                # frame, early socket close or failed response must propagate
+                # immediately, not hide behind a 90-second event timeout.
+                await asyncio.wait_for(listener, timeout=deadline)
             finally:
                 if not listener.done():
                     listener.cancel()
