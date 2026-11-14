@@ -1470,6 +1470,55 @@ async def test_broken_native_voice_cannot_block_operator_physical_speaker_stop(
     assert first.client_abort is True
 
 
+async def test_vad_monitor_loss_routes_native_block_without_operator_quiet(
+    bridge, monkeypatch,
+):
+    """Temporary monitor failure must never be treated as an operator pause."""
+    events = []
+    first = conn("mac-01")
+    bridge.register(first)
+
+    async def monitor_failure(current):
+        assert current is first
+        events.append("native_monitor_suspended")
+        return True
+
+    async def wrong_route(_current):
+        raise AssertionError("Monitor loss cannot change operator quiet")
+
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni", SimpleNamespace(
+        suspend_proactive_for_monitor_loss=monitor_failure,
+        suspend_proactive_for_operator=wrong_route,
+        on_barge=wrong_route,
+    ))
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        response = await client.post(
+            "/interrupt", headers=headers, json={
+                "device_id": "mac-01", "monitor_unavailable": True,
+            }
+        )
+        assert response.status == 200
+        # Distinct, conflicting reasons never accidentally authorize either
+        # a persistent operator pause or an ordinary human-barge route.
+        conflict = await client.post(
+            "/interrupt", headers=headers, json={
+                "device_id": "mac-01", "monitor_unavailable": True,
+                "revoke_initiative": True,
+            }
+        )
+        assert conflict.status == 400
+        malformed = await client.post(
+            "/interrupt", headers=headers, json={
+                "device_id": "mac-01", "monitor_unavailable": "yes",
+            }
+        )
+        assert malformed.status == 400
+    assert events == ["native_monitor_suspended"]
+    assert bridge.interrupt_generation["mac-01"] == 1
+    assert first.client_abort is True
+
+
 async def test_normal_human_barge_cancels_native_reply_without_muting_pet(
     bridge, monkeypatch,
 ):
