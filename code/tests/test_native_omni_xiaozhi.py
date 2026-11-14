@@ -297,6 +297,56 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 @pytest.mark.parametrize("owner_present", [False, True])
+
+async def test_failed_mac_stop_blocks_fleet_until_fresh_authenticated_head_stop(native):
+    """A Mac TTS transport failure must not release the physical decoder."""
+    module, bridge = native
+    first, _ = connection()
+    bridge.connections["mac-01"] = first
+    assert await module.begin_external_speech(first)
+    await module.end_external_speech(first, stop_confirmed=False)
+    assert module._output_owner == "mac-01"
+    assert module._output_owner_unverified == "mac-01"
+    assert module._external_speaker_owner is None
+
+    # A different pet cannot speak while the old decoder may still play.
+    peer, _ = connection()
+    peer.device_id = "mac-02"
+    bridge.connections["mac-02"] = peer
+    assert not await module.begin_external_speech(peer)
+
+    # Merely authenticating a new session with the same device ID is not
+    # proof of STOP. A failed explicit reset retains the old exclusive lease.
+    reconnect, sent = connection()
+    reconnect.session_id = "new-head"
+    bridge.connections["mac-01"] = reconnect
+
+    class BrokenSocket:
+        async def send(self, _):
+            raise ConnectionError("head disconnected")
+
+    reconnect.websocket = BrokenSocket()
+    assert not await module.begin_external_speech(reconnect)
+    assert module._output_owner_unverified == "mac-01"
+
+    class RecoveredSocket:
+        async def send(self, packet):
+            sent.append(packet)
+
+    reconnect.websocket = RecoveredSocket()
+    assert await module.begin_external_speech(reconnect)
+    assert len(sent) == 1
+    assert json.loads(sent[0]) == {
+        "type": "tts", "state": "stop", "flush": True,
+        "session_id": "new-head",
+    }
+    assert module._output_owner_unverified is None
+    assert module._output_owner is None
+    assert module._external_speaker_owner == "mac-01"
+    await module.end_external_speech(reconnect)
+    assert module._external_speaker_owner is None
+
+
 async def test_native_speaker_refuses_orphan_or_closed_prior_owner(
     native, owner_present,
 ):
