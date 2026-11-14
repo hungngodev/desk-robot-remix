@@ -533,7 +533,7 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
         assert "Recent head telemetry" in context.interaction
         hub.tool_history[ids[0]].clear()
         head.reported_id = ids[1]
-        assert client.get(status_url, headers=marked).status_code == 200
+        assert client.get(status_url, headers=marked).status_code == 503
         assert not hub.tool_history[ids[0]]  # Foreign head is never evidence.
         assert "Mac pickup job receipt, not verified grasp" in context.interaction
         assert hub.recent_tool_context(ids[1], time.monotonic()) == []
@@ -1190,7 +1190,7 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
         head.reported_id = settings.robots[1].id
         assert client.get(url, headers={
             **token, "X-Desk-Robot-Tool-Receipt": "1",
-        }).status_code == 200
+        }).status_code == 503
         assert not hub.tool_history[robot]  # Foreign AUX cannot become a fact.
 
 
