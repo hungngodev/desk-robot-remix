@@ -26,6 +26,7 @@ GAUGES = (
     "battery_boost_tray", "dock_contact_recess_gauge",
     "jaw_calibration_coupon",
 )
+DOCKS = ("dock_passive_fit",)
 
 
 def binary_stl_triangles(path: Path) -> int:
@@ -82,6 +83,7 @@ def export_kit(
     sources = (
         ("adapter_stls", source_dir / "one_robot_adapter_kit.scad", ADAPTERS),
         ("fit_stls", source_dir / "remaining_fit_gauges.scad", GAUGES),
+        ("dock_stls", source_dir / "dock/dock_passive_fit.scad", DOCKS),
     )
     for _, source, _ in sources:
         if not source.is_file():

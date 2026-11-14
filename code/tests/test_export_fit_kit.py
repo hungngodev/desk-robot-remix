@@ -69,6 +69,8 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     folder.mkdir(parents=True)
     for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad"):
         (folder / name).write_text("cube([1,1,1]);\n")
+    (folder / "dock").mkdir()
+    (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
     monkeypatch.setattr(source.shutil, "which", lambda _command: "/usr/bin/openscad")
     commands = []
 
@@ -83,10 +85,13 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     monkeypatch.setattr(source.subprocess, "run", fake_render)
     rendered = tmp_path / "rendered"
     report = source.export_kit(tmp_path, output_dir=rendered)
-    assert len(commands) == len(source.ADAPTERS) + len(source.GAUGES) == 10
-    assert len(report["parts"]) == 10
+    assert len(commands) == (
+        len(source.ADAPTERS) + len(source.GAUGES) + len(source.DOCKS)
+    ) == 11
+    assert len(report["parts"]) == 11
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
+    assert (rendered / "dock_stls/dock_passive_fit.stl").is_file()
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
@@ -103,6 +108,8 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     folder.mkdir(parents=True)
     for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad"):
         (folder / name).write_text("cube([1,1,1]);\n")
+    (folder / "dock").mkdir()
+    (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
     monkeypatch.setattr(source.shutil, "which", lambda _command: "/usr/bin/openscad")
     tries = 0
 
@@ -126,7 +133,8 @@ def test_real_openscad_renders_provisional_source_parts(tmp_path):
     source = module()
     output = tmp_path / "rendered"
     report = source.export_kit(ROOT, output_dir=output)
-    assert len(report["parts"]) == 10
+    assert len(report["parts"]) == 11
+    assert (output / "dock_stls/dock_passive_fit.stl").is_file()
     for item in report["parts"]:
         assert source.binary_stl_triangles(output / item["location"]) > 0
     assert report["full_printable_assembly_verified"] is False
