@@ -190,3 +190,17 @@ def test_each_independent_supply_rating_must_cover_simultaneous_load(undersized,
     assert report["candidate_physically_qualified"] is False
     assert report["charger_and_load_sharing_verified"] is False
     assert report["thermal_and_brownout_verified"] is False
+
+
+def test_bq25895_otg_output_limit_cannot_be_confused_with_charge_current():
+    # TI BQ25895 advertises 5 A charging, but its OTG boost output is
+    # specified up to 3.1 A. Neither rating qualifies a particular board.
+    # Full pet peak sizing requires 3.9 A at 5 V with the stated margin.
+    report = tool(3.0, 1.8, boost_max_input_a=9.0,
+                  boost_continuous_input_a=5.0,
+                  boost_continuous_output_a=3.1,
+                  protected_cell_continuous_a=9.0)
+    assert report["minimum_rated_5v_output_a"] == 3.9
+    assert report["candidate_electrically_sufficient_on_paper"] is False
+    assert report["candidate_physically_qualified"] is False
+    assert report["charger_and_load_sharing_verified"] is False
