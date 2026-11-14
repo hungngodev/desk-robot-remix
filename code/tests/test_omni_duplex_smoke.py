@@ -182,3 +182,24 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt(
         assert output is None and report is None
 
 
+
+def test_native_probe_rejects_truncated_jpeg_before_opening_model(tmp_path):
+    smoke = smoke_module()
+    path = tmp_path / "truncated.jpg"
+    path.write_bytes(b"\xff\xd8" + b"truncated camera image")
+    with pytest.raises(ValueError, match="complete"):
+        smoke.read_jpeg(path)
+
+
+@pytest.mark.asyncio
+async def test_native_video_probe_refuses_partial_audio_unit_before_network():
+    smoke = smoke_module()
+    jpeg = b"\xff\xd8" + b"test camera image" + b"\xff\xd9"
+    with pytest.raises(ValueError, match="at least one second"):
+        await smoke.probe(
+            "ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            "openbmb/MiniCPM-o-4_5",
+            b"\0" * 3200, jpeg, deadline=5,
+        )
+
+
