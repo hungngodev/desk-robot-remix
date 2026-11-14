@@ -338,6 +338,9 @@ def test_bq25798_otg_current_limit_cannot_qualify_full_robot_peak():
     ("--measured-efficiency", "inf"),
     ("--boost-max-input-a", "nan"),
     ("--protected-cell-continuous-a", "inf"),
+    ("--margin", "nan"),
+    ("--boost-continuous-input-a", "inf"),
+    ("--boost-continuous-output-a", "-inf"),
 ])
 def test_cli_rejects_nonfinite_power_telemetry_and_ratings(monkeypatch, capsys, flag, value):
     # A malformed machine-generated CLI argument must never yield a plausible
