@@ -383,7 +383,8 @@ class NativeOmniSession:
                     )
                     if bridge.connections.get(self.device) is not self.conn:
                         raise RuntimeError("Head identity changed during legacy STOP")
-            except Exception:
+            except (Exception, asyncio.CancelledError):
+                # Cancellation is not an authenticated decoder STOP either.
                 # Even a queued legacy welcome can still be inside XIAO
                 # decoder buffers when client_is_speaking is false. A failed
                 # startup STOP must block all fleet speech until head reset.
@@ -2147,6 +2148,7 @@ class NativeOmniSession:
                 not self.conn.client_is_speaking
                 and _output_owner_unverified != self.device
             )
+            cancelled_during_stop = False
             try:
                 if (self.conn.client_is_speaking
                         and not self._external_speech_active):
@@ -2167,6 +2169,11 @@ class NativeOmniSession:
                             raise RuntimeError("Head replaced during native STOP")
                     self.conn.client_is_speaking = False
                     stop_confirmed = True
+            except asyncio.CancelledError:
+                # A second cancellation during teardown is not a physical
+                # STOP. Record the uncertain lease before propagating it.
+                stop_confirmed = False
+                cancelled_during_stop = True
             except Exception:
                 # A failed WebSocket STOP is not a physical decoder reset.
                 # Preserve the fleet owner lease until reconnect/explicit
@@ -2191,6 +2198,8 @@ class NativeOmniSession:
                     if _output_owner is None:
                         _output_owner = self.device
                     _output_owner_unverified = self.device
+            if cancelled_during_stop:
+                raise asyncio.CancelledError
 
 
 # A native session and its Mac proactive speaker must serialize bytes and
