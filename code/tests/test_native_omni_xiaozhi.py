@@ -2321,6 +2321,7 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
                 "charging_authorized": False,
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
                 "model_context": (
                     "Physical sensor edge: touch_tap; "
                     "Earlier local VLM guess, not fresh sighting: a blue mug; "
@@ -2400,6 +2401,7 @@ async def test_native_private_speech_rechecks_consent_after_slow_model_completio
                         "charging_authorized": False,
                         "memory_tools_enabled": access_allowed,
                         "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
                     }
             return Policy()
 
@@ -2481,6 +2483,7 @@ async def test_native_tool_chat_revoked_consent_cannot_speak_prefetched_private_
                 "charging_authorized": False,
                 "memory_tools_enabled": True,
                 "transcript_memory_enabled": True,
+                        "voice_monitor_ready": True,
             }
             policy[changed] = False
             return policy
@@ -2542,6 +2545,7 @@ async def test_native_private_tool_needs_fresh_consent_when_mac_context_unavaila
                 "charging_authorized": False,
                 "memory_tools_enabled": True,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
             }
 
     class Mac:
@@ -4495,6 +4499,7 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
                 "model_context_untrusted_not_instructions": True,
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
             }
 
     class Mac:
@@ -4580,6 +4585,7 @@ async def test_native_live_context_expiry_restores_base_model_instructions(nativ
                 "model_context_untrusted_not_instructions": True,
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
             }
 
     class Mac:
@@ -4651,6 +4657,7 @@ async def test_native_context_send_is_not_counted_without_backend_ack(native):
                 "model_context_untrusted_not_instructions": True,
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
             }
 
     class Mac:
@@ -4753,6 +4760,7 @@ async def test_native_unsupported_context_keeps_polling_mac_consent_without_send
                 "model_context_untrusted_not_instructions": True,
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
             }
     class Mac:
         def get(self, url, **kwargs):
@@ -4814,6 +4822,7 @@ async def test_native_live_context_refuses_cross_robot_and_stale_turn_data(nativ
                 "model_context_untrusted_not_instructions": True,
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
             }
 
     class Mac:
@@ -4872,6 +4881,7 @@ async def test_native_consent_toggle_retires_model_with_old_private_context(
                 "model_context_untrusted_not_instructions": True,
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
             }
 
     class Mac:
@@ -4945,6 +4955,7 @@ async def test_native_persona_negotiates_live_asr_without_disk_permission(native
                 "model_can_arm_motors": False,
                 "live_transcript_context_enabled": True,
                 "transcript_memory_enabled": False,
+                        "voice_monitor_ready": True,
             }
 
     class Mac:
