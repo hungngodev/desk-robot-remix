@@ -342,6 +342,7 @@ class NativeOmniSession:
         Only one voice provider may own the head decoder. This is a requested
         firmware flush, NOT an ACK of physically completed I2S playback.
         """
+        global _output_owner, _output_owner_unverified
         speaking = bool(getattr(self.conn, "client_is_speaking", False))
         tts = getattr(self.conn, "tts", None)
         pending = False
@@ -368,7 +369,6 @@ class NativeOmniSession:
             if uncertain:
                 # Recover a stale physical speaker lease only AFTER the new
                 # authenticated connection has sent its own decoder STOP.
-                global _output_owner, _output_owner_unverified
                 async with _output_owner_lock:
                     if (_output_owner == self.device
                             and _output_owner_unverified == self.device):
