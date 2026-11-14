@@ -837,6 +837,82 @@ async def test_normal_barge_in_does_not_cut_off_auto_or_peer_speech(bridge):
     assert bridge.voice_frames.get("mac-01") is None
 
 
+
+@pytest.mark.parametrize("failure", ["socket", "stall"])
+async def test_direct_human_barge_failed_head_stop_preserves_authenticated_vad(
+    bridge, failure,
+):
+    """A wedged XIAO must not erase real human VAD or fake speaker STOP."""
+    one = conn("mac-01")
+    one.client_listen_mode = "realtime"
+    one.client_is_speaking = True
+    one.session_id = "physical-head"
+    cleared = []
+    one.clear_queues = lambda: cleared.append("queued")
+    one.clearSpeakStatus = lambda: cleared.append("speaker")
+    bridge.register(one)
+
+    class Unavailable:
+        async def send(self, _):
+            if failure == "socket":
+                raise ConnectionError("head disconnected")
+            await asyncio.Event().wait()
+
+    one.websocket = Unavailable()
+    assert not await bridge.interrupt_for_normal_voice(one, True)
+    with pytest.raises((ConnectionError, asyncio.TimeoutError)):
+        await asyncio.wait_for(
+            bridge.interrupt_for_normal_voice(one, True), timeout=0.8,
+        )
+    assert one.client_abort
+    assert one.client_is_speaking
+    assert cleared == ["queued"]
+    assert bridge.voice_event_cursor == 1
+    assert bridge.voice_event_history[-1]["kind"] == "normal"
+    assert bridge.voice_frames.get(one.device_id) is None
+    bridge.unregister(one)
+
+
+@pytest.mark.parametrize("failure", ["socket", "stall"])
+async def test_group_human_barge_failed_head_stop_keeps_voice_and_aborts_mac(
+    bridge, failure,
+):
+    first = conn("mac-01")
+    second = conn("mac-02")
+    first.session_id = "group-head"
+    first.client_listen_mode = "realtime"
+    first.clearSpeakStatus = lambda: None
+    bridge.register(first)
+    bridge.register(second)
+    bridge.lease_ids = frozenset({"mac-01", "mac-02"})
+    bridge.lease_until = time.monotonic() + 15
+    bridge.active_device_id = "mac-01"
+
+    class Unavailable:
+        async def send(self, _):
+            if failure == "socket":
+                raise OSError("group speaker lost")
+            await asyncio.Event().wait()
+
+    first.websocket = Unavailable()
+    await bridge.speaker_lock.acquire()
+    try:
+        assert not await bridge.interrupt_for_user_voice(first, True)
+        with pytest.raises((OSError, asyncio.TimeoutError)):
+            await asyncio.wait_for(
+                bridge.interrupt_for_user_voice(first, True), timeout=0.8,
+            )
+        assert first.client_abort
+        assert bridge.was_interrupted_by_human("mac-01")
+        assert bridge.voice_event_cursor == 1
+        assert bridge.voice_event_history[-1]["kind"] == "group"
+        assert bridge.lease_stopping
+    finally:
+        bridge.speaker_lock.release()
+    await asyncio.wait_for(bridge.lease_cleanup_task, timeout=2)
+
+
+
 def test_sustained_voice_resets_after_gap_and_silence(bridge, monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(bridge.time, "monotonic", lambda: clock[0])
