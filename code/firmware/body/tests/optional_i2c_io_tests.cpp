@@ -21,6 +21,9 @@ int main() {
                 << " outbound_bytes=" << Wire.outbound.size() << '\n';
     }
     CHECK(accessories_initialized);
+    CHECK(desk_robot::advance_jaw_sample_seq(0U) == 1U);
+    CHECK(desk_robot::advance_jaw_sample_seq(0xfffffffeU) == 0xffffffffU);
+    CHECK(desk_robot::advance_jaw_sample_seq(0xffffffffU) == 1U);
     CHECK(pulse.begin(Wire));
     CHECK(touch.begin(Wire));
     CHECK(Wire.ranges == 0 && Wire.extras == 0);

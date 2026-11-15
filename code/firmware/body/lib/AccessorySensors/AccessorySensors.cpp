@@ -258,7 +258,7 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   if (fresh) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
-    if (ads_channel_ == 1) ++f.jaw_sample_seq;
+    if (ads_channel_ == 1) f.jaw_sample_seq = advance_jaw_sample_seq(f.jaw_sample_seq);
     f.at_ms = now_ms;
   } else {
     f.valid_mask &= static_cast<std::uint8_t>(~(1U << ads_channel_));
