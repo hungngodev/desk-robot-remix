@@ -133,6 +133,13 @@ class DualIrEvidence {
       return;
     }
     IrSideEvidence& s = sides_[side];
+    // Reject duplicate or regressed receive times even if a future caller
+    // bypasses the queue gate. Unsigned half-range ordering permits wrap.
+    const std::uint32_t elapsed = now_ms - s.at_ms;
+    if (s.valid && (elapsed == 0U || elapsed >= 0x80000000U)) {
+      invalidate();
+      return;
+    }
     s.code = code;
     s.at_ms = now_ms;
     s.valid = true;
