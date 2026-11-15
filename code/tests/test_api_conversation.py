@@ -149,6 +149,44 @@ async def test_group_live_permission_rechecked_between_stream_segments(
     assert speaker.spoken == [("robot-01", "A brief observation already sent.")]
 
 
+async def test_group_sensor_talk_cannot_speak_revoked_shared_camera_context(
+    settings,
+):
+    """A physical touch topic can still include opt-in visual timeline cues."""
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = True
+    speaker = SimulatedSpeaker()
+    captured = []
+
+    class Chat:
+        async def reply(self, history):
+            captured.append(history)
+            settings.voice_vision_tools_enabled = False
+            return "My camera earlier mentioned something private."
+
+    class Hub:
+        def interaction_timeline(self, robot_id, now, *, limit):
+            assert robot_id in {"robot-01", "robot-02"}
+            return [{
+                "channel": "camera", "kind": "proactive",
+                "trigger_kind": "touch_tap",
+            }]
+
+    conversation = Conversation(settings, Chat(), speaker)
+    conversation.multimodal = SimpleNamespace(hub=Hub())
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(
+            ["robot-01", "robot-02"],
+            "One pet reported a touch sensor tap", utterances=2,
+        )
+    assert captured and "XIAO frame received" in str(captured)
+    assert speaker.spoken == []
+    assert conversation.active is None
+
+
 async def test_empty_ollama_stream_never_creates_phantom_social_speech(
     settings, tmp_path,
 ):
