@@ -310,3 +310,63 @@ async def test_stalled_force_feedback_never_bypasses_local_wroom_disarm(monkeypa
         )
     assert checks == 3
     assert head.commands == ["grip 65"]
+
+
+
+async def test_hung_gripper_command_still_attempts_bounded_safe_relief(monkeypatch):
+    """An unacknowledged jaw command may already have moved the servo."""
+    import asyncio
+    import desk_robot.grasp_feedback as feedback
+
+    monkeypatch.setattr(feedback, "_GRIP_COMMAND_TIMEOUT_S", 0.04)
+    monkeypatch.setattr(feedback, "_HEALTH_READ_TIMEOUT_S", 0.04)
+
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr(feedback.asyncio, "sleep", instant)
+    head = FakeHead([100, 101])
+    entered = asyncio.Event()
+
+    async def stalled_close(command):
+        head.commands.append(command)
+        if command == "grip 65":
+            entered.set()
+            await asyncio.Event().wait()
+
+    head.command = stalled_close
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(
+            guarded_grasp(head, Settings(), health=healthy), timeout=0.5,
+        )
+    assert entered.is_set()
+    assert head.commands == ["grip 65", "grip 60"]
+
+
+async def test_hung_safety_recheck_blocks_extra_grip_and_relief(monkeypatch):
+    """No cached WROOM armed state is permission for another jaw command."""
+    import asyncio
+    import desk_robot.grasp_feedback as feedback
+
+    monkeypatch.setattr(feedback, "_HEALTH_READ_TIMEOUT_S", 0.04)
+
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr(feedback.asyncio, "sleep", instant)
+    head = FakeHead([100, 101])
+    checks = 0
+
+    async def health():
+        nonlocal checks
+        checks += 1
+        if checks >= 2:
+            await asyncio.Event().wait()
+        return {"armed": True}
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(
+            guarded_grasp(head, Settings(), health=health), timeout=0.5,
+        )
+    assert checks == 3  # Before close, after close, attempted safe relief.
+    assert head.commands == ["grip 65"]
