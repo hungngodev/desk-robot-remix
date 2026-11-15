@@ -9,6 +9,11 @@ if TYPE_CHECKING:
     from .calibration import Calibration
     from .transport import Head
 
+# An optional accessory ADC read must not indefinitely hold a live jaw.
+# The real HTTP head already has its own transport timeout; this also
+# bounds a stalled alternate head adapter before the next servo pulse.
+_FORCE_READ_TIMEOUT_S = 2.0
+
 
 def grip_angles(start: int, end: int, step: int) -> tuple[int, ...]:
     if (type(start) is not int or type(end) is not int or type(step) is not int
@@ -48,12 +53,17 @@ async def guarded_grasp(
     if threshold is None or ceiling is None:
         raise OperationError("Measured gripper sensor calibration missing")
     try:
-        baseline_a, seq_a = force_observation(await head.aux_status())
+        baseline_a, seq_a = force_observation(
+            await asyncio.wait_for(head.aux_status(), timeout=_FORCE_READ_TIMEOUT_S)
+        )
         # One ADS1115 jaw channel conversion approximately every 144ms;
         # require distinct observations, not repeated reads of one ADC value.
         await asyncio.sleep(0.18)
-        baseline_b, seq_b = force_observation(await head.aux_status())
-    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        baseline_b, seq_b = force_observation(
+            await asyncio.wait_for(head.aux_status(), timeout=_FORCE_READ_TIMEOUT_S)
+        )
+    except (KeyError, TypeError, ValueError, AttributeError,
+            TimeoutError) as exc:
         raise OperationError("Fresh force feedback required before moving jaw") from exc
     if seq_b <= seq_a:
         raise OperationError("No new ADS1115 jaw sample; jaw not moved")
@@ -71,8 +81,13 @@ async def guarded_grasp(
             await asyncio.sleep(0.18)
             await health()
             try:
-                measured, seq = force_observation(await head.aux_status())
-            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                measured, seq = force_observation(
+                    await asyncio.wait_for(
+                        head.aux_status(), timeout=_FORCE_READ_TIMEOUT_S
+                    )
+                )
+            except (KeyError, TypeError, ValueError, AttributeError,
+            TimeoutError) as exc:
                 raise OperationError("Lost fresh force sensor during closing") from exc
             if seq <= latest_seq:
                 raise OperationError("No new jaw sample after servo movement")
