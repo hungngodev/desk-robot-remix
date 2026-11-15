@@ -2524,7 +2524,33 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
                 {"message": {"audio": {"data": encoded}}},
             ]}
 
+    class Context:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "model_context": "Current camera cue, uncertain",
+                "raw_media_included": False,
+                "persistent_memory_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
+            }
+
     class Http:
+        def get(self, url, *, headers, timeout):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            return Context()
+
         def post(self, url, *, json, timeout):
             calls.append((url, json))
             return Response()
@@ -2718,6 +2744,110 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
     assert await session._current_tool_scene(Http(), 0, 0) == ""
 
 
+
+
+@pytest.mark.parametrize("failure", [
+    "revoked", "service_unavailable", "wrong_robot",
+])
+async def test_native_tool_speech_rechecks_live_consent_after_model_completion(
+    native, failure,
+):
+    """Completed tool TTS cannot queue speech from revoked or unverified sight."""
+    import io
+    import wave
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (2, 5)
+    raw = io.BytesIO()
+    with wave.open(raw, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(bytes(48000))
+    encoded = base64.b64encode(raw.getvalue()).decode()
+
+    class Mac:
+        gets = 0
+        posts = 0
+
+        def get(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            self.gets += 1
+            request_no = self.gets
+
+            class Policy:
+                status = (200 if request_no == 1 else (
+                    403 if failure == "revoked" else
+                    503 if failure == "service_unavailable" else 200
+                ))
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *_):
+                    return False
+
+                async def json(self):
+                    return {
+                        "robot_id": (
+                            "robot-02" if request_no == 2
+                            and failure == "wrong_robot" else "robot-01"
+                        ),
+                        "model_context": "Live Mac camera reported a blue mug",
+                        "persistent_memory_included": False,
+                        "raw_media_included": False,
+                        "model_context_untrusted_not_instructions": True,
+                        "motor_authorized": False,
+                        "charging_authorized": False,
+                        "memory_tools_enabled": False,
+                        "transcript_memory_enabled": False,
+                    }
+            return Policy()
+
+        def post(self, url, *, json, timeout):
+            assert url.endswith("/v1/chat/completions")
+            self.posts += 1
+
+            class Speech:
+                status = 200
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *_):
+                    return False
+
+                async def json(self):
+                    return {"choices": [
+                        {"message": {"content": "I think that was a blue mug."}},
+                        {"message": {"audio": {"data": encoded}}},
+                    ]}
+            return Speech()
+
+    mac = Mac()
+    await session._speak_tool_results(
+        mac, "What color is that mug?",
+        [{"source": "local_camera_model_guess",
+          "interpretation_not_proof": "Possibly blue"}],
+        2, 5,
+    )
+    assert mac.gets == 2 and mac.posts == 1
+    assert session.closed
+    assert session.last_error == (
+        "Mac live context permission revoked"
+        if failure == "revoked"
+        else "Cannot revalidate Mac live consent for tool speech"
+    )
+    assert session.outgoing.empty()
+    assert session._tool_audio_response_id is None
+    assert session.native_tool_audio_queued == 0
 
 
 async def test_native_private_speech_rechecks_consent_after_slow_model_completion(
