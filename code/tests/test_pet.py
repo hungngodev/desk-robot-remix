@@ -1231,6 +1231,48 @@ async def test_revoked_camera_source_cannot_offer_proactive_speech(
         await pet.close()
 
 
+async def test_camera_derived_social_turn_revokes_before_group_speaker(
+    fleet, tmp_path,
+):
+    """The actual pet path passes its camera consent fence into Conversation."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+
+    class RevokingChat:
+        async def reply(self, history):
+            fleet.voice_vision_tools_enabled = False
+            return "A stale camera remark that should not be played."
+
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, RevokingChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    for robot_id in ("robot-01", "robot-02"):
+        pet.states[robot_id].enabled = True
+        pet.states[robot_id].generation = 11
+    pet.set_voice_monitor_ready(True)
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "Camera estimated a key", .99),
+            11, camera_derived=True,
+        )
+        await wait_for(lambda: pet._speech_task is None)
+        assert not speaker.spoken
+        assert memory.count("robot-01") == memory.count("robot-02") == 0
+        assert "Group conversation consent revoked" in (
+            pet.states["robot-01"].last_error or ""
+        )
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
 async def test_operator_selected_peer_memory_share_recovers_pr4_without_rewriting_witness(
     fleet, tmp_path
 ):
