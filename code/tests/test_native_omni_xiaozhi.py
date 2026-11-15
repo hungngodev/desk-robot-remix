@@ -440,6 +440,58 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 
+@pytest.mark.parametrize("producer", ["mac", "native"])
+async def test_opus_send_rejects_head_replaced_while_socket_write_awaited(
+    native, producer,
+):
+    """A successful old socket write is not authenticated new-head delivery."""
+    module, bridge = native
+    old, _ = connection()
+    new, _ = connection()
+    new.session_id = "new-authenticated-head"
+    bridge.connections[old.device_id] = old
+    bridge.interrupt_generation = {old.device_id: 0}
+    entered, release = asyncio.Event(), asyncio.Event()
+    sent = []
+
+    class Socket:
+        async def send(self, packet):
+            sent.append(packet)
+            entered.set()
+            await release.wait()
+
+    old.websocket = Socket()
+    session = None
+    if producer == "mac":
+        module._external_speaker_owner = old.device_id
+        module._external_speaker_connection = old
+        task = asyncio.create_task(
+            module.send_external_opus(old, b"old-opus", 0)
+        )
+    else:
+        session = module.NativeOmniSession(
+            old, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+        )
+        task = asyncio.create_task(
+            session._send_device_opus(b"old-opus", session._generation)
+        )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        bridge.connections[old.device_id] = new
+        release.set()
+        with pytest.raises(RuntimeError, match="Head replaced during .* Opus send"):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+    assert sent == [b"old-opus"]
+    assert bridge.connections[old.device_id] is new
+    if session is not None:
+        assert session.head_packets == 0
+
+
 def test_native_and_mac_reuse_physical_lock_through_session_replacement(native):
     """Native startup must never switch the lock protecting Mac Opus/STOP."""
     module, bridge = native
