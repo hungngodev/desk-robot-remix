@@ -1157,6 +1157,80 @@ async def test_manual_peer_share_revoked_while_sqlite_writes_removes_new_copy(
         await pet.close()
 
 
+async def test_camera_memory_retracted_after_vision_consent_revoked_inside_sqlite(
+    fleet, tmp_path, monkeypatch,
+):
+    """Sensor memory survives; a newly inserted camera guess is rolled back."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    original = memory.remember
+    inserted = []
+
+    def revoke_after_camera_insert(robot_id, event_id, summary, **kwargs):
+        saved = original(robot_id, event_id, summary, **kwargs)
+        if kwargs["kind"] == "key" and saved:
+            inserted.append(event_id)
+            fleet.voice_vision_tools_enabled = False
+        return saved
+
+    monkeypatch.setattr(memory, "remember", revoke_after_camera_insert)
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    try:
+        await pet._store_observation(
+            "robot-01",
+            SceneChange("key", "My camera model guessed there is a brass key", 0.94),
+            camera_derived=True,
+        )
+        assert len(inserted) == 1
+        assert memory.count("robot-01") == 0
+        assert memory.count("robot-02") == memory.count("robot-03") == 0
+        await pet._store_observation(
+            "robot-01",
+            SceneChange("touch_tap", "My head touch sensor was tapped", 1.0),
+        )
+        assert memory.count("robot-01") == 1
+        assert memory.recent("robot-01")[0].kind == "touch_tap"
+    finally:
+        await pet.close()
+
+
+async def test_revoked_camera_source_cannot_offer_proactive_speech(
+    fleet, tmp_path,
+):
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = False
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), speaker, memory=memory,
+        ), memory, KeyScene(), speech_cooldown=0,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 5
+    pet.set_voice_monitor_ready(True)
+    try:
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("key", "My camera guessed a key arrived", 0.99), 5,
+            camera_derived=True,
+        )
+        assert state.suppressed == 1
+        assert state.last_initiative_suppression == (
+            "pet_disabled_or_generation_changed"
+        )
+        assert pet._speech_task is None
+        assert not speaker.spoken
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_operator_selected_peer_memory_share_recovers_pr4_without_rewriting_witness(
     fleet, tmp_path
 ):
