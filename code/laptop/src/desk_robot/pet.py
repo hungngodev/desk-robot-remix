@@ -428,35 +428,47 @@ class PetController:
             # Per-robot SQLite databases are independent. A failed or busy
             # peer must not erase the eyewitness fact or suppress its reply.
             destinations = [r.id for r in self.settings.robots if r.id != robot_id]
-            def persist_peer(peer_id: str) -> bool:
-                # A cancelled gathering coroutine cannot abandon a newly
-                # inserted private peer copy after fleet sharing is revoked.
-                permitted = (
+            def permitted() -> bool:
+                return (
                     self.settings.fleet_text_sharing_enabled
                     and self.settings.fleet_text_auto_fanout_enabled
                     and (not camera_derived or self.settings.mode != "hardware"
                          or self.settings.voice_vision_tools_enabled)
                 )
-                if not permitted:
-                    return False
-                inserted = self.memory.remember(
-                    peer_id, event_id, change.description, kind=change.kind,
-                    source_robot=robot_id, witnessed=False,
-                    observed_at=observed_at, confidence=change.confidence,
-                )
-                if (inserted and (
-                        not self.settings.fleet_text_sharing_enabled
-                        or not self.settings.fleet_text_auto_fanout_enabled
-                        or (camera_derived and self.settings.mode == "hardware"
-                            and not self.settings.voice_vision_tools_enabled))):
-                    self.memory.forget_episode(peer_id, event_id)
-                    return False
-                return inserted
 
-            results = await asyncio.gather(
-                *(asyncio.to_thread(persist_peer, peer_id) for peer_id in destinations),
-                return_exceptions=True,
-            )
+            def persist_peer_batch() -> list:
+                # One off-loop worker owns ALL newly inserted copies. If a
+                # peer stalls and the coroutine is cancelled on opt out, a
+                # completed sibling cannot escape the old gather cleanup.
+                results, new_copies = [], []
+                for peer_id in destinations:
+                    if not permitted():
+                        break
+                    try:
+                        inserted = self.memory.remember(
+                            peer_id, event_id, change.description,
+                            kind=change.kind, source_robot=robot_id,
+                            witnessed=False, observed_at=observed_at,
+                            confidence=change.confidence,
+                        )
+                        results.append(inserted)
+                        if inserted:
+                            new_copies.append(peer_id)
+                    except Exception as exc:
+                        # One failed peer must not erase the eyewitness event
+                        # or suppress independent peers.
+                        results.append(exc)
+                if not permitted():
+                    for peer_id in new_copies:
+                        # Only copies from THIS request, not older duplicates.
+                        self.memory.forget_episode(peer_id, event_id)
+                    results = [
+                        item if isinstance(item, BaseException) else False
+                        for item in results
+                    ]
+                return results + [False] * (len(destinations) - len(results))
+
+            results = await asyncio.to_thread(persist_peer_batch)
             for peer_id, result in zip(destinations, results, strict=True):
                 if isinstance(result, BaseException):
                     self.states[robot_id].last_error = (
