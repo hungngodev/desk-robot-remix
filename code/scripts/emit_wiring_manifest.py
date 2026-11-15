@@ -112,8 +112,9 @@ def verify(plan: dict, body: str, head: str) -> None:
         "floor_rear_right", "front_obstacle", "left_obstacle",
         "right_obstacle", "rear_obstacle",
     )
-    if tuple(lane["position"] for lane in ranges) != expected_roles:
-        raise ValueError("Critical cliff/obstacle sensor order drift")
+    if any(lane["channel"] != index or lane["position"] != expected_roles[index]
+           for index, lane in enumerate(ranges)):
+        raise ValueError("Critical cliff/obstacle sensor channel mapping drift")
 
 
 def render(plan: dict, body: str, head: str) -> str:
