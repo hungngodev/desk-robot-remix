@@ -1836,6 +1836,32 @@ class PetController:
                                     turn["robot_id"], turn["text"], now
                                 )
                 return
+
+            def model_context_permitted() -> bool:
+                # The decision may outlive a live context or private memory
+                # opt in. Never submit its already composed private prompt to
+                # another model call after revocation, even for a touch event.
+                now = time.monotonic()
+                return (
+                    not self._closed and self.voice_monitor_ready
+                    and state.enabled and not state.quiet
+                    and state.generation == generation
+                    and (not private_memory_allowed
+                         or self.settings.voice_memory_tools_enabled)
+                    and (not live_context_used
+                         or self.settings.voice_vision_tools_enabled)
+                    and (not camera_derived
+                         or self.settings.mode != "hardware"
+                         or self.settings.voice_vision_tools_enabled)
+                    and not self._human_active_in_fleet(now)
+                    and not newer_human_turn()
+                    and now - offered_at <= self.max_observation_age
+                )
+
+            if not model_context_permitted():
+                state.suppressed += 1
+                state.last_initiative_suppression = "model_context_superseded"
+                return
             history = [
                 {
                     "role": "system",
@@ -1896,10 +1922,7 @@ class PetController:
                     state.last_initiative_suppression = "event_expired_during_reasoning"
                     return
                 if choice["action"] == "inspect":
-                    if (self._human_active_in_fleet(time.monotonic())
-                            or newer_human_turn()
-                            or time.monotonic() - offered_at
-                                > self.max_observation_age):
+                    if not model_context_permitted():
                         state.suppressed += 1
                         state.last_initiative_suppression = "tool_candidate_superseded"
                         return
@@ -1913,10 +1936,7 @@ class PetController:
                         state.suppressed += 1
                         state.last_initiative_suppression = "read_only_tool_unavailable"
                         return
-                    if (self._human_active_in_fleet(time.monotonic())
-                            or newer_human_turn()
-                            or time.monotonic() - offered_at
-                                > self.max_observation_age):
+                    if not model_context_permitted():
                         state.suppressed += 1
                         state.last_initiative_suppression = "tool_result_superseded"
                         return
