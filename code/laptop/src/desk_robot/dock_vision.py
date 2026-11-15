@@ -82,7 +82,9 @@ class DockCameraCalibration:
                 != (self.mount_yaw_deg is None)):
             raise ValueError("Camera mount lateral offset and yaw must both be measured")
         if self.mount_lateral_offset_mm is not None:
-            if (not _finite_number(self.mount_lateral_offset_mm)
+            if (type(self.mount_lateral_offset_mm) not in (int, float)
+                    or type(self.mount_yaw_deg) not in (int, float)
+                    or not _finite_number(self.mount_lateral_offset_mm)
                     or not _finite_number(self.mount_yaw_deg)
                     or not -100 <= self.mount_lateral_offset_mm <= 100
                     or not -20 <= self.mount_yaw_deg <= 20):
