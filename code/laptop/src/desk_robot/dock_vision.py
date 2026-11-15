@@ -172,8 +172,8 @@ def detect_apriltag(
         dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
         detector = cv2.aruco.ArucoDetector(dictionary)
         corners, ids, _rejected = detector.detectMarkers(frame)
-    except cv2.error:
-        return None  # Corrupt native detector output is never a docking observation
+    except (cv2.error, TypeError, ValueError):
+        return None  # Malformed native detector result is not a dock observation
     if ids is None:
         return None
     # A native detector may return IDs alongside missing or malformed corners.
