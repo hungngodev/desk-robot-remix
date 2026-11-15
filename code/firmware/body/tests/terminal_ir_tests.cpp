@@ -92,6 +92,31 @@ int main() {
     CHECK(!result.same_code && !result.left_fresh && !result.right_fresh);
     CHECK(result.left_seq == 2 && result.right_seq == 2);
     CHECK(!result.motor_authorized && !result.charging_authorized);
+    // A caller bypassing the queue gate must not replay a same-tick or
+    // older receiver frame to refresh previously qualified dock evidence.
+    desk_robot::DualIrEvidence replay;
+    replay.accept(0, code, 100);
+    replay.accept(1, code, 110);
+    CHECK(replay.assess(110).same_code);
+    replay.accept(0, code, 100);
+    result = replay.assess(110);
+    CHECK(!result.same_code && !result.left_fresh && !result.right_fresh);
+    CHECK(result.left_seq == 1 && result.right_seq == 1);
+    CHECK(!result.motor_authorized && !result.charging_authorized);
+    replay.accept(0, code, 120);
+    replay.accept(1, code, 125);
+    CHECK(replay.assess(125).same_code);
+    replay.accept(1, code, 124);
+    CHECK(!replay.assess(125).same_code);
+    // Valid monotonic timestamps across the 32-bit clock wrap still work.
+    desk_robot::DualIrEvidence replay_wrap;
+    replay_wrap.accept(0, code, 0xfffffff0U);
+    replay_wrap.accept(1, code, 0xfffffff1U);
+    replay_wrap.accept(0, code, 0x00000012U);
+    replay_wrap.accept(1, code, 0x00000013U);
+    CHECK(replay_wrap.assess(0x00000022U).same_code);
+    CHECK(replay_wrap.assess(0x00000022U).left_seq == 2);
+    CHECK(replay_wrap.assess(0x00000022U).right_seq == 2);
     // Invalidation must reject old sightings without erasing diagnostic counts.
     desk_robot::DualIrEvidence invalidated;
     invalidated.accept(0, code, 100);
