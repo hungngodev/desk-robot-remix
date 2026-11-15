@@ -1245,6 +1245,88 @@ async def test_pet_discards_camera_inference_when_vision_revoked_mid_model(
         await pet.close()
 
 
+@pytest.mark.parametrize("stage", [
+    "initial_proactive_decision", "after_readonly_tool", "legacy_chat_reply",
+])
+async def test_proactive_model_deadline_releases_only_fleet_initiative_task(
+    fleet, tmp_path, stage,
+):
+    """An unresponsive local model never monopolizes future observations."""
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    entered = asyncio.Event()
+
+    class HangingDecision:
+        calls = 0
+        cancelled = False
+
+        async def proactive_decision(self, history):
+            self.calls += 1
+            if stage == "after_readonly_tool" and self.calls == 1:
+                return {"action": "inspect", "text": "", "tool": "status"}
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+        async def reply(self, history):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    class HangingLegacy:
+        cancelled = False
+
+        async def reply(self, history):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    class ReadOnlyHead:
+        async def status(self):
+            return {
+                "robot_id": "robot-01", "armed": False,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+            }
+
+        async def command(self, *_):
+            raise AssertionError("No model may issue autonomous movement")
+
+    chat = HangingLegacy() if stage == "legacy_chat_reply" else HangingDecision()
+    pet = PetController(
+        fleet, {"robot-01": ReadOnlyHead()},
+        Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0, max_observation_age=.7,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 12
+    pet.set_voice_monitor_ready(True)
+    try:
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("key", "A new key appeared near my wheel", .99), 12,
+        )
+        await asyncio.wait_for(entered.wait(), timeout=.6)
+        await wait_for(lambda: pet._speech_task is None, timeout=1.5)
+        assert chat.cancelled is True
+        assert state.last_initiative_suppression == "event_expired_during_reasoning"
+        assert state.spoken == 0
+        assert pet._group_last_spoken == float("-inf")
+        assert speaker.spoken == []
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_camera_peer_fanout_retracts_copies_after_visual_opt_out(
     fleet, tmp_path, monkeypatch,
 ):
