@@ -440,6 +440,72 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 
+def test_native_and_mac_reuse_physical_lock_through_session_replacement(native):
+    """Native startup must never switch the lock protecting Mac Opus/STOP."""
+    module, bridge = native
+    old, _ = connection()
+    bridge.connections[old.device_id] = old
+    lock = module._external_device_send_lock(old)
+    session = module.NativeOmniSession(
+        old, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    assert session._device_send_lock is lock
+    module._sessions[old.device_id] = session
+    assert module._external_device_send_lock(old) is lock
+    session.closed = True
+    assert module._external_device_send_lock(old) is lock
+    new, _ = connection()
+    new.session_id = "replacement-head"
+    bridge.connections[new.device_id] = new
+    replacement = module.NativeOmniSession(
+        new, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    assert replacement._device_send_lock is lock
+    assert module._external_device_send_lock(new) is lock
+
+
+async def test_native_startup_cannot_switch_mac_stop_to_an_unlocked_path(native):
+    """A queued head STOP cannot jump Mac's preexisting physical send lock."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    lock = module._external_device_send_lock(conn)
+    async with lock:
+        session = module.NativeOmniSession(
+            conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+        )
+        module._sessions[conn.device_id] = session
+        assert session._device_send_lock is lock
+        task = asyncio.create_task(module.send_external_urgent_stop(conn))
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert sent == []
+    await asyncio.wait_for(task, timeout=0.6)
+    assert json.loads(sent[0])["state"] == "stop"
+    assert json.loads(sent[0])["flush"] is True
+
+
+async def test_stalled_one_physical_head_does_not_block_other_pet_stop(native):
+    """Five pets need independent urgent STOP locks, not one fleetwide lock."""
+    module, bridge = native
+    first, sent_first = connection()
+    peer, sent_peer = connection()
+    peer.device_id = "mac-02"
+    peer.session_id = "independent-peer"
+    bridge.connections.update({first.device_id: first, peer.device_id: peer})
+    first_lock = module._external_device_send_lock(first)
+    peer_lock = module._external_device_send_lock(peer)
+    assert first_lock is not peer_lock
+    async with first_lock:
+        await asyncio.wait_for(module.send_external_urgent_stop(peer), timeout=0.2)
+        assert sent_first == []
+    assert len(sent_peer) == 1
+    assert json.loads(sent_peer[0])["state"] == "stop"
+
+
 async def test_authenticated_human_stop_waits_for_inflight_mac_opus(native):
     """A real urgent STOP must follow a previously started Opus transport."""
     module, bridge = native
