@@ -2508,18 +2508,20 @@ async def end_external_speech(
         session = _sessions.get(conn.device_id)
         if session is not None and session.conn is conn:
             session._external_speech_active = False
-        if (stop_confirmed and bridge.connections.get(conn.device_id) is conn
+        current_head_stopped = (
+            stop_confirmed and bridge.connections.get(conn.device_id) is conn
+        )
+        if (current_head_stopped
                 and _output_owner_unverified == conn.device_id):
-            # A failed earlier urgent STOP may have blocked the entire fleet.
-            # A NEW, successful Mac terminal STOP on the SAME authenticated
-            # head is valid recovery, but an old socket must not clear it.
+            # A successful Mac STOP recovers old uncertainty ONLY if this
+            # exact head is still the current authenticated connection.
             if _output_owner == conn.device_id:
                 _output_owner = None
             _output_owner_unverified = None
-        elif not stop_confirmed:
-            # An unsuccessful Mac STOP has exactly the same uncertain
-            # physical speaker state as a failed native model STOP. Hold
-            # the fleet floor until a real head transport reset succeeds.
+        elif not current_head_stopped:
+            # A successful send on a REPLACED socket is just as uncertain as
+            # a failed send. Neither is proof that the currently registered
+            # physical decoder stopped. Fail closed across the whole fleet.
             _output_owner = conn.device_id
             _output_owner_unverified = conn.device_id
 
