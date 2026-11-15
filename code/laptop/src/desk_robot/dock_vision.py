@@ -149,7 +149,10 @@ def detect_apriltag(
         import numpy as np
     except ImportError as exc:
         raise RuntimeError("Install the existing vision extra for OpenCV AprilTag") from exc
-    frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+    try:
+        frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+    except cv2.error:
+        return None  # A native decoder failure is not a trusted dock observation
     if frame is None or frame.size == 0:
         raise ValueError("Invalid JPEG frame")
     # OpenCV intrinsics and distortion belong to one exact capture mode.
