@@ -466,7 +466,7 @@ def test_exhausted_boot_history_revokes_active_pose_without_evicting_replay_fenc
     for boot in range(1, 10):
         assert qualified(gate, sample(boot_id=boot, sample_ms=boot),
                          100 + boot * .1, new_sample=False) == ()
-    for i in range(7):
+    for i in range(8):
         assert qualified(gate, sample(boot_id=9, sample_ms=20 + i),
                          102 + i * .1, new_sample=False) == ()
     assert gate.reference is not None
