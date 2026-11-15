@@ -648,3 +648,24 @@ def test_native_decoder_malformed_frame_shape_fails_closed(monkeypatch, bad_fram
     decision = assess_dock(None, now=5.1, target_distance_mm=120)
     assert decision.phase == "hold"
     assert not decision.motor_authorized and not decision.charging_authorized
+
+
+@pytest.mark.parametrize("bad_dtype", ["float32", "float64", "int16", "bool"])
+def test_native_jpeg_decoder_non_uint8_frame_cannot_reach_detector(monkeypatch, bad_dtype):
+    """A corrupt native decoder must not feed unexpected pixel types to ArUco."""
+    import cv2
+    import numpy as np
+
+    def corrupt_decode(*args, **kwargs):
+        return np.zeros((480, 640), dtype=bad_dtype)
+
+    def forbidden_detector(*args, **kwargs):
+        pytest.fail("Non uint8 decoded frame reached native AprilTag detector")
+
+    monkeypatch.setattr(cv2, "imdecode", corrupt_decode)
+    monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", forbidden_detector)
+    with pytest.raises(ValueError, match="Invalid JPEG frame"):
+        detect_apriltag(b"synthetic JPEG", calibration(), captured_at=5)
+    decision = assess_dock(None, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized and not decision.charging_authorized
