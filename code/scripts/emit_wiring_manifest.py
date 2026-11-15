@@ -98,6 +98,20 @@ def verify(plan: dict, body: str, head: str) -> None:
         ("PN532 I2C", 0x24), ("MCP23017", 0x20)
     } or len(dock_lane["devices"]) != 2:
         raise ValueError("Dock accessory lane 5 must retain PN532 and MCP23017")
+    # Battery and wheel telemetry must not be silently moved to another
+    # mux lane while retaining individually valid I2C addresses. This is
+    # a declared harness contract, not proof of an assembled device.
+    accessory_roles = {
+        4: {("INA226", 0x40), ("MAX17048", 0x36)},
+        6: {("AS5600", 0x36)},
+        7: {("AS5600", 0x36)},
+    }
+    for channel, expected in accessory_roles.items():
+        lane = next(c for c in bus["mux_extras"]["channels"] if c["channel"] == channel)
+        devices = lane["devices"]
+        if (len(devices) != len(expected)
+                or {(d.get("name"), d["address"]) for d in devices} != expected):
+            raise ValueError(f"Accessory lane {channel} battery/wheel identity drift")
     ranges = bus["mux_ranges"]["channels"]
     # Each selected TCA9548A lane isolates one VL53L4CD at its native
     # 7-bit address. Reject a manifest that silently substitutes another
