@@ -159,7 +159,7 @@ def detect_apriltag(
     except cv2.error:
         return None  # A native decoder failure is not a trusted dock observation
     if (frame is None or not isinstance(frame, np.ndarray)
-            or frame.ndim != 2 or frame.size == 0
+            or frame.ndim != 2 or frame.dtype != np.uint8 or frame.size == 0
             or frame.shape[0] < 1 or frame.shape[1] < 1):
         raise ValueError("Invalid JPEG frame")
     # OpenCV intrinsics and distortion belong to one exact capture mode.
