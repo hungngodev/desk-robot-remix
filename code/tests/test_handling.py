@@ -476,7 +476,12 @@ def test_exhausted_boot_history_revokes_active_pose_without_evicting_replay_fenc
                      104, new_sample=False) == ()
     assert gate.reference is None and gate.startup_samples == []
     assert gate.last_boot_id == 9
+    assert gate.last_sample_ms == 27
     assert gate.retired_boot_ids == list(range(1, 9))
+    # The same trusted conversion cannot seed a new baseline after revocation.
+    assert qualified(gate, sample(boot_id=9, sample_ms=27),
+                     104.05, new_sample=False) == ()
+    assert gate.startup_samples == []
     # Retired replay cannot displace the source identity after revocation.
     assert qualified(gate, sample(boot_id=1, sample_ms=500),
                      104.1, new_sample=False) == ()
