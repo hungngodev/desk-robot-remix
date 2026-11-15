@@ -129,7 +129,10 @@ def detect_apriltag(
         raise ValueError("Dock JPEG resolution differs from measured intrinsics")
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
     detector = cv2.aruco.ArucoDetector(dictionary)
-    corners, ids, _rejected = detector.detectMarkers(frame)
+    try:
+        corners, ids, _rejected = detector.detectMarkers(frame)
+    except cv2.error:
+        return None  # Corrupt native detector output is never a docking observation
     if ids is None:
         return None
     # Native detector IDs must be a one-column integer array matching corners.
@@ -175,14 +178,17 @@ def detect_apriltag(
         calibration.distortion_coeffs if calibration.distortion_coeffs is not None
         else (0.0,) * 5, dtype=np.float64,
     ).reshape(-1, 1)
-    success, rvec, tvec = cv2.solvePnP(
-        object_points, image_points, intrinsics, distortion,
-        flags=cv2.SOLVEPNP_IPPE_SQUARE,
-    )
-    if not success:
-        return None
-    projected, _ = cv2.projectPoints(object_points, rvec, tvec,
-                                     intrinsics, distortion)
+    try:
+        success, rvec, tvec = cv2.solvePnP(
+            object_points, image_points, intrinsics, distortion,
+            flags=cv2.SOLVEPNP_IPPE_SQUARE,
+        )
+        if not success:
+            return None
+        projected, _ = cv2.projectPoints(object_points, rvec, tvec,
+                                         intrinsics, distortion)
+    except cv2.error:
+        return None  # Native pose failure cannot authorize contact approach
     error = float(np.sqrt(np.mean(np.sum(
         (projected.reshape(4, 2) - image_points) ** 2, axis=1,
     ))))
