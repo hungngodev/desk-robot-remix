@@ -2316,6 +2316,7 @@ async def send_external_urgent_stop(conn) -> None:
     send_external_opus. Both must share the very same physical XIAO send
     lock, even before a native inference session exists.
     """
+    global _output_owner, _output_owner_unverified
     import desk_robot_bridge as bridge
     async def protected_stop():
         async with _external_device_send_lock(conn):
@@ -2327,7 +2328,27 @@ async def send_external_urgent_stop(conn) -> None:
             }))
             if bridge.connections.get(conn.device_id) is not conn:
                 raise RuntimeError("Head replaced during urgent STOP")
-    await asyncio.wait_for(protected_stop(), timeout=0.4)
+    try:
+        await asyncio.wait_for(protected_stop(), timeout=0.4)
+    except (Exception, asyncio.CancelledError):
+        # A socket timeout or an interrupt cancelled while another Opus
+        # owns the lock is NOT evidence that the decoder is silent. Retain
+        # the exact device's uncertain fleet lease until authenticated STOP.
+        async with _output_owner_lock:
+            if (_output_owner in (None, conn.device_id)
+                    and _output_owner_unverified in (None, conn.device_id)):
+                if _output_owner is None:
+                    _output_owner = conn.device_id
+                _output_owner_unverified = conn.device_id
+        raise
+    else:
+        # Only the same current authenticated head may clear uncertainty.
+        async with _output_owner_lock:
+            if (_output_owner_unverified == conn.device_id
+                    and bridge.connections.get(conn.device_id) is conn):
+                if _output_owner == conn.device_id:
+                    _output_owner = None
+                _output_owner_unverified = None
 
 
 async def send_external_tts_control(
