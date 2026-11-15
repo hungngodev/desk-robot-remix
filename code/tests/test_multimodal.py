@@ -1920,3 +1920,15 @@ def test_native_sent_audio_receipts_enter_only_own_bounded_live_history():
     hub.clear("robot-01")
     assert not hub.native_spoken_ids["robot-01"]
 
+
+
+def test_finite_rejects_unrepresentable_host_timestamps():
+    """Untrusted integer timestamps must fail closed, not raise OverflowError."""
+    from desk_robot.multimodal import _finite
+
+    assert _finite(0)
+    assert _finite(1.5)
+    assert not _finite(True)
+    assert not _finite(float("inf"))
+    assert not _finite(10 ** 1000)
+    assert not _finite(-(10 ** 1000))
