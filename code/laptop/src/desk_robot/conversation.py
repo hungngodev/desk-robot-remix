@@ -547,6 +547,11 @@ class Conversation:
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
                             await self._persist_spoken_turn(robot, text, robots)
+                            # SQLite writes yield to other tasks. Revocation
+                            # during persistence must not publish a completed
+                            # turn or authorize another peer response.
+                            if not consent_still_valid():
+                                raise RuntimeError("Group conversation consent revoked")
                             self.histories[robot.id].append({"role": "assistant", "content": text})
                             for peer in robots:
                                 if peer.id != robot.id:
