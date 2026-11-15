@@ -382,3 +382,23 @@ def test_wiring_manifest_rejects_noninteger_mux_i2c_address(group, address):
     head = (ROOT / module.HEAD_PINS).read_text()
     with pytest.raises(ValueError, match="Incorrect .* mux address"):
         module.render(plan, body, head)
+
+
+@pytest.mark.parametrize("group", ["mux_ranges"])
+def test_wiring_manifest_rejects_swapped_cliff_mux_channels(group):
+    """A complete set of channels is insufficient if floor roles are swapped."""
+    import copy
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan = copy.deepcopy(PLAN)
+    lanes = plan["bus"][group]["channels"]
+    lanes[0]["channel"], lanes[1]["channel"] = lanes[1]["channel"], lanes[0]["channel"]
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    with pytest.raises(ValueError, match="Critical cliff/obstacle sensor channel mapping drift"):
+        module.verify(plan, body, head)
