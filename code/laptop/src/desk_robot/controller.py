@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Awaitable, Callable
 
 from .calibration import Calibration
@@ -413,6 +413,11 @@ class Coordinator:
             raise OperationError(
                 "Dock motion requires calibrated camera frame resolution"
             )
+        if (camera.mount_lateral_offset_mm is None
+                or camera.mount_yaw_deg is None):
+            raise OperationError(
+                "Dock motion requires measured camera to chassis mounting geometry"
+            )
         return self._submit(
             robot_id, "dock_approach",
             lambda job: self._dock_approach(
@@ -442,8 +447,15 @@ class Coordinator:
             pose = await detect_bounded(
                 jpeg, camera, captured_at=received_at
             )
+            # A centered AprilTag in the camera frame is not necessarily
+            # centered on the wheel chassis. Apply measured camera yaw and
+            # lateral lens offset before choosing a left/right/forward pulse.
+            aligned = (
+                replace(pose, x_mm=camera.chassis_lateral_mm(pose))
+                if pose is not None else None
+            )
             decision = assess_dock(
-                pose, now=time.monotonic(), target_distance_mm=target_mm
+                aligned, now=time.monotonic(), target_distance_mm=target_mm
             )
             job.events.append(f"dock observation {attempt}: {decision.phase}")
             if decision.phase == "hold":
@@ -471,7 +483,7 @@ class Coordinator:
                     raise OperationError(
                         "Dock turn refused: side and rear clearance unqualified"
                     )
-                direction = turn_sign if pose.x_mm > 0 else -turn_sign
+                direction = turn_sign if aligned.x_mm > 0 else -turn_sign
                 command = f"drive {20 * direction} {-20 * direction} 100"
             else:
                 # Stopping at least 300mm away from a detected frontal surface
@@ -487,7 +499,7 @@ class Coordinator:
             # It verifies sensor safety, not that the old AprilTag image is
             # still useful. Reject a marker that expired while polling safety.
             latest = assess_dock(
-                pose, now=time.monotonic(), target_distance_mm=target_mm
+                aligned, now=time.monotonic(), target_distance_mm=target_mm
             )
             if latest.phase != decision.phase:
                 return {
