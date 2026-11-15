@@ -237,6 +237,33 @@ def test_wiring_manifest_rejects_unqualified_range_lane_mutations(mutation):
         module.render(plan, body, head)
 
 
+@pytest.mark.parametrize("mutation", ["wrong_expander_address", "wrong_expander_name", "missing_expander", "extra_device"])
+def test_wiring_manifest_rejects_dock_expander_lane_drift(mutation):
+    """Dock interlock harness must not silently substitute or move MCP23017."""
+    import copy
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    plan = copy.deepcopy(PLAN)
+    devices = plan["bus"]["mux_extras"]["channels"][5]["devices"]
+    if mutation == "wrong_expander_address":
+        devices[1]["address"] = 0x21
+    elif mutation == "wrong_expander_name":
+        devices[1]["name"] = "unknown expander"
+    elif mutation == "missing_expander":
+        devices.pop()
+    else:
+        devices.append({"name": "unexpected", "address": 0x30})
+    with pytest.raises(ValueError, match="Dock accessory lane 5"):
+        module.render(plan, body, head)
+
+
 @pytest.mark.parametrize("group,channel", [
     ("mux_ranges", True), ("mux_ranges", 0.0),
     ("mux_extras", False), ("mux_extras", "0"),
