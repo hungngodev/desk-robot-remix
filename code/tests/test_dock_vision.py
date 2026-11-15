@@ -134,7 +134,9 @@ def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
         [camera.fx, 0, camera.cx], [0, camera.fy, camera.cy],
         [0, 0, 1],
     ], dtype=np.float64)
-    rotation = np.array([[0.08], [-0.04], [0.03]])
+    # A real printed AprilTag faces the lens: its surface normal points
+    # toward the camera, not away as in an inverted synthetic square.
+    rotation = np.array([[math.pi - 0.08], [-0.04], [0.03]])
     translation = np.array([[14.0], [-8.0], [380.0]])
     corners, _ = cv2.projectPoints(
         object_points, rotation, translation, intrinsics,
@@ -166,6 +168,78 @@ def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
 @pytest.mark.parametrize("field", [
     "fx", "fy", "cx", "cy", "tag_side_mm", "distortion_coeffs",
 ])
+
+def test_real_printed_apriltag_faces_camera_before_dock_approach():
+    """Use real OpenCV tag generation/detection, not a mocked marker ID."""
+    import cv2
+    import numpy as np
+
+    dictionary = cv2.aruco.getPredefinedDictionary(
+        cv2.aruco.DICT_APRILTAG_36h11,
+    )
+    tag = cv2.aruco.generateImageMarker(dictionary, 12, 160)
+    canvas = np.full((480, 640), 255, dtype=np.uint8)
+    canvas[160:320, 240:400] = tag
+    ok, jpeg = cv2.imencode(".jpg", canvas)
+    assert ok
+    cam = DockCameraCalibration(
+        fx=410, fy=410, cx=320, cy=240, tag_side_mm=60,
+        marker_id=12, image_width_px=640, image_height_px=480,
+    )
+    pose = detect_apriltag(jpeg.tobytes(), cam, captured_at=1.0)
+    assert pose is not None
+    assert abs(pose.x_mm) < 1
+    assert abs(pose.y_mm) < 1
+    assert 120 < pose.z_mm < 180
+    assert pose.reprojection_error_px < 0.5
+    decision = assess_dock(
+        pose, now=1.05, target_distance_mm=120,
+    )
+    assert decision.phase == "approach"
+    assert not decision.motor_authorized
+    assert not decision.charging_authorized
+
+
+def test_inverted_apriltag_plane_rejected_even_with_perfect_reprojection(monkeypatch):
+    """A mirrored/back-facing tag cannot become a physical approach target."""
+    import cv2
+    import numpy as np
+
+    half = 30.0
+    square = np.array([
+        [-half, half, 0], [half, half, 0],
+        [half, -half, 0], [-half, -half, 0],
+    ], dtype=np.float64)
+    K = np.array([[410, 0, 320], [0, 410, 240], [0, 0, 1]], dtype=np.float64)
+    # Exactly inverted face. IPPE recovers a legitimate low-error PnP
+    # solution, but its normal points AWAY from the camera.
+    image_points, _ = cv2.projectPoints(
+        square, np.zeros((3, 1)), np.array([[0.], [0.], [380.]]),
+        K, np.zeros(5),
+    )
+
+    class BackFacingDetector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [
+                image_points.astype(np.float32).reshape(1, 4, 2),
+            ], np.array([[12]], dtype=np.int32), []
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", BackFacingDetector)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    assert detect_apriltag(
+        jpeg.tobytes(), calibration(), captured_at=5.0,
+    ) is None
+    decision = assess_dock(None, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized
+    assert not decision.charging_authorized
+
+
+
 def test_unrepresentable_measured_camera_number_is_rejected(field):
     from dataclasses import replace
     huge = 10 ** 1000
