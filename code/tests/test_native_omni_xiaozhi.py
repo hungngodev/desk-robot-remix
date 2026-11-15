@@ -6655,6 +6655,37 @@ async def test_decoder_stop_from_replaced_xiao_socket_never_clears_owner(
     assert not await module.begin_external_speech(fresh)
 
 
+async def test_native_legacy_decoder_stop_bounds_occupied_device_lock(native):
+    """Startup cannot wait indefinitely behind a hung prior Opus writer."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    async with session._device_send_lock:
+        # The old implementation timed only websocket.send AFTER this lock.
+        # Its acquisition could hang forever, blocking model startup.
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(session._retire_legacy_audio(), timeout=0.85)
+        assert sent == []
+        assert conn.client_is_speaking is True
+        assert module._output_owner == conn.device_id
+        assert module._output_owner_unverified == conn.device_id
+
+    # A later current authenticated STOP can recover the uncertain lease.
+    await session._retire_legacy_audio()
+    assert json.loads(sent[-1]) == {
+        "type": "tts", "state": "stop", "flush": True,
+        "session_id": conn.session_id,
+    }
+    assert conn.client_is_speaking is False
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+
+
 @pytest.mark.parametrize("phase", ["legacy_start", "shutdown"])
 async def test_cancelled_head_stop_preserves_fleet_decoder_uncertainty(
     native, phase,
