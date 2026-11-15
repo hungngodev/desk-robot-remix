@@ -2010,43 +2010,46 @@ class NativeOmniSession:
                 return False
         speech_raced = False
         refused_after_claim = False
-        async with self._device_send_lock:
-            if bridge.connections.get(self.device) is not self.conn:
-                raise RuntimeError("Head replaced before native TTS control")
-            # Quiet/autonomy can change AFTER the first policy check while
-            # claim_speaker waits for the physical send lock. Never trust a
-            # pre-await snapshot for speaker authorization.
-            direct_required = self._pet_quiet or not self._pet_autonomy_enabled
-            if (self.closed or generation != self._generation
-                    or self._external_speech_active
-                    or (state == "start" and self._monitor_lost)
-                    or (state == "start" and direct_required and not (
-                        self._direct_reply_available
-                        and 0 <= time.monotonic() -
-                            self._last_human_speech_at <= 12.0
-                    ))):
-                refused_after_claim = True
-            # VAD may start between claim_speaker and acquiring the device
-            # send lock. Suppress the TTS START packet in that case.
-            elif state == "start" and bridge.human_speech_active():
-                speech_raced = True
-            else:
-                if state == "start":
-                    self.conn.client_abort = False
-                    self.conn.client_is_speaking = True
-                await asyncio.wait_for(
-                    self.conn.websocket.send(json.dumps({
-                        "type": "tts", "state": state,
-                        "session_id": self.conn.session_id,
-                    })), timeout=0.4,
-                )
+        # Deadline covers lock admission and transport. A stuck prior Opus
+        # sender must not indefinitely block human priority TTS STOP.
+        async with asyncio.timeout(0.6):
+            async with self._device_send_lock:
                 if bridge.connections.get(self.device) is not self.conn:
-                    # Sending to the old socket does not stop the new head.
-                    # Do not release the fleet lease for a stale TTS STOP.
-                    raise RuntimeError("Head replaced during native TTS control")
-                if state == "start" and direct_required:
-                    self._direct_reply_available = False
-                    self._direct_reply_active = True
+                    raise RuntimeError("Head replaced before native TTS control")
+                # Quiet/autonomy can change AFTER the first policy check while
+                # claim_speaker waits for the physical send lock. Never trust a
+                # pre-await snapshot for speaker authorization.
+                direct_required = self._pet_quiet or not self._pet_autonomy_enabled
+                if (self.closed or generation != self._generation
+                        or self._external_speech_active
+                        or (state == "start" and self._monitor_lost)
+                        or (state == "start" and direct_required and not (
+                            self._direct_reply_available
+                            and 0 <= time.monotonic() -
+                                self._last_human_speech_at <= 12.0
+                        ))):
+                    refused_after_claim = True
+                # VAD may start between claim_speaker and acquiring the device
+                # send lock. Suppress the TTS START packet in that case.
+                elif state == "start" and bridge.human_speech_active():
+                    speech_raced = True
+                else:
+                    if state == "start":
+                        self.conn.client_abort = False
+                        self.conn.client_is_speaking = True
+                    await asyncio.wait_for(
+                        self.conn.websocket.send(json.dumps({
+                            "type": "tts", "state": state,
+                            "session_id": self.conn.session_id,
+                        })), timeout=0.4,
+                    )
+                    if bridge.connections.get(self.device) is not self.conn:
+                        # Sending to the old socket does not stop the new head.
+                        # Do not release the fleet lease for a stale TTS STOP.
+                        raise RuntimeError("Head replaced during native TTS control")
+                    if state == "start" and direct_required:
+                        self._direct_reply_available = False
+                        self._direct_reply_active = True
         if refused_after_claim:
             if state == "start":
                 async with _output_owner_lock:
