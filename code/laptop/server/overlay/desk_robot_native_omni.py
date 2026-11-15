@@ -2309,6 +2309,27 @@ def _external_device_send_lock(conn) -> asyncio.Lock:
     return _external_opus_send_lock
 
 
+async def send_external_urgent_stop(conn) -> None:
+    """Send human VAD STOP AFTER any currently transmitting Opus packet.
+
+    A direct bridge WebSocket STOP could overtake a packet already inside
+    send_external_opus. Both must share the very same physical XIAO send
+    lock, even before a native inference session exists.
+    """
+    import desk_robot_bridge as bridge
+    async def protected_stop():
+        async with _external_device_send_lock(conn):
+            if bridge.connections.get(getattr(conn, "device_id", None)) is not conn:
+                raise RuntimeError("Urgent STOP has no current authenticated head")
+            await conn.websocket.send(json.dumps({
+                "type": "tts", "state": "stop", "flush": True,
+                "session_id": conn.session_id,
+            }))
+            if bridge.connections.get(conn.device_id) is not conn:
+                raise RuntimeError("Head replaced during urgent STOP")
+    await asyncio.wait_for(protected_stop(), timeout=0.4)
+
+
 async def send_external_tts_control(
     conn, generation: int, send, *, terminal: bool = False,
 ) -> None:
