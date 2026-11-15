@@ -187,12 +187,22 @@ def detect_apriltag(
             return None
         projected, _ = cv2.projectPoints(object_points, rvec, tvec,
                                          intrinsics, distortion)
-    except cv2.error:
+        normal = cv2.Rodrigues(rvec)[0][:, 2]
+        # AprilTag's physical printed face must point TOWARD the camera.
+        # IPPE_SQUARE can also fit an inverted/back-facing square to four
+        # synthetic corners with near-zero reprojection error. Steering
+        # toward such a pose is not a trustworthy dock approach.
+        if (normal.shape != (3,) or not np.isfinite(normal).all()
+                or normal[2] > -math.cos(math.radians(45))):
+            return None
+        projected = np.asarray(projected, dtype=np.float64).reshape(4, 2)
+        translation = np.asarray(tvec, dtype=np.float64).reshape(3)
+    except (cv2.error, ValueError, TypeError, IndexError, OverflowError):
         return None  # Native pose failure cannot authorize contact approach
     error = float(np.sqrt(np.mean(np.sum(
-        (projected.reshape(4, 2) - image_points) ** 2, axis=1,
+        (projected - image_points) ** 2, axis=1,
     ))))
-    x_mm, y_mm, z_mm = [float(v) for v in tvec.reshape(3)]
+    x_mm, y_mm, z_mm = [float(v) for v in translation]
     if (not all(_finite_number(v) for v in (x_mm, y_mm, z_mm, error))
             or not 30 <= z_mm <= 2000 or error > max_reprojection_error_px):
         return None
