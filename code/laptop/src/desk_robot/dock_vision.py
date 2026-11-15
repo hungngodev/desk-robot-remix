@@ -37,6 +37,11 @@ class DockCameraCalibration:
     distortion_coeffs: tuple[float, ...] | None = None
     image_width_px: int | None = None
     image_height_px: int | None = None
+    # Measured camera lens offset relative to the chassis centerline, right
+    # positive, and horizontal yaw pointing right relative to chassis forward.
+    # Image intrinsics alone cannot establish either mounting dimension.
+    mount_lateral_offset_mm: float | None = None
+    mount_yaw_deg: float | None = None
 
     def __post_init__(self):
         for name in ("fx", "fy", "cx", "cy", "tag_side_mm"):
@@ -71,6 +76,30 @@ class DockCameraCalibration:
                 raise ValueError("Invalid measured camera distortion coefficients")
         if type(self.marker_id) is not int or not 0 <= self.marker_id < 587:
             raise ValueError("AprilTag 36h11 marker ID out of range")
+        # A measured offset and yaw are a pair. Never silently treat the
+        # missing side of a mount calibration as a perfect centerline.
+        if ((self.mount_lateral_offset_mm is None)
+                != (self.mount_yaw_deg is None)):
+            raise ValueError("Camera mount lateral offset and yaw must both be measured")
+        if self.mount_lateral_offset_mm is not None:
+            if (not _finite_number(self.mount_lateral_offset_mm)
+                    or not _finite_number(self.mount_yaw_deg)
+                    or not -100 <= self.mount_lateral_offset_mm <= 100
+                    or not -20 <= self.mount_yaw_deg <= 20):
+                raise ValueError("Camera mount offset or yaw outside measured limits")
+
+    def chassis_lateral_mm(self, pose: DockPose) -> float:
+        """Transform the AprilTag camera x/z into the drive centerline.
+
+        A pose is a camera observation, not a chassis alignment. The
+        operator must first measure the lens position and yaw on the actual
+        assembled frame before this geometry may steer wheels.
+        """
+        if self.mount_lateral_offset_mm is None or self.mount_yaw_deg is None:
+            raise ValueError("Dock chassis camera mounting geometry unmeasured")
+        yaw = math.radians(self.mount_yaw_deg)
+        return (self.mount_lateral_offset_mm
+                + pose.x_mm * math.cos(yaw) + pose.z_mm * math.sin(yaw))
 
 
 @dataclass(frozen=True)
