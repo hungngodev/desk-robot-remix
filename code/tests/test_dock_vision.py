@@ -530,3 +530,34 @@ def test_dock_jpeg_decode_failure_cannot_authorize_motion(monkeypatch, decode_fa
     assert assessment.phase == "hold"
     assert not assessment.motor_authorized
     assert not assessment.charging_authorized
+
+
+@pytest.mark.parametrize("failure_stage", ["dictionary", "constructor"])
+def test_native_apriltag_setup_failure_cannot_reach_pose_or_motion(monkeypatch, failure_stage):
+    """A failed OpenCV detector initialization is not a trusted dock sighting."""
+    import cv2
+    import numpy as np
+
+    def broken_dictionary(*args, **kwargs):
+        raise cv2.error("injected dictionary failure")
+
+    class BrokenDetector:
+        def __init__(self, dictionary):
+            raise cv2.error("injected detector construction failure")
+
+    def forbidden_pnp(*args, **kwargs):
+        pytest.fail("Detector setup failure reached pose estimation")
+
+    if failure_stage == "dictionary":
+        monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", broken_dictionary)
+    else:
+        monkeypatch.setattr(cv2.aruco, "ArucoDetector", BrokenDetector)
+    monkeypatch.setattr(cv2, "solvePnP", forbidden_pnp)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), calibration(), captured_at=5)
+    assert pose is None
+    decision = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized
+    assert not decision.charging_authorized
