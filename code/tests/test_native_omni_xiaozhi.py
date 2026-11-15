@@ -440,6 +440,62 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 
+@pytest.mark.parametrize("state", ["start", "stop"])
+@pytest.mark.parametrize("phase", ["lock_wait", "socket_send"])
+async def test_native_tts_control_rejects_replaced_head_while_awaiting(
+    native, state, phase,
+):
+    """START and STOP must not outlive their authenticated XIAO socket."""
+    module, bridge = native
+    old, packets = connection()
+    new, _ = connection()
+    new.session_id = "new-head-after-reconnect"
+    bridge.connections[old.device_id] = old
+    session = module.NativeOmniSession(
+        old, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    if state == "stop":
+        old.client_is_speaking = True
+        module._output_owner = old.device_id
+
+    if phase == "lock_wait":
+        actual_lock = session._device_send_lock
+        entered = asyncio.Event()
+
+        class ObservedLock:
+            async def __aenter__(self):
+                entered.set()
+                await actual_lock.acquire()
+
+            async def __aexit__(self, *exc):
+                actual_lock.release()
+
+        session._device_send_lock = ObservedLock()
+        async with actual_lock:
+            task = asyncio.create_task(
+                session._send_device_state(state, session._generation)
+            )
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            bridge.connections[old.device_id] = new
+        with pytest.raises(RuntimeError, match="Head replaced before native TTS"):
+            await asyncio.wait_for(task, timeout=1)
+        assert packets == []
+    else:
+        class ReconnectingSocket:
+            async def send(self, packet):
+                packets.append(packet)
+                bridge.connections[old.device_id] = new
+
+        old.websocket = ReconnectingSocket()
+        with pytest.raises(RuntimeError, match="Head replaced during native TTS"):
+            await session._send_device_state(state, session._generation)
+        assert len(packets) == 1
+    assert bridge.connections[old.device_id] is new
+    # A stale STOP never grants another pet the physical speaker floor.
+    assert module._output_owner == old.device_id
+
+
 @pytest.mark.parametrize("producer", ["mac", "native"])
 async def test_opus_packet_timeout_includes_waiting_for_device_send_lock(
     native, producer,
