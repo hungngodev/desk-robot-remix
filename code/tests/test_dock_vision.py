@@ -61,6 +61,27 @@ def test_unmeasured_or_invalid_camera_mount_cannot_be_used_to_steer(
 
 
 
+
+@pytest.mark.parametrize(("x_mm", "z_mm", "yaw_deg"), [
+    (1.7e308, 1.7e308, 20.0),
+    (-1.7e308, 1.7e308, -20.0),
+])
+def test_dock_camera_mount_transform_overflow_fails_closed(
+    x_mm, z_mm, yaw_deg,
+):
+    """Finite pose components must not become infinite chassis steering data."""
+    from dataclasses import replace
+
+    camera = replace(calibration(), mount_lateral_offset_mm=0.0,
+                     mount_yaw_deg=yaw_deg)
+    pose = DockPose(x_mm, 0, z_mm, 0.5, 1)
+    with pytest.raises(ValueError, match="lateral transform"):
+        camera.chassis_lateral_mm(pose)
+    assessment = assess_dock(None, now=1.1, target_distance_mm=120)
+    assert assessment.phase == "hold"
+    assert not assessment.motor_authorized and not assessment.charging_authorized
+
+
 def test_camera_calibration_never_guesses_zero_or_nan_geometry():
     assert calibration().tag_side_mm == 60
     for value in (0, -10, float("nan"), float("inf")):
