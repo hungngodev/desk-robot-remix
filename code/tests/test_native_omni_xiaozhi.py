@@ -1273,6 +1273,46 @@ async def test_native_audio_refused_by_mac_speaker_never_sends_stop_or_records_h
         await asyncio.gather(playback, return_exceptions=True)
 
 
+@pytest.mark.parametrize("failure", ["cancelled", "failed"])
+async def test_unfinished_mac_cutover_never_certifies_native_decoder_stop(
+    native, failure,
+):
+    """A failed native cutover is not Mac STOP evidence, even before Mac TTS."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+
+    async def failed_flush():
+        if failure == "cancelled":
+            raise asyncio.CancelledError()
+        raise RuntimeError("Native decoder flush could not complete")
+
+    session._invalidate_head_first = failed_flush
+    if failure == "cancelled":
+        with pytest.raises(asyncio.CancelledError):
+            await module.begin_external_speech(conn)
+    else:
+        assert not await module.begin_external_speech(conn)
+    assert sent == []
+    assert module._external_speaker_owner is None
+    assert module._external_speaker_connection is None
+    assert session._external_speech_active is False
+    assert module._output_owner == conn.device_id
+    assert module._output_owner_unverified == conn.device_id
+    # Only a new authenticated physical STOP, not a discarded Python lease,
+    # can recover the fleet after an interrupted handoff.
+    await module.send_external_urgent_stop(conn)
+    assert len(sent) == 1
+    assert json.loads(sent[0])["flush"] is True
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+
+
 @pytest.mark.parametrize("cancel_mode", ["raised", "task_cancel"])
 async def test_cancelled_proactive_handoff_releases_fleet_speaker_lease(
     native, cancel_mode,
