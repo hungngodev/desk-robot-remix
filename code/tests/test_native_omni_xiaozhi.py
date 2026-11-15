@@ -536,14 +536,17 @@ async def test_uncertain_mac_decoder_recovery_bounds_all_lock_waits(
         assert not await asyncio.wait_for(
             module.begin_external_speech(conn), timeout=0.85,
         )
-        assert sent == []
+        # If only the owner-state lock is held, the physical STOP can
+        # already reach the head, but its result cannot be committed yet.
+        # Retain the uncertain lease until another full recovery succeeds.
+        assert len(sent) == (1 if lock_name == "owner" else 0)
         assert module._output_owner == conn.device_id
         assert module._output_owner_unverified == conn.device_id
         assert module._external_speaker_owner is None
 
     # Recovery becomes possible only after a fresh authenticated STOP.
     assert await module.begin_external_speech(conn)
-    assert len(sent) == 1
+    assert len(sent) == (2 if lock_name == "owner" else 1)
     assert json.loads(sent[0]) == {
         "type": "tts", "state": "stop", "flush": True,
         "session_id": conn.session_id,
