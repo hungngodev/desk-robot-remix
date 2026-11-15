@@ -618,3 +618,33 @@ def test_degenerate_dock_quad_rejected_before_native_pnp(monkeypatch, points):
     assert decision.phase == "hold"
     assert not decision.motor_authorized
     assert not decision.charging_authorized
+
+
+@pytest.mark.parametrize("bad_frame", [
+    None, 1, [],
+    pytest.param("one_dimensional", id="one-dimensional"),
+    pytest.param("three_dimensional", id="three-dimensional"),
+    pytest.param("empty_width", id="empty-width"),
+])
+def test_native_decoder_malformed_frame_shape_fails_closed(monkeypatch, bad_frame):
+    """A decoder result without a 2D grayscale image cannot reach ArUco."""
+    import cv2
+    import numpy as np
+
+    if bad_frame == "one_dimensional":
+        bad_frame = np.zeros(8, dtype=np.uint8)
+    elif bad_frame == "three_dimensional":
+        bad_frame = np.zeros((8, 8, 3), dtype=np.uint8)
+    elif bad_frame == "empty_width":
+        bad_frame = np.zeros((8, 0), dtype=np.uint8)
+
+    def forbidden_dictionary(*args, **kwargs):
+        pytest.fail("Malformed JPEG frame reached marker detection")
+
+    monkeypatch.setattr(cv2, "imdecode", lambda *args, **kwargs: bad_frame)
+    monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", forbidden_dictionary)
+    with pytest.raises(ValueError, match="Invalid JPEG frame"):
+        detect_apriltag(b"malformed frame", calibration(), captured_at=5)
+    decision = assess_dock(None, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized and not decision.charging_authorized
