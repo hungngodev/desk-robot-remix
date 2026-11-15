@@ -368,7 +368,8 @@ class Conversation:
                 )
 
     async def run(
-        self, robot_ids: list[str], topic: str, utterances: int | None = None
+        self, robot_ids: list[str], topic: str, utterances: int | None = None,
+        *, permission_check: Callable[[], bool] | None = None,
     ) -> list[dict]:
         turns = conversation_turns(robot_ids, utterances)
         if self.active is not None and not self.active.done():
@@ -390,6 +391,7 @@ class Conversation:
                  or self.settings.fleet_text_sharing_enabled)
                 and (not private_at_start
                      or self.settings.voice_memory_tools_enabled)
+                and (permission_check is None or permission_check())
             )
 
         async def say_group(robot: RobotConfig, text: str) -> None:
