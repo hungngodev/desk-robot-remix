@@ -962,6 +962,64 @@ async def test_normal_barge_in_does_not_cut_off_auto_or_peer_speech(bridge):
 
 
 @pytest.mark.parametrize("failure", ["socket", "stall"])
+@pytest.mark.parametrize("fail_send", [False, True])
+async def test_normal_voice_barge_uses_native_shared_device_stop(
+    bridge, monkeypatch, fail_send,
+):
+    """The bridge delegates authenticated STOP to the physical send owner."""
+    current = conn("mac-01")
+    current.client_listen_mode = "realtime"
+    current.client_is_speaking = True
+    current.session_id = "current-xiao"
+    current.clear_queues = lambda: None
+    cleared, events = [], []
+    current.clearSpeakStatus = lambda: cleared.append(True)
+    bridge.register(current)
+
+    class Socket:
+        async def send(self, data):
+            events.append(("physical", json.loads(data)["state"]))
+
+    current.websocket = Socket()
+    async def urgent(owner):
+        assert owner is current
+        events.append(("native_lock", "stop"))
+        if fail_send:
+            raise ConnectionError("Head STOP did not reach the authenticated socket")
+        await owner.websocket.send(json.dumps({
+            "type": "tts", "state": "stop", "flush": True,
+            "session_id": owner.session_id,
+        }))
+
+    async def cancel_native(owner):
+        assert owner is current
+        events.append(("native_model", "cancel"))
+        return True
+
+    async def peer_preempt(_):
+        events.append(("fleet", "preempt"))
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        send_external_urgent_stop=urgent,
+        on_barge=cancel_native,
+        preempt_others_for_human=peer_preempt,
+    ))
+    assert await bridge.interrupt_for_normal_voice(current, True) is False
+    if fail_send:
+        with pytest.raises(ConnectionError, match="STOP did not reach"):
+            await bridge.interrupt_for_normal_voice(current, True)
+        assert cleared == []
+        assert ("physical", "stop") not in events
+    else:
+        assert await bridge.interrupt_for_normal_voice(current, True) is True
+        assert cleared == [True]
+        assert ("physical", "stop") in events
+    assert ("native_lock", "stop") in events
+    assert ("native_model", "cancel") in events
+    assert current.client_abort is True
+    assert bridge.interrupt_generation[current.device_id] == 1
+
+
 async def test_direct_human_barge_failed_head_stop_preserves_authenticated_vad(
     bridge, failure,
 ):
