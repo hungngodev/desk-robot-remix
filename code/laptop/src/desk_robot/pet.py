@@ -310,6 +310,8 @@ class PetController:
         state = self.states[robot_id]
         state.generation += 1
         state.enabled = False
+        state.gate.reset()  # Pause must forget the previous private JPEG.
+        state.last_scene_frame_at = None
         tasks = [
             t for t in (state.task, state.touch_task, state.aux_task)
             if t is not None
@@ -1149,6 +1151,12 @@ class PetController:
         state = self.states[robot_id]
         while state.enabled and state.generation == generation and not self._closed:
             try:
+                if (self.settings.mode == "hardware"
+                        and not self.settings.voice_vision_tools_enabled):
+                    state.gate.reset()
+                    state.last_scene_frame_at = None
+                    await asyncio.sleep(self.interval)
+                    continue
                 if self.conversation.active is not None or (
                     self._speech_task is not None and not self._speech_task.done()
                 ):
@@ -1266,6 +1274,8 @@ class PetController:
                     gray = await asyncio.to_thread(state.gate._reduced, jpeg)
                     if (not state.enabled or state.generation != generation
                             or self._closed
+                            or (self.settings.mode == "hardware"
+                                and not self.settings.voice_vision_tools_enabled)
                             or self._vision_preemption_epoch != preemption_epoch
                             or self._direct_vision_requests
                             or self._human_active_in_fleet(time.monotonic())
@@ -1283,7 +1293,9 @@ class PetController:
                         # must yield, even if they lacked an inference task
                         # when the explicit question called preempt().
                         if (preemption_epoch != self._vision_preemption_epoch
-                                or self._direct_vision_requests):
+                                or self._direct_vision_requests
+                                or (self.settings.mode == "hardware"
+                                    and not self.settings.voice_vision_tools_enabled)):
                             state.stale_camera_events += 1
                             continue
                         if self._human_active_in_fleet(time.monotonic()):
@@ -1320,6 +1332,8 @@ class PetController:
                             if self._vision_inflight is inference:
                                 self._vision_inflight = None
                     if (time.monotonic() - received > self.max_observation_age
+                            or (self.settings.mode == "hardware"
+                                and not self.settings.voice_vision_tools_enabled)
                             or (callable(voice_started_at)
                                 and received <= voice_started_at())):
                         state.stale_camera_events += 1
