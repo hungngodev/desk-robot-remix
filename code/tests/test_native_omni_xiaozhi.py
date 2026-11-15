@@ -6405,6 +6405,77 @@ async def test_new_native_session_cannot_flush_preexisting_mac_speaker(
     assert module._output_owner_unverified is None
 
 
+async def test_native_shutdown_mac_claim_during_device_lock_wait_is_safe(native):
+    """A Mac claim after the initial check must still own native teardown."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+
+    async def fail_start():
+        raise RuntimeError("Native backend stopped")
+    session._retire_legacy_audio = fail_start
+    actual_lock = session._device_send_lock
+    waiting = asyncio.Event()
+
+    class ObserveLock:
+        async def __aenter__(self):
+            waiting.set()
+            await actual_lock.acquire()
+        async def __aexit__(self, *exc):
+            actual_lock.release()
+
+    session._device_send_lock = ObserveLock()
+    async with actual_lock:
+        task = asyncio.create_task(session.run())
+        await asyncio.wait_for(waiting.wait(), timeout=0.5)
+        # Exactly while native shutdown awaits the physical send lock,
+        # Mac obtains its fleet speech lease and will send its own STOP.
+        module._external_speaker_owner = conn.device_id
+        module._external_speaker_connection = conn
+    await asyncio.wait_for(task, timeout=0.85)
+    assert session.closed
+    assert sent == []
+    assert conn.client_is_speaking is True
+    assert module._external_speaker_owner == conn.device_id
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+    await module.end_external_speech(conn, stop_confirmed=True)
+
+
+async def test_native_shutdown_stop_lock_timeout_keeps_fleet_blocked(native):
+    """Native exit must not hang behind an old socket's occupied send lock."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+
+    async def fail_start():
+        raise RuntimeError("Native backend exited")
+    session._retire_legacy_audio = fail_start
+    async with session._device_send_lock:
+        await asyncio.wait_for(session.run(), timeout=0.85)
+        assert sent == []
+        assert conn.client_is_speaking is True
+        assert module._output_owner == conn.device_id
+        assert module._output_owner_unverified == conn.device_id
+    assert session.closed
+    # Recovery is permitted only after a real authenticated decoder STOP.
+    await module.send_external_urgent_stop(conn)
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+
+
 @pytest.mark.parametrize("stop_confirmed", [True, False])
 async def test_native_shutdown_does_not_steal_active_mac_speaker_stop(
     native, stop_confirmed,
