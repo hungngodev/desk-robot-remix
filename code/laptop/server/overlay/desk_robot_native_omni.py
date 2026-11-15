@@ -437,11 +437,14 @@ class NativeOmniSession:
                 # Even a queued legacy welcome can still be inside XIAO
                 # decoder buffers when client_is_speaking is false. A failed
                 # startup STOP must block all fleet speech until head reset.
-                async with _output_owner_lock:
-                    if _output_owner_unverified in (None, self.device):
-                        if _output_owner is None:
-                            _output_owner = self.device
-                        _output_owner_unverified = self.device
+                # The STOP already failed. Waiting here for a wedged owner
+                # lock would prevent startup failure from completing and
+                # could leave other pets unguarded. These assignments have
+                # no await and are atomic on the shared asyncio event loop.
+                if _output_owner_unverified in (None, self.device):
+                    if _output_owner is None:
+                        _output_owner = self.device
+                    _output_owner_unverified = self.device
                 raise
             self.conn.client_is_speaking = False
             if uncertain:
