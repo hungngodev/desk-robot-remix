@@ -134,7 +134,8 @@ class MemoryStore:
         confidence: float = 1.0,
     ) -> bool:
         """Idempotently store one fact; duplicates do not rewrite earlier evidence."""
-        if robot_id not in self.robot_ids or source_robot not in self.robot_ids:
+        if (not isinstance(robot_id, str) or not isinstance(source_robot, str)
+                or robot_id not in self.robot_ids or source_robot not in self.robot_ids):
             raise ValueError("Unknown robot identity")
         if (not isinstance(event_id, str) or not isinstance(kind, str)
                 or not _EVENT_ID.fullmatch(event_id) or not _EVENT_KIND.fullmatch(kind)):
