@@ -396,11 +396,21 @@ class PetController:
                 and not self.settings.voice_vision_tools_enabled):
             return
         event_id, observed_at = uuid.uuid4().hex, time.time()
-        inserted = await asyncio.to_thread(
-            self.memory.remember, robot_id, event_id, change.description,
-            kind=change.kind, source_robot=robot_id, witnessed=True,
-            observed_at=observed_at, confidence=change.confidence,
-        )
+        def persist_eyewitness() -> bool:
+            # Cancelling an await never cancels the SQLite worker. Retraction
+            # must be owned by that worker if visual consent was withdrawn.
+            inserted = self.memory.remember(
+                robot_id, event_id, change.description,
+                kind=change.kind, source_robot=robot_id, witnessed=True,
+                observed_at=observed_at, confidence=change.confidence,
+            )
+            if (inserted and camera_derived and self.settings.mode == "hardware"
+                    and not self.settings.voice_vision_tools_enabled):
+                self.memory.forget_episode(robot_id, event_id)
+                return False
+            return inserted
+
+        inserted = await asyncio.to_thread(persist_eyewitness)
         if (camera_derived and self.settings.mode == "hardware"
                 and not self.settings.voice_vision_tools_enabled):
             if inserted:
@@ -418,16 +428,33 @@ class PetController:
             # Per-robot SQLite databases are independent. A failed or busy
             # peer must not erase the eyewitness fact or suppress its reply.
             destinations = [r.id for r in self.settings.robots if r.id != robot_id]
+            def persist_peer(peer_id: str) -> bool:
+                # A cancelled gathering coroutine cannot abandon a newly
+                # inserted private peer copy after fleet sharing is revoked.
+                permitted = (
+                    self.settings.fleet_text_sharing_enabled
+                    and self.settings.fleet_text_auto_fanout_enabled
+                    and (not camera_derived or self.settings.mode != "hardware"
+                         or self.settings.voice_vision_tools_enabled)
+                )
+                if not permitted:
+                    return False
+                inserted = self.memory.remember(
+                    peer_id, event_id, change.description, kind=change.kind,
+                    source_robot=robot_id, witnessed=False,
+                    observed_at=observed_at, confidence=change.confidence,
+                )
+                if (inserted and (
+                        not self.settings.fleet_text_sharing_enabled
+                        or not self.settings.fleet_text_auto_fanout_enabled
+                        or (camera_derived and self.settings.mode == "hardware"
+                            and not self.settings.voice_vision_tools_enabled))):
+                    self.memory.forget_episode(peer_id, event_id)
+                    return False
+                return inserted
+
             results = await asyncio.gather(
-                *(
-                    asyncio.to_thread(
-                        self.memory.remember, peer_id, event_id,
-                        change.description, kind=change.kind,
-                        source_robot=robot_id, witnessed=False,
-                        observed_at=observed_at, confidence=change.confidence,
-                    )
-                    for peer_id in destinations
-                ),
+                *(asyncio.to_thread(persist_peer, peer_id) for peer_id in destinations),
                 return_exceptions=True,
             )
             for peer_id, result in zip(destinations, results, strict=True):
@@ -486,13 +513,23 @@ class PetController:
             raise ValueError("Only the original eyewitness may share this event")
         if not self.settings.fleet_text_sharing_enabled:
             raise ValueError("Fleet sharing consent revoked before peer write")
-        stored = await asyncio.to_thread(
-            self.memory.remember,
-            to_robot, source.event_id, source.summary,
-            kind=source.kind, source_robot=source.source_robot,
-            witnessed=False, observed_at=source.observed_at,
-            confidence=source.confidence,
-        )
+        def persist_shared_copy() -> bool:
+            if not self.settings.fleet_text_sharing_enabled:
+                return False
+            stored = self.memory.remember(
+                to_robot, source.event_id, source.summary,
+                kind=source.kind, source_robot=source.source_robot,
+                witnessed=False, observed_at=source.observed_at,
+                confidence=source.confidence,
+            )
+            if stored and not self.settings.fleet_text_sharing_enabled:
+                # The worker survives cancellation of an operator HTTP
+                # request. It also owns retraction of its new private copy.
+                self.memory.forget_episode(to_robot, source.event_id)
+                return False
+            return stored
+
+        stored = await asyncio.to_thread(persist_shared_copy)
         if not self.settings.fleet_text_sharing_enabled:
             if stored:
                 # Retract only the copy THIS request inserted. A repeated
