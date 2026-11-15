@@ -105,7 +105,7 @@ class MemoryStore:
 
     @contextmanager
     def _connect(self, robot_id: str):
-        if robot_id not in self.robot_ids:
+        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
         path = self.root / (robot_id + ".sqlite3")
         if path.is_symlink():
@@ -199,7 +199,7 @@ class MemoryStore:
         records per robot, so this bounded fallback needs no embedding server.
         Empty matches produce no invented recollections.
         """
-        if robot_id not in self.robot_ids:
+        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
         if (not isinstance(query, str) or not 1 <= len(query.strip()) <= 240
                 or "\x00" in query or type(limit) is not int
@@ -242,7 +242,7 @@ class MemoryStore:
         No model/tool automatically edits identity, user preferences or safety
         policy. This bounded core is separate from ephemeral episodes.
         """
-        if robot_id not in self.robot_ids:
+        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
         if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
             raise ValueError("Invalid core memory slot")
