@@ -46,6 +46,16 @@ def force_adc(payload: dict) -> int:
     return force_observation(payload)[0]
 
 
+def _fresh_jaw_sequence(new: int, previous: int) -> bool:
+    """Accept only forward ADS1115 hardware conversions, including uint32 wrap.
+
+    WROOM's 32-bit acquisition counter may roll over, skipping the invalid
+    zero sentinel. Half-range ordering rejects old/replayed and reset frames.
+    """
+    delta = (new - previous) & 0xffffffff
+    return 0 < delta < 0x80000000
+
+
 async def guarded_grasp(
     head: "Head", calibration: "Calibration",
     *, health: Callable[[], Awaitable[dict]],
@@ -69,7 +79,7 @@ async def guarded_grasp(
     except (KeyError, TypeError, ValueError, AttributeError,
             TimeoutError) as exc:
         raise OperationError("Fresh force feedback required before moving jaw") from exc
-    if seq_b <= seq_a:
+    if not _fresh_jaw_sequence(seq_b, seq_a):
         raise OperationError("No new ADS1115 jaw sample; jaw not moved")
     if abs(baseline_a - baseline_b) > max(40, threshold // 3):
         raise OperationError("Gripper baseline unstable; jaw not moved")
@@ -95,7 +105,7 @@ async def guarded_grasp(
             except (KeyError, TypeError, ValueError, AttributeError,
             TimeoutError) as exc:
                 raise OperationError("Lost fresh force sensor during closing") from exc
-            if seq <= latest_seq:
+            if not _fresh_jaw_sequence(seq, latest_seq):
                 raise OperationError("No new jaw sample after servo movement")
             latest_seq = seq
             raw_delta = (measured - baseline) * calibration.grip_force_sign

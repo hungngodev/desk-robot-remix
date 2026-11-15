@@ -370,3 +370,46 @@ async def test_hung_safety_recheck_blocks_extra_grip_and_relief(monkeypatch):
         )
     assert checks == 3  # Before close, after close, attempted safe relief.
     assert head.commands == ["grip 65"]
+
+
+async def test_jaw_hardware_sequence_wraps_without_falsely_rejecting_fresh_force(monkeypatch):
+    """The WROOM uint32 hardware counter can wrap between real conversions."""
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    # Zero is reserved as invalid; 0xffffffff -> 1 is still forward.
+    head = FakeHead([
+        (100, 0xfffffffe), (101, 0xffffffff),
+        (130, 1), (240, 2), (245, 3),
+    ])
+    result = await guarded_grasp(head, Settings(), health=healthy)
+    assert result["contact_delta_raw"] >= Settings.grip_force_delta_raw
+    assert head.commands == ["grip 65", "grip 70", "grip 75"]
+    assert result["physical_acceptance_pass"] is False
+
+
+@pytest.mark.parametrize("first,second", [
+    (50, 49),              # Backwards, not a fresh hardware sample.
+    (10, 10),              # Replayed same conversion.
+    (1, 0x80000002),      # An ambiguous huge jump is not forward evidence.
+])
+async def test_jaw_baseline_rejects_replayed_or_backwards_sequence(
+    monkeypatch, first, second,
+):
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([(100, first), (101, second)])
+    with pytest.raises(OperationError, match="No new ADS1115 jaw sample"):
+        await guarded_grasp(head, Settings(), health=healthy)
+    assert head.commands == []
+
+
+async def test_jaw_after_movement_rejects_backwards_frame_and_relaxes(monkeypatch):
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([(100, 100), (101, 101), (240, 100)])
+    with pytest.raises(OperationError, match="No new jaw sample"):
+        await guarded_grasp(head, Settings(), health=healthy)
+    assert head.commands == ["grip 65", "grip 60"]
