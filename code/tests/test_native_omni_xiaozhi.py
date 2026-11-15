@@ -1103,6 +1103,23 @@ async def test_fleet_native_speaker_claim_flushes_old_pet_before_second_pet_talk
 
 
 
+async def test_mac_speaker_refuses_other_pets_unverified_decoder_even_without_owner(
+    native,
+):
+    """No Mac lease may bypass another head's unresolved STOP uncertainty."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    # A prior interrupt may preserve uncertainty after another operation
+    # releases the active owner. The marker independently blocks ALL pets.
+    module._output_owner = None
+    module._output_owner_unverified = "mac-02"
+    assert not await module.begin_external_speech(conn)
+    assert module._external_speaker_owner is None
+    assert module._external_speaker_connection is None
+    assert sent == []
+
+
 async def test_native_handoff_rechecks_failed_stop_after_old_flush_await(native):
     """A failed STOP during peer handoff must block a later speaker grant."""
     module, bridge = native
