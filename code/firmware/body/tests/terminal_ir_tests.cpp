@@ -91,6 +91,17 @@ int main() {
     CHECK(queue.finish(1, 1, true));
     CHECK(queue.on_poll(250));
     CHECK(queue.finish(0, 1, true)); // a later isolated frame recovers
+    // A single malformed/noisy frame must revoke the previous pair, not
+    // leave its old same-code bearing usable alongside a newer other side.
+    CHECK(queue.on_poll(275));
+    CHECK(!queue.finish(0, 1, true, false)); // checksum/polarity/size failure
+    CHECK(queue.finish(1, 1, true, true));
+    CHECK(queue.on_poll(300));
+    CHECK(!queue.finish(0, 1, true, false)); // repeated invalid frame
+    CHECK(queue.finish(1, 0, true, false)); // empty side is not a failure
+    CHECK(queue.on_poll(325));
+    CHECK(queue.finish(0, 1, true, true)); // later valid frame reacquires
+    CHECK(queue.finish(1, 1, true, true));
     CHECK(queue.finish(1, 0, true));
     CHECK(!queue.on_poll(400)); // old messages after a long stall are stale
     CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
