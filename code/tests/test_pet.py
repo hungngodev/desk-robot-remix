@@ -1089,6 +1089,74 @@ async def test_local_wroom_safety_transitions_are_firsthand_not_replayed(fleet, 
         await pet.close()
 
 
+async def test_auto_fanout_revocation_during_peer_sqlite_commit_retracts_only_copy(
+    fleet, tmp_path, monkeypatch,
+):
+    """Live opt out cannot leave an automatically inserted secondhand event."""
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    original = memory.remember
+    inserted_peers = []
+
+    def revoke_on_peer_insert(robot_id, event_id, summary, **kwargs):
+        stored = original(robot_id, event_id, summary, **kwargs)
+        if kwargs["witnessed"] is False and stored:
+            inserted_peers.append((robot_id, event_id))
+            fleet.fleet_text_sharing_enabled = False
+        return stored
+
+    monkeypatch.setattr(memory, "remember", revoke_on_peer_insert)
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    try:
+        await pet._store_observation(
+            "robot-01", SceneChange("key", "A brass key is on my table", 0.91)
+        )
+        assert inserted_peers
+        eyewitness = memory.recent("robot-01")
+        assert len(eyewitness) == 1
+        assert eyewitness[0].witnessed is True
+        assert memory.count("robot-02") == 0
+        assert memory.count("robot-03") == 0
+    finally:
+        await pet.close()
+
+
+async def test_manual_peer_share_revoked_while_sqlite_writes_removes_new_copy(
+    fleet, tmp_path, monkeypatch,
+):
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    event_id = "eyewitness_before_revoke"
+    memory.remember(
+        "robot-01", event_id, "A real key appeared",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    original = memory.remember
+
+    def revoke_during_peer_insert(robot_id, incoming_event, summary, **kwargs):
+        stored = original(robot_id, incoming_event, summary, **kwargs)
+        if robot_id == "robot-02":
+            fleet.fleet_text_sharing_enabled = False
+        return stored
+
+    monkeypatch.setattr(memory, "remember", revoke_during_peer_insert)
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    try:
+        with pytest.raises(ValueError, match="revoked during peer write"):
+            await pet.share_with_peer("robot-01", "robot-02", event_id)
+        assert memory.count("robot-01") == 1
+        assert memory.count("robot-02") == 0
+    finally:
+        await pet.close()
+
+
 async def test_operator_selected_peer_memory_share_recovers_pr4_without_rewriting_witness(
     fleet, tmp_path
 ):
