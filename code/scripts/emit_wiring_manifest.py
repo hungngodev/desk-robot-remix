@@ -73,8 +73,12 @@ def verify(plan: dict, body: str, head: str) -> None:
         raise ValueError("Stock XIAO PDM pins changed")
     if bus["sense_gpio"]["rgb_data"] != 9:
         raise ValueError("RGB reservation changed; check SD J3")
-    if bus["mux_ranges"]["address"] != 0x70 or bus["mux_extras"]["address"] != 0x71:
-        raise ValueError("Incorrect mux address")
+    # Do not accept bool/float addresses that compare equal to an integer.
+    # They would later break hex formatting or misstate the physical harness.
+    for group, expected in (("mux_ranges", 0x70), ("mux_extras", 0x71)):
+        address = bus[group]["address"]
+        if type(address) is not int or address != expected:
+            raise ValueError(f"Incorrect {group} mux address")
     for group in ("mux_ranges", "mux_extras"):
         channels = bus[group]["channels"]
         if (len(channels) != 8 or any(type(c.get("channel")) is not int for c in channels)
