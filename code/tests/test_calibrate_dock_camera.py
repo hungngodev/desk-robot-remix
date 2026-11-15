@@ -54,6 +54,8 @@ def test_opencv_recovers_synthetic_distorted_camera_but_cannot_approve_dock():
     candidate = fit(projected_views(cv2))
     assert candidate["measured"] is False
     assert candidate["requires_real_head_mount_review"] is True
+    assert candidate["mount_lateral_offset_mm"] is None
+    assert candidate["mount_yaw_deg"] is None
     assert candidate["physical_acceptance_pass"] is False
     assert candidate["motor_authorized"] is False
     assert candidate["charging_authorized"] is False
