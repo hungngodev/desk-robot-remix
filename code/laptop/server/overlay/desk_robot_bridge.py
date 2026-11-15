@@ -416,14 +416,24 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
     # Record authenticated VAD before awaiting a possibly disconnected
     # head, so Mac and other pets can preempt independently of this STOP.
     record_human_voice(conn, "normal")
+    try:
+        native = _native_adapter()
+    except ModuleNotFoundError:
+        native = None  # Physical STOP never waits for optional inference.
+    urgent = getattr(native, "send_external_urgent_stop", None)
     stop_sent = False
     try:
-        await asyncio.wait_for(
-            conn.websocket.send(json.dumps({
-                "type": "tts", "state": "stop",
-                "session_id": conn.session_id, "flush": True,
-            })), timeout=0.4,
-        )
+        if callable(urgent):
+            # Use the same device lock as a currently transmitted Mac Opus
+            # frame. STOP must follow it, never get overtaken by old audio.
+            await urgent(conn)
+        else:
+            await asyncio.wait_for(
+                conn.websocket.send(json.dumps({
+                    "type": "tts", "state": "stop",
+                    "session_id": conn.session_id, "flush": True,
+                })), timeout=0.4,
+            )
         stop_sent = True
     finally:
         if stop_sent:
@@ -433,10 +443,6 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
         # even when the first urgent STOP failed.
         voice_frames.pop(device, None)
         voice_last_frame_at.pop(device, None)
-        try:
-            native = _native_adapter()
-        except ModuleNotFoundError:
-            native = None  # Physical STOP never waits for optional inference.
         if native is not None:
             try:
                 await asyncio.wait_for(native.on_barge(conn), timeout=0.5)
