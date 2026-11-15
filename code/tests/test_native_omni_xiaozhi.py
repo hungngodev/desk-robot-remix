@@ -7181,6 +7181,30 @@ async def test_native_pending_legacy_stop_failure_blocks_fleet_without_tts_flag(
     assert conn.client_abort
 
 
+async def test_failed_legacy_stop_marks_uncertain_without_owner_lock_wait(native):
+    """Physical STOP failure must fail closed even while owner lock is held."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+
+    async def broken_socket(_packet):
+        raise ConnectionError("Old XIAO STOP transport failed")
+
+    conn.websocket.send = broken_socket
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    async with module._output_owner_lock:
+        with pytest.raises(ConnectionError, match="STOP transport failed"):
+            await asyncio.wait_for(session._retire_legacy_audio(), timeout=0.35)
+        # The emergency fail-closed marker cannot await this held lock.
+        assert module._output_owner == conn.device_id
+        assert module._output_owner_unverified == conn.device_id
+    assert conn.client_abort is True
+
+
 @pytest.mark.parametrize("failure", ["disconnect", "stall"])
 async def test_native_failed_startup_cleanup_without_claim_keeps_uncertain_speaker(
     native, failure,
