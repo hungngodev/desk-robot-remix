@@ -91,6 +91,11 @@ def fit_corners(
         "image_width_px": width, "image_height_px": height,
         "tag_side_mm": tag_side_mm, "marker_id": marker_id,
         "target_distance_mm": target_distance_mm,
+        # Checkerboard intrinsics cannot measure where the camera sits on
+        # the robot. These must be physically measured and explicitly set
+        # after assembly; absent values prohibit dock motor qualification.
+        "mount_lateral_offset_mm": None,
+        "mount_yaw_deg": None,
         "checkerboard_square_mm": square_mm,
         "checkerboard_views": len(views),
         "reprojection_rms_px": round(float(rms), 4),
