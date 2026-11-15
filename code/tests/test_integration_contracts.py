@@ -237,6 +237,38 @@ def test_wiring_manifest_rejects_unqualified_range_lane_mutations(mutation):
         module.render(plan, body, head)
 
 
+
+@pytest.mark.parametrize("lane,mutation", [
+    (4, "swap_battery_monitor"),
+    (4, "remove_fuel_gauge"),
+    (6, "wrong_wheel_address"),
+    (7, "extra_wheel_device"),
+])
+def test_wiring_manifest_rejects_battery_and_wheel_lane_drift(lane, mutation):
+    """Do not mislabel pack monitoring or wheel encoder mux ownership."""
+    import copy
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan = copy.deepcopy(PLAN)
+    devices = plan["bus"]["mux_extras"]["channels"][lane]["devices"]
+    if mutation == "swap_battery_monitor":
+        devices[0]["name"] = "MAX17048"
+    elif mutation == "remove_fuel_gauge":
+        devices.pop()
+    elif mutation == "wrong_wheel_address":
+        devices[0]["address"] = 0x37
+    else:
+        devices.append({"name": "unexpected", "address": 0x30})
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    with pytest.raises(ValueError, match=f"Accessory lane {lane} battery/wheel"):
+        module.render(plan, body, head)
+
 @pytest.mark.parametrize("mutation", ["wrong_expander_address", "wrong_expander_name", "missing_expander", "extra_device"])
 def test_wiring_manifest_rejects_dock_expander_lane_drift(mutation):
     """Dock interlock harness must not silently substitute or move MCP23017."""
