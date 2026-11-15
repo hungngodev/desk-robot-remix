@@ -100,6 +100,55 @@ async def test_kokoro_wav_generated_after_group_memory_revoke_never_reaches_xiao
     assert any(url.endswith("/interrupt") for url in calls)
 
 
+async def test_group_opt_in_source_permission_revoked_while_model_thinks(
+    settings,
+):
+    """Reuse one speaker lease but recheck camera provenance after inference."""
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    speaker = SimulatedSpeaker()
+
+    class SlowChat:
+        async def reply(self, history):
+            settings.voice_vision_tools_enabled = False
+            return "An obsolete camera interpretation should not be spoken."
+
+    conversation = Conversation(settings, SlowChat(), speaker)
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(
+            ["robot-01", "robot-02"], "A camera noticed a key", 2,
+            permission_check=lambda: settings.voice_vision_tools_enabled,
+        )
+    assert conversation.active is None
+    assert speaker.spoken == []
+
+
+async def test_group_live_permission_rechecked_between_stream_segments(
+    settings,
+):
+    """A revoked camera turn may not send a later segment to a peer."""
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    speaker = SimulatedSpeaker()
+
+    class Chat:
+        async def stream_reply(self, history):
+            yield "A brief observation already sent."
+            settings.voice_vision_tools_enabled = False
+            yield "A new phrase after consent was withdrawn."
+
+    conversation = Conversation(settings, Chat(), speaker)
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(
+            ["robot-01", "robot-02"], "What changed near the desk?", 2,
+            permission_check=lambda: settings.voice_vision_tools_enabled,
+        )
+    assert conversation.active is None
+    assert speaker.spoken == [("robot-01", "A brief observation already sent.")]
+
+
 async def test_empty_ollama_stream_never_creates_phantom_social_speech(
     settings, tmp_path,
 ):
