@@ -2856,6 +2856,66 @@ async def test_proactive_mac_does_not_claim_invalid_dock_charger_evidence(
         await pet.close()
 
 
+@pytest.mark.parametrize(("sensor", "field", "invalid"), [
+    ("climate", "temp_centi", -4501),
+    ("climate", "temp_centi", 13001),
+    ("climate", "rh_centi", 10001),
+    ("climate", "rh_centi", True),
+    ("bmp280", "pressure_pa", 29999),
+    ("bmp280", "pressure_pa", 120001),
+    ("power", "soc_centi", -1),
+    ("power", "soc_centi", 10001),
+    ("power", "cell_mv", 4501),
+    ("proximity", "gesture", 5),
+    ("proximity", "gesture", True),
+    ("nfc", "e", -1),
+    ("nfc", "e", 0x100000000),
+])
+async def test_proactive_ollama_cannot_narrate_out_of_range_wroom_readings(
+    fleet, tmp_path, sensor, field, invalid,
+):
+    """Final Mac model adapter distrusts malformed but typed head status."""
+    from copy import deepcopy
+
+    values = {
+        "robot_id": "robot-01",
+        "climate": {"valid": True, "temp_centi": 2200, "rh_centi": 5000},
+        "bmp280": {"valid": True, "pressure_pa": 101325},
+        "power": {"fuel_valid": True, "soc_centi": 5000, "cell_mv": 3700},
+        "proximity": {"valid": True, "gesture": 2},
+        "nfc": {"v": True, "e": 4},
+    }
+    values = deepcopy(values)
+    values[sensor][field] = invalid
+
+    class Head:
+        async def aux_status(self):
+            return values
+
+        async def command(self, *_):
+            raise AssertionError("Proactive read-only tool must not move motors")
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    key = {
+        "climate": "sht41", "bmp280": "bmp280", "power": "fuel_gauge",
+        "proximity": "proximity", "nfc": "nfc",
+    }[sensor]
+    try:
+        receipt = await pet._proactive_tool_receipt("robot-01", "aux_status")
+        assert receipt["robot_id"] == "robot-01"
+        assert receipt["verified_motion"] is False
+        assert receipt["verified_charging"] is False
+        assert key not in receipt["data"]
+        assert any(name != key for name in receipt["data"])
+    finally:
+        await pet.close()
+
+
 async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fields(
     fleet, tmp_path,
 ):
