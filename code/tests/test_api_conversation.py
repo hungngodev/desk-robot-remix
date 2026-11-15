@@ -822,3 +822,34 @@ def test_conversation_turns_rejects_unhashable_or_invalid_robot_ids(robot_ids):
 def test_conversation_turns_valid_fleet_bounds_unchanged():
     assert conversation_turns(["robot-01", "robot-02"]) == 6
     assert conversation_turns(["robot-01", "robot-02", "robot-03", "robot-04"]) == 8
+
+
+async def test_group_consent_revoked_during_memory_persist_never_publishes_turn(settings):
+    """A SQLite await cannot turn a revoked utterance into a completed peer turn."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    allowed = True
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+
+    async def delayed_persist(robot, text, peers):
+        entered.set()
+        await release.wait()
+
+    conversation._persist_spoken_turn = delayed_persist
+    task = asyncio.create_task(conversation.run(
+        ["robot-01", "robot-02"], "Discuss a toy", 2,
+        permission_check=lambda: allowed,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        allowed = False
+    finally:
+        release.set()
+    with pytest.raises(RuntimeError, match="consent revoked"):
+        await asyncio.wait_for(task, timeout=1)
+    assert len(speaker.spoken) == 1
+    assert conversation.active is None
+    assert not conversation.session_lock.locked()
+    assert not conversation.speaker_lock.locked()
+    assert all(len(history) == 2 for history in conversation.histories.values())
