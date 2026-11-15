@@ -825,3 +825,8 @@ PR #17 source `4a8b5e9` preserves `boot_id` and `sample_ms` when a structurally 
 ### November 14 ASR whitespace and requested tool priority: unexecuted
 
 Starting PR #17 head `e3d3837262595b465df1dcd32c9e3bc3d2937f43`. Source commit `cac1ba6db71c33615a4ec83daf3718d1ffa354b6`, regression commit `69ae5f67990c089cc5258955428bd662a4e3c1ef`. Human ASR text now uses the same single-line bounded normalization for request matching and prompt display. Regression adds a multiline/leading-space battery request with competing tool receipts to `code/tests/test_brain_context.py`. **Tests not executed**: local container cannot resolve github.com for repository checkout; connector write/readback is not an executable test. QA command: `cd code && python -m pytest -q tests/test_brain_context.py` on the current integration head. No physical verification, battery/charging approval, measured latency or native spoken tool-result proof.
+
+
+## November 15 stale VAD end ordering regression awaiting execution
+
+Source aac4b52ed9b704379b013fc3b32a79d4d3d0f302 and regression 9a938d89b7052d644f05cdf9ec6987e00c11a248 on PR #17 reject an older speech_end after a newer authenticated human_voice start, preserving the proactive speech floor until the current end. No repository pytest or hardware run occurred. Local git ls-remote failed to resolve github.com, exit 128. Required executable check: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_multimodal.py -k stale_speech_end_does_not_release_newer_human_vad. This is a source level race fix only, not proof of physical XIAO interruption or acoustic ACK.
