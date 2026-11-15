@@ -77,6 +77,41 @@ int main() {
     CHECK(!invalidated.assess(130).same_code);
     invalidated.accept(1, code, 140);
     CHECK(invalidated.assess(140).same_code);
+    // Reproduce the actual poll owner's fail-closed composition: a single
+    // corrupt right receiver packet revokes a previously valid pair, even
+    // when the left receiver simultaneously reports a valid new NEC burst.
+    // Recovery requires two independent subsequent clean observations.
+    desk_robot::DualIrEvidence integrated;
+    desk_robot::IrFrameQueueGate integrated_gate;
+    CHECK(!integrated_gate.on_poll(100));
+    CHECK(integrated_gate.finish(0, 0, true));
+    CHECK(integrated_gate.finish(1, 0, true));
+    CHECK(integrated_gate.on_poll(125));
+    CHECK(integrated_gate.finish(0, 1, true, true));
+    CHECK(integrated_gate.finish(1, 1, true, true));
+    integrated.accept(0, code, 125);
+    integrated.accept(1, code, 125);
+    CHECK(integrated.assess(125).same_code);
+    CHECK(integrated_gate.on_poll(150));
+    const bool clean_left = integrated_gate.finish(0, 1, true, true);
+    const bool corrupt_right = integrated_gate.finish(1, 1, true, false);
+    CHECK(clean_left && !corrupt_right);
+    if (!(clean_left && corrupt_right)) integrated.invalidate();
+    CHECK(!integrated.assess(150).same_code);
+    CHECK(!integrated.assess(150).motor_authorized);
+    CHECK(!integrated.assess(150).charging_authorized);
+    CHECK(integrated_gate.on_poll(175));
+    CHECK(integrated_gate.finish(0, 1, true, true));
+    CHECK(integrated_gate.finish(1, 0, true));
+    integrated.accept(0, code, 175);
+    CHECK(!integrated.assess(175).same_code);
+    CHECK(integrated_gate.on_poll(200));
+    CHECK(integrated_gate.finish(0, 0, true));
+    CHECK(integrated_gate.finish(1, 1, true, true));
+    integrated.accept(1, code, 200);
+    CHECK(integrated.assess(200).same_code);
+    CHECK(!integrated.assess(200).motor_authorized);
+    CHECK(!integrated.assess(200).charging_authorized);
     // IDF 4.4 has no receive timestamp. An unqualified poll cannot relabel
     // queued old RMT frames as fresh directional evidence.
     desk_robot::IrFrameQueueGate queue;
