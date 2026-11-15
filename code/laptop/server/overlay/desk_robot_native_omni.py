@@ -2095,6 +2095,10 @@ class NativeOmniSession:
                 await asyncio.wait_for(
                     self.conn.websocket.send(packet), timeout=0.4,
                 )
+                if bridge.connections.get(self.device) is not self.conn:
+                    # A replaced socket cannot acknowledge its new head's
+                    # playback. Teardown must retain uncertain speaker state.
+                    raise RuntimeError("Head replaced during native Opus send")
                 self.head_packets += 1
         if blocked_by_human:
             events = await self._invalidate_head_first()
@@ -2410,6 +2414,10 @@ async def send_external_opus(conn, packet: bytes, generation: int) -> None:
         await asyncio.wait_for(
             conn.websocket.send(packet), timeout=0.4,
         )
+        if bridge.connections.get(conn.device_id) is not conn:
+            # A reconnect may replace the authenticated socket WHILE this
+            # awaited send runs. Its old packet is not new-head delivery.
+            raise RuntimeError("Head replaced during Mac Opus send")
 
 
 async def begin_external_speech(conn) -> bool:
