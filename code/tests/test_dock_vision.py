@@ -502,3 +502,31 @@ def test_corrupt_detector_corner_container_fails_closed(monkeypatch, bad_corners
     assert decision.phase == "hold"
     assert not decision.motor_authorized
     assert not decision.charging_authorized
+
+
+@pytest.mark.parametrize("decode_failure", ["native_error", "empty_frame"])
+def test_dock_jpeg_decode_failure_cannot_authorize_motion(monkeypatch, decode_failure):
+    """A failed native JPEG decode never reaches marker detection or motor authority."""
+    import cv2
+
+    def corrupt_decode(*args, **kwargs):
+        if decode_failure == "native_error":
+            raise cv2.error("simulated JPEG decoder failure")
+        return None
+
+    def forbidden_dictionary(*args, **kwargs):
+        pytest.fail("Failed JPEG reached AprilTag detection")
+
+    monkeypatch.setattr(cv2, "imdecode", corrupt_decode)
+    monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", forbidden_dictionary)
+    if decode_failure == "native_error":
+        pose = detect_apriltag(b"corrupt JPEG", calibration(), captured_at=5)
+        assert pose is None
+    else:
+        with pytest.raises(ValueError, match="Invalid JPEG frame"):
+            detect_apriltag(b"corrupt JPEG", calibration(), captured_at=5)
+        pose = None
+    assessment = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert assessment.phase == "hold"
+    assert not assessment.motor_authorized
+    assert not assessment.charging_authorized
