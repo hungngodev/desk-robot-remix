@@ -1515,7 +1515,10 @@ class PetController:
                 if (type(climate.get("temp_centi")) is int
                         and -4500 <= climate["temp_centi"] <= 13000
                         and type(climate.get("rh_centi")) is int
-                        and 0 <= climate["rh_centi"] <= 10000):
+                        and 0 <= climate["rh_centi"] <= 10000
+                        and (climate.get("age_ms") is None or (
+                            type(climate["age_ms"]) is int
+                            and 0 <= climate["age_ms"] < 1000))):
                     selected["sht41"] = {
                         "temp_centi": climate["temp_centi"],
                         "rh_centi": climate["rh_centi"],
@@ -1523,7 +1526,10 @@ class PetController:
             bmp = result.get("bmp280")
             if isinstance(bmp, dict) and bmp.get("valid") is True:
                 if (type(bmp.get("pressure_pa")) is int
-                        and 30000 <= bmp["pressure_pa"] <= 120000):
+                        and 30000 <= bmp["pressure_pa"] <= 120000
+                        and (bmp.get("age_ms") is None or (
+                            type(bmp["age_ms"]) is int
+                            and 0 <= bmp["age_ms"] < 2000))):
                     selected["bmp280"] = {
                         "pressure_pa": bmp["pressure_pa"],
                         "physically_verified": False,
