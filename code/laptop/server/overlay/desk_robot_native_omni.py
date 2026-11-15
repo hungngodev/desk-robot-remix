@@ -386,14 +386,22 @@ class NativeOmniSession:
             raise RuntimeError("Mac speaker owns decoder during native startup")
         uncertain = _output_owner_unverified == self.device
         if speaking or pending or uncertain:
-            self.conn.client_abort = True
-            clear = getattr(self.conn, "clear_queues", None)
-            if callable(clear):
-                clear()
+            stop_started = False
             async def stop_legacy_head():
+                nonlocal stop_started
                 async with self._device_send_lock:
                     if bridge.connections.get(self.device) is not self.conn:
                         raise RuntimeError("Head identity changed before legacy STOP")
+                    if (_external_speaker_owner == self.device
+                            and _external_speaker_connection is self.conn):
+                        # Mac may claim the decoder while we wait for the
+                        # physical send lock. Do not abort its new speech.
+                        raise RuntimeError("Mac speaker owns decoder during native startup")
+                    self.conn.client_abort = True
+                    clear = getattr(self.conn, "clear_queues", None)
+                    if callable(clear):
+                        clear()
+                    stop_started = True
                     await self.conn.websocket.send(json.dumps({
                         "type": "tts", "state": "stop", "flush": True,
                         "session_id": self.conn.session_id,
@@ -405,6 +413,12 @@ class NativeOmniSession:
                 # Bound lock admission AND STOP delivery as one operation.
                 await asyncio.wait_for(stop_legacy_head(), timeout=0.5)
             except (Exception, asyncio.CancelledError):
+                if (not stop_started
+                        and _external_speaker_owner == self.device
+                        and _external_speaker_connection is self.conn):
+                    # We never touched this Mac-owned decoder. Its real Mac
+                    # STOP outcome, not our aborted startup, owns the lease.
+                    raise
                 # Cancellation is not an authenticated decoder STOP either.
                 # Even a queued legacy welcome can still be inside XIAO
                 # decoder buffers when client_is_speaking is false. A failed
