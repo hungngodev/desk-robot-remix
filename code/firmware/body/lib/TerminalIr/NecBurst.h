@@ -119,7 +119,12 @@ class DualIrEvidence {
   }
   // Called only after an actual valid independent RMT frame for that side.
   void accept(unsigned side, std::uint32_t code, std::uint32_t now_ms) {
-    if (side > 1) return;
+    // An impossible receiver index is a corrupt observation, not a reason
+    // to keep a previously valid paired docking bearing alive.
+    if (side > 1) {
+      invalidate();
+      return;
+    }
     if (static_cast<std::uint8_t>(code ^ (code >> 8)) != 0xff ||
         static_cast<std::uint8_t>((code >> 16) ^ (code >> 24)) != 0xff) {
       // A corrupt observation from either receiver revokes the old pair.
