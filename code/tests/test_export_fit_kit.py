@@ -128,6 +128,40 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     assert not (output / "fit_kit_manifest.json").exists()
 
 
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_passive_dock_tag_registration_mesh_stays_watertight_and_centered(tmp_path):
+    """Real CGAL render checks the unpowered paper AprilTag mounting pocket."""
+    from struct import unpack_from
+
+    source = ROOT / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    output = tmp_path / "dock.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o",
+        str(output), str(source),
+    ], check=True, timeout=60)
+    assert module().closed_mesh_edges(output) > 0
+    blob = output.read_bytes()
+    triangle_count = unpack_from("<I", blob, 80)[0]
+    assert triangle_count >= 20
+    assert len(blob) == 84 + 50 * triangle_count
+    vertices = [
+        unpack_from("<3f", blob, 84 + i * 50 + 12 + j * 12)
+        for i in range(triangle_count) for j in range(3)
+    ]
+    xyz = list(zip(*vertices, strict=True))
+    bounds = tuple((min(axis), max(axis)) for axis in xyz)
+    assert bounds == ((0.0, 126.0), (0.0, 138.0), (0.0, 93.0))
+    # 60 mm printed tag + 5 mm white margin/side + 0.6 mm paper
+    # clearance/side, centered horizontally in the 126 mm backstop.
+    for expected in (27.4, 98.6):
+        assert any(abs(x - expected) < 0.02 for x in xyz[0])
+    assert any(abs(y - 133.8) < 0.02 for y in xyz[1])
+    for expected in (16.0, 87.2):
+        assert any(abs(z - expected) < 0.02 for z in xyz[2])
+
+
+
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs real OpenSCAD CLI")
 def test_real_openscad_renders_provisional_source_parts(tmp_path):
     source = module()
