@@ -2309,6 +2309,39 @@ def _external_device_send_lock(conn) -> asyncio.Lock:
     return _external_opus_send_lock
 
 
+async def send_external_tts_control(
+    conn, generation: int, send, *, terminal: bool = False,
+) -> None:
+    """Order Mac TTS controls with Opus and the actual human STOP.
+
+    Upstream Xiaozhi still formats START, caption and STOP. This function
+    only serializes their existing sends under the SAME physical device lock,
+    so a queued START can never follow an authenticated barge STOP.
+    """
+    import desk_robot_bridge as bridge
+    if type(generation) is not int or type(terminal) is not bool or not callable(send):
+        raise ValueError("Invalid Mac speech control")
+    async def protected_send():
+        async with _external_device_send_lock(conn):
+            if (bridge.connections.get(conn.device_id) is not conn
+                    or _external_speaker_owner != conn.device_id
+                    or _external_speaker_connection is not conn):
+                raise RuntimeError("Mac speaker lost physical decoder ownership")
+            if (not terminal and (
+                    conn.client_abort
+                    or generation != getattr(
+                        bridge, "interrupt_generation", {},
+                    ).get(conn.device_id, 0)
+                    or bridge.human_speech_active())):
+                raise RuntimeError("Mac TTS control interrupted before device send")
+            await send()
+            if bridge.connections.get(conn.device_id) is not conn:
+                raise RuntimeError("Head replaced during Mac TTS control")
+    # Bound the lock wait as well as the actual socket send. Unconfirmed STOP
+    # always leaves the external lease to fail closed in end_external_speech.
+    await asyncio.wait_for(protected_send(), timeout=0.8)
+
+
 async def send_external_opus(conn, packet: bytes, generation: int) -> None:
     """Send existing Mac Opus through the native head's actual send lock.
 
