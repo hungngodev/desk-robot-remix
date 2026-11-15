@@ -49,6 +49,14 @@ int main() {
     auto result = pair.assess(100);
     CHECK(!result.left_fresh && !result.right_fresh && !result.same_code);
     CHECK(!result.motor_authorized && !result.charging_authorized);
+    // The evidence owner must not trust raw codes from future RMT callers.
+    // Invalid complement bytes must never refresh freshness or sequence.
+    pair.accept(0, 0U, 99);
+    pair.accept(1, code ^ 0x01000000U, 99);
+    result = pair.assess(100);
+    CHECK(!result.left_fresh && !result.right_fresh && !result.same_code);
+    CHECK(result.left_seq == 0 && result.right_seq == 0);
+    CHECK(!result.motor_authorized && !result.charging_authorized);
     pair.accept(0, code, 100);
     result = pair.assess(100);
     CHECK(result.left_fresh && !result.right_fresh && !result.same_code);
