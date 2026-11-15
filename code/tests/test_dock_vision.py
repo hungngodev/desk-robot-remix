@@ -18,6 +18,49 @@ def calibration():
     )
 
 
+
+@pytest.mark.parametrize(("offset", "yaw", "expected"), [
+    (40.0, 0.0, 40.0),
+    (-40.0, 0.0, -40.0),
+    (0.0, 5.0, 500 * math.sin(math.radians(5))),
+    (0.0, -5.0, -500 * math.sin(math.radians(5))),
+])
+def test_measured_camera_mount_maps_tag_into_chassis_centerline(
+    offset, yaw, expected,
+):
+    from dataclasses import replace
+
+    camera = replace(
+        calibration(),
+        mount_lateral_offset_mm=offset, mount_yaw_deg=yaw,
+    )
+    pose = DockPose(0, 0, 500, 0.5, 1)
+    assert abs(camera.chassis_lateral_mm(pose) - expected) < 1e-6
+    # Reprojection error alone describes the CAMERA, not robot centerline.
+    assert pose.x_mm == 0
+
+
+@pytest.mark.parametrize(("offset", "yaw"), [
+    (None, 0.0), (0.0, None), (True, 0), (0, False),
+    ("20", 0), (0, "5"), (101, 0), (-101, 0),
+    (0, 21), (0, -21), (float("nan"), 0),
+    (0, float("inf")), (10 ** 1000, 0),
+])
+def test_unmeasured_or_invalid_camera_mount_cannot_be_used_to_steer(
+    offset, yaw,
+):
+    from dataclasses import replace
+
+    with pytest.raises(ValueError):
+        replace(calibration(), mount_lateral_offset_mm=offset,
+                mount_yaw_deg=yaw)
+    with pytest.raises(ValueError, match="mounting geometry"):
+        calibration().chassis_lateral_mm(
+            DockPose(0, 0, 500, 0.5, 1),
+        )
+
+
+
 def test_camera_calibration_never_guesses_zero_or_nan_geometry():
     assert calibration().tag_side_mm == 60
     for value in (0, -10, float("nan"), float("inf")):
