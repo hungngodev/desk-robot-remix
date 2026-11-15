@@ -489,7 +489,7 @@ async def test_authenticated_human_stop_never_accepts_unverified_send(
     bridge.connections[conn.device_id] = conn
     conn.client_is_speaking = True
     if failure == "stalled_lock":
-        async with module._external_opus_send_lock:
+        async with module._external_device_send_lock(conn):
             with pytest.raises(asyncio.TimeoutError):
                 await module.send_external_urgent_stop(conn)
         assert sent == []
@@ -533,7 +533,7 @@ async def test_mac_tts_control_cannot_reenter_after_waiting_for_human_stop(
     async def start():
         delivered.append("start")
 
-    async with module._external_opus_send_lock:
+    async with module._external_device_send_lock(conn):
         task = asyncio.create_task(
             module.send_external_tts_control(conn, 4, start)
         )
@@ -595,7 +595,7 @@ async def test_mac_tts_control_times_out_while_device_send_lock_occupied(native)
     async def send():
         sent.append(True)
 
-    async with module._external_opus_send_lock:
+    async with module._external_device_send_lock(conn):
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(
                 module.send_external_tts_control(
@@ -734,7 +734,7 @@ async def test_uncertain_mac_decoder_recovery_bounds_all_lock_waits(
     module._output_owner_unverified = conn.device_id
     lock = {
         "handoff": module._speaker_handoff_lock,
-        "device": module._external_opus_send_lock,
+        "device": module._external_device_send_lock(conn),
         "owner": module._output_owner_lock,
     }[lock_name]
     async with lock:
@@ -7104,9 +7104,9 @@ async def test_human_fleet_preemption_bounds_mac_or_uncertain_stop_lock_wait(
     else:
         module._output_owner_unverified = "mac-02"
 
-    # Without a native session both cases share the real fallback lock.
-    # This is exactly the lock an old Mac Opus sender may still hold.
-    async with module._external_opus_send_lock:
+    # The current physical peer head shares its own stable send lock with
+    # Mac Opus and human STOP, even without a native inference session.
+    async with module._external_device_send_lock(peer):
         await asyncio.wait_for(
             module.preempt_others_for_human("mac-01"), timeout=0.7,
         )
