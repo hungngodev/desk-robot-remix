@@ -13,6 +13,10 @@ if TYPE_CHECKING:
 # The real HTTP head already has its own transport timeout; this also
 # bounds a stalled alternate head adapter before the next servo pulse.
 _FORCE_READ_TIMEOUT_S = 2.0
+# The transport has its own request deadline, but preserve local bounds for
+# alternate head adapters and cancellation after an unacknowledged jaw pulse.
+_GRIP_COMMAND_TIMEOUT_S = 2.5
+_HEALTH_READ_TIMEOUT_S = 2.5
 
 
 def grip_angles(start: int, end: int, step: int) -> tuple[int, ...]:
@@ -76,10 +80,12 @@ async def guarded_grasp(
         for angle in grip_angles(
             calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
         )[1:]:
-            await health()
-            await head.command(f"grip {angle}")
+            await asyncio.wait_for(health(), timeout=_HEALTH_READ_TIMEOUT_S)
+            await asyncio.wait_for(
+                head.command(f"grip {angle}"), timeout=_GRIP_COMMAND_TIMEOUT_S
+            )
             await asyncio.sleep(0.18)
-            await health()
+            await asyncio.wait_for(health(), timeout=_HEALTH_READ_TIMEOUT_S)
             try:
                 measured, seq = force_observation(
                     await asyncio.wait_for(
@@ -113,8 +119,11 @@ async def guarded_grasp(
         # ONLY while the WROOM still reports fresh local safety authority.
         # If touch/cliff/IMU disarmed the body, NEVER bypass that interlock.
         try:
-            await health()
-            await head.command(f"grip {calibration.grip_open}")
+            await asyncio.wait_for(health(), timeout=_HEALTH_READ_TIMEOUT_S)
+            await asyncio.wait_for(
+                head.command(f"grip {calibration.grip_open}"),
+                timeout=_GRIP_COMMAND_TIMEOUT_S,
+            )
         except Exception:
             pass  # Preserve the primary failure; body stop/watchdog is next.
         raise
