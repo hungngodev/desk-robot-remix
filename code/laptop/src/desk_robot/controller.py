@@ -366,6 +366,16 @@ class Coordinator:
 
     async def _explore(self, job: Job) -> dict:
         head = self.heads[job.robot_id]
+
+        async def observe_camera() -> None:
+            jpeg = await asyncio.wait_for(head.snapshot(), timeout=2.0)
+            # An HTTP success with an empty, partial or non-JPEG response
+            # is not evidence of a functioning XIAO camera stream.
+            if (not isinstance(jpeg, bytes) or not 4 <= len(jpeg) <= 512000
+                    or not jpeg.startswith(b"\xff\xd8")
+                    or not jpeg.endswith(b"\xff\xd9")):
+                raise OperationError("Exploration camera returned invalid JPEG")
+
         steps = 0
         # This loop persists until a stop, quiet mode, failure, or disconnect.
         # There is no unbounded drive: every track movement expires after 100ms.
@@ -373,7 +383,7 @@ class Coordinator:
             await self._assert_armed_health(job.robot_id, require_front_clearance=True)
             # The reused Sense camera source must be alive before and after
             # each short pulse; an image does not by itself prove a clear path.
-            await asyncio.wait_for(head.snapshot(), timeout=2.0)
+            await observe_camera()
             # A camera request can hang while a local cliff, touch or IMU
             # fault disarms WROOM. Never drive from a pre-camera verdict.
             await self._assert_armed_health(job.robot_id, require_front_clearance=True)
@@ -384,7 +394,7 @@ class Coordinator:
             if len(job.events) >= 96:
                 job.events.pop(0)
             job.events.append(f"bounded exploration pulse {steps}, stopped for reobservation")
-            await asyncio.wait_for(head.snapshot(), timeout=2.0)
+            await observe_camera()
             # No blind reverse/turn when only one forward beam exists. Swept
             # turns need real footprint and obstacle qualification.
             await asyncio.sleep(0.35)

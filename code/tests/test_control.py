@@ -564,3 +564,50 @@ async def test_pickup_never_drives_if_wroom_faults_during_object_detector(settin
         assert head.commands[-1] == "stop"
     finally:
         await c.close()
+
+
+@pytest.mark.parametrize("bad_frame", [
+    None, b"", b"<html>camera unavailable</html>",
+    b"\xff\xd8incomplete", b"incomplete\xff\xd9",
+    b"\xff\xd8" + b"x" * 512001 + b"\xff\xd9",
+])
+async def test_exploration_refuses_invalid_camera_before_any_drive(settings, bad_frame):
+    c, head = make(settings)
+
+    async def invalid_camera():
+        return bad_frame
+
+    head.snapshot = invalid_camera
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=4)
+        assert job.state == "failed"
+        assert "invalid JPEG" in (job.error or "")
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()
+
+
+async def test_exploration_stops_after_corrupted_post_drive_camera(settings):
+    c, head = make(settings)
+    original = head.snapshot
+    calls = 0
+
+    async def camera_then_corruption():
+        nonlocal calls
+        calls += 1
+        return await original() if calls == 1 else b"<html>camera fault</html>"
+
+    head.snapshot = camera_then_corruption
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=4)
+        assert job.state == "failed"
+        assert "invalid JPEG" in (job.error or "")
+        assert head.commands.count("drive 20 20 100") == 1
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()
