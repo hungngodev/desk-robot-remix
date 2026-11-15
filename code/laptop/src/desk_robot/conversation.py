@@ -384,6 +384,12 @@ class Conversation:
         private_at_start = (
             sharing_at_start and self.settings.voice_memory_tools_enabled
         )
+        visual_at_start = (
+            self.settings.mode == "hardware"
+            and self.multimodal is not None
+            and self.settings.voice_vision_tools_enabled
+            and self.settings.fleet_text_sharing_enabled
+        )
 
         def consent_still_valid() -> bool:
             return (
@@ -391,6 +397,8 @@ class Conversation:
                  or self.settings.fleet_text_sharing_enabled)
                 and (not private_at_start
                      or self.settings.voice_memory_tools_enabled)
+                and (not visual_at_start
+                     or self.settings.voice_vision_tools_enabled)
                 and (permission_check is None or permission_check())
             )
 
