@@ -2075,31 +2075,34 @@ class NativeOmniSession:
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed")
         blocked_by_human = False
-        async with self._device_send_lock:
-            # Human VAD can begin AFTER a reply already started, before the
-            # queued cross-pet preemption task runs. Check real floor state
-            # before every 60 ms packet, not just the TTS START frame.
-            if (self.closed
-                    or generation != self._generation
-                    or self._external_speech_active
-                    or self._monitor_lost
-                    or ((self._pet_quiet or not self._pet_autonomy_enabled)
-                        and not self._direct_reply_active)):
-                return False
-            if bridge.human_speech_active():
-                blocked_by_human = True
-            else:
-                # A slow/broken head transport must release the device lock
-                # so urgent human STOP can acquire it. Unsent Opus is never
-                # a delivered PCM or a playback acknowledgement.
-                await asyncio.wait_for(
-                    self.conn.websocket.send(packet), timeout=0.4,
-                )
-                if bridge.connections.get(self.device) is not self.conn:
-                    # A replaced socket cannot acknowledge its new head's
-                    # playback. Teardown must retain uncertain speaker state.
-                    raise RuntimeError("Head replaced during native Opus send")
-                self.head_packets += 1
+        # Bound admission to the SAME physical send lock as human STOP.
+        # An indefinitely stalled prior sender cannot wedge this model turn.
+        async with asyncio.timeout(0.6):
+            async with self._device_send_lock:
+                # Human VAD can begin AFTER a reply already started, before the
+                # queued cross-pet preemption task runs. Check real floor state
+                # before every 60 ms packet, not just the TTS START frame.
+                if (self.closed
+                        or generation != self._generation
+                        or self._external_speech_active
+                        or self._monitor_lost
+                        or ((self._pet_quiet or not self._pet_autonomy_enabled)
+                            and not self._direct_reply_active)):
+                    return False
+                if bridge.human_speech_active():
+                    blocked_by_human = True
+                else:
+                    # A slow/broken head transport must release the device lock
+                    # so urgent human STOP can acquire it. Unsent Opus is never
+                    # a delivered PCM or a playback acknowledgement.
+                    await asyncio.wait_for(
+                        self.conn.websocket.send(packet), timeout=0.4,
+                    )
+                    if bridge.connections.get(self.device) is not self.conn:
+                        # A replaced socket cannot acknowledge its new head's
+                        # playback. Teardown must retain uncertain speaker state.
+                        raise RuntimeError("Head replaced during native Opus send")
+                    self.head_packets += 1
         if blocked_by_human:
             events = await self._invalidate_head_first()
             self._schedule_remote_cancel(events)
@@ -2401,23 +2404,25 @@ async def send_external_opus(conn, packet: bytes, generation: int) -> None:
     import desk_robot_bridge as bridge
     if not isinstance(packet, bytes) or len(packet) == 0:
         raise ValueError("Expected a nonempty existing Mac Opus packet")
-    async with _external_device_send_lock(conn):
-        if (bridge.connections.get(conn.device_id) is not conn
-                or _external_speaker_owner != conn.device_id
-                or _external_speaker_connection is not conn
-                or conn.client_abort
-                or generation != bridge.interrupt_generation.get(conn.device_id, 0)
-                or bridge.human_speech_active()):
-            raise RuntimeError("Mac speech interrupted before device Opus send")
-        # This Mac voice shares the same physical decoder lock as native
-        # speech. Bound each packet so an urgent STOP never waits forever.
-        await asyncio.wait_for(
-            conn.websocket.send(packet), timeout=0.4,
-        )
-        if bridge.connections.get(conn.device_id) is not conn:
-            # A reconnect may replace the authenticated socket WHILE this
-            # awaited send runs. Its old packet is not new-head delivery.
-            raise RuntimeError("Head replaced during Mac Opus send")
+    # Bound the complete packet, including lock admission, not just send().
+    async with asyncio.timeout(0.6):
+        async with _external_device_send_lock(conn):
+            if (bridge.connections.get(conn.device_id) is not conn
+                    or _external_speaker_owner != conn.device_id
+                    or _external_speaker_connection is not conn
+                    or conn.client_abort
+                    or generation != bridge.interrupt_generation.get(conn.device_id, 0)
+                    or bridge.human_speech_active()):
+                raise RuntimeError("Mac speech interrupted before device Opus send")
+            # This Mac voice shares the same physical decoder lock as native
+            # speech. Bound each packet so an urgent STOP never waits forever.
+            await asyncio.wait_for(
+                conn.websocket.send(packet), timeout=0.4,
+            )
+            if bridge.connections.get(conn.device_id) is not conn:
+                # A reconnect may replace the authenticated socket WHILE this
+                # awaited send runs. Its old packet is not new-head delivery.
+                raise RuntimeError("Head replaced during Mac Opus send")
 
 
 async def begin_external_speech(conn) -> bool:
