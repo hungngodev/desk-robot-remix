@@ -149,6 +149,13 @@ int main() {
     CHECK(!queue.finish(0, 2, true)); // merely draining is not a new sighting
     CHECK(!queue.draining(0));
     CHECK(queue.finish(0, 1, true)); // only a later batch can reacquire
+    // The second receiver must reject an untimestamped double burst too.
+    // A valid opposite-side packet cannot make that ambiguous batch safe.
+    CHECK(queue.on_poll(525));
+    CHECK(queue.finish(0, 1, true, true));
+    CHECK(!queue.finish(1, 2, true, true));
+    CHECK(queue.on_poll(550));
+    CHECK(queue.finish(1, 1, true, true)); // isolated recovery only
     CHECK(!queue.draining(9));
     CHECK(!queue.finish(9, 1, true));
     queue.reset();
