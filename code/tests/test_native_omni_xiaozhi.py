@@ -6655,6 +6655,39 @@ async def test_decoder_stop_from_replaced_xiao_socket_never_clears_owner(
     assert not await module.begin_external_speech(fresh)
 
 
+async def test_mac_claim_during_native_startup_lock_wait_preserves_speaker(
+    native,
+):
+    """An old session may not abort a new Mac voice while awaiting device lock."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    cleared = []
+    conn.clear_queues = lambda: cleared.append(True)
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    async with session._device_send_lock:
+        task = asyncio.create_task(session._retire_legacy_audio())
+        # One event loop turn lets native reach its STOP lock wait.
+        await asyncio.sleep(0)
+        assert not task.done()
+        module._external_speaker_owner = conn.device_id
+        module._external_speaker_connection = conn
+    with pytest.raises(RuntimeError, match="Mac speaker owns decoder"):
+        await asyncio.wait_for(task, timeout=0.8)
+    assert conn.client_is_speaking is True
+    assert conn.client_abort is False
+    assert cleared == []
+    assert sent == []
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+    await module.end_external_speech(conn, stop_confirmed=True)
+    assert module._external_speaker_owner is None
+
+
 async def test_native_legacy_decoder_stop_bounds_occupied_device_lock(native):
     """Startup cannot wait indefinitely behind a hung prior Opus writer."""
     module, bridge = native
@@ -6672,6 +6705,8 @@ async def test_native_legacy_decoder_stop_bounds_occupied_device_lock(native):
             await asyncio.wait_for(session._retire_legacy_audio(), timeout=0.85)
         assert sent == []
         assert conn.client_is_speaking is True
+        # Lock timeout must abort OLD legacy output, not leave it streaming.
+        assert conn.client_abort is True
         assert module._output_owner == conn.device_id
         assert module._output_owner_unverified == conn.device_id
 
