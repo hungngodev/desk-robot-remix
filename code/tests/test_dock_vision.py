@@ -318,3 +318,41 @@ def test_malformed_detector_ids_cannot_select_dock_pose(monkeypatch, bad_ids):
     decision = assess_dock(pose, now=5.1, target_distance_mm=120)
     assert decision.phase == "hold"
     assert not decision.motor_authorized and not decision.charging_authorized
+
+
+@pytest.mark.parametrize("failure_stage", ["detect", "solve", "project"])
+def test_native_opencv_failure_fails_closed_without_pose_authority(monkeypatch, failure_stage):
+    """A native detector or PnP error cannot become an approach observation."""
+    import cv2
+    import numpy as np
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            if failure_stage == "detect":
+                raise cv2.error("simulated native detector failure")
+            points = np.array([[[100., 100.], [140., 100.],
+                                [140., 140.], [100., 140.]]], dtype=np.float32)
+            return [points], np.array([[12]], dtype=np.int32), []
+
+    def solve(*args, **kwargs):
+        if failure_stage == "solve":
+            raise cv2.error("simulated native solve failure")
+        return True, np.zeros((3, 1)), np.array([[0.], [0.], [400.]])
+
+    def project(*args, **kwargs):
+        raise cv2.error("simulated native projection failure")
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    monkeypatch.setattr(cv2, "solvePnP", solve)
+    monkeypatch.setattr(cv2, "projectPoints", project)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), calibration(), captured_at=5)
+    assert pose is None
+    assessment = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert assessment.phase == "hold"
+    assert assessment.motor_authorized is False
+    assert assessment.charging_authorized is False
