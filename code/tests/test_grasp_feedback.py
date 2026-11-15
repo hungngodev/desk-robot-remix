@@ -295,13 +295,18 @@ async def test_stalled_force_feedback_never_bypasses_local_wroom_disarm(monkeypa
 
     head.aux_status = stalled_after_jaw_move
 
+    checks = 0
+
     async def disarmed():
-        if head.commands:
+        nonlocal checks
+        checks += 1
+        if checks >= 3:
             raise OperationError("WROOM local stop latched")
         return {"armed": True}
 
-    with pytest.raises(OperationError, match="WROOM local stop latched"):
+    with pytest.raises(OperationError, match="Lost fresh force sensor"):
         await asyncio.wait_for(
             guarded_grasp(head, Settings(), health=disarmed), timeout=0.5,
         )
+    assert checks == 3
     assert head.commands == ["grip 65"]
