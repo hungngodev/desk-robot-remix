@@ -60,7 +60,7 @@ int main() {
     pair.accept(0, code, 100);
     result = pair.assess(100);
     CHECK(result.left_fresh && !result.right_fresh && !result.same_code);
-    pair.accept(1, code ^ 0x01000000U, 105);
+    pair.accept(1, code ^ 0x01010000U, 105); // distinct but checksum-valid NEC command
     result = pair.assess(110);
     CHECK(result.left_fresh && result.right_fresh && !result.same_code);
     pair.accept(1, code, 120);
