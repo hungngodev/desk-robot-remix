@@ -116,7 +116,10 @@ class DualIrEvidence {
   }
   // Called only after an actual valid independent RMT frame for that side.
   void accept(unsigned side, std::uint32_t code, std::uint32_t now_ms) {
-    if (side > 1) return;
+    if (side > 1 ||
+        static_cast<std::uint8_t>(code ^ (code >> 8)) != 0xff ||
+        static_cast<std::uint8_t>((code >> 16) ^ (code >> 24)) != 0xff)
+      return;  // Never promote an unchecked raw frame to directional evidence.
     IrSideEvidence& s = sides_[side];
     s.code = code;
     s.at_ms = now_ms;
