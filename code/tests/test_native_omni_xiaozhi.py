@@ -1103,6 +1103,54 @@ async def test_fleet_native_speaker_claim_flushes_old_pet_before_second_pet_talk
 
 
 
+async def test_native_handoff_rechecks_failed_stop_after_old_flush_await(native):
+    """A failed STOP during peer handoff must block a later speaker grant."""
+    module, bridge = native
+    first, _ = connection()
+    second, _ = connection()
+    second.device_id = "mac-02"
+    second.session_id = "second-robot"
+    bridge.connections.update({"mac-01": first, "mac-02": second})
+    bridge.robot_for_device = lambda dev: {
+        "mac-01": "robot-01", "mac-02": "robot-02",
+    }.get(dev)
+    previous = module.NativeOmniSession(
+        first, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    next_pet = module.NativeOmniSession(
+        second, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions.update({"mac-01": previous, "mac-02": next_pet})
+    module._output_owner = "mac-01"
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def old_flush():
+        entered.set()
+        await release.wait()
+        return ({"type": "response.cancel"},)
+
+    previous._invalidate_head_first = old_flush
+    previous._schedule_remote_cancel = lambda _events: None
+    task = asyncio.create_task(module.claim_speaker(next_pet))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.6)
+        # A concurrent failed hardware STOP makes the prior owner uncertain
+        # while this claim is still waiting for the original flush.
+        async with module._output_owner_lock:
+            module._output_owner_unverified = "mac-01"
+        release.set()
+        assert await asyncio.wait_for(task, timeout=0.7) is False
+        assert module._output_owner == "mac-01"
+        assert module._output_owner_unverified == "mac-01"
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_native_handoff_slow_old_stop_does_not_block_human_fleet_floor(
     native, monkeypatch,
 ):
