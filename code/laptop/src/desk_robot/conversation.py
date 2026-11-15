@@ -593,10 +593,15 @@ class Conversation:
         if self.active is not None and not self.active.done():
             return False
         async with self.session_lock:
-            if self.active is not None and not self.active.done():
+            if (self.active is not None and not self.active.done()) or (
+                permission_check is not None and not permission_check()
+            ):
                 return False
             async with self.speaker.session([robot]):
                 async with self.speaker_lock:
+                    # Consent may change while the session or speaker lock waits.
+                    if permission_check is not None and not permission_check():
+                        return False
                     try:
                         if isinstance(self.speaker, KokoroHeadSpeaker):
                             await self.speaker.say(
