@@ -35,3 +35,24 @@ def test_remember_keeps_firsthand_and_peer_provenance(tmp_path):
     )
     assert store.recent("robot-01")[0].witnessed is True
     assert store.recent("robot-02")[0].witnessed is False
+
+
+@pytest.mark.parametrize("bad", [[], {}, None, 7, True])
+@pytest.mark.parametrize("operation", [
+    "recent", "search", "set_core_fact", "core_facts", "forget_core_fact",
+    "forget_episode", "count",
+])
+def test_memory_operations_reject_malformed_identity(tmp_path, operation, bad):
+    store = MemoryStore(tmp_path / "memory", ["robot-01"])
+    actions = {
+        "recent": lambda: store.recent(bad),
+        "search": lambda: store.search(bad, "touch"),
+        "set_core_fact": lambda: store.set_core_fact(bad, "favorite_color", "blue"),
+        "core_facts": lambda: store.core_facts(bad),
+        "forget_core_fact": lambda: store.forget_core_fact(bad, "favorite_color"),
+        "forget_episode": lambda: store.forget_episode(bad, "evt-1"),
+        "count": lambda: store.count(bad),
+    }
+    with pytest.raises(ValueError, match="Unknown robot memory identity"):
+        actions[operation]()
+    assert store.count("robot-01") == 0
