@@ -69,9 +69,11 @@ class MemoryStore:
 
     def __init__(self, root: Path, robot_ids: list[str] | tuple[str, ...]):
         self.root = Path(root)
-        self.robot_ids = frozenset(robot_ids)
-        if not self.robot_ids or not all(_ROBOT_ID.fullmatch(i) for i in self.robot_ids):
+        if (not isinstance(robot_ids, (list, tuple)) or not robot_ids
+                or not all(isinstance(i, str) and _ROBOT_ID.fullmatch(i)
+                           for i in robot_ids)):
             raise ValueError("Every robot ID must be a safe nonempty identifier")
+        self.robot_ids = frozenset(robot_ids)
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.root.is_symlink():
             raise ValueError("Memory root must not be a symlink")
