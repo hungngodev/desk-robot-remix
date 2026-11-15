@@ -236,3 +236,72 @@ async def test_real_task_cancellation_during_unacknowledged_jaw_command(monkeypa
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+
+@pytest.mark.parametrize("phase", ["before_first", "during_close"])
+async def test_stalled_force_feedback_is_bounded_and_jaw_relaxes_only_if_safe(
+    monkeypatch, phase,
+):
+    """A stalled WROOM auxiliary read cannot hold an active jaw indefinitely."""
+    import asyncio
+    import desk_robot.grasp_feedback as feedback
+
+    monkeypatch.setattr(feedback, "_FORCE_READ_TIMEOUT_S", 0.04)
+
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr(feedback.asyncio, "sleep", instant)
+    head = FakeHead([100, 101])
+    original = head.aux_status
+    waiting = asyncio.Event()
+
+    async def stalls():
+        if phase == "before_first" or head.commands:
+            await waiting.wait()
+        return await original()
+
+    head.aux_status = stalls
+    with pytest.raises(OperationError, match=(
+        "Fresh force feedback" if phase == "before_first"
+        else "Lost fresh force sensor"
+    )):
+        await asyncio.wait_for(
+            guarded_grasp(head, Settings(), health=healthy), timeout=0.5,
+        )
+    assert head.commands == (
+        [] if phase == "before_first" else ["grip 65", "grip 60"]
+    )
+
+
+async def test_stalled_force_feedback_never_bypasses_local_wroom_disarm(monkeypatch):
+    import asyncio
+    import desk_robot.grasp_feedback as feedback
+
+    monkeypatch.setattr(feedback, "_FORCE_READ_TIMEOUT_S", 0.04)
+
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr(feedback.asyncio, "sleep", instant)
+    head = FakeHead([100, 101])
+    original = head.aux_status
+
+    async def stalled_after_jaw_move():
+        if head.commands:
+            await asyncio.Event().wait()
+        return await original()
+
+    head.aux_status = stalled_after_jaw_move
+
+    async def disarmed():
+        if head.commands:
+            raise OperationError("WROOM local stop latched")
+        return {"armed": True}
+
+    with pytest.raises(OperationError, match="WROOM local stop latched"):
+        await asyncio.wait_for(
+            guarded_grasp(head, Settings(), health=disarmed), timeout=0.5,
+        )
+    assert head.commands == ["grip 65"]
