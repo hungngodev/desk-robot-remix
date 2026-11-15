@@ -672,6 +672,36 @@ async def test_mac_tts_control_times_out_while_device_send_lock_occupied(native)
     assert module._external_speaker_owner == conn.device_id
 
 
+async def test_mac_lease_release_after_socket_replacement_keeps_uncertain_floor(
+    native,
+):
+    """A successful STOP sent to an OLD socket cannot certify the new head."""
+    module, bridge = native
+    old, sent = connection()
+    bridge.connections[old.device_id] = old
+    assert await module.begin_external_speech(old)
+    assert module._output_owner_unverified is None
+    assert module._output_owner is None
+
+    await old.websocket.send(json.dumps({
+        "type": "tts", "state": "stop", "session_id": old.session_id,
+    }))
+    replacement, _ = connection()
+    replacement.session_id = "new-authenticated-head"
+    bridge.connections[old.device_id] = replacement
+    await module.end_external_speech(old, stop_confirmed=True)
+
+    assert len(sent) == 1
+    assert module._external_speaker_owner is None
+    assert module._output_owner == old.device_id
+    assert module._output_owner_unverified == old.device_id
+    assert not await module.begin_external_speech(old)
+    assert await module.begin_external_speech(replacement)
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+    await module.end_external_speech(replacement)
+
+
 @pytest.mark.parametrize("head_current", [True, False])
 async def test_later_mac_stop_recovers_only_current_authenticated_decoder(
     native, head_current,
