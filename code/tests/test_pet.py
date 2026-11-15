@@ -1157,6 +1157,94 @@ async def test_manual_peer_share_revoked_while_sqlite_writes_removes_new_copy(
         await pet.close()
 
 
+def test_visual_gate_reset_clears_private_jpeg_without_changing_thresholds():
+    gate = VisualChangeGate(min_changed_fraction=0.02, confirmations=3)
+    assert gate.observe(WHITE) is None
+    assert gate._baseline == WHITE
+    gate.reset()
+    assert gate._baseline is None
+    assert gate._pixel_baseline is None
+    assert gate._hits == 0
+    assert gate.min_changed_fraction == 0.02
+    assert gate.confirmations == 3
+    assert gate.observe(RED) is None  # New opt in starts with fresh image.
+
+
+async def test_hardware_pet_no_longer_polls_or_retains_camera_without_consent(
+    fleet, tmp_path,
+):
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = False
+    camera = ChangingCamera()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(
+        fleet, {"robot-01": camera}, conversation, memory,
+        KeyScene(), interval=0.01,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 4
+    state.gate.observe(WHITE)
+    state.last_scene_frame_at = time.monotonic()
+    task = asyncio.create_task(pet._observe("robot-01", 4))
+    try:
+        await asyncio.sleep(0.04)
+        assert camera.calls == 0
+        assert state.gate._baseline is None
+        assert state.last_scene_frame_at is None
+        assert memory.count("robot-01") == 0
+    finally:
+        state.enabled = False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await pet.close()
+
+
+async def test_pet_discards_camera_inference_when_vision_revoked_mid_model(
+    fleet, tmp_path,
+):
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    camera = ChangingCamera()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    scene_called = asyncio.Event()
+
+    class RevokingScene:
+        async def compare(self, before, after):
+            assert before == WHITE and after == RED
+            fleet.voice_vision_tools_enabled = False
+            scene_called.set()
+            return SceneChange("key", "A key from the now revoked scene", .99)
+
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(
+        fleet, {"robot-01": camera}, conversation, memory,
+        RevokingScene(), interval=0.01,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 8
+    task = asyncio.create_task(pet._observe("robot-01", 8))
+    try:
+        await asyncio.wait_for(scene_called.wait(), timeout=1.5)
+        await asyncio.sleep(0.05)
+        assert memory.count("robot-01") == 0
+        assert state.events == 0
+        assert state.last_event is None
+        assert state.gate._baseline is None
+        assert pet._speech_task is None
+    finally:
+        state.enabled = False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await pet.close()
+
+
 async def test_camera_peer_fanout_retracts_copies_after_visual_opt_out(
     fleet, tmp_path, monkeypatch,
 ):
