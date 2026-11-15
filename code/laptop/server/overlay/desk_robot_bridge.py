@@ -595,6 +595,16 @@ async def transmit(conn, text, frames):
                         "type": "tts", "state": "stop",
                         "session_id": conn.session_id, "flush": True,
                     }))
+                elif leased and callable(control):
+                    # Pinned Xiaozhi's normal stop waits for its own TTS
+                    # audio-rate queue, not Mac's separately sent Opus.
+                    # The Mac sender has already paced its packets and tail.
+                    # Send the SAME upstream control envelope directly while
+                    # owning the device lock; no acoustic ACK is fabricated.
+                    await conn.websocket.send(json.dumps({
+                        "type": "tts", "state": "stop",
+                        "session_id": conn.session_id,
+                    }))
                 else:
                     await send_tts_message(conn, "stop")
             if leased and callable(control):
