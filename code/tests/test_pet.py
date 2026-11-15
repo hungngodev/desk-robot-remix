@@ -1125,6 +1125,170 @@ async def test_auto_fanout_revocation_during_peer_sqlite_commit_retracts_only_co
         await pet.close()
 
 
+async def test_cancelled_camera_eyewitness_insert_retracts_revoked_visual(
+    fleet, tmp_path, monkeypatch,
+):
+    """Cancelling a camera write cannot strand a new private observation."""
+    import threading
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    original_remember, original_forget = memory.remember, memory.forget_episode
+    written, resume, retracted = (
+        threading.Event(), threading.Event(), threading.Event()
+    )
+
+    def blocked_insert(*args, **kwargs):
+        result = original_remember(*args, **kwargs)
+        written.set()
+        assert resume.wait(3)
+        return result
+
+    def observed_forget(*args):
+        result = original_forget(*args)
+        retracted.set()
+        return result
+
+    monkeypatch.setattr(memory, "remember", blocked_insert)
+    monkeypatch.setattr(memory, "forget_episode", observed_forget)
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+        ), memory, KeyScene(),
+    )
+    task = asyncio.create_task(pet._store_observation(
+        "robot-01", SceneChange("key", "A private camera guess", 0.95),
+        camera_derived=True,
+    ))
+    try:
+        assert await asyncio.to_thread(written.wait, 2)
+        fleet.voice_vision_tools_enabled = False
+        task.cancel()
+    finally:
+        resume.set()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await asyncio.to_thread(retracted.wait, 2)
+        assert memory.count("robot-01") == 0
+    finally:
+        await pet.close()
+
+
+async def test_cancelled_fleet_fanout_retracts_all_new_peer_copies(
+    fleet, tmp_path, monkeypatch,
+):
+    """A stalled second peer cannot strand a completed first peer copy."""
+    import threading
+
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    ids = [r.id for r in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    original_remember, original_forget = memory.remember, memory.forget_episode
+    written, resume, cleaned_second = (
+        threading.Event(), threading.Event(), threading.Event()
+    )
+
+    def blocked_second_peer(robot_id, *args, **kwargs):
+        result = original_remember(robot_id, *args, **kwargs)
+        if robot_id == "robot-03" and kwargs.get("witnessed") is False:
+            written.set()
+            assert resume.wait(3)
+        return result
+
+    def observed_forget(robot_id, event_id):
+        result = original_forget(robot_id, event_id)
+        if robot_id == "robot-03":
+            cleaned_second.set()
+        return result
+
+    monkeypatch.setattr(memory, "remember", blocked_second_peer)
+    monkeypatch.setattr(memory, "forget_episode", observed_forget)
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+        ), memory, KeyScene(),
+    )
+    task = asyncio.create_task(pet._store_observation(
+        "robot-01", SceneChange("touch_tap", "A real touch", 1.0),
+    ))
+    try:
+        assert await asyncio.to_thread(written.wait, 2)
+        assert memory.count("robot-02") == 1
+        fleet.fleet_text_sharing_enabled = False
+        task.cancel()
+    finally:
+        resume.set()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await asyncio.to_thread(cleaned_second.wait, 2)
+        assert memory.count("robot-01") == 1
+        assert all(memory.count(peer_id) == 0 for peer_id in ids[1:])
+    finally:
+        await pet.close()
+
+
+async def test_cancelled_manual_peer_share_retracts_revoked_copy(
+    fleet, tmp_path, monkeypatch,
+):
+    """Cancelling manual share cannot abandon a still-running SQLite worker."""
+    import threading
+
+    fleet.fleet_text_sharing_enabled = True
+    ids = [r.id for r in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    source_id = "manual_share_cancel"
+    memory.remember(
+        "robot-01", source_id, "An original witnessed key",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    original_remember, original_forget = memory.remember, memory.forget_episode
+    written, resume, retracted = (
+        threading.Event(), threading.Event(), threading.Event()
+    )
+
+    def blocked_insert(robot_id, *args, **kwargs):
+        result = original_remember(robot_id, *args, **kwargs)
+        if robot_id == "robot-02":
+            written.set()
+            assert resume.wait(3)
+        return result
+
+    def observed_forget(robot_id, event_id):
+        result = original_forget(robot_id, event_id)
+        if robot_id == "robot-02":
+            retracted.set()
+        return result
+
+    monkeypatch.setattr(memory, "remember", blocked_insert)
+    monkeypatch.setattr(memory, "forget_episode", observed_forget)
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+        ), memory, KeyScene(),
+    )
+    task = asyncio.create_task(
+        pet.share_with_peer("robot-01", "robot-02", source_id)
+    )
+    try:
+        assert await asyncio.to_thread(written.wait, 2)
+        fleet.fleet_text_sharing_enabled = False
+        task.cancel()
+    finally:
+        resume.set()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await asyncio.to_thread(retracted.wait, 2)
+        assert memory.count("robot-01") == 1
+        assert memory.count("robot-02") == 0
+    finally:
+        await pet.close()
+
+
 async def test_manual_peer_share_revoked_while_sqlite_writes_removes_new_copy(
     fleet, tmp_path, monkeypatch,
 ):
