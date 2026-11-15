@@ -606,6 +606,46 @@ async def test_mac_tts_control_times_out_while_device_send_lock_occupied(native)
     assert module._external_speaker_owner == conn.device_id
 
 
+@pytest.mark.parametrize("head_current", [True, False])
+async def test_later_mac_stop_recovers_only_current_authenticated_decoder(
+    native, head_current,
+):
+    """A successful Mac STOP may clear urgent uncertainty, never a stale head."""
+    module, bridge = native
+    conn, packets = connection()
+    bridge.connections[conn.device_id] = conn
+    module._external_speaker_owner = conn.device_id
+    module._external_speaker_connection = conn
+    module._output_owner = conn.device_id
+    module._output_owner_unverified = conn.device_id
+
+    async def send_stop():
+        await conn.websocket.send(json.dumps({
+            "type": "tts", "state": "stop",
+            "session_id": conn.session_id,
+        }))
+
+    if head_current:
+        await module.send_external_tts_control(
+            conn, 0, send_stop, terminal=True,
+        )
+    else:
+        # The old head sent STOP, but its socket was replaced before Mac
+        # reported completion. That is NOT current-head reset evidence.
+        await send_stop()
+        new_head, _ = connection()
+        bridge.connections[conn.device_id] = new_head
+    await module.end_external_speech(conn, stop_confirmed=True)
+
+    assert len(packets) == 1
+    assert json.loads(packets[0])["state"] == "stop"
+    assert module._external_speaker_owner is None
+    assert module._output_owner == (None if head_current else conn.device_id)
+    assert module._output_owner_unverified == (
+        None if head_current else conn.device_id
+    )
+
+
 async def test_failed_mac_stop_blocks_fleet_until_fresh_authenticated_head_stop(native):
     """A Mac TTS transport failure must not release the physical decoder."""
     module, bridge = native
