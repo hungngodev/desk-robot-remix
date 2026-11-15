@@ -514,6 +514,45 @@ async def test_failed_mac_stop_recovery_timeout_cannot_release_fleet_owner(nativ
     assert module._output_owner == "mac-01"
 
 
+@pytest.mark.parametrize("lock_name", [
+    "handoff", "device", "owner",
+])
+async def test_uncertain_mac_decoder_recovery_bounds_all_lock_waits(
+    native, lock_name,
+):
+    """A wedged lock must not wait forever or counterfeit physical STOP."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    module._output_owner = conn.device_id
+    module._output_owner_unverified = conn.device_id
+    lock = {
+        "handoff": module._speaker_handoff_lock,
+        "device": module._external_opus_send_lock,
+        "owner": module._output_owner_lock,
+    }[lock_name]
+    async with lock:
+        # The timeout must encompass the lock acquisition itself.
+        assert not await asyncio.wait_for(
+            module.begin_external_speech(conn), timeout=0.85,
+        )
+        assert sent == []
+        assert module._output_owner == conn.device_id
+        assert module._output_owner_unverified == conn.device_id
+        assert module._external_speaker_owner is None
+
+    # Recovery becomes possible only after a fresh authenticated STOP.
+    assert await module.begin_external_speech(conn)
+    assert len(sent) == 1
+    assert json.loads(sent[0]) == {
+        "type": "tts", "state": "stop", "flush": True,
+        "session_id": conn.session_id,
+    }
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+    await module.end_external_speech(conn)
+
+
 @pytest.mark.parametrize("owner_present", [False, True])
 async def test_native_speaker_refuses_orphan_or_closed_prior_owner(
     native, owner_present,
