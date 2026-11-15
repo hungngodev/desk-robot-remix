@@ -34,6 +34,8 @@ def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
         ),
         image_width_px=data.get("image_width_px"),
         image_height_px=data.get("image_height_px"),
+        mount_lateral_offset_mm=data.get("mount_lateral_offset_mm"),
+        mount_yaw_deg=data.get("mount_yaw_deg"),
     )
     target = data.get("target_distance_mm")
     if type(target) not in (float, int) or not 50 <= target <= 500 or not math.isfinite(target):
