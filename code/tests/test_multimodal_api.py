@@ -1,4 +1,5 @@
 """Native Mac vision endpoints can be called by Xiaozhi, not used to mint motion."""
+import pytest
 from fastapi.testclient import TestClient
 
 from desk_robot.api import create_app
@@ -66,6 +67,60 @@ def test_mac_existing_ollama_selects_only_consented_readonly_tools(
         ).status_code == 404
         settings.voice_vision_tools_enabled = False
         assert client.post(url, headers=headers, json=request).status_code == 403
+
+
+@pytest.mark.parametrize("revocation", ["live", "memory"])
+def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
+    settings, tokens, revocation,
+):
+    """An in-flight Ollama reply cannot publish an opt-out tool plan."""
+    import json
+    import time
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    robot = settings.robots[0].id
+    hub = CameraFrameHub([item.id for item in settings.robots])
+    if revocation == "memory":
+        hub.remember_tool(
+            robot, "memory_recall", "A private historical personal preference",
+            time.monotonic(),
+        )
+
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        async def reply(self, history):
+            self.calls += 1
+            if revocation == "memory":
+                assert "private historical" in str(history)
+                settings.voice_memory_tools_enabled = False
+            else:
+                settings.voice_vision_tools_enabled = False
+            return json.dumps({"tools": [{"route": "status"}]})
+
+    async def noop():
+        pass
+
+    model = Model()
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=model),
+        multimodal=SimpleNamespace(hub=hub),
+        start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        response = client.post(
+            f"/v1/pet/{robot}/plan-readonly", headers=headers,
+            json={"transcript": "What is your safety status?"},
+        )
+    assert model.calls == 1
+    assert response.status_code == 403
+    assert "revoked during planning" in response.json()["detail"]
 
 
 def test_mac_semantic_planner_ignores_nonstring_tool_names_without_500(
