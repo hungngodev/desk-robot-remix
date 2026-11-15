@@ -680,6 +680,78 @@ async def test_mac_proactive_tts_claims_and_releases_native_speaker_owner(
     assert not sent
 
 
+@pytest.mark.parametrize("interrupt_start", [False, True])
+async def test_mac_tts_bridge_orders_controls_with_native_device_lock(
+    bridge, monkeypatch, interrupt_start,
+):
+    """The same physical owner serializes START, caption, Opus, and STOP."""
+    operations = []
+
+    async def fake_tts(connection, state, text=None):
+        operations.append(("device_control", state))
+
+    monkeypatch.setitem(
+        sys.modules, "core.handle.sendAudioHandle",
+        SimpleNamespace(send_tts_message=fake_tts),
+    )
+
+    async def begin(_):
+        operations.append(("lease", "begin"))
+        return True
+
+    async def end(_, *, stop_confirmed=True):
+        operations.append(("lease", "end", stop_confirmed))
+
+    async def send_control(current, generation, send, *, terminal=False):
+        operations.append(("native_lock", "stop" if terminal else "active"))
+        if interrupt_start and not terminal:
+            bridge.interrupt_generation[current.device_id] += 1
+            current.client_abort = True
+            raise RuntimeError("Authenticated VAD invalidated queued START")
+        await send()
+
+    async def send_opus(current, packet, generation):
+        operations.append(("opus", packet))
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        begin_external_speech=begin,
+        end_external_speech=end,
+        send_external_tts_control=send_control,
+        send_external_opus=send_opus,
+    ))
+    current = conn("mac-01")
+    current.conn_from_mqtt_gateway = False
+    current.session_id = "mac-speaker-test"
+    current.last_activity_time = 0
+    current.clearSpeakStatus = lambda: None
+
+    class Socket:
+        async def send(self, data):
+            operations.append(("physical_stop", json.loads(data)["state"]))
+
+    current.websocket = Socket()
+    bridge.interrupt_generation[current.device_id] = 0
+    bridge.lease_ids = frozenset({current.device_id})
+    bridge.lease_until = time.monotonic() + 20
+    if interrupt_start:
+        with pytest.raises(RuntimeError, match="VAD invalidated"):
+            await bridge.transmit(current, "Old words", [b"opus"])
+        assert ("device_control", "sentence_start") not in operations
+        assert ("opus", b"opus") not in operations
+        assert ("physical_stop", "stop") in operations
+    else:
+        await bridge.transmit(current, "Current words", [b"opus"])
+        assert operations.index(("device_control", "start")) < operations.index(
+            ("device_control", "sentence_start")
+        ) < operations.index(("opus", b"opus")) < operations.index(
+            ("device_control", "stop")
+        )
+    assert operations[0] == ("lease", "begin")
+    assert operations[-1] == ("lease", "end", True)
+    assert sum(1 for item in operations
+               if item[0] == "native_lock") == (2 if interrupt_start else 3)
+
+
 async def test_human_vad_during_tts_start_cannot_send_obsolete_sentence(
     bridge, monkeypatch,
 ):
