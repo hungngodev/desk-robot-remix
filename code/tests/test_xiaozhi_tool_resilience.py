@@ -1098,3 +1098,53 @@ async def test_already_cancelled_voice_turn_does_not_start_mac_tool_http(
         "retried": False,
     }
     assert bridge_tools.voice_turn_response(result).action == 1
+
+
+async def test_cancelled_turn_consumes_simultaneous_mac_failure(
+    bridge_tools, monkeypatch,
+):
+    """A cancelled read-only request must not leak an unobserved task error."""
+    import asyncio
+
+    bridge = bridge_tools.bridge
+    cancelled = asyncio.Event()
+    bridge.tool_turn_cancel_event = lambda device: cancelled
+    started = asyncio.Event()
+    release = asyncio.Event()
+    unhandled = []
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+
+    class FailingMac:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def get(self, *args, **kwargs):
+            started.set()
+            await release.wait()
+            raise RuntimeError("simultaneous obsolete HTTP failure")
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", FailingMac)
+    task = asyncio.create_task(
+        bridge_tools.call(bridge_tools.registered_head, "status")
+    )
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        cancelled.set()
+        release.set()
+        result = await asyncio.wait_for(task, 1)
+        assert result["retried"] is False
+        assert "superseded" in result["error"]
+        await asyncio.sleep(0)
+        assert unhandled == []
+    finally:
+        release.set()
+        loop.set_exception_handler(previous)
+        await asyncio.gather(task, return_exceptions=True)
