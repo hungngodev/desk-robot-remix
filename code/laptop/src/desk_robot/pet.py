@@ -1802,23 +1802,28 @@ class PetController:
                 # pass a LIVE camera consent fence to every speech segment.
                 # Merely checking when the topic was created is insufficient
                 # if the operator opts out while two heads are talking.
-                visual_permission = ({
-                    "permission_check": lambda: (
-                        self.settings.voice_vision_tools_enabled
-                        and self.voice_monitor_ready
+                def social_permission() -> bool:
+                    # A sensor-triggered social turn needs the SAME current
+                    # speech, peer and operator consent fences as camera
+                    # conversation. Recheck throughout both robot replies.
+                    return (
+                        not self._closed and self.voice_monitor_ready
+                        and self.settings.fleet_social_autonomy_enabled
+                        and self.settings.fleet_text_sharing_enabled
                         and state.enabled and not state.quiet
                         and state.generation == generation
                         and peer.enabled and not peer.quiet
                         and peer.generation == social_peer_generation
+                        and (not camera_derived
+                             or self.settings.mode != "hardware"
+                             or self.settings.voice_vision_tools_enabled)
                         and not self._human_active_in_fleet(time.monotonic())
                         and not newer_human_turn()
-                    ),
-                } if camera_derived and self.settings.mode == "hardware"
-                    else {})
+                    )
                 turns = await asyncio.wait_for(
                     self.conversation.run(
                         [robot_id, social_peer_id], topic, utterances=2,
-                        **visual_permission,
+                        permission_check=social_permission,
                     ), timeout=75.0
                 )
                 if len(turns) == 2:
