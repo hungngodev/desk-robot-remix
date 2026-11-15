@@ -93,6 +93,13 @@ async def call(conn, route, payload=None):
     try:
         if readonly and callable(observe_turn):
             signal = observe_turn(conn.device_id)
+            # A turn already invalidated before scheduling must not start
+            # even a read-only Mac request or fresh camera capture.
+            if signal.is_set():
+                return {
+                    "error": "Robot tool result superseded by new speech or reconnect",
+                    "retried": False,
+                }
             request_task = asyncio.create_task(request_mac())
             turn_task = asyncio.create_task(signal.wait())
             try:
