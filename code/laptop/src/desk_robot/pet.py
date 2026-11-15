@@ -1444,14 +1444,17 @@ class PetController:
             climate = result.get("climate")
             if isinstance(climate, dict) and climate.get("valid") is True:
                 if (type(climate.get("temp_centi")) is int
-                        and type(climate.get("rh_centi")) is int):
+                        and -4500 <= climate["temp_centi"] <= 13000
+                        and type(climate.get("rh_centi")) is int
+                        and 0 <= climate["rh_centi"] <= 10000):
                     selected["sht41"] = {
                         "temp_centi": climate["temp_centi"],
                         "rh_centi": climate["rh_centi"],
                     }
             bmp = result.get("bmp280")
             if isinstance(bmp, dict) and bmp.get("valid") is True:
-                if type(bmp.get("pressure_pa")) is int:
+                if (type(bmp.get("pressure_pa")) is int
+                        and 30000 <= bmp["pressure_pa"] <= 120000):
                     selected["bmp280"] = {
                         "pressure_pa": bmp["pressure_pa"],
                         "physically_verified": False,
@@ -1459,7 +1462,9 @@ class PetController:
             power = result.get("power")
             if isinstance(power, dict) and power.get("fuel_valid") is True:
                 if (type(power.get("soc_centi")) is int
-                        and type(power.get("cell_mv")) is int):
+                        and 0 <= power["soc_centi"] <= 10000
+                        and type(power.get("cell_mv")) is int
+                        and 0 <= power["cell_mv"] <= 4500):
                     selected["fuel_gauge"] = {
                         "soc_centi": power["soc_centi"],
                         "cell_mv": power["cell_mv"],
@@ -1467,14 +1472,16 @@ class PetController:
                     }
             proximity = result.get("proximity")
             if isinstance(proximity, dict) and proximity.get("valid") is True:
-                if type(proximity.get("gesture")) is int:
+                if (type(proximity.get("gesture")) is int
+                        and 0 <= proximity["gesture"] <= 4):
                     selected["proximity"] = {
                         "gesture": proximity["gesture"],
                         "physically_qualified": False,
                     }
             nfc = result.get("nfc")
             if isinstance(nfc, dict) and nfc.get("v") is True:
-                if type(nfc.get("e")) is int:
+                if (type(nfc.get("e")) is int
+                        and 0 <= nfc["e"] <= 0xffffffff):
                     selected["nfc"] = {"event_count": nfc["e"]}
             dock = result.get("dock")
             if (isinstance(dock, dict)
