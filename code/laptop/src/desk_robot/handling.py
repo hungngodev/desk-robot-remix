@@ -87,12 +87,13 @@ class HandlingGate:
     ) -> tuple[str, ...]:
         if (type(qualified) is not bool
                 or type(now) not in (int, float)
+                or not -1e15 <= now <= 1e15
                 or not math.isfinite(now)
                 or type(shake_delta_mg) is not int
                 or not 300 <= shake_delta_mg <= 1400
                 or type(tilt_threshold_deg) not in (int, float)
-                or not math.isfinite(tilt_threshold_deg)
-                or not 25 <= tilt_threshold_deg <= 75):
+                or not 25 <= tilt_threshold_deg <= 75
+                or not math.isfinite(tilt_threshold_deg)):
             raise ValueError("Physically qualified MPU6050 thresholds required")
         if not qualified:
             # Revoking qualification clears pose, never trusted source identity.
