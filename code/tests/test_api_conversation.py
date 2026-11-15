@@ -666,3 +666,46 @@ async def test_proactive_group_activated_while_waiting_for_speaker_lock(settings
             pending_group.cancel()
             await asyncio.gather(pending_group, return_exceptions=True)
         conversation.active = None
+
+
+async def test_kokoro_permission_revoked_during_bridge_transmission_stops_head(
+    settings, monkeypatch,
+):
+    """A late successful bridge receipt cannot authorize revoked speech."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_memory_tools_enabled = True
+    robot = settings.robots[0]
+    robot.device_id = "mac-01"
+    monkeypatch.setenv(settings.speech_bridge_token_env, "p" * 32)
+    calls = []
+
+    class Response:
+        content = b"RIFFsynthetic-wav-fixture"
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"transmitted": True}
+
+    class Client:
+        async def post(self, url, **kwargs):
+            calls.append(url.rsplit("/", 1)[-1])
+            if url.endswith("/speak"):
+                settings.voice_memory_tools_enabled = False
+            return Response()
+
+    class Chat:
+        async def reply(self, history):
+            return "A once-authorized private sentence"
+
+    speaker = KokoroHeadSpeaker(settings, Client())
+    conversation = Conversation(settings, Chat(), speaker)
+    with pytest.raises(RuntimeError, match="revoked during transmission"):
+        await conversation.run(
+            ["robot-01", "robot-02"], "Discuss private memories", 2,
+        )
+    assert calls.count("speak") == 1
+    assert calls.count("interrupt") >= 1
+    assert conversation.active is None
