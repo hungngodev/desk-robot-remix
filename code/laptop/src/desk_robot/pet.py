@@ -1697,7 +1697,11 @@ class PetController:
             # The existing camera hub owns all transient sensor/tool events.
             # No second model, audio stack or memory database is introduced.
             timeline = []
-            if self.multimodal is not None:
+            # A physical touch can still trigger curiosity after visual opt
+            # out; it must not reuse the old opt-in ASR/camera/tool timeline.
+            if (self.multimodal is not None
+                    and (self.settings.mode != "hardware"
+                         or self.settings.voice_vision_tools_enabled)):
                 hub = self.multimodal.hub
                 now = time.monotonic()
                 ordered = getattr(hub, "interaction_timeline", None)
@@ -1715,6 +1719,7 @@ class PetController:
                         {"channel": "sensor", "kind": item["kind"]}
                         for item in hints
                     ]
+            live_context_used = self.settings.mode == "hardware" and bool(timeline)
             context = compose_brain_context(memory, core_memory, timeline)
             # A social turn is NOT five independent agents speaking at once.
             # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
@@ -1994,6 +1999,11 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "memory_consent_revoked"
                 return
+            if (live_context_used
+                    and not self.settings.voice_vision_tools_enabled):
+                state.suppressed += 1
+                state.last_initiative_suppression = "live_context_consent_revoked"
+                return
             def audio_still_permitted() -> bool:
                 # Kokoro synthesis can outlive the authenticated VAD monitor.
                 # A lost listener cannot certify that a human has not barged.
@@ -2003,6 +2013,8 @@ class PetController:
                     and state.generation == generation
                     and (not private_memory_allowed
                          or self.settings.voice_memory_tools_enabled)
+                    and (not live_context_used
+                         or self.settings.voice_vision_tools_enabled)
                     and (not camera_derived or self.settings.mode != "hardware"
                          or self.settings.voice_vision_tools_enabled)
                     and not self._human_active_in_fleet(time.monotonic())
