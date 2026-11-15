@@ -133,6 +133,9 @@ class HandlingGate:
                 # otherwise impersonate a new boot and reset live calibration.
                 # Require an operator/session restart after this bounded limit.
                 if len(self.retired_boot_ids) >= 8:
+                    # An unrecognized generation cannot be trusted. Keep the
+                    # replay fence, but revoke any calibrated handling pose.
+                    self.reset()
                     return ()
                 old_boot = self.last_boot_id
                 self.reset()  # new WROOM boot identity requires fresh calibration
