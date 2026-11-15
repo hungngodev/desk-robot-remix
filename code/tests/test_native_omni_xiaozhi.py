@@ -441,6 +441,36 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 @pytest.mark.parametrize("state", ["start", "stop"])
+async def test_native_control_lock_wait_has_deadline_and_recovers(native, state):
+    """A wedged Opus lock cannot leave native START/STOP waiting forever."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._pet_autonomy_enabled = True
+    if state == "stop":
+        conn.client_is_speaking = True
+        module._output_owner = conn.device_id
+    async with session._device_send_lock:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                session._send_device_state(state, session._generation),
+                timeout=0.9,
+            )
+        assert sent == []
+        assert module._output_owner == conn.device_id
+    # Only a fresh authenticated command after the lock becomes available
+    # may advance decoder state and release the native speaker owner.
+    assert await session._send_device_state("stop", session._generation)
+    assert len(sent) == 1
+    assert json.loads(sent[0])["state"] == "stop"
+    assert module._output_owner is None
+
+
+@pytest.mark.parametrize("state", ["start", "stop"])
 @pytest.mark.parametrize("phase", ["lock_wait", "socket_send"])
 async def test_native_tts_control_rejects_replaced_head_while_awaiting(
     native, state, phase,
