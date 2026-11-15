@@ -77,8 +77,9 @@ def verify(plan: dict, body: str, head: str) -> None:
         raise ValueError("Incorrect mux address")
     for group in ("mux_ranges", "mux_extras"):
         channels = bus[group]["channels"]
-        if {c["channel"] for c in channels} != set(range(8)):
-            raise ValueError(f"Incomplete {group} lanes")
+        if (len(channels) != 8 or any(type(c.get("channel")) is not int for c in channels)
+                or {c["channel"] for c in channels} != set(range(8))):
+            raise ValueError(f"Invalid or incomplete {group} lanes")
         for lane in channels:
             ids = [x["address"] for x in lane["devices"]]
             if not ids or any(type(a) is not int or not 0x08 <= a <= 0x77 for a in ids):
