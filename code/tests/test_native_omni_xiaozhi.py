@@ -2326,9 +2326,8 @@ def test_native_aux_sensor_facts_are_only_bounded_typed_physical_values(native):
         },
         "nfc": {"v": True, "e": hostile},
     })
-    assert result["sht41"] == {
-        "temp_centi": 2150, "humidity_centi": 4400,
-    }
+    # A bad age is not optional freshness evidence: discard the reading.
+    assert "sht41" not in result
     assert "fuel_gauge" not in result
     assert "bmp280" not in result
     assert "apds9960" not in result
@@ -2384,6 +2383,40 @@ def test_native_aux_sensor_facts_are_only_bounded_typed_physical_values(native):
     assert clean["nfc"]["events"] == 7
     assert clean["physical_acceptance_verified"] is False
 
+
+
+@pytest.mark.parametrize(
+    ("sensor", "age"),
+    [
+        ("climate", 1000),
+        ("climate", -1),
+        ("climate", True),
+        ("climate", "20"),
+        ("bmp280", 2000),
+        ("bmp280", -1),
+        ("bmp280", False),
+        ("bmp280", "20"),
+    ],
+)
+def test_native_ambient_tool_rejects_invalid_sample_age(native, sensor, age):
+    """An optional age, when supplied, cannot excuse stale sensor speech."""
+    module, _ = native
+    response = {
+        "robot_id": "robot-01",
+        "climate": {
+            "valid": True, "temp_centi": 2250, "rh_centi": 5400,
+            "age_ms": 25,
+        },
+        "power": {"fuel_valid": False},
+        "bmp280": {
+            "valid": True, "pressure_pa": 101325,
+            "temp_centi": 2200, "age_ms": 25,
+        },
+    }
+    response[sensor]["age_ms"] = age
+    result = module.native_grounded_fact("aux-status", response)
+    assert ("sht41" in result) is (sensor != "climate")
+    assert ("bmp280" in result) is (sensor != "bmp280")
 
 
 def test_native_grounded_tool_discards_unbounded_status_and_pickup_strings(native):
