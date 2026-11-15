@@ -2504,6 +2504,7 @@ async def begin_external_speech(conn) -> bool:
     session = _sessions.get(conn.device_id)
     async with _output_owner_lock:
         if (_external_speaker_owner is not None or _output_owner is not None
+                or _output_owner_unverified is not None
                 or bridge.human_speech_active()
                 or (session is not None and not session.closed
                     and (session._user_was_talking
