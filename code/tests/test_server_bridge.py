@@ -688,6 +688,9 @@ async def test_mac_tts_bridge_orders_controls_with_native_device_lock(
     operations = []
 
     async def fake_tts(connection, state, text=None):
+        # The pinned upstream STOP waits for Xiaozhi's unrelated TTS
+        # queues. Mac owned Opus must deliver its STOP without that wait.
+        assert state != "stop"
         operations.append(("device_control", state))
 
     monkeypatch.setitem(
@@ -727,7 +730,9 @@ async def test_mac_tts_bridge_orders_controls_with_native_device_lock(
 
     class Socket:
         async def send(self, data):
-            operations.append(("physical_stop", json.loads(data)["state"]))
+            packet = json.loads(data)
+            operations.append(("physical_stop", packet["state"],
+                               packet.get("flush", False)))
 
     current.websocket = Socket()
     bridge.interrupt_generation[current.device_id] = 0
@@ -738,13 +743,13 @@ async def test_mac_tts_bridge_orders_controls_with_native_device_lock(
             await bridge.transmit(current, "Old words", [b"opus"])
         assert ("device_control", "sentence_start") not in operations
         assert ("opus", b"opus") not in operations
-        assert ("physical_stop", "stop") in operations
+        assert ("physical_stop", "stop", True) in operations
     else:
         await bridge.transmit(current, "Current words", [b"opus"])
         assert operations.index(("device_control", "start")) < operations.index(
             ("device_control", "sentence_start")
         ) < operations.index(("opus", b"opus")) < operations.index(
-            ("device_control", "stop")
+            ("physical_stop", "stop", False)
         )
     assert operations[0] == ("lease", "begin")
     assert operations[-1] == ("lease", "end", True)
