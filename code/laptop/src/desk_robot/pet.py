@@ -1327,13 +1327,15 @@ class PetController:
                             and (self.settings.mode != "hardware"
                                  or self.settings.voice_vision_tools_enabled)
                             and not self._human_active_in_fleet(time.monotonic())):
-                        state.events += 1
-                        state.last_event = change.description
                         await self._store_observation(
                             robot_id, change, camera_derived=True,
                         )
                         if (self.settings.mode != "hardware"
                                 or self.settings.voice_vision_tools_enabled):
+                            # A revoked camera guess may not even become a
+                            # public pet status event or speech candidate.
+                            state.events += 1
+                            state.last_event = change.description
                             self._consider_speech(
                                 robot_id, change, generation,
                                 camera_derived=True,
