@@ -84,6 +84,14 @@ int main() {
     CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
     CHECK(queue.on_poll(150)); // previous queues were observed empty
     CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
+    // Two valid packets on one receiver have no source timestamps. They
+    // cannot be treated as a single current bearing even when both decode.
+    CHECK(queue.on_poll(200));
+    CHECK(!queue.finish(0, 2, true));
+    CHECK(queue.finish(1, 1, true));
+    CHECK(queue.on_poll(250));
+    CHECK(queue.finish(0, 1, true)); // a later isolated frame recovers
+    CHECK(queue.finish(1, 0, true));
     CHECK(!queue.on_poll(400)); // old messages after a long stall are stale
     CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
     CHECK(queue.on_poll(450));
