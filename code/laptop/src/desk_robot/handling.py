@@ -128,10 +128,14 @@ class HandlingGate:
             return ()
         if self.last_boot_id is not None:
             if boot_id != self.last_boot_id:
+                # Never evict a retired identity: its delayed packets could
+                # otherwise impersonate a new boot and reset live calibration.
+                # Require an operator/session restart after this bounded limit.
+                if len(self.retired_boot_ids) >= 8:
+                    return ()
                 old_boot = self.last_boot_id
                 self.reset()  # new WROOM boot identity requires fresh calibration
                 self.retired_boot_ids.append(old_boot)
-                self.retired_boot_ids = self.retired_boot_ids[-8:]
             elif sample_ms < self.last_sample_ms:
                 # Only a near-uint32 wrap can legitimately restart the clock.
                 # A backward sample from the same boot must not be treated as
