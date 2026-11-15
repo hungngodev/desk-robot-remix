@@ -863,6 +863,7 @@ class NativeOmniSession:
     async def _current_tool_scene(
         self, http: aiohttp.ClientSession, epoch: int, request_turn: int,
         *, require_private_consent: bool = False,
+        require_live_consent: bool = False,
     ) -> str:
         """Read real transient sensor, speech and vision context from Mac.
 
@@ -875,6 +876,8 @@ class NativeOmniSession:
             # however, cannot be spoken without a fresh Mac consent check.
             if require_private_consent and not self.closed:
                 self.fail("Cannot revalidate Mac private memory consent for tool speech")
+            elif require_live_consent and not self.closed:
+                self.fail("Cannot revalidate Mac live consent for tool speech")
             return ""
 
         if (self.closed or not self.connected
@@ -1065,13 +1068,18 @@ class NativeOmniSession:
                         or not 0 < wav.getnframes() <= 24_000 * 20):
                     raise ValueError("Expected 24 kHz mono PCM16 model WAV")
                 pcm = wav.readframes(wav.getnframes())
-            if private_facts:
-                # A 24s model generation may outlive the operator's memory
-                # consent. Check current Mac policy AGAIN before a single
-                # byte of private-context speech enters the head queue.
-                await self._current_tool_scene(
-                    http, epoch, request_turn, require_private_consent=True,
-                )
+            if (self.closed or not self.connected
+                    or self._tool_speech_turn != (epoch, request_turn)):
+                return
+            # The 24s model generation may outlive live camera/ASR consent
+            # even when no persistent memory was requested. All tool speech
+            # was grounded through the authenticated Mac live context, so
+            # reauthorize that same source before sending ANY physical audio.
+            await self._current_tool_scene(
+                http, epoch, request_turn,
+                require_private_consent=private_facts,
+                require_live_consent=True,
+            )
             if (self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
                 return
