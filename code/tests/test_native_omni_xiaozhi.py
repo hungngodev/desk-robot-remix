@@ -440,6 +440,97 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 
+@pytest.mark.parametrize("change", [
+    "generation", "abort", "human_vad", "lease_lost", "connection_replaced",
+])
+async def test_mac_tts_control_cannot_reenter_after_waiting_for_human_stop(
+    native, change,
+):
+    """A late START/caption never follows an authenticated STOP."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    bridge.interrupt_generation = {conn.device_id: 4}
+    module._external_speaker_owner = conn.device_id
+    module._external_speaker_connection = conn
+    delivered = []
+
+    async def start():
+        delivered.append("start")
+
+    async with module._external_opus_send_lock:
+        task = asyncio.create_task(
+            module.send_external_tts_control(conn, 4, start)
+        )
+        await asyncio.sleep(0)
+        if change == "generation":
+            bridge.interrupt_generation[conn.device_id] += 1
+        elif change == "abort":
+            conn.client_abort = True
+        elif change == "human_vad":
+            bridge.human_speech_active = lambda: True
+        elif change == "lease_lost":
+            module._external_speaker_owner = None
+            module._external_speaker_connection = None
+        else:
+            replacement, _ = connection()
+            bridge.connections[conn.device_id] = replacement
+    with pytest.raises(RuntimeError):
+        await asyncio.wait_for(task, timeout=1)
+    assert delivered == []
+
+
+async def test_mac_tts_control_serializes_start_caption_and_terminal_stop(native):
+    """Only the current Mac owner can submit controls to its decoder."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    bridge.interrupt_generation = {conn.device_id: 0}
+    module._external_speaker_owner = conn.device_id
+    module._external_speaker_connection = conn
+    sequence = []
+
+    for kind in ("start", "caption"):
+        async def transmit(label=kind):
+            sequence.append(label)
+        await module.send_external_tts_control(conn, 0, transmit)
+    bridge.interrupt_generation[conn.device_id] += 1
+    conn.client_abort = True
+
+    async def stop():
+        sequence.append("stop")
+    await module.send_external_tts_control(
+        conn, 0, stop, terminal=True,
+    )
+    assert sequence == ["start", "caption", "stop"]
+    module._external_speaker_owner = None
+    module._external_speaker_connection = None
+
+
+async def test_mac_tts_control_times_out_while_device_send_lock_occupied(native):
+    """One hung Opus writer cannot block START or STOP indefinitely."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    bridge.interrupt_generation = {conn.device_id: 0}
+    module._external_speaker_owner = conn.device_id
+    module._external_speaker_connection = conn
+    sent = []
+
+    async def send():
+        sent.append(True)
+
+    async with module._external_opus_send_lock:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                module.send_external_tts_control(
+                    conn, 0, send, terminal=True,
+                ), timeout=1.1,
+            )
+    assert sent == []
+    assert module._external_speaker_owner == conn.device_id
+
+
 async def test_failed_mac_stop_blocks_fleet_until_fresh_authenticated_head_stop(native):
     """A Mac TTS transport failure must not release the physical decoder."""
     module, bridge = native
