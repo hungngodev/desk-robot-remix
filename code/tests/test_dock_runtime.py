@@ -55,17 +55,50 @@ def test_measured_distortion_survives_json_loader_and_invalid_values_fail_closed
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
         "distortion_coeffs": [0.18, -0.07, 0.003, -0.002, 0.01],
         "image_width_px": 640, "image_height_px": 480,
+        "mount_lateral_offset_mm": 22.0, "mount_yaw_deg": -2.0,
     }
     path.write_text(json.dumps(payload))
     camera, target = dock_runtime.load_real_dock_calibration(path)
     assert camera.distortion_coeffs == tuple(payload["distortion_coeffs"])
     assert (camera.image_width_px, camera.image_height_px) == (640, 480)
+    assert camera.mount_lateral_offset_mm == 22.0
+    assert camera.mount_yaw_deg == -2.0
     assert target == 120
     for invalid in ([0.1], [0.0, 0.0, True, 0.0], "invalid"):
         payload["distortion_coeffs"] = invalid
         path.write_text(json.dumps(payload))
         with pytest.raises(ValueError):
             dock_runtime.load_real_dock_calibration(path)
+
+
+
+@pytest.mark.parametrize("invalid", [
+    {"mount_lateral_offset_mm": None, "mount_yaw_deg": 0},
+    {"mount_lateral_offset_mm": 0, "mount_yaw_deg": None},
+    {"mount_lateral_offset_mm": True, "mount_yaw_deg": 0},
+    {"mount_lateral_offset_mm": 0, "mount_yaw_deg": "sideways"},
+    {"mount_lateral_offset_mm": 200, "mount_yaw_deg": 0},
+])
+async def test_invalid_mount_measurement_fails_before_dock_camera(
+    tmp_path, invalid,
+):
+    base = {
+        "measured": True, "fx": 410, "fy": 410,
+        "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12,
+        "target_distance_mm": 120, **invalid,
+    }
+    file = tmp_path / "dock.json"
+    file.write_text(json.dumps(base))
+    head = Head()
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=file),
+    )
+    assert result["phase"] == "hold"
+    assert result["source"] == "not_calibrated"
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert head.captures == 0 and head.commands == []
+
 
 
 async def test_measured_marker_pose_does_not_energize_contact_or_drive(tmp_path, monkeypatch):
