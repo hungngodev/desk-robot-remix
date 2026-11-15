@@ -265,7 +265,9 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
         temp, humidity = climate.get("temp_centi"), climate.get("rh_centi")
         if (climate.get("valid") is True
                 and measured(temp, -4500, 13000)
-                and measured(humidity, 0, 10000)):
+                and measured(humidity, 0, 10000)
+                and (climate.get("age_ms") is None
+                     or measured(climate["age_ms"], 0, 999))):
             reading = {"temp_centi": temp, "humidity_centi": humidity}
             age = climate.get("age_ms")
             if measured(age, 0, 999):
@@ -274,7 +276,9 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
         bmp = result.get("bmp280")
         if (isinstance(bmp, dict) and bmp.get("valid") is True
                 and measured(bmp.get("pressure_pa"), 30000, 120000)
-                and measured(bmp.get("temp_centi"), -4000, 8500)):
+                and measured(bmp.get("temp_centi"), -4000, 8500)
+                and (bmp.get("age_ms") is None
+                     or measured(bmp["age_ms"], 0, 1999))):
             observed["bmp280"] = {
                 "pressure_pa": bmp["pressure_pa"],
                 "temp_centi": bmp["temp_centi"],
