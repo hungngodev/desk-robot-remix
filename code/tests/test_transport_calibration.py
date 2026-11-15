@@ -98,6 +98,71 @@ async def test_camera_completion_sequence_and_boot_id_protect_five_pet_capture(s
 
 
 
+
+async def test_old_xiao_camera_boot_cannot_reenter_after_live_reconnect(
+    settings, tokens,
+):
+    """Boot A, B, then delayed A is not a new observation on the Mac."""
+    frames = [
+        (12, 1, 10000), (13, 1, 2000), (12, 3, 30000),
+    ]
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        assert request.url.path == "/api/camera.jpg"
+        boot, seq, completed = frames[calls]
+        calls += 1
+        return httpx.Response(
+            200, headers={
+                "X-Desk-Camera-Boot": str(boot),
+                "X-Desk-Camera-Sequence": str(seq),
+                "X-Desk-Camera-Complete-Us": str(completed),
+            }, content=b"\xff\xd8new frame\xff\xd9",
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        assert (await head.snapshot()).startswith(b"\xff\xd8")
+        assert (await head.snapshot()).startswith(b"\xff\xd8")
+        with pytest.raises(HeadError, match="retired boot"):
+            await head.snapshot()
+        assert head._last_camera == (13, 1, 2000)
+        assert head._retired_camera_boots == {12}
+        assert calls == 3
+
+
+async def test_xiao_camera_boot_history_never_evicts_old_frame_identity(
+    settings, tokens,
+):
+    """Nine real boot changes exhaust a bounded camera provenance lease."""
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        boot = 100 + calls
+        calls += 1
+        return httpx.Response(
+            200, headers={
+                "X-Desk-Camera-Boot": str(boot),
+                "X-Desk-Camera-Sequence": "1",
+                "X-Desk-Camera-Complete-Us": "1000",
+            }, content=b"\xff\xd8image\xff\xd9",
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        for _ in range(9):
+            await head.snapshot()  # 100 through 108, eight retired boots.
+        assert len(head._retired_camera_boots) == 8
+        with pytest.raises(HeadError, match="history exhausted"):
+            await head.snapshot()
+        assert head._last_camera == (108, 1, 1000)
+        assert 100 in head._retired_camera_boots
+        assert calls == 10
+
+
+
 async def test_truncated_camera_jpeg_does_not_consume_source_sequence(settings, tokens):
     calls = 0
 
