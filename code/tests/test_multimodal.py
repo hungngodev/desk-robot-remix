@@ -1932,3 +1932,17 @@ def test_finite_rejects_unrepresentable_host_timestamps():
     assert not _finite(float("inf"))
     assert not _finite(10 ** 1000)
     assert not _finite(-(10 ** 1000))
+
+
+def test_stale_speech_end_does_not_release_newer_human_vad():
+    """Out of order end from the previous turn must not free the fleet floor."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-01", "human_voice", 10.0)
+    hub.notify("robot-01", "human_voice", 12.0)
+    hub.speech_ended("robot-01", 11.0)
+    assert hub.user_active("robot-01", 12.1)
+    assert hub.spontaneous_floor_busy(12.1)
+    hub.speech_ended("robot-01", 13.0)
+    assert not hub.user_active("robot-01", 13.0)
+    assert hub.spontaneous_floor_busy(13.2)
+    assert not hub.spontaneous_floor_busy(14.0)
