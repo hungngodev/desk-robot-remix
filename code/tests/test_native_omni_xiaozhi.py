@@ -504,6 +504,15 @@ async def test_authenticated_human_stop_never_accepts_unverified_send(
             await module.send_external_urgent_stop(conn)
         assert len(sent) == 1
     assert conn.client_is_speaking is True
+    assert module._output_owner == conn.device_id
+    assert module._output_owner_unverified == conn.device_id
+
+    # An old socket cannot erase the uncertain floor. The current head must
+    # explicitly transmit its own new authenticated STOP to recover it.
+    current = replacement if failure == "replaced_head" else conn
+    await module.send_external_urgent_stop(current)
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
 
 
 @pytest.mark.parametrize("change", [
