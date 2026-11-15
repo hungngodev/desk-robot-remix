@@ -561,3 +561,36 @@ def test_native_apriltag_setup_failure_cannot_reach_pose_or_motion(monkeypatch, 
     assert decision.phase == "hold"
     assert not decision.motor_authorized
     assert not decision.charging_authorized
+
+
+@pytest.mark.parametrize("points", [
+    [[100., 100.], [100., 100.], [140., 140.], [100., 140.]],
+    [[100., 100.], [140., 140.], [140., 100.], [100., 140.]],
+    [[100., 100.], [101., 100.], [101., 101.], [100., 101.]],
+])
+def test_degenerate_dock_quad_rejected_before_native_pnp(monkeypatch, points):
+    """Collapsed, crossed and subpixel markers cannot provide a dock pose."""
+    import cv2
+    import numpy as np
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [np.asarray(points, dtype=np.float32).reshape(1, 4, 2)], (
+                np.array([[12]], dtype=np.int32)), []
+
+    def forbidden_pnp(*args, **kwargs):
+        pytest.fail("Degenerate AprilTag reached solvePnP")
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    monkeypatch.setattr(cv2, "solvePnP", forbidden_pnp)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), calibration(), captured_at=5)
+    assert pose is None
+    decision = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized
+    assert not decision.charging_authorized
