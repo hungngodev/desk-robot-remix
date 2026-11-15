@@ -86,6 +86,14 @@ def verify(plan: dict, body: str, head: str) -> None:
                 raise ValueError(f"Invalid {group} I2C address")
             if len(ids) != len(set(ids)):
                 raise ValueError(f"Duplicate {group} I2C address on one lane")
+    # Dock GPIO and NFC are wired to accessory channel 5. A moved or
+    # substituted expander can make a generated harness look authoritative
+    # while the WROOM dock interlock reads the wrong physical device.
+    dock_lane = next(c for c in bus["mux_extras"]["channels"] if c["channel"] == 5)
+    if {(d.get("name"), d["address"]) for d in dock_lane["devices"]} != {
+        ("PN532 I2C", 0x24), ("MCP23017", 0x20)
+    } or len(dock_lane["devices"]) != 2:
+        raise ValueError("Dock accessory lane 5 must retain PN532 and MCP23017")
     ranges = bus["mux_ranges"]["channels"]
     # Each selected TCA9548A lane isolates one VL53L4CD at its native
     # 7-bit address. Reject a manifest that silently substitutes another
