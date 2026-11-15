@@ -2256,23 +2256,43 @@ class NativeOmniSession:
             try:
                 if (self.conn.client_is_speaking
                         and not external_mac_owns_decoder):
-                    # Native model shutdown cannot stop a Mac proactive
-                    # utterance that currently owns the same decoder.
-                    async with self._device_send_lock:
-                        import desk_robot_bridge as bridge
-                        if bridge.connections.get(self.device) is not self.conn:
-                            raise RuntimeError("Old head cannot confirm native STOP")
-                        await asyncio.wait_for(
-                            self.conn.websocket.send(json.dumps({
-                                "type": "tts", "state": "stop",
-                                "session_id": self.conn.session_id,
-                                "flush": True,
-                            })), timeout=0.4,
-                        )
-                        if bridge.connections.get(self.device) is not self.conn:
-                            raise RuntimeError("Head replaced during native STOP")
-                    self.conn.client_is_speaking = False
-                    stop_confirmed = True
+                    # Bound BOTH the physical send-lock wait and STOP. A Mac
+                    # voice may claim this decoder while native shutdown is
+                    # awaiting that lock, so recheck its current ownership.
+                    async def stop_native_shutdown():
+                        nonlocal external_mac_owns_decoder, stop_confirmed
+                        async with self._device_send_lock:
+                            import desk_robot_bridge as bridge
+                            if (_external_speaker_owner == self.device
+                                    and _external_speaker_connection is self.conn):
+                                external_mac_owns_decoder = True
+                                return
+                            if bridge.connections.get(self.device) is not self.conn:
+                                raise RuntimeError("Old head cannot confirm native STOP")
+                            if not self.conn.client_is_speaking:
+                                stop_confirmed = (
+                                    _output_owner_unverified != self.device
+                                )
+                                return
+                            await asyncio.wait_for(
+                                self.conn.websocket.send(json.dumps({
+                                    "type": "tts", "state": "stop",
+                                    "session_id": self.conn.session_id,
+                                    "flush": True,
+                                })), timeout=0.4,
+                            )
+                            if bridge.connections.get(self.device) is not self.conn:
+                                raise RuntimeError("Head replaced during native STOP")
+                            if (_external_speaker_owner == self.device
+                                    and _external_speaker_connection is self.conn):
+                                # Mac acquired its lease while this STOP was
+                                # transmitting. Its own START follows this
+                                # device lock, and only Mac may end that lease.
+                                external_mac_owns_decoder = True
+                                return
+                            self.conn.client_is_speaking = False
+                            stop_confirmed = True
+                    await asyncio.wait_for(stop_native_shutdown(), timeout=0.55)
             except asyncio.CancelledError:
                 # A second cancellation during teardown is not a physical
                 # STOP. Record the uncertain lease before propagating it.
