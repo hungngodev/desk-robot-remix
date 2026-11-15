@@ -2191,6 +2191,15 @@ class NativeOmniSession:
                     *self._tasks, *self._pending_cancels,
                     return_exceptions=True,
                 )
+            # This native session can exit while Mac proactive speech owns
+            # the SAME authenticated decoder. Native teardown must not call
+            # that Mac speech a failed STOP or take over its separate lease.
+            # end_external_speech owns the eventual STOP result.
+            external_mac_owns_decoder = (
+                self._external_speech_active
+                and _external_speaker_owner == self.device
+                and _external_speaker_connection is self.conn
+            )
             stop_confirmed = (
                 not self.conn.client_is_speaking
                 and _output_owner_unverified != self.device
@@ -2198,7 +2207,7 @@ class NativeOmniSession:
             cancelled_during_stop = False
             try:
                 if (self.conn.client_is_speaking
-                        and not self._external_speech_active):
+                        and not external_mac_owns_decoder):
                     # Native model shutdown cannot stop a Mac proactive
                     # utterance that currently owns the same decoder.
                     async with self._device_send_lock:
@@ -2233,7 +2242,13 @@ class NativeOmniSession:
                 )[:140]
                 _retry_after[self.device] = time.monotonic() + 15.0
             async with _output_owner_lock:
-                if stop_confirmed:
+                if external_mac_owns_decoder:
+                    # A Mac lease might finish while this task is waiting.
+                    # Neither completion nor failure belongs to native
+                    # cleanup. Preserve the Mac STOP outcome as reported by
+                    # end_external_speech, including an unverified failure.
+                    pass
+                elif stop_confirmed:
                     if _output_owner == self.device:
                         _output_owner = None
                     if _output_owner_unverified == self.device:
