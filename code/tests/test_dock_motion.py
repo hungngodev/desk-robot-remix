@@ -223,6 +223,107 @@ async def test_dock_motion_needs_calibrated_camera_resolution_even_with_distorti
     finally:
         await controller.close()
 
+
+async def test_dock_refuses_motion_without_measured_camera_mount_before_permit(
+    settings, tmp_path,
+):
+    """Good checkerboard intrinsics do not prove the camera's chassis pose."""
+    import time
+
+    settings.mode = "hardware"
+    robot = settings.robots[0]
+    robot.motion_enabled = True
+    robot.dock_motion_qualified = True
+    robot.dock_turn_sign = 1
+    robot.dock_forward_sign = 1
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
+        "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
+        "image_width_px": 640, "image_height_px": 480,
+    }))
+    robot.dock_calibration = path
+    controller, head = make(settings)
+    try:
+        controller.permits["robot-01"] = time.monotonic() + 10
+        with pytest.raises(OperationError, match="camera to chassis mounting"):
+            controller.dock("robot-01")
+        assert controller.permits["robot-01"] > time.monotonic()
+        assert not controller.jobs and not head.commands
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize(("lateral", "yaw", "expected_drive"), [
+    (40, 0, "drive 20 -20 100"),
+    (-40, 0, "drive -20 20 100"),
+    (0, 5, "drive 20 -20 100"),
+    (0, -5, "drive -20 20 100"),
+])
+async def test_dock_turns_by_chassis_not_lens_axis(
+    settings, monkeypatch, lateral, yaw, expected_drive,
+):
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration, DockPose
+
+    settings.mode = "hardware"
+
+    class SafeHead:
+        def __init__(self):
+            self.commands = []
+
+        async def status(self):
+            return {
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {
+                    "present_mask": 31, "valid_mask": 31,
+                    "mm": [50, 50, 50, 50, 650],
+                    "age_ms": [5, 5, 5, 5, 5],
+                },
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+                "side_ranges": {
+                    "valid_mask": 7, "age_ms": [10, 10, 10],
+                    "mm": [600, 600, 600],
+                },
+            }
+
+        async def snapshot(self):
+            return b"synthetic tag image"
+
+        async def command(self, text):
+            self.commands.append(text)
+
+    head = SafeHead()
+    coordinator = Coordinator(
+        settings, {"robot-01": head}, SimulationVision(),
+    )
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1,
+        mount_lateral_offset_mm=lateral, mount_yaw_deg=yaw,
+    )
+    z_values = iter((500, 150))
+    monkeypatch.setattr(
+        "desk_robot.dock_runtime.detect_apriltag",
+        lambda jpeg, calib, *, captured_at: DockPose(
+            0, 0, next(z_values), 0.2, captured_at,
+        ),
+    )
+    try:
+        result = await coordinator._dock_approach(
+            Job("mount-unit", "robot-01", "dock_approach"),
+            camera, 200, 1, 1,
+        )
+        assert result["phase"] == "hold"
+        assert not result["charging_authorized"]
+        assert head.commands == [expected_drive, "stop"]
+    finally:
+        await coordinator.close()
+
+
+
 async def test_dock_approach_requires_operator_permit_after_qualification(settings, tmp_path):
     settings.mode = "hardware"
     robot = settings.robots[0]
