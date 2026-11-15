@@ -390,18 +390,20 @@ class NativeOmniSession:
             clear = getattr(self.conn, "clear_queues", None)
             if callable(clear):
                 clear()
-            try:
+            async def stop_legacy_head():
                 async with self._device_send_lock:
                     if bridge.connections.get(self.device) is not self.conn:
                         raise RuntimeError("Head identity changed before legacy STOP")
-                    await asyncio.wait_for(
-                        self.conn.websocket.send(json.dumps({
-                            "type": "tts", "state": "stop", "flush": True,
-                            "session_id": self.conn.session_id,
-                        })), timeout=0.4,
-                    )
+                    await self.conn.websocket.send(json.dumps({
+                        "type": "tts", "state": "stop", "flush": True,
+                        "session_id": self.conn.session_id,
+                    }))
                     if bridge.connections.get(self.device) is not self.conn:
                         raise RuntimeError("Head identity changed during legacy STOP")
+            try:
+                # A stalled prior Opus writer can hold this shared lock.
+                # Bound lock admission AND STOP delivery as one operation.
+                await asyncio.wait_for(stop_legacy_head(), timeout=0.5)
             except (Exception, asyncio.CancelledError):
                 # Cancellation is not an authenticated decoder STOP either.
                 # Even a queued legacy welcome can still be inside XIAO
