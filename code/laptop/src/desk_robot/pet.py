@@ -1704,6 +1704,8 @@ class PetController:
                         or state.generation != generation or self._closed
                         or not peer.enabled or peer.quiet
                         or peer.generation != social_peer_generation
+                        or (camera_derived and self.settings.mode == "hardware"
+                            and not self.settings.voice_vision_tools_enabled)
                         or not self.voice_monitor_ready
                         or self._human_active_in_fleet(time.monotonic())
                         or newer_human_turn()
@@ -1713,16 +1715,34 @@ class PetController:
                     return
                 topic = (
                     f"{robot.name} reported this new event from its own "
-                    f"{'sensor' if change.kind in _PHYSICAL_INITIATIVE_KINDS else 'camera model'}: "
+                    f"{'camera model' if camera_derived else 'sensor'}: "
                     f"{change.description[:160]}. Only {robot.name} observed it. "
                     "Respond to each other naturally in one short sentence each. "
                     "Suggest a harmless verbal game or shared curiosity. "
                     "The listening pet must not pretend it saw or sensed the event. "
                     "Do not move, grasp, command motors or claim new physical facts."
                 )
+                # Keep the original group speaker and memory owner, but
+                # pass a LIVE camera consent fence to every speech segment.
+                # Merely checking when the topic was created is insufficient
+                # if the operator opts out while two heads are talking.
+                visual_permission = ({
+                    "permission_check": lambda: (
+                        self.settings.voice_vision_tools_enabled
+                        and self.voice_monitor_ready
+                        and state.enabled and not state.quiet
+                        and state.generation == generation
+                        and peer.enabled and not peer.quiet
+                        and peer.generation == social_peer_generation
+                        and not self._human_active_in_fleet(time.monotonic())
+                        and not newer_human_turn()
+                    ),
+                } if camera_derived and self.settings.mode == "hardware"
+                    else {})
                 turns = await asyncio.wait_for(
                     self.conversation.run(
-                        [robot_id, social_peer_id], topic, utterances=2
+                        [robot_id, social_peer_id], topic, utterances=2,
+                        **visual_permission,
                     ), timeout=75.0
                 )
                 if len(turns) == 2:
