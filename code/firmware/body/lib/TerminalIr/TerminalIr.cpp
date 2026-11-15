@@ -97,7 +97,7 @@ void TerminalIr::poll(std::uint32_t now_ms) {
       }
       vRingbufferReturnItem(ring_[side], item);
     }
-    if (!queue_.finish(side, packets, emptied)) window_ok = false;
+    if (!queue_.finish(side, packets, emptied, candidate_valid[side])) window_ok = false;
   }
   if (!window_ok) {
     // Also discard a candidate from the opposite receiver on any stall.
