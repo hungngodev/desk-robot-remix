@@ -126,6 +126,7 @@ class CameraFrameHub:
         }
         self.last_capture = {robot: -math.inf for robot in robot_ids}
         self.voice_until = {robot: -math.inf for robot in robot_ids}
+        self.voice_started_at = {robot: -math.inf for robot in robot_ids}
         # Qwen Live Harness defers unsolicited context/speech until quiet
         # after the human turn. This does not pretend speaker DMA stopped.
         self.quiet_until = {robot: -math.inf for robot in robot_ids}
@@ -172,6 +173,7 @@ class CameraFrameHub:
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
         if kind == "human_voice":
+            self.voice_started_at[robot_id] = max(self.voice_started_at[robot_id], now)
             # Real Xiaozhi speech_end (or explicit disconnect/clear) owns
             # release. A 7s guess previously unmuted proactive speech while
             # someone was still talking. Missing end must fail quiet.
@@ -194,6 +196,10 @@ class CameraFrameHub:
         self._check(robot_id)
         if not _finite(now):
             raise ValueError("Invalid VAD end timestamp")
+        # An old speech_end can arrive after a newer authenticated speech_start.
+        # Never release the newer human floor on that stale end event.
+        if now < self.voice_started_at[robot_id]:
+            return
         self.voice_until[robot_id] = min(self.voice_until[robot_id], now)
         self.quiet_until[robot_id] = now + 0.8
 
