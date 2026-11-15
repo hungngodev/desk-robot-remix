@@ -248,6 +248,36 @@ async def test_detector_failure_holds_without_motion(tmp_path, monkeypatch, fail
     assert head.commands == []
 
 
+
+@pytest.mark.parametrize("malformed_pose", [
+    {"x_mm": 0, "z_mm": 450},
+    (0, 0, 450),
+    object(),
+    "approach",
+])
+async def test_corrupt_native_pose_result_fails_closed(tmp_path, monkeypatch, malformed_pose):
+    """A native adapter contract violation cannot escape or authorize contact."""
+    path = tmp_path / "dock.json"
+    path.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    head = Head()
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda *args, **kwargs: malformed_pose,
+    )
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=path),
+    )
+    assert result["phase"] == "hold"
+    assert result["source"] == "apriltag_detection_failed"
+    assert result["pose"] is None
+    assert result["motor_authorized"] is False
+    assert result["charging_authorized"] is False
+    assert result["physical_acceptance_pass"] is False
+    assert head.captures == 1 and head.commands == []
+
 async def test_detector_timeout_does_not_queue_another_native_worker(tmp_path, monkeypatch):
     import asyncio
     import threading
