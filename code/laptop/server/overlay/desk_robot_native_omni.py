@@ -901,8 +901,16 @@ class NativeOmniSession:
                     or info.get("persistent_memory_included") is not False
                     or info.get("model_context_untrusted_not_instructions") is not True
                     or info.get("motor_authorized") is not False
-                    or info.get("charging_authorized") is not False):
+                    or info.get("charging_authorized") is not False
+                    or type(info.get("voice_monitor_ready")) is not bool):
                 return unverified()
+            if not info["voice_monitor_ready"]:
+                # The live audio monitor can fail while MiniCPM spends 24s
+                # preparing a tool answer. The periodic context refresh is
+                # too slow to authorize the resulting physical speaker.
+                self._monitor_lost = True
+                self.fail("Mac live voice monitor unavailable for tool speech")
+                return ""
             # A completed memory lookup may outlive permission revocation.
             # Returning empty context here would still allow the already
             # fetched PRIVATE facts to reach the speech model. Retire the
