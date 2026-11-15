@@ -2509,6 +2509,102 @@ async def test_proactive_hardware_voice_never_reads_private_history_without_opt_
         await pet.close()
 
 
+async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
+    fleet, tmp_path,
+):
+    """Touch reactions remain possible, but prior live ASR is not reusable."""
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = False
+    ids = [robot.id for robot in fleet.robots]
+    hub = CameraFrameHub(ids)
+    hub.remember_heard(
+        "robot-01", "old_asr", "My private conversation was about the safe",
+        time.monotonic(),
+    )
+    memory = MemoryStore(tmp_path, ids)
+    chat = GroundedChat()
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 78
+    try:
+        await pet._speak(
+            "robot-01", SceneChange("paw_contact", "My paw was tapped", 1.0),
+            78, offered_at=time.monotonic(),
+        )
+        assert state.last_error is None
+        assert speaker.spoken
+        assert "private conversation" not in str(chat.prompts)
+        assert "safe" not in str(chat.prompts)
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_proactive_physical_sensor_rechecks_live_consent_after_model_await(
+    fleet, tmp_path,
+):
+    """The same sensor event cannot narrate ASR after opt out mid thought."""
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    ids = [robot.id for robot in fleet.robots]
+    hub = CameraFrameHub(ids)
+    hub.remember_heard(
+        "robot-01", "recent_asr",
+        "The private object is inside the locked drawer", time.monotonic(),
+    )
+    entered, resume = asyncio.Event(), asyncio.Event()
+
+    class Chat:
+        async def reply(self, history):
+            assert "locked drawer" in str(history)
+            entered.set()
+            await resume.wait()
+            return "I can talk about the private object"
+
+    memory = MemoryStore(tmp_path, ids)
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, Chat(), speaker, memory=memory),
+        memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 79
+    task = asyncio.create_task(pet._speak(
+        "robot-01", SceneChange("paw_contact", "My paw was tapped", 1.0),
+        79, offered_at=time.monotonic(),
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        fleet.voice_vision_tools_enabled = False
+        resume.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert state.last_error is None
+        assert state.last_initiative_suppression == "live_context_consent_revoked"
+        assert state.spoken == 0
+        assert speaker.spoken == []
+        assert memory.count("robot-01") == 0
+    finally:
+        resume.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
 async def test_proactive_source_prompt_does_not_claim_sensor_is_camera(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     chat = GroundedChat()
