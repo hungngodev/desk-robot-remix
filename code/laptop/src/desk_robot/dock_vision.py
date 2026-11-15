@@ -200,6 +200,16 @@ def detect_apriltag(
             or np.any(image_points[:, 1] < 0)
             or np.any(image_points[:, 1] >= frame.shape[0])):
         return None
+    # Four in-frame corners can still describe a collapsed or crossed square.
+    # Reject subpixel/degenerate quads before native PnP can fit an unstable
+    # pose with deceptively small reprojection error.
+    edges = np.roll(image_points, -1, axis=0) - image_points
+    if np.any(np.sum(edges * edges, axis=1) < 4.0):
+        return None
+    x, y = image_points[:, 0], image_points[:, 1]
+    signed_twice_area = np.sum(x * np.roll(y, -1) - y * np.roll(x, -1))
+    if not np.isfinite(signed_twice_area) or abs(signed_twice_area) < 32.0:
+        return None
     side = calibration.tag_side_mm / 2
     object_points = np.array([
         [-side, side, 0], [side, side, 0],
