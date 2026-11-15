@@ -286,6 +286,30 @@ def test_wiring_manifest_rejects_noninteger_mux_lane(group, channel):
         module.verify(plan, body, head)
 
 
+
+@pytest.mark.parametrize("group,address", [
+    ("mux_ranges", True), ("mux_ranges", 0x29 + 0.0),
+    ("mux_extras", False), ("mux_extras", "0x20"),
+])
+def test_wiring_manifest_rejects_coercible_device_addresses(group, address):
+    """A sensor or dock expander address must be a genuine 7-bit integer."""
+    import copy
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan = copy.deepcopy(PLAN)
+    lane = 0 if group == "mux_ranges" else 5
+    plan["bus"][group]["channels"][lane]["devices"][0]["address"] = address
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    with pytest.raises(ValueError, match="Invalid .* I2C address"):
+        module.verify(plan, body, head)
+
+
 def test_plan_source_owners_exist_without_implying_hardware_qualified():
     evidence = PLAN["bus"]["implementation_evidence"]
     for key in (
