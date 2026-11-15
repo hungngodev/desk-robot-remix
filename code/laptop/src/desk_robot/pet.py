@@ -381,7 +381,8 @@ class PetController:
             await asyncio.gather(task, return_exceptions=True)
 
     async def _store_observation(
-        self, robot_id: str, change: SceneChange
+        self, robot_id: str, change: SceneChange, *,
+        camera_derived: bool = False,
     ) -> None:
         """Same text/event ID, different eyewitness provenance per local DB.
 
@@ -389,14 +390,29 @@ class PetController:
         JPEG/PCM to another head and never claim a peer saw this firsthand.
         Operator must explicitly enable text sharing in local settings.
         """
+        if (camera_derived and self.settings.mode == "hardware"
+                and not self.settings.voice_vision_tools_enabled):
+            return
         event_id, observed_at = uuid.uuid4().hex, time.time()
-        await asyncio.to_thread(
+        inserted = await asyncio.to_thread(
             self.memory.remember, robot_id, event_id, change.description,
             kind=change.kind, source_robot=robot_id, witnessed=True,
             observed_at=observed_at, confidence=change.confidence,
         )
+        if (camera_derived and self.settings.mode == "hardware"
+                and not self.settings.voice_vision_tools_enabled):
+            if inserted:
+                # Permission can change while a SQLite write is in flight.
+                # Retract only this new visual guess, not a physical sensor
+                # or previously consented firsthand memory.
+                await asyncio.to_thread(
+                    self.memory.forget_episode, robot_id, event_id,
+                )
+            return
         if (self.settings.fleet_text_sharing_enabled
-                and self.settings.fleet_text_auto_fanout_enabled):
+                and self.settings.fleet_text_auto_fanout_enabled
+                and (not camera_derived or self.settings.mode != "hardware"
+                     or self.settings.voice_vision_tools_enabled)):
             # Per-robot SQLite databases are independent. A failed or busy
             # peer must not erase the eyewitness fact or suppress its reply.
             destinations = [r.id for r in self.settings.robots if r.id != robot_id]
@@ -1308,11 +1324,20 @@ class PetController:
                         continue
                     if (change is not None and state.enabled
                             and state.generation == generation
+                            and (self.settings.mode != "hardware"
+                                 or self.settings.voice_vision_tools_enabled)
                             and not self._human_active_in_fleet(time.monotonic())):
                         state.events += 1
                         state.last_event = change.description
-                        await self._store_observation(robot_id, change)
-                        self._consider_speech(robot_id, change, generation)
+                        await self._store_observation(
+                            robot_id, change, camera_derived=True,
+                        )
+                        if (self.settings.mode != "hardware"
+                                or self.settings.voice_vision_tools_enabled):
+                            self._consider_speech(
+                                robot_id, change, generation,
+                                camera_derived=True,
+                            )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1376,10 +1401,15 @@ class PetController:
             return None
         return candidates[self._social_round % len(candidates)]
 
-    def _consider_speech(self, robot_id: str, change: SceneChange, generation: int) -> None:
+    def _consider_speech(
+        self, robot_id: str, change: SceneChange, generation: int, *,
+        camera_derived: bool = False,
+    ) -> None:
         state = self.states[robot_id]
         now = time.monotonic()
-        if self._closed or not state.enabled or state.generation != generation:
+        if (self._closed or not state.enabled or state.generation != generation
+                or (camera_derived and self.settings.mode == "hardware"
+                    and not self.settings.voice_vision_tools_enabled)):
             state.suppressed += 1
             state.last_initiative_suppression = "pet_disabled_or_generation_changed"
             return
@@ -1434,7 +1464,8 @@ class PetController:
         self._speech_task = asyncio.create_task(
             self._speak(robot_id, change, generation,
                         offered_at=now, social_peer_id=peer_id,
-                        social_peer_generation=peer_generation)
+                        social_peer_generation=peer_generation,
+                        camera_derived=camera_derived)
         )
 
     async def _proactive_tool_receipt(
@@ -1581,6 +1612,7 @@ class PetController:
         self, robot_id: str, change: SceneChange, generation: int,
         *, offered_at: float, social_peer_id: str | None = None,
         social_peer_generation: int | None = None,
+        camera_derived: bool = False,
     ) -> None:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
@@ -1873,6 +1905,8 @@ class PetController:
                 return
             if (not state.enabled or state.quiet
                     or state.generation != generation
+                    or (camera_derived and self.settings.mode == "hardware"
+                        and not self.settings.voice_vision_tools_enabled)
                     or self._human_active_in_fleet(time.monotonic())
                     or newer_human_turn()
                     or self.conversation.active is not None):
@@ -1897,6 +1931,8 @@ class PetController:
                     and state.generation == generation
                     and (not private_memory_allowed
                          or self.settings.voice_memory_tools_enabled)
+                    and (not camera_derived or self.settings.mode != "hardware"
+                         or self.settings.voice_vision_tools_enabled)
                     and not self._human_active_in_fleet(time.monotonic())
                     and not newer_human_turn()
                 )
