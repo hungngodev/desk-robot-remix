@@ -252,7 +252,7 @@ def description(name, text, properties=None, required=None):
     ToolType.IOT_CTL,
 )
 async def desk_robot_pickup(conn, target):
-    if target not in {"key", "candy"}:
+    if not isinstance(target, str) or target not in {"key", "candy"}:
         return ActionResponse(Action.REQLLM, result={"error": "Target must be key or candy"})
     result = await call(conn, "pickup", {"target": target})
     # The Mac Coordinator owns job identities and progress. A WebSocket
