@@ -165,10 +165,6 @@ def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
     assert assessment.charging_authorized is False
 
 
-@pytest.mark.parametrize("field", [
-    "fx", "fy", "cx", "cy", "tag_side_mm", "distortion_coeffs",
-])
-
 def test_real_printed_apriltag_faces_camera_before_dock_approach():
     """Use real OpenCV tag generation/detection, not a mocked marker ID."""
     import cv2
@@ -240,6 +236,9 @@ def test_inverted_apriltag_plane_rejected_even_with_perfect_reprojection(monkeyp
 
 
 
+@pytest.mark.parametrize("field", [
+    "fx", "fy", "cx", "cy", "tag_side_mm", "distortion_coeffs",
+])
 def test_unrepresentable_measured_camera_number_is_rejected(field):
     from dataclasses import replace
     huge = 10 ** 1000
