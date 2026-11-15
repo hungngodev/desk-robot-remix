@@ -336,3 +336,25 @@ def test_body_status_uart_capacity_covers_full_width_sensor_counters():
     head_capacity = int(re.search(r"kMaxReply\s*=\s*(\d+)", bridge).group(1))
     rx_capacity = int(re.search(r"uart_driver_install\(kUart,\s*(\d+)", bridge).group(1))
     assert worst_case < body_capacity < head_capacity < rx_capacity
+
+
+@pytest.mark.parametrize("group,address", [
+    ("mux_ranges", 112.0), ("mux_ranges", "112"),
+    ("mux_extras", 113.0), ("mux_extras", "113"),
+])
+def test_wiring_manifest_rejects_noninteger_mux_i2c_address(group, address):
+    """Reject coercible mux addresses before formatting or exporting wiring."""
+    import copy
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan = copy.deepcopy(PLAN)
+    plan["bus"][group]["address"] = address
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    with pytest.raises(ValueError, match="Incorrect .* mux address"):
+        module.render(plan, body, head)
