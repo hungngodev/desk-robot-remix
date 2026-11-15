@@ -161,9 +161,9 @@ def detect_apriltag(
             and (frame.shape[1], frame.shape[0]) !=
                 (calibration.image_width_px, calibration.image_height_px)):
         raise ValueError("Dock JPEG resolution differs from measured intrinsics")
-    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
-    detector = cv2.aruco.ArucoDetector(dictionary)
     try:
+        dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
+        detector = cv2.aruco.ArucoDetector(dictionary)
         corners, ids, _rejected = detector.detectMarkers(frame)
     except cv2.error:
         return None  # Corrupt native detector output is never a docking observation
