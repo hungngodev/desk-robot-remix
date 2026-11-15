@@ -127,7 +127,14 @@ async def observe_actual_dock(head, robot) -> dict:
             reason=f"Dock marker detection unavailable: {type(exc).__name__}",
             source="apriltag_detection_failed",
         )
-    # A corrupted native adapter result must not escape as a plausible dock\n    # phase or crash the observer after the detector worker has completed.\n    if pose is not None and not isinstance(pose, DockPose):\n        return _hold(\n            robot.id, reason="Dock marker detector returned invalid pose",\n            source="apriltag_detection_failed",\n        )\n    # Receipt timestamp is not the end of OpenCV computation. A slow or
+    # A corrupted native adapter result must not escape as a plausible dock
+    # phase or crash the observer after the detector worker has completed.
+    if pose is not None and not isinstance(pose, DockPose):
+        return _hold(
+            robot.id, reason="Dock marker detector returned invalid pose",
+            source="apriltag_detection_failed",
+        )
+    # Receipt timestamp is not the end of OpenCV computation. A slow or
     # stalled detector cannot authorize a now-stale dock observation.
     assessment = assess_dock(pose, now=time.monotonic(), target_distance_mm=target)
     return {
