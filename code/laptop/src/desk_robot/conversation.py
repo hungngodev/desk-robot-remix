@@ -27,7 +27,9 @@ class Speaker(Protocol):
 
 def conversation_turns(robot_ids: list[str], utterances: int | None = None) -> int:
     """Keep every group bounded, including the original six-turn pair."""
-    if not 2 <= len(robot_ids) <= 5 or len(set(robot_ids)) != len(robot_ids):
+    if (not isinstance(robot_ids, list) or not 2 <= len(robot_ids) <= 5
+            or any(not isinstance(robot_id, str) or not robot_id for robot_id in robot_ids)
+            or len(set(robot_ids)) != len(robot_ids)):
         raise ValueError("Choose two to five distinct robots")
     limit = max(6, 2 * len(robot_ids))
     if utterances is None:
