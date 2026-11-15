@@ -3422,6 +3422,163 @@ async def test_proactive_completed_tool_rejoins_native_mac_timeline(
         await pet.close()
 
 
+@pytest.mark.parametrize("revocation", [
+    "private_memory", "live_context", "quiet", "generation",
+])
+async def test_proactive_tool_reentry_requires_current_context_consent(
+    fleet, tmp_path, revocation,
+):
+    """An awaited WROOM read must not reuse an old model prompt after revoke."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.voice_memory_tools_enabled = revocation == "private_memory"
+    ids = [r.id for r in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    if revocation == "private_memory":
+        memory.remember(
+            "robot-01", "private_before_tool",
+            "Private older preference before opt out",
+            kind="key", source_robot="robot-01", witnessed=True,
+        )
+    hub = CameraFrameHub(ids)
+    if revocation == "live_context":
+        hub.remember_heard(
+            "robot-01", "live_before_tool",
+            "My private audio mentioned the drawer", time.monotonic(),
+        )
+    entered, resume = asyncio.Event(), asyncio.Event()
+
+    class Head:
+        async def status(self):
+            entered.set()
+            await resume.wait()
+            return {"robot_id": "robot-01", "battery": {"percent": 60}}
+
+        async def command(self, *_):
+            raise AssertionError("Read only initiative cannot command motors")
+
+    class Chat:
+        def __init__(self):
+            self.calls = 0
+
+        async def proactive_decision(self, history):
+            self.calls += 1
+            if self.calls != 1:
+                raise AssertionError("Revoked private context reentered the model")
+            return {"action": "inspect", "tool": "status", "text": ""}
+
+    chat, speaker = Chat(), SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 91
+    task = asyncio.create_task(pet._speak(
+        "robot-01", SceneChange("paw_contact", "A paw was touched", 1.0),
+        91, offered_at=time.monotonic(),
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        if revocation == "private_memory":
+            fleet.voice_memory_tools_enabled = False
+        elif revocation == "live_context":
+            fleet.voice_vision_tools_enabled = False
+        elif revocation == "quiet":
+            state.quiet = True
+        else:
+            state.generation += 1
+        resume.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert chat.calls == 1
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        assert state.last_error is None
+        assert state.last_initiative_suppression == "tool_result_superseded"
+        assert hub.recent_tool_context("robot-01", time.monotonic()) == []
+        assert memory.count("robot-01") == (
+            1 if revocation == "private_memory" else 0
+        )
+    finally:
+        resume.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
+@pytest.mark.parametrize("revocation", ["private_memory", "live_context"])
+async def test_proactive_tool_request_dropped_after_model_context_revocation(
+    fleet, tmp_path, revocation,
+):
+    """Slow first model decision may not even start a new sensor read."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.voice_memory_tools_enabled = revocation == "private_memory"
+    ids = [r.id for r in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    if revocation == "private_memory":
+        memory.remember(
+            "robot-01", "private_while_model_thinks",
+            "Personal preference stored before consent revocation",
+            kind="key", source_robot="robot-01", witnessed=True,
+        )
+    hub = CameraFrameHub(ids)
+    if revocation == "live_context":
+        hub.remember_heard(
+            "robot-01", "live_while_model_thinks",
+            "Recent private microphone transcript", time.monotonic(),
+        )
+    entered, resume = asyncio.Event(), asyncio.Event()
+
+    class Head:
+        async def status(self):
+            raise AssertionError("Revoked private prompt requested a new tool read")
+
+    class Chat:
+        async def proactive_decision(self, history):
+            entered.set()
+            await resume.wait()
+            return {"action": "inspect", "tool": "status", "text": ""}
+
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, Chat(), speaker, memory=memory),
+        memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 92
+    task = asyncio.create_task(pet._speak(
+        "robot-01", SceneChange("paw_contact", "A paw was touched", 1.0),
+        92, offered_at=time.monotonic(),
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        if revocation == "private_memory":
+            fleet.voice_memory_tools_enabled = False
+        else:
+            fleet.voice_vision_tools_enabled = False
+        resume.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert state.last_error is None
+        assert state.last_initiative_suppression == "tool_candidate_superseded"
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        assert hub.recent_tool_context("robot-01", time.monotonic()) == []
+    finally:
+        resume.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
 async def test_proactive_ollama_tool_round_trip_is_bounded_and_grounded(
     fleet, tmp_path,
 ):
