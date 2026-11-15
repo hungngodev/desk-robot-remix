@@ -753,6 +753,7 @@ def create_app():
         # operator explicitly revokes future unsolicited initiative. These
         # intents must never share a hidden quiet-mode side effect.
         stopped_native = False
+        native = None
         try:
             native = _native_adapter()
             if native is not None:
@@ -772,12 +773,19 @@ def create_app():
             # none; its decoder flush is an idempotent safety action.
             stopped_native = False
         if not stopped_native:
-            # Normal Mac Kokoro playback, still through the same XIAO
-            # decoder. The actual Sense overlay handles decoder/DMA reset.
-            await connection.websocket.send(json.dumps({
-                "type": "tts", "state": "stop",
-                "session_id": connection.session_id, "flush": True,
-            }))
+            # A Mac Opus packet can still be in flight when the native model
+            # session is absent. Use its shared physical device lock before
+            # requesting DMA flush, not an unordered direct WebSocket STOP.
+            urgent = getattr(native, "send_external_urgent_stop", None)
+            if callable(urgent):
+                await urgent(connection)
+            else:
+                await asyncio.wait_for(
+                    connection.websocket.send(json.dumps({
+                        "type": "tts", "state": "stop",
+                        "session_id": connection.session_id, "flush": True,
+                    })), timeout=0.4,
+                )
         return web.json_response({
             "interrupted": True,
             "device_id": device,
