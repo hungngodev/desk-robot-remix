@@ -5907,6 +5907,63 @@ async def test_native_shutdown_preserves_speaker_lease_until_head_stop_sent(
         assert not packets
 
 
+def test_native_audio_defers_session_creation_while_mac_owns_decoder(
+    native, monkeypatch,
+):
+    """The first quiet/native mic frame must not STOP an existing Mac reply."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    monkeypatch.setenv("DESK_ROBOT_OMNI_ROBOTS", "robot-01")
+    module._external_speaker_owner = conn.device_id
+    module._external_speaker_connection = conn
+    conn.client_is_speaking = True
+
+    assert module.route_audio(conn, b"\x00" * 3200, False) is True
+    assert module._sessions == {}
+    assert conn.client_is_speaking is True
+    assert conn.client_abort is False
+    assert sent == []
+
+
+@pytest.mark.parametrize("run_session", [False, True])
+async def test_new_native_session_cannot_flush_preexisting_mac_speaker(
+    native, run_session,
+):
+    """Startup and teardown must honor a Mac lease created before native."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    module._external_speaker_owner = conn.device_id
+    module._external_speaker_connection = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    # Mac began speaking before the session existed, so this flag correctly
+    # remains false. Only the authenticated global lease knows the owner.
+    assert session._external_speech_active is False
+    module._sessions[conn.device_id] = session
+
+    if run_session:
+        await session.run()
+        assert session.closed
+    else:
+        with pytest.raises(RuntimeError, match="Mac speaker owns decoder"):
+            await session._retire_legacy_audio()
+
+    assert conn.client_is_speaking is True
+    assert conn.client_abort is False
+    assert sent == []
+    assert module._external_speaker_owner == conn.device_id
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+    await module.end_external_speech(conn, stop_confirmed=True)
+    assert module._external_speaker_owner is None
+    assert module._output_owner_unverified is None
+
+
 @pytest.mark.parametrize("stop_confirmed", [True, False])
 async def test_native_shutdown_does_not_steal_active_mac_speaker_stop(
     native, stop_confirmed,
