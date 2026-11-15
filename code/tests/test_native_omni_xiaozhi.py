@@ -441,6 +441,37 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 @pytest.mark.parametrize("producer", ["mac", "native"])
+async def test_opus_packet_timeout_includes_waiting_for_device_send_lock(
+    native, producer,
+):
+    """No robot packet writer may wait forever behind a wedged STOP/Opus."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    bridge.interrupt_generation = {conn.device_id: 0}
+    session = None
+    if producer == "mac":
+        module._external_speaker_owner = conn.device_id
+        module._external_speaker_connection = conn
+        send = lambda: module.send_external_opus(conn, b"old-packet", 0)
+    else:
+        session = module.NativeOmniSession(
+            conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+        )
+        send = lambda: session._send_device_opus(
+            b"old-packet", session._generation,
+        )
+    async with module._external_device_send_lock(conn):
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(send(), timeout=0.85)
+        assert sent == []
+    assert conn.client_is_speaking is False
+    if session is not None:
+        assert session.head_packets == 0
+
+
+@pytest.mark.parametrize("producer", ["mac", "native"])
 async def test_opus_send_rejects_head_replaced_while_socket_write_awaited(
     native, producer,
 ):
