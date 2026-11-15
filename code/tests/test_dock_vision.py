@@ -472,3 +472,33 @@ def test_native_opencv_failure_fails_closed_without_pose_authority(monkeypatch, 
     assert assessment.phase == "hold"
     assert assessment.motor_authorized is False
     assert assessment.charging_authorized is False
+
+
+@pytest.mark.parametrize("bad_corners", [
+    None, 12, (1, 2, 3), {"marker": 12},
+])
+def test_corrupt_detector_corner_container_fails_closed(monkeypatch, bad_corners):
+    """Native detector output cannot crash the observation safety boundary."""
+    import cv2
+    import numpy as np
+
+    class CorruptDetector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return bad_corners, np.array([[12]], dtype=np.int32), []
+
+    def forbidden_pnp(*args, **kwargs):
+        pytest.fail("Malformed corners reached native pose estimation")
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", CorruptDetector)
+    monkeypatch.setattr(cv2, "solvePnP", forbidden_pnp)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), calibration(), captured_at=5)
+    assert pose is None
+    decision = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized
+    assert not decision.charging_authorized
