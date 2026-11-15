@@ -437,3 +437,23 @@ def test_late_retired_boot_delivery_does_not_reset_current_calibration():
     assert qualified(gate, sample(boot_id=2, sample_ms=previous_sample + 1),
                      previous_at + 1.6, new_sample=False) == ()
     assert gate.reference is None
+
+
+def test_retired_boot_history_exhaustion_fails_closed_without_replay_eviction():
+    gate = HandlingGate()
+    # Eight legitimate boot transitions fill the bounded replay history.
+    for boot in range(1, 10):
+        assert qualified(gate, sample(boot_id=boot, sample_ms=boot),
+                         100 + boot * .1, new_sample=False) == ()
+    assert gate.last_boot_id == 9
+    assert gate.retired_boot_ids == list(range(1, 9))
+    # A ninth transition must not evict boot 1 and permit its delayed replay.
+    for boot in (10, 1, 10):
+        assert qualified(gate, sample(boot_id=boot, sample_ms=999),
+                         102 + boot * .01, new_sample=False) == ()
+        assert gate.last_boot_id == 9
+        assert gate.retired_boot_ids == list(range(1, 9))
+    # Current boot still supplies fresh samples; no new identity is trusted.
+    assert qualified(gate, sample(boot_id=9, sample_ms=1000),
+                     103, new_sample=False) == ()
+    assert gate.last_boot_id == 9
