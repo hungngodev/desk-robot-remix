@@ -1048,12 +1048,15 @@ async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
     import pytest
     from desk_robot.api import NativeHeardRequest
     from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
 
     settings.mode = "hardware"
-    settings.voice_vision_tools_enabled = False
+    settings.voice_vision_tools_enabled = True
     settings.voice_transcript_memory_enabled = True
     robot = settings.robots[0].id
-    memory = MemoryStore(tmp_path / "private", [r.id for r in settings.robots])
+    ids = [r.id for r in settings.robots]
+    memory = MemoryStore(tmp_path / "private", ids)
+    hub = CameraFrameHub(ids)
     remember = memory.remember
     forget = memory.forget_episode
     inserted = threading.Event()
@@ -1080,7 +1083,8 @@ async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
 
     runtime = SimpleNamespace(
         coordinator=SimpleNamespace(robot=settings.robot),
-        memory=memory, multimodal=None, start=noop, close=noop,
+        memory=memory, multimodal=SimpleNamespace(hub=hub),
+        start=noop, close=noop,
     )
     app = create_app(settings, runtime=runtime)
     app.state.runtime = runtime
@@ -1097,6 +1101,7 @@ async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
         assert await asyncio.wait_for(
             asyncio.to_thread(inserted.wait, 2), timeout=2.5,
         )
+        assert len(hub.heard_history[robot]) == 1
         settings.voice_transcript_memory_enabled = False
         task.cancel()
     finally:
@@ -1108,6 +1113,8 @@ async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
     )
     assert memory.count(robot) == 0
     assert memory.count(settings.robots[1].id) == 0
+    assert not hub.heard_history[robot]
+    assert not hub.heard_history[ids[1]]
 
 
 def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
