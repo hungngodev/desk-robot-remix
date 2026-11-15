@@ -542,15 +542,27 @@ async def transmit(conn, text, frames):
     # abort state; once interrupted this exact transmission cannot restart.
     conn.client_abort = False
     conn.client_is_speaking = True
+    control = getattr(native, "send_external_tts_control", None)
+    async def send_control(state: str, content: str | None = None) -> None:
+        async def deliver():
+            if content is None:
+                await send_tts_message(conn, state)
+            else:
+                await send_tts_message(conn, state, content)
+        if leased and callable(control):
+            await control(conn, generation, deliver)
+        else:
+            await deliver()
+
     try:
-        await send_tts_message(conn, "start")
+        await send_control("start")
         # The real microphone may have interrupted during the async START.
         # Never publish even the old caption or subsequent Opus in that case.
         if (conn.client_abort
                 or generation != interrupt_generation.get(conn.device_id, 0)
                 or not muted(conn.device_id) or human_speech_active()):
             raise RuntimeError("Speech interrupted before the first sentence")
-        await send_tts_message(conn, "sentence_start", text)
+        await send_control("sentence_start", text)
         for packet in frames:
             if (conn.client_abort
                     or generation != interrupt_generation.get(conn.device_id, 0)
@@ -572,15 +584,20 @@ async def transmit(conn, text, frames):
     finally:
         stop_confirmed = False
         try:
-            if (conn.client_abort
-                    or generation != interrupt_generation.get(conn.device_id, 0)):
-                # Bypass upstream normal stop's wait-for-all-audio behavior.
-                await conn.websocket.send(json.dumps({
-                    "type": "tts", "state": "stop",
-                    "session_id": conn.session_id, "flush": True,
-                }))
+            async def send_stop():
+                if (conn.client_abort
+                        or generation != interrupt_generation.get(conn.device_id, 0)):
+                    # Bypass upstream normal stop's wait-for-all-audio behavior.
+                    await conn.websocket.send(json.dumps({
+                        "type": "tts", "state": "stop",
+                        "session_id": conn.session_id, "flush": True,
+                    }))
+                else:
+                    await send_tts_message(conn, "stop")
+            if leased and callable(control):
+                await control(conn, generation, send_stop, terminal=True)
             else:
-                await send_tts_message(conn, "stop")
+                await send_stop()
             # A sent transport command is not an acoustic playback ACK,
             # but a failed send must never release the five-pet speaker.
             stop_confirmed = True
