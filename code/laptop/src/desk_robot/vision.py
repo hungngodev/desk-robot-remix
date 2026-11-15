@@ -81,6 +81,16 @@ class VisualChangeGate:
         self._pixel_baseline: bytes | None = None
         self._hits = 0
 
+    def reset(self) -> None:
+        """Forget visual JPEG/pixel baseline without changing measured thresholds.
+
+        Camera consent revoke, reconnect, or turn invalidation cannot carry
+        an old private image into the next operator-approved observation.
+        """
+        self._baseline = None
+        self._pixel_baseline = None
+        self._hits = 0
+
     @staticmethod
     def _reduced(jpeg: bytes) -> bytes:
         from PIL import ImageOps
