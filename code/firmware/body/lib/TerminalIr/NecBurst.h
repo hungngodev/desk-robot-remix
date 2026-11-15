@@ -77,7 +77,10 @@ class IrFrameQueueGate {
   }
   bool on_poll(std::uint32_t now_ms) {
     // Unsigned subtraction handles the normal millis 32-bit wraparound.
-    const bool timely = started_ && (now_ms - last_ms_) <= 100U;
+    const std::uint32_t elapsed = now_ms - last_ms_;
+    // A second poll in the same millisecond cannot establish a new
+    // independently completed NEC burst; reject untimestamped backlog.
+    const bool timely = started_ && elapsed != 0U && elapsed <= 100U;
     started_ = true;
     last_ms_ = now_ms;
     return timely;
