@@ -1157,6 +1157,44 @@ async def test_manual_peer_share_revoked_while_sqlite_writes_removes_new_copy(
         await pet.close()
 
 
+async def test_camera_peer_fanout_retracts_copies_after_visual_opt_out(
+    fleet, tmp_path, monkeypatch,
+):
+    """Another pet never retains a newly shared camera guess after opt out."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    original = memory.remember
+    inserted_peer_count = 0
+
+    def revoke_during_peer_insert(robot_id, event_id, summary, **kwargs):
+        nonlocal inserted_peer_count
+        saved = original(robot_id, event_id, summary, **kwargs)
+        if saved and kwargs["witnessed"] is False:
+            inserted_peer_count += 1
+            fleet.voice_vision_tools_enabled = False
+        return saved
+
+    monkeypatch.setattr(memory, "remember", revoke_during_peer_insert)
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    try:
+        await pet._store_observation(
+            "robot-01",
+            SceneChange("key", "Local camera model suggested a key", .96),
+            camera_derived=True,
+        )
+        assert inserted_peer_count >= 1
+        assert memory.count("robot-01") == 1
+        assert memory.count("robot-02") == memory.count("robot-03") == 0
+    finally:
+        await pet.close()
+
+
 async def test_camera_memory_retracted_after_vision_consent_revoked_inside_sqlite(
     fleet, tmp_path, monkeypatch,
 ):
