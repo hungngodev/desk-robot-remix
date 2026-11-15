@@ -206,6 +206,35 @@ def test_all_eight_tof_lanes_and_every_aux_lane_have_unique_i2c_addresses():
                for lane in ranges["channels"])
 
 
+
+@pytest.mark.parametrize("mutation", ["wrong_address", "extra_device", "missing_device", "bool_address"])
+def test_wiring_manifest_rejects_unqualified_range_lane_mutations(mutation):
+    """Negative contract for the existing eight isolated native-address ToF lanes."""
+    import copy
+    import importlib.util
+
+    module_path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    plan = copy.deepcopy(PLAN)
+    module.verify(plan, body, head)
+    devices = plan["bus"]["mux_ranges"]["channels"][0]["devices"]
+    if mutation == "wrong_address":
+        devices[0]["address"] = 0x30
+    elif mutation == "extra_device":
+        devices.append({"name": "unapproved sensor", "address": 0x30})
+    elif mutation == "missing_device":
+        devices.clear()
+    else:
+        devices[0]["address"] = True
+    with pytest.raises(ValueError, match="I2C address|Range lane"):
+        module.render(plan, body, head)
+
+
 def test_plan_source_owners_exist_without_implying_hardware_qualified():
     evidence = PLAN["bus"]["implementation_evidence"]
     for key in (
