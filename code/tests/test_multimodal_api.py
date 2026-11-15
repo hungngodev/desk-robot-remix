@@ -1037,6 +1037,79 @@ def test_native_asr_write_revoked_during_sqlite_commit_rolls_back_only_new_event
 
 
 
+async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
+    settings, tmp_path, monkeypatch,
+):
+    """HTTP cancellation cannot abandon an in-flight revoked SQLite insert."""
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    import pytest
+    from desk_robot.api import NativeHeardRequest
+    from desk_robot.memory import MemoryStore
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    settings.voice_transcript_memory_enabled = True
+    robot = settings.robots[0].id
+    memory = MemoryStore(tmp_path / "private", [r.id for r in settings.robots])
+    remember = memory.remember
+    forget = memory.forget_episode
+    inserted = threading.Event()
+    release = threading.Event()
+    retracted = threading.Event()
+
+    def paused_insert(*args, **kwargs):
+        added = remember(*args, **kwargs)
+        assert added
+        inserted.set()
+        assert release.wait(3)
+        return added
+
+    def observed_forget(robot_id, event_id):
+        result = forget(robot_id, event_id)
+        retracted.set()
+        return result
+
+    monkeypatch.setattr(memory, "remember", paused_insert)
+    monkeypatch.setattr(memory, "forget_episode", observed_forget)
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot),
+        memory=memory, multimodal=None, start=noop, close=noop,
+    )
+    app = create_app(settings, runtime=runtime)
+    app.state.runtime = runtime
+    endpoint = next(
+        route.endpoint for route in app.routes
+        if getattr(route, "path", None) == "/v1/pet/{robot_id}/omni-heard"
+    )
+    request = NativeHeardRequest(
+        event_id="omni_" + "a" * 12 + "_" + "c" * 20,
+        transcript="This private transcript should not survive opt out",
+    )
+    task = asyncio.create_task(endpoint(robot, request))
+    try:
+        assert await asyncio.wait_for(
+            asyncio.to_thread(inserted.wait, 2), timeout=2.5,
+        )
+        settings.voice_transcript_memory_enabled = False
+        task.cancel()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await asyncio.wait_for(
+        asyncio.to_thread(retracted.wait, 2), timeout=2.5,
+    )
+    assert memory.count(robot) == 0
+    assert memory.count(settings.robots[1].id) == 0
+
+
 def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
     settings, tokens, tmp_path, monkeypatch,
 ):
