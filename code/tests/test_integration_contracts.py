@@ -237,6 +237,28 @@ def test_wiring_manifest_rejects_unqualified_range_lane_mutations(mutation):
         module.render(plan, body, head)
 
 
+@pytest.mark.parametrize("group,channel", [
+    ("mux_ranges", True), ("mux_ranges", 0.0),
+    ("mux_extras", False), ("mux_extras", "0"),
+])
+def test_wiring_manifest_rejects_noninteger_mux_lane(group, channel):
+    """Bool and coercible channel IDs must not masquerade as physical mux lanes."""
+    import copy
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan = copy.deepcopy(PLAN)
+    plan["bus"][group]["channels"][0]["channel"] = channel
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    with pytest.raises(ValueError, match="Invalid or incomplete"):
+        module.verify(plan, body, head)
+
+
 def test_plan_source_owners_exist_without_implying_hardware_qualified():
     evidence = PLAN["bus"]["implementation_evidence"]
     for key in (
