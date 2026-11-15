@@ -41,7 +41,12 @@ TRIGGERS = frozenset({
 
 
 def _finite(value: float) -> bool:
-    return type(value) in (int, float) and math.isfinite(value)
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False  # Huge Python integers cannot represent host timestamps.
 
 
 def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
