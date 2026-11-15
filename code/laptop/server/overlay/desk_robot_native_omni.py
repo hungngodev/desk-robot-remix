@@ -2530,10 +2530,12 @@ async def begin_external_speech(conn) -> bool:
             # A task cancelled during the async native cutover has already
             # claimed the fleet speaker lease. Releasing it is mandatory,
             # otherwise every future Mac proactive utterance is locked out.
-            await end_external_speech(conn)
+            # No Mac terminal STOP was sent. Native cutover may already
+            # have failed mid-flush, so the decoder cannot be certified idle.
+            await end_external_speech(conn, stop_confirmed=False)
             raise
         except Exception:
-            await end_external_speech(conn)
+            await end_external_speech(conn, stop_confirmed=False)
             return False
     return True
 
