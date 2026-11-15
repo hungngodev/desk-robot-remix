@@ -86,6 +86,13 @@ def verify(plan: dict, body: str, head: str) -> None:
             if len(ids) != len(set(ids)):
                 raise ValueError(f"Duplicate {group} I2C address on one lane")
     ranges = bus["mux_ranges"]["channels"]
+    # Each selected TCA9548A lane isolates one VL53L4CD at its native
+    # 7-bit address. Reject a manifest that silently substitutes another
+    # device or claims multiple same-address range sensors on one lane.
+    for lane in ranges:
+        devices = lane["devices"]
+        if len(devices) != 1 or devices[0]["address"] != 0x29:
+            raise ValueError("Range lane must contain one VL53L4CD at 0x29")
     expected_roles = (
         "floor_front_left", "floor_front_right", "floor_rear_left",
         "floor_rear_right", "front_obstacle", "left_obstacle",
