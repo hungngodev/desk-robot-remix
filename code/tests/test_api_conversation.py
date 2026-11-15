@@ -766,3 +766,40 @@ async def test_kokoro_permission_revoked_during_bridge_transmission_stops_head(
     assert calls.count("speak") == 1
     assert calls.count("interrupt") >= 1
     assert conversation.active is None
+
+
+async def test_proactive_consent_revoked_during_alternate_speaker_send(settings):
+    """A non-Kokoro speaker cannot report success after a mid-send opt-out."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    allowed = True
+
+    class DelayedSpeaker(SimulatedSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.interruptions = []
+
+        async def say(self, robot, text):
+            entered.set()
+            await release.wait()
+            await super().say(robot, text)
+
+        async def interrupt(self, robot):
+            self.interruptions.append(robot.id)
+
+    speaker = DelayedSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+    robot = settings.robot("robot-01")
+    task = asyncio.create_task(conversation.say_proactive(
+        robot, "A remark that lost consent", permission_check=lambda: allowed,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        allowed = False
+    finally:
+        release.set()
+    with pytest.raises(RuntimeError, match="permission revoked during transmission"):
+        await asyncio.wait_for(task, timeout=1)
+    assert speaker.interruptions == [robot.id]
+    assert not conversation.session_lock.locked()
+    assert not conversation.speaker_lock.locked()
