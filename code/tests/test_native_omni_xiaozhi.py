@@ -5865,6 +5865,49 @@ async def test_native_shutdown_preserves_speaker_lease_until_head_stop_sent(
         assert not packets
 
 
+@pytest.mark.parametrize("stop_confirmed", [True, False])
+async def test_native_shutdown_does_not_steal_active_mac_speaker_stop(
+    native, stop_confirmed,
+):
+    """A dying native model cannot invent a Mac STOP failure or release it."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._external_speaker_owner = conn.device_id
+    module._external_speaker_connection = conn
+    session._external_speech_active = True
+
+    async def failed_native_backend():
+        raise RuntimeError("Native model died while Mac speech owned the head")
+
+    session._retire_legacy_audio = failed_native_backend
+    await session.run()
+
+    assert session.closed
+    assert not sent  # Native must not STOP Mac's current audible reply.
+    assert module._external_speaker_owner == conn.device_id
+    assert module._external_speaker_connection is conn
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+
+    # The existing Mac owner, NOT native cleanup, decides the STOP result.
+    await module.end_external_speech(conn, stop_confirmed=stop_confirmed)
+    assert module._external_speaker_owner is None
+    assert module._external_speaker_connection is None
+    if stop_confirmed:
+        assert module._output_owner is None
+        assert module._output_owner_unverified is None
+    else:
+        assert module._output_owner == conn.device_id
+        assert module._output_owner_unverified == conn.device_id
+
+
 async def test_reconnect_failed_stop_does_not_erase_old_uncertain_owner(native):
     """A failed recovery attempt must not free the old acoustic floor."""
     module, bridge = native
