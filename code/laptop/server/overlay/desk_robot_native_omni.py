@@ -2318,29 +2318,37 @@ async def begin_external_speech(conn) -> bool:
         # reconnecting the same device ID, cannot silence its decoder. Reuse
         # the existing head send lock to require a fresh authenticated STOP
         # before granting this or any other pet a new audio lease.
-        async with _speaker_handoff_lock:
-            if _output_owner_unverified == conn.device_id:
-                try:
-                    async with _external_device_send_lock(conn):
-                        if (bridge.connections.get(conn.device_id) is not conn
-                                or bridge.human_speech_active()):
-                            return False
-                        await asyncio.wait_for(
-                            conn.websocket.send(json.dumps({
-                                "type": "tts", "state": "stop", "flush": True,
-                                "session_id": conn.session_id,
-                            })), timeout=0.4,
-                        )
-                        if bridge.connections.get(conn.device_id) is not conn:
-                            raise RuntimeError("Head replaced during decoder recovery")
-                except Exception:
-                    return False
+        async def recover_uncertain_decoder() -> bool:
+            global _output_owner, _output_owner_unverified
+            async with _speaker_handoff_lock:
+                if _output_owner_unverified != conn.device_id:
+                    return True  # Another authenticated STOP already recovered it.
+                async with _external_device_send_lock(conn):
+                    if (bridge.connections.get(conn.device_id) is not conn
+                            or bridge.human_speech_active()):
+                        return False
+                    await conn.websocket.send(json.dumps({
+                        "type": "tts", "state": "stop", "flush": True,
+                        "session_id": conn.session_id,
+                    }))
+                    if bridge.connections.get(conn.device_id) is not conn:
+                        raise RuntimeError("Head replaced during decoder recovery")
                 conn.client_is_speaking = False
                 async with _output_owner_lock:
                     if _output_owner_unverified == conn.device_id:
                         if _output_owner == conn.device_id:
                             _output_owner = None
                         _output_owner_unverified = None
+                return True
+
+        try:
+            # Waiting for either lock is part of the physical STOP deadline,
+            # not an unbounded preamble to a separately timed socket send.
+            if not await asyncio.wait_for(recover_uncertain_decoder(), timeout=0.5):
+                return False
+        except Exception:
+            # Cancellation, timeout or send failure leaves uncertainty held.
+            return False
     session = _sessions.get(conn.device_id)
     async with _output_owner_lock:
         if (_external_speaker_owner is not None or _output_owner is not None
