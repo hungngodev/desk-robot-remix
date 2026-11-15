@@ -677,6 +677,7 @@ async def test_kokoro_permission_revoked_during_bridge_transmission_stops_head(
     settings.voice_memory_tools_enabled = True
     robot = settings.robots[0]
     robot.device_id = "mac-01"
+    settings.robots[1].device_id = "mac-02"
     monkeypatch.setenv(settings.speech_bridge_token_env, "p" * 32)
     calls = []
 
