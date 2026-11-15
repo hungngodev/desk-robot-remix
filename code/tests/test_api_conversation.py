@@ -638,3 +638,31 @@ async def test_proactive_consent_revoked_while_waiting_for_speech_lease(settings
         lock.release()
     assert await asyncio.wait_for(task, timeout=1) is False
     assert speaker.spoken == []
+
+
+async def test_proactive_group_activated_while_waiting_for_speaker_lock(settings):
+    """A group that starts while a remark waits must win the shared floor."""
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+    await conversation.speaker_lock.acquire()
+    pending_group = None
+    try:
+        remark = asyncio.create_task(conversation.say_proactive(
+            settings.robot("robot-01"), "Outdated background remark",
+        ))
+        await asyncio.sleep(0)
+        assert not remark.done()
+        # Conversation.run registers its active owner before awaiting its
+        # first session lock. Model the same transition deterministically.
+        pending_group = asyncio.create_task(asyncio.sleep(60))
+        conversation.active = pending_group
+    finally:
+        conversation.speaker_lock.release()
+    try:
+        assert await asyncio.wait_for(remark, timeout=1) is False
+        assert speaker.spoken == []
+    finally:
+        if pending_group is not None:
+            pending_group.cancel()
+            await asyncio.gather(pending_group, return_exceptions=True)
+        conversation.active = None
