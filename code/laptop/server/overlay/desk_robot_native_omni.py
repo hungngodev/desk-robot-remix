@@ -2606,11 +2606,14 @@ async def claim_speaker(session: NativeOmniSession) -> bool:
         async with _output_owner_lock:
             # Human VAD or a Mac group speaker may have claimed the floor
             # while the old head was flushing. No stale grant survives.
-            if (bridge.human_speech_active()
+            if (_output_owner_unverified is not None
+                    or bridge.human_speech_active()
                     or _external_speaker_owner is not None
                     or _output_owner not in (
                         None, other_id, session.device
                     )):
+                # The old STOP may fail while we awaited its flush.
+                # Never grant another pet a decoder with uncertain state.
                 return False
             _output_owner = session.device
             return True
