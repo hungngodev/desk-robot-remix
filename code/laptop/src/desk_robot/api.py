@@ -576,12 +576,26 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         memory_opt_in = settings.voice_transcript_memory_enabled
         inserted = False
         if memory_opt_in:
-            inserted = await asyncio.to_thread(
-                app.state.runtime.memory.remember, robot_id, request.event_id,
-                "Someone spoke (uncertain ASR): " + spoken[:240],
-                kind="heard_human", source_robot=robot_id, witnessed=True,
-                confidence=0.6,
-            )
+            def persist_transcript_with_cleanup() -> bool:
+                # Cancelling an asyncio.to_thread await never stops its SQLite
+                # worker. Keep the consent fence and compensating delete in
+                # that same worker, even when the HTTP caller disconnects.
+                if not settings.voice_transcript_memory_enabled:
+                    return False
+                added = app.state.runtime.memory.remember(
+                    robot_id, request.event_id,
+                    "Someone spoke (uncertain ASR): " + spoken[:240],
+                    kind="heard_human", source_robot=robot_id, witnessed=True,
+                    confidence=0.6,
+                )
+                if added and not settings.voice_transcript_memory_enabled:
+                    app.state.runtime.memory.forget_episode(
+                        robot_id, request.event_id,
+                    )
+                    return False
+                return added
+
+            inserted = await asyncio.to_thread(persist_transcript_with_cleanup)
         # A newly completed ASR can also be in the short-lived Mac timeline
         # before SQLite I/O finishes. Live context consent is separate from
         # durable transcript consent: retract only THIS newly accepted item
