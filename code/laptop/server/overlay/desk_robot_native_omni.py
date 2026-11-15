@@ -2011,6 +2011,8 @@ class NativeOmniSession:
         speech_raced = False
         refused_after_claim = False
         async with self._device_send_lock:
+            if bridge.connections.get(self.device) is not self.conn:
+                raise RuntimeError("Head replaced before native TTS control")
             # Quiet/autonomy can change AFTER the first policy check while
             # claim_speaker waits for the physical send lock. Never trust a
             # pre-await snapshot for speaker authorization.
@@ -2038,6 +2040,10 @@ class NativeOmniSession:
                         "session_id": self.conn.session_id,
                     })), timeout=0.4,
                 )
+                if bridge.connections.get(self.device) is not self.conn:
+                    # Sending to the old socket does not stop the new head.
+                    # Do not release the fleet lease for a stale TTS STOP.
+                    raise RuntimeError("Head replaced during native TTS control")
                 if state == "start" and direct_required:
                     self._direct_reply_available = False
                     self._direct_reply_active = True
