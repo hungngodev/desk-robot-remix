@@ -419,6 +419,17 @@ class NativeOmniSession:
                     # We never touched this Mac-owned decoder. Its real Mac
                     # STOP outcome, not our aborted startup, owns the lease.
                     raise
+                if not stop_started:
+                    # The lock itself may have stalled before STOP began.
+                    # Abort the OLD legacy producer only once we know no Mac
+                    # speaker took over during the wait.
+                    self.conn.client_abort = True
+                    clear = getattr(self.conn, "clear_queues", None)
+                    if callable(clear):
+                        try:
+                            clear()
+                        except Exception:
+                            pass  # The unverified fleet lease still protects audio.
                 # Cancellation is not an authenticated decoder STOP either.
                 # Even a queued legacy welcome can still be inside XIAO
                 # decoder buffers when client_is_speaking is false. A failed
