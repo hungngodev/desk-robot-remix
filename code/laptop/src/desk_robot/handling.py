@@ -135,7 +135,9 @@ class HandlingGate:
                 if len(self.retired_boot_ids) >= 8:
                     # An unrecognized generation cannot be trusted. Keep the
                     # replay fence, but revoke any calibrated handling pose.
+                    previous = (self.last_boot_id, self.last_sample_ms)
                     self.reset()
+                    self.last_boot_id, self.last_sample_ms = previous
                     return ()
                 old_boot = self.last_boot_id
                 self.reset()  # new WROOM boot identity requires fresh calibration
