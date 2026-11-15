@@ -309,6 +309,39 @@ async def test_mjpeg_duplicate_camera_identity_cannot_replay_frame(settings, tok
         assert not head._stream_connected
 
 
+
+async def test_mjpeg_stream_rejects_old_boot_replay_after_real_head_reset(
+    settings, tokens,
+):
+    """The same boot lease covers continuous MJPEG, not just still JPEG."""
+    async def handler(request):
+        return httpx.Response(
+            200, headers={
+                "content-type":
+                    "multipart/x-mixed-replace; boundary=deskrobotframe",
+            },
+            content=(
+                _stream_part(1, boot=12)
+                + _stream_part(1, boot=13)
+                + _stream_part(2, boot=12)
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        frames = head.stream_frames()
+        try:
+            assert (await anext(frames))[0].startswith(b"\xff\xd8")
+            assert (await anext(frames))[0].startswith(b"\\xff\\xd8")
+            with pytest.raises(HeadError, match="retired boot"):
+                await anext(frames)
+            assert head._last_camera == (13, 1, 1000)
+        finally:
+            await frames.aclose()
+        assert not head._stream_connected
+
+
+
 def test_calibration_rejects_examples_and_degenerate_geometry(settings):
     path = settings.robots[0].calibration
     c = Calibration.load(path)
