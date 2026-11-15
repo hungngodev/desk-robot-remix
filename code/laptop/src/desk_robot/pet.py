@@ -417,6 +417,16 @@ class PetController:
                     self.states[robot_id].last_error = (
                         f"Peer memory {peer_id}: {type(result).__name__}: {str(result)[:80]}"
                     )
+                elif (result is True
+                      and (not self.settings.fleet_text_sharing_enabled
+                           or not self.settings.fleet_text_auto_fanout_enabled)):
+                    # A newly inserted peer copy may finish after the
+                    # operator revokes sharing while SQLite is running.
+                    # The original eyewitness record remains untouched;
+                    # never erase an older idempotent peer memory.
+                    await asyncio.to_thread(
+                        self.memory.forget_episode, peer_id, event_id
+                    )
 
     async def share_with_peer(
         self, from_robot: str, to_robot: str, event_id: str
@@ -454,6 +464,8 @@ class PetController:
         # secondhand relay avoids misrepresenting who passed on that memory.
         if not source.witnessed or source.source_robot != from_robot:
             raise ValueError("Only the original eyewitness may share this event")
+        if not self.settings.fleet_text_sharing_enabled:
+            raise ValueError("Fleet sharing consent revoked before peer write")
         stored = await asyncio.to_thread(
             self.memory.remember,
             to_robot, source.event_id, source.summary,
@@ -461,6 +473,14 @@ class PetController:
             witnessed=False, observed_at=source.observed_at,
             confidence=source.confidence,
         )
+        if not self.settings.fleet_text_sharing_enabled:
+            if stored:
+                # Retract only the copy THIS request inserted. A repeated
+                # share of a preexisting event must not delete older consent.
+                await asyncio.to_thread(
+                    self.memory.forget_episode, to_robot, source.event_id,
+                )
+            raise ValueError("Fleet sharing consent revoked during peer write")
         return {
             "from_robot": from_robot,
             "to_robot": to_robot,
