@@ -2544,6 +2544,7 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
                 "charging_authorized": False,
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
+                "voice_monitor_ready": True,
             }
 
     class Http:
@@ -2747,7 +2748,7 @@ async def test_native_tool_chat_reads_same_live_multimodal_mac_context(
 
 
 @pytest.mark.parametrize("failure", [
-    "revoked", "service_unavailable", "wrong_robot",
+    "revoked", "service_unavailable", "wrong_robot", "vad_lost",
 ])
 async def test_native_tool_speech_rechecks_live_consent_after_model_completion(
     native, failure,
@@ -2808,6 +2809,9 @@ async def test_native_tool_speech_rechecks_live_consent_after_model_completion(
                         "charging_authorized": False,
                         "memory_tools_enabled": False,
                         "transcript_memory_enabled": False,
+                        "voice_monitor_ready": not (
+                            request_no == 2 and failure == "vad_lost"
+                        ),
                     }
             return Policy()
 
@@ -2843,6 +2847,8 @@ async def test_native_tool_speech_rechecks_live_consent_after_model_completion(
     assert session.last_error == (
         "Mac live context permission revoked"
         if failure == "revoked"
+        else "Mac live voice monitor unavailable for tool speech"
+        if failure == "vad_lost"
         else "Cannot revalidate Mac live consent for tool speech"
     )
     assert session.outgoing.empty()
