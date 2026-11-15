@@ -207,7 +207,7 @@ def test_all_eight_tof_lanes_and_every_aux_lane_have_unique_i2c_addresses():
 
 
 
-@pytest.mark.parametrize("mutation", ["wrong_address", "extra_device", "missing_device", "bool_address"])
+@pytest.mark.parametrize("mutation", ["wrong_address", "extra_device", "missing_device", "bool_address", "wrong_name"])
 def test_wiring_manifest_rejects_unqualified_range_lane_mutations(mutation):
     """Negative contract for the existing eight isolated native-address ToF lanes."""
     import copy
@@ -229,8 +229,10 @@ def test_wiring_manifest_rejects_unqualified_range_lane_mutations(mutation):
         devices.append({"name": "unapproved sensor", "address": 0x30})
     elif mutation == "missing_device":
         devices.clear()
-    else:
+    elif mutation == "bool_address":
         devices[0]["address"] = True
+    else:
+        devices[0]["name"] = "unapproved range sensor"
     with pytest.raises(ValueError, match="I2C address|Range lane"):
         module.render(plan, body, head)
 
