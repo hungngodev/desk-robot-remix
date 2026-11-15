@@ -166,6 +166,10 @@ def detect_apriltag(
         return None  # Corrupt native detector output is never a docking observation
     if ids is None:
         return None
+    # A native detector may return IDs alongside missing or malformed corners.
+    # Validate the container before calling len() or indexing a marker.
+    if not isinstance(corners, (list, tuple)):
+        return None
     # Native detector IDs must be a one-column integer array matching corners.
     # Never truncate floats, accept booleans, or index with a corrupt ID list.
     if (not isinstance(ids, np.ndarray) or ids.ndim != 2
