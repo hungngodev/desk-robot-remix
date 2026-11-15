@@ -86,6 +86,7 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
     camera = DockCameraCalibration(
         fx=410, fy=410, cx=320, cy=240,
         tag_side_mm=60, marker_id=1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
     monkeypatch.setattr(
         "desk_robot.dock_runtime.detect_apriltag",
@@ -139,6 +140,7 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         fx=410, fy=410, cx=320, cy=240, tag_side_mm=60, marker_id=1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
     distances = iter((500, 150))
     monkeypatch.setattr(
@@ -233,6 +235,7 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
         "image_width_px": 640, "image_height_px": 480,
+        "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
     }))
     robot.dock_calibration = path
     controller, head = make(settings)
@@ -285,7 +288,10 @@ async def test_dock_refuses_stale_pre_camera_safety_after_sensor_fault(
 
     head = HeadWithMidframeFault()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
-    camera = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+    )
     monkeypatch.setattr(
         "desk_robot.dock_runtime.detect_apriltag",
         lambda jpeg, cal, *, captured_at: DockPose(
@@ -342,7 +348,10 @@ async def test_dock_refuses_new_side_obstacle_after_camera_frame(
 
     head = SideChangedHead()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
-    camera = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+    )
     monkeypatch.setattr(
         "desk_robot.dock_runtime.detect_apriltag",
         lambda jpeg, cal, *, captured_at: DockPose(
@@ -403,7 +412,10 @@ async def test_dock_slow_marker_inference_never_drives_from_expired_image(
     monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", slow_detector)
     head = CameraHead()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
-    camera = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+    )
     try:
         task = asyncio.create_task(controller._dock_approach(
             Job("stale-tag", "robot-01", "dock_approach"),
@@ -461,7 +473,10 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
 
     head = SlowStatus()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
-    calibration = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    calibration = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+    )
     monkeypatch.setattr(
         "desk_robot.dock_runtime.detect_apriltag",
         lambda image, camera, *, captured_at: DockPose(
@@ -515,7 +530,10 @@ async def test_dock_approach_refuses_parallel_native_detector_ownership(settings
 
     head = HealthyHead()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
-    camera = DockCameraCalibration(410, 410, 320, 240, 60, 1)
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+    )
     assert dock_runtime._DETECTOR_SLOT.acquire(blocking=False)
     try:
         with pytest.raises(dock_runtime.DockDetectorBusy):
