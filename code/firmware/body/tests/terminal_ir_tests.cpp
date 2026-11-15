@@ -72,6 +72,26 @@ int main() {
     pair.accept(9, code, 420);  // invalid source is not registered
     result = pair.assess(420);
     CHECK(result.left_seq == 1 && result.right_seq == 2);
+    // A corrupt receiver identity must revoke both old sightings. Otherwise
+    // a future RMT caller could preserve a stale terminal dock bearing.
+    desk_robot::DualIrEvidence invalid_side;
+    invalid_side.accept(0, code, 100);
+    invalid_side.accept(1, code, 110);
+    CHECK(invalid_side.assess(115).same_code);
+    invalid_side.accept(2, code, 116);
+    result = invalid_side.assess(116);
+    CHECK(!result.left_fresh && !result.right_fresh && !result.same_code);
+    CHECK(result.left_seq == 1 && result.right_seq == 1);
+    CHECK(!result.motor_authorized && !result.charging_authorized);
+    invalid_side.accept(0, code, 120);
+    CHECK(!invalid_side.assess(120).same_code);
+    invalid_side.accept(1, code, 125);
+    CHECK(invalid_side.assess(125).same_code);
+    invalid_side.accept(0xffffffffU, code, 130);
+    result = invalid_side.assess(130);
+    CHECK(!result.same_code && !result.left_fresh && !result.right_fresh);
+    CHECK(result.left_seq == 2 && result.right_seq == 2);
+    CHECK(!result.motor_authorized && !result.charging_authorized);
     // Invalidation must reject old sightings without erasing diagnostic counts.
     desk_robot::DualIrEvidence invalidated;
     invalidated.accept(0, code, 100);
