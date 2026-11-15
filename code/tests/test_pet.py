@@ -2927,6 +2927,60 @@ async def test_proactive_model_rejects_long_uninvited_monologue_without_tts(
         await pet.close()
 
 
+@pytest.mark.parametrize("revocation", [
+    "speaker_quiet", "peer_quiet", "human_vad", "social_consent",
+])
+async def test_sensor_social_dialogue_rechecks_live_permission_after_model_await(
+    fleet, tmp_path, revocation,
+):
+    """A sensor event cannot authorize stale peer speech after consent changes."""
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = None
+
+    class RevokingChat:
+        async def reply(self, history):
+            if revocation == "speaker_quiet":
+                pet.states["robot-01"].quiet = True
+            elif revocation == "peer_quiet":
+                pet.states["robot-02"].quiet = True
+            elif revocation == "human_vad":
+                pet._human_active_in_fleet = lambda _now: True
+            else:
+                fleet.fleet_social_autonomy_enabled = False
+            return "This remark must not reach the other robot."
+
+    conversation = Conversation(
+        fleet, RevokingChat(), speaker, memory=memory,
+    )
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), speech_cooldown=0,
+    )
+    for rid in ("robot-01", "robot-02"):
+        pet.states[rid].enabled = True
+        pet.states[rid].generation = 12
+    try:
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("nfc_tag", "My local NFC tag was presented", 1.0),
+            12,
+        )
+        await wait_for(lambda: pet._speech_task is None)
+        assert speaker.spoken == []
+        assert memory.count("robot-01") == 0
+        assert memory.count("robot-02") == 0
+        assert all(state.spoken == 0 for state in pet.states.values())
+        assert "Group conversation consent revoked" in (
+            pet.states["robot-01"].last_error or ""
+        )
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
 async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
     fleet, tmp_path,
 ):
