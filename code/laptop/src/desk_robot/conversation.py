@@ -289,6 +289,11 @@ class KokoroHeadSpeaker:
                 "wav_base64": base64.b64encode(response.content).decode(),
             },
         )
+        # Permission can change while the bridge is sending queued Opus.
+        # The conversation owner catches this failure and requests physical
+        # decoder STOP before releasing the shared speaker floor.
+        if permission_check is not None and not permission_check():
+            raise RuntimeError("Speech permission revoked during transmission")
         if result.get("transmitted") is not True:
             raise RuntimeError("Speech transmission to head failed")
 
