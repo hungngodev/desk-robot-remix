@@ -229,7 +229,10 @@ class NativeOmniSession:
         self._pending_cancels: set[asyncio.Task] = set()
         self._socket = None
         self._socket_lock = asyncio.Lock()
-        self._device_send_lock = asyncio.Lock()
+        # One stable lock per physical XIAO device, shared before, during and
+        # after a native session. A session-owned replacement could let an old
+        # Mac Opus send race a newer native STOP across distinct locks.
+        self._device_send_lock = _external_device_send_lock(conn)
         self._generation = 0
         self._external_speech_active = False
         self._user_was_talking = False
@@ -2299,14 +2302,14 @@ class NativeOmniSession:
 # A native session and its Mac proactive speaker must serialize bytes and
 # STOP on the same head. Only one Mac speaker lease exists fleet-wide; the
 # fallback lock covers its device even before the native model connects.
-_external_opus_send_lock = asyncio.Lock()
+_physical_device_send_locks: dict[str, asyncio.Lock] = {}
 
 
 def _external_device_send_lock(conn) -> asyncio.Lock:
-    session = _sessions.get(conn.device_id)
-    if (session is not None and session.conn is conn and not session.closed):
-        return session._device_send_lock
-    return _external_opus_send_lock
+    # Keep the identity of this lock stable across native startup, teardown,
+    # socket replacement and Mac fallback operation. Separate robots must
+    # still stop independently when one head transport is stalled.
+    return _physical_device_send_locks.setdefault(conn.device_id, asyncio.Lock())
 
 
 async def send_external_urgent_stop(conn) -> None:
