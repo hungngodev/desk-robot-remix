@@ -917,6 +917,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 timeline = [entry for entry in timeline
                             if not (entry.get("channel") == "tool"
                                     and entry.get("kind") == "memory_recall")]
+        private_context_used = any(
+            item.get("channel") == "tool"
+            and item.get("kind") == "memory_recall"
+            for item in timeline
+        )
         context = compose_brain_context([], [], timeline).interaction[:280]
         schema = (
             'Return ONLY a JSON object {"tools":[{"route":"look"},'
@@ -946,6 +951,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # An unavailable or malformed optional Ollama plan must never
             # become a guessed physical action or stall live microphone I/O.
             parsed = {}
+        # Slow Ollama planning may finish after live consent is withdrawn.
+        # Do not return executable selections from an obsolete private prompt.
+        if not settings.voice_vision_tools_enabled:
+            raise HTTPException(403, "Live observation consent revoked during planning")
+        if private_context_used and not settings.voice_memory_tools_enabled:
+            raise HTTPException(403, "Private memory consent revoked during planning")
         choices = parsed.get("tools") if isinstance(parsed, dict) else None
         allowed = {
             "look", "status", "power-status", "aux-status",
