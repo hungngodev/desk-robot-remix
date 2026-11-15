@@ -120,6 +120,11 @@ async def call(conn, route, payload=None):
                 # Task cancellation must be requested before returning to
                 # the active human turn. Never hold the speaker on a hung
                 # optional VLM task that suppresses cancellation.
+                # Cancellation can win the wait in the same loop turn as
+                # an HTTP failure. Retrieve that completed exception even
+                # when the obsolete result is deliberately discarded.
+                if request_task.done() and not request_task.cancelled():
+                    request_task.exception()
                 pending = [task for task in (request_task, turn_task)
                            if not task.done()]
                 if pending:
