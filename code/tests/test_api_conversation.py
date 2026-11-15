@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 from desk_robot.api import create_app
-from desk_robot.conversation import Conversation, KokoroHeadSpeaker
+from desk_robot.conversation import Conversation, KokoroHeadSpeaker, conversation_turns
 from desk_robot.memory import MemoryStore
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 from fastapi.testclient import TestClient
@@ -803,3 +803,22 @@ async def test_proactive_consent_revoked_during_alternate_speaker_send(settings)
     assert speaker.interruptions == [robot.id]
     assert not conversation.session_lock.locked()
     assert not conversation.speaker_lock.locked()
+
+
+@pytest.mark.parametrize("robot_ids", [
+    [["robot-01"], "robot-02"],
+    [{"id": "robot-01"}, "robot-02"],
+    ["robot-01", None],
+    ["robot-01", 1],
+    ["robot-01", "robot-01"],
+    [],
+])
+def test_conversation_turns_rejects_unhashable_or_invalid_robot_ids(robot_ids):
+    """Malformed API inputs must not escape as TypeError before identity validation."""
+    with pytest.raises(ValueError, match="distinct robots"):
+        conversation_turns(robot_ids)
+
+
+def test_conversation_turns_valid_fleet_bounds_unchanged():
+    assert conversation_turns(["robot-01", "robot-02"]) == 6
+    assert conversation_turns(["robot-01", "robot-02", "robot-03", "robot-04"]) == 8
