@@ -566,7 +566,7 @@ async def transmit(conn, text, frames):
         for packet in frames:
             if (conn.client_abort
                     or generation != interrupt_generation.get(conn.device_id, 0)
-                    or not muted(conn.device_id)):
+                    or not muted(conn.device_id) or human_speech_active()):
                 raise RuntimeError("Speech interrupted or session expired")
             # Reuse the firmware's existing 16 kHz mono, 60 ms Opus
             # framing. The native adapter already owns the device send lock:
@@ -579,14 +579,17 @@ async def transmit(conn, text, frames):
             conn.last_activity_time = time.time() * 1000
             await asyncio.sleep(0.06)
         await asyncio.sleep(0.24)  # estimated buffer tail; no physical playback acknowledgement
-        if conn.client_abort or generation != interrupt_generation.get(conn.device_id, 0):
+        if (conn.client_abort
+                or generation != interrupt_generation.get(conn.device_id, 0)
+                or human_speech_active()):
             raise RuntimeError("Speech interrupted during playback tail")
     finally:
         stop_confirmed = False
         try:
             async def send_stop():
                 if (conn.client_abort
-                        or generation != interrupt_generation.get(conn.device_id, 0)):
+                        or generation != interrupt_generation.get(conn.device_id, 0)
+                        or human_speech_active()):
                     # Bypass upstream normal stop's wait-for-all-audio behavior.
                     await conn.websocket.send(json.dumps({
                         "type": "tts", "state": "stop",
