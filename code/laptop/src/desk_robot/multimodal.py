@@ -847,6 +847,12 @@ class MultimodalOrchestrator:
                     except RuntimeError:
                         metrics["stream_frames_skipped"] += 1
                         continue
+                    if not self.settings.voice_vision_tools_enabled:
+                        # Opt out can arrive while Pillow/motion preparation
+                        # owns the frame. Do not publish that completed JPEG
+                        # to the Mac hub, native subscriber or pet observer.
+                        self.hub.discard_video(robot_id)
+                        return
                     if (self._closed or turn != self._turn_epoch[robot_id]
                             or generation != self.hub._generation[robot_id]
                             or (source == "proactive"
