@@ -440,6 +440,72 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 
+async def test_authenticated_human_stop_waits_for_inflight_mac_opus(native):
+    """A real urgent STOP must follow a previously started Opus transport."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    bridge.interrupt_generation = {conn.device_id: 0}
+    module._external_speaker_owner = conn.device_id
+    module._external_speaker_connection = conn
+    entered, release = asyncio.Event(), asyncio.Event()
+    order = []
+
+    class Socket:
+        async def send(self, packet):
+            if isinstance(packet, bytes):
+                order.append("opus")
+                entered.set()
+                await release.wait()
+            else:
+                order.append(json.loads(packet)["state"])
+
+    conn.websocket = Socket()
+    opus = asyncio.create_task(module.send_external_opus(conn, b"opus", 0))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        bridge.interrupt_generation[conn.device_id] += 1
+        conn.client_abort = True
+        stop = asyncio.create_task(module.send_external_urgent_stop(conn))
+        await asyncio.sleep(0)
+        assert order == ["opus"]  # STOP cannot overtake in-flight PCM.
+        release.set()
+        await asyncio.wait_for(asyncio.gather(opus, stop), timeout=1)
+        assert order == ["opus", "stop"]
+    finally:
+        release.set()
+        for task in (opus, locals().get("stop")):
+            if task is not None and not task.done():
+                task.cancel()
+
+
+@pytest.mark.parametrize("failure", ["stalled_lock", "replaced_head"])
+async def test_authenticated_human_stop_never_accepts_unverified_send(
+    native, failure,
+):
+    """Timeout or socket replacement is not physical decoder STOP evidence."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    if failure == "stalled_lock":
+        async with module._external_opus_send_lock:
+            with pytest.raises(asyncio.TimeoutError):
+                await module.send_external_urgent_stop(conn)
+        assert sent == []
+    else:
+        replacement, _ = connection()
+        class Replaced:
+            async def send(self, packet):
+                sent.append(packet)
+                bridge.connections[conn.device_id] = replacement
+        conn.websocket = Replaced()
+        with pytest.raises(RuntimeError, match="Head replaced"):
+            await module.send_external_urgent_stop(conn)
+        assert len(sent) == 1
+    assert conn.client_is_speaking is True
+
+
 @pytest.mark.parametrize("change", [
     "generation", "abort", "human_vad", "lease_lost", "connection_replaced",
 ])
