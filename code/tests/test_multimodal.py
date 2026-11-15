@@ -104,6 +104,50 @@ async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_p
 
 
 
+
+async def test_stream_consent_revoked_during_frame_preparation_cannot_publish_jpeg():
+    """An in-flight image worker cannot outlive operator visual opt out."""
+    entered, release = asyncio.Event(), asyncio.Event()
+    policy = config(enabled=True)
+
+    class LiveHead(Head):
+        async def stream_frames(self):
+            yield image(square=True), time.monotonic()
+            await asyncio.Event().wait()
+
+    head = LiveHead()
+    visual = MultimodalOrchestrator(
+        policy, {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def slow_prepare(jpeg, *, priority):
+        assert not priority
+        entered.set()
+        await release.wait()
+        return _prepare(jpeg)
+
+    visual._prepare_bounded = slow_prepare
+    visual.start_streams()
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert visual.status("robot-01")["software_timings"][
+            "stream_frames_selected"
+        ] == 0
+        policy.voice_vision_tools_enabled = False
+        release.set()
+        await asyncio.wait_for(visual._stream_tasks["robot-01"], timeout=1)
+        assert not visual.hub.frames["robot-01"]
+        assert visual.status("robot-01")["software_timings"][
+            "stream_frames_selected"
+        ] == 0
+        assert head.captures == 0
+    finally:
+        release.set()
+        await visual.close()
+
+
+
 async def test_native_subscriber_gets_quiet_room_frames_from_live_stream_not_vad():
     class ContinuousHead(Head):
         async def stream_frames(self):
