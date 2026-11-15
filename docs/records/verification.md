@@ -1,3 +1,7 @@
+## November 15 proactive group priority after speaker lease: source committed, regression unexecuted
+
+Starting PR #17 head 5b9fabdef7601b4b9380f8396b70527c58edc5d7. Source debd77bb8e147adeb676438697a06b61706be9f0 checks for newly active group conversation after waiting for the proactive speaker lock; regression e3bab63feb384a5a8b60d587f3905c2fe21b5b2b covers the interleaving. Local git ls-remote failed DNS, exit 128. No pytest, firmware build or physical test executed. Next exact test: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_api_conversation.py -k proactive_group_activated_while_waiting_for_speaker_lock. Full conversation tests and five pet acoustic output remain unverified.
+
 ## November 15 proactive speech permission lease race: source committed, test not executed
 
 PR #17 start head d5892a7a7d18c809f80e8464db3e405e23f70522. Source commit 409ec395a092836f36490454769cdfee82dcaea4 rechecks proactive speech permission after the session and speaker lease awaits. Regression commit 16f0329766e97808144efd84ca62bd70d0e8598c adds two async lock contention cases. Local git ls-remote https://github.com/hungngodev/desk-robot-remix.git HEAD failed DNS resolution, exit 128; pytest, builds, device tests and physical validation NOT EXECUTED. Required: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_api_conversation.py -k proactive_consent_revoked_while_waiting_for_speech_lease; follow with full test_api_conversation.py. No acoustic ACK or battery/motor qualification inferred.
