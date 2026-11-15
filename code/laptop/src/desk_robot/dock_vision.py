@@ -158,7 +158,9 @@ def detect_apriltag(
         frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
     except cv2.error:
         return None  # A native decoder failure is not a trusted dock observation
-    if frame is None or frame.size == 0:
+    if (frame is None or not isinstance(frame, np.ndarray)
+            or frame.ndim != 2 or frame.size == 0
+            or frame.shape[0] < 1 or frame.shape[1] < 1):
         raise ValueError("Invalid JPEG frame")
     # OpenCV intrinsics and distortion belong to one exact capture mode.
     # Camera mode changes invalidate pose geometry, not just image quality.
