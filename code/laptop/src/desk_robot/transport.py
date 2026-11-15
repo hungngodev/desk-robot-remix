@@ -145,6 +145,7 @@ class HttpHead:
         self.capture_lock = asyncio.Lock()
         self.strict_capture = strict_capture
         self._last_camera: tuple[int, int, int] | None = None
+        self._retired_camera_boots: set[int] = set()
         self._stream_connected = False
         self._stream_required = False
         self._stream_condition = asyncio.Condition()
@@ -209,7 +210,19 @@ class HttpHead:
     def _accept_camera_identity(self, identity: tuple[int, int, int]) -> None:
         boot, sequence, completed = identity
         earlier = self._last_camera
-        if earlier and earlier[0] == boot and (
+        if boot in self._retired_camera_boots:
+            # A reconnect must not replay an earlier Sense boot as if it
+            # were a new scene. This also protects genuine long-lived MJPEG
+            # subscriptions from stale frames delivered after a reboot.
+            raise HeadError("Camera returned retired boot frame metadata")
+        if earlier is not None and earlier[0] != boot:
+            # Never evict old boot IDs merely to accept a ninth unexpected
+            # reset. That would make delayed old images valid again. A fresh
+            # operator-created head session is required after this limit.
+            if len(self._retired_camera_boots) >= 8:
+                raise HeadError("Camera reboot history exhausted; reset observation session")
+            self._retired_camera_boots.add(earlier[0])
+        elif earlier and (
             sequence <= earlier[1] or completed <= earlier[2]
         ):
             raise HeadError("Camera returned stale or replayed frame metadata")
