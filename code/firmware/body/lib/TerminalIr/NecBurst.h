@@ -87,7 +87,10 @@ class IrFrameQueueGate {
   }
   bool finish(unsigned side, unsigned packets, bool queue_emptied) {
     if (side > 1) return false;
-    // Multiple queued frames have no individual receive timestamps. Even two\n    // valid NEC packets may be old or from competing beacons; require exactly\n    // one packet for a directional observation, or an empty drained queue.\n    const bool acceptable = !draining_[side] && queue_emptied && packets <= 1;
+    // Multiple queued frames have no individual receive timestamps. Even two
+    // valid NEC packets may be old or from competing beacons; require exactly
+    // one packet for a directional observation, or an empty drained queue.
+    const bool acceptable = !draining_[side] && queue_emptied && packets <= 1;
     // An exhausted packet budget is never silently considered an empty queue.
     draining_[side] = !queue_emptied;
     return acceptable;
