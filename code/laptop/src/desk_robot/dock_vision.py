@@ -100,8 +100,13 @@ class DockCameraCalibration:
         if self.mount_lateral_offset_mm is None or self.mount_yaw_deg is None:
             raise ValueError("Dock chassis camera mounting geometry unmeasured")
         yaw = math.radians(self.mount_yaw_deg)
-        return (self.mount_lateral_offset_mm
-                + pose.x_mm * math.cos(yaw) + pose.z_mm * math.sin(yaw))
+        lateral = (self.mount_lateral_offset_mm
+                   + pose.x_mm * math.cos(yaw) + pose.z_mm * math.sin(yaw))
+        # Individually finite native pose values can overflow when transformed.
+        # Never pass an infinite chassis offset into a docking alignment gate.
+        if not math.isfinite(lateral):
+            raise ValueError("Dock chassis lateral transform is not finite")
+        return lateral
 
 
 @dataclass(frozen=True)
