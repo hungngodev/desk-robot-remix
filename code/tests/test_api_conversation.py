@@ -418,6 +418,62 @@ async def test_group_peer_memory_revoked_inside_sqlite_write_is_compensated(
 
 
 
+async def test_cancelled_group_peer_write_retracts_revoked_insert(
+    settings, tmp_path, monkeypatch,
+):
+    """A cancelled coroutine cannot abandon an in-flight private peer INSERT."""
+    import threading
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    ids = ["robot-01", "robot-02"]
+    memory = MemoryStore(tmp_path, ids)
+    original_remember = memory.remember
+    original_forget = memory.forget_episode
+    inserted = threading.Event()
+    release = threading.Event()
+    retracted = threading.Event()
+
+    def pause_after_peer_insert(robot_id, event_id, summary, **kwargs):
+        added = original_remember(robot_id, event_id, summary, **kwargs)
+        if kwargs["kind"] == "peer_utterance":
+            assert added
+            inserted.set()
+            release.wait(3)
+        return added
+
+    def observe_forget(robot_id, event_id):
+        result = original_forget(robot_id, event_id)
+        retracted.set()
+        return result
+
+    monkeypatch.setattr(memory, "remember", pause_after_peer_insert)
+    monkeypatch.setattr(memory, "forget_episode", observe_forget)
+    agent = Conversation(
+        settings, SimulatedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    task = asyncio.create_task(agent._persist_spoken_turn(
+        settings.robot("robot-01"), "Real sent speech",
+        [settings.robot(robot_id) for robot_id in ids],
+    ))
+    try:
+        assert await asyncio.wait_for(
+            asyncio.to_thread(inserted.wait, 2), timeout=2.5,
+        )
+        settings.fleet_text_sharing_enabled = False
+        task.cancel()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await asyncio.wait_for(
+        asyncio.to_thread(retracted.wait, 2), timeout=2.5,
+    )
+    assert memory.count("robot-02") == 0
+    own = memory.recent("robot-01")
+    assert len(own) == 1 and own[0].kind == "own_utterance"
+
+
 async def test_hardware_group_memory_respects_fleet_sharing_consent(
     settings, tmp_path,
 ):
