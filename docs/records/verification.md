@@ -856,3 +856,8 @@ Source aac4b52ed9b704379b013fc3b32a79d4d3d0f302 and regression 9a938d89b7052d644
 ### November 15 Kokoro consent revocation during /speak: unexecuted
 
 Starting PR #17 head b7bc337b8e9afdab33e64a9f664dece88372f004. Source a68822493 and test e4631c79 plus fixture correction 612de49c add a permission recheck after the awaited /speak bridge call, and a deterministic fake bridge consent revocation test expecting the existing group conversation cleanup to request /interrupt. TEST_NOT_EXECUTED: local git ls-remote https://github.com/hungngodev/desk-robot-remix.git HEAD failed DNS resolution; GitHub connector accepted source and test commits but cannot run pytest. Required: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_api_conversation.py -k kokoro_permission_revoked_during_bridge_transmission_stops_head. No physical decoder silence, real acoustic interruption, or charger/motion verification claimed.
+
+
+### November 15 conversation identity validation
+
+Owner: Robot Code Fixes and Cleanup. Reconciled PR #17 at c1cda3b3dd4a004d4de0ef24103dc424735afcc2, 67 combined discussion entries and no inline review threads. Source d4ce61e032c5d08c2fcdae658250d650c7a6141b rejects unhashable, nonstring, empty or duplicate conversation robot IDs before set construction; regression c4898de9793bc612f4e1ab11b41bb5d2e3fa8f40 adds six invalid cases and two valid fleet limits. Eight source-equivalent isolated cases executed in local Python, exit 0. Repository pytest NOT EXECUTED: git ls-remote failed DNS resolution, exit 128. Required exact repository check: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_api_conversation.py -k conversation_turns. No physical qualification. Keep PR draft.
