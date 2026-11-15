@@ -616,3 +616,25 @@ async def test_group_prompts_never_promote_forged_peer_memory_to_firsthand(setti
     prompt = c.histories["robot-02"][1]["content"]
     assert "robot-01 reported: I picked up a key" in prompt
     assert "I said previously: I picked up a key" not in prompt
+
+
+@pytest.mark.parametrize("lease", ["session_lock", "speaker_lock"])
+async def test_proactive_consent_revoked_while_waiting_for_speech_lease(settings, lease):
+    """A queued remark cannot speak after opt-out during either async lock wait."""
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+    allowed = True
+    lock = getattr(conversation, lease)
+    await lock.acquire()
+    try:
+        task = asyncio.create_task(conversation.say_proactive(
+            settings.robot("robot-01"), "Stale unsolicited remark",
+            permission_check=lambda: allowed,
+        ))
+        await asyncio.sleep(0)
+        assert not task.done()
+        allowed = False
+    finally:
+        lock.release()
+    assert await asyncio.wait_for(task, timeout=1) is False
+    assert speaker.spoken == []
