@@ -435,7 +435,9 @@ class PetController:
                     )
                 elif (result is True
                       and (not self.settings.fleet_text_sharing_enabled
-                           or not self.settings.fleet_text_auto_fanout_enabled)):
+                           or not self.settings.fleet_text_auto_fanout_enabled
+                           or (camera_derived and self.settings.mode == "hardware"
+                               and not self.settings.voice_vision_tools_enabled))):
                     # A newly inserted peer copy may finish after the
                     # operator revokes sharing while SQLite is running.
                     # The original eyewitness record remains untouched;
