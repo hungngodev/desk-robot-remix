@@ -595,7 +595,16 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                     return False
                 return added
 
-            inserted = await asyncio.to_thread(persist_transcript_with_cleanup)
+            try:
+                inserted = await asyncio.to_thread(persist_transcript_with_cleanup)
+            except asyncio.CancelledError:
+                # The HTTP request can be gone while its SQLite worker is
+                # still running. That worker owns durable consent cleanup,
+                # but the current event loop must retract its own transient
+                # ASR receipt rather than leaving an abandoned live cue.
+                if ephemeral:
+                    visual.hub.discard_heard(robot_id, request.event_id)
+                raise
         # A newly completed ASR can also be in the short-lived Mac timeline
         # before SQLite I/O finishes. Live context consent is separate from
         # durable transcript consent: retract only THIS newly accepted item
