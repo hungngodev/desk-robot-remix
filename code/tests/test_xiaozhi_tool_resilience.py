@@ -1073,3 +1073,28 @@ async def test_native_aux_sensor_tool_rejects_foreign_robot_result(
         "error": "Robot Mac tool identity or authority invalid",
         "retried": False,
     }
+
+
+async def test_already_cancelled_voice_turn_does_not_start_mac_tool_http(
+    bridge_tools, monkeypatch,
+):
+    """A superseded turn must not trigger even one stale camera request."""
+    import asyncio
+
+    cancelled = asyncio.Event()
+    cancelled.set()
+    bridge_tools.bridge.tool_turn_cancel_event = lambda device: cancelled
+
+    class ForbiddenHTTP:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Cancelled turn started a Mac HTTP request")
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", ForbiddenHTTP)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "look", {"question": "What changed?"}
+    )
+    assert result == {
+        "error": "Robot tool result superseded by new speech or reconnect",
+        "retried": False,
+    }
+    assert bridge_tools.voice_turn_response(result).action == 1
