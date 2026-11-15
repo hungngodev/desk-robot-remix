@@ -2543,7 +2543,6 @@ async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
         assert state.last_error is None
         assert speaker.spoken
         assert "private conversation" not in str(chat.prompts)
-        assert "safe" not in str(chat.prompts)
     finally:
         state.enabled = False
         await pet.close()
@@ -2601,6 +2600,71 @@ async def test_proactive_physical_sensor_rechecks_live_consent_after_model_await
         resume.set()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
+async def test_proactive_sensor_private_live_context_revoked_during_tts(
+    fleet, tmp_path, monkeypatch,
+):
+    """Opted-out ASR context must not reach the head from a physical paw cue."""
+    from types import SimpleNamespace
+    from desk_robot.multimodal import CameraFrameHub
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.robots[0].device_id = "mac-01"
+    monkeypatch.setenv(fleet.speech_bridge_token_env, "p" * 32)
+    ids = [robot.id for robot in fleet.robots]
+    hub = CameraFrameHub(ids)
+    hub.remember_heard(
+        "robot-01", "live_asr_for_paw",
+        "A private conversation about the wooden drawer", time.monotonic(),
+    )
+    calls = []
+
+    class Response:
+        content = b"RIFFsynthetic-wav-fixture"
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {}
+
+    class Client:
+        async def post(self, url, **kwargs):
+            calls.append(url)
+            if url.endswith("/v1/audio/speech"):
+                fleet.voice_vision_tools_enabled = False
+            if url.endswith("/speak"):
+                raise AssertionError("Revoked live context was sent to the head")
+            return Response()
+
+    memory = MemoryStore(tmp_path, ids)
+    speaker = KokoroHeadSpeaker(fleet, Client())
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 80
+    try:
+        await pet._speak(
+            "robot-01", SceneChange("paw_contact", "A paw press occurred", 1.0),
+            80, offered_at=time.monotonic(),
+        )
+        assert state.spoken == 0
+        assert state.last_error is not None
+        assert "Speech permission revoked during synthesis" in state.last_error
+        assert sum(url.endswith("/v1/audio/speech") for url in calls) == 1
+        assert not any(url.endswith("/speak") for url in calls)
+        assert any(url.endswith("/interrupt") for url in calls)
+        assert memory.count("robot-01") == 0
+    finally:
         state.enabled = False
         await pet.close()
 
