@@ -1169,3 +1169,7 @@ Owner: Robot Implementation Loop. Reconciled PR #17 issue comments (68), submitt
 
 ### 2026-11-15 group consent persistence fence
 Ownership: only `code/laptop/src/desk_robot/conversation.py` group transcript publication and `code/tests/test_api_conversation.py` targeted regression. Commits `53d1c053` and `cb1b4662` recheck consent after awaited SQLite persistence, before publishing peer history/transcript; deterministic Event test suspends persistence and revokes permission. No changes to motion, VAD, camera, charger or speaker broker. Concurrent writers must re-read current head and avoid editing these same lines without reconciliation. Git checkout blocked by DNS (exit 128); repository pytest NOT executed. Physical STOP and acoustic qualification remain open.
+
+
+### November 15 duplicate fleet memory identity source guard
+Owner: Robot Code Fixes and Cleanup. Narrow source area `code/laptop/src/desk_robot/memory.py` constructor and new `code/tests/test_memory_duplicate_identity.py`. Starting PR head `02ec81a129be82b1cea6e9e17cb95eaaf1aa1621`; source `438c4bb2` and regression `6cf15409` reject duplicate fleet robot IDs before opening any SQLite files and preserve valid independent stores. Tests NOT EXECUTED because local GitHub DNS failed, exit 128. Avoid overlapping this constructor without fresh head/blob reconciliation. Next execute pytest regression, then existing memory suite. Physical qualification not claimed; keep PR draft.
