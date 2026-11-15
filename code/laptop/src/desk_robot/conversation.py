@@ -352,25 +352,26 @@ class Conversation:
                 # consent for a second pet to durably retain that speaker's
                 # words. Each pet may still retain its own sent speech.
                 continue
-            inserted = await asyncio.to_thread(
-                self.memory.remember,
-                peer.id,
-                event_id,
-                text[:300],
-                kind="own_utterance" if peer.id == speaker.id else "peer_utterance",
-                source_robot=speaker.id,
-                witnessed=(peer.id == speaker.id),
-                confidence=1.0,
-            )
-            if (inserted and peer.id != speaker.id
-                    and self.settings.mode == "hardware"
-                    and not self.settings.fleet_text_sharing_enabled):
-                # Revocation can land while SQLite is writing. Retract only
-                # this newly inserted secondhand copy, not the speaker's
-                # own legitimately sent words or an older idempotent event.
-                await asyncio.to_thread(
-                    self.memory.forget_episode, peer.id, event_id,
+            def persist_with_consent_cleanup() -> None:
+                inserted = self.memory.remember(
+                    peer.id,
+                    event_id,
+                    text[:300],
+                    kind="own_utterance" if peer.id == speaker.id else "peer_utterance",
+                    source_robot=speaker.id,
+                    witnessed=(peer.id == speaker.id),
+                    confidence=1.0,
                 )
+                if (inserted and peer.id != speaker.id
+                        and self.settings.mode == "hardware"
+                        and not self.settings.fleet_text_sharing_enabled):
+                    # The worker must own its compensating delete. Cancelling
+                    # asyncio.to_thread does NOT cancel a SQLite thread, so
+                    # coroutine-side cleanup could otherwise be skipped.
+                    # Never retract the speaker's own transmitted words.
+                    self.memory.forget_episode(peer.id, event_id)
+
+            await asyncio.to_thread(persist_with_consent_cleanup)
 
     async def run(
         self, robot_ids: list[str], topic: str, utterances: int | None = None,
