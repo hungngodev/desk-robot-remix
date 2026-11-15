@@ -85,6 +85,22 @@ int main() {
     CHECK(!invalidated.assess(130).same_code);
     invalidated.accept(1, code, 140);
     CHECK(invalidated.assess(140).same_code);
+    // A future caller bypassing the RMT queue gate must not preserve a
+    // previous bearing when it supplies a checksum-invalid raw observation.
+    invalidated.accept(1, code ^ 0x01000000U, 145);
+    result = invalidated.assess(145);
+    CHECK(!result.left_fresh && !result.right_fresh && !result.same_code);
+    CHECK(result.left_seq == 2 && result.right_seq == 2);
+    CHECK(!result.motor_authorized && !result.charging_authorized);
+    invalidated.accept(0, code, 150);
+    CHECK(!invalidated.assess(150).same_code);
+    invalidated.accept(1, code, 155);
+    CHECK(invalidated.assess(155).same_code);
+    // A corrupt left observation must revoke both sides as well.
+    invalidated.accept(0, code ^ 0x00000100U, 160);
+    CHECK(!invalidated.assess(160).same_code);
+    CHECK(!invalidated.assess(160).left_fresh);
+    CHECK(!invalidated.assess(160).right_fresh);
     // Reproduce the actual poll owner's fail-closed composition: a single
     // corrupt right receiver packet revokes a previously valid pair, even
     // when the left receiver simultaneously reports a valid new NEC burst.
