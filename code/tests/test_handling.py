@@ -201,6 +201,8 @@ def test_missing_or_malformed_imu_source_identity_fails_quiet():
 @pytest.mark.parametrize("field,value", [
     ("now", None), ("now", "100"), ("now", True),
     ("now", float("nan")), ("now", float("inf")),
+    ("now", 10 ** 1000), ("now", -(10 ** 1000)),
+    ("tilt_threshold_deg", 10 ** 1000),
     ("tilt_threshold_deg", None), ("tilt_threshold_deg", "38"),
     ("tilt_threshold_deg", True), ("tilt_threshold_deg", float("nan")),
 ])
