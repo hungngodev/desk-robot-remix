@@ -136,7 +136,8 @@ class MemoryStore:
         """Idempotently store one fact; duplicates do not rewrite earlier evidence."""
         if robot_id not in self.robot_ids or source_robot not in self.robot_ids:
             raise ValueError("Unknown robot identity")
-        if not _EVENT_ID.fullmatch(event_id) or not _EVENT_KIND.fullmatch(kind):
+        if (not isinstance(event_id, str) or not isinstance(kind, str)
+                or not _EVENT_ID.fullmatch(event_id) or not _EVENT_KIND.fullmatch(kind)):
             raise ValueError("Invalid event ID or kind")
         if witnessed is not True and witnessed is not False:
             raise ValueError("witnessed must be a boolean")
