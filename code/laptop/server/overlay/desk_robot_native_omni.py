@@ -378,6 +378,12 @@ class NativeOmniSession:
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Only current authenticated head can reset decoder")
+        if (_external_speaker_owner == self.device
+                and _external_speaker_connection is self.conn):
+            # A native model may start while Mac group/proactive speech is
+            # already playing. Never flush the Mac owner's decoder merely
+            # because a new model handshake was attempted.
+            raise RuntimeError("Mac speaker owns decoder during native startup")
         uncertain = _output_owner_unverified == self.device
         if speaking or pending or uncertain:
             self.conn.client_abort = True
@@ -2196,8 +2202,7 @@ class NativeOmniSession:
             # that Mac speech a failed STOP or take over its separate lease.
             # end_external_speech owns the eventual STOP result.
             external_mac_owns_decoder = (
-                self._external_speech_active
-                and _external_speaker_owner == self.device
+                _external_speaker_owner == self.device
                 and _external_speaker_connection is self.conn
             )
             stop_confirmed = (
@@ -2648,6 +2653,12 @@ def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
         return True  # fail closed during reconnect cooldown, no flood
     session = _sessions.get(device)
     if session is None:
+        # The Mac may have claimed the speaker before native mic routing
+        # established a model session. Defer this model's decoder startup;
+        # authenticated human VAD still owns interruption of the Mac voice.
+        if (_external_speaker_owner == device
+                and _external_speaker_connection is conn):
+            return True
         try:
             token = os.environ.get("DESK_ROBOT_TOOL_TOKEN", "")
             session = NativeOmniSession(
