@@ -56,3 +56,20 @@ def test_memory_operations_reject_malformed_identity(tmp_path, operation, bad):
     with pytest.raises(ValueError, match="Unknown robot memory identity"):
         actions[operation]()
     assert store.count("robot-01") == 0
+
+
+@pytest.mark.parametrize("bad_ids", [
+    [], [None], [[]], [{}], [7], [True], ["robot-01", {}],
+    ["robot-01", None], "robot-01", None,
+])
+def test_constructor_rejects_malformed_robot_id_collection(tmp_path, bad_ids):
+    root = tmp_path / "memory"
+    with pytest.raises(ValueError, match="Every robot ID"):
+        MemoryStore(root, bad_ids)
+    assert not root.exists()
+
+
+def test_constructor_accepts_multiple_valid_robot_ids(tmp_path):
+    store = MemoryStore(tmp_path / "memory", ["robot-01", "robot-02"])
+    assert store.robot_ids == {"robot-01", "robot-02"}
+    assert store.count("robot-01") == store.count("robot-02") == 0
