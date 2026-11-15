@@ -1801,6 +1801,61 @@ async def test_broken_native_voice_cannot_block_operator_physical_speaker_stop(
     assert first.client_abort is True
 
 
+@pytest.mark.parametrize("reason", ["operator", "monitor", "barge"])
+async def test_operator_interrupt_fallback_uses_locked_physical_stop(
+    bridge, monkeypatch, reason,
+):
+    """No native inference session must not mean an unordered Mac STOP."""
+    first = conn("mac-01")
+    first.session_id = "live-mac-head"
+    physical = []
+    bridge.register(first)
+
+    class Socket:
+        async def send(self, data):
+            physical.append(("socket", json.loads(data)))
+
+    first.websocket = Socket()
+    async def inactive_model(_):
+        return False
+
+    async def urgent(current):
+        assert current is first
+        physical.append(("locked", "stop"))
+        await current.websocket.send(json.dumps({
+            "type": "tts", "state": "stop", "flush": True,
+            "session_id": current.session_id,
+        }))
+
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni", SimpleNamespace(
+        suspend_proactive_for_operator=inactive_model,
+        suspend_proactive_for_monitor_loss=inactive_model,
+        on_barge=inactive_model,
+        send_external_urgent_stop=urgent,
+    ))
+    request = {"device_id": first.device_id}
+    if reason == "operator":
+        request["revoke_initiative"] = True
+    elif reason == "monitor":
+        request["monitor_unavailable"] = True
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        response = await client.post("/interrupt", headers=headers, json=request)
+        assert response.status == 200
+        body = await response.json()
+        assert body["head_flush_requested"] is True
+        assert body["head_flush_acknowledged"] is False
+    assert physical == [
+        ("locked", "stop"),
+        ("socket", {
+            "type": "tts", "state": "stop", "flush": True,
+            "session_id": first.session_id,
+        }),
+    ]
+    assert first.client_abort is True
+    assert bridge.interrupt_generation[first.device_id] == 1
+
+
 async def test_vad_monitor_loss_routes_native_block_without_operator_quiet(
     bridge, monkeypatch,
 ):
