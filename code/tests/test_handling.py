@@ -459,3 +459,25 @@ def test_retired_boot_history_exhaustion_fails_closed_without_replay_eviction():
     assert qualified(gate, sample(boot_id=9, sample_ms=1000),
                      103, new_sample=False) == ()
     assert gate.last_boot_id == 9
+
+
+def test_exhausted_boot_history_revokes_active_pose_without_evicting_replay_fence():
+    gate = HandlingGate()
+    for boot in range(1, 10):
+        assert qualified(gate, sample(boot_id=boot, sample_ms=boot),
+                         100 + boot * .1, new_sample=False) == ()
+    for i in range(7):
+        assert qualified(gate, sample(boot_id=9, sample_ms=20 + i),
+                         102 + i * .1, new_sample=False) == ()
+    assert gate.reference is not None
+    assert gate.retired_boot_ids == list(range(1, 9))
+    # Unknown generation may be a real WROOM reboot. Do not retain pose.
+    assert qualified(gate, sample(boot_id=10, sample_ms=1),
+                     104, new_sample=False) == ()
+    assert gate.reference is None and gate.startup_samples == []
+    assert gate.last_boot_id == 9
+    assert gate.retired_boot_ids == list(range(1, 9))
+    # Retired replay cannot displace the source identity after revocation.
+    assert qualified(gate, sample(boot_id=1, sample_ms=500),
+                     104.1, new_sample=False) == ()
+    assert gate.last_boot_id == 9
