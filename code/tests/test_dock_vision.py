@@ -669,3 +669,37 @@ def test_native_jpeg_decoder_non_uint8_frame_cannot_reach_detector(monkeypatch, 
     decision = assess_dock(None, now=5.1, target_distance_mm=120)
     assert decision.phase == "hold"
     assert not decision.motor_authorized and not decision.charging_authorized
+
+
+@pytest.mark.parametrize("malformed_result", [
+    None,
+    (),
+    ([],),
+    ([], None),
+    ([], None, [], "unexpected fourth field"),
+    42,
+])
+def test_malformed_native_detector_result_fails_closed(monkeypatch, malformed_result):
+    """Unexpected native return arity must never reach PnP or docking authority."""
+    import cv2
+    import numpy as np
+
+    class CorruptDetector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return malformed_result
+
+    def forbidden_pnp(*args, **kwargs):
+        pytest.fail("Malformed native detector result reached solvePnP")
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", CorruptDetector)
+    monkeypatch.setattr(cv2, "solvePnP", forbidden_pnp)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), calibration(), captured_at=5)
+    assert pose is None
+    decision = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized and not decision.charging_authorized
