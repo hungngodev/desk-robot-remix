@@ -800,6 +800,52 @@ async def test_human_vad_during_tts_start_cannot_send_obsolete_sentence(
                for packet in packets)
 
 
+@pytest.mark.parametrize("vad_during", ["caption", "first_packet"])
+async def test_real_human_floor_blocks_mac_opus_before_async_preempt(
+    bridge, monkeypatch, vad_during,
+):
+    """Authenticated VAD must stop old audio before generation callback runs."""
+    current = conn("mac-01")
+    current.conn_from_mqtt_gateway = False
+    current.session_id = "physical-head"
+    current.last_activity_time = 0
+    current.clearSpeakStatus = lambda: None
+    packets = []
+
+    class Socket:
+        async def send(self, packet):
+            packets.append(packet)
+            if vad_during == "first_packet" and packet == b"first":
+                assert bridge.record_human_voice(current, "normal")
+
+    current.websocket = Socket()
+    bridge.register(current)
+    bridge.lease_ids = frozenset({current.device_id})
+    bridge.lease_until = time.monotonic() + 10
+
+    async def send_tts(owner, state, text=None):
+        if state == "sentence_start" and vad_during == "caption":
+            assert bridge.record_human_voice(owner, "normal")
+
+    monkeypatch.setitem(
+        sys.modules, "core.handle.sendAudioHandle",
+        SimpleNamespace(send_tts_message=send_tts),
+    )
+    # Reproduce the short window before an optional native preemption task
+    # modifies interrupt_generation. The VAD owner is already authoritative.
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
+    original_generation = bridge.interrupt_generation.get(current.device_id, 0)
+    with pytest.raises(RuntimeError, match="Speech interrupted"):
+        await bridge.transmit(current, "Old reply", [b"first", b"second"])
+    assert bridge.interrupt_generation.get(current.device_id, 0) == original_generation
+    assert [p for p in packets if isinstance(p, bytes)] == (
+        [] if vad_during == "caption" else [b"first"]
+    )
+    stops = [json.loads(p) for p in packets if isinstance(p, str)]
+    assert len(stops) == 1
+    assert stops[0]["state"] == "stop" and stops[0]["flush"] is True
+
+
 @pytest.mark.parametrize("vad_mode", ["generation", "fleet_floor"])
 async def test_human_vad_during_native_speaker_handoff_cannot_restart_old_tts(
     bridge, monkeypatch, vad_mode,
