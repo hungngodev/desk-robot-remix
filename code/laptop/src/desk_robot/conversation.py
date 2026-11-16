@@ -16,6 +16,26 @@ from .memory import MemoryStore
 from .streamed_ollama import ollama_speech_segments
 
 
+_SPEAKER_ABORT_TIMEOUT_S = 2.0
+_CONVERSATION_STOP_TIMEOUT_S = 2.5
+
+
+async def _bounded_speaker_abort(interrupt, robot: RobotConfig) -> None:
+    """Attempt physical speaker abort without waiting for ignored cancellation."""
+    task = asyncio.create_task(interrupt(robot))
+    try:
+        done, _ = await asyncio.wait({task}, timeout=_SPEAKER_ABORT_TIMEOUT_S)
+        if not done:
+            raise TimeoutError("Speaker interruption unconfirmed")
+        await task
+    finally:
+        if not task.done():
+            task.cancel()
+            task.add_done_callback(
+                lambda done: None if done.cancelled() else done.exception()
+            )
+
+
 class Chat(Protocol):
     async def reply(self, history: list[dict]) -> str: ...
 
@@ -566,9 +586,7 @@ class Conversation:
                         interrupt = getattr(self.speaker, "interrupt", None)
                         if current_robot is not None and callable(interrupt):
                             try:
-                                await asyncio.wait_for(
-                                    interrupt(current_robot), timeout=2.0
-                                )
+                                await _bounded_speaker_abort(interrupt, current_robot)
                             except Exception:
                                 pass  # Preserve the original model/transport failure.
                         if current_robot is not None and completed_segments:
@@ -636,7 +654,7 @@ class Conversation:
                         interrupt = getattr(self.speaker, "interrupt", None)
                         if interrupt is not None:
                             try:
-                                await asyncio.wait_for(interrupt(robot), timeout=2)
+                                await _bounded_speaker_abort(interrupt, robot)
                             except Exception:
                                 pass  # Still cancel; transport failure remains unverified.
                         raise
@@ -645,7 +663,18 @@ class Conversation:
     async def stop(self):
         task = self.active
         if task and task is not asyncio.current_task():
-            # Repeated stop requests must not cancel a session's cleanup a second time.
+            # Do not double-cancel a session's ongoing decoder cleanup.
             if not task.cancelling():
                 task.cancel()
-            await asyncio.shield(asyncio.gather(task, return_exceptions=True))
+            done, _ = await asyncio.wait(
+                {task}, timeout=_CONVERSATION_STOP_TIMEOUT_S
+            )
+            if not done:
+                # Never pretend that a stuck model or speaker released its lease.
+                task.add_done_callback(
+                    lambda completed: None if completed.cancelled()
+                    else completed.exception()
+                )
+                raise TimeoutError("Conversation STOP unconfirmed; owner still active")
+            if not task.cancelled():
+                task.exception()

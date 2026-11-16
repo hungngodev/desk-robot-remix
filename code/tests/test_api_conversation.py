@@ -895,3 +895,73 @@ def test_stop_api_does_not_hide_body_timeout_behind_pet_cleanup_failure(
         assert "WROOM STOP transport acknowledgement unconfirmed" in (
             response.json()["error"]
         )
+
+
+async def test_conversation_stop_does_not_wait_forever_on_ignored_cancellation(
+    settings, monkeypatch,
+):
+    """A blocked model owner cannot make explicit operator STOP hang forever."""
+    monkeypatch.setattr(
+        "desk_robot.conversation._CONVERSATION_STOP_TIMEOUT_S", 0.05
+    )
+    agent = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stubborn_owner():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    task = asyncio.create_task(stubborn_owner())
+    agent.active = task
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        with pytest.raises(TimeoutError, match="Conversation STOP unconfirmed"):
+            await asyncio.wait_for(agent.stop(), timeout=0.3)
+        assert agent.active is task and not task.done()
+        release.set()
+        await asyncio.wait_for(task, timeout=0.3)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_proactive_speaker_abort_is_bounded_if_adapter_ignores_cancel(
+    settings, monkeypatch,
+):
+    """Failed speech never blocks the only speaker lease indefinitely."""
+    monkeypatch.setattr(
+        "desk_robot.conversation._SPEAKER_ABORT_TIMEOUT_S", 0.05
+    )
+    speaker = SimulatedSpeaker()
+    release = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def fails_speech(robot, text):
+        raise RuntimeError("Transport failed during proactive speech")
+
+    async def stubborn_interrupt(robot):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    speaker.say = fails_speech
+    speaker.interrupt = stubborn_interrupt
+    agent = Conversation(settings, SimulatedChat(), speaker)
+    try:
+        with pytest.raises(RuntimeError, match="Transport failed"):
+            await asyncio.wait_for(
+                agent.say_proactive(settings.robot("robot-01"), "hello"),
+                timeout=0.3,
+            )
+        assert entered.is_set() and not release.is_set()
+    finally:
+        release.set()
+        await asyncio.sleep(0)
