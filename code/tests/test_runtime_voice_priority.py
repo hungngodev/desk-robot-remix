@@ -935,3 +935,52 @@ async def test_runtime_shutdown_bounds_uncooperative_voice_monitor_and_continues
     finally:
         release.set()
         await asyncio.wait_for(task, timeout=0.3)
+
+
+async def test_shutdown_fences_late_human_callbacks_after_blocked_stop():
+    """A VAD edge already awaiting audio STOP cannot resurrect camera on close."""
+    calls = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            entered.set()
+            await release.wait()
+
+        def set_voice_monitor_ready(self, ready):
+            calls.append(("monitor", ready))
+
+    class Conversation:
+        async def stop(self):
+            calls.append(("speaker", "stop"))
+
+    class Visual:
+        def prepare_human_turn(self, robot_id, *, end_expected):
+            calls.append(("prepare", robot_id))
+
+        def start_speech_frames(self, robot_id):
+            calls.append(("camera", robot_id))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime._closed = False
+    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id="robot-01")])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+    interrupt = asyncio.create_task(
+        runtime._on_voice_interrupt("robot-01", "speech_start")
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        runtime._closed = True  # Coordinator.close begins; voice task not yet retired.
+        release.set()
+        await asyncio.wait_for(interrupt, timeout=0.5)
+        await runtime._on_voice_monitor_ready(True)
+        await runtime._on_voice_interrupt("robot-01", "speech_start")
+        await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+        await runtime._on_voice_global("stream_unavailable")
+        assert calls == [("prepare", "robot-01"), ("speaker", "stop")]
+    finally:
+        release.set()
+        await asyncio.gather(interrupt, return_exceptions=True)

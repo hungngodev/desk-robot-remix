@@ -133,6 +133,8 @@ class Runtime:
             raise RuntimeError("Unable to preempt one or more pet speakers") from failures[0]
 
     async def _on_voice_snapshot(self, active: frozenset[str]) -> None:
+        if getattr(self, "_closed", False):
+            return
         visual = getattr(self, "multimodal", None)
         if visual is None:
             return
@@ -170,6 +172,8 @@ class Runtime:
                 # An unresolved physical STOP must remain an error, but it
                 # cannot erase the authenticated human's live camera turn.
                 preempt_error = exc
+            if getattr(self, "_closed", False):
+                return
             for robot_id in sorted(missing_starts):
                 if callable(prepare):
                     visual.start_speech_frames(robot_id)
@@ -193,11 +197,15 @@ class Runtime:
             raise preempt_error
 
     async def _on_voice_monitor_ready(self, ready: bool) -> None:
+        if getattr(self, "_closed", False):
+            return
         # Re-enable spontaneous voice only after a successful authenticated
         # event-stream bootstrap or ordered poll, never on a guessed timeout.
         self.pet.set_voice_monitor_ready(ready)
 
     async def _on_voice_global(self, reason: str) -> None:
+        if getattr(self, "_closed", False):
+            return  # Shutdown owns the final physical STOP and teardown.
         if reason not in ("gap", "reset", "stream_unavailable"):
             raise ValueError("Unsupported global voice transport fault")
         self.pet.set_voice_monitor_ready(False)
@@ -229,6 +237,8 @@ class Runtime:
             raise RuntimeError("Voice monitor lost; physical speaker stop unconfirmed") from failures[0]
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
+        if getattr(self, "_closed", False):
+            return
         if robot_id not in {robot.id for robot in self.settings.robots}:
             raise KeyError(f"Unknown voice source: {robot_id}")
         if kind == "speech_end":
@@ -254,6 +264,8 @@ class Runtime:
             await self._preempt_audio_floor()
         except Exception as exc:
             preempt_error = exc
+        if getattr(self, "_closed", False):
+            return  # A late STOP completion must not reopen camera workers.
         if visual is not None:
             if callable(prepare):
                 if kind in ("speech_start", "normal", "group"):
