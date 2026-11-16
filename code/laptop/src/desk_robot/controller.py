@@ -15,6 +15,30 @@ from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
 
 
+async def _bounded_body_stop(head: Head) -> dict:
+    """Attempt one STOP without waiting for a cancellation-resistant adapter.
+
+    Transport acceptance is not motor or acoustic evidence. On timeout the
+    WROOM watchdog remains independent; a late ACK cannot retroactively make
+    the timed-out operator/job STOP successful.
+    """
+    task = asyncio.create_task(head.command("stop"))
+    try:
+        done, _ = await asyncio.wait({task}, timeout=1.0)
+        if not done:
+            raise TimeoutError("WROOM STOP transport acknowledgement unconfirmed")
+        return await task
+    finally:
+        if not task.done():
+            task.cancel()
+            # Unlike wait_for, asyncio.wait never waits for cancellation to be
+            # honored. Observe a late error so it cannot escape as a lost task.
+            def observe_late_stop(completed: asyncio.Task) -> None:
+                if not completed.cancelled():
+                    completed.exception()
+            task.add_done_callback(observe_late_stop)
+
+
 class OperationError(RuntimeError):
     pass
 
@@ -150,9 +174,7 @@ class Coordinator:
         # network or model cleanup; waiting for it would delay the real WROOM
         # stop command despite an urgent operator or human request.
         try:
-            acknowledgement = await asyncio.wait_for(
-                self.heads[robot_id].command("stop"), timeout=1.0
-            )
+            acknowledgement = await _bounded_body_stop(self.heads[robot_id])
         finally:
             if running:
                 # asyncio.wait_for(gather(...)) is NOT bounded if a task
@@ -263,9 +285,7 @@ class Coordinator:
                 # Dispatch WROOM stop before potentially slow canceled camera
                 # or model cleanup. No second actor may treat this as charging.
                 try:
-                    await asyncio.wait_for(
-                        self.heads[job.robot_id].command("stop"), timeout=1.0
-                    )
+                    await _bounded_body_stop(self.heads[job.robot_id])
                     job.events.append(
                         "stop acknowledged; servo positions are commanded, not measured"
                     )

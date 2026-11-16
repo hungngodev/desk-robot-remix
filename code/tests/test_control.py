@@ -717,3 +717,67 @@ async def test_job_cleanup_stop_timeout_fails_without_false_ack(settings):
         assert head.commands.count("drive 0 0 10") == 1
     finally:
         await c.close()
+
+
+async def test_cancellation_resistant_stop_returns_before_transport_finishes(settings):
+    """STOP timeout stays bounded even if a transport suppresses CancelledError."""
+    c, head = make(settings)
+    reached = asyncio.Event()
+    release = asyncio.Event()
+    original = head.command
+
+    async def stubborn_stop(command):
+        if command != "stop":
+            return await original(command)
+        reached.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            return {"ok": True, "reply": "stop", "robot_id": "robot-01"}
+
+    head.command = stubborn_stop
+    try:
+        with pytest.raises(TimeoutError, match="STOP transport acknowledgement unconfirmed"):
+            await asyncio.wait_for(c.stop("robot-01"), timeout=1.8)
+        assert reached.is_set()
+        assert not release.is_set()
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+        await c.close()
+
+
+async def test_cleanup_cannot_claim_late_uncertain_stop_ack(settings):
+    """A late ACK after timed-out STOP is not successful job cleanup."""
+    c, head = make(settings)
+    reached = asyncio.Event()
+    release = asyncio.Event()
+    original = head.command
+
+    async def stubborn_stop(command):
+        if command != "stop":
+            return await original(command)
+        reached.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            return {"ok": True, "reply": "stop", "robot_id": "robot-01"}
+
+    head.command = stubborn_stop
+    try:
+        await c.operator_arm("robot-01")
+        job = c.manual("robot-01", "drive 0 0 10")
+        await asyncio.wait_for(c.tasks[job.id], timeout=1.8)
+        assert reached.is_set()
+        assert job.state == "failed"
+        assert "STOP failed" in (job.error or "")
+        assert not any("stop acknowledged" in event for event in job.events)
+        release.set()
+        await asyncio.sleep(0)
+        assert job.state == "failed"
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+        await c.close()
