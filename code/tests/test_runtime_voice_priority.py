@@ -844,3 +844,87 @@ async def test_recovered_vad_snapshot_reconciles_camera_despite_failed_audio_sto
     assert events == ["vad-prepared", "pet-stop", "group-stop", "camera-start"]
     assert hub.user_active("robot-01", time.monotonic())
     assert hub.voice_until["robot-01"] == float("inf")
+
+
+async def test_runtime_shutdown_attempts_other_owners_after_pet_cleanup_failure():
+    """One stuck observer never suppresses camera, speaker or client cleanup."""
+    events = []
+
+    class Coordinator:
+        async def close(self):
+            events.append("wroom")
+
+    class Pet:
+        async def close(self):
+            events.append("pet")
+            raise TimeoutError("Pet observer cancellation unconfirmed")
+
+    class Multimodal:
+        async def close(self):
+            events.append("camera")
+
+    class Conversation:
+        async def stop(self):
+            events.append("speaker")
+
+    class Client:
+        async def aclose(self):
+            events.append("client")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(mode="simulation")
+    runtime._voice_task = None
+    runtime.coordinator = Coordinator()
+    runtime.pet = Pet()
+    runtime.multimodal = Multimodal()
+    runtime.conversation = Conversation()
+    runtime.client = Client()
+
+    with pytest.raises(TimeoutError, match="Pet observer cancellation unconfirmed"):
+        await asyncio.wait_for(runtime.close(), timeout=1)
+    assert events == ["wroom", "pet", "camera", "speaker", "client"]
+
+
+async def test_runtime_shutdown_bounds_uncooperative_voice_monitor_and_continues(
+    monkeypatch,
+):
+    monkeypatch.setattr("desk_robot.runtime._RUNTIME_VOICE_STOP_TIMEOUT_S", 0.05)
+    events = []
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def stubborn_monitor():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    class CloseOwner:
+        async def close(self):
+            events.append("owner")
+
+        async def stop(self):
+            events.append("speaker")
+
+        async def aclose(self):
+            events.append("client")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(mode="simulation")
+    runtime.coordinator = CloseOwner()
+    runtime.pet = CloseOwner()
+    runtime.multimodal = CloseOwner()
+    runtime.conversation = CloseOwner()
+    runtime.client = CloseOwner()
+    task = asyncio.create_task(stubborn_monitor())
+    runtime._voice_task = task
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        with pytest.raises(TimeoutError, match="voice monitor shutdown unconfirmed"):
+            await asyncio.wait_for(runtime.close(), timeout=0.5)
+        assert events == ["owner", "owner", "owner", "speaker", "client"]
+        assert not task.done()
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=0.3)

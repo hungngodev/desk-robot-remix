@@ -24,6 +24,7 @@ from .vision import OllamaScene, YoloWorldVision
 
 
 _MONITOR_STOP_TIMEOUT_S = 0.35
+_RUNTIME_VOICE_STOP_TIMEOUT_S = 2.5
 
 
 async def _bounded_monitor_stop(coro) -> None:
@@ -262,20 +263,53 @@ class Runtime:
             raise preempt_error
 
     async def close(self):
+        """Attempt every owner cleanup even after one unconfirmed STOP."""
+        errors: list[Exception] = []
+
+        async def step(label: str, operation, deadline: float) -> None:
+            task = asyncio.create_task(operation)
+            try:
+                done, _ = await asyncio.wait({task}, timeout=deadline)
+                if not done:
+                    raise TimeoutError(f"{label} shutdown unconfirmed")
+                await task
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    task.add_done_callback(
+                        lambda done: None if done.cancelled() else done.exception()
+                    )
+
+        # Physical motor STOP is always attempted before expensive voice
+        # and camera teardown. A stuck pet cannot starve its four peers.
         if self.settings.mode == "hardware":
-            self.pet.set_voice_monitor_ready(False)
-        # Keep network resource cleanup unconditional even if a stuck voice
-        # owner reports an unconfirmed shutdown after physical STOP.
-        try:
-            # Never wait for voice/model teardown before physical STOP.
-            await self.coordinator.close()
-            if self._voice_task is not None:
-                self._voice_task.cancel()
-                await asyncio.gather(self._voice_task, return_exceptions=True)
-                self._voice_task = None
-            await self.pet.close()
-            if self.multimodal is not None:
-                await self.multimodal.close()
-            await self.conversation.stop()
-        finally:
-            await self.client.aclose()
+            try:
+                self.pet.set_voice_monitor_ready(False)
+            except Exception as exc:
+                errors.append(exc)
+        await step("WROOM motion", self.coordinator.close(), 4.0)
+
+        if self._voice_task is not None:
+            task = self._voice_task
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=_RUNTIME_VOICE_STOP_TIMEOUT_S)
+            if not done:
+                errors.append(TimeoutError("Native voice monitor shutdown unconfirmed"))
+                task.add_done_callback(
+                    lambda done: None if done.cancelled() else done.exception()
+                )
+            elif not task.cancelled():
+                error = task.exception()
+                if error is not None:
+                    errors.append(error)
+            self._voice_task = None
+
+        await step("Pet observer", self.pet.close(), 5.0)
+        if self.multimodal is not None:
+            await step("Camera orchestration", self.multimodal.close(), 3.0)
+        await step("Conversation", self.conversation.stop(), 3.0)
+        await step("Mac HTTP client", self.client.aclose(), 3.0)
+        if errors:
+            raise errors[0]
