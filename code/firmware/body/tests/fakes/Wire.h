@@ -12,6 +12,7 @@ class TwoWire {
   bool unsafe_parallel_mux = false;
   unsigned transactions = 0;
   std::uint8_t ads_config_high = 0xC3;
+  bool ads_conversion_ready = true;
   std::uint8_t current_address = 0, register_address = 0;
   std::vector<std::uint8_t> outbound;
   std::vector<std::uint8_t> inbound;
@@ -198,6 +199,11 @@ class TwoWire {
       inbound = {0x10, 0x00};
     else if (addr == 0x40 && register_address == 0x01)
       inbound = {0x00, 0x10};
+    else if (addr == 0x48 && register_address == 0x01) {
+      inbound = {static_cast<std::uint8_t>(
+          (ads_config_high & 0x7fU) | (ads_conversion_ready ? 0x80U : 0U)
+        ), 0x83};
+    }
     else if (addr == 0x48 && register_address == 0x00) {
       if (ads_config_high == 0xC3) inbound = {0x04, 0x00};
       else inbound = {0xFE, 0xDC};

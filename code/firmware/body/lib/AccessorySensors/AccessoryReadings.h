@@ -55,6 +55,13 @@ struct BarometerRaw {
 constexpr std::uint32_t next_nonzero_sensor_sequence(std::uint32_t previous) {
   return previous == 0xffffffffU ? 1U : previous + 1U;
 }
+// ADS1115 datasheet 8.1.3: OS=1 on read means conversion completed.
+// Also require the configured single-shot mode and selected channel.
+constexpr bool ads1115_completed_for_channel(std::uint16_t config,
+                                             std::uint8_t channel) {
+  return channel < 2U && (config & 0x8000U) != 0U &&
+    (config & 0x7fffU) == (channel == 0U ? 0x4383U : 0x5383U);
+}
 
 struct ForceRaw {
   bool present = false, valid = false;

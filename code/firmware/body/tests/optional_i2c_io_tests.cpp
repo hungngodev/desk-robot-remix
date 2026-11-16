@@ -24,6 +24,12 @@ int main() {
     CHECK(desk_robot::next_nonzero_sensor_sequence(0U) == 1U);
     CHECK(desk_robot::next_nonzero_sensor_sequence(0xfffffffeU) == 0xffffffffU);
     CHECK(desk_robot::next_nonzero_sensor_sequence(0xffffffffU) == 1U);
+    CHECK(desk_robot::ads1115_completed_for_channel(0xC383U, 0U));
+    CHECK(desk_robot::ads1115_completed_for_channel(0xD383U, 1U));
+    CHECK(!desk_robot::ads1115_completed_for_channel(0x4383U, 0U)); // OS busy
+    CHECK(!desk_robot::ads1115_completed_for_channel(0x5383U, 1U)); // OS busy
+    CHECK(!desk_robot::ads1115_completed_for_channel(0xD383U, 0U)); // wrong mux
+    CHECK(!desk_robot::ads1115_completed_for_channel(0xC383U, 2U)); // no lane 2
     CHECK(pulse.begin(Wire));
     CHECK(touch.begin(Wire));
     CHECK(Wire.ranges == 0 && Wire.extras == 0);
@@ -35,6 +41,19 @@ int main() {
       CHECK(Wire.ranges == 0 && Wire.extras == 0);
       CHECK(!Wire.unsafe_parallel_mux);
     }
+    // A busy ADS1115 must not turn a cached old register into new jaw data.
+    const auto prior_jaw_seq = accessories.readings().force.jaw_sample_seq;
+    CHECK(prior_jaw_seq > 0U);
+    Wire.ads_conversion_ready = false;
+    for (std::uint32_t ms = 1608; ms < 3200; ms += 12)
+      accessories.poll(ms);
+    CHECK(accessories.readings().force.jaw_sample_seq == prior_jaw_seq);
+    CHECK(!accessories.readings().force.valid);
+    Wire.ads_conversion_ready = true;
+    for (std::uint32_t ms = 3204; ms < 4700; ms += 12)
+      accessories.poll(ms);
+    CHECK(accessories.readings().force.valid);
+    CHECK(accessories.readings().force.jaw_sample_seq > prior_jaw_seq);
     CHECK(bits == 0xA5);
     CHECK(pulse.sample().present);
     CHECK(pulse.sample().valid);

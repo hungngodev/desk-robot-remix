@@ -253,8 +253,17 @@ void AccessorySensors::force(std::uint32_t now_ms) {
     return;
   }
   if (now_ms - ads_started_ < 9U) return; // nonblocking ADS1115 128SPS
+  std::uint16_t config = 0;
+  const bool status_read = read16(0x48, 0x01, config);
+  // Do not increment an acquisition sequence for a cached conversion register.
+  // OS=0 means the previous single-shot conversion is still in progress.
+  // Allow another 12ms mux round, but never wait indefinitely on a dead ADC.
+  if (status_read && (config & 0x8000U) == 0U &&
+      now_ms - ads_started_ < 200U) return;
   std::uint16_t value = 0;
-  const bool fresh = read16(0x48, 0x00, value);
+  const bool fresh = status_read &&
+      ads1115_completed_for_channel(config, ads_channel_) &&
+      read16(0x48, 0x00, value);
   if (fresh) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
