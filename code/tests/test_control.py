@@ -822,3 +822,67 @@ async def test_exploration_inflight_stop_timeout_aborts_before_second_drive(sett
         release.set()
         await asyncio.sleep(0)
         await c.close()
+
+
+async def test_slow_operator_arm_cannot_revive_permit_after_stop(settings):
+    """A STOP supersedes an unfinished but previously healthy preflight."""
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    arrived = asyncio.Event()
+    release = asyncio.Event()
+    original = head.status
+
+    async def delayed_status():
+        arrived.set()
+        await release.wait()
+        return await original()
+
+    head.status = delayed_status
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        arm = asyncio.create_task(c.operator_arm("robot-01"))
+        await asyncio.wait_for(arrived.wait(), timeout=1)
+        assert not c.permits
+        await c.stop("robot-01")
+        release.set()
+        with pytest.raises(OperationError, match="superseded"):
+            await asyncio.wait_for(arm, timeout=1)
+        assert c.permits.get("robot-01") is None
+    finally:
+        release.set()
+        await c.close()
+
+
+async def test_latest_operator_arm_wins_over_older_delayed_preflight(settings):
+    """A stale callback cannot overwrite a later operator permit."""
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    arrived = asyncio.Event()
+    release = asyncio.Event()
+    reads = 0
+    original = head.status
+
+    async def delayed_first_status():
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            arrived.set()
+            await release.wait()
+        return await original()
+
+    head.status = delayed_first_status
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        first = asyncio.create_task(c.operator_arm("robot-01"))
+        await asyncio.wait_for(arrived.wait(), timeout=1)
+        latest = await c.operator_arm("robot-01")
+        assert latest["operator_permit"] is True
+        permit = c.permits["robot-01"]
+        release.set()
+        with pytest.raises(OperationError, match="superseded"):
+            await asyncio.wait_for(first, timeout=1)
+        assert c.permits["robot-01"] == permit
+        assert head.commands == []
+    finally:
+        release.set()
+        await c.close()

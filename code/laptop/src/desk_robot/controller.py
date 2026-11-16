@@ -67,6 +67,7 @@ class Coordinator:
         self.tasks: dict[str, asyncio.Task] = {}
         self.closed = False
         self.permits: dict[str, float] = {}
+        self._permit_epoch = {r.id: 0 for r in settings.robots}
 
     def robot(self, robot_id):
         try:
@@ -149,8 +150,16 @@ class Coordinator:
             j.robot_id == robot_id and j.state in {"queued", "running"} for j in self.jobs.values()
         ):
             raise OperationError("Robot busy")
+        # Retire any older in-flight preflight before awaiting the head.
+        self._permit_epoch[robot_id] += 1
+        owner_epoch = self._permit_epoch[robot_id]
         self.permits.pop(robot_id, None)
         await self._hardware_preflight(robot_id)
+        if (self.closed or self._permit_epoch[robot_id] != owner_epoch
+                or self.locks[robot_id].locked()
+                or any(j.robot_id == robot_id and j.state in {"queued", "running"}
+                       for j in self.jobs.values())):
+            raise OperationError("Operator arm superseded or robot became busy")
         self.permits[robot_id] = time.monotonic() + 30
         return {
             "robot_id": robot_id,
@@ -162,6 +171,7 @@ class Coordinator:
 
     async def stop(self, robot_id: str):
         self.robot(robot_id)
+        self._permit_epoch[robot_id] += 1
         self.permits.pop(robot_id, None)
         running = [
             task
@@ -231,6 +241,7 @@ class Coordinator:
                     del self.jobs[jid]
                     del self.tasks[jid]
                     break
+        self._permit_epoch[robot_id] += 1
         self.permits.pop(robot_id, None)  # consume once, even if ACK/job later fails
         job = Job(uuid.uuid4().hex, robot_id, kind)
         self.jobs[job.id] = job
