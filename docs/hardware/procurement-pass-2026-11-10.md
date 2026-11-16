@@ -1,3 +1,5 @@
+> **SUPERSEDED November 16, preserved as historical November 10 audit.** This page's 25-VL53L4CD and 5-TCA9548A estimates are obsolete. The full eight-ranger/two-mux design instead requires **40 VL53L4CD and 10 TCA9548A** across five robots, plus the five docks and shared room station. Consult only [the canonical machine plan](full-feature-plan.json) and [generated owned and buy lists](complete-shopping-checklist.md) for order quantities. Do not order on the figures below.
+
 # Purchase and owned stock reconciliation, November 10, 2026
 
 This is not a purchase order. No physical inventory count, electrical bench acceptance,
