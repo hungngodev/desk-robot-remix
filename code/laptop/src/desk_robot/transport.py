@@ -179,7 +179,7 @@ class HttpHead:
             response = await self._request("POST", "/api/command", json={"command": command})
             data = response.json()
             reply = data.get("reply", "")
-            if not data.get("ok") or data.get("robot_id") != self.config.id or reply != expected:
+            if data.get("ok") is not True or data.get("robot_id") != self.config.id or reply != expected:
                 raise HeadError("Unmatched or failed command ACK; movement not retried")
             return data
 

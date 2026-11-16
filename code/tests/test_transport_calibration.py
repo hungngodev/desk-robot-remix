@@ -642,3 +642,26 @@ async def test_replaced_mjpeg_stream_cannot_publish_or_clear_new_stream(settings
         assert await head.snapshot() == fresh
         await replacement.aclose()
         assert not head._stream_connected
+
+
+@pytest.mark.parametrize("ok", [
+    None, 0, 1, "true", "false", [], {}, False,
+])
+async def test_head_command_ack_requires_json_boolean_true(settings, tokens, ok):
+    """A truthy nonboolean ACK must not authorize more physical motion."""
+    import httpx
+
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={
+            "ok": ok, "reply": "OK drive left=20 right=20 ms=100",
+            "robot_id": "robot-01",
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client)
+        with pytest.raises(HeadError, match="Unmatched or failed command ACK"):
+            await head.command("drive 20 20 100")
+        assert len(calls) == 1
