@@ -1172,3 +1172,29 @@ async def test_failed_speech_snapshot_retries_without_replaying_acked_interrupt(
         assert await listener.poll() == 0
         assert snapshots == 3
         assert calls == [("robot-01", "speech_start")]
+
+
+async def test_cancelled_shared_audio_abort_does_not_cancel_voice_monitor():
+    """A child STOP cancellation is not an instruction to kill VAD polling."""
+    import asyncio
+
+    async def cancelled_abort(reason):
+        raise asyncio.CancelledError()
+
+    async def unexpected_single(robot, reason):
+        raise AssertionError("Unexpected per pet abort")
+
+    async with httpx.AsyncClient() as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=unexpected_single,
+            on_global_interrupt=cancelled_abort,
+        )
+        with pytest.raises(TimeoutError, match="cancelled without ACK"):
+            await listener._preempt_all("stream_unavailable")
+        assert listener._global_abort_task is not None
+        assert listener._global_abort_task.cancelled()
+        # A new attempt remains available; a cancelled child is not a
+        # successful shared decoder STOP or permanent monitor shutdown.
+        with pytest.raises(TimeoutError, match="cancelled without ACK"):
+            await listener._preempt_all("stream_unavailable")

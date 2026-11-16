@@ -83,6 +83,11 @@ class VoiceEventListener:
                 done, pending = await asyncio.wait({task}, timeout=0.5)
                 if pending:
                     raise TimeoutError("Shared fleet interruption incomplete")
+                if task.cancelled():
+                    # Cancellation of a child speaker callback is not a
+                    # confirmed decoder flush and must not terminate the
+                    # independent VAD monitor task as if it was cancelled.
+                    raise TimeoutError("Shared fleet interruption cancelled without ACK")
                 task.result()
             finally:
                 if not task.done():
