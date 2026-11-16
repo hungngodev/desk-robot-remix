@@ -459,3 +459,38 @@ async def test_gripper_foreign_robot_force_mid_close_triggers_guarded_relief(
             head, Settings(), robot_id="robot-01", health=healthy,
         )
     assert head.commands == ["grip 65", "grip 60"]
+
+
+async def test_gripper_cannot_wait_forever_for_uncooperative_force_adapter(
+    monkeypatch,
+):
+    """A late ADC result after cancellation must never authorize jaw closure."""
+    import asyncio
+    import desk_robot.grasp_feedback as feedback
+
+    monkeypatch.setattr(feedback, "_FORCE_READ_TIMEOUT_S", 0.04)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class StalledForceHead(FakeHead):
+        async def aux_status(self):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return await super().aux_status()
+
+    head = StalledForceHead([100])
+    try:
+        with pytest.raises(OperationError, match="Fresh force feedback required"):
+            await asyncio.wait_for(
+                guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy),
+                timeout=0.5,
+            )
+        assert entered.is_set()
+        assert head.commands == []
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+    assert head.commands == []

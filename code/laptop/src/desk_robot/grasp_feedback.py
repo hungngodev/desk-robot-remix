@@ -60,7 +60,7 @@ async def guarded_grasp(
     head: "Head", calibration: "Calibration",
     *, robot_id: str, health: Callable[[], Awaitable[dict]],
 ) -> dict:
-    from .controller import OperationError
+    from .controller import OperationError, _bounded_head_reply
 
     threshold = calibration.grip_force_delta_raw
     ceiling = calibration.grip_force_limit_raw
@@ -70,8 +70,9 @@ async def guarded_grasp(
         raise ValueError("Gripper requires the configured robot identity")
 
     async def read_force() -> tuple[int, int]:
-        sample = await asyncio.wait_for(
-            head.aux_status(), timeout=_FORCE_READ_TIMEOUT_S
+        sample = await _bounded_head_reply(
+            head.aux_status(), seconds=_FORCE_READ_TIMEOUT_S,
+            timeout_message="ADS1115 jaw force read timed out",
         )
         if not isinstance(sample, dict) or sample.get("robot_id") != robot_id:
             raise ValueError("Foreign or missing jaw sensor robot identity")
@@ -97,12 +98,19 @@ async def guarded_grasp(
         for angle in grip_angles(
             calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
         )[1:]:
-            await asyncio.wait_for(health(), timeout=_HEALTH_READ_TIMEOUT_S)
-            await asyncio.wait_for(
-                head.command(f"grip {angle}"), timeout=_GRIP_COMMAND_TIMEOUT_S
+            await _bounded_head_reply(
+                health(), seconds=_HEALTH_READ_TIMEOUT_S,
+                timeout_message="Gripper WROOM health check timed out",
+            )
+            await _bounded_head_reply(
+                head.command(f"grip {angle}"), seconds=_GRIP_COMMAND_TIMEOUT_S,
+                timeout_message="Gripper servo command unconfirmed",
             )
             await asyncio.sleep(0.18)
-            await asyncio.wait_for(health(), timeout=_HEALTH_READ_TIMEOUT_S)
+            await _bounded_head_reply(
+                health(), seconds=_HEALTH_READ_TIMEOUT_S,
+                timeout_message="Gripper WROOM health check timed out",
+            )
             try:
                 measured, seq = await read_force()
             except (KeyError, TypeError, ValueError, AttributeError,
@@ -132,10 +140,14 @@ async def guarded_grasp(
         # ONLY while the WROOM still reports fresh local safety authority.
         # If touch/cliff/IMU disarmed the body, NEVER bypass that interlock.
         try:
-            await asyncio.wait_for(health(), timeout=_HEALTH_READ_TIMEOUT_S)
-            await asyncio.wait_for(
+            await _bounded_head_reply(
+                health(), seconds=_HEALTH_READ_TIMEOUT_S,
+                timeout_message="Gripper relief health check timed out",
+            )
+            await _bounded_head_reply(
                 head.command(f"grip {calibration.grip_open}"),
-                timeout=_GRIP_COMMAND_TIMEOUT_S,
+                seconds=_GRIP_COMMAND_TIMEOUT_S,
+                timeout_message="Gripper relief command unconfirmed",
             )
         except Exception:
             pass  # Preserve the primary failure; body stop/watchdog is next.
