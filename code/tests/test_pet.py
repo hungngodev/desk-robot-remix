@@ -4380,7 +4380,7 @@ async def test_camera_hub_reconnect_drops_inflight_old_scene_comparison(
     hub = CameraFrameHub([robot.id for robot in fleet.robots])
     memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
     pet = PetController(
-        fleet, {"robot-01": Head()},
+        fleet, {"robot-01": ChangingCamera()},
         Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
         memory, SlowScene(), interval=0.01,
     )
