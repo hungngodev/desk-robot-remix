@@ -490,7 +490,7 @@ def test_late_output_clear_cannot_mute_recovered_native_response():
     assert wire.handle_event(delta("old", epoch=0)) is not None
     wire.interrupt()
     # STOP and output clear each advance the native server generation.
-    wire.append_audio(b"\\0" * 32000, speech=False)
+    wire.append_audio(bytes(32000), speech=False)
     wire.handle_event({
         "type": "response.created", "response_id": "new",
         "response": {"id": "new", "metadata": {"duplex_event": {"epoch": 2}}},
