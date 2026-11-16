@@ -178,6 +178,118 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             "missing_system_evidence": missing_system, "robots": rows, "room_pod": room}
 
 
+
+def _purchase_rows(report: dict):
+    for row in report["robots"]:
+        yield "pet or dock", row
+    for row in report["room_pod"]:
+        yield "shared station", row
+
+
+def render_csv(report: dict) -> str:
+    """Authoritative machine-readable 49-role view of the physical gated plan."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow((
+        "scope", "part_id", "component", "per_robot", "fleet_total",
+        "reported_owned_unverified", "estimated_owned_unverified",
+        "ordered_unreceived", "remaining_if_all_reported_stock_works",
+        "purchase_approved", "reference_vendor", "reference_sku",
+        "reference_url", "shopping_decision", "notes",
+    ))
+    for scope, part in _purchase_rows(report):
+        ref = part.get("reference_only") or {}
+        writer.writerow((
+            scope, part["id"], part["name"], part["per_robot"],
+            part.get("fleet_total", part.get("shared_total", 0)),
+            part["reported_owned_not_verified"],
+            part["estimated_owned_not_verified"],
+            part["ordered_unreceived_not_verified"],
+            part["remaining_if_reported_stock_works"],
+            "yes" if part["approved_for_fleet_purchase"] else "NO",
+            ref.get("vendor", ""), ref.get("sku", ""), ref.get("url", ""),
+            part["shopping_decision"], part["notes"],
+        ))
+    return output.getvalue()
+
+
+def render_markdown(report: dict) -> str:
+    """Only two shopping lists, with explicit counts and no implied purchase."""
+    def cell(value: object) -> str:
+        return str(value).replace("|", r"\|").replace("\n", " ").strip()
+
+    output = [
+        "# Five desk pets, five docks, and the shared room station",
+        "",
+        "Generated from docs/hardware/full-feature-plan.json by "
+        "code/scripts/procurement_release.py. This file is a projection "
+        "of the plan, never a second editable bill of materials.",
+        "",
+        "**FULL FLEET PURCHASE: " +
+        ("APPROVED BY RECORDED EVIDENCE" if report["order_released"]
+         else "HOLD. No complete electrical, mechanical or physical acceptance.") +
+        "** Quantities are design slots, not certified supplier checkouts. "
+        "Estimated owned counts and ordered units have not been inspected.",
+        "",
+        "## 1. Owned or ordered, as reported",
+        "",
+        "| Component | Reported on hand, unverified | Estimated on hand, unverified | Ordered, not received |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for _, part in _purchase_rows(report):
+        owned = part["reported_owned_not_verified"]
+        estimate = part["estimated_owned_not_verified"]
+        ordered = part["ordered_unreceived_not_verified"]
+        if owned or estimate or ordered:
+            output.append(
+                f"| {cell(part['name'])} | {owned} | {estimate} | {ordered} |"
+            )
+    output.extend((
+        "",
+        "Other reported spares are not interchangeable with chosen modules: "
+        "BerryIMU, MAX9814, an extra camera, GY61, PAM8403, spare DRV8833 "
+        "and assorted IR sensors. The owned Feather nRF52840 is only "
+        "an estimated station controller until its actual firmware works.",
+        "",
+        "## 2. Remaining components or unqualified roles",
+        "",
+        "| Scope | Component | Fleet required | Conditional remaining | Status | Vendor reference or design blocker |",
+        "| --- | --- | ---: | ---: | --- | --- |",
+    ))
+    for scope, part in _purchase_rows(report):
+        total = part.get("fleet_total", part.get("shared_total", 0))
+        remaining = part["remaining_if_reported_stock_works"]
+        status = "APPROVED" if part["approved_for_fleet_purchase"] else "HOLD"
+        if part["shopping_decision"].startswith("hold_until_drivetrain"):
+            status = "HOLD MOTOR CHOICE"
+        reference = part.get("reference_only") or {}
+        note = (f"{reference['vendor']} {reference['sku']}: {reference['url']}"
+                if reference else part["notes"])
+        output.append(
+            f"| {cell(scope)} | {cell(part['name'])} | {total} | "
+            f"{remaining} | {status} | {cell(note)} |"
+        )
+    output.extend((
+        "",
+        "A zero remaining quantity can mean a component is estimated owned "
+        "or ordered, NOT physically counted, delivered or qualified. "
+        "Recount the estimated ten MG90S and five MAX30102 and verify "
+        "arrival of the one ordered XIAO Sense before buying duplicates.",
+        "",
+        "Existing 28BYJ48 and ULN2003 totals belong to the STEP motor "
+        "variant. The new guarded DC firmware does not mean that N20 "
+        "motors have been selected, fitted or load tested. Do not buy "
+        "the missing steppers or new N20 motors before that decision.",
+        "",
+        "Protected single-cell charging, contact isolation, IR baffles, "
+        "station USB readings, and commercially reusable fitted CAD "
+        "remain unqualified. Do not energize any lithium charging circuit "
+        "based on this design ledger.",
+        "",
+    ))
+    return "\n".join(output)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, default=PLAN)
@@ -185,12 +297,19 @@ def main() -> int:
                         help="Operator-recorded measured qualification JSON, if any")
     parser.add_argument("--require-release", action="store_true",
                         help="Exit 2 unless every part and system receipt has passed")
+    parser.add_argument("--format", choices=("json", "csv", "markdown"),
+                        default="json", help="Render one verified quantity ledger")
     args = parser.parse_args()
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
     evidence = (json.loads(args.evidence.read_text(encoding="utf-8"))
                 if args.evidence else {})
     report = generate(plan, evidence)
-    print(json.dumps(report, indent=2))
+    if args.format == "csv":
+        print(render_csv(report), end="")
+    elif args.format == "markdown":
+        print(render_markdown(report), end="")
+    else:
+        print(json.dumps(report, indent=2))
     return 2 if args.require_release and not report["order_released"] else 0
 
 
