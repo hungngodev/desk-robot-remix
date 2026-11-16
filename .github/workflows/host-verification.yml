@@ -65,6 +65,8 @@ jobs:
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
       - name: Compile full eight VL53L4CD robot firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full
+      - name: Compile full guarded DRV8833 DC drivetrain firmware
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_full
       - name: Compile preserved DC reference
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32dev
       - name: Compile five source-reused classic NEC bench dock beacons
