@@ -2031,3 +2031,59 @@ async def test_uncooperative_visual_model_timeout_releases_fleet_inference_lock(
         release.set()
         await asyncio.sleep(0)
         await service.close()
+
+
+async def test_cancel_resistant_snapshot_keeps_physical_read_owned_across_turns(
+    monkeypatch,
+):
+    """A stale snapshot cannot overlap a newer capture on the same XIAO."""
+    from desk_robot import controller
+
+    normal = controller._bounded_head_reply
+
+    async def fast_timeout(coro, *, seconds, timeout_message):
+        return await normal(coro, seconds=0.04, timeout_message=timeout_message)
+
+    monkeypatch.setattr(controller, "_bounded_head_reply", fast_timeout)
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    class StubbornHead(Head):
+        async def snapshot(self):
+            self.captures += 1
+            if self.captures == 1:
+                entered.set()
+                while not released.is_set():
+                    try:
+                        await released.wait()
+                    except asyncio.CancelledError:
+                        continue
+            return image(square=True)
+
+    head, peer = StubbornHead(), Head()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": peer},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        with pytest.raises(TimeoutError, match="Live proactive camera timed out"):
+            await visual.capture("robot-01", source="proactive")
+        await asyncio.wait_for(entered.wait(), 0.2)
+        assert not visual._head_snapshot_tasks["robot-01"].done()
+        # An expired snapshot is still touching this device. Do not create
+        # a competing human or background snapshot while it runs.
+        with pytest.raises(RuntimeError, match="still in flight"):
+            await visual.capture("robot-01", source="speech")
+        assert head.captures == 1
+        assert not visual.hub.frames["robot-01"]
+        # The other robot is independently operational.
+        await visual.capture("robot-02", source="speech")
+        assert peer.captures == 1
+        released.set()
+        await asyncio.wait_for(visual._head_snapshot_tasks["robot-01"], 0.5)
+        assert not visual.hub.frames["robot-01"]
+        await visual.capture("robot-01", source="speech")
+        assert head.captures == 2
+        assert len(visual.hub.frames["robot-01"]) == 1
+    finally:
+        released.set()
+        await visual.close()

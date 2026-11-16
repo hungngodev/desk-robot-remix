@@ -650,6 +650,9 @@ class MultimodalOrchestrator:
         self._sensor_tasks: dict[str, asyncio.Task] = {}
         # Own only the optional HTTP snapshot, not its permanent pet loop.
         self._proactive_snapshots: dict[str, asyncio.Task] = {}
+        # A timed out adapter can ignore cancellation. Preserve ownership of
+        # its real physical read even after the caller releases camera_lock.
+        self._head_snapshot_tasks: dict[str, asyncio.Task] = {}
         self._last_sensor_request = {r.id: -math.inf for r in settings.robots}
         self._look_tasks: dict[str, asyncio.Task] = {}
         self._camera_locks = {
@@ -1134,6 +1137,38 @@ class MultimodalOrchestrator:
         future.add_done_callback(finished)
         return await asyncio.wrap_future(future)
 
+    async def _head_snapshot(self, robot_id: str, *, source: str) -> bytes:
+        """One real device read until its task exits, even after a timeout."""
+        previous = self._head_snapshot_tasks.get(robot_id)
+        if previous is not None:
+            if not previous.done():
+                raise RuntimeError("Previous XIAO camera snapshot still in flight")
+            self._head_snapshot_tasks.pop(robot_id, None)
+        task = asyncio.create_task(self.heads[robot_id].snapshot())
+        self._head_snapshot_tasks[robot_id] = task
+        # Observe late adapter failures; obsolete frames are never published.
+        task.add_done_callback(
+            lambda finished: None if finished.cancelled()
+            else finished.exception()
+        )
+        if source == "proactive":
+            self._proactive_snapshots[robot_id] = task
+        try:
+            from .controller import _bounded_head_reply
+            return await _bounded_head_reply(
+                task, seconds=4.0,
+                timeout_message=(
+                    "Live proactive camera timed out"
+                    if source == "proactive" else "Live human camera timed out"
+                ),
+            )
+        finally:
+            if self._proactive_snapshots.get(robot_id) is task:
+                self._proactive_snapshots.pop(robot_id, None)
+            # Preserve incomplete work as the one physical camera owner.
+            if task.done() and self._head_snapshot_tasks.get(robot_id) is task:
+                self._head_snapshot_tasks.pop(robot_id, None)
+
     async def capture(self, robot_id: str, *, source: str,
                       reuse_if_recent_s: float = 0.0,
                       trigger_kind: str | None = None) -> CameraEvidence:
@@ -1179,28 +1214,9 @@ class MultimodalOrchestrator:
             # Camera latency is measured before CPU postprocessing. A new
             # human voice can still preempt the event loop during decoding.
             try:
-                if source == "proactive":
-                    if self._any_human_active(time.monotonic()):
-                        raise RuntimeError("Human speech preempts autonomous camera")
-                    pending = asyncio.create_task(
-                        self.heads[robot_id].snapshot()
-                    )
-                    self._proactive_snapshots[robot_id] = pending
-                    try:
-                        from .controller import _bounded_head_reply
-                        jpeg = await _bounded_head_reply(
-                            pending, seconds=4.0,
-                            timeout_message="Live proactive camera timed out",
-                        )
-                    finally:
-                        if self._proactive_snapshots.get(robot_id) is pending:
-                            self._proactive_snapshots.pop(robot_id, None)
-                else:
-                    from .controller import _bounded_head_reply
-                    jpeg = await _bounded_head_reply(
-                        self.heads[robot_id].snapshot(), seconds=4.0,
-                        timeout_message="Live human camera timed out",
-                    )
+                if source == "proactive" and self._any_human_active(time.monotonic()):
+                    raise RuntimeError("Human speech preempts autonomous camera")
+                jpeg = await self._head_snapshot(robot_id, source=source)
                 received = time.monotonic()
                 prepared = await self._prepare_bounded(
                     jpeg, priority=source in ("speech", "voice_question")
@@ -1419,7 +1435,8 @@ class MultimodalOrchestrator:
                  + list(self._sensor_tasks.values())
                  + list(self._look_tasks.values())
                  + list(self._stream_tasks.values()))
-        for task in tasks + list(self._proactive_snapshots.values()):
+        for task in set(tasks + list(self._proactive_snapshots.values())
+                        + list(self._head_snapshot_tasks.values())):
             task.cancel()
         pending = tasks + list(self._proactive_snapshots.values())
         if pending:
@@ -1429,5 +1446,6 @@ class MultimodalOrchestrator:
         self._sensor_tasks.clear()
         self._look_tasks.clear()
         self._proactive_snapshots.clear()
+        self._head_snapshot_tasks.clear()
         self.hub.close()
         self._preprocess_pool.shutdown(wait=False, cancel_futures=True)
