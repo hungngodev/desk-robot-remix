@@ -216,6 +216,7 @@ class Coordinator:
     async def close(self):
         """Revoke permits and send bounded physical STOP before slow cleanup."""
         self.closed = True
+        self.shutdown_stop_failures.clear()  # Each close attempt owns fresh evidence.
         self.permits.clear()
         for robot_id in self._permit_epoch:
             self._permit_epoch[robot_id] += 1
