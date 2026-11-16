@@ -227,5 +227,9 @@
     ],
     "budget_warning": "HTML proposed $34 delivered power plus reported $18.87 Sense listing already totals $52.87 before other unknown parts; potential overlap in shopping list must be reconciled.",
     "engineering_audit": "docs/research/2026-11-09-html-verification.md"
-  }
+  },
+  "historical_prototype_only": true,
+  "procurement_authority": false,
+  "superseded_by": "docs/hardware/full-feature-plan.json",
+  "warning": "This 2026-11-04 $50 quote uses outdated sensor models and incomplete role counts. Never use for current five robot purchases."
 }
