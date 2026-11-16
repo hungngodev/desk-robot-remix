@@ -1169,6 +1169,13 @@ class PetController:
         if getter is None:
             return
         body = await getter()
+        if self.settings.mode == "hardware" and (
+            not isinstance(body, dict) or body.get("robot_id") != robot_id
+        ):
+            # An alternate authenticated head adapter must not attach a
+            # foreign WROOM fault, touch, or side-range reading to this pet.
+            # The poller handles HeadError by disabling background activity.
+            raise HeadError("Pet WROOM status identity mismatch")
         if isinstance(body, dict):
             await self._observe_body_safety(robot_id, generation, body)
             await self._observe_imu(robot_id, generation, body)

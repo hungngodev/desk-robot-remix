@@ -4165,3 +4165,39 @@ async def test_proactive_uncooperative_decision_releases_speech_candidate(
         release.set()
         state.enabled = False
         await pet.close()
+
+
+@pytest.mark.parametrize("reply", [
+    {"robot_id": "robot-02", "touch": {"active": False, "count": 1}},
+    {"touch": {"active": False, "count": 1}},
+    ["robot-01", {"touch": {"active": False, "count": 1}}],
+])
+async def test_pet_background_sensor_source_rejects_foreign_body_identity(
+    fleet, tmp_path, reply,
+):
+    """No cross-pet touch, fault or memory comes from an unverified WROOM."""
+    import copy
+
+    fleet.mode = "hardware"
+
+    class WrongBody:
+        async def status(self):
+            return copy.deepcopy(reply)
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": WrongBody()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(), interval=.01, touch_interval=.01,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 3
+    try:
+        await pet._poll_touch("robot-01", 3)
+        assert state.enabled is False
+        assert "Pet WROOM status identity mismatch" in (state.last_error or "")
+        assert state.events == 0 and state.safety_fault_events == 0
+        assert memory.recent("robot-01") == []
+    finally:
+        await pet.close()
