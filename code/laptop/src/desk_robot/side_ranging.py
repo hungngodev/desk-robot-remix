@@ -15,6 +15,7 @@ SIDE_NAMES = ("left", "right", "rear")
 @dataclass
 class Direction:
     previous_sample_at: float | None = None
+    previous_sample_ms: int | None = None
     initialized: bool = False
     near: bool = False
     consecutive_near: int = 0
@@ -27,6 +28,8 @@ class SideRangeEvents:
         default_factory=lambda: [Direction() for _ in range(3)]
     )
     threshold_mm: int | None = None
+    active_boot_id: int | None = None
+    retired_boot_ids: set[int] = field(default_factory=set)
 
     def observe(self, body: dict, *, now: float, near_mm: int) -> list[tuple[str, int]]:
         """Only transition far -> near after two genuinely new fresh samples.
@@ -51,6 +54,8 @@ class SideRangeEvents:
             return []
         present, valid = data.get("present_mask"), data.get("valid_mask")
         distances, ages = data.get("mm"), data.get("age_ms")
+        sample_times, boot_id = data.get("sample_ms"), data.get("boot_id")
+        has_hardware_identity = sample_times is not None or boot_id is not None
         if (type(present) is not int or type(valid) is not int
                 or not 0 <= present <= 7 or not 0 <= valid <= 7
                 or valid & ~present
@@ -60,7 +65,31 @@ class SideRangeEvents:
                 or any(type(d) is not int or not 0 <= d <= 1300
                        for d in distances)
                 or any(type(a) is not int or not 0 <= a <= 0xffffffff
-                       for a in ages)):
+                       for a in ages)
+                or (has_hardware_identity and (
+                    not isinstance(sample_times, list) or len(sample_times) != 3
+                    or any(type(t) is not int or not 0 <= t <= 0xffffffff
+                           for t in sample_times)
+                    or type(boot_id) is not int or not 1 <= boot_id <= 0xffffffff
+                ))):
+            self._reset()
+            return []
+
+        # Current WROOM frames carry physical acquisition time and per-boot
+        # identity. Once verified, never fall back to host HTTP timing or
+        # resurrect an earlier boot's delayed sensor observations.
+        if has_hardware_identity:
+            if boot_id in self.retired_boot_ids:
+                return []
+            if self.active_boot_id != boot_id:
+                if self.active_boot_id is not None:
+                    if len(self.retired_boot_ids) >= 8:
+                        self._reset()
+                        return []
+                    self.retired_boot_ids.add(self.active_boot_id)
+                self._reset()
+                self.active_boot_id = boot_id
+        elif self.active_boot_id is not None:
             self._reset()
             return []
 
@@ -72,9 +101,19 @@ class SideRangeEvents:
                 self.directions[i] = Direction()
                 continue
             sample_at = now - ages[i] / 1000.0
-            if track.previous_sample_at is not None:
-                # Current Mac event may be a second HTTP read of the same
-                # physical WROOM sample. Cannot earn confirmation twice.
+            if has_hardware_identity:
+                stamp = sample_times[i]
+                if track.previous_sample_ms is not None:
+                    delta = (stamp - track.previous_sample_ms) & 0xffffffff
+                    # Cached reads and backward packets cannot each earn a
+                    # new near/far vote when Mac/network timing fluctuates.
+                    if delta == 0 or delta >= 0x80000000 or delta < 60:
+                        continue
+                    if delta > 2000:
+                        self.directions[i] = track = Direction()
+                track.previous_sample_ms = stamp
+            elif track.previous_sample_at is not None:
+                # Legacy/simulation data lacks WROOM acquisition identity.
                 if sample_at - track.previous_sample_at < 0.06:
                     continue
                 if sample_at - track.previous_sample_at > 2.0:

@@ -11,14 +11,15 @@ from desk_robot.simulator import SimulatedChat, SimulatedScene, SimulatedSpeaker
 
 
 def body(*, mm=(600, 600, 600), ages=(30, 30, 30),
-         present=7, valid=7):
-    return {
-        "side_ranges": {
-            "mm": list(mm), "age_ms": list(ages),
-            "present_mask": present, "valid_mask": valid,
-            "motion_certified": False,
-        },
+         present=7, valid=7, sample_ms=None, boot_id=None):
+    side = {
+        "mm": list(mm), "age_ms": list(ages),
+        "present_mask": present, "valid_mask": valid,
+        "motion_certified": False,
     }
+    if sample_ms is not None:
+        side.update(sample_ms=list(sample_ms), boot_id=boot_id)
+    return {"side_ranges": side}
 
 
 def test_side_near_requires_two_independent_new_samples_and_far_rearm():
@@ -133,3 +134,52 @@ def test_threshold_change_cannot_fabricate_new_side_arrival():
                            near_mm=250) == []
     assert tracker.observe(body(mm=(215, 600, 600)), now=1.72,
                            near_mm=250) == [("left", 215)]
+
+
+def test_real_wroom_side_acquisition_identity_rejects_polling_jitter():
+    tracker = SideRangeEvents()
+
+    def sample(mm, stamp, boot=901):
+        return body(mm=(mm, 600, 600), sample_ms=(stamp, stamp, stamp),
+                    boot_id=boot)
+
+    assert tracker.observe(sample(600, 100), now=1.0, near_mm=170) == []
+    assert tracker.observe(sample(100, 200), now=1.2, near_mm=170) == []
+    # Two HTTP responses with different latency are not two conversions.
+    assert tracker.observe(body(mm=(100, 600, 600), ages=(0, 0, 0),
+                                sample_ms=(200, 200, 200), boot_id=901),
+                           now=1.5, near_mm=170) == []
+    assert tracker.observe(sample(105, 300), now=1.6,
+                           near_mm=170) == [("left", 105)]
+    assert tracker.observe(sample(600, 250), now=1.8, near_mm=170) == []
+    assert tracker.observe(sample(90, 100), now=2.0, near_mm=170) == []
+
+    # Reboot establishes a new baseline, not an immediate rearming event.
+    assert tracker.observe(sample(90, 500, boot=902), now=2.1,
+                           near_mm=170) == []
+    assert tracker.observe(sample(90, 600, boot=901), now=2.2,
+                           near_mm=170) == []
+    assert tracker.observe(sample(600, 600, boot=902), now=2.3,
+                           near_mm=170) == []
+    assert tracker.observe(sample(600, 700, boot=902), now=2.4,
+                           near_mm=170) == []
+    assert tracker.observe(sample(110, 800, boot=902), now=2.5,
+                           near_mm=170) == []
+    assert tracker.observe(sample(112, 900, boot=902), now=2.6,
+                           near_mm=170) == [("left", 112)]
+    # Metadata downgrade after a real WROOM boot must also fail closed.
+    assert tracker.observe(body(mm=(90, 600, 600)), now=2.7,
+                           near_mm=170) == []
+
+
+def test_invalid_side_acquisition_metadata_cannot_create_an_event():
+    tracker = SideRangeEvents()
+    assert tracker.observe(body(sample_ms=(100, 100, 100), boot_id=3),
+                           now=1.0, near_mm=170) == []
+    for tampered in (
+        body(sample_ms=(200, 200), boot_id=3),
+        body(sample_ms=(200, 200, 200), boot_id=0),
+        body(sample_ms=(True, 200, 200), boot_id=3),
+        body(sample_ms=(200, 200, 200), boot_id="foreign"),
+    ):
+        assert tracker.observe(tampered, now=1.2, near_mm=170) == []
