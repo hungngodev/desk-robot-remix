@@ -315,6 +315,11 @@ class Coordinator:
             raise OperationError("Operation stopped: body disarmed or unavailable")
         if self.settings.mode != "hardware":
             return body
+        # Preflight identity alone is insufficient. Every subsequent motion
+        # health read must still belong to this WROOM, including after a
+        # head reconnect or reassignment of an alternate transport adapter.
+        if body.get("robot_id") != robot_id:
+            raise OperationError("Operation blocked: body identity mismatch")
         safety = body.get("safety")
         ranges = body.get("ranges")
         imu = body.get("imu")

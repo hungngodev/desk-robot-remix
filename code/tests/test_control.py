@@ -611,3 +611,22 @@ async def test_exploration_stops_after_corrupted_post_drive_camera(settings):
         assert head.commands[-1] == "stop"
     finally:
         await c.close()
+
+
+@pytest.mark.parametrize("reported_id", [None, "", "robot-02", 1])
+async def test_hardware_running_health_rechecks_body_identity(settings, reported_id):
+    """A preflight on this robot never authorizes later foreign WROOM status."""
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        head.body_status["armed"] = True
+        head.body_status["ranges"]["mm"][4] = 300
+        head.body_status["robot_id"] = reported_id
+        with pytest.raises(OperationError, match="body identity mismatch"):
+            await coordinator._assert_armed_health(
+                "robot-01", require_front_clearance=True
+            )
+        assert head.commands == []
+    finally:
+        await coordinator.close()
