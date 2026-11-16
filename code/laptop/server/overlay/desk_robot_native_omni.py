@@ -1846,7 +1846,15 @@ class NativeOmniSession:
                     raise RuntimeError("Model audio too fast for XIAO speaker") from exc
             elif (kind == "response.done"
                   and event.get("response_id") == self.wire.response_id):
-                await self.outgoing.put((event["response_id"], None))
+                # A full bounded Opus queue must not suspend model reception
+                # indefinitely while its consumer is wedged. Fail the native
+                # session; its existing shutdown owns physical decoder STOP.
+                try:
+                    self.outgoing.put_nowait((event["response_id"], None))
+                except asyncio.QueueFull as exc:
+                    raise RuntimeError(
+                        "Native model output queue full before terminal STOP"
+                    ) from exc
 
     async def _play(self) -> None:
         """24k model PCM to the SAME Xiaozhi 16k Opus speaker.

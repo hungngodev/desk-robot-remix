@@ -7705,3 +7705,41 @@ async def test_cancelling_mac_fleet_human_stop_preserves_uncertain_head(native):
     assert mac_head.client_is_speaking
 
 
+
+
+@pytest.mark.asyncio
+async def test_native_completed_response_never_waits_on_full_audio_queue(native):
+    """A stalled XIAO Opus consumer cannot block the native receiver forever."""
+    from aiohttp import WSMsgType
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.outgoing = asyncio.Queue(maxsize=1)
+    session.outgoing.put_nowait(("previous", bytes(9600)))
+    session.wire.handle_event({
+        "type": "response.created", "response_id": "new",
+        "response": {
+            "id": "new",
+            "metadata": {"duplex_event": {"epoch": 0}},
+        },
+    })
+
+    class Model:
+        async def __aiter__(self):
+            yield SimpleNamespace(
+                type=WSMsgType.TEXT,
+                data=json.dumps({
+                    "type": "response.done", "response_id": "new",
+                }),
+            )
+
+    session._socket = Model()
+    with pytest.raises(RuntimeError, match="output queue full before terminal STOP"):
+        await asyncio.wait_for(session._receive_model(), timeout=0.3)
+    assert session.outgoing.qsize() == 1
+    assert session.outgoing.get_nowait()[0] == "previous"
