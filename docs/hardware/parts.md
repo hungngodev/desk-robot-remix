@@ -1,3 +1,5 @@
+> **Procurement consolidation November 16:** All purchase quantities and remaining counts now come only from [full-feature-plan.json](full-feature-plan.json), with [generated two shopping lists](complete-shopping-checklist.md) and [generated fleet CSV](fleet-components.csv). This page preserves historical ownership notes and supplier research, not a production purchase list. Do not use the old L0X or one-multiplexer estimates.
+
 > **Current selected five robot shopping and wiring design:** [Complete full feature plan](full-feature-wiring-and-shopping.md) and [exact per-robot quantities](full-feature-plan.json). This file is an older combined ownership/prototype audit, not the purchase basket for all advanced add-ons. The $50 historical cap is not established for this selected full design.
 
 > 2026-11-10 inventory correction: user reports using the popular **MPU6050**. The matching existing WROOM driver, Mac preflight, USB diagnostics and test family are now implemented. The old BerryIMU first choice references later in this document are superseded. Count/measure the user's MPU6050 before any replacement order.
