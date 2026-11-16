@@ -9,6 +9,8 @@ separate ESP32 firmware and audio transport integration.
 
 from __future__ import annotations
 
+_PET_SPEECH_ABORT_TIMEOUT_S = 2.5
+
 import asyncio
 import json
 import math
@@ -375,12 +377,24 @@ class PetController:
         task = self._speech_task
         if (task is not None and not task.done()
                 and robot_id in self._speech_participants):
-            # Human VAD preempts the whole fleet concurrently. Repeated
-            # cancellation of one shared social task can interrupt its
-            # urgent Xiaozhi STOP cleanup before the head is flushed.
+            # Human VAD preempts the whole fleet. Do not double-cancel its
+            # physical STOP cleanup, but do not wait forever if a speaker
+            # adapter refuses cancellation.
             if not task.cancelling():
                 task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            done, _ = await asyncio.wait(
+                {task}, timeout=_PET_SPEECH_ABORT_TIMEOUT_S
+            )
+            if not done:
+                # Keep the current owner marked active. Never claim that an
+                # uncertain physical XIAO decoder has stopped its playback.
+                task.add_done_callback(
+                    lambda completed: None if completed.cancelled()
+                    else completed.exception()
+                )
+                raise TimeoutError("Pet speaker cancellation unconfirmed")
+            if not task.cancelled():
+                task.exception()
 
     async def _store_observation(
         self, robot_id: str, change: SceneChange, *,

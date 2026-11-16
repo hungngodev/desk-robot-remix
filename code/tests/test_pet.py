@@ -3926,3 +3926,37 @@ async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fiel
     finally:
         state.enabled = False
         await pet.close()
+
+
+async def test_pet_speaker_interrupt_is_bounded_when_task_ignores_cancel(
+    fleet, tmp_path, monkeypatch,
+):
+    """Authenticated human VAD cannot hang behind noncooperative pet speech."""
+    monkeypatch.setattr("desk_robot.pet._PET_SPEECH_ABORT_TIMEOUT_S", 0.05)
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def cancellation_resistant_speech():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    task = asyncio.create_task(cancellation_resistant_speech())
+    pet._speech_task = task
+    pet._speech_participants = frozenset({"robot-01"})
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        with pytest.raises(TimeoutError, match="Pet speaker cancellation unconfirmed"):
+            await asyncio.wait_for(pet.interrupt("robot-01"), timeout=0.3)
+        assert not task.done()
+        assert pet._speech_task is task
+        release.set()
+        await asyncio.wait_for(task, timeout=0.3)
+    finally:
+        release.set()
+        await pet.close()
