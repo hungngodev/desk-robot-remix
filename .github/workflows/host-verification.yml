@@ -67,6 +67,11 @@ jobs:
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full
       - name: Compile preserved DC reference
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32dev
+      - name: Compile five source-reused classic NEC bench dock beacons
+        run: |
+          for id in 01 02 03 04 05; do
+            uvx --from platformio==6.1.18 pio run -d code/firmware/dock -e "bench_nano_dock_$id"
+          done
 
   body-host:
     name: Body C++ host tests with sanitizers
