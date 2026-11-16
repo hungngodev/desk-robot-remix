@@ -27,6 +27,12 @@ jobs:
       - name: Install pinned headless OpenCV for dock geometry tests
         working-directory: code
         run: uv pip install --python .venv/bin/python opencv-python-headless==4.13.0.92
+      - name: Enforce one generated fleet purchase ledger
+        working-directory: code
+        run: |
+          uv run --no-sync python scripts/procurement_release.py --format csv | diff -u ../docs/hardware/fleet-components.csv -
+          uv run --no-sync python scripts/procurement_release.py --format markdown | diff -u ../docs/hardware/complete-shopping-checklist.md -
+
       - name: Test real OpenCV calibration and dock perception
         working-directory: code
         run: uv run --no-sync pytest -q tests/test_calibrate_dock_camera.py tests/test_dock_vision.py
