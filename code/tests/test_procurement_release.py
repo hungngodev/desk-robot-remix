@@ -131,3 +131,80 @@ def test_shared_station_rejects_duplicate_and_phantom_modules():
     p["room_pod"]["modules"][0]["quantity_per_room"] = True
     with pytest.raises(ValueError, match="nonnegative integer"):
         mod.generate(p)
+
+
+
+def test_canonical_full_fleet_plan_has_all_forty_nine_roles():
+    import json
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan)
+    robots = {row["id"]: row for row in report["robots"]}
+    room = {row["id"]: row for row in report["room_pod"]}
+    assert len(robots) == 42 and len(room) == 7
+    assert robots["cliff_obstacle"]["fleet_total"] == 40
+    assert robots["i2c_mux"]["fleet_total"] == 10
+    assert robots["dock_ir_receivers"]["fleet_total"] == 10
+    assert robots["dock_ir_beacon_controller"]["fleet_total"] == 5
+    assert robots["dock_ir_emitter_channels"]["fleet_total"] == 10
+    assert robots["xiao_sense"]["ordered_unreceived_not_verified"] == 1
+    assert robots["xiao_sense"]["remaining_if_reported_stock_works"] == 4
+    assert robots["mg90s"]["estimated_owned_not_verified"] == 10
+    assert robots["mg90s"]["remaining_if_reported_stock_works"] == 0
+    assert robots["max30102"]["estimated_owned_not_verified"] == 5
+    assert robots["max30102"]["remaining_if_reported_stock_works"] == 0
+    assert room["room_controller"]["estimated_owned_not_verified"] == 1
+    assert room["room_controller"]["remaining_if_reported_stock_works"] == 0
+    assert robots["stepper"]["shopping_decision"].startswith("hold_until_drivetrain")
+    assert not report["order_released"]
+
+
+def test_entire_shopping_csv_and_two_lists_match_authoritative_source():
+    import csv
+    import io
+    import json
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan)
+    root = mod.PLAN.parents[1]
+    expected_csv = mod.render_csv(report)
+    expected_md = mod.render_markdown(report)
+    assert (root / "docs/hardware/fleet-components.csv").read_text(
+        encoding="utf-8"
+    ) == expected_csv, "Do not edit fleet CSV independently of full feature plan"
+    assert (root / "docs/hardware/complete-shopping-checklist.md").read_text(
+        encoding="utf-8"
+    ) == expected_md, "Do not edit shopping lists independently of plan"
+    rows = list(csv.DictReader(io.StringIO(expected_csv)))
+    assert len(rows) == 49
+    assert {r["scope"] for r in rows} == {"pet or dock", "shared station"}
+    assert all(row["purchase_approved"] == "NO" for row in rows)
+    assert not any(
+        "VL53L0X" in row["component"] or "VL6180X" in row["component"]
+        for row in rows
+    )
+    assert expected_md.count("## 1. Owned or ordered") == 1
+    assert expected_md.count("## 2. Remaining components") == 1
+
+
+@pytest.mark.parametrize("where,key", [
+    ("parts", "estimated_owned_total"),
+    ("parts", "ordered_unreceived_total"),
+    ("room", "estimated_owned_total"),
+])
+def test_fake_or_overcounted_reported_stock_cannot_erase_purchase_quantity(
+    where, key
+):
+    plan = fixture()
+    if where == "parts":
+        target = plan["parts"][0]
+        target[key] = True
+    else:
+        target = plan["room_pod"]["modules"][0]
+        target[key] = True
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        mod.generate(plan)
+    if where == "parts":
+        target[key] = 100
+    else:
+        target[key] = 3
+    with pytest.raises(ValueError, match="exceeds"):
+        mod.generate(plan)
