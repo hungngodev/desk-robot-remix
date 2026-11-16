@@ -2125,3 +2125,39 @@ async def test_old_speech_frame_worker_cannot_outlive_new_voice_epoch():
         if not old.done():
             old.cancel()
         await visual.close()
+
+
+async def test_close_preserves_cancellation_resistant_physical_snapshot_ownership():
+    """Shutdown must not forget an adapter still executing a device read."""
+    started, release = asyncio.Event(), asyncio.Event()
+    head = Head()
+    async def stubborn_snapshot():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+        return b"\\xff\\xd8"
+
+    head.snapshot = stubborn_snapshot
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    caller = asyncio.create_task(visual._head_snapshot("robot-01", source="speech"))
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        physical = visual._head_snapshot_tasks["robot-01"]
+        await asyncio.wait_for(visual.close(), 2)
+        assert not physical.done()
+        assert visual._head_snapshot_tasks["robot-01"] is physical
+        release.set()
+        await asyncio.wait_for(physical, 1)
+        await asyncio.sleep(0)
+        assert "robot-01" not in visual._head_snapshot_tasks
+        assert visual._closed
+    finally:
+        release.set()
+        if not caller.done():
+            caller.cancel()
+        await asyncio.gather(caller, return_exceptions=True)
