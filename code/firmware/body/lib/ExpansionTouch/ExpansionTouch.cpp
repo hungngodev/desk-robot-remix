@@ -5,7 +5,16 @@ namespace desk_robot {
 bool ExpansionTouch::mux(std::uint8_t address, std::uint8_t mask) {
   if (wire_ == nullptr) return false;
   wire_->beginTransmission(address);
-  return wire_->write(mask) == 1 && wire_->endTransmission(true) == 0;
+  const bool wrote = wire_->write(mask) == 1;
+  // Complete the attempted transfer even when write() fails.
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  if (!wrote || !acknowledged) return false;
+  // A TCA9548A may ACK while a channel is stuck selected. Verify its
+  // control register after STOP before exposing optional sensors to the
+  // same physical bus as safety-critical 0x29 ranging.
+  if (wire_->requestFrom(address, static_cast<std::size_t>(1), true) != 1 ||
+      wire_->available() < 1) return false;
+  return wire_->read() == mask;
 }
 bool ExpansionTouch::select() {
   // Never expose safety 0x29 sensors and optional 0x29 devices at once.
