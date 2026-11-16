@@ -442,3 +442,18 @@ async def test_all_five_full_system_simulated_integration_and_persistent_motion(
     finally:
         await runtime.close()
     assert len(list((tmp_path / "private_memories").glob("*.sqlite3"))) == 5
+
+
+async def test_runtime_closes_http_client_even_if_conversation_refuses_to_stop(
+    fleet, tmp_path,
+):
+    """A noncooperative speaker owner must not leak the Mac HTTP client."""
+    fleet.memory_dir = tmp_path / "memory"
+    runtime = Runtime(fleet)
+    async def unconfirmed_conversation_stop():
+        raise TimeoutError("Conversation STOP unconfirmed; owner still active")
+    runtime.conversation.stop = unconfirmed_conversation_stop
+    with pytest.raises(TimeoutError, match="Conversation STOP unconfirmed"):
+        await runtime.close()
+    assert runtime.client.is_closed
+    assert runtime.coordinator.closed
