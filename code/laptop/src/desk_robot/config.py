@@ -43,6 +43,9 @@ class RobotConfig(BaseModel):
     calibration: Path | None = None
     dock_calibration: Path | None = None
     dock_motion_qualified: bool = False
+    # Actual AVR dock beacon is flashed per physical station. Never infer
+    # an assigned dock from a pet name or from one matching IR observation.
+    dock_beacon_id: int | None = Field(default=None, ge=1, le=5)
     dock_turn_sign: int | None = Field(default=None, ge=-1, le=1)
     dock_forward_sign: int | None = Field(default=None, ge=-1, le=1)
     voice: str = "af_heart"
@@ -108,6 +111,14 @@ class Settings(BaseModel):
         device_ids = [r.device_id for r in self.robots if r.device_id]
         if len(set(device_ids)) != len(device_ids):
             raise ValueError("device_id must uniquely identify a robot")
+        docks = [r.dock_beacon_id for r in self.robots if r.dock_beacon_id is not None]
+        if len(set(docks)) != len(docks):
+            raise ValueError("Each physical dock beacon may be assigned to only one robot")
+        if self.mode == "hardware" and any(
+            r.dock_motion_qualified and r.dock_beacon_id is None
+            for r in self.robots
+        ):
+            raise ValueError("Qualified dock approach requires assigned beacon ID")
         return self
 
     def robot(self, robot_id: str) -> RobotConfig:
