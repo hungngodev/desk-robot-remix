@@ -176,3 +176,37 @@ async def test_dock_gpio_sequence_rollover_matches_wroom_half_range_rule(
     assert result["motor_authorized"] is False
 
 
+
+
+async def test_uncooperative_dock_evidence_read_times_out_without_charge_claim(
+    monkeypatch,
+):
+    """A stuck authenticated GPIO poller cannot invent stable charge evidence."""
+    import asyncio
+    import desk_robot.dock_evidence as evidence
+
+    monkeypatch.setattr(evidence, "_DOCK_READ_TIMEOUT_S", 0.04)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class StubbornHead(FakeHead):
+        async def aux_status(self):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return await super().aux_status()
+
+    head = StubbornHead(fresh_samples())
+    try:
+        with pytest.raises(TimeoutError, match="Dock GPIO evidence read timed out"):
+            await asyncio.wait_for(
+                observe_dock_evidence(head, "robot-01"), timeout=0.5,
+            )
+        assert entered.is_set()
+        assert head.commands == []
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+    assert head.commands == []

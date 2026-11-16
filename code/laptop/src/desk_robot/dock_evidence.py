@@ -10,6 +10,8 @@ import asyncio
 
 from .aux import validate_aux
 
+_DOCK_READ_TIMEOUT_S = 2.0
+
 
 def classify_dock(dock: dict) -> str:
     """Strict independent seat and charger-pin truth table."""
@@ -43,7 +45,13 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
     snapshots = []
     sample_sequences = []
     for index in range(3):
-        sample = validate_aux(await asyncio.wait_for(head.aux_status(), timeout=2), robot_id)
+        # Do not let a cancellation-ignoring alternate telemetry adapter
+        # freeze the read-only dock evidence request indefinitely.
+        from .controller import _bounded_head_reply
+        sample = validate_aux(await _bounded_head_reply(
+            head.aux_status(), seconds=_DOCK_READ_TIMEOUT_S,
+            timeout_message="Dock GPIO evidence read timed out",
+        ), robot_id)
         dock = sample.get("dock")
         if dock is None or not dock["valid"] or not dock["present"]:
             return _result(robot_id, "dock_telemetry_unavailable", False)
