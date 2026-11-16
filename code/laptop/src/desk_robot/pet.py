@@ -1168,7 +1168,21 @@ class PetController:
         getter = getattr(self.heads[robot_id], "status", None)
         if getter is None:
             return
-        body = await getter()
+        if self.settings.mode == "hardware":
+            # A disconnected or cancellation-resistant alternate head must
+            # not leave proactive observation active without touch/safety IO.
+            from .controller import _bounded_head_reply
+            try:
+                body = await _bounded_head_reply(
+                    getter(), seconds=2.5,
+                    timeout_message="Pet WROOM body status read timed out",
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise HeadError("Pet WROOM body status unavailable") from exc
+        else:
+            body = await getter()
         if self.settings.mode == "hardware" and (
             not isinstance(body, dict) or body.get("robot_id") != robot_id
         ):

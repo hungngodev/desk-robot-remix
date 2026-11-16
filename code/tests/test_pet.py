@@ -4201,3 +4201,51 @@ async def test_pet_background_sensor_source_rejects_foreign_body_identity(
         assert memory.recent("robot-01") == []
     finally:
         await pet.close()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "runtime"])
+async def test_pet_hardware_body_monitor_does_not_survive_stalled_status(
+    fleet, tmp_path, monkeypatch, failure,
+):
+    """An unreachable safety/touch bridge cannot leave the pet proactively active."""
+    import asyncio
+    import desk_robot.pet as pet_module
+
+    fleet.mode = "hardware"
+    monkeypatch.setattr(
+        pet_module, "_PET_OBSERVER_CANCEL_TIMEOUT_S", 0.1,
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class FailingBody:
+        async def status(self):
+            entered.set()
+            if failure == "runtime":
+                raise RuntimeError("Corrupt alternate head adapter")
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": FailingBody()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(), touch_interval=.01,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 9
+    polling = asyncio.create_task(pet._poll_touch("robot-01", 9))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await asyncio.wait_for(polling, timeout=4)
+        assert state.enabled is False
+        assert "Pet WROOM body status unavailable" in (state.last_error or "")
+        assert state.events == 0
+        assert memory.recent("robot-01") == []
+    finally:
+        release.set()
+        await pet.close()
