@@ -29,6 +29,7 @@ SYSTEM_GATES = (
     "full_power_load_and_faults", "protected_1s_charger_and_dock_contacts",
     "real_dual_ir_terminal_docking", "lift_and_grip_calibration",
     "sense_speaker_mic_double_talk", "five_robot_integration",
+    "room_pod_usb_serial_and_five_pet_observers",
     "source_builds_and_tests",
 )
 PART_GATES = (
@@ -121,12 +122,36 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     pod = plan.get("room_pod", {})
     if not isinstance(pod, dict) or not isinstance(pod.get("modules"), list):
         raise ValueError("Missing shared room station inventory")
-    room = []
+    # The shared station is part of the FULL product. Previously it was
+    # always printed as "not_proven" yet was ignored by order_released.
+    # That bug could approve a five-robot order with no qualified room pod.
+    room_evidence = evidence.get("room_pod", {})
+    if not isinstance(room_evidence, dict):
+        raise ValueError("Invalid shared station evidence")
+    room, room_ids = [], set()
     for module in pod["modules"]:
-        qty = _count(module.get("quantity_per_room"), "room module quantity")
-        room.append({"name": module.get("name"), "shared_total": qty,
-                     "physical_acceptance": "not_proven"})
-    approved = not missing_system and all(row["approved_for_fleet_purchase"] for row in rows)
+        ident = module.get("id") if isinstance(module, dict) else None
+        if not isinstance(ident, str) or not ident or ident in room_ids:
+            raise ValueError("Missing or duplicate shared station part ID")
+        room_ids.add(ident)
+        qty = _count(module.get("quantity_per_room"), ident + ".quantity_per_room")
+        ev = room_evidence.get(ident, {})
+        if not isinstance(ev, dict):
+            raise ValueError(f"Invalid shared station evidence: {ident}")
+        missing = [name for name in PART_GATES if not _receipt(ev.get(name))]
+        if not (isinstance(ev.get("vendor"), str) and ev["vendor"].strip()
+                and isinstance(ev.get("sku"), str) and ev["sku"].strip()
+                and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
+            missing.insert(0, "exact_vendor_sku_and_pcb_revision")
+        room.append({"id": ident, "name": module.get("name"),
+                     "shared_total": qty,
+                     "approved_for_fleet_purchase": not missing,
+                     "missing_part_evidence": missing})
+    if set(room_evidence) - room_ids:
+        raise ValueError("Evidence refers to nonexistent shared station part IDs")
+    approved = (not missing_system
+                and all(row["approved_for_fleet_purchase"] for row in rows)
+                and all(row["approved_for_fleet_purchase"] for row in room))
     return {"fleet_robots": fleet, "docks": fleet, "room_stations": 1,
             "order_released": approved, "order_release_is_not_an_electrical_guarantee": True,
             "known_one_head_ordered_unreceived": 1,
