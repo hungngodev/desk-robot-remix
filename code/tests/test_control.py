@@ -495,6 +495,7 @@ async def test_shared_body_armed_health_checks_do_not_assume_front_camera_safety
         head.last_control = time.monotonic()
         async def status():
             return {
+                "robot_id": "robot-01",
                 "armed": True,
                 "safety": {"required": True, "ready": True, "fault": "none"},
                 "ranges": {"mm": [30, 30, 30, 30, 220],
