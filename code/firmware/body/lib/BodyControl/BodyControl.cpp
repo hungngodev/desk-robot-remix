@@ -281,7 +281,7 @@ void BodyControl::tick(std::uint32_t now_ms) {
     ++state_.touch_taps;
     touch_pending_tap_ = false;
   }
-  if (profile_ == BodyProfile::StepperGuarded &&
+  if (guarded_motion_profile() &&
       (guard_ == nullptr || !guard_->evaluate(now_ms))) {
     stop_motion();
     state_.armed = false;
@@ -420,7 +420,7 @@ void BodyControl::execute(const char* line, std::size_t length,
   }
 
   if (calibration) {
-    if (!local_safety_rearm || profile_ != BodyProfile::StepperGuarded || guard_ == nullptr) {
+    if (!local_safety_rearm || !guarded_motion_profile() || guard_ == nullptr) {
       std::snprintf(reply, capacity, "ERR calibration local_usb_only");
       return;
     }
@@ -654,7 +654,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         state_.servos_attached ? "true" : "false",
         static_cast<unsigned long>(watchdog_remaining(now_ms)),
         static_cast<unsigned long>(drive_remaining(now_ms)),
-        profile_ == BodyProfile::StepperGuarded ? "stepper_28byj48" : "dc_pwm",
+        profile_ == BodyProfile::StepperGuarded ? "stepper_28byj48" :
+          profile_ == BodyProfile::DcGuarded ? "dc_pwm_guarded" : "dc_pwm",
         (state_.touch_active || state_.touch_raw_active) ? "true" : "false",
         static_cast<unsigned long>(state_.touch_count),
         static_cast<unsigned long>(state_.touch_taps),
@@ -690,10 +691,10 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(imu_.valid ? imu_age : 0U),
         static_cast<unsigned long>(imu_.valid ? imu_.at_ms : 0U),
         static_cast<unsigned long>(boot_epoch_),
-        profile_ == BodyProfile::StepperGuarded ? "true" : "false",
-        profile_ == BodyProfile::StepperGuarded && guard_ != nullptr &&
+        guarded_motion_profile() ? "true" : "false",
+        guarded_motion_profile() && guard_ != nullptr &&
             guard_->evaluate(now_ms) ? "true" : "false",
-        profile_ != BodyProfile::StepperGuarded ? "not_required" :
+        !guarded_motion_profile() ? "not_required" :
             guard_ == nullptr ? "missing_guard" : CliffGuard::fault_name(guard_->fault()),
         static_cast<unsigned>(guard_ == nullptr ? kNoFaultSensor : guard_->fault_sensor()),
         static_cast<unsigned>(ranges[0].distance_mm),
@@ -718,7 +719,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     stop_motion();
     state_.armed = false;
-    if (profile_ != BodyProfile::StepperGuarded || guard_ == nullptr ||
+    if (!guarded_motion_profile() || guard_ == nullptr ||
         !guard_->try_rearm(now_ms)) {
       std::snprintf(reply, capacity, "ERR rearm safety_interlock");
       return;
@@ -741,7 +742,7 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR arm touch_active");
       return;
     }
-    if (profile_ == BodyProfile::StepperGuarded &&
+    if (guarded_motion_profile() &&
         (guard_ == nullptr || !guard_->evaluate(now_ms))) {
       std::snprintf(reply, capacity, "ERR arm safety_interlock");
       return;
