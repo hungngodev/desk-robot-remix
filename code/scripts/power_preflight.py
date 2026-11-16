@@ -93,6 +93,91 @@ def size_5v_supply(
     return requirements
 
 
+
+def assess_docked_load(
+    measured_idle_5v_a: float,
+    requested_cell_charge_a: float,
+    *,
+    measured_sys_v: float,
+    measured_boost_efficiency: float,
+    charger_input_limit_a: float | None = None,
+    charger_board_thermal_input_a: float | None = None,
+    dock_adapter_continuous_a: float | None = None,
+    rated_5v_boost_continuous_a: float | None = None,
+    protected_pack_max_charge_a: float | None = None,
+    reserve: float = 1.2,
+    motors_confirmed_disarmed: bool = False,
+) -> dict:
+    """Conservatively bound simultaneous idle system and 1S charge currents.
+
+    TI BQ24074's OUT rail is roughly battery-domain 4.4V, not a 5V rail.
+    The charger 1.5A input rating is NOT a 1.5A boosted system plus an
+    independent 1.5A charge budget. A separate boost supplies 5V.
+    This is a conservative input-current arithmetic gate, not a battery
+    charge measurement, thermal/NTC proof or enable signal.
+    """
+    measured = (measured_idle_5v_a, requested_cell_charge_a, measured_sys_v,
+                measured_boost_efficiency, reserve)
+    if any(not _finite_number(x) for x in measured):
+        raise ValueError("Actual docked loads and conversion measurements required")
+    if (not 0 < measured_idle_5v_a <= 20
+            or not 0 < requested_cell_charge_a <= 5
+            or not 3.0 <= measured_sys_v <= 4.5
+            or not 0.5 <= measured_boost_efficiency <= 0.99
+            or not 1 <= reserve <= 2):
+        raise ValueError("Invalid docked load, cell, SYS or reserve measurement")
+    if type(motors_confirmed_disarmed) is not bool:
+        raise ValueError("Motor disarm state must be an explicit physical boolean")
+    ratings = (charger_input_limit_a, charger_board_thermal_input_a,
+               dock_adapter_continuous_a, rated_5v_boost_continuous_a,
+               protected_pack_max_charge_a)
+    if any(v is not None and (not _finite_number(v) or v <= 0)
+           for v in ratings):
+        raise ValueError("Positive real component ratings are required")
+    decimal = lambda x: Decimal(str(x))
+    boost_input = (Decimal("5") * decimal(measured_idle_5v_a)
+                   / (decimal(measured_sys_v)
+                      * decimal(measured_boost_efficiency)))
+    # Do not use a status LED as evidence that the battery has net charge.
+    # With a linear 1S charger, conservatively budget separate pack charge
+    # current plus measured system draw on the dock input.
+    required_dock_input = (
+        boost_input + decimal(requested_cell_charge_a)) * decimal(reserve)
+    required_5v = decimal(measured_idle_5v_a) * decimal(reserve)
+    required_pack = decimal(requested_cell_charge_a) * decimal(reserve)
+    milliamp = Decimal("0.001")
+
+    def ceiling(value: Decimal) -> float:
+        return float(value.quantize(milliamp, rounding=ROUND_CEILING))
+
+    total = ceiling(required_dock_input)
+    five_v = ceiling(required_5v)
+    charge = ceiling(required_pack)
+    on_paper = None
+    if all(v is not None for v in ratings):
+        on_paper = (
+            motors_confirmed_disarmed
+            and all(decimal(v) >= decimal(total)
+                    for v in ratings[:3])
+            and decimal(rated_5v_boost_continuous_a) >= decimal(five_v)
+            and decimal(protected_pack_max_charge_a) >= decimal(charge)
+        )
+    return {
+        "measured_idle_5v_a": measured_idle_5v_a,
+        "requested_cell_charge_a": requested_cell_charge_a,
+        "required_sys_to_boost_input_a": ceiling(boost_input * decimal(reserve)),
+        "minimum_sustained_dock_input_a": total,
+        "minimum_sustained_5v_output_a": five_v,
+        "minimum_protected_pack_charge_rating_a": charge,
+        "motors_confirmed_disarmed": motors_confirmed_disarmed,
+        "candidate_docked_load_on_paper": on_paper,
+        "signed_battery_charge_current_measured": False,
+        "charger_ntc_and_thermal_verified": False,
+        "contact_protection_and_reverse_polarity_verified": False,
+        "charger_and_load_sharing_verified": False,
+        "candidate_physically_qualified": False,
+    }
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--peak-5v-a", required=True, type=float)
