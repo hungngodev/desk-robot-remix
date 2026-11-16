@@ -92,13 +92,19 @@ async def test_real_side_event_is_one_robot_memory_not_motion(tmp_path):
     state = pet.states["robot-01"]
     state.enabled, state.quiet, state.generation = True, True, 3
     try:
-        await pet._observe_side_ranges("robot-01", 3, body())
+        await pet._observe_side_ranges(
+            "robot-01", 3, body(sample_ms=(100, 100, 100), boot_id=901)
+        )
         await asyncio.sleep(.08)
-        await pet._observe_side_ranges("robot-01", 3,
-                                       body(mm=(600, 75, 600)))
+        await pet._observe_side_ranges(
+            "robot-01", 3, body(mm=(600, 75, 600),
+                                sample_ms=(200, 200, 200), boot_id=901)
+        )
         await asyncio.sleep(.08)
-        await pet._observe_side_ranges("robot-01", 3,
-                                       body(mm=(600, 80, 600)))
+        await pet._observe_side_ranges(
+            "robot-01", 3, body(mm=(600, 80, 600),
+                                sample_ms=(300, 300, 300), boot_id=901)
+        )
         records = [m for m in memory.recent("robot-01")
                    if m.kind == "side_object"]
         assert len(records) == 1
@@ -183,3 +189,25 @@ def test_invalid_side_acquisition_metadata_cannot_create_an_event():
         body(sample_ms=(200, 200, 200), boot_id="foreign"),
     ):
         assert tracker.observe(tampered, now=1.2, near_mm=170) == []
+
+
+def test_hardware_side_proximity_requires_wroom_conversion_identity():
+    tracker = SideRangeEvents()
+    assert tracker.observe(body(), now=1.0, near_mm=170,
+                           require_hardware_identity=True) == []
+    assert tracker.observe(body(mm=(100, 600, 600)), now=1.1,
+                           near_mm=170, require_hardware_identity=True) == []
+    assert tracker.observe(body(mm=(90, 600, 600)), now=1.2,
+                           near_mm=170, require_hardware_identity=True) == []
+    # A validated boot and real acquisitions recover normal event delivery.
+    assert tracker.observe(body(sample_ms=(100, 100, 100), boot_id=2),
+                           now=1.3, near_mm=170,
+                           require_hardware_identity=True) == []
+    assert tracker.observe(body(mm=(100, 600, 600),
+                                sample_ms=(200, 200, 200), boot_id=2),
+                           now=1.4, near_mm=170,
+                           require_hardware_identity=True) == []
+    assert tracker.observe(body(mm=(95, 600, 600),
+                                sample_ms=(300, 300, 300), boot_id=2),
+                           now=1.5, near_mm=170,
+                           require_hardware_identity=True) == [("left", 95)]

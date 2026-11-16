@@ -1202,7 +1202,8 @@ class PetController:
                 or robot.side_near_threshold_mm is None):
             return
         detected = state.side_events.observe(
-            body, now=time.monotonic(), near_mm=robot.side_near_threshold_mm
+            body, now=time.monotonic(), near_mm=robot.side_near_threshold_mm,
+            require_hardware_identity=True,
         )
         for direction, mm in detected:
             if not state.enabled or state.generation != generation:

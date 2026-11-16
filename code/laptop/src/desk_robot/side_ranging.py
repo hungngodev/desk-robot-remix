@@ -31,7 +31,8 @@ class SideRangeEvents:
     active_boot_id: int | None = None
     retired_boot_ids: set[int] = field(default_factory=set)
 
-    def observe(self, body: dict, *, now: float, near_mm: int) -> list[tuple[str, int]]:
+    def observe(self, body: dict, *, now: float, near_mm: int,
+                require_hardware_identity: bool = False) -> list[tuple[str, int]]:
         """Only transition far -> near after two genuinely new fresh samples.
 
         A range-age clock is WROOM local uptime; the Mac reconstructs a
@@ -41,7 +42,8 @@ class SideRangeEvents:
         reading is a baseline, never a fabricated arrival.
         """
         if (type(now) not in (int, float) or not math.isfinite(now)
-                or type(near_mm) is not int or not 35 <= near_mm <= 1000):
+                or type(near_mm) is not int or not 35 <= near_mm <= 1000
+                or type(require_hardware_identity) is not bool):
             raise ValueError("Measured side range threshold and finite clock required")
         # Changing a measured threshold is not a physical object arrival.
         # Start a new baseline instead of interpreting the same range twice.
@@ -56,6 +58,11 @@ class SideRangeEvents:
         distances, ages = data.get("mm"), data.get("age_ms")
         sample_times, boot_id = data.get("sample_ms"), data.get("boot_id")
         has_hardware_identity = sample_times is not None or boot_id is not None
+        if require_hardware_identity and not has_hardware_identity:
+            # Hardware autonomy must never count a legacy host clock guess as
+            # a second physical conversion. Simulation can retain that path.
+            self._reset()
+            return []
         if (type(present) is not int or type(valid) is not int
                 or not 0 <= present <= 7 or not 0 <= valid <= 7
                 or valid & ~present
