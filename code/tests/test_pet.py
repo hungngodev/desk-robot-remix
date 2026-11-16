@@ -4113,3 +4113,55 @@ async def test_expired_uncooperative_scene_releases_fleet_vision_lock(
     finally:
         release.set()
         await pet.close()
+
+
+async def test_proactive_uncooperative_decision_releases_speech_candidate(
+    fleet, tmp_path,
+):
+    """A model ignoring cancellation cannot monopolize proactive initiative."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class StubbornDecision:
+        async def proactive_decision(self, history):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
+                return {"action": "speak", "text": "Obsolete scene!", "tool": "none"}
+
+        async def reply(self, history):
+            raise AssertionError("No legacy reply may bypass the decision")
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, StubbornDecision(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0, max_observation_age=.3,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 124
+    pet.set_voice_monitor_ready(True)
+    try:
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("key", "A newly appeared brass key", .99), 124,
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        await asyncio.wait_for(cancelled.wait(), timeout=2)
+        await wait_for(lambda: pet._speech_task is None, timeout=.5)
+        assert state.spoken == 0
+        assert state.last_initiative_suppression == "event_expired_during_reasoning"
+        assert speaker.spoken == []
+        assert pet._group_last_spoken == float("-inf")
+        release.set()
+        await asyncio.sleep(0)
+        assert speaker.spoken == []
+    finally:
+        release.set()
+        state.enabled = False
+        await pet.close()

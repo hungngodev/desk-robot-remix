@@ -1956,7 +1956,14 @@ class PetController:
                 if remaining <= 0:
                     return None
                 try:
-                    return await asyncio.wait_for(call(), timeout=remaining)
+                    # Ollama or an alternate decision client may suppress
+                    # cancellation; its obsolete answer cannot retain this
+                    # fleet speech candidate past the observation deadline.
+                    from .controller import _bounded_head_reply
+                    return await _bounded_head_reply(
+                        call(), seconds=remaining,
+                        timeout_message="Proactive decision deadline expired",
+                    )
                 except TimeoutError:
                     return None
 
