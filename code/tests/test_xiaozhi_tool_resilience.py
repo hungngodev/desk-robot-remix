@@ -1148,3 +1148,47 @@ async def test_cancelled_turn_consumes_simultaneous_mac_failure(
         release.set()
         loop.set_exception_handler(previous)
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_cancel_event_wins_even_if_waiter_task_is_not_yet_done(
+    bridge_tools, monkeypatch,
+):
+    """HTTP completion cannot publish a receipt after the source event fires."""
+    import asyncio
+
+    event = asyncio.Event()
+    bridge_tools.bridge.tool_turn_cancel_event = lambda device: event
+    original_wait = asyncio.wait
+
+    async def race_wait(tasks, *, return_when=None, timeout=None):
+        if return_when == asyncio.FIRST_COMPLETED:
+            request_task = next(task for task in tasks if task.get_coro().__name__ == "request_mac")
+            await request_task
+            event.set()
+            # Simulate the event waiter not yet having resumed.
+            return {request_task}, set(tasks) - {request_task}
+        return await original_wait(tasks, return_when=return_when, timeout=timeout)
+
+    class Mac:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def get(self, *args, **kwargs):
+            return httpx.Response(200, json={
+                "robot_id": "robot-01",
+                "answer": "obsolete private observation",
+                "motor_authorized": False,
+                "charging_authorized": False,
+            })
+
+    monkeypatch.setattr(bridge_tools.asyncio, "wait", race_wait)
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", lambda **kwargs: Mac())
+    result = await bridge_tools.call(bridge_tools.registered_head, "status")
+    assert result == {
+        "error": "Robot tool result superseded by new speech or reconnect",
+        "retried": False,
+    }
+    assert bridge_tools.voice_turn_response(result).action == 1
