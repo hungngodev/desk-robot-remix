@@ -968,11 +968,10 @@ static void guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract() {
   CHECK(send(dc, "drive 40 40 250", 0) ==
         "OK drive left=40 right=40 ms=250");
   CHECK(dc.state().left == 40 && dc.state().armed);
-  dc.touch_trip();
+  dc.sample_touch_input(true);
   dc.tick(1);
   CHECK(dc.state().left == 0 && dc.state().right == 0 && !dc.state().armed);
-  CHECK(send(dc, "arm", 2) == "ERR arm touch_active" ||
-        send(dc, "arm", 2) == "ERR arm safety_interlock");
+  CHECK(send(dc, "arm", 2) == "ERR arm touch_active");
   dc.sample_touch_input(false);
   fresh(guard, 3);
   CHECK(send(dc, "rearm", 3, true) == "OK rearm");
