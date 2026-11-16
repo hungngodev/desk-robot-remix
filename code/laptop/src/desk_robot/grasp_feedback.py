@@ -58,7 +58,7 @@ def _fresh_jaw_sequence(new: int, previous: int) -> bool:
 
 async def guarded_grasp(
     head: "Head", calibration: "Calibration",
-    *, health: Callable[[], Awaitable[dict]],
+    *, robot_id: str, health: Callable[[], Awaitable[dict]],
 ) -> dict:
     from .controller import OperationError
 
@@ -66,16 +66,23 @@ async def guarded_grasp(
     ceiling = calibration.grip_force_limit_raw
     if threshold is None or ceiling is None:
         raise OperationError("Measured gripper sensor calibration missing")
-    try:
-        baseline_a, seq_a = force_observation(
-            await asyncio.wait_for(head.aux_status(), timeout=_FORCE_READ_TIMEOUT_S)
+    if not isinstance(robot_id, str) or not robot_id:
+        raise ValueError("Gripper requires the configured robot identity")
+
+    async def read_force() -> tuple[int, int]:
+        sample = await asyncio.wait_for(
+            head.aux_status(), timeout=_FORCE_READ_TIMEOUT_S
         )
+        if not isinstance(sample, dict) or sample.get("robot_id") != robot_id:
+            raise ValueError("Foreign or missing jaw sensor robot identity")
+        return force_observation(sample)
+
+    try:
+        baseline_a, seq_a = await read_force()
         # One ADS1115 jaw channel conversion approximately every 144ms;
         # require distinct observations, not repeated reads of one ADC value.
         await asyncio.sleep(0.18)
-        baseline_b, seq_b = force_observation(
-            await asyncio.wait_for(head.aux_status(), timeout=_FORCE_READ_TIMEOUT_S)
-        )
+        baseline_b, seq_b = await read_force()
     except (KeyError, TypeError, ValueError, AttributeError,
             TimeoutError) as exc:
         raise OperationError("Fresh force feedback required before moving jaw") from exc
@@ -97,11 +104,7 @@ async def guarded_grasp(
             await asyncio.sleep(0.18)
             await asyncio.wait_for(health(), timeout=_HEALTH_READ_TIMEOUT_S)
             try:
-                measured, seq = force_observation(
-                    await asyncio.wait_for(
-                        head.aux_status(), timeout=_FORCE_READ_TIMEOUT_S
-                    )
-                )
+                measured, seq = await read_force()
             except (KeyError, TypeError, ValueError, AttributeError,
             TimeoutError) as exc:
                 raise OperationError("Lost fresh force sensor during closing") from exc

@@ -13,13 +13,13 @@ class FakeHead:
     async def aux_status(self):
         value = next(self.samples)
         if value is None:
-            return {"force": {"valid": False, "calibrated": False,
+            return {"robot_id": "robot-01", "force": {"valid": False, "calibrated": False,
                               "jaw_seq": self.seq, "adc": [0, 0]}}
         if isinstance(value, tuple):
             value, self.seq = value
         else:
             self.seq += 1
-        return {"force": {"valid": True, "calibrated": False,
+        return {"robot_id": "robot-01", "force": {"valid": True, "calibrated": False,
                           "jaw_seq": self.seq, "adc": [0, value]}}
 
     async def command(self, command):
@@ -58,7 +58,7 @@ async def test_contact_stops_before_full_closure(monkeypatch):
         pass
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
     head = FakeHead([100, 101, 130, 240, 245])
-    result = await guarded_grasp(head, Settings(), health=healthy)
+    result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert result["contact_delta_raw"] >= 120
     assert head.commands == ["grip 65", "grip 70", "grip 75"]
     assert result["physical_acceptance_pass"] is False
@@ -70,7 +70,7 @@ async def test_stale_feedback_fails_before_next_servo_pulse(monkeypatch):
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
     head = FakeHead([100, 100, None])
     with pytest.raises(OperationError, match="Lost fresh"):
-        await guarded_grasp(head, Settings(), health=healthy)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == ["grip 65", "grip 60"]
 
 
@@ -80,7 +80,7 @@ async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
     head = FakeHead([(100, 1), (100, 2), (240, 3), (240, 3)])
     with pytest.raises(OperationError, match="No new jaw sample"):
-        await guarded_grasp(head, Settings(), health=healthy)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == ["grip 65", "grip 70", "grip 60"]
 
 
@@ -90,11 +90,11 @@ async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
     head = FakeHead([100, 100, 800])
     with pytest.raises(OperationError, match="ceiling"):
-        await guarded_grasp(head, Settings(), health=healthy)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == ["grip 65", "grip 60"]
     head = FakeHead([100, 250])
     with pytest.raises(OperationError, match="baseline"):
-        await guarded_grasp(head, Settings(), health=healthy)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == []
 
 
@@ -115,7 +115,7 @@ async def test_local_disarm_never_bypassed_to_release_jaw(monkeypatch):
         return {"armed": True}
 
     with pytest.raises(OperationError, match="Body disarmed"):
-        await guarded_grasp(head, Settings(), health=intermittent_health)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=intermittent_health)
     assert head.commands == ["grip 65"]
 
 
@@ -134,7 +134,7 @@ async def test_uncertain_transport_failure_after_jaw_move_attempts_safe_relief(m
 
     head.aux_status = failing_adc
     with pytest.raises(OSError, match="ADC bus timed out"):
-        await guarded_grasp(head, Settings(), health=healthy)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == ["grip 65", "grip 60"]
 
 
@@ -159,7 +159,7 @@ async def test_uncertain_transport_failure_does_not_override_local_disarm(monkey
         return {"armed": True}
 
     with pytest.raises(OSError, match="ADC bus timed out"):
-        await guarded_grasp(head, Settings(), health=status)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=status)
     assert head.commands == ["grip 65"]
 
 
@@ -178,7 +178,7 @@ async def test_cancelled_close_attempts_relief_only_with_live_safety(monkeypatch
 
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", cancel_after_close)
     with pytest.raises(asyncio.CancelledError):
-        await guarded_grasp(head, Settings(), health=healthy)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == ["grip 65", "grip 60"]
 
 
@@ -202,7 +202,7 @@ async def test_cancelled_close_does_not_bypass_body_disarm(monkeypatch):
 
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", cancel_after_close)
     with pytest.raises(asyncio.CancelledError):
-        await guarded_grasp(head, Settings(), health=disarmed_after_first_close)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=disarmed_after_first_close)
     assert head.commands == ["grip 65"]
 
 
@@ -225,7 +225,7 @@ async def test_real_task_cancellation_during_unacknowledged_jaw_command(monkeypa
             await never_acknowledged.wait()
 
     head.command = interrupted_command
-    task = asyncio.create_task(guarded_grasp(head, Settings(), health=healthy))
+    task = asyncio.create_task(guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy))
     try:
         await asyncio.wait_for(command_sent.wait(), timeout=1)
         task.cancel()  # Real task cancellation, not manually raising the exception.
@@ -268,7 +268,7 @@ async def test_stalled_force_feedback_is_bounded_and_jaw_relaxes_only_if_safe(
         else "Lost fresh force sensor"
     )):
         await asyncio.wait_for(
-            guarded_grasp(head, Settings(), health=healthy), timeout=0.5,
+            guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy), timeout=0.5,
         )
     assert head.commands == (
         [] if phase == "before_first" else ["grip 65", "grip 60"]
@@ -306,7 +306,7 @@ async def test_stalled_force_feedback_never_bypasses_local_wroom_disarm(monkeypa
 
     with pytest.raises(OperationError, match="Lost fresh force sensor"):
         await asyncio.wait_for(
-            guarded_grasp(head, Settings(), health=disarmed), timeout=0.5,
+            guarded_grasp(head, Settings(), robot_id="robot-01", health=disarmed), timeout=0.5,
         )
     assert checks == 3
     assert head.commands == ["grip 65"]
@@ -337,7 +337,7 @@ async def test_hung_gripper_command_still_attempts_bounded_safe_relief(monkeypat
     head.command = stalled_close
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(
-            guarded_grasp(head, Settings(), health=healthy), timeout=0.5,
+            guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy), timeout=0.5,
         )
     assert entered.is_set()
     assert head.commands == ["grip 65", "grip 60"]
@@ -366,7 +366,7 @@ async def test_hung_safety_recheck_blocks_extra_grip_and_relief(monkeypatch):
 
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(
-            guarded_grasp(head, Settings(), health=health), timeout=0.5,
+            guarded_grasp(head, Settings(), robot_id="robot-01", health=health), timeout=0.5,
         )
     assert checks == 3  # Before close, after close, attempted safe relief.
     assert head.commands == ["grip 65"]
@@ -382,7 +382,7 @@ async def test_jaw_hardware_sequence_wraps_without_falsely_rejecting_fresh_force
         (100, 0xfffffffe), (101, 0xffffffff),
         (130, 1), (240, 2), (245, 3),
     ])
-    result = await guarded_grasp(head, Settings(), health=healthy)
+    result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert result["contact_delta_raw"] >= Settings.grip_force_delta_raw
     assert head.commands == ["grip 65", "grip 70", "grip 75"]
     assert result["physical_acceptance_pass"] is False
@@ -401,7 +401,7 @@ async def test_jaw_baseline_rejects_replayed_or_backwards_sequence(
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
     head = FakeHead([(100, first), (101, second)])
     with pytest.raises(OperationError, match="No new ADS1115 jaw sample"):
-        await guarded_grasp(head, Settings(), health=healthy)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == []
 
 
@@ -411,5 +411,51 @@ async def test_jaw_after_movement_rejects_backwards_frame_and_relaxes(monkeypatc
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
     head = FakeHead([(100, 100), (101, 101), (240, 100)])
     with pytest.raises(OperationError, match="No new jaw sample"):
-        await guarded_grasp(head, Settings(), health=healthy)
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    assert head.commands == ["grip 65", "grip 60"]
+
+
+async def test_gripper_rejects_foreign_robot_force_before_any_pulse(monkeypatch):
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class ForeignHead(FakeHead):
+        async def aux_status(self):
+            reading = await super().aux_status()
+            reading["robot_id"] = "robot-02"
+            return reading
+
+    head = ForeignHead([100, 101, 240])
+    with pytest.raises(OperationError, match="Fresh force feedback"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=healthy,
+        )
+    assert head.commands == []
+
+
+async def test_gripper_foreign_robot_force_mid_close_triggers_guarded_relief(
+    monkeypatch,
+):
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class SwitchedHead(FakeHead):
+        def __init__(self, samples):
+            super().__init__(samples)
+            self.reads = 0
+
+        async def aux_status(self):
+            self.reads += 1
+            reading = await super().aux_status()
+            reading["robot_id"] = ("robot-01" if self.reads <= 2
+                                   else "robot-02")
+            return reading
+
+    head = SwitchedHead([100, 101, 240])
+    with pytest.raises(OperationError, match="Lost fresh force sensor"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=healthy,
+        )
     assert head.commands == ["grip 65", "grip 60"]

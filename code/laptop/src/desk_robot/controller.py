@@ -691,7 +691,8 @@ class Coordinator:
         await self._assert_armed_health(job.robot_id)
         if self.settings.mode == "hardware":
             tactile = await guarded_grasp(
-                head, c, health=lambda: self._assert_armed_health(job.robot_id)
+                head, c, robot_id=job.robot_id,
+                health=lambda: self._assert_armed_health(job.robot_id)
             )
             job.events.append(
                 f"tactile contact delta={tactile['contact_delta_raw']} "
