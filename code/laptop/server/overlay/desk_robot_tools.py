@@ -107,7 +107,10 @@ async def call(conn, route, payload=None):
                     {request_task, turn_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                if turn_task in done:
+                # The HTTP task can finish in the same event-loop turn as
+                # cancellation before signal.wait() itself is scheduled.
+                # Inspect the source event, not only the waiter task state.
+                if signal.is_set() or turn_task in done:
                     return {
                         "error": "Robot tool result superseded by new speech or reconnect",
                         "retried": False,
