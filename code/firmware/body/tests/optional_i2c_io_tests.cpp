@@ -33,6 +33,32 @@ int main() {
     CHECK(pulse.begin(Wire));
     CHECK(touch.begin(Wire));
     CHECK(Wire.ranges == 0 && Wire.extras == 0);
+    // An ACK is not proof that the safety mux actually disabled its 0x29
+    // sensor. The optional CAP1188 path must refuse to open the 0x71
+    // branch, even when the CAP chip itself uses the safer 0x28 address.
+    TwoWire stuck_range_touch_wire;
+    stuck_range_touch_wire.ranges = 1;
+    stuck_range_touch_wire.range_mux_stuck = true;
+    desk_robot::ExpansionTouch stuck_range_touch;
+    CHECK(!stuck_range_touch.begin(stuck_range_touch_wire));
+    CHECK(!stuck_range_touch.verified());
+    CHECK(stuck_range_touch_wire.ranges == 1);
+    CHECK(stuck_range_touch_wire.extras == 0);
+    CHECK(!stuck_range_touch_wire.unsafe_parallel_mux);
+    // A multiplexer can ACK a write but return the wrong control byte.
+    // Do not trust ID/status reads from an unverified selected branch.
+    TwoWire bad_range_readback;
+    bad_range_readback.range_mux_bad_readback = true;
+    desk_robot::ExpansionTouch bad_range_touch;
+    CHECK(!bad_range_touch.begin(bad_range_readback));
+    CHECK(!bad_range_touch.verified());
+    CHECK(bad_range_readback.extras == 0);
+    TwoWire stuck_extra_touch_wire;
+    stuck_extra_touch_wire.optional_mux_stuck = true;
+    desk_robot::ExpansionTouch stuck_extra_touch;
+    CHECK(!stuck_extra_touch.begin(stuck_extra_touch_wire));
+    CHECK(!stuck_extra_touch.verified());
+    CHECK(stuck_extra_touch_wire.extras == 0);
     std::uint8_t bits = 0;
     for (std::uint32_t now_ms = 0; now_ms < 1600; now_ms += 12) {
       accessories.poll(now_ms);
