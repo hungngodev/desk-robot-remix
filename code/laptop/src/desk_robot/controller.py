@@ -518,6 +518,8 @@ class Coordinator:
             if decision.phase == "align":
                 side = body.get("side_ranges")
                 if (not isinstance(side, dict)
+                        or type(side.get("present_mask")) is not int
+                        or side["present_mask"] != 7
                         or type(side.get("valid_mask")) is not int
                         or side["valid_mask"] != 7
                         or not isinstance(side.get("age_ms"), list)
@@ -526,7 +528,8 @@ class Coordinator:
                                for n in side["age_ms"])
                         or not isinstance(side.get("mm"), list)
                         or len(side["mm"]) != 3
-                        or any(type(n) is not int or n < 300 for n in side["mm"])):
+                        or any(type(n) is not int or not 300 <= n <= 1300
+                               for n in side["mm"])):
                     raise OperationError(
                         "Dock turn refused: side and rear clearance unqualified"
                     )

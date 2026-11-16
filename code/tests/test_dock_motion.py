@@ -48,8 +48,18 @@ async def test_dock_does_not_consume_permit_without_measured_steering(settings, 
         await controller.close()
 
 
+@pytest.mark.parametrize("side_override", [
+    {"valid_mask": 0},
+    {"present_mask": 0},
+    {"present_mask": True},
+    {"present_mask": "7"},
+    {"mm": [600, 600, 1301]},
+    {"mm": [600, 600, -1]},
+    {"mm": [600, True, 600]},
+    {"age_ms": [10, 351, 10]},
+])
 async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
-    settings, monkeypatch,
+    settings, monkeypatch, side_override,
 ):
     from desk_robot.controller import Job
     from desk_robot.dock_vision import DockCameraCalibration, DockPose
@@ -70,8 +80,9 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
                            "age_ms": [5, 5, 5, 5, 5]},
                 "imu": {"valid": True, "age_ms": 10},
                 "touch": {"active": False},
-                "side_ranges": {"valid_mask": 0, "age_ms": [10, 10, 10],
-                                "mm": [600, 600, 600]},
+                "side_ranges": {"present_mask": 7, "valid_mask": 7,
+                                "age_ms": [10, 10, 10], "mm": [600, 600, 600],
+                                **side_override},
             }
 
         async def snapshot(self):
@@ -128,7 +139,7 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
                            "age_ms": [5, 5, 5, 5, 5]},
                 "imu": {"valid": True, "age_ms": 10},
                 "touch": {"active": False},
-                "side_ranges": {"valid_mask": 7, "age_ms": [10, 10, 10],
+                "side_ranges": {"present_mask": 7, "valid_mask": 7, "age_ms": [10, 10, 10],
                                 "mm": [600, 600, 600]},
             }
 
@@ -288,6 +299,7 @@ async def test_dock_turns_by_chassis_not_lens_axis(
                 "imu": {"valid": True, "age_ms": 10},
                 "touch": {"active": False},
                 "side_ranges": {
+                    "present_mask": 7,
                     "valid_mask": 7, "age_ms": [10, 10, 10],
                     "mm": [600, 600, 600],
                 },
@@ -378,7 +390,7 @@ async def test_dock_refuses_stale_pre_camera_safety_after_sensor_fault(
                            "age_ms": [5, 5, 5, 5, 5]},
                 "imu": {"valid": True, "age_ms": 10},
                 "touch": {"active": False},
-                "side_ranges": {"valid_mask": 7,
+                "side_ranges": {"present_mask": 7, "valid_mask": 7,
                                 "age_ms": [10, 10, 10],
                                 "mm": [600, 600, 600]},
             }
@@ -439,6 +451,7 @@ async def test_dock_refuses_new_side_obstacle_after_camera_frame(
                 "imu": {"valid": True, "age_ms": 10},
                 "touch": {"active": False},
                 "side_ranges": {
+                    "present_mask": 7,
                     "valid_mask": 7 if not self.blocked else 0,
                     "age_ms": [10, 10, 10],
                     "mm": [600, 600, 600],
@@ -685,6 +698,7 @@ async def test_dock_rejects_foreign_body_identity_after_camera_before_turn(
                 "imu": {"valid": True, "age_ms": 10},
                 "touch": {"active": False},
                 "side_ranges": {
+                    "present_mask": 7,
                     "valid_mask": 7,
                     "age_ms": [5] * 3,
                     "mm": [600] * 3,
