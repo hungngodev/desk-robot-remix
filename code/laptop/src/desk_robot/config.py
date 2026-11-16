@@ -82,6 +82,9 @@ class Settings(BaseModel):
     fleet_text_sharing_enabled: bool = False  # Opt-in local, provenance-tagged text only.
     fleet_social_autonomy_enabled: bool = False  # Bounded pet-to-pet talk, explicit opt-in.
     fleet_social_min_interval_seconds: int = Field(default=300, ge=30, le=3600)
+    room_station_enabled: bool = False  # One explicit USB source, never an extra robot
+    room_station_port: str | None = None  # Actual local /dev/tty.* device
+    room_station_context_enabled: bool = False  # Consent for all pets to read room facts
     fleet_text_auto_fanout_enabled: bool = True  # Keep existing broadcast behavior unless selective-only chosen.
     max_job_seconds: float = Field(default=45, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
@@ -105,6 +108,14 @@ class Settings(BaseModel):
             )
         if self.fleet_social_autonomy_enabled and not self.fleet_text_sharing_enabled:
             raise ValueError("Automatic peer dialogue requires explicit local text sharing consent")
+        if self.room_station_enabled and (
+            self.mode != "hardware" or not isinstance(self.room_station_port, str)
+            or not self.room_station_port.startswith("/dev/")
+            or len(self.room_station_port) > 255
+        ):
+            raise ValueError("Room station requires a real explicit local USB serial port")
+        if self.room_station_context_enabled and not self.room_station_enabled:
+            raise ValueError("Room station context needs explicit source enable and consent")
         ids = [r.id for r in self.robots]
         if not ids or len(set(ids)) != len(ids):
             raise ValueError("At least one robot and unique robot IDs are required")
