@@ -570,6 +570,7 @@ async def test_pickup_never_drives_if_wroom_faults_during_object_detector(settin
 @pytest.mark.parametrize("bad_frame", [
     None, b"", b"<html>camera unavailable</html>",
     b"\xff\xd8incomplete", b"incomplete\xff\xd9",
+    b"\xff\xd8fake but properly delimited\xff\xd9",
     b"\xff\xd8" + b"x" * 512001 + b"\xff\xd9",
 ])
 async def test_exploration_refuses_invalid_camera_before_any_drive(settings, bad_frame):
@@ -631,3 +632,28 @@ async def test_hardware_running_health_rechecks_body_identity(settings, reported
         assert head.commands == []
     finally:
         await coordinator.close()
+
+
+async def test_exploration_rejects_valid_jpeg_with_unusable_dimensions(settings):
+    """Even a decodable one pixel image is not a meaningful live camera feed."""
+    from io import BytesIO
+    from PIL import Image
+
+    image = BytesIO()
+    Image.new("RGB", (1, 1), "white").save(image, format="JPEG")
+    c, head = make(settings)
+
+    async def tiny_camera():
+        return image.getvalue()
+
+    head.snapshot = tiny_camera
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=4)
+        assert job.state == "failed"
+        assert "invalid JPEG dimensions" in (job.error or "")
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()

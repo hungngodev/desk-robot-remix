@@ -380,6 +380,12 @@ class Coordinator:
                     or not jpeg.startswith(b"\xff\xd8")
                     or not jpeg.endswith(b"\xff\xd9")):
                 raise OperationError("Exploration camera returned invalid JPEG")
+            try:
+                width, height = image_size(jpeg)
+            except (OSError, ValueError, SyntaxError) as exc:
+                raise OperationError("Exploration camera returned invalid JPEG") from exc
+            if not 80 <= width <= 2048 or not 80 <= height <= 1536:
+                raise OperationError("Exploration camera returned invalid JPEG dimensions")
 
         steps = 0
         # This loop persists until a stop, quiet mode, failure, or disconnect.
