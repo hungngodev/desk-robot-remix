@@ -8,6 +8,10 @@ tool = runpy.run_path(str(
     Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
 ))["size_5v_supply"]
 
+docked = runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+))["assess_docked_load"]
+
 
 def test_full_one_pet_load_derates_low_single_cell_voltage():
     report = tool(3, 1.8)
@@ -406,3 +410,89 @@ def test_docked_electronics_budget_must_not_inherit_undocked_motor_peak():
         assert report["charger_and_load_sharing_verified"] is False
         assert report["candidate_physically_qualified"] is False
         assert report["physical_load_verified"] is False
+
+
+
+def _qualified_dock_ratings():
+    return {
+        "measured_sys_v": 4.4, "measured_boost_efficiency": 0.85,
+        "charger_input_limit_a": 1.5,
+        "charger_board_thermal_input_a": 1.5,
+        "dock_adapter_continuous_a": 3.0,
+        "rated_5v_boost_continuous_a": 2.0,
+        "protected_pack_max_charge_a": 1.0,
+        "motors_confirmed_disarmed": True,
+    }
+
+
+def test_docked_idle_current_plus_real_charge_target_must_both_fit():
+    small = docked(.5, .25, **_qualified_dock_ratings())
+    assert small["candidate_docked_load_on_paper"] is True
+    assert small["candidate_physically_qualified"] is False
+    assert small["signed_battery_charge_current_measured"] is False
+    # Camera, audio and a moving motor can take all available charger input.
+    large = docked(1.0, .25, **_qualified_dock_ratings())
+    assert large["minimum_sustained_dock_input_a"] > 1.5
+    assert large["candidate_docked_load_on_paper"] is False
+    assert large["charger_and_load_sharing_verified"] is False
+
+
+@pytest.mark.parametrize("missing", [
+    "charger_input_limit_a",
+    "charger_board_thermal_input_a",
+    "dock_adapter_continuous_a",
+    "rated_5v_boost_continuous_a",
+    "protected_pack_max_charge_a",
+])
+def test_docked_load_refuses_unspecified_carrier_or_pack_limit(missing):
+    ratings = _qualified_dock_ratings()
+    ratings.pop(missing)
+    assert docked(.5, .25, **ratings)["candidate_docked_load_on_paper"] is None
+
+
+@pytest.mark.parametrize("bottleneck,limit", [
+    ("charger_input_limit_a", 1.0),
+    ("charger_board_thermal_input_a", 1.0),
+    ("dock_adapter_continuous_a", 1.0),
+    ("rated_5v_boost_continuous_a", 0.5),
+    ("protected_pack_max_charge_a", 0.25),
+])
+def test_docked_load_requires_every_independent_rating(bottleneck, limit):
+    ratings = _qualified_dock_ratings()
+    ratings[bottleneck] = limit
+    result = docked(.5, .25, **ratings)
+    assert result["candidate_docked_load_on_paper"] is False
+
+
+@pytest.mark.parametrize("invalid", [
+    True, 0, -1, float("nan"), float("inf"), 100,
+])
+def test_dock_current_reports_must_be_real_measurements(invalid):
+    with pytest.raises(ValueError):
+        docked(invalid, .25, **_qualified_dock_ratings())
+    with pytest.raises(ValueError):
+        docked(.5, invalid, **_qualified_dock_ratings())
+
+
+def test_docked_charger_requires_motors_disarmed_but_not_full_approval():
+    ratings = _qualified_dock_ratings()
+    ratings["motors_confirmed_disarmed"] = False
+    result = docked(.5, .25, **ratings)
+    assert result["candidate_docked_load_on_paper"] is False
+    assert result["candidate_physically_qualified"] is False
+    ratings["motors_confirmed_disarmed"] = 1
+    with pytest.raises(ValueError, match="explicit physical boolean"):
+        docked(.5, .25, **ratings)
+
+
+def test_docked_lower_sys_voltage_and_efficiency_never_ease_load():
+    rated = _qualified_dock_ratings()
+    baseline = docked(.5, .25, **rated)
+    rated["measured_sys_v"] = 3.4
+    depleted = docked(.5, .25, **rated)
+    assert depleted["minimum_sustained_dock_input_a"] > (
+        baseline["minimum_sustained_dock_input_a"])
+    rated["measured_boost_efficiency"] = 0.6
+    inefficient = docked(.5, .25, **rated)
+    assert inefficient["minimum_sustained_dock_input_a"] > (
+        depleted["minimum_sustained_dock_input_a"])
