@@ -506,3 +506,27 @@ def test_late_output_clear_cannot_mute_recovered_native_response():
     wire.handle_event({"type": "output_audio_buffer.cleared",
                        "response_id": "new"})
     assert wire.handle_event(delta("new", epoch=2)) is None
+
+
+def test_epochless_native_delta_cannot_restart_audio_after_barge():
+    wire = OmniDuplexWire()
+    wire.handle_event({
+        "type": "response.created", "response_id": "old",
+        "response": {"id": "old", "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    wire.interrupt()
+    wire.append_audio(bytes(32000), speech=False)
+    wire.handle_event({
+        "type": "response.created", "response_id": "new",
+        "response": {"id": "new", "metadata": {"duplex_event": {"epoch": 2}}},
+    })
+    for missing in (None, {}, {"epoch": None}, {"epoch": "2"}):
+        packet = delta("new", epoch=2)
+        if missing is None:
+            packet.pop("metadata")
+        else:
+            packet["metadata"] = missing
+        assert wire.handle_event(packet) is None
+    # A genuine current-epoch delta is still allowed after the interruption.
+    assert wire.handle_event(delta("new", epoch=2)) is not None
+    assert wire.handle_event(delta("new", epoch=1)) is None

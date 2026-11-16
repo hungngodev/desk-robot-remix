@@ -305,6 +305,13 @@ class OmniDuplexWire:
             if event.get("response_id") != self.response_id:
                 return None  # Old backend response after a new human turn.
             meta = event.get("metadata")
+            # The native server supplies a per-delta epoch. After a barge,
+            # an epochless delta cannot prove it belongs to the freshly
+            # accepted response, even if its response_id looks plausible.
+            if (self._min_server_epoch is not None and (
+                not isinstance(meta, dict) or type(meta.get("epoch")) is not int
+            )):
+                return None
             if isinstance(meta, dict) and meta.get("epoch") is not None:
                 if (type(meta["epoch"]) is not int
                         or (self._server_response_epoch is not None
