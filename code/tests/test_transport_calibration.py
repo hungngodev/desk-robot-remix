@@ -590,3 +590,55 @@ def test_usb_bench_rejects_malformed_or_wrong_profile_status(change):
     status.update(change)
     with pytest.raises(ValueError):
         inspect_status(status)
+
+
+async def test_replaced_mjpeg_stream_cannot_publish_or_clear_new_stream(settings, tokens):
+    """An old reader finishing after reconnect must not erase fresh camera state."""
+    import asyncio
+
+    old_release = asyncio.Event()
+    first = b"\\xff\\xd8old\\xff\\xd9"
+    stale = b"\\xff\\xd8stale\\xff\\xd9"
+    fresh = b"\\xff\\xd8fresh\\xff\\xd9"
+    requests = 0
+
+    class Feed(httpx.AsyncByteStream):
+        def __init__(self, old):
+            self.old = old
+
+        async def __aiter__(self):
+            if self.old:
+                yield _stream_part(1, first)
+                await old_release.wait()
+                yield _stream_part(3, stale)
+            else:
+                yield _stream_part(2, fresh)
+
+        async def aclose(self):
+            pass
+
+    async def handler(request):
+        nonlocal requests
+        requests += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "multipart/x-mixed-replace; boundary=deskrobotframe"},
+            stream=Feed(requests == 1),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        old = head.stream_frames()
+        assert (await anext(old))[0] == first
+        replacement = head.stream_frames()
+        assert (await anext(replacement))[0] == fresh
+        old_release.set()
+        with pytest.raises(HeadError, match="Superseded"):
+            await anext(old)
+        await old.aclose()
+        assert head._stream_connected
+        assert head._stream_latest == fresh
+        assert head._last_camera == (17, 2, 2000)
+        assert await head.snapshot() == fresh
+        await replacement.aclose()
+        assert not head._stream_connected
