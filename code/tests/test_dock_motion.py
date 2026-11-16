@@ -62,6 +62,7 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
 
         async def status(self):
             return {
+                "robot_id": "robot-01",
                 "armed": True,
                 "safety": {"required": True, "ready": True, "fault": "none"},
                 "ranges": {"present_mask": 31, "valid_mask": 31,
@@ -119,6 +120,7 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
 
         async def status(self):
             return {
+                "robot_id": "robot-01",
                 "armed": True,
                 "safety": {"required": True, "ready": True, "fault": "none"},
                 "ranges": {"present_mask": 31, "valid_mask": 31,
@@ -275,6 +277,7 @@ async def test_dock_turns_by_chassis_not_lens_axis(
 
         async def status(self):
             return {
+                "robot_id": "robot-01",
                 "armed": True,
                 "safety": {"required": True, "ready": True, "fault": "none"},
                 "ranges": {
@@ -366,6 +369,7 @@ async def test_dock_refuses_stale_pre_camera_safety_after_sensor_fault(
         async def status(self):
             self.reads += 1
             return {
+                "robot_id": "robot-01",
                 "armed": self.armed,
                 "safety": {"required": True, "ready": self.armed,
                            "fault": "none" if self.armed else "missing_sample"},
@@ -426,6 +430,7 @@ async def test_dock_refuses_new_side_obstacle_after_camera_frame(
 
         async def status(self):
             return {
+                "robot_id": "robot-01",
                 "armed": True,
                 "safety": {"required": True, "ready": True, "fault": "none"},
                 "ranges": {"present_mask": 31, "valid_mask": 31,
@@ -488,6 +493,7 @@ async def test_dock_slow_marker_inference_never_drives_from_expired_image(
 
         async def status(self):
             return {
+                "robot_id": "robot-01",
                 "armed": True,
                 "safety": {"required": True, "ready": True, "fault": "none"},
                 "ranges": {"present_mask": 31, "valid_mask": 31,
@@ -557,6 +563,7 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
                 # geometry was already outside the 200 ms marker age policy.
                 await asyncio.sleep(0.26)
             return {
+                "robot_id": "robot-01",
                 "armed": True,
                 "safety": {"required": True, "ready": True, "fault": "none"},
                 "ranges": {"present_mask": 31, "valid_mask": 31,
@@ -613,6 +620,7 @@ async def test_dock_approach_refuses_parallel_native_detector_ownership(settings
 
         async def status(self):
             return {
+                "robot_id": "robot-01",
                 "armed": True,
                 "safety": {"required": True, "ready": True, "fault": "none"},
                 "ranges": {"present_mask": 31, "valid_mask": 31,
@@ -647,3 +655,68 @@ async def test_dock_approach_refuses_parallel_native_detector_ownership(settings
     finally:
         dock_runtime._DETECTOR_SLOT.release()
         await controller.close()
+
+
+async def test_dock_rejects_foreign_body_identity_after_camera_before_turn(
+    settings, monkeypatch,
+):
+    """A replaced body response cannot authorize another robot's motors."""
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration, DockPose
+
+    settings.mode = "hardware"
+
+    class SwappedBody:
+        def __init__(self):
+            self.reads = 0
+            self.commands = []
+
+        async def status(self):
+            self.reads += 1
+            return {
+                "robot_id": "robot-01" if self.reads == 1 else "robot-02",
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {
+                    "present_mask": 31, "valid_mask": 31,
+                    "mm": [50, 50, 50, 50, 650],
+                    "age_ms": [5] * 5,
+                },
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+                "side_ranges": {
+                    "valid_mask": 7,
+                    "age_ms": [5] * 3,
+                    "mm": [600] * 3,
+                },
+            }
+
+        async def snapshot(self):
+            return b"synthetic tag image"
+
+        async def command(self, command):
+            self.commands.append(command)
+
+    head = SwappedBody()
+    camera = DockCameraCalibration(
+        fx=410, fy=410, cx=320, cy=240,
+        tag_side_mm=60, marker_id=1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+    )
+    monkeypatch.setattr(
+        "desk_robot.dock_runtime.detect_apriltag",
+        lambda jpeg, calibration, *, captured_at: DockPose(
+            80, 0, 500, 0.5, captured_at,
+        ),
+    )
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(OperationError, match="body identity mismatch"):
+            await coordinator._dock_approach(
+                Job("dock-identity", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
+            )
+        assert head.reads == 2
+        assert head.commands == []
+    finally:
+        await coordinator.close()
