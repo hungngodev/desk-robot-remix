@@ -323,6 +323,27 @@ async def test_hardware_enable_fails_closed_on_unqualified_body_status(
         await coordinator.close()
 
 
+
+
+
+async def test_full_guarded_dc_path_is_not_confused_with_unprotected_pwm(settings):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["backend"] = "dc_pwm_guarded"
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        permit = await coordinator.operator_arm("robot-01")
+        assert permit["operator_permit"] is True
+        assert not head.commands
+        # Real sensor fault still refuses the same guarded DC backend.
+        head.body_status["safety"]["ready"] = False
+        with pytest.raises(OperationError, match="Hardware preflight"):
+            await coordinator.operator_arm("robot-01")
+        assert not head.commands
+        assert coordinator.permits.get("robot-01") is None
+    finally:
+        await coordinator.close()
+
 async def test_hardware_motion_requires_new_safety_status_at_execution(settings):
     settings.mode = "hardware"
     head = HardwareStatusHead("robot-01")
