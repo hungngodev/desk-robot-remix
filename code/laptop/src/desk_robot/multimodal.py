@@ -1187,13 +1187,19 @@ class MultimodalOrchestrator:
                     )
                     self._proactive_snapshots[robot_id] = pending
                     try:
-                        jpeg = await asyncio.wait_for(pending, timeout=4)
+                        from .controller import _bounded_head_reply
+                        jpeg = await _bounded_head_reply(
+                            pending, seconds=4.0,
+                            timeout_message="Live proactive camera timed out",
+                        )
                     finally:
                         if self._proactive_snapshots.get(robot_id) is pending:
                             self._proactive_snapshots.pop(robot_id, None)
                 else:
-                    jpeg = await asyncio.wait_for(
-                        self.heads[robot_id].snapshot(), timeout=4
+                    from .controller import _bounded_head_reply
+                    jpeg = await _bounded_head_reply(
+                        self.heads[robot_id].snapshot(), seconds=4.0,
+                        timeout_message="Live human camera timed out",
                     )
                 received = time.monotonic()
                 prepared = await self._prepare_bounded(

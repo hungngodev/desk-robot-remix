@@ -21,7 +21,8 @@ from .vision import Detection, Vision, image_size
 async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
                               timeout_message: str) -> _T:
     """Bound even adapters that suppress task cancellation; ignore late replies."""
-    task = asyncio.create_task(coro)
+    # Callers may already own a cancellable snapshot task for VAD preemption.
+    task = asyncio.ensure_future(coro)
     try:
         done, _ = await asyncio.wait({task}, timeout=seconds)
         if not done:

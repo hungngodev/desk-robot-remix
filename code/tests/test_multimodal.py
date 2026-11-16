@@ -1946,3 +1946,49 @@ def test_stale_speech_end_does_not_release_newer_human_vad():
     assert not hub.user_active("robot-01", 13.0)
     assert hub.spontaneous_floor_busy(13.2)
     assert not hub.spontaneous_floor_busy(14.0)
+
+
+async def test_proactive_camera_ignoring_cancel_does_not_pin_live_camera_lock(
+    monkeypatch,
+):
+    """An obsolete low-priority camera cannot hold a new human capture lock."""
+    from desk_robot import controller
+
+    original = controller._bounded_head_reply
+    async def short_deadline(coro, *, seconds, timeout_message):
+        return await original(coro, seconds=0.04,
+                              timeout_message=timeout_message)
+    monkeypatch.setattr(controller, "_bounded_head_reply", short_deadline)
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class StubbornCamera(Head):
+        async def snapshot(self):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return image(square=True)
+
+    head = StubbornCamera()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        with pytest.raises(TimeoutError, match="Live proactive camera timed out"):
+            await asyncio.wait_for(
+                visual.capture("robot-01", source="proactive"), timeout=.5,
+            )
+        assert started.is_set()
+        assert not visual._camera_locks["robot-01"].locked()
+        assert "robot-01" not in visual._proactive_snapshots
+        assert not visual.hub.frames["robot-01"]
+        release.set()
+        await asyncio.sleep(0)
+        assert not visual.hub.frames["robot-01"]
+    finally:
+        release.set()
+        await visual.close()
