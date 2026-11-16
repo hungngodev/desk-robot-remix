@@ -597,9 +597,9 @@ async def test_replaced_mjpeg_stream_cannot_publish_or_clear_new_stream(settings
     import asyncio
 
     old_release = asyncio.Event()
-    first = b"\\xff\\xd8old\\xff\\xd9"
-    stale = b"\\xff\\xd8stale\\xff\\xd9"
-    fresh = b"\\xff\\xd8fresh\\xff\\xd9"
+    first = b"\xff\xd8old\xff\xd9"
+    stale = b"\xff\xd8stale\xff\xd9"
+    fresh = b"\xff\xd8fresh\xff\xd9"
     requests = 0
 
     class Feed(httpx.AsyncByteStream):
