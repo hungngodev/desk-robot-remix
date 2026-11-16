@@ -4414,3 +4414,48 @@ async def test_camera_hub_reconnect_drops_inflight_old_scene_comparison(
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
         await pet.close()
+
+
+async def test_visual_memory_write_is_retracted_after_camera_generation_changes(
+    fleet, tmp_path,
+):
+    """Late SQLite completion cannot revive an obsolete JPEG as pet memory."""
+    import threading
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    entered, release = threading.Event(), threading.Event()
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    original = memory.remember
+
+    def delayed_remember(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=3)
+        return original(*args, **kwargs)
+
+    memory.remember = delayed_remember
+    hub = CameraFrameHub([robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+        ), memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    camera_generation = hub._generation["robot-01"]
+    work = asyncio.create_task(pet._store_observation(
+        "robot-01", SceneChange(
+            "key", "An obsolete camera image showed a key", 0.99,
+        ), camera_derived=True, camera_generation=camera_generation,
+    ))
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(entered.wait), timeout=1)
+        hub.discard_video("robot-01")
+        release.set()
+        await asyncio.wait_for(work, timeout=2)
+        assert all(memory.recent(robot.id) == [] for robot in fleet.robots)
+    finally:
+        release.set()
+        await asyncio.gather(work, return_exceptions=True)
+        await pet.close()

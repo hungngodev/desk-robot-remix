@@ -429,7 +429,7 @@ class PetController:
 
     async def _store_observation(
         self, robot_id: str, change: SceneChange, *,
-        camera_derived: bool = False,
+        camera_derived: bool = False, camera_generation: int | None = None,
     ) -> None:
         """Same text/event ID, different eyewitness provenance per local DB.
 
@@ -437,27 +437,37 @@ class PetController:
         JPEG/PCM to another head and never claim a peer saw this firsthand.
         Operator must explicitly enable text sharing in local settings.
         """
-        if (camera_derived and self.settings.mode == "hardware"
-                and not self.settings.voice_vision_tools_enabled):
+        def current_visual_epoch() -> bool:
+            return (not camera_derived or camera_generation is None
+                    or (self.multimodal is not None
+                        and self.multimodal.hub._generation[robot_id] == camera_generation))
+
+        if (not current_visual_epoch()
+                or (camera_derived and self.settings.mode == "hardware"
+                    and not self.settings.voice_vision_tools_enabled)):
             return
         event_id, observed_at = uuid.uuid4().hex, time.time()
         def persist_eyewitness() -> bool:
             # Cancelling an await never cancels the SQLite worker. Retraction
             # must be owned by that worker if visual consent was withdrawn.
+            if not current_visual_epoch():
+                return False
             inserted = self.memory.remember(
                 robot_id, event_id, change.description,
                 kind=change.kind, source_robot=robot_id, witnessed=True,
                 observed_at=observed_at, confidence=change.confidence,
             )
-            if (inserted and camera_derived and self.settings.mode == "hardware"
-                    and not self.settings.voice_vision_tools_enabled):
+            if (inserted and (not current_visual_epoch()
+                    or (camera_derived and self.settings.mode == "hardware"
+                        and not self.settings.voice_vision_tools_enabled))):
                 self.memory.forget_episode(robot_id, event_id)
                 return False
             return inserted
 
         inserted = await asyncio.to_thread(persist_eyewitness)
-        if (camera_derived and self.settings.mode == "hardware"
-                and not self.settings.voice_vision_tools_enabled):
+        if (not current_visual_epoch()
+                or (camera_derived and self.settings.mode == "hardware"
+                    and not self.settings.voice_vision_tools_enabled)):
             if inserted:
                 # Permission can change while a SQLite write is in flight.
                 # Retract only this new visual guess, not a physical sensor
@@ -468,6 +478,7 @@ class PetController:
             return
         if (self.settings.fleet_text_sharing_enabled
                 and self.settings.fleet_text_auto_fanout_enabled
+                and current_visual_epoch()
                 and (not camera_derived or self.settings.mode != "hardware"
                      or self.settings.voice_vision_tools_enabled)):
             # Per-robot SQLite databases are independent. A failed or busy
@@ -477,6 +488,7 @@ class PetController:
                 return (
                     self.settings.fleet_text_sharing_enabled
                     and self.settings.fleet_text_auto_fanout_enabled
+                    and current_visual_epoch()
                     and (not camera_derived or self.settings.mode != "hardware"
                          or self.settings.voice_vision_tools_enabled)
                 )
@@ -522,6 +534,7 @@ class PetController:
                 elif (result is True
                       and (not self.settings.fleet_text_sharing_enabled
                            or not self.settings.fleet_text_auto_fanout_enabled
+                           or not current_visual_epoch()
                            or (camera_derived and self.settings.mode == "hardware"
                                and not self.settings.voice_vision_tools_enabled))):
                     # A newly inserted peer copy may finish after the
@@ -1520,6 +1533,7 @@ class PetController:
                             and not self._human_active_in_fleet(time.monotonic())):
                         await self._store_observation(
                             robot_id, change, camera_derived=True,
+                            camera_generation=hub_generation,
                         )
                         if (hub_generation is not None and
                                 self.multimodal.hub._generation[robot_id] != hub_generation):
