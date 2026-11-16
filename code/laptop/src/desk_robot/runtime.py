@@ -152,6 +152,7 @@ class Runtime:
             if robot_id not in active
             and visual.hub.voice_until[robot_id] == float("inf")
         ]
+        preempt_error = None
         if missing_starts:
             prepare = getattr(visual, "prepare_human_turn", None)
             # Mark authenticated VAD NOW. A slow Xiaozhi STOP cannot keep
@@ -159,7 +160,12 @@ class Runtime:
             if callable(prepare):
                 for robot_id in sorted(missing_starts):
                     prepare(robot_id, end_expected=True)
-            await self._preempt_audio_floor()
+            try:
+                await self._preempt_audio_floor()
+            except Exception as exc:
+                # An unresolved physical STOP must remain an error, but it
+                # cannot erase the authenticated human's live camera turn.
+                preempt_error = exc
             for robot_id in sorted(missing_starts):
                 if callable(prepare):
                     visual.start_speech_frames(robot_id)
@@ -179,6 +185,8 @@ class Runtime:
                 if robot_id not in missing_starts:
                     visual.voice_started(robot_id)
             recovering.clear()
+        if preempt_error is not None:
+            raise preempt_error
 
     async def _on_voice_monitor_ready(self, ready: bool) -> None:
         # Re-enable spontaneous voice only after a successful authenticated
@@ -234,10 +242,14 @@ class Runtime:
         # launch another camera HTTP request, inference, or audio owner.
         if callable(prepare) and kind in ("speech_start", "normal", "group"):
             prepare(robot_id, end_expected=kind == "speech_start")
-        # Human speech cancels one shared five-pet speech floor once.
-        await self._preempt_audio_floor()
-        # Only after the urgent speaker cleanup may the optional JPEG
-        # sampler start. Preserve smaller test adapters' prior interface.
+        # Human speech cancels one shared five-pet speech floor once. The
+        # authenticated human camera must still start if audio STOP fails,
+        # without treating the unresolved speaker lease as a success.
+        preempt_error = None
+        try:
+            await self._preempt_audio_floor()
+        except Exception as exc:
+            preempt_error = exc
         if visual is not None:
             if callable(prepare):
                 if kind in ("speech_start", "normal", "group"):
@@ -246,6 +258,8 @@ class Runtime:
                 visual.voice_started(robot_id)
             elif kind in ("normal", "group"):
                 visual.voice_interrupted(robot_id)
+        if preempt_error is not None:
+            raise preempt_error
 
     async def close(self):
         if self.settings.mode == "hardware":

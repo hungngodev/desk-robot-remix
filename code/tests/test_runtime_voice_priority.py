@@ -767,3 +767,80 @@ async def test_monitor_loss_stalled_xiao_stop_cannot_starve_other_heads(monkeypa
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+async def test_human_vad_camera_still_starts_when_fleet_audio_stop_fails():
+    """Keep input camera live, but propagate uncertain physical audio STOP."""
+    import pytest
+    events = []
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            events.append("pet-stop")
+            raise RuntimeError("failed pet decoder STOP")
+
+    class Conversation:
+        async def stop(self):
+            events.append("group-stop")
+
+    class Visual:
+        def prepare_human_turn(self, robot_id, *, end_expected):
+            events.append("vad-prepared")
+
+        def start_speech_frames(self, robot_id):
+            events.append("camera-start")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")]
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+    with pytest.raises(RuntimeError, match="Unable to preempt"):
+        await runtime._on_voice_interrupt("robot-01", "speech_start")
+    assert events == ["vad-prepared", "pet-stop", "group-stop", "camera-start"]
+
+
+async def test_recovered_vad_snapshot_reconciles_camera_despite_failed_audio_stop():
+    from desk_robot.multimodal import CameraFrameHub
+    import pytest
+
+    events = []
+    hub = CameraFrameHub(["robot-01"])
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            events.append("pet-stop")
+            raise RuntimeError("decoder still active")
+
+    class Conversation:
+        async def stop(self):
+            events.append("group-stop")
+
+    class Visual:
+        def __init__(self):
+            self.hub = hub
+
+        def prepare_human_turn(self, robot_id, *, end_expected):
+            events.append("vad-prepared")
+            hub.notify(robot_id, "human_voice", time.monotonic())
+
+        def start_speech_frames(self, robot_id):
+            events.append("camera-start")
+
+        def voice_ended(self, robot_id):
+            events.append("camera-end")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")]
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+    with pytest.raises(RuntimeError, match="Unable to preempt"):
+        await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+    assert events == ["vad-prepared", "pet-stop", "group-stop", "camera-start"]
+    assert hub.user_active("robot-01", time.monotonic())
+    assert hub.voice_until["robot-01"] == float("inf")
