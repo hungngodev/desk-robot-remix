@@ -402,3 +402,41 @@ def test_native_handshake_can_reset_local_preconnect_interrupt_but_not_repeat():
         OmniDuplexWire().handle_event({
             "type": "session.created", "session": {"epoch": -1},
         })
+
+
+def test_epochless_old_response_cannot_override_recovered_native_output():
+    """After a native STOP, missing epoch must never become speaker authority."""
+    wire = OmniDuplexWire()
+    wire.handle_event({
+        "type": "response.created", "response_id": "before",
+        "response": {"id": "before", "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    wire.interrupt()
+    wire.append_audio(bytes(3200), speech=True)
+    wire.commit()
+    wire.handle_event({
+        "type": "response.created", "response_id": "recovered",
+        "response": {"id": "recovered", "metadata": {"duplex_event": {"epoch": 2}}},
+    })
+    assert wire.response_id == "recovered"
+    assert wire.handle_event(delta("recovered", epoch=2)) is not None
+    for ambiguous in (
+        {"type": "response.created", "response_id": "old-no-epoch"},
+        {"type": "response.created", "response_id": "old-no-metadata",
+         "response": {"id": "old-no-metadata"}},
+        {"type": "response.created", "response_id": "old-empty-metadata",
+         "response": {"id": "old-empty-metadata", "metadata": {}}},
+    ):
+        wire.handle_event(ambiguous)
+        assert wire.response_id == "recovered"
+        assert wire.handle_event(delta("recovered", epoch=2)) is not None
+
+
+def test_epochless_native_response_allowed_before_first_barge_for_legacy_fixture():
+    """Preserve simple pre-interruption simulated transport tests only."""
+    wire = OmniDuplexWire()
+    wire.handle_event({
+        "type": "response.created", "response_id": "first",
+        "response": {"id": "first"},
+    })
+    assert wire.handle_event(delta("first")) is not None

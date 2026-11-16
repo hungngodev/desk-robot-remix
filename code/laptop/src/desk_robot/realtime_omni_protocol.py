@@ -277,7 +277,11 @@ class OmniDuplexWire:
                     self._min_server_epoch is not None
                     and server_epoch < self._min_server_epoch
                 )
-            )) or (self._interrupted and server_epoch is None):
+            )) or (self._min_server_epoch is not None and server_epoch is None):
+                # Once a physical barge/cancel established an epoch floor,
+                # an epochless response is never safe, even after a valid new
+                # response cleared _interrupted. vLLM-Omni advertises epoch
+                # in response.metadata.duplex_event for native sessions.
                 return None
             self._interrupted = False
             if server_epoch is not None:
