@@ -1,3 +1,13 @@
+**Single procurement authority:** The machine plan is [full-feature-plan.json](docs/hardware/full-feature-plan.json). The [owned and remaining lists](docs/hardware/complete-shopping-checklist.md) and [fleet CSV](docs/hardware/fleet-components.csv) are generated views, not independently editable shopping decisions. The 2026-11-04 $50 prototype quote and earlier sensor/mux counts are historical. Current full five-robot purchase approval is **HOLD** until loaded drive, actual power/charging, optics, fit, voice and physical trials are qualified.
+
+To regenerate both views from the same source (no separate BOM), from the repository root run:
+
+```sh
+python code/scripts/procurement_release.py --format markdown > docs/hardware/complete-shopping-checklist.md
+python code/scripts/procurement_release.py --format csv > docs/hardware/fleet-components.csv
+python -m pytest code/tests/test_procurement_release.py
+```
+
 # Desk Robot Remix
 
 - [**Docs**](docs/README.md) is the living handbook. Start here for the plan,
