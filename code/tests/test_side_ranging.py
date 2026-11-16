@@ -19,6 +19,7 @@ def body(*, mm=(600, 600, 600), ages=(30, 30, 30),
     }
     if sample_ms is not None:
         side.update(sample_ms=list(sample_ms), boot_id=boot_id)
+        return {"side_ranges": side, "imu": {"boot_id": boot_id}}
     return {"side_ranges": side}
 
 
@@ -211,3 +212,30 @@ def test_hardware_side_proximity_requires_wroom_conversion_identity():
                                 sample_ms=(300, 300, 300), boot_id=2),
                            now=1.5, near_mm=170,
                            require_hardware_identity=True) == [("left", 95)]
+
+
+def test_hardware_side_source_rejects_conflicting_imu_boot_identity():
+    tracker = SideRangeEvents()
+    trusted = body(sample_ms=(100, 100, 100), boot_id=17)
+    assert tracker.observe(trusted, now=1, near_mm=170,
+                           require_hardware_identity=True) == []
+    mismatch = body(mm=(100, 600, 600),
+                    sample_ms=(200, 200, 200), boot_id=17)
+    mismatch["imu"]["boot_id"] = 18
+    assert tracker.observe(mismatch, now=1.1, near_mm=170,
+                           require_hardware_identity=True) == []
+    incomplete = body(mm=(100, 600, 600),
+                      sample_ms=(300, 300, 300), boot_id=17)
+    incomplete.pop("imu")
+    assert tracker.observe(incomplete, now=1.2, near_mm=170,
+                           require_hardware_identity=True) == []
+    # A subsequent intact response begins afresh instead of inheriting a
+    # near hit from the mismatched or missing hardware identity.
+    assert tracker.observe(body(mm=(100, 600, 600),
+                                sample_ms=(400, 400, 400), boot_id=17),
+                           now=1.3, near_mm=170,
+                           require_hardware_identity=True) == []
+    assert tracker.observe(body(mm=(95, 600, 600),
+                                sample_ms=(500, 500, 500), boot_id=17),
+                           now=1.4, near_mm=170,
+                           require_hardware_identity=True) == []

@@ -274,6 +274,7 @@ static void optional_max30102_raw_never_authorizes_motion_or_diagnosis() {
 static void extra_three_ranging_channels_are_diagnostics_only() {
   desk_robot::CliffGuard guard;
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.set_boot_epoch(45);  // same per-boot source as the IMU status
   body.sample_side_range(0, 125, true, 10);
   body.sample_side_range(1, 0, false, 11);
   body.sample_side_range(2, 300, true, 12);
@@ -283,7 +284,7 @@ static void extra_three_ranging_channels_are_diagnostics_only() {
   CHECK(status.find("\"mm\":[125,0,300]") != std::string::npos);
   CHECK(status.find("\"age_ms\":[20,19,18]") != std::string::npos);
   CHECK(status.find("\"sample_ms\":[10,11,12]") != std::string::npos);
-  CHECK(status.find("\"boot_id\":0") != std::string::npos);
+  CHECK(status.find("\"boot_id\":45") != std::string::npos);
   CHECK(status.find("\"present_mask\":7,\"valid_mask\":5") != std::string::npos);
   CHECK(status.find("\"motion_certified\":false") != std::string::npos);
   // At 350ms source age a previously valid optional direction may still

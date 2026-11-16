@@ -58,11 +58,15 @@ class SideRangeEvents:
         distances, ages = data.get("mm"), data.get("age_ms")
         sample_times, boot_id = data.get("sample_ms"), data.get("boot_id")
         has_hardware_identity = sample_times is not None or boot_id is not None
-        if require_hardware_identity and not has_hardware_identity:
-            # Hardware autonomy must never count a legacy host clock guess as
-            # a second physical conversion. Simulation can retain that path.
-            self._reset()
-            return []
+        if require_hardware_identity:
+            imu = body.get("imu")
+            if (not has_hardware_identity or not isinstance(imu, dict)
+                    or type(imu.get("boot_id")) is not int
+                    or imu["boot_id"] != boot_id):
+                # Hardware autonomy requires one consistent physical WROOM
+                # source for side ranging and the existing IMU status.
+                self._reset()
+                return []
         if (type(present) is not int or type(valid) is not int
                 or not 0 <= present <= 7 or not 0 <= valid <= 7
                 or valid & ~present
