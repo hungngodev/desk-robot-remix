@@ -11,6 +11,7 @@ _T = TypeVar("_T")
 
 from .calibration import Calibration
 from .config import Settings
+from .dock_ir import validate_ir
 from .dock_runtime import detect_bounded, load_real_dock_calibration
 from .dock_vision import assess_dock
 from .grasp_feedback import guarded_grasp
@@ -530,6 +531,8 @@ class Coordinator:
             raise OperationError(
                 "Dock motion requires measured camera to chassis mounting geometry"
             )
+        if robot.dock_beacon_id is None:
+            raise OperationError("Dock approach needs the assigned physical NEC beacon")
         return self._submit(
             robot_id, "dock_approach",
             lambda job: self._dock_approach(
@@ -541,8 +544,10 @@ class Coordinator:
         self, job: Job, camera, target_mm: float,
         turn_sign: int, forward_sign: int
     ) -> dict:
-        """Real camera observations + local guard only; no charger operation."""
+        """Camera plus fresh assigned dock IR plus local guard; NEVER charge."""
         head = self.heads[job.robot_id]
+        expected_dock = self.robot(job.robot_id).dock_beacon_id
+        previous_ir: tuple[int, int] | None = None
         for attempt in range(16):
             # Check before vision and AGAIN afterwards: camera and PnP may
             # pause for seconds while the hardware floor/front state changes.
@@ -613,9 +618,43 @@ class Coordinator:
                         "charging_authorized": False, "physical_acceptance_pass": False,
                     }
                 command = f"drive {20 * forward_sign} {20 * forward_sign} 100"
-            # The second fresh WROOM status request itself may take seconds.
-            # It verifies sensor safety, not that the old AprilTag image is
-            # still useful. Reject a marker that expired while polling safety.
+            # Actual hardware docking requires BOTH independent IR receivers
+            # to see the code flashed on THIS pet's assigned station. A valid
+            # foreign dock NEC frame never justifies a turn/forward pulse.
+            # This does not grant any movement or charging authorization:
+            # the five local WROOM ranging and dock-contact interlocks still
+            # own the physical STOP verdict.
+            if expected_dock is not None:
+                getter = getattr(head, "ir_status", None)
+                if not callable(getter):
+                    raise OperationError("Assigned dock IR receiver unavailable")
+                reading = await _bounded_head_reply(
+                    getter(), seconds=1.0,
+                    timeout_message="Assigned dock IR status timeout",
+                )
+                try:
+                    beacon = validate_ir(
+                        reading, job.robot_id, expected_dock_id=expected_dock,
+                    )
+                except ValueError as exc:
+                    raise OperationError(f"Assigned dock IR rejected: {exc}") from exc
+                if not beacon["match"]:
+                    return {
+                        "phase": "hold", "reason": "Assigned dock IR not jointly visible",
+                        "charging_authorized": False, "physical_acceptance_pass": False,
+                    }
+                current_ir = (beacon["left_seq"], beacon["right_seq"])
+                if previous_ir is not None and any(
+                    (new - old) & 0xffffffff not in range(1, 0x80000000)
+                    for new, old in zip(current_ir, previous_ir)
+                ):
+                    return {
+                        "phase": "hold", "reason": "Assigned dock IR replay or stale conversion",
+                        "charging_authorized": False, "physical_acceptance_pass": False,
+                    }
+                previous_ir = current_ir
+            # IR and the second fresh WROOM status can each delay movement.
+            # Never use an old camera frame simply because the NEC code matched.
             latest = assess_dock(
                 aligned, now=time.monotonic(), target_distance_mm=target_mm
             )
