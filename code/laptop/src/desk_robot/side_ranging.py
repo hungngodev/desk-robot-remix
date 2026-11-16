@@ -26,6 +26,7 @@ class SideRangeEvents:
     directions: list[Direction] = field(
         default_factory=lambda: [Direction() for _ in range(3)]
     )
+    threshold_mm: int | None = None
 
     def observe(self, body: dict, *, now: float, near_mm: int) -> list[tuple[str, int]]:
         """Only transition far -> near after two genuinely new fresh samples.
@@ -39,6 +40,11 @@ class SideRangeEvents:
         if (type(now) not in (int, float) or not math.isfinite(now)
                 or type(near_mm) is not int or not 35 <= near_mm <= 1000):
             raise ValueError("Measured side range threshold and finite clock required")
+        # Changing a measured threshold is not a physical object arrival.
+        # Start a new baseline instead of interpreting the same range twice.
+        if self.threshold_mm != near_mm:
+            self._reset()
+            self.threshold_mm = near_mm
         data = body.get("side_ranges") if isinstance(body, dict) else None
         if not isinstance(data, dict):
             self._reset()

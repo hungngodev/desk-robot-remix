@@ -110,3 +110,26 @@ async def test_real_side_event_is_one_robot_memory_not_motion(tmp_path):
     finally:
         state.enabled = False
         await pet.close()
+
+
+def test_threshold_change_cannot_fabricate_new_side_arrival():
+    tracker = SideRangeEvents()
+    # A stationary object is far with the original measured threshold.
+    assert tracker.observe(body(mm=(220, 600, 600)), now=1.00,
+                           near_mm=170) == []
+    # Operator updates the threshold; the same range is now classed near,
+    # but it is a fresh baseline, not evidence that the object moved.
+    assert tracker.observe(body(mm=(220, 600, 600)), now=1.12,
+                           near_mm=250) == []
+    assert tracker.observe(body(mm=(220, 600, 600)), now=1.24,
+                           near_mm=250) == []
+    # After the threshold change, two genuinely far readings rearm the
+    # transition and two new near readings admit exactly one event.
+    assert tracker.observe(body(mm=(400, 600, 600)), now=1.36,
+                           near_mm=250) == []
+    assert tracker.observe(body(mm=(400, 600, 600)), now=1.48,
+                           near_mm=250) == []
+    assert tracker.observe(body(mm=(220, 600, 600)), now=1.60,
+                           near_mm=250) == []
+    assert tracker.observe(body(mm=(215, 600, 600)), now=1.72,
+                           near_mm=250) == [("left", 215)]
