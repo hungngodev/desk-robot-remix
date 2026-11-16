@@ -2087,3 +2087,41 @@ async def test_cancel_resistant_snapshot_keeps_physical_read_owned_across_turns(
     finally:
         released.set()
         await visual.close()
+
+
+async def test_old_speech_frame_worker_cannot_outlive_new_voice_epoch():
+    """A cancelled sampler that ignores cancellation cannot serve a new turn."""
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def stubborn_capture(robot_id, *, source, reuse_if_recent_s):
+        calls.append((robot_id, source))
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+        return None
+
+    visual.capture = stubborn_capture
+    visual.hub.notify("robot-01", "human_voice", time.monotonic())
+    visual._turn_epoch["robot-01"] = 1
+    old = asyncio.create_task(visual._speech_frames("robot-01", 1))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        old.cancel()
+        visual._turn_epoch["robot-01"] = 2
+        visual.hub.notify("robot-01", "human_voice", time.monotonic())
+        release.set()
+        await asyncio.wait_for(old, timeout=0.4)
+        assert calls == [("robot-01", "speech")]
+    finally:
+        release.set()
+        if not old.done():
+            old.cancel()
+        await visual.close()

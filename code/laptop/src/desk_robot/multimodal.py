@@ -1067,7 +1067,7 @@ class MultimodalOrchestrator:
             # NEVER await a camera capture in the realtime VAD cancellation
             # callback. Audio playback stops without waiting for JPEG/LLM.
             self._capture_tasks[robot_id] = asyncio.create_task(
-                self._speech_frames(robot_id)
+                self._speech_frames(robot_id, self._turn_epoch[robot_id])
             )
 
     def voice_ended(self, robot_id: str) -> None:
@@ -1076,21 +1076,24 @@ class MultimodalOrchestrator:
         if task is not None and not task.done():
             task.cancel()  # Preserve captured visual context for current ASR.
 
-    async def _speech_frames(self, robot_id: str) -> None:
+    async def _speech_frames(self, robot_id: str, turn: int) -> None:
         try:
             # Keep the 1 FPS visual stream for a genuinely long utterance,
             # but cap unacknowledged camera work if a VAD end is lost. The
             # voice floor itself remains held until explicit end/disconnect.
             for _ in range(60):
-                if (self._closed or not self.hub.user_active(
-                    robot_id, time.monotonic()
-                )):
+                if (self._closed or turn != self._turn_epoch[robot_id]
+                        or not self.hub.user_active(
+                            robot_id, time.monotonic()
+                        )):
                     break
                 if self.hub.due(robot_id, time.monotonic()):
                     try:
                         await self.capture(
                             robot_id, source="speech", reuse_if_recent_s=0.65
                         )
+                        if turn != self._turn_epoch[robot_id]:
+                            return  # Older cancelled sampler cannot own a new VAD turn.
                     except Exception:
                         # Camera failure does NOT prove the human stopped
                         # speaking. Only discard stale frames, never VAD state.
