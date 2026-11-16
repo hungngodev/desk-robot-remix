@@ -102,7 +102,13 @@ async def observe_actual_dock(head, robot) -> dict:
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock calibration required: {exc}", source="not_calibrated")
     try:
-        jpeg = await asyncio.wait_for(head.snapshot(), timeout=3.0)
+        # The native AprilTag slot must not be occupied by an alternate
+        # head snapshot that suppresses coroutine cancellation indefinitely.
+        from .controller import _bounded_head_reply
+        jpeg = await _bounded_head_reply(
+            head.snapshot(), seconds=3.0,
+            timeout_message="Dock diagnostic camera snapshot timeout",
+        )
     except (OSError, ConnectionError, TimeoutError, RuntimeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
     # Reject malformed or oversized snapshots before occupying the sole native

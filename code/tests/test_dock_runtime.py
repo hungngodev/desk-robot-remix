@@ -608,3 +608,55 @@ async def test_invalid_dock_snapshot_never_starts_native_detector(tmp_path, monk
     assert result["pose"] is None
     assert not result["motor_authorized"] and not result["charging_authorized"]
     assert not result["physical_acceptance_pass"] and not head.commands
+
+
+async def test_dock_diagnostic_uncooperative_camera_returns_hold(
+    tmp_path, monkeypatch,
+):
+    """Cancellation ignoring JPEG source must not hold dock diagnostics open."""
+    import asyncio
+    from types import SimpleNamespace
+    import desk_robot.dock_runtime as runtime
+    from desk_robot.controller import _bounded_head_reply as real_bounded
+
+    # Tighten only this diagnostic's deadline in the test while exercising
+    # the same real bounded helper used by physical motion safety.
+    async def tiny_deadline(coro, *, seconds, timeout_message):
+        return await real_bounded(coro, seconds=0.04,
+                                  timeout_message=timeout_message)
+    monkeypatch.setattr("desk_robot.controller._bounded_head_reply", tiny_deadline)
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class StuckHead:
+        def __init__(self):
+            self.commands = []
+
+        async def snapshot(self):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return b"\\xff\\xd8late\\xff\\xd9"
+
+    calibration = tmp_path / "dock.json"
+    calibration.write_text('''{
+        "measured": true, "fx": 410, "fy": 410,
+        "cx": 320, "cy": 240, "tag_side_mm": 60,
+        "marker_id": 1, "target_distance_mm": 200
+    }''')
+    head = StuckHead()
+    try:
+        result = await asyncio.wait_for(runtime.observe_actual_dock(
+            head, SimpleNamespace(id="robot-01", dock_calibration=calibration),
+        ), timeout=0.5)
+        assert entered.is_set()
+        assert result["phase"] == "hold"
+        assert result["source"] == "head_snapshot_failed"
+        assert result["charging_authorized"] is False
+        assert head.commands == []
+    finally:
+        release.set()
+        await asyncio.sleep(0)
