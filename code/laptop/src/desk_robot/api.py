@@ -356,26 +356,36 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                     )
 
     async def stop_pet_and_audio(robot_id: str, *, quiet: bool):
-        """Single safety order for STOP, pause and operator quiet.
+        """Stop body first, then revoke pet initiative and native speaker.
 
-        A failed body command still revokes pet initiative and attempts to
-        flush native audio. A failed audio service never delays the real
-        WROOM stop request. No alternate motor or speaker is introduced.
+        Cleanup must run despite previous failures. Crucially, a failed WROOM
+        STOP may never be hidden by a later pet or speaker cleanup failure.
         """
         acknowledgement = None
         pet_status = None
+        failures: list[tuple[str, BaseException]] = []
         try:
             acknowledgement = await coordinator().stop(robot_id)
-        finally:
-            try:
-                if quiet:
-                    pet_status = await app.state.runtime.pet.set_quiet(
-                        robot_id, True
-                    )
-                else:
-                    pet_status = await app.state.runtime.pet.pause(robot_id)
-            finally:
-                await stop_native_pet_speech(robot_id)
+        except (Exception, asyncio.CancelledError) as exc:
+            failures.append(("WROOM STOP", exc))
+        try:
+            if quiet:
+                pet_status = await app.state.runtime.pet.set_quiet(robot_id, True)
+            else:
+                pet_status = await app.state.runtime.pet.pause(robot_id)
+        except (Exception, asyncio.CancelledError) as exc:
+            failures.append(("pet pause", exc))
+        try:
+            await stop_native_pet_speech(robot_id)
+        except (Exception, asyncio.CancelledError) as exc:
+            failures.append(("XIAO speech STOP", exc))
+        if failures:
+            primary = failures[0][1]
+            for stage, secondary in failures[1:]:
+                primary.add_note(
+                    f"Additional {stage} failure: {type(secondary).__name__}"
+                )
+            raise primary
         return acknowledgement, pet_status
 
     @app.post("/v1/robots/{robot_id}/stop", dependencies=[Depends(authorize)])

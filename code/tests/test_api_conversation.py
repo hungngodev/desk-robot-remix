@@ -871,3 +871,27 @@ def test_stop_endpoint_reports_unconfirmed_body_timeout_as_unavailable(settings,
         assert result.status_code == 503
         assert "STOP transport acknowledgement unconfirmed" in result.json()["error"]
         assert runtime.pet.states["robot-01"].enabled is False
+
+
+
+def test_stop_api_does_not_hide_body_timeout_behind_pet_cleanup_failure(
+    settings, tokens,
+):
+    """Both failures matter, but the failed WROOM STOP is the primary result."""
+    operator = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+
+        async def unavailable_body(robot_id):
+            raise TimeoutError("WROOM STOP transport acknowledgement unconfirmed")
+
+        async def failed_pet_cleanup(robot_id):
+            raise RuntimeError("pet shutdown failed")
+
+        runtime.coordinator.stop = unavailable_body
+        runtime.pet.pause = failed_pet_cleanup
+        response = client.post("/v1/robots/robot-01/stop", headers=operator)
+        assert response.status_code == 503
+        assert "WROOM STOP transport acknowledgement unconfirmed" in (
+            response.json()["error"]
+        )
