@@ -8,7 +8,14 @@ constexpr std::uint8_t kMax30102 = 0x57;
 }
 bool PulsePad::select_mux(std::uint8_t address, std::uint8_t mask) {
   wire_->beginTransmission(address);
-  return wire_->write(mask) == 1 && wire_->endTransmission(true) == 0;
+  const bool wrote = wire_->write(mask) == 1;
+  // Always finish a partial transfer; an ACK alone does not prove the
+  // 0x70/0x71 multiplexer selected the requested channel.
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  if (!wrote || !acknowledged) return false;
+  if (wire_->requestFrom(address, static_cast<std::size_t>(1), true) != 1 ||
+      wire_->available() < 1) return false;
+  return wire_->read() == mask;
 }
 bool PulsePad::select() {
   // Never expose the floor range multiplexer at the same time as an accessory.
