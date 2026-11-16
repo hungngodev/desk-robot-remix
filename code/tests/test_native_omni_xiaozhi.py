@@ -7743,3 +7743,35 @@ async def test_native_completed_response_never_waits_on_full_audio_queue(native)
         await asyncio.wait_for(session._receive_model(), timeout=0.3)
     assert session.outgoing.qsize() == 1
     assert session.outgoing.get_nowait()[0] == "previous"
+
+
+@pytest.mark.asyncio
+async def test_native_counts_only_current_model_listen_after_barge(native):
+    from aiohttp import WSMsgType
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.wire.interrupt()
+    session.wire.append_audio(bytes(3200), speech=False)
+    session.wire.commit()
+
+    class Model:
+        async def __aiter__(self):
+            for epoch in (0, 1, 2):
+                yield SimpleNamespace(
+                    type=WSMsgType.TEXT,
+                    data=json.dumps({
+                        "type": "response.listen", "epoch": epoch,
+                        "response": {"status": "listening"},
+                    }),
+                )
+
+    session._socket = Model()
+    await asyncio.wait_for(session._receive_model(), timeout=0.4)
+    assert session.native_listen_decisions == 1
+    assert session.model_chunks == 0

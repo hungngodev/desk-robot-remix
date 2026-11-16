@@ -327,6 +327,25 @@ class OmniDuplexWire:
             self.accept_output = False
         return None
 
+    def model_listen_current(self, event: dict) -> bool:
+        """Count only native model silence belonging to the current input.
+
+        Model-owned listen decisions can arrive with no response.created, but
+        always carry the upstream epoch. Delayed prior-turn decisions may not
+        be counted as current speech arbitration after a physical barge.
+        """
+        if not isinstance(event, dict) or event.get("type") != "response.listen":
+            return False
+        epoch = event.get("epoch")
+        response_id = event.get("response_id")
+        return (
+            type(epoch) is int and epoch >= self._server_epoch_seen
+            and (self._min_server_epoch is None
+                 or epoch >= self._min_server_epoch)
+            and not self._needs_new_input
+            and (response_id is None or response_id == self.response_id)
+        )
+
     def playback_ack(self, *, response_id: str, actually_played_ms: int,
                      truncate: bool = False) -> dict:
         """Only call from actual speaker playback progress, never from HTTP send.

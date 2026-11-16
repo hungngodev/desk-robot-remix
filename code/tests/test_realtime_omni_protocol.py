@@ -440,3 +440,34 @@ def test_epochless_native_response_allowed_before_first_barge_for_legacy_fixture
         "response": {"id": "first"},
     })
     assert wire.handle_event(delta("first")) is not None
+
+
+def test_native_listen_epoch_rejects_stale_silence_after_interrupt():
+    wire = OmniDuplexWire()
+    assert wire.model_listen_current({
+        "type": "response.listen", "epoch": 0,
+    })
+    wire.interrupt()
+    assert not wire.model_listen_current({
+        "type": "response.listen", "epoch": 0,
+    })
+    assert not wire.model_listen_current({
+        "type": "response.listen", "epoch": 2,
+    })  # Need fresh microphone PCM or an explicit commit.
+    wire.append_audio(bytes(3200), speech=False)
+    wire.commit()
+    assert wire.model_listen_current({
+        "type": "response.listen", "epoch": 2,
+    })
+    assert not wire.model_listen_current({
+        "type": "response.listen", "epoch": 1,
+    })
+    assert not wire.model_listen_current({
+        "type": "response.listen", "epoch": "2",
+    })
+    assert not wire.model_listen_current({
+        "type": "response.listen",
+    })
+    assert not wire.model_listen_current({
+        "type": "response.listen", "epoch": 2, "response_id": "unknown",
+    })

@@ -1780,9 +1780,9 @@ class NativeOmniSession:
             # A model response may be interrupted at any time. Use a bounded
             # FIFO and response identity, never detached unbounded audio tasks.
             pcm = self.wire.handle_event(event)
-            if kind == "response.listen":
-                # A deliberate model listen decision is an actual native
-                # duplex event, not a completed speech or playback receipt.
+            if kind == "response.listen" and self.wire.model_listen_current(event):
+                # Only current native model silence counts. A reordered old
+                # listen decision must not describe this human/camera turn.
                 self.native_listen_decisions += 1
             # Reuse official vLLM-Omni text / audio-transcript events. They
             # are model estimates, not audible speaker acknowledgement.
