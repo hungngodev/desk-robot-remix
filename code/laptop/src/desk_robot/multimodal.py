@@ -1345,10 +1345,17 @@ class MultimodalOrchestrator:
                 # claim a scene is still current or delay new user turns.
                 model_started = time.monotonic()
                 try:
-                    async with asyncio.timeout(self._vision_timeout_s):
-                        answer = await self.scene.answer(
+                    # An alternate VLM client may swallow cancellation after
+                    # the deadline. Its late response must not retain the
+                    # common inference lock or become a new human answer.
+                    from .controller import _bounded_head_reply
+                    answer = await _bounded_head_reply(
+                        self.scene.answer(
                             question, [frame.jpeg for frame in chosen]
-                        )
+                        ),
+                        seconds=self._vision_timeout_s,
+                        timeout_message="Live visual analysis timed out",
+                    )
                     metrics["model_latency_last_ms"] = round(
                         (time.monotonic() - model_started) * 1000
                     )

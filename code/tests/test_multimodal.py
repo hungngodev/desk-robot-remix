@@ -1992,3 +1992,42 @@ async def test_proactive_camera_ignoring_cancel_does_not_pin_live_camera_lock(
     finally:
         release.set()
         await visual.close()
+
+
+async def test_uncooperative_visual_model_timeout_releases_fleet_inference_lock():
+    """A slow provider that suppresses cancellation cannot starve five pets."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class StubbornModel:
+        async def answer(self, question, frames):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
+                return "An obsolete visual reply must not be published"
+
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        StubbornModel(), asyncio.Lock(),
+    )
+    service._vision_timeout_s = 0.04
+    try:
+        with pytest.raises(RuntimeError, match="timed out"):
+            await asyncio.wait_for(
+                service.look("robot-01", "What is on my desk?"), timeout=.5,
+            )
+        assert entered.is_set()
+        assert cancelled.is_set()
+        await asyncio.wait_for(service.inference_lock.acquire(), timeout=.2)
+        service.inference_lock.release()
+        assert not service._look_tasks
+        assert service.status("robot-01")["software_timings"]["visual_answers"] == 0
+        assert service.hub.recent_tool_context("robot-01", time.monotonic()) == []
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+        await service.close()
