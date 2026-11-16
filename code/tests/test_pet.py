@@ -4030,3 +4030,50 @@ async def test_pet_fleet_close_pauses_other_peers_despite_stuck_observer(
     finally:
         release.set()
         await asyncio.wait_for(task, timeout=0.3)
+
+
+async def test_proactive_optional_tool_timeout_ignoring_cancel_does_not_block_speaker(
+    fleet, tmp_path, monkeypatch,
+):
+    """No late WROOM status can delay the optional tool boundary forever."""
+    import types
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class StubbornHead:
+        async def status(self):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return {"robot_id": "robot-01", "armed": True}
+
+    head = StubbornHead()
+    pet = PetController(
+        fleet, {"robot-01": head}, conversation, memory, KeyScene(),
+    )
+    # Patch only the global wait timeout for this test's read; use a fake
+    # loop clock by advancing elapsed time through a small temporary wrapper.
+    original_wait = asyncio.wait
+    async def short_wait(tasks, *, timeout=None, **kwargs):
+        if timeout == 1.5:
+            timeout = 0.05
+        return await original_wait(tasks, timeout=timeout, **kwargs)
+
+    monkeypatch.setattr("desk_robot.pet.asyncio.wait", short_wait)
+    try:
+        with pytest.raises(TimeoutError, match="Optional proactive read-only tool timed out"):
+            await asyncio.wait_for(
+                pet._proactive_tool_receipt("robot-01", "status"),
+                timeout=0.3,
+            )
+        assert entered.is_set()
+        assert not release.is_set()
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+        await pet.close()

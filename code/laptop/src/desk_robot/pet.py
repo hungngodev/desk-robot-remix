@@ -1581,7 +1581,20 @@ class PetController:
         read = getattr(head, tool, None)
         if not callable(read):
             raise RuntimeError("Selected head read-only tool unavailable")
-        result = await asyncio.wait_for(read(), timeout=1.5)
+        pending = asyncio.create_task(read())
+        try:
+            done, _ = await asyncio.wait({pending}, timeout=1.5)
+            if not done:
+                raise TimeoutError("Optional proactive read-only tool timed out")
+            result = await pending
+        finally:
+            if not pending.done():
+                pending.cancel()
+                # An alternate head may suppress cancellation. Never apply
+                # its late status/aux result to a newer turn or block speech.
+                pending.add_done_callback(
+                    lambda task: None if task.cancelled() else task.exception()
+                )
         if (not isinstance(result, dict)
                 or result.get("robot_id") != robot_id):
             raise RuntimeError("Proactive tool returned wrong robot identity")
