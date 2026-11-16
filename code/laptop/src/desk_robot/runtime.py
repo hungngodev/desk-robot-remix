@@ -12,6 +12,7 @@ from .live_voice_events import VoiceEventListener
 from .memory import MemoryStore
 from .multimodal import MultimodalOrchestrator
 from .pet import PetController
+from .room_station import RoomObservation, RoomSerialFeed
 from .simulator import (
     SimulatedChat,
     SimulatedHead,
@@ -82,7 +83,16 @@ class Runtime:
             self.multimodal.end_direct_vision = self.pet.end_direct_vision
         self.voice_events: VoiceEventListener | None = None
         self._voice_task: asyncio.Task | None = None
+        self._room_stop = asyncio.Event()
+        self._room_task: asyncio.Task | None = None
+        self.room_feed: RoomSerialFeed | None = None
         self._closed = False
+
+    def _on_room_observation(self, observation: RoomObservation) -> None:
+        """One Mac owner shares only opt-in, ephemeral environmental facts."""
+        if (not self._closed and self.settings.room_station_context_enabled
+                and self.multimodal is not None):
+            self.multimodal.hub.remember_room(observation)
 
     async def start(self):
         """Bridge Xiaozhi's real voice interruption into Mac speech cancellation."""
@@ -95,6 +105,23 @@ class Runtime:
         # The pet still needs its separate opt-in to speak proactively.
         if self.multimodal is not None:
             self.multimodal.start_streams()
+        if self.settings.room_station_enabled and self._room_task is None:
+            try:
+                import serial  # noqa: F401, room extra only
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Room station requires pip install '.[room]' for pyserial"
+                ) from exc
+            loop = asyncio.get_running_loop()
+            self.room_feed = RoomSerialFeed(
+                self.settings.room_station_port,
+                lambda observation: loop.call_soon_threadsafe(
+                    self._on_room_observation, observation
+                ),
+            )
+            self._room_task = asyncio.create_task(
+                self.room_feed.run(self._room_stop),
+            )
         if not any(robot.device_id for robot in self.settings.robots):
             return
         self.voice_events = VoiceEventListener(
@@ -308,6 +335,12 @@ class Runtime:
             except Exception as exc:
                 errors.append(exc)
         await step("WROOM motion", self.coordinator.close(), 4.0)
+        # Stop the one read-only USB producer after the urgent WROOM STOP and
+        # before tearing down per-pet camera and context owners.
+        self._room_stop.set()
+        if self._room_task is not None:
+            await step("Shared room USB", self._room_task, 1.0)
+            self._room_task = None
         unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
         if unconfirmed:
             # An idle robot can still have an uncertain prior motor pulse.
