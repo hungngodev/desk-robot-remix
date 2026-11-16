@@ -23,8 +23,10 @@ bool ExpansionTouch::select() {
 bool ExpansionTouch::close() { return mux(kExpansionMux, 0); }
 bool ExpansionTouch::read(std::uint8_t reg, std::uint8_t& value) {
   wire_->beginTransmission(kAddress);
-  if (wire_->write(reg) != 1 || wire_->endTransmission(false) != 0)
-    return false;
+  const bool wrote = wire_->write(reg) == 1;
+  // Always terminate the attempted register transaction, including a failed write.
+  const bool acknowledged = wire_->endTransmission(false) == 0;
+  if (!wrote || !acknowledged) return false;
   if (wire_->requestFrom(kAddress, static_cast<std::size_t>(1), true) != 1 ||
       wire_->available() < 1) return false;
   const int result = wire_->read();
