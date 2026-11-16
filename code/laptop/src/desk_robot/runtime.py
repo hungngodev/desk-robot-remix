@@ -82,9 +82,12 @@ class Runtime:
             self.multimodal.end_direct_vision = self.pet.end_direct_vision
         self.voice_events: VoiceEventListener | None = None
         self._voice_task: asyncio.Task | None = None
+        self._closed = False
 
     async def start(self):
         """Bridge Xiaozhi's real voice interruption into Mac speech cancellation."""
+        if getattr(self, "_closed", False):
+            raise RuntimeError("Closed runtime cannot restart voice listeners")
         if self.settings.mode != "hardware" or self._voice_task is not None:
             return
         # Visual consent enables a persistent feed independently of voice
@@ -264,6 +267,9 @@ class Runtime:
 
     async def close(self):
         """Attempt every owner cleanup even after one unconfirmed STOP."""
+        # A timed out voice monitor might still be alive. Never authorize
+        # a second listener on this runtime after shutdown has begun.
+        self._closed = True
         errors: list[Exception] = []
 
         async def step(label: str, operation, deadline: float) -> None:
@@ -312,7 +318,9 @@ class Runtime:
                 error = task.exception()
                 if error is not None:
                     errors.append(error)
-            self._voice_task = None
+            if done:
+                self._voice_task = None
+            # Otherwise retain the cancelled but still live task as owned.
 
         await step("Pet observer", self.pet.close(), 5.0)
         if self.multimodal is not None:

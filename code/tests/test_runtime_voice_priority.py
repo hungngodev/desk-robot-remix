@@ -927,6 +927,11 @@ async def test_runtime_shutdown_bounds_uncooperative_voice_monitor_and_continues
             await asyncio.wait_for(runtime.close(), timeout=0.5)
         assert events == ["owner", "owner", "owner", "speaker", "client"]
         assert not task.done()
+        assert runtime._closed is True
+        assert runtime._voice_task is task
+        with pytest.raises(RuntimeError, match="Closed runtime"):
+            await runtime.start()
+        assert runtime._voice_task is task
     finally:
         release.set()
         await asyncio.wait_for(task, timeout=0.3)
