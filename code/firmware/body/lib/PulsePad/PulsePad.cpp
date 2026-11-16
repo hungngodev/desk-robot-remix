@@ -1,5 +1,6 @@
 #include "PulsePad.h"
-#if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
+#if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
+    (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 namespace desk_robot {
 namespace {
 constexpr std::uint8_t kTofMux = 0x70;
