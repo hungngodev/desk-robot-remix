@@ -996,3 +996,52 @@ async def test_close_reports_unconfirmed_stop_without_hanging(settings):
     assert c.closed and task.cancelled()
     assert job.state == "failed"
     assert "Shutdown STOP unconfirmed" in (job.error or "")
+
+
+async def test_hardware_close_stops_idle_registered_bodies_concurrently(settings):
+    """A permit consumed earlier is no excuse to skip physical fleet STOP."""
+    settings.mode = "hardware"
+    first = HardwareStatusHead("robot-01")
+    second = HardwareStatusHead("robot-02")
+    c = Coordinator(
+        settings, {"robot-01": first, "robot-02": second},
+        SimulationVision(),
+    )
+    await asyncio.wait_for(c.close(), timeout=1)
+    assert c.closed and not c.permits
+    assert first.commands == ["stop"]
+    assert second.commands == ["stop"]
+
+
+async def test_hardware_close_stalled_peer_does_not_starve_other_body(settings):
+    settings.mode = "hardware"
+    first = HardwareStatusHead("robot-01")
+    second = HardwareStatusHead("robot-02")
+    sent = asyncio.Event()
+    release = asyncio.Event()
+    original = first.command
+
+    async def uncooperative_first(command):
+        if command == "stop":
+            sent.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return {"ok": True, "reply": "OK stop", "robot_id": "robot-01"}
+        return await original(command)
+
+    first.command = uncooperative_first
+    c = Coordinator(
+        settings, {"robot-01": first, "robot-02": second},
+        SimulationVision(),
+    )
+    try:
+        await asyncio.wait_for(c.close(), timeout=1.8)
+        assert sent.is_set()
+        assert c.closed
+        assert second.commands == ["stop"]
+        assert not release.is_set()
+    finally:
+        release.set()
+        await asyncio.sleep(0)

@@ -226,9 +226,11 @@ class Coordinator:
         running = [task for task in self.tasks.values() if not task.done()]
         for task in running:
             task.cancel()
-        # One active hardware head must not hold another robot's STOP.
-        if active and self.settings.mode == "hardware":
-            ids = sorted(active)
+        # Every configured hardware body needs a STOP on shutdown, not just
+        # active jobs: a previously uncertain command can leave motors armed.
+        # One disconnected head cannot delay STOP on the other four.
+        if self.settings.mode == "hardware":
+            ids = sorted(self.heads)
             receipts = await asyncio.gather(
                 *(_bounded_body_stop(self.heads[robot_id]) for robot_id in ids),
                 return_exceptions=True,
