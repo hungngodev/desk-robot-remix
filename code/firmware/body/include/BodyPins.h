@@ -12,6 +12,8 @@ constexpr int kUartTx = 17;
 constexpr int kLeftStepperPins[] = {13, 14, 25, 26};
 constexpr int kRightStepperPins[] = {27, 32, 33, 23};
 constexpr int kMotorPins[] = {13, 14, 25, 26, 27, 32, 33, 23};
+#endif
+#if DESK_ROBOT_STEPPER || (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 constexpr int kSensorSda = 21;
 constexpr int kSensorScl = 22;
 // No spare boot-safe output on this pin map. GPIO4 is a boot strapping
@@ -32,8 +34,9 @@ constexpr int kTerminalIrLeftInput = 36;
 constexpr int kTerminalIrRightInput = 39;
 // Slow magnetic hat/reed and PIR inputs move to MCP23017 GPIOB0 and GPIOB1.
 // They are not WROOM GPIOs and cannot capture 560us IR pulses.
+#endif
 
-#else
+#if !DESK_ROBOT_STEPPER
 // DRV8833: xIN1 positive PWM / xIN2 low, reversed for negative; both low = coast.
 constexpr int kLeftIn1 = 25;
 constexpr int kLeftIn2 = 26;
