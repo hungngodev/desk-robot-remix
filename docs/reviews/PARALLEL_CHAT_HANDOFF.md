@@ -1,4 +1,8 @@
 
+## November 16 bounded cancellation resistant stream shutdown
+
+Owner Robot Code Fixes and Cleanup. Source 6ef2979ce34184cf7d5af5845da437a434866260 bounds shutdown of stream, sensor, look, capture and proactive workers to 0.5 seconds and retains unfinished owner entries until actual completion. Deterministic stream cancellation regression 98410775fced39b1a1ec56f4e6dbf94dbbe1ef70 is committed but NOT EXECUTED. Local git ls-remote failed DNS exit 128. Run cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_multimodal.py -k close_bounds_cancellation_resistant_stream_worker then full multimodal suite. Do not overlap multimodal.close edits. Physical safety unqualified. PR remains draft.
+
 ## November 16 bounded camera shutdown ownership regression
 
 Owner Robot Code Fixes and Cleanup. Starting PR #17 head 9a401efbadeb2f6f1964b5eec4badee27c1c36f9. Source commit 3c9964982e046e490e0fc73497eefc18e0179ba0 keeps cancellation resistant physical XIAO snapshot tasks in the ownership registry until actual completion, with bounded 0.5 second shutdown wait and identity guarded completion cleanup. Test commit 06d06b731c55ff746ccc2776b7a9724a9aaac803 adds a deterministic Event barrier regression for a snapshot adapter that suppresses cancellation. The source and test were committed through GitHub contents API; regression NOT EXECUTED. Local git ls-remote failed github.com DNS resolution, exit 128. Required: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_multimodal.py -k close_preserves_cancellation_resistant_physical_snapshot_ownership, then full multimodal suite. No device, acoustic, dock, charge or motor qualification. PR stays draft.
