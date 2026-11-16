@@ -9,8 +9,6 @@ separate ESP32 firmware and audio transport integration.
 
 from __future__ import annotations
 
-_PET_SPEECH_ABORT_TIMEOUT_S = 2.5
-
 import asyncio
 import json
 import math
@@ -27,6 +25,9 @@ from .memory import MemoryStore
 from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
 from .vision import SceneChange, VisualChangeGate
+
+_PET_SPEECH_ABORT_TIMEOUT_S = 2.5
+_PET_OBSERVER_CANCEL_TIMEOUT_S = 2.0
 
 
 class SceneComparator(Protocol):
@@ -318,17 +319,33 @@ class PetController:
             t for t in (state.task, state.touch_task, state.aux_task)
             if t is not None
         ]
-        state.task = state.touch_task = state.aux_task = None
         for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        await self._cancel_speech(robot_id)
-        if self.multimodal is not None:
-            # Pausing autonomous observation drops this pet's RAM-only
-            # camera context, but may NOT release Xiaozhi human speech VAD.
-            # The actual voice event owner supplies speech_end/disconnect.
-            self.multimodal.hub.discard_video(robot_id)
+            if not task.done():
+                task.cancel()
+        try:
+            if tasks:
+                done, pending = await asyncio.wait(
+                    tasks, timeout=_PET_OBSERVER_CANCEL_TIMEOUT_S
+                )
+                for task in done:
+                    if not task.cancelled():
+                        task.exception()
+                if pending:
+                    # Keep pending references so start() cannot create a
+                    # second observer before the old one actually exits.
+                    raise TimeoutError("Pet observer cancellation unconfirmed")
+        finally:
+            for attr in ("task", "touch_task", "aux_task"):
+                task = getattr(state, attr)
+                if task is not None and task.done():
+                    setattr(state, attr, None)
+            try:
+                await self._cancel_speech(robot_id)
+            finally:
+                if self.multimodal is not None:
+                    # Discard the RAM-only JPEG even during failed cleanup.
+                    # Human VAD remains owned by the live voice source.
+                    self.multimodal.hub.discard_video(robot_id)
         return self.status(robot_id)
 
     async def set_quiet(self, robot_id: str, quiet: bool) -> dict:
@@ -2139,5 +2156,12 @@ class PetController:
 
     async def close(self) -> None:
         self._closed = True
-        for robot_id in self.states:
-            await self.pause(robot_id)
+        # One noncooperative head must not prevent four peers from pausing.
+        results = await asyncio.gather(
+            *(self.pause(robot_id) for robot_id in self.states),
+            return_exceptions=True,
+        )
+        failures = [result for result in results
+                    if isinstance(result, BaseException)]
+        if failures:
+            raise RuntimeError("One or more pet observers did not stop") from failures[0]

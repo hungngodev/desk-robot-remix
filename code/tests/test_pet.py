@@ -3960,3 +3960,73 @@ async def test_pet_speaker_interrupt_is_bounded_when_task_ignores_cancel(
     finally:
         release.set()
         await pet.close()
+
+
+async def test_pet_pause_keeps_unresponsive_observer_reference_until_real_exit(
+    fleet, tmp_path, monkeypatch,
+):
+    """Pause timeout must never permit duplicate observers on the same head."""
+    monkeypatch.setattr("desk_robot.pet._PET_OBSERVER_CANCEL_TIMEOUT_S", 0.05)
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stubborn_observer():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    task = asyncio.create_task(stubborn_observer())
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.task = task
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        with pytest.raises(TimeoutError, match="Pet observer cancellation unconfirmed"):
+            await asyncio.wait_for(pet.pause("robot-01"), timeout=0.3)
+        assert state.enabled is False
+        assert state.task is task and not task.done()
+        with pytest.raises(RuntimeError, match="Previous pet task still shutting down"):
+            pet.start("robot-01")
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=0.3)
+        await pet.close()
+
+
+async def test_pet_fleet_close_pauses_other_peers_despite_stuck_observer(
+    fleet, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr("desk_robot.pet._PET_OBSERVER_CANCEL_TIMEOUT_S", 0.05)
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stubborn_observer():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    task = asyncio.create_task(stubborn_observer())
+    pet.states["robot-01"].task = task
+    pet.states["robot-01"].enabled = True
+    pet.states["robot-02"].enabled = True
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        with pytest.raises(RuntimeError, match="One or more pet observers did not stop"):
+            await asyncio.wait_for(pet.close(), timeout=0.3)
+        assert pet._closed is True
+        assert pet.states["robot-01"].enabled is False
+        assert pet.states["robot-02"].enabled is False
+        assert pet.states["robot-01"].task is task and not task.done()
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=0.3)
