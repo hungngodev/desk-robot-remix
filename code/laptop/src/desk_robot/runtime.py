@@ -231,6 +231,8 @@ class Runtime:
     async def close(self):
         if self.settings.mode == "hardware":
             self.pet.set_voice_monitor_ready(False)
+        # Never make the physical STOP wait behind voice/model/pet teardown.
+        await self.coordinator.close()
         if self._voice_task is not None:
             self._voice_task.cancel()
             await asyncio.gather(self._voice_task, return_exceptions=True)
@@ -239,5 +241,4 @@ class Runtime:
         if self.multimodal is not None:
             await self.multimodal.close()
         await self.conversation.stop()
-        await self.coordinator.close()
         await self.client.aclose()

@@ -213,11 +213,43 @@ class Coordinator:
         return acknowledgement
 
     async def close(self):
+        """Revoke permits and send bounded physical STOP before slow cleanup."""
         self.closed = True
-        for task in self.tasks.values():
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*self.tasks.values(), return_exceptions=True)
+        self.permits.clear()
+        for robot_id in self._permit_epoch:
+            self._permit_epoch[robot_id] += 1
+        active = {
+            job.robot_id for jid, job in self.jobs.items()
+            if (job.state in {"queued", "running"}
+                and jid in self.tasks and not self.tasks[jid].done())
+        }
+        running = [task for task in self.tasks.values() if not task.done()]
+        for task in running:
+            task.cancel()
+        # One active hardware head must not hold another robot's STOP.
+        if active and self.settings.mode == "hardware":
+            ids = sorted(active)
+            receipts = await asyncio.gather(
+                *(_bounded_body_stop(self.heads[robot_id]) for robot_id in ids),
+                return_exceptions=True,
+            )
+            for robot_id, result in zip(ids, receipts):
+                if isinstance(result, BaseException):
+                    for job in self.jobs.values():
+                        if job.robot_id == robot_id and job.state in {"queued", "running"}:
+                            job.state = "failed"
+                            job.error = "Shutdown STOP unconfirmed; rely on WROOM watchdog"
+        if running:
+            done, pending = await asyncio.wait(running, timeout=2.0)
+            for task in done:
+                if not task.cancelled():
+                    task.exception()
+            for jid, task in self.tasks.items():
+                if task in pending:
+                    self.jobs[jid].state = "failed"
+                    self.jobs[jid].error = (
+                        "Shutdown task ignored cancellation; WROOM watchdog required"
+                    )
 
     def _submit(self, robot_id: str, kind: str, work: Callable[[Job], Awaitable[dict]]) -> Job:
         self.robot(robot_id)

@@ -952,3 +952,47 @@ async def test_exploration_uncooperative_status_timeout_stops_motion(settings):
         release.set()
         await asyncio.sleep(0)
         await c.close()
+
+
+async def test_close_revokes_permits_and_stops_active_hardware_job(settings):
+    """Shutdown attempts real STOP before awaiting stale job cleanup."""
+    from desk_robot.controller import Job
+
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    blocked = asyncio.Event()
+    task = asyncio.create_task(blocked.wait())
+    job = Job("shutdown-unit", "robot-01", "exploration", state="running")
+    c.tasks[job.id] = task
+    c.jobs[job.id] = job
+    c.permits["robot-01"] = time.monotonic() + 30
+    await c.close()
+    assert c.closed is True
+    assert c.permits == {}
+    assert task.cancelled()
+    assert head.commands == ["stop"]
+
+
+async def test_close_reports_unconfirmed_stop_without_hanging(settings):
+    """One failed hardware STOP must not freeze runtime shutdown."""
+    from desk_robot.controller import Job
+
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    original = head.command
+    async def stuck_stop(command):
+        if command == "stop":
+            await asyncio.sleep(30)
+        return await original(command)
+    head.command = stuck_stop
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    blocked = asyncio.Event()
+    task = asyncio.create_task(blocked.wait())
+    job = Job("shutdown-unconfirmed", "robot-01", "exploration", state="running")
+    c.tasks[job.id] = task
+    c.jobs[job.id] = job
+    await asyncio.wait_for(c.close(), timeout=1.8)
+    assert c.closed and task.cancelled()
+    assert job.state == "failed"
+    assert "Shutdown STOP unconfirmed" in (job.error or "")
