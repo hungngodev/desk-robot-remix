@@ -1394,8 +1394,13 @@ class PetController:
                         )
                         self._vision_inflight = inference
                         try:
-                            change = await asyncio.wait_for(
-                                inference, timeout=remaining
+                            # A model adapter can ignore asyncio cancellation.
+                            # Do not hold the shared five-pet VLM lock until
+                            # that obsolete background request eventually exits.
+                            from .controller import _bounded_head_reply
+                            change = await _bounded_head_reply(
+                                inference, seconds=remaining,
+                                timeout_message="Proactive scene comparison expired",
                             )
                         except TimeoutError:
                             # Cancel the expensive speculative request at its

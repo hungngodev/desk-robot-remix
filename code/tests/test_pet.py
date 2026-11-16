@@ -4068,3 +4068,48 @@ async def test_proactive_optional_tool_timeout_ignoring_cancel_does_not_block_sp
         release.set()
         await asyncio.sleep(0)
         await pet.close()
+
+
+async def test_expired_uncooperative_scene_releases_fleet_vision_lock(
+    fleet, tmp_path,
+):
+    """A stuck speculative VLM must not starve a human look on another pet."""
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+
+    class StubbornScene:
+        async def compare(self, before, after):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
+                return SceneChange("key", "Obsolete guess from old frames", 0.99)
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": ChangingCamera()},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, StubbornScene(), interval=.01, max_observation_age=.30,
+    )
+    try:
+        pet.start("robot-01")
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        await asyncio.wait_for(cancelled.wait(), timeout=2)
+        await wait_for(lambda:
+            pet.status("robot-01")["stale_camera_events_dropped"] >= 1)
+        # This is the SAME vision lock used by an authenticated human look.
+        await asyncio.wait_for(pet._vision_lock.acquire(), timeout=.3)
+        pet._vision_lock.release()
+        assert pet._vision_inflight is None
+        assert memory.count("robot-01") == 0
+        assert speaker.spoken == []
+        release.set()
+        await asyncio.sleep(0)
+        assert memory.count("robot-01") == 0
+    finally:
+        release.set()
+        await pet.close()
