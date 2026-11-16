@@ -19,7 +19,7 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | Check the hard behavior and proactive requirements | [System contract](product-definition.md) and [acceptance A1–A12](records/verification.md) |
 | See the exact proposed code and firmware changes | [Implementation file map](PLAN.md) and [source reuse decisions](research/2026-11-03-active-pet-sources.md) |
 | See actual reused open source implementations and new tests | [November 10 open source integration pass](research/2026-11-10-active-open-source-reuse-pass.md) |
-| Check the selected full five-pet wiring and exact purchase quantities | [One robot inventory and buy table](hardware/one-robot-inventory-and-shopping.md), [finalized full feature wiring and shopping](hardware/full-feature-wiring-and-shopping.md) and [machine-readable allocation](hardware/full-feature-plan.json) |
+| Check the only current five-pet shopping quantities | [Generated owned and buy lists](hardware/complete-shopping-checklist.md), [generated full fleet CSV](hardware/fleet-components.csv) and [sole physical-gated machine plan](hardware/full-feature-plan.json). The detailed wiring page and old one-pet pages are reference material, not purchase authority |
 | Check reported stock and historical prototype quote | [Owned inventory](hardware/fleet-inventory.json) and [historical prototype BOM](hardware/bom.json) |
 | Start the first physical check | [Gripper fit and bench guide](guides/first-gripper-test.md) |
 
