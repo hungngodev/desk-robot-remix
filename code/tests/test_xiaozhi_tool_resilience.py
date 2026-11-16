@@ -1192,3 +1192,50 @@ async def test_cancel_event_wins_even_if_waiter_task_is_not_yet_done(
         "retried": False,
     }
     assert bridge_tools.voice_turn_response(result).action == 1
+
+
+async def test_xiaozhi_tool_cancel_during_waiter_cleanup_never_speaks_stale_result(
+    bridge_tools, monkeypatch,
+):
+    """The turn can end after HTTP completion but before its waiter is reaped."""
+    import asyncio
+
+    bridge = bridge_tools.bridge
+    bridge.voice_turn_generation = {"mac-head-01": 3}
+    signal = asyncio.Event()
+    bridge.tool_turn_cancel_event = lambda device: signal
+    original_client = httpx.AsyncClient
+    original_wait = asyncio.wait
+    waits = 0
+
+    async def handler(request):
+        await asyncio.sleep(0)
+        return httpx.Response(200, json={
+            "robot_id": "robot-01", "old_private_answer": "STALE_TURN",
+        })
+
+    def client_factory(*args, **kwargs):
+        return original_client(
+            *args, transport=httpx.MockTransport(handler), **kwargs
+        )
+
+    async def switch_turn_during_cleanup(tasks, *args, **kwargs):
+        nonlocal waits
+        result = await original_wait(tasks, *args, **kwargs)
+        waits += 1
+        if waits == 2:
+            # The HTTP result already won the first wait. A new human starts
+            # speaking while cancellation of the waiter finishes. The event
+            # may precede the separate generation bookkeeping callback.
+            signal.set()
+        return result
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    monkeypatch.setattr(bridge_tools.asyncio, "wait", switch_turn_during_cleanup)
+    result = await bridge_tools.call(bridge_tools.registered_head, "status")
+    assert waits == 2
+    assert result == {
+        "error": "Robot tool result superseded by new speech or reconnect",
+        "retried": False,
+    }
+    assert "STALE_TURN" not in str(result)

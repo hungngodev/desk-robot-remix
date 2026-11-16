@@ -154,6 +154,9 @@ async def call(conn, route, payload=None):
         getattr(bridge, "voice_turn_generation", {}).get(
             conn.device_id, 0
         ) != generation
+        # A new turn can signal cancellation while we await cleanup of the
+        # obsolete HTTP waiter, before the bridge advances its generation.
+        or (readonly and callable(observe_turn) and signal.is_set())
     )
     if turn_superseded and readonly:
         return {
