@@ -496,3 +496,46 @@ def test_docked_lower_sys_voltage_and_efficiency_never_ease_load():
     inefficient = docked(.5, .25, **rated)
     assert inefficient["minimum_sustained_dock_input_a"] > (
         depleted["minimum_sustained_dock_input_a"])
+
+
+
+def test_docked_cli_uses_exact_same_fail_closed_preflight(monkeypatch, capsys):
+    import json
+    import sys
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    base = [
+        str(script),
+        "--dock-idle-5v-a", "0.5", "--dock-requested-charge-a", "0.25",
+        "--dock-sys-v", "4.4", "--dock-boost-efficiency", "0.85",
+        "--dock-charger-input-limit-a", "1.5",
+        "--dock-board-thermal-input-a", "1.5",
+        "--dock-adapter-continuous-a", "3",
+        "--dock-boost-5v-continuous-a", "2",
+        "--dock-pack-charge-max-a", "1",
+    ]
+    monkeypatch.setattr(sys, "argv", base)
+    runpy.run_path(str(script), run_name="__main__")
+    no_motion_proof = json.loads(capsys.readouterr().out)
+    assert no_motion_proof["candidate_docked_load_on_paper"] is False
+    monkeypatch.setattr(sys, "argv", base + ["--dock-motors-disarmed"])
+    runpy.run_path(str(script), run_name="__main__")
+    checked = json.loads(capsys.readouterr().out)
+    assert checked["candidate_docked_load_on_paper"] is True
+    assert checked["candidate_physically_qualified"] is False
+    assert checked["signed_battery_charge_current_measured"] is False
+
+
+def test_cli_rejects_mixed_and_incomplete_power_modes(monkeypatch):
+    import sys
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    for arguments in (
+        ["--dock-idle-5v-a", "0.5"],
+        ["--dock-idle-5v-a", "0.5", "--dock-requested-charge-a", "0.2",
+         "--dock-sys-v", "4.4", "--dock-boost-efficiency", "0.8",
+         "--peak-5v-a", "1", "--continuous-5v-a", "0.5"],
+        ["--peak-5v-a", "1"],
+    ):
+        monkeypatch.setattr(sys, "argv", [str(script)] + arguments)
+        with pytest.raises(SystemExit) as result:
+            runpy.run_path(str(script), run_name="__main__")
+        assert result.value.code == 2
