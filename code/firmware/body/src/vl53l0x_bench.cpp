@@ -74,7 +74,7 @@ void loop() {
   const uint16_t mm = sensor.readRangeContinuousMillimeters();
   const bool timed_out = sensor.timeoutOccurred();
   const bool valid = !timed_out && mm != 65535U && mm != 0U;
-  Serial.printf("t_ms=%lu range_mm=%u valid=%u timeout=%u\\n",
+  Serial.printf("t_ms=%lu range_mm=%u valid=%u timeout=%u\n",
                 static_cast<unsigned long>(now), static_cast<unsigned>(mm),
                 valid ? 1U : 0U, timed_out ? 1U : 0U);
   // These are raw measurements, NOT sufficient evidence of safe cliff stops.
