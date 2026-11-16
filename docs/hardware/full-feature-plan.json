@@ -307,7 +307,7 @@
       "name": "Independent powered 38 kHz classic NEC dock beacon controller and programmable board",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "One per dock, not a second robot MCU. Source reuse candidate: Arduino-IRremote MIT sendNEC on supported AVR, or design adaptation of Apache-2.0 OOMWOO CH32V003 dock PCB. OOMWOO's 20V 4S power and contact switching CANNOT be reused for this robot's 1S/5V charger. Exact MCU module, flashing/debug provision, firmware and output carrier must be selected and verified; no final purchase SKU.",
+      "notes": "One per dock, not a second robot MCU. Source reuse candidate: Arduino-IRremote MIT sendNEC on supported AVR, or design adaptation of Apache-2.0 OOMWOO CH32V003 dock PCB. OOMWOO's 20V 4S power and contact switching CANNOT be reused for this robot's 1S/5V charger. Source-reused Arduino Nano ATmega328P BENCH emitter now exists at code/firmware/dock (Arduino-IRremote 4.7.1). Exact final compact controller, flashing/debug provision, physical carrier and optical/thermal behavior remain unqualified; no production SKU.",
       "group": "pet"
     },
     {
@@ -315,7 +315,7 @@
       "name": "Two independently aimed 940 nm 38 kHz infrared LED emitter channels with rated transistor driver and current limiting per dock",
       "per_robot": 2,
       "reported_owned_total": 0,
-      "notes": "Two per dock for left/right code and optical steering, based on OOMWOO IR BEACON KiCad Apache-2.0 reference; number of LEDs per channel, driver, resistor and final 5V supply must be dimensioned, no naked LED wired to MCU pin. Protocol and baffle must be measured against WROOM dual receiver RMT NEC decoder, never authorize charging by light.",
+      "notes": "Two aimed LED channels per dock driven simultaneously with the SAME classic NEC frame, because current WROOM DualIrEvidence requires equal code at both receivers. Based on OOMWOO IR BEACON KiCad Apache-2.0 design, but OOMWOO separate left/right codes are NOT compatible unchanged; number of LEDs per channel, driver, resistor and final 5V supply must be dimensioned, no naked LED wired to MCU pin. Protocol and baffle must be measured against WROOM dual receiver RMT NEC decoder, never authorize charging by light.",
       "group": "pet"
     },
     {
