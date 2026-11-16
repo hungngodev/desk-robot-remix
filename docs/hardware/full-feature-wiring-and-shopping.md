@@ -1,3 +1,5 @@
+> **Authoritative buying quantities, November 16:** This page is retained for detailed wiring, I2C allocation and source verification. Its embedded static shopping tables are not maintained as a second purchasing ledger. Use [the generated two shopping lists](complete-shopping-checklist.md), [the generated 49-role CSV](fleet-components.csv) and [the sole hardware plan](full-feature-plan.json). In particular, full range is eight VL53L4CD per robot and two muxes per robot, independent of earlier prototype figures. **All irreversible purchases remain on HOLD.**
+
 # Final selected full five-pet hardware architecture
 
 **Decision:** This is the selected complete-feature electrical and sensor allocation for five identical core pets. It is not a stripped-down robot. Exact board carrier, battery and printed fit are not physically qualified. The original $50 total prototype cap is incompatible with the selected ranging carriers; do not invent a false price.
