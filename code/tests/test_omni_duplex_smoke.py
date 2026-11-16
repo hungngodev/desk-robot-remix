@@ -1,5 +1,7 @@
 """Offline native video/audio probe checks; no service or robot required."""
+import asyncio
 import importlib.util
+import json
 import wave
 from pathlib import Path
 
