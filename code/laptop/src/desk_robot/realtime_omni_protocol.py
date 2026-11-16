@@ -276,6 +276,10 @@ class OmniDuplexWire:
                 type(server_epoch) is not int or server_epoch < 0
             ):
                 raise ValueError("Invalid realtime response epoch")
+            if self._session_created and server_epoch is None:
+                # The authenticated model-native server advertises epochs.
+                # A response without one cannot establish speech authority.
+                return None
             # Never allow an old response to regain the speaker owner, even
             # AFTER a newer epoch has already been accepted. The two urgent
             # cancellation events advance the upstream epoch independently.
@@ -308,9 +312,9 @@ class OmniDuplexWire:
             # The native server supplies a per-delta epoch. After a barge,
             # an epochless delta cannot prove it belongs to the freshly
             # accepted response, even if its response_id looks plausible.
-            if (self._min_server_epoch is not None and (
-                not isinstance(meta, dict) or type(meta.get("epoch")) is not int
-            )):
+            if ((self._session_created or self._min_server_epoch is not None)
+                    and (not isinstance(meta, dict)
+                         or type(meta.get("epoch")) is not int)):
                 return None
             if isinstance(meta, dict) and meta.get("epoch") is not None:
                 if (type(meta["epoch"]) is not int

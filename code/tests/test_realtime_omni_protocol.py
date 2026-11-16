@@ -530,3 +530,25 @@ def test_epochless_native_delta_cannot_restart_audio_after_barge():
     # A genuine current-epoch delta is still allowed after the interruption.
     assert wire.handle_event(delta("new", epoch=2)) is not None
     assert wire.handle_event(delta("new", epoch=1)) is None
+
+
+def test_native_handshake_requires_epoch_on_response_and_pcm_delta():
+    wire = OmniDuplexWire()
+    wire.handle_event({"type": "session.created", "session": {"epoch": 5}})
+    wire.handle_event({"type": "response.created", "response_id": "missing"})
+    assert wire.response_id is None
+    wire.handle_event({
+        "type": "response.created", "response_id": "old",
+        "response": {"metadata": {"duplex_event": {"epoch": 4}}},
+    })
+    assert wire.response_id is None
+    wire.handle_event({
+        "type": "response.created", "response_id": "current",
+        "response": {"metadata": {"duplex_event": {"epoch": 5}}},
+    })
+    assert wire.response_id == "current"
+    stale = delta("current", epoch=5)
+    stale.pop("metadata")
+    assert wire.handle_event(stale) is None
+    assert wire.handle_event(delta("current", epoch=4)) is None
+    assert wire.handle_event(delta("current", epoch=5)) is not None
