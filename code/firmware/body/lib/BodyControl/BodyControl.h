@@ -61,7 +61,7 @@ struct State {
   int grip_target = 90;
 };
 
-enum class BodyProfile { DcPwm, StepperGuarded };
+enum class BodyProfile { DcPwm, StepperGuarded, DcGuarded };
 
 class BodyControl {
  public:
@@ -122,6 +122,9 @@ class BodyControl {
   std::uint32_t drive_remaining(std::uint32_t now_ms) const;
 
  private:
+  // The full sensor interlock is independent of the selected motor backend.
+  // DcPwm is preserved ONLY for the isolated historical DC bench fixture.
+  bool guarded_motion_profile() const { return profile_ != BodyProfile::DcPwm; }
   BodyProfile profile_;
   CliffGuard* guard_;
   State state_{};
