@@ -4363,3 +4363,54 @@ async def test_touch_stale_nonzero_counter_cannot_replay_firmware_gesture(
     finally:
         state.enabled = False
         await pet.close()
+
+
+async def test_camera_hub_reconnect_drops_inflight_old_scene_comparison(
+    fleet, tmp_path,
+):
+    """A camera disconnect may not become an eyewitness memory or spoken event."""
+    started, released = asyncio.Event(), asyncio.Event()
+
+    class SlowScene:
+        async def compare(self, before, after):
+            started.set()
+            await released.wait()
+            return SceneChange("key", "An old key appeared in the previous camera session", 1.0)
+
+    hub = CameraFrameHub([robot.id for robot in fleet.robots])
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, SlowScene(), interval=0.01,
+    )
+    pet.multimodal = SimpleNamespace(
+        hub=hub,
+        stream_owns_camera=lambda robot_id: True,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 7, True
+    state.gate._reduced = lambda jpeg: b"\x00" * (64 * 48)
+    state.gate.observe_reduced = lambda jpeg, gray: WHITE
+    hub.offer("robot-01", WHITE, time.monotonic(), source="proactive")
+    worker = asyncio.create_task(pet._observe("robot-01", 7))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        old_epoch = state.last_hub_generation
+        hub.discard_video("robot-01")
+        assert hub._generation["robot-01"] != old_epoch
+        released.set()
+        await asyncio.sleep(.08)
+        assert state.events == 0
+        assert not memory.recent("robot-01")
+        # After reconnect, a new visual baseline cannot use pre-disconnect
+        # pixels or its old receipt timestamp.
+        assert pet._sync_visual_generation("robot-01") == hub._generation["robot-01"]
+        assert state.gate._baseline is None
+        assert state.last_scene_frame_at is None
+    finally:
+        released.set()
+        state.enabled = False
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        await pet.close()

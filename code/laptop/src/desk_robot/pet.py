@@ -111,6 +111,7 @@ class PetState:
     stale_camera_events: int = 0
     last_event: str | None = None
     last_scene_frame_at: float | None = None  # latest processed Mac receipt, this robot only
+    last_hub_generation: int | None = None  # rejects cross-reconnect scene inference
     last_error: str | None = None
     last_touch_count: int | None = None
     last_touch_events: dict[str, int] | None = None
@@ -272,6 +273,7 @@ class PetController:
         state.generation += 1
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
         state.last_scene_frame_at = None
+        state.last_hub_generation = None
         if self.multimodal is not None:
             self.multimodal.hub.discard_video(robot_id)
         state.last_touch_count = None
@@ -326,6 +328,7 @@ class PetController:
         state.enabled = False
         state.gate.reset()  # Pause must forget the previous private JPEG.
         state.last_scene_frame_at = None
+        state.last_hub_generation = None
         tasks = [
             t for t in (state.task, state.touch_task, state.aux_task,
                         state.aux_read_task) if t is not None
@@ -1283,6 +1286,18 @@ class PetController:
                 robot_id, generation, "touch", "Someone has just touched my body"
             )
 
+    def _sync_visual_generation(self, robot_id: str) -> int | None:
+        """Prevent pre-reconnect pixels from anchoring a new visual scene."""
+        if self.multimodal is None:
+            return None
+        hub_generation = self.multimodal.hub._generation[robot_id]
+        state = self.states[robot_id]
+        if state.last_hub_generation != hub_generation:
+            state.gate.reset()
+            state.last_scene_frame_at = None
+            state.last_hub_generation = hub_generation
+        return hub_generation
+
     async def _observe(self, robot_id: str, generation: int) -> None:
         """The one semantic camera owner also consumes sensor burst frames.
 
@@ -1295,6 +1310,7 @@ class PetController:
         state = self.states[robot_id]
         while state.enabled and state.generation == generation and not self._closed:
             try:
+                hub_generation = self._sync_visual_generation(robot_id)
                 if (self.settings.mode == "hardware"
                         and not self.settings.voice_vision_tools_enabled):
                     state.gate.reset()
@@ -1389,6 +1405,10 @@ class PetController:
                     if (not state.enabled or state.generation != generation
                             or self._closed):
                         break
+                    if (hub_generation is not None and
+                            self.multimodal.hub._generation[robot_id] != hub_generation):
+                        state.stale_camera_events += 1
+                        break
                     if (state.last_scene_frame_at is not None
                             and received <= state.last_scene_frame_at):
                         continue
@@ -1421,6 +1441,8 @@ class PetController:
                             or (self.settings.mode == "hardware"
                                 and not self.settings.voice_vision_tools_enabled)
                             or self._vision_preemption_epoch != preemption_epoch
+                            or (hub_generation is not None and
+                                self.multimodal.hub._generation[robot_id] != hub_generation)
                             or self._direct_vision_requests
                             or self._human_active_in_fleet(time.monotonic())
                             or (callable(voice_started_at)
@@ -1437,6 +1459,8 @@ class PetController:
                         # must yield, even if they lacked an inference task
                         # when the explicit question called preempt().
                         if (preemption_epoch != self._vision_preemption_epoch
+                                or (hub_generation is not None and
+                                    self.multimodal.hub._generation[robot_id] != hub_generation)
                                 or self._direct_vision_requests
                                 or (self.settings.mode == "hardware"
                                     and not self.settings.voice_vision_tools_enabled)):
@@ -1481,6 +1505,8 @@ class PetController:
                             if self._vision_inflight is inference:
                                 self._vision_inflight = None
                     if (time.monotonic() - received > self.max_observation_age
+                            or (hub_generation is not None and
+                                self.multimodal.hub._generation[robot_id] != hub_generation)
                             or (self.settings.mode == "hardware"
                                 and not self.settings.voice_vision_tools_enabled)
                             or (callable(voice_started_at)
@@ -1495,6 +1521,10 @@ class PetController:
                         await self._store_observation(
                             robot_id, change, camera_derived=True,
                         )
+                        if (hub_generation is not None and
+                                self.multimodal.hub._generation[robot_id] != hub_generation):
+                            state.stale_camera_events += 1
+                            continue
                         if (self.settings.mode != "hardware"
                                 or self.settings.voice_vision_tools_enabled):
                             # A revoked camera guess may not even become a
