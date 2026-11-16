@@ -781,3 +781,44 @@ async def test_cleanup_cannot_claim_late_uncertain_stop_ack(settings):
         release.set()
         await asyncio.sleep(0)
         await c.close()
+
+
+async def test_exploration_inflight_stop_timeout_aborts_before_second_drive(settings):
+    """An unconfirmed post-pulse STOP fails, even if final cleanup succeeds."""
+    c, head = make(settings)
+    original = head.command
+    started = asyncio.Event()
+    release = asyncio.Event()
+    stop_calls = 0
+
+    async def stubborn_first_stop(command):
+        nonlocal stop_calls
+        if command == "stop":
+            stop_calls += 1
+            if stop_calls == 1:
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    await release.wait()
+                    return {"ok": True, "reply": "stop", "robot_id": "robot-01"}
+        return await original(command)
+
+    head.command = stubborn_first_stop
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=3)
+        assert started.is_set()
+        assert not release.is_set()
+        assert job.state == "failed"
+        assert "STOP transport acknowledgement unconfirmed" in (job.error or "")
+        assert head.commands.count("drive 20 20 100") == 1
+        assert head.commands[-1] == "stop"
+        release.set()
+        await asyncio.sleep(0)
+        assert job.state == "failed"
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+        await c.close()
