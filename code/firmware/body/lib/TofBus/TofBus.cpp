@@ -1,7 +1,8 @@
 #include "TofBus.h"
 #include "BerryImu.h"
 
-#if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
+#if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
+    (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 
 namespace desk_robot {
 
