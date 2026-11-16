@@ -310,7 +310,9 @@ class Coordinator:
         This is shared by sustained exploration and each pickup phase.
         A remote status never clears a local fault or creates a new permit.
         """
-        body = await self.heads[robot_id].status()
+        # Exploration has no overall job deadline. An alternate head adapter
+        # holding this status request must not keep the WROOM armed forever.
+        body = await asyncio.wait_for(self.heads[robot_id].status(), timeout=2.5)
         if not isinstance(body, dict) or body.get("armed") is not True:
             raise OperationError("Operation stopped: body disarmed or unavailable")
         if self.settings.mode != "hardware":

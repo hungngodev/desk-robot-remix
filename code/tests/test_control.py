@@ -657,3 +657,23 @@ async def test_exploration_rejects_valid_jpeg_with_unusable_dimensions(settings)
         assert head.commands[-1] == "stop"
     finally:
         await c.close()
+
+
+async def test_exploration_stalled_body_health_times_out_before_motion(settings):
+    """Persistent exploration cannot wait indefinitely on a hung status adapter."""
+    c, head = make(settings)
+    try:
+        await c.operator_arm("robot-01")
+
+        async def stalled_status():
+            await asyncio.sleep(30)
+
+        head.status = stalled_status
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=4)
+        assert job.state == "failed"
+        assert "timeout" in (job.error or "").lower()
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert head.commands[-1] == "stop"
+    finally:
+        await c.close()
