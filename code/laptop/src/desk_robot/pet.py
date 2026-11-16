@@ -116,6 +116,7 @@ class PetState:
     handling_gate: HandlingGate = field(default_factory=HandlingGate, repr=False)
     handling_events: int = 0
     aux_task: asyncio.Task | None = field(default=None, repr=False)
+    aux_read_task: asyncio.Task | None = field(default=None, repr=False)
     aux_reads: int = 0
     last_battery_low: bool | None = None
     last_nose_angle: int | None = None
@@ -257,6 +258,7 @@ class PetController:
             (state.task is not None and not state.task.done())
             or (state.touch_task is not None and not state.touch_task.done())
             or (state.aux_task is not None and not state.aux_task.done())
+            or (state.aux_read_task is not None and not state.aux_read_task.done())
         ):
             raise RuntimeError("Previous pet task still shutting down")
         state.generation += 1
@@ -317,8 +319,8 @@ class PetController:
         state.gate.reset()  # Pause must forget the previous private JPEG.
         state.last_scene_frame_at = None
         tasks = [
-            t for t in (state.task, state.touch_task, state.aux_task)
-            if t is not None
+            t for t in (state.task, state.touch_task, state.aux_task,
+                        state.aux_read_task) if t is not None
         ]
         for task in tasks:
             if not task.done():
@@ -336,7 +338,7 @@ class PetController:
                     # second observer before the old one actually exits.
                     raise TimeoutError("Pet observer cancellation unconfirmed")
         finally:
-            for attr in ("task", "touch_task", "aux_task"):
+            for attr in ("task", "touch_task", "aux_task", "aux_read_task"):
                 task = getattr(state, attr)
                 if task is not None and task.done():
                     setattr(state, attr, None)
@@ -634,7 +636,23 @@ class PetController:
             return
         while state.enabled and state.generation == generation and not self._closed:
             try:
-                sample = await getter()  # HttpHead does strict schema validation
+                pending = state.aux_read_task
+                if pending is not None:
+                    if not pending.done():
+                        # Cancellation can be ignored by an alternate adapter.
+                        # Never start another physical I2C read while it owns IO.
+                        raise TimeoutError("Previous optional sensor read still in flight")
+                    if not pending.cancelled():
+                        pending.exception()  # observe late transport failure
+                    state.aux_read_task = None
+                pending = asyncio.create_task(getter())
+                state.aux_read_task = pending
+                done, _ = await asyncio.wait({pending}, timeout=1.5)
+                if not done:
+                    pending.cancel()
+                    raise TimeoutError("Optional sensor read timed out")
+                sample = pending.result()  # HttpHead validates full schema
+                state.aux_read_task = None
                 await self._observe_aux(robot_id, generation, sample)
             except asyncio.CancelledError:
                 raise

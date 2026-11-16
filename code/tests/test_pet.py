@@ -4249,3 +4249,55 @@ async def test_pet_hardware_body_monitor_does_not_survive_stalled_status(
     finally:
         release.set()
         await pet.close()
+
+
+async def test_optional_aux_read_never_duplicates_cancel_resistant_adapter(
+    fleet, tmp_path, monkeypatch,
+):
+    """A hung auxiliary sensor read retains its owner through timeout and pause."""
+    import asyncio
+    import desk_robot.pet as pet_module
+
+    fleet.mode = "hardware"
+    monkeypatch.setattr(pet_module, "_PET_OBSERVER_CANCEL_TIMEOUT_S", 0.05)
+    entered, released = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    class StuckAccessory:
+        async def aux_status(self):
+            calls.append("read")
+            entered.set()
+            while not released.is_set():
+                try:
+                    await released.wait()
+                except asyncio.CancelledError:
+                    continue
+            return {"robot_id": "robot-01"}
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": StuckAccessory()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 8
+    polling = asyncio.create_task(pet._poll_aux("robot-01", 8))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await asyncio.sleep(1.7)
+        assert len(calls) == 1
+        assert state.aux_read_task is not None
+        assert not state.aux_read_task.done()
+        polling.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await polling
+        with pytest.raises(TimeoutError, match="cancellation unconfirmed"):
+            await pet.pause("robot-01")
+        assert len(calls) == 1
+        assert state.aux_read_task is not None
+    finally:
+        released.set()
+        if state.aux_read_task is not None:
+            await asyncio.wait_for(state.aux_read_task, timeout=1)
+        await pet.close()
