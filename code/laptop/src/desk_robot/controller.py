@@ -98,8 +98,9 @@ class Coordinator:
         )
         if not isinstance(status, dict) or status.get("robot_id") != robot_id:
             raise OperationError("Hardware preflight: body identity missing or mismatched")
-        if status.get("backend") != "stepper_28byj48" or status.get("armed") is not False:
-            raise OperationError("Hardware preflight: stepper body must be present and disarmed")
+        if (status.get("backend") not in ("stepper_28byj48", "dc_pwm_guarded")
+                or status.get("armed") is not False):
+            raise OperationError("Hardware preflight: guarded body must be present and disarmed")
         touch = status.get("touch")
         if not isinstance(touch, dict) or touch.get("active") is not False:
             raise OperationError("Hardware preflight: touch input unavailable or pressed")
