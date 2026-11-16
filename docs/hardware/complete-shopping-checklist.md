@@ -1,5 +1,97 @@
 # Buy this for the full five desk pets
 
+## Canonical five-robot order ledger (November 16 2026)
+
+**Scope: five identical full-feature tracked pets, five docks, and one shared room/game pod.** This is a COMPLETE QUANTITY LEDGER, not a certification to purchase five copies. Stock counts are user reported, not physically counted. A HOLD item is a required role whose exact electrical or fitted module is still unqualified. Never infer physical acceptance from firmware or a vendor datasheet. **This ledger supersedes conflicting older staged wording below while retaining historical evidence.** No new Adafruit branded boards are requested; already-owned hardware may be reused.
+
+### List 1: user-reported owned or ordered
+
+| Item | Count reported | Important qualification |
+| --- | ---: | --- |
+| ESP32 WROOM32 | 1 or more | Devboard revision and fit uncounted |
+| Seeed XIAO ESP32S3 Sense camera/mic | 1 ordered minimum | Arrival and PCB/J3 revision unconfirmed |
+| SSD1306 0.96 inch OLED | 1 or more | Verify display controller, I2C and size |
+| 28BYJ48 5V stepper + ULN2003 driver | 5 of each | Need 10 of each for five pets |
+| MG90S positional servos | around 10 | Potentially enough, recount and loaded-test |
+| MPU6050 and AT42QT1010 | at least 1 each | At least one head touch photographed |
+| MAX30102 paw optical | around 5 CLAIMED | Recount before buying; not photo confirmed |
+| BMP280, PIR, reed switch, 3V coin motor | at least 1 each | Reported/photo, physical condition unknown |
+| Feather nRF52840 | 1 | Candidate USB shared room station controller |
+| Jumper ribbons, filament, USB power bank | several / uncounted | Signal-only DuPont; bank power rating not proved |
+| BerryIMU, GY61, DRV8833, PAM8403, MAX9814, spare camera/IR, USB-C breakout, continuous servo | various spares | Do not buy duplicates or substitute analog amp for I2S |
+
+### List 2: everything still needed for the ENTIRE project
+
+"Buy" is the remaining target for five complete robots after the minimum reported stock. Physical stock may reduce this further. "Conditional" denotes reported quantities or speculative fitted variant. "HOLD" denotes no specific safe final SKU before a real bench or mechanical qualification.
+
+| Group | Required part or module | Total installed | Buy remaining | Status or exact reference |
+| --- | --- | ---: | ---: | --- |
+| Compute | XIAO ESP32S3 Sense camera/mic complete kit | 5 | 4 if one ordered | Seeed Sense PCB / J3 GPIO isolation test |
+| Compute | ESP32 WROOM32 development board | 5 | 4 | Match footprint and known pinout |
+| Compute | SSD1306 0.96 inch I2C OLED | 5 | 4 | 3.3 V head bus |
+| Motion | 28BYJ48 5V stepper | 10 | 5 | HOLD full loaded torque/heat trial before bulk |
+| Motion | Matching ULN2003 phase driver | 10 | 5 | Only with 5V 28BYJ48; not DRV8833 |
+| Motion | MG90S positional servo | 10 | 0 if ten owned | Recount; buy missing only |
+| Sensing | MPU6050 GY521 six-axis module | 5 | 4 | Check source ID 0x68 and 3.3 V carrier |
+| Sensing | AT42QT1010 head touch | 5 | 4 | Direct physical STOP pad |
+| Sensing | MAX30102 optical paw sensor | 5 | 0–5 | Recount claimed five, 3.3 V breakout |
+| Navigation | VL53L4CD short-range ToF carrier | 40 | 40 | Pololu #3692 source-compatible; HOLD 39 pending actual optical fit/budget; other chip requires driver |
+| Bus | TCA9548A eight-channel I2C mux | 10 | 10 | SparkFun BOB-16784 reference; 0x70/0x71 and 3.3 V pullups |
+| Audio | MAX98357A I2S mono amplifier | 5 | 5 | SparkFun DEV-14809 reference; XIAO GPIO4/7/8 and SD J3 isolation |
+| Audio | 20mm 8ohm 1W speaker | 5 | 5 | SparkFun COM-26553 reference; output gain MUST be limited |
+| Touch | CAP1188 eight-electrode 3.3V I2C breakout | 5 | 5 | HOLD exact non-Adafruit carrier with physical 0x28 address strap |
+| Touch | Copper tape electrodes and insulation | 40 electrodes | 1 sufficient roll/kit | Size electrode patches to shells |
+| Interaction | APDS9960 gesture/proximity/color sensor | 5 | 5 | Chip matching firmware 0x39; exact breakout 3.3V pending |
+| Interaction | FSR402 equivalent force resistors | 10 | 10 | 2 per pet; physical jaw/belly calibration |
+| Interaction | ADS1115 four-channel ADC | 5 | 5 | 3.3V / 0x48 compatible |
+| Interaction | AS5600 magnetic rotation modules | 15 | 15 | 3 per pet; mechanical fit pending |
+| Interaction | Matching DIAMETRIC magnets | 15 | 15 | HOLD magnet diameter and air gap |
+| Interaction | PN532 13.56MHz NFC I2C reader | 5 | 5 | HOLD exact 3.3V logic and I2C wake/stretch; NOT RC522 |
+| Interaction | SHT41 temp/humidity breakout | 5 | 5 | CRC source exists, not an AHT10 replacement |
+| Interaction | BMP280 pressure/temp breakout | 5 | 4 | Reuse one owned |
+| Interaction | Optional PIR sensor at 3.3V output | 5 | 4 | Input only MCP23017 GPIOB |
+| Interaction | Optional reed switch | 5 | 4 | Consider one owned 3144 hall only after test |
+| Interaction | 3V coin vibration motor | 5 | 4 | One reported owned, output not integrated |
+| Interaction | AO3400 MOSFET, flyback diode, pulldown | 5 circuits | 5 circuits | HOLD approved GPIO output and circuit |
+| Lighting | WS2812B diffused RGB pixel | 5 | 5 | HOLD XIAO J3 isolation and source enable |
+| Lighting | 74AHCT1G125 3.3V/5V data buffer | 5 | 5 | Verify package and 5V supply |
+| Safety | Normally closed chassis bump switches | 10 | 10 | 2 per robot, external pullup GPIO35 |
+| Safety | MCP23017 I2C GPIO expander | 5 | 5 | Waveshare SKU15391 3.3V compatible 0x20 reference; fitted size TBD |
+| Power | 1S protected rechargeable pack | 5 | 5 | HOLD chemistry, capacity, protection, max discharge, shape |
+| Power | 1S charger with real load-sharing power path | 5 | 5 | HOLD exact validated module (BQ24074/MCP73871 alone not 5V) |
+| Power | 5V regulated boost converter, measured sustained and peak rating | 5 | 5 | HOLD measured simultaneous motor+servo+WiFi+speaker load |
+| Power | Dedicated 3.3V sensor regulator | 5 | 5 | HOLD measured I2C and sensor load |
+| Power | INA226 current monitor and calibrated shunt | 5 of each | 5 of each | HOLD actual shunt value/trace ampacity |
+| Power | MAX17048 single-cell fuel gauge | 5 | 5 | Match selected protected pack |
+| Power | Charger NTC temperature probe | 5 | 0–5 | Only if not integrated in packs |
+| Power | Switch and correctly rated fuse/holder | 5 sets | 5 sets | HOLD final current/fuse spec |
+| Power | Proper power wire, keyed JST connectors, capacitors, resistors | 5 sets | 5 sets | No high-current Dupont wiring |
+| Power | One-way USB/external 5V isolation components | 5 sets | 5 sets | HOLD actual XIAO revision and power design |
+| Dock | Recessed keyed spring pogo charging contact pairs | 5 mated sets | 5 sets | HOLD charger protection; no live bare battery pads |
+| Dock | Independent normally-closed seat switches | 10 | 10 | 2 per dock, MCP23017 GPIOA |
+| Dock | 38kHz demodulated receiver | 10 | 10 | 2 per robot, actual optical proof pending |
+| Dock | Encoded 940nm IR emitter + transistor driver and resistors | 5 sets | 5 sets + LED spares | HOLD encoder circuit, geometry and interference |
+| Dock | Current-limited independent contact safety circuit | 5 | 5 | HOLD circuit schematic + reverse polarity |
+| Dock | Rated 5V dock adapter with cable/connector | 5 | 5 | HOLD charger/input current and headroom |
+| Dock | Printed docking cradle, alignment, AprilTag marker, shrouds | 5 sets | PRINT 5 | Fit and physical autonomous dock trial pending |
+| Mechanics | Printed tracked chassis, tracks, wheels, lift, gripper, head, mounts | 5 complete sets | PRINT 5 | HOLD physical fit and commercial license clearance |
+| Mechanics | Shafts, springs, gears, bushings/bearings, rubber feet | 5 fitted sets | 5 sets | HOLD final printed dimensions |
+| Assembly | M2/M3 screws/nuts/inserts, headers, perfboard, heat shrink | 1 shared assorted bulk supply | Buy as needed | Existing filament/reusable tools first |
+| Room station | SCD40 genuine NDIR CO2 sensor | 1 | 1 | Station firmware/Mac link not completed |
+| Room station | BME688 VOC/environment sensor | 1 | 1 | Station firmware/Mac link not completed |
+| Room station | LD2410C UART mmWave presence module | 1 | 1 | Station firmware/Mac link not completed |
+| Room station | Capacitive soil moisture probe | 1 | 1 optional | Plant accessory |
+| Room station | AMG8833 8×8 thermal sensor | 1 | 1 optional | Thermal gameplay, not core camera |
+| Room station | NTAG213 NFC tokens, safe magnets and removable game props | 1 assorted set | 1 set | Toy/pet ID must be separate from access permissions |
+| Room station | USB station controller | 1 | 0 if Feather usable, else 1 ESP32C3 | Validate firmware and pin allocation |
+| Room station | Ventilated printed case, USB cable and wiring | 1 set | 1 set | PRINT shell; USB power & serial validation |
+| Shared bench | Current-limited 5V/variable bench PSU, DMM, logic analyzer, calipers, solder/crimp tools | 1 shared station | Buy only if makerspace lacks | Required for qualification, not each robot |
+
+**Actual buying order:** first confirm user-owned quantities and source-compatible sample electronics; bench-test one complete robot on a protected current-limited supply, qualify 1S pack plus charger/boost/dock contacts and final print geometry, then buy the remaining matched fleet copies. This ordering avoids paying for 39 sensors, four power systems and unlicensed bodies that may need replacement.
+
+**Not an approved production bulk PO:** no actual loaded stop trial, five-head voice proof, calibrated grasp, powered recharge, fitted CAD, or clean current-commit CI is recorded. Avoid blanket safety/compatibility guarantees. Published Pololu #3692 price tier for 25+ is $11.81 each, hence 40 reference sensors alone cost $472.40 before any other part. Exact prices are not committed checkout quotes.
+
+
 **Selected full robot, not a reduced starter.** Generic modules only. User reported stock is not a physical recount. Every row is a real selected role or a clearly separate room accessory. All quantity totals come from [the electrical allocation](full-feature-plan.json). Exact power module and enclosure measurements still require real hardware.
 
 ## Already have or ordered
