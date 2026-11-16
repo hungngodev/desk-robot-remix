@@ -24,6 +24,9 @@ from .runtime import Runtime
 from .transport import HeadError
 
 
+_PET_SHUTDOWN_TIMEOUT_S = 1.0
+
+
 class CommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     command: str = Field(max_length=95)
@@ -326,6 +329,21 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     async def pickup(robot_id: str, request: PickupRequest):
         return coordinator().pickup(robot_id, request.target).data()
 
+    async def bounded_cleanup(coro, *, seconds: float, message: str):
+        """A cancelled but uncooperative adapter must not block later STOPs."""
+        task = asyncio.create_task(coro)
+        try:
+            done, _ = await asyncio.wait({task}, timeout=seconds)
+            if not done:
+                raise TimeoutError(message)
+            return await task
+        finally:
+            if not task.done():
+                task.cancel()
+                task.add_done_callback(
+                    lambda done: None if done.cancelled() else done.exception()
+                )
+
     async def stop_native_pet_speech(robot_id: str):
         """Interrupt the one existing Xiaozhi speaker, never a second TTS."""
         if settings.mode != "hardware":
@@ -340,20 +358,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             interrupt = getattr(speaker, "interrupt", None)
         robot = settings.robot(robot_id)
         if callable(interrupt) and robot.device_id:
-            task = asyncio.create_task(interrupt(robot))
-            try:
-                # wait_for() can exceed its deadline if an alternate speech
-                # adapter catches cancellation. No such task may hang STOP.
-                done, _ = await asyncio.wait({task}, timeout=2.5)
-                if not done:
-                    raise TimeoutError("XIAO speech interruption unconfirmed")
-                await task
-            finally:
-                if not task.done():
-                    task.cancel()
-                    task.add_done_callback(
-                        lambda done: None if done.cancelled() else done.exception()
-                    )
+            await bounded_cleanup(
+                interrupt(robot), seconds=2.5,
+                message="XIAO speech interruption unconfirmed",
+            )
 
     async def stop_pet_and_audio(robot_id: str, *, quiet: bool):
         """Stop body first, then revoke pet initiative and native speaker.
@@ -369,10 +377,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         except (Exception, asyncio.CancelledError) as exc:
             failures.append(("WROOM STOP", exc))
         try:
-            if quiet:
-                pet_status = await app.state.runtime.pet.set_quiet(robot_id, True)
-            else:
-                pet_status = await app.state.runtime.pet.pause(robot_id)
+            operation = (
+                app.state.runtime.pet.set_quiet(robot_id, True)
+                if quiet else app.state.runtime.pet.pause(robot_id)
+            )
+            pet_status = await bounded_cleanup(
+                operation, seconds=_PET_SHUTDOWN_TIMEOUT_S,
+                message="Pet pause timeout; speaker STOP still required",
+            )
         except (Exception, asyncio.CancelledError) as exc:
             failures.append(("pet pause", exc))
         try:

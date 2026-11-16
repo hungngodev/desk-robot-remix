@@ -965,3 +965,55 @@ async def test_proactive_speaker_abort_is_bounded_if_adapter_ignores_cancel(
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+async def test_pet_pause_stall_cannot_skip_native_operator_speech_stop(
+    settings, monkeypatch,
+):
+    """Body STOP happens first; stalled pet cleanup cannot delay XIAO STOP."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("desk_robot.api._PET_SHUTDOWN_TIMEOUT_S", 0.05)
+    app = create_app(settings)
+    settings.mode = "hardware"
+    settings.robots[0].device_id = "unit-xiao-01"
+    seen = []
+    release = asyncio.Event()
+
+    class CoordinatorFake:
+        def robot(self, robot_id):
+            return settings.robot(robot_id)
+
+        async def stop(self, robot_id):
+            seen.append("body")
+            return {"ok": True, "robot_id": robot_id}
+
+    async def stubborn_pause(robot_id):
+        seen.append("pet")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    async def speaker_stop(robot):
+        assert robot.id == "robot-01"
+        seen.append("speaker")
+
+    app.state.runtime = SimpleNamespace(
+        coordinator=CoordinatorFake(),
+        pet=SimpleNamespace(pause=stubborn_pause),
+        conversation=SimpleNamespace(
+            speaker=SimpleNamespace(operator_stop=speaker_stop),
+        ),
+    )
+    endpoint = next(
+        route.endpoint for route in app.routes
+        if getattr(route, "path", None) == "/v1/robots/{robot_id}/stop"
+    )
+    try:
+        with pytest.raises(TimeoutError, match="Pet pause timeout"):
+            await asyncio.wait_for(endpoint("robot-01"), timeout=0.3)
+        assert seen == ["body", "pet", "speaker"]
+    finally:
+        release.set()
+        await asyncio.sleep(0)
