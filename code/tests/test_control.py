@@ -1046,3 +1046,60 @@ async def test_hardware_close_stalled_peer_does_not_starve_other_body(settings):
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+async def test_exploration_uncooperative_camera_cannot_hold_motion_job_open(settings):
+    """A cancelled but stubborn capture must not pin the exploration job."""
+    c, head = make(settings)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stale_camera():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            return b"\\xff\\xd8late\\xff\\xd9"
+
+    head.snapshot = stale_camera
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=3.2)
+        assert entered.is_set()
+        assert job.state == "failed"
+        assert "Camera snapshot timeout" in (job.error or "")
+        assert not any(command.startswith("drive ") for command in head.commands)
+        assert head.commands[-1] == "stop"
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+        await c.close()
+
+
+async def test_bounded_head_reply_disregards_uncooperative_late_success():
+    """The reusable deadline must never await a transport ignoring cancel."""
+    from desk_robot.controller import _bounded_head_reply
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    async def fake_adapter():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            return {"ok": True}
+
+    try:
+        with pytest.raises(TimeoutError, match="camera deadline"):
+            await asyncio.wait_for(
+                _bounded_head_reply(fake_adapter(), seconds=0.03,
+                                    timeout_message="camera deadline"),
+                timeout=0.2,
+            )
+        assert entered.is_set()
+    finally:
+        release.set()
+        await asyncio.sleep(0)

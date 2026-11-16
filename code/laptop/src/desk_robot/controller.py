@@ -4,7 +4,10 @@ import asyncio
 import time
 import uuid
 from dataclasses import asdict, dataclass, field, replace
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, TypeVar
+
+
+_T = TypeVar("_T")
 
 from .calibration import Calibration
 from .config import Settings
@@ -15,8 +18,8 @@ from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
 
 
-async def _bounded_head_reply(coro: Awaitable[dict], *, seconds: float,
-                              timeout_message: str) -> dict:
+async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
+                              timeout_message: str) -> _T:
     """Bound even adapters that suppress task cancellation; ignore late replies."""
     task = asyncio.create_task(coro)
     try:
@@ -456,7 +459,10 @@ class Coordinator:
         head = self.heads[job.robot_id]
 
         async def observe_camera() -> None:
-            jpeg = await asyncio.wait_for(head.snapshot(), timeout=2.0)
+            jpeg = await _bounded_head_reply(
+                head.snapshot(), seconds=2.0,
+                timeout_message="Camera snapshot timeout",
+            )
             # An HTTP success with an empty, partial or non-JPEG response
             # is not evidence of a functioning XIAO camera stream.
             if (not isinstance(jpeg, bytes) or not 4 <= len(jpeg) <= 512000
@@ -543,7 +549,10 @@ class Coordinator:
             )
             # Camera receipt time is NOT equivalent to image exposure time.
             # Local WROOM cliff stop remains mandatory for every short pulse.
-            jpeg = await asyncio.wait_for(head.snapshot(), timeout=2.0)
+            jpeg = await _bounded_head_reply(
+                head.snapshot(), seconds=2.0,
+                timeout_message="Camera snapshot timeout",
+            )
             received_at = time.monotonic()
             # The shared bounded native detector also owns all read-only
             # AprilTag observations. A cancelled/expired C detector cannot
@@ -640,15 +649,17 @@ class Coordinator:
         return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
 
     async def _observe(self, robot_id: str, target: str, c: Calibration) -> Detection:
-        jpeg = await asyncio.wait_for(
-            self.heads[robot_id].snapshot(), timeout=3.0
+        jpeg = await _bounded_head_reply(
+            self.heads[robot_id].snapshot(), seconds=3.0,
+            timeout_message="Pickup camera snapshot timeout",
         )
         if image_size(jpeg) != (c.image_width, c.image_height):
             raise OperationError("Camera resolution differs from measured calibration")
         objects = [
             d
-            for d in await asyncio.wait_for(
-                self.vision.detect(jpeg, target), timeout=15.0
+            for d in await _bounded_head_reply(
+                self.vision.detect(jpeg, target), seconds=15.0,
+                timeout_message="Pickup vision inference timeout",
             )
             if d.label == target
             and d.confidence >= c.min_confidence
