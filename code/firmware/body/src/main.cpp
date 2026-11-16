@@ -3,7 +3,13 @@
 
 #include "BodyControl.h"
 #include "BodyPins.h"
-#if DESK_ROBOT_STEPPER
+#ifndef DESK_ROBOT_FULL_SENSORS
+#define DESK_ROBOT_FULL_SENSORS DESK_ROBOT_STEPPER
+#endif
+#if DESK_ROBOT_STEPPER && !DESK_ROBOT_FULL_SENSORS
+#error Stepper backend requires the full sensor guard
+#endif
+#if DESK_ROBOT_FULL_SENSORS
 #include "CliffGuard.h"
 #include "BerryImu.h"
 #include "StepperDrive.h"
@@ -16,13 +22,16 @@
 #endif
 
 namespace {
-#if DESK_ROBOT_STEPPER
-// No fabricated calibration or sample source. Until sensor I/O and measured
-// calibration are supplied, every arm request is rejected by this guard.
+#if DESK_ROBOT_FULL_SENSORS
+// A common full motion safety guard survives motor backend substitution.
 desk_robot::CliffGuard cliff_guard;
-desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &cliff_guard);
+desk_robot::BodyControl control(
+    DESK_ROBOT_STEPPER ? desk_robot::BodyProfile::StepperGuarded :
+                         desk_robot::BodyProfile::DcGuarded, &cliff_guard);
+#if DESK_ROBOT_STEPPER
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
+#endif
 desk_robot::TofBus tof;
 desk_robot::ExpansionTouch cap1188;
 desk_robot::PulsePad paw_pulse;
@@ -282,7 +291,7 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool loca
       control.force_disarm();
       snprintf(reply, sizeof(reply), "ERR arm pwm_unavailable");
     }
-#if DESK_ROBOT_STEPPER
+#if DESK_ROBOT_FULL_SENSORS
     if (completed && local_usb && strcmp(reply, "OK calcommit") == 0 &&
         !save_calibration()) {
       // A partially written or unavailable NVS record cannot silently allow
@@ -309,7 +318,7 @@ void setup() {
   // This is observation identity only, not cryptographic authentication.
   // New WROOM boots must not reuse the last IMU observation session.
   control.set_boot_epoch(esp_random() | 1U);
-#if DESK_ROBOT_STEPPER
+#if DESK_ROBOT_FULL_SENSORS
   // The touch breakout OUT is actively driven and powered at 3.3V.
   // GPIO34 has no internal pullup; do not leave it floating when fitted.
   pinMode(body_pins::kTouchOutput, INPUT);
@@ -342,7 +351,7 @@ void setup() {
   zero_motor_pwm();
   Serial.begin(115200);
   head_uart.begin(115200, SERIAL_8N1, body_pins::kUartRx, body_pins::kUartTx);
-#if DESK_ROBOT_STEPPER
+#if DESK_ROBOT_FULL_SENSORS
   // Keep motors and servos de-energized through all five device inits.
   // No accepted calibration is embedded in this image. A local calibration
   // commit and a fresh manual USB rearm are required before any arm can pass.
@@ -413,14 +422,16 @@ void setup() {
   Serial.println(pwm_ready ?
 #if DESK_ROBOT_STEPPER
       "READY desk-robot-body stepper disarmed local_rearm_required" :
+#elif DESK_ROBOT_FULL_SENSORS
+      "READY desk-robot-body dc_guarded disarmed local_rearm_required" :
 #else
-      "READY desk-robot-body dc disarmed" :
+      "READY desk-robot-body dc_bench_only disarmed" :
 #endif
       "ERR boot pwm_unavailable");
 }
 
 void loop() {
-#if DESK_ROBOT_STEPPER
+#if DESK_ROBOT_FULL_SENSORS
   // Real I2C sampling precedes every physical motor update. The pure
   // CliffGuard remains the only local motion/safety authority.
   if (tof.ready()) {
