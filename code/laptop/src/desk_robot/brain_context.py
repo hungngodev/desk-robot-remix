@@ -118,7 +118,7 @@ def compose_brain_context(
     crossed_voice_boundary = False
     priorities = {
         "human_transcript": 0, "tool": 1, "sensor": 2,
-        "human_voice": 3, "robot_speech": 4, "camera": 5,
+        "room_station": 2, "human_voice": 3, "robot_speech": 4, "camera": 5,
     }
     # A burst of camera receipts must not erase older tool or touch evidence
     # before modality-aware deduplication. Bound the scan for prompt latency.
@@ -148,6 +148,16 @@ def compose_brain_context(
         phrase = ""
         if channel == "sensor" and isinstance(kind, str):
             phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
+        elif channel == "room_station":
+            reading = item.get("content")
+            if (item.get("shared_not_robot_eyewitness") is True
+                    and item.get("identity_verified") is False
+                    and isinstance(reading, str)):
+                phrase = (
+                    "One shared room USB station, not my own sight or person "
+                    "identity; raw environmental reading: "
+                    + _clean(reading, limit=115)
+                )
         elif channel == "human_voice":
             phrase = "Authenticated human voice turn"
         elif channel == "human_transcript" and kind == "model_asr_completed":
