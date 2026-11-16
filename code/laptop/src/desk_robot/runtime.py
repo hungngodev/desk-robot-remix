@@ -317,6 +317,30 @@ class Runtime:
                 + ", ".join(sorted(unconfirmed))
             ))
 
+        # Shutdown must explicitly stop every native Xiaozhi decoder even
+        # when the VAD monitor never emitted its normal loss callback.
+        # Send to all heads in parallel; a silent or stalled peer cannot
+        # prevent another robot from receiving the urgent bridge request.
+        if self.settings.mode == "hardware":
+            robots = [r for r in self.settings.robots if r.device_id]
+            if robots:
+                speaker = getattr(self.conversation, "speaker", None)
+                stop = getattr(speaker, "monitor_lost", None)
+                if not callable(stop):
+                    stop = getattr(speaker, "interrupt", None)
+                if not callable(stop):
+                    errors.append(RuntimeError("Native speaker shutdown STOP unavailable"))
+                else:
+                    outcomes = await asyncio.gather(
+                        *(_bounded_monitor_stop(stop(robot)) for robot in robots),
+                        return_exceptions=True,
+                    )
+                    for robot, result in zip(robots, outcomes):
+                        if isinstance(result, BaseException):
+                            errors.append(RuntimeError(
+                                f"Native speaker shutdown STOP unconfirmed for {robot.id}"
+                            ))
+
         if self._voice_task is not None:
             task = self._voice_task
             task.cancel()

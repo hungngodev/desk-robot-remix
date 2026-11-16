@@ -984,3 +984,53 @@ async def test_shutdown_fences_late_human_callbacks_after_blocked_stop():
     finally:
         release.set()
         await asyncio.gather(interrupt, return_exceptions=True)
+
+
+@pytest.mark.parametrize("failed_peer", [None, "robot-01"])
+async def test_hardware_runtime_close_stops_all_native_speakers(failed_peer):
+    """Native decoders receive an independent shutdown abort, even if one fails."""
+    events = []
+
+    class Owner:
+        def set_voice_monitor_ready(self, ready):
+            events.append(("monitor", ready))
+
+        async def close(self):
+            events.append(("close", "owner"))
+
+        async def stop(self):
+            events.append(("close", "conversation"))
+
+        async def aclose(self):
+            events.append(("close", "http"))
+
+    class Speaker:
+        async def monitor_lost(self, robot):
+            events.append(("native_stop", robot.id))
+            if robot.id == failed_peer:
+                raise RuntimeError("decoder STOP failed")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(mode="hardware", robots=[
+        SimpleNamespace(id="robot-01", device_id="head01"),
+        SimpleNamespace(id="robot-02", device_id="head02"),
+    ])
+    runtime._voice_task = None
+    runtime.coordinator = Owner()
+    runtime.pet = Owner()
+    runtime.multimodal = None
+    runtime.conversation = Owner()
+    runtime.conversation.speaker = Speaker()
+    runtime.client = Owner()
+
+    if failed_peer is None:
+        await runtime.close()
+    else:
+        with pytest.raises(RuntimeError, match="Native speaker shutdown STOP unconfirmed"):
+            await runtime.close()
+    assert runtime._closed
+    assert ("native_stop", "robot-01") in events
+    assert ("native_stop", "robot-02") in events
+    assert events.index(("native_stop", "robot-01")) > events.index(("close", "owner"))
+    assert ("close", "conversation") in events
+    assert ("close", "http") in events
