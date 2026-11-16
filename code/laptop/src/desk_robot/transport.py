@@ -147,6 +147,7 @@ class HttpHead:
         self._last_camera: tuple[int, int, int] | None = None
         self._retired_camera_boots: set[int] = set()
         self._stream_connected = False
+        self._stream_generation = 0
         self._stream_required = False
         self._stream_condition = asyncio.Condition()
         self._stream_latest: bytes | None = None
@@ -237,6 +238,12 @@ class HttpHead:
         """
         url = self.config.head_url.rstrip("/") + "/api/camera.mjpg"
         headers = {"Authorization": f"Bearer {secret(self.config.token_env)}"}
+        async with self._stream_condition:
+            self._stream_generation += 1
+            generation = self._stream_generation
+            self._stream_connected = False
+            self._stream_latest = None
+            self._stream_condition.notify_all()
         try:
             async with self.client.stream(
                 "GET", url, headers=headers,
@@ -249,13 +256,17 @@ class HttpHead:
                     raise HeadError("XIAO did not return MJPEG stream")
                 reader = _MjpegFrames()
                 async with self._stream_condition:
+                    if generation != self._stream_generation:
+                        raise HeadError("Superseded XIAO camera stream")
                     self._stream_connected = True
                     self._stream_condition.notify_all()
                 async for chunk in response.aiter_bytes():
                     for jpeg, identity in reader.feed(chunk):
-                        self._accept_camera_identity(identity)
                         received = time.monotonic()
                         async with self._stream_condition:
+                            if generation != self._stream_generation:
+                                raise HeadError("Superseded XIAO camera stream")
+                            self._accept_camera_identity(identity)
                             self._stream_latest = jpeg
                             self._stream_received_at = received
                             self._stream_version += 1
@@ -265,9 +276,10 @@ class HttpHead:
             raise HeadError("XIAO authenticated camera stream unavailable") from exc
         finally:
             async with self._stream_condition:
-                self._stream_connected = False
-                self._stream_latest = None
-                self._stream_condition.notify_all()
+                if generation == self._stream_generation:
+                    self._stream_connected = False
+                    self._stream_latest = None
+                    self._stream_condition.notify_all()
 
     async def snapshot(self) -> bytes:
         # Separate camera serialization: concurrent Mac pet/pickup callers must
