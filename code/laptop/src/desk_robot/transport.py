@@ -134,6 +134,17 @@ class _MjpegFrames:
         return frames
 
 
+def _response_object(response: httpx.Response) -> dict:
+    """Never treat malformed authenticated JSON as an unexpected server fault."""
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise HeadError("Malformed authenticated head JSON response") from exc
+    if not isinstance(data, dict):
+        raise HeadError("Malformed authenticated head JSON object")
+    return data
+
+
 class HttpHead:
     def __init__(
         self, config: RobotConfig, client: httpx.AsyncClient,
@@ -177,9 +188,7 @@ class HttpHead:
         expected = expected_ack(command)
         async with self.lock:
             response = await self._request("POST", "/api/command", json={"command": command})
-            data = response.json()
-            if not isinstance(data, dict):
-                raise HeadError("Malformed motor command ACK payload")
+            data = _response_object(response)
             reply = data.get("reply", "")
             if data.get("ok") is not True or data.get("robot_id") != self.config.id or reply != expected:
                 raise HeadError("Unmatched or failed command ACK; movement not retried")
@@ -187,7 +196,7 @@ class HttpHead:
 
     async def status(self) -> dict:
         async with self.lock:
-            data = (await self._request("GET", "/api/status")).json()
+            data = _response_object(await self._request("GET", "/api/status"))
             if not isinstance(data, dict) or data.get("robot_id") != self.config.id:
                 raise HeadError("Status robot identity mismatch")
             return data
@@ -195,7 +204,7 @@ class HttpHead:
     async def aux_status(self) -> dict:
         """Authenticate and validate all optional sensor provenance, never arm."""
         async with self.lock:
-            data = (await self._request("GET", "/api/aux")).json()
+            data = _response_object(await self._request("GET", "/api/aux"))
             try:
                 return validate_aux(data, self.config.id)
             except ValueError as exc:
@@ -204,7 +213,7 @@ class HttpHead:
     async def ir_status(self) -> dict:
         """Independent read-only terminal IR evidence from actual WROOM RMT."""
         async with self.lock:
-            data = (await self._request("GET", "/api/ir")).json()
+            data = _response_object(await self._request("GET", "/api/ir"))
             try:
                 return validate_ir(data, self.config.id)
             except ValueError as exc:

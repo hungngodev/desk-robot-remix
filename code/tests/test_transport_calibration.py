@@ -686,3 +686,32 @@ async def test_head_rejects_nonobject_status_or_motion_ack(
                 await head.status()
             else:
                 await head.command("drive 20 20 100")
+
+
+@pytest.mark.parametrize("path,method", [
+    ("/api/command", "command"),
+    ("/api/status", "status"),
+    ("/api/aux", "aux_status"),
+    ("/api/ir", "ir_status"),
+])
+@pytest.mark.parametrize("payload", [b"<html>gateway error</html>", b"{", b"[]", b"null"])
+async def test_authenticated_transport_rejects_malformed_json_as_head_error(
+    settings, tokens, path, method, payload,
+):
+    """HTTP success is not a valid WROOM receipt without a JSON object."""
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path))
+        assert request.url.path == path
+        return httpx.Response(200, content=payload, headers={"content-type": "application/json"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client)
+        with pytest.raises(HeadError, match="Malformed authenticated head JSON"):
+            if method == "command":
+                await head.command("drive 20 20 100")
+            else:
+                await getattr(head, method)()
+        assert len(seen) == 1
+        assert seen[0][1] == path
