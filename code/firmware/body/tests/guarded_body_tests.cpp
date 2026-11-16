@@ -946,6 +946,46 @@ static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   CHECK(disabled.find("\"extras\":{\"mask\":0") != std::string::npos);
 }
 
+
+static void guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract() {
+  // This is a policy/command contract test, not a load or PWM hardware test.
+  using desk_robot::BodyControl;
+  using desk_robot::BodyProfile;
+  BodyControl no_guard(BodyProfile::DcGuarded);
+  CHECK(send(no_guard, "arm", 0) == "ERR arm safety_interlock");
+  CHECK(send(no_guard, "rearm", 0, true) == "ERR rearm safety_interlock");
+  CHECK(send(no_guard, "status", 0).find("dc_pwm_guarded") != std::string::npos);
+  CHECK(send(no_guard, "status", 0).find("missing_guard") != std::string::npos);
+
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  BodyControl dc(BodyProfile::DcGuarded, &guard);
+  CHECK(send(dc, "arm", 0) == "ERR arm safety_interlock");
+  CHECK(send(dc, "rearm", 0) == "ERR rearm local_only");
+  CHECK(send(dc, "rearm", 0, true) == "OK rearm");
+  CHECK(send(dc, "arm", 0) == "OK arm");
+  CHECK(send(dc, "drive 40 40 250", 0) ==
+        "OK drive left=40 right=40 ms=250");
+  CHECK(dc.state().left == 40 && dc.state().armed);
+  dc.touch_trip();
+  dc.tick(1);
+  CHECK(dc.state().left == 0 && dc.state().right == 0 && !dc.state().armed);
+  CHECK(send(dc, "arm", 2) == "ERR arm touch_active" ||
+        send(dc, "arm", 2) == "ERR arm safety_interlock");
+  dc.sample_touch_input(false);
+  fresh(guard, 3);
+  CHECK(send(dc, "rearm", 3, true) == "OK rearm");
+  CHECK(send(dc, "arm", 3) == "OK arm");
+  CHECK(send(dc, "drive 30 30 250", 3) ==
+        "OK drive left=30 right=30 ms=250");
+  guard.bus_fault();
+  dc.tick(4);
+  CHECK(!dc.state().armed && dc.state().left == 0);
+  CHECK(send(dc, "arm", 5) == "ERR arm safety_interlock");
+  CHECK(send(dc, "status", 5).find("dc_pwm_guarded") != std::string::npos);
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -959,6 +999,8 @@ int main() {
     CHECK(status.size() < desk_robot::kReplyCapacity - 1);
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
+    guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract();
+    std::cout << "PASS guarded DC uses same real cliff and USB recovery policy\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
     dock_removal_needs_new_fresh_real_gpio_sample();
     dock_removal_accepts_genuine_uint32_wrap();
