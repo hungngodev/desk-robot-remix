@@ -7,6 +7,8 @@ must independently inspect the original measurements before ordering.
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 from pathlib import Path
 
@@ -85,10 +87,12 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             raise ValueError(f"Unexpected scope for {ident}")
         per = _count(part.get("per_robot"), f"{ident}.per_robot")
         owned = _count(part.get("reported_owned_total"), f"{ident}.reported_owned_total")
+        estimated = _count(part.get("estimated_owned_total", 0), f"{ident}.estimated_owned_total")
+        ordered = _count(part.get("ordered_unreceived_total", 0), f"{ident}.ordered_unreceived_total")
         needed = fleet * per
         # Reported ownership is not physical stock verification. An ordered
         # head is explicitly NOT counted as a delivered/accepted board.
-        if owned > needed:
+        if owned + estimated + ordered > needed:
             raise ValueError(f"Reported stock exceeds total design slots: {ident}")
         ev = approvals.get(ident, {})
         if not isinstance(ev, dict):
@@ -102,7 +106,11 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         rows.append({
             "id": ident, "name": part.get("name"), "per_robot": per,
             "fleet_total": needed, "reported_owned_not_verified": owned,
-            "remaining_if_reported_stock_works": max(needed - owned, 0),
+            "estimated_owned_not_verified": estimated,
+            "ordered_unreceived_not_verified": ordered,
+            "remaining_if_reported_stock_works": max(needed - owned - estimated - ordered, 0),
+            "shopping_decision": part.get("shopping_decision", "hold_until_qualified"),
+            "notes": part.get("notes", ""),
             "reference_only": ({"vendor": vendor[0], "sku": vendor[1],
                                 "url": vendor[2]} if vendor else None),
             "approved_for_fleet_purchase": not missing,
@@ -135,6 +143,10 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             raise ValueError("Missing or duplicate shared station part ID")
         room_ids.add(ident)
         qty = _count(module.get("quantity_per_room"), ident + ".quantity_per_room")
+        estimated = _count(module.get("estimated_owned_total", 0),
+                           ident + ".estimated_owned_total")
+        if estimated > qty:
+            raise ValueError("Room station estimated stock exceeds design slots")
         ev = room_evidence.get(ident, {})
         if not isinstance(ev, dict):
             raise ValueError(f"Invalid shared station evidence: {ident}")
@@ -144,7 +156,14 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
         room.append({"id": ident, "name": module.get("name"),
-                     "shared_total": qty,
+                     "shared_total": qty, "per_robot": 0,
+                     "reported_owned_not_verified": 0,
+                     "estimated_owned_not_verified": estimated,
+                     "ordered_unreceived_not_verified": 0,
+                     "remaining_if_reported_stock_works": qty - estimated,
+                     "notes": module.get("location", ""),
+                     "shopping_decision": "hold_until_qualified",
+                     "reference_only": None,
                      "approved_for_fleet_purchase": not missing,
                      "missing_part_evidence": missing})
     if set(room_evidence) - room_ids:
