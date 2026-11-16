@@ -7816,3 +7816,57 @@ async def test_native_worker_shutdown_does_not_wait_for_cancellation_resistant_m
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_native_model_worker_ignores_late_old_clear_before_current_audio(
+    native,
+):
+    """A delayed cancellation receipt cannot starve the live XIAO audio FIFO."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    service = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    service.wire.handle_event({
+        "type": "session.created", "session": {"epoch": 0},
+    })
+    service.wire.interrupt()
+    service.wire.append_audio(bytes(32000), speech=False)
+    pcm = bytes(4800)
+    events = [
+        {"type": "response.created", "response_id": "current",
+         "response": {"id": "current",
+                      "metadata": {"duplex_event": {"epoch": 2}}}},
+        {"type": "response.output_audio.delta", "response_id": "current",
+         "format": "pcm16", "sample_rate_hz": 24000,
+         "delta": base64.b64encode(pcm).decode(),
+         "metadata": {"epoch": 2}},
+        {"type": "output_audio_buffer.cleared", "response_id": "old"},
+        {"type": "output_audio_buffer.cleared"},
+        {"type": "response.output_audio.delta", "response_id": "current",
+         "format": "pcm16", "sample_rate_hz": 24000,
+         "delta": base64.b64encode(pcm).decode(),
+         "metadata": {"epoch": 2}},
+        {"type": "response.done", "response_id": "current"},
+    ]
+
+    class ModelSocket:
+        def __aiter__(self):
+            async def stream():
+                for event in events:
+                    yield SimpleNamespace(
+                        type=module.aiohttp.WSMsgType.TEXT,
+                        data=json.dumps(event),
+                    )
+            return stream()
+
+    service._socket = ModelSocket()
+    await service._receive_model()
+    assert service.model_chunks == 2
+    assert service.outgoing.qsize() == 3
+    assert service.outgoing.get_nowait() == ("current", pcm)
+    assert service.outgoing.get_nowait() == ("current", pcm)
+    assert service.outgoing.get_nowait() == ("current", None)
+    assert service.wire.accept_output is False
