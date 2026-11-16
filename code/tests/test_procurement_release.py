@@ -23,7 +23,9 @@ def fixture():
             {"id": "mg90s", "name": "MG90S", "per_robot": 2,
              "reported_owned_total": 0, "group": "pet"},
         ],
-        "room_pod": {"modules": [{"name": "SCD40", "quantity_per_room": 1}]},
+        "room_pod": {"modules": [
+            {"id": "scd40", "name": "SCD40", "quantity_per_room": 1}
+        ]},
     }
 
 
@@ -81,7 +83,51 @@ def test_bona_fide_receipts_are_operator_provided_not_inferred():
     ev = {"parts": {x["id"]: {"vendor": "X", "sku": "Y", "pcb_revision": "1",
                              **{k: receipt for k in mod.PART_GATES}}
                     for x in p["parts"]},
-          "system": {k: receipt for k in mod.SYSTEM_GATES}}
+          "system": {k: receipt for k in mod.SYSTEM_GATES},
+          "room_pod": {"scd40": {
+              "vendor": "Sensirion", "sku": "SCD40", "pcb_revision": "1",
+              **{k: receipt for k in mod.PART_GATES},
+          }}}
     assert mod.generate(p, ev)["order_released"]
     ev["system"]["protected_1s_charger_and_dock_contacts"] = {"result": "pass"}
     assert not mod.generate(p, ev)["order_released"]
+
+
+
+def test_shared_station_and_controller_must_be_in_release_scope():
+    """Every listed room module is needed for the requested complete build."""
+    p = fixture()
+    p["qualified_assumptions"] = True
+    p["physical_trial_count"] = 1
+    p["prices_complete"] = True
+    receipt = {"result": "pass", "evidence_url": "https://example.org/test",
+               "tested_on": "bench trial", "reviewer": "operator"}
+    passed = {"vendor": "specific vendor", "sku": "specific part",
+              "pcb_revision": "1", **{k: receipt for k in mod.PART_GATES}}
+    ev = {
+        "parts": {x["id"]: passed for x in p["parts"]},
+        "system": {k: receipt for k in mod.SYSTEM_GATES},
+    }
+    assert not mod.generate(p, ev)["order_released"]
+    assert "exact_vendor_sku_and_pcb_revision" in (
+        mod.generate(p, ev)["room_pod"][0]["missing_part_evidence"])
+    ev["room_pod"] = {"scd40": passed}
+    assert mod.generate(p, ev)["order_released"]
+    ev["room_pod"]["scd40"] = {"vendor": "X", "sku": "Y", "pcb_revision": "1"}
+    assert not mod.generate(p, ev)["order_released"]
+
+
+def test_shared_station_rejects_duplicate_and_phantom_modules():
+    p = fixture()
+    p["room_pod"]["modules"].append({"id": "scd40",
+                                       "name": "Duplicate",
+                                       "quantity_per_room": 1})
+    with pytest.raises(ValueError, match="duplicate shared station"):
+        mod.generate(p)
+    p = fixture()
+    with pytest.raises(ValueError, match="nonexistent shared station"):
+        mod.generate(p, {"room_pod": {"invented_sensor": {}}})
+    p = fixture()
+    p["room_pod"]["modules"][0]["quantity_per_room"] = True
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        mod.generate(p)
