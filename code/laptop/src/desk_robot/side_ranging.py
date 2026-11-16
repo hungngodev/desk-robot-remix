@@ -94,9 +94,13 @@ class SideRangeEvents:
                 return []
             if self.active_boot_id != boot_id:
                 if self.active_boot_id is not None:
-                    if len(self.retired_boot_ids) >= 8:
-                        self._reset()
-                        return []
+                    # Keep retired identities for this observer's entire life.
+                    # The old eight-boot cutoff silently made every later
+                    # legitimate WROOM reboot permanently lose side events.
+                    # Evicting identities to bound the set would instead let a
+                    # delayed old boot masquerade as a fresh one. A set grows
+                    # by one small integer per actual distinct observed boot;
+                    # only the explicit owner lifecycle can retire the tracker.
                     self.retired_boot_ids.add(self.active_boot_id)
                 self._reset()
                 self.active_boot_id = boot_id
