@@ -853,3 +853,21 @@ async def test_group_consent_revoked_during_memory_persist_never_publishes_turn(
     assert not conversation.session_lock.locked()
     assert not conversation.speaker_lock.locked()
     assert all(len(history) == 2 for history in conversation.histories.values())
+
+
+
+def test_stop_endpoint_reports_unconfirmed_body_timeout_as_unavailable(settings, tokens):
+    """A motor STOP timeout is not a success or an unhelpful HTTP 500."""
+    operator = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+
+        async def timed_out_stop(robot_id):
+            assert robot_id == "robot-01"
+            raise TimeoutError("WROOM STOP transport acknowledgement unconfirmed")
+
+        runtime.coordinator.stop = timed_out_stop
+        result = client.post("/v1/robots/robot-01/stop", headers=operator)
+        assert result.status_code == 503
+        assert "STOP transport acknowledgement unconfirmed" in result.json()["error"]
+        assert runtime.pet.states["robot-01"].enabled is False

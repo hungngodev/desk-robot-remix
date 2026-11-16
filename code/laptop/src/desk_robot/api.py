@@ -133,6 +133,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     async def head_error(request, exc):
         return JSONResponse(status_code=503, content={"error": str(exc)})
 
+    @app.exception_handler(TimeoutError)
+    async def deadline_error(request, exc):
+        return JSONResponse(status_code=503, content={"error": str(exc) or "Hardware deadline exceeded"})
+
     @app.exception_handler(ValueError)
     async def invalid_input(request, exc):
         return JSONResponse(status_code=400, content={"error": str(exc)})
@@ -336,7 +340,20 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             interrupt = getattr(speaker, "interrupt", None)
         robot = settings.robot(robot_id)
         if callable(interrupt) and robot.device_id:
-            await asyncio.wait_for(interrupt(robot), timeout=2.5)
+            task = asyncio.create_task(interrupt(robot))
+            try:
+                # wait_for() can exceed its deadline if an alternate speech
+                # adapter catches cancellation. No such task may hang STOP.
+                done, _ = await asyncio.wait({task}, timeout=2.5)
+                if not done:
+                    raise TimeoutError("XIAO speech interruption unconfirmed")
+                await task
+            finally:
+                if not task.done():
+                    task.cancel()
+                    task.add_done_callback(
+                        lambda done: None if done.cancelled() else done.exception()
+                    )
 
     async def stop_pet_and_audio(robot_id: str, *, quiet: bool):
         """Single safety order for STOP, pause and operator quiet.
