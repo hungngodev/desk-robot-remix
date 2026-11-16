@@ -180,8 +180,8 @@ def assess_docked_load(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--peak-5v-a", required=True, type=float)
-    parser.add_argument("--continuous-5v-a", required=True, type=float)
+    parser.add_argument("--peak-5v-a", type=float)
+    parser.add_argument("--continuous-5v-a", type=float)
     parser.add_argument("--low-cell-v", type=float, default=3.0)
     parser.add_argument("--measured-efficiency", type=float, default=0.85)
     parser.add_argument("--margin", type=float, default=1.3,
@@ -190,17 +190,52 @@ def main() -> None:
     parser.add_argument("--boost-continuous-input-a", type=float)
     parser.add_argument("--boost-continuous-output-a", type=float)
     parser.add_argument("--protected-cell-continuous-a", type=float)
+    # Use the SAME existing source owner to size real low-motion dock loads.
+    # No default numeric input is represented as a measured charger rating.
+    parser.add_argument("--dock-idle-5v-a", type=float)
+    parser.add_argument("--dock-requested-charge-a", type=float)
+    parser.add_argument("--dock-sys-v", type=float)
+    parser.add_argument("--dock-boost-efficiency", type=float)
+    parser.add_argument("--dock-charger-input-limit-a", type=float)
+    parser.add_argument("--dock-board-thermal-input-a", type=float)
+    parser.add_argument("--dock-adapter-continuous-a", type=float)
+    parser.add_argument("--dock-boost-5v-continuous-a", type=float)
+    parser.add_argument("--dock-pack-charge-max-a", type=float)
+    parser.add_argument("--dock-motors-disarmed", action="store_true")
     args = parser.parse_args()
-    result = size_5v_supply(
-        args.peak_5v_a, args.continuous_5v_a,
-        cell_low_v=args.low_cell_v,
-        measured_boost_efficiency=args.measured_efficiency,
-        margin=args.margin,
-        boost_max_input_a=args.boost_max_input_a,
-        boost_continuous_input_a=args.boost_continuous_input_a,
-        boost_continuous_output_a=args.boost_continuous_output_a,
-        protected_cell_continuous_a=args.protected_cell_continuous_a,
+    dock_inputs = (
+        args.dock_idle_5v_a, args.dock_requested_charge_a, args.dock_sys_v,
+        args.dock_boost_efficiency,
     )
+    if any(v is not None for v in dock_inputs):
+        if any(v is None for v in dock_inputs):
+            parser.error("Dock mode requires idle current, charge current, SYS voltage and efficiency")
+        if args.peak_5v_a is not None or args.continuous_5v_a is not None:
+            parser.error("Use one mode: undocked peak load OR docked idle load")
+        result = assess_docked_load(
+            args.dock_idle_5v_a, args.dock_requested_charge_a,
+            measured_sys_v=args.dock_sys_v,
+            measured_boost_efficiency=args.dock_boost_efficiency,
+            charger_input_limit_a=args.dock_charger_input_limit_a,
+            charger_board_thermal_input_a=args.dock_board_thermal_input_a,
+            dock_adapter_continuous_a=args.dock_adapter_continuous_a,
+            rated_5v_boost_continuous_a=args.dock_boost_5v_continuous_a,
+            protected_pack_max_charge_a=args.dock_pack_charge_max_a,
+            motors_confirmed_disarmed=args.dock_motors_disarmed,
+        )
+    else:
+        if args.peak_5v_a is None or args.continuous_5v_a is None:
+            parser.error("Undocked mode requires --peak-5v-a and --continuous-5v-a")
+        result = size_5v_supply(
+            args.peak_5v_a, args.continuous_5v_a,
+            cell_low_v=args.low_cell_v,
+            measured_boost_efficiency=args.measured_efficiency,
+            margin=args.margin,
+            boost_max_input_a=args.boost_max_input_a,
+            boost_continuous_input_a=args.boost_continuous_input_a,
+            boost_continuous_output_a=args.boost_continuous_output_a,
+            protected_cell_continuous_a=args.protected_cell_continuous_a,
+        )
     print(json.dumps(result, indent=2))
 
 
