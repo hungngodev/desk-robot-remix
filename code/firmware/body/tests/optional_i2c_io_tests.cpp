@@ -59,6 +59,23 @@ int main() {
     CHECK(!stuck_extra_touch.begin(stuck_extra_touch_wire));
     CHECK(!stuck_extra_touch.verified());
     CHECK(stuck_extra_touch_wire.extras == 0);
+    // A failed CAP1188 register-address write must still terminate the
+    // attempted I2C transaction, without accepting a cached touch sample.
+    TwoWire cap_failed_write_wire;
+    desk_robot::ExpansionTouch cap_failed_write;
+    CHECK(cap_failed_write.begin(cap_failed_write_wire));
+    const auto before_cap_ends = cap_failed_write_wire.cap_register_end_calls;
+    const auto before_cap_requests = cap_failed_write_wire.cap_register_requests;
+    cap_failed_write_wire.fail_cap_register_write = true;
+    std::uint8_t failed_zones = 0x5A;
+    CHECK(!cap_failed_write.poll(100, failed_zones));
+    CHECK(cap_failed_write_wire.cap_register_end_calls == before_cap_ends + 1);
+    CHECK(cap_failed_write_wire.cap_register_requests == before_cap_requests);
+    CHECK(failed_zones == 0x5A);
+    CHECK(!cap_failed_write.verified());
+    CHECK(cap_failed_write_wire.ranges == 0);
+    CHECK(cap_failed_write_wire.extras == 0);
+    CHECK(!cap_failed_write_wire.unsafe_parallel_mux);
     // MAX30102 shares the same optional lane. It must enforce the same
     // verified 0x70 quiescence and 0x71 isolation as CAP1188.
     TwoWire stuck_range_pulse_wire;
