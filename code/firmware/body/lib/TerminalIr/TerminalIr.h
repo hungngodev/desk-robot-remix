@@ -1,5 +1,6 @@
 #pragma once
-#if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
+#if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
+    (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 #include <Arduino.h>
 #include <driver/rmt.h>
 #include <freertos/ringbuf.h>
