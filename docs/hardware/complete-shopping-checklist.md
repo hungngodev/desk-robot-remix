@@ -22,7 +22,7 @@
 
 | Search for generic module | Quantity |
 | --- | ---: |
-| Eight ToF ranging slots, original code VL53L4CD; generic VL53L0X is cheaper but NOT firmware compatible yet | **8** (4 floor, front, left, right, rear); buy ONE low-cost VL53L0X for measured comparison, HOLD other seven and all fleet units |
+| Eight ToF ranging slots, original code VL53L4CD; generic VL53L0X is cheaper but NOT firmware compatible yet | **8** (4 floor, front, left, right, rear); buy ONE exact Pololu VL53L4CD carrier #3692 for measured comparison, HOLD other seven and all fleet units. VL53L0X is a separate driver-change experiment, not an installed equivalent |
 | TCA9548A I2C multiplexer | **2** (0x70 safety, 0x71 extras) |
 | MAX98357A I2S mono amplifier and 8 ohm 1 W 20mm speaker | 1 each |
 | CAP1188 8 zone I2C capacitive touch module, selectable address 0x28 | 1 |
@@ -79,7 +79,7 @@ One full robot requires eight confirmed-compatible ToF modules, therefore **40 t
 
 ## November 16 consolidated staged generic-price procurement review
 
-**Source-of-truth warning:** This section records the one-robot purchase candidates and the exact unresolved purchase gates. Prices are **USD estimated generic component targets** from recent public listings and prior quotes, NOT verified landed offers. Package/shipping/tax and 3.3 V/PCB variants vary. Do not order a complete robot or five sets yet. The only immediate new sample purchase authorized for comparison is **one generic VL53L0X** after confirming its PCB regulator and logic voltage. Prefer cheap, documented generic boards; do not buy Adafruit branded hardware. Owned boards can retain their original brand.
+**Source-of-truth warning:** This section records the one-robot purchase candidates and the exact unresolved purchase gates. Prices are **USD estimated generic component targets** from recent public listings and prior quotes, NOT verified landed offers. Package/shipping/tax and 3.3 V/PCB variants vary. Do not order a complete robot or five sets yet. The only immediate ranging sample is **one genuine Pololu VL53L4CD #3692**, with VIN supplied from the 3.3 V bus, before purchasing the other seven or any fleet copies. Generic VL53L0X requires a different driver and is not an approved current-firmware replacement. Prefer cheap, documented generic boards; do not buy Adafruit branded hardware. Owned boards can retain their original brand.
 
 **Status vocabulary:** `SAMPLE` means one-unit experiment, `HOLD` means the role is selected but exact purchase requires electrical/fit/software evidence, `MATCH` means existing firmware supports the exact CHIP but carrier/behavior still need testing, `PRINT` reuse filament. The programmatic `full-feature-plan.json` still owns electrical allocation. These prices do not silently change its selected drivers.
 
@@ -101,7 +101,7 @@ One full robot requires eight confirmed-compatible ToF modules, therefore **40 t
 
 | Stage | Generic part | Quantity | Estimated USD component total | Gate |
 | --- | --- | ---: | ---: | --- |
-| Core 1 | GY530 / VL53L0X ToF candidate | 8 target, **1 sample now** | $16–32 for 8 | SAMPLE; current firmware is VL53L4CD, real 30–60mm cliff reliability unverified |
+| Core 1 | Pololu VL53L4CD carrier #3692 (source-compatible sample; not yet physically cliff-qualified) | 8 target, **1 sample now** | $111.60 for 8 at $13.95 each | SAMPLE; run 3.3 V I2C, loaded 30–60mm cliff, black/gloss surface and stop trials before remaining seven; generic VL53L0X needs its own driver |
 | Core 1 | TCA9548A 8 channel I2C mux | 2 | $2–6 | MATCH, verify 3.3V breakout |
 | Core 1 | MCP23017 GPIO expander | 1 | $2–5 | MATCH, mandatory fresh dock IO in full profile |
 | Core 1 | NC collision bumper | 2 | $1–3 | HOLD physical pullup/fault test |
@@ -182,3 +182,22 @@ Four more each of XIAO Sense, WROOM32, OLED, MPU6050, AT42QT1010 and every other
 ### Agent assignments and mandatory acceptance gates
 
 Master PR [procurement comment](https://github.com/hungngodev/desk-robot-remix/pull/17#issuecomment-6922090288) and numbered comments 01–12 cover: ranging, bus carrier voltages, power/charge, docking, CAD/licensing, audio, brain, touch, extra sensors, toys, room pod and CI. Refresh live head/comments before edits; use actual source and tests. Present one complete robot with measured local stop and real safe battery charge, measured jaw/key pickup, XIAO acoustic interrupt, full multimodal observation and five-robot digital coordination before naming any bill of materials production-ready.
+
+
+## November 16 independent exact-module procurement gate
+
+This section supersedes any older line in this checklist that implied a generic VL53L0X was a drop-in purchase for the current VL53L4CD guard. This is **one-robot bench procurement, not a completed production BOM**. Every board below has a published, verifiable part number and 3.3 V integration path in the existing source. The current final fitted enclosure and the powered robot are still unqualified; do not order five copies of any item.
+
+| Manufacturer part and direct non-Adafruit vendor link | Buy for ONE robot hardware bench | Proven connection / condition |
+| --- | ---: | --- |
+| [SparkFun TCA9548A mux BOB-16784](https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html) | 2 | WROOM 3.3 V SDA/SCL, set 0x70 and 0x71 using address solder jumper; inspect all pullups and both control register reads |
+| [Pololu VL53L4CD carrier 3692](https://www.pololu.com/product/3692) | 1 sample | Exact supported Pololu chip/register driver, 3.3 V to VIN ensures 3.3 V I2C high; verify true cliff stopping before 7 more |
+| [Waveshare MCP23017 IO expansion SKU15391](https://www.waveshare.com/mcp23017-io-expansion-board.htm) | 1 sample | 3.3 V VCC and I2C address 0x20; set address straps per board revision; 38 x 23 mm board fit still pending |
+| [SparkFun MAX98357A DEV-14809](https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html) | 1 | Existing Sense GPIO4/7/8 I2S; physically isolate camera expansion J3, adjust gain and keep differential speaker leads isolated |
+| [SparkFun 20mm 8ohm 1W speaker COM-26553](https://www.sparkfun.com/mini-speaker-1w-8-ohm.html) | 1 | Audio load for DEV-14809, gain/output limited to protect 1W driver; test mic feedback and acoustic cavity |
+
+**No Adafruit purchase.** Previously reported owned Adafruit-branded touch hardware may be reused. **Do not approve CAP1188 yet:** its I2C address is resistor-selected and current code requires 0x28; a generic 0x29 carrier without correctly accessible ADDR_COMM is incompatible. A documented non-Adafruit breakout has not yet been verified. Microchip source: https://ww1.microchip.com/downloads/en/DeviceDoc/00001620C.pdf .
+
+**Do not approve an unexamined PN532.** The old Elechouse V3 documentation specifies 5 V TTL on I2C/UART, unsafe to assume for this WROOM 3.3 V bus: https://www.elechouse.com/elechouse/images/product/PN532_module_V3/ . A new 3.3 V PV532 V3.5 substitute has different chip provenance and lacks actual driver/fit tests. Do not authorize it as a drop-in.
+
+**Mobile battery and charger are blocked, not forgotten.** A documented charger IC and published current ratings cannot replace measured worst-case 5 V continuous/peak load, protected pack selection, NTC, real power-sharing/current and unpowered dock contact acceptance. The Seeed XIAO onboard 100mA charger cannot serve motors/servos. 8 Pololu #3692 modules at single-unit prices cost $111.60 before power and the other sensors, contradicting the old $50/robot target. Refer to `one-robot-power-gate.md` and `charging-design-and-validation.md`.
