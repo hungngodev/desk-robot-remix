@@ -73,6 +73,8 @@ jobs:
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full
       - name: Compile full guarded DRV8833 DC drivetrain firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_full
+      - name: Compile one shared Feather room station with pinned upstream drivers
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_bench
       - name: Compile preserved DC reference
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32dev
       - name: Compile five source-reused classic NEC bench dock beacons
