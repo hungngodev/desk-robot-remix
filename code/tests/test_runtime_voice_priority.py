@@ -711,3 +711,59 @@ async def test_authenticated_vad_snapshot_upgrades_finite_aec_barge_hold():
     await runtime._on_voice_snapshot(frozenset())
     assert events[-1] == ("camera", "end")
     assert not hub.user_active("robot-01", time.monotonic())
+
+
+async def test_monitor_loss_stalled_xiao_stop_cannot_starve_other_heads(monkeypatch):
+    """Every real head gets its STOP attempt even if one ignores cancellation."""
+    import asyncio
+    import pytest
+
+    monkeypatch.setattr("desk_robot.runtime._MONITOR_STOP_TIMEOUT_S", 0.05)
+    events = []
+    release = asyncio.Event()
+
+    class Pet:
+        def set_voice_monitor_ready(self, ready):
+            events.append(("ready", ready))
+
+        async def interrupt(self, robot_id):
+            events.append(("pet", robot_id))
+
+    class Speaker:
+        async def monitor_lost(self, robot):
+            events.append(("stop", robot.device_id))
+            if robot.device_id == "mac-01":
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    await release.wait()
+
+    class Conversation:
+        speaker = Speaker()
+
+        async def stop(self):
+            events.append(("group", "stop"))
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        mode="hardware",
+        robots=[
+            SimpleNamespace(id="robot-01", device_id="mac-01"),
+            SimpleNamespace(id="robot-02", device_id="mac-02"),
+        ],
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    try:
+        with pytest.raises(RuntimeError, match="physical speaker stop unconfirmed"):
+            await asyncio.wait_for(
+                runtime._on_voice_global("stream_unavailable"), timeout=0.3
+            )
+        assert ("stop", "mac-01") in events
+        assert ("stop", "mac-02") in events
+        assert ("pet", "robot-01") in events
+        assert ("pet", "robot-02") in events
+        assert ("group", "stop") in events
+    finally:
+        release.set()
+        await asyncio.sleep(0)

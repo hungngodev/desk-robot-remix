@@ -23,6 +23,25 @@ from .transport import HttpHead
 from .vision import OllamaScene, YoloWorldVision
 
 
+_MONITOR_STOP_TIMEOUT_S = 0.35
+
+
+async def _bounded_monitor_stop(coro) -> None:
+    """One stalled decoder cannot block the five-head monitor outage abort."""
+    task = asyncio.create_task(coro)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=_MONITOR_STOP_TIMEOUT_S)
+        if not done:
+            raise TimeoutError("Physical XIAO STOP unconfirmed on monitor loss")
+        await task
+    finally:
+        if not task.done():
+            task.cancel()
+            task.add_done_callback(
+                lambda done: None if done.cancelled() else done.exception()
+            )
+
+
 class Runtime:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -184,7 +203,7 @@ class Runtime:
         if not callable(stop):
             stop = getattr(speaker, "interrupt", None)
         native_stops = (
-            [asyncio.wait_for(stop(robot), timeout=0.35)
+            [_bounded_monitor_stop(stop(robot))
              for robot in self.settings.robots if getattr(robot, "device_id", None)]
             if getattr(self.settings, "mode", None) == "hardware"
             and callable(stop) else []
