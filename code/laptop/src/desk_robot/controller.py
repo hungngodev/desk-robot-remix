@@ -150,7 +150,9 @@ class Coordinator:
         # network or model cleanup; waiting for it would delay the real WROOM
         # stop command despite an urgent operator or human request.
         try:
-            acknowledgement = await self.heads[robot_id].command("stop")
+            acknowledgement = await asyncio.wait_for(
+                self.heads[robot_id].command("stop"), timeout=1.0
+            )
         finally:
             if running:
                 # asyncio.wait_for(gather(...)) is NOT bounded if a task
@@ -261,7 +263,9 @@ class Coordinator:
                 # Dispatch WROOM stop before potentially slow canceled camera
                 # or model cleanup. No second actor may treat this as charging.
                 try:
-                    await self.heads[job.robot_id].command("stop")
+                    await asyncio.wait_for(
+                        self.heads[job.robot_id].command("stop"), timeout=1.0
+                    )
                     job.events.append(
                         "stop acknowledged; servo positions are commanded, not measured"
                     )

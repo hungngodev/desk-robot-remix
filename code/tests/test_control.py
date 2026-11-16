@@ -677,3 +677,43 @@ async def test_exploration_stalled_body_health_times_out_before_motion(settings)
         assert head.commands[-1] == "stop"
     finally:
         await c.close()
+
+
+async def test_unresponsive_body_stop_is_bounded(settings):
+    """An operator STOP must not await a hung alternate head forever."""
+    c, head = make(settings)
+    async def hung_stop(command):
+        if command == "stop":
+            await asyncio.sleep(30)
+        return await original(command)
+
+    original = head.command
+    head.command = hung_stop
+    try:
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(c.stop("robot-01"), timeout=2)
+        assert c.permits.get("robot-01") is None
+    finally:
+        await c.close()
+
+
+async def test_job_cleanup_stop_timeout_fails_without_false_ack(settings):
+    """After command completion, never label an unacknowledged STOP as safe."""
+    c, head = make(settings)
+    original = head.command
+    async def hung_stop(command):
+        if command == "stop":
+            await asyncio.sleep(30)
+        return await original(command)
+
+    head.command = hung_stop
+    try:
+        await c.operator_arm("robot-01")
+        job = c.manual("robot-01", "drive 0 0 10")
+        await asyncio.wait_for(c.tasks[job.id], timeout=2)
+        assert job.state == "failed"
+        assert "STOP failed" in (job.error or "")
+        assert not any("stop acknowledged" in event for event in job.events)
+        assert head.commands.count("drive 0 0 10") == 1
+    finally:
+        await c.close()
