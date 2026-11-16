@@ -129,3 +129,24 @@ def test_vl53l0x_probe_is_isolated_from_production_cliff_driver():
     assert "sensor.setTimeout(80)" in probe
     assert "VL53L4CD" in production and "read_register(0x0089" in production
     assert "VL53L0X" not in production
+
+def test_live_dock_ir_requires_real_receiver_and_beacon_purchase_slots():
+    """A double demodulator in firmware still needs a real transmitting dock."""
+    p = load()
+    parts = {part["id"]: part for part in p["parts"]}
+    assert parts["dock_ir_receivers"]["per_robot"] == 2
+    assert parts["dock_ir_beacon_controller"]["per_robot"] == 1
+    assert parts["dock_ir_emitter_channels"]["per_robot"] == 2
+    assert all(parts[k]["reported_owned_total"] == 0 for k in (
+        "dock_ir_receivers", "dock_ir_beacon_controller",
+        "dock_ir_emitter_channels",
+    ))
+    assert p["target_robots"] * parts["dock_ir_receivers"]["per_robot"] == 10
+    assert p["target_robots"] * parts["dock_ir_emitter_channels"]["per_robot"] == 10
+    assert p["physical_trial_count"] == 0
+    body_ir = (Path(__file__).resolve().parents[1] /
+               "firmware/body/lib/TerminalIr/NecBurst.h").read_text()
+    assert "decode_nec" in body_ir
+    assert "motor_authorized = false" in body_ir
+    assert "charging_authorized = false" in body_ir
+
