@@ -646,7 +646,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
-        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"extras\":{\"mask\":%u,\"bumper\":%s,\"bumps\":%lu,\"reed\":%s,\"reed_count\":%lu,\"pir\":%s,\"pir_count\":%lu,\"cap\":%u,\"cap_ok\":%s,\"cap_events\":%lu},\"side_ranges\":{\"mm\":[%u,%u,%u],\"age_ms\":[%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u,\"motion_certified\":false},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"age_ms\":%lu,\"sample_ms\":%lu,\"boot_id\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"extras\":{\"mask\":%u,\"bumper\":%s,\"bumps\":%lu,\"reed\":%s,\"reed_count\":%lu,\"pir\":%s,\"pir_count\":%lu,\"cap\":%u,\"cap_ok\":%s,\"cap_events\":%lu},\"side_ranges\":{\"mm\":[%u,%u,%u],\"age_ms\":[%lu,%lu,%lu],\"sample_ms\":[%lu,%lu,%lu],\"boot_id\":%lu,\"present_mask\":%u,\"valid_mask\":%u,\"motion_certified\":false},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"age_ms\":%lu,\"sample_ms\":%lu,\"boot_id\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
         "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
         "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
@@ -676,6 +676,10 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(state_.side_present[0] ? now_ms - state_.side_at_ms[0] : 0),
         static_cast<unsigned long>(state_.side_present[1] ? now_ms - state_.side_at_ms[1] : 0),
         static_cast<unsigned long>(state_.side_present[2] ? now_ms - state_.side_at_ms[2] : 0),
+        static_cast<unsigned long>(state_.side_present[0] ? state_.side_at_ms[0] : 0),
+        static_cast<unsigned long>(state_.side_present[1] ? state_.side_at_ms[1] : 0),
+        static_cast<unsigned long>(state_.side_present[2] ? state_.side_at_ms[2] : 0),
+        static_cast<unsigned long>(boot_epoch_),
         side_present_mask, side_valid_mask,
         static_cast<unsigned>(state_.imu_family),
         static_cast<unsigned>(state_.imu_gyro_id),

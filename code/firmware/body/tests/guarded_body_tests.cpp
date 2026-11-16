@@ -282,6 +282,8 @@ static void extra_three_ranging_channels_are_diagnostics_only() {
   CHECK(status.find("\"side_ranges\":{") != std::string::npos);
   CHECK(status.find("\"mm\":[125,0,300]") != std::string::npos);
   CHECK(status.find("\"age_ms\":[20,19,18]") != std::string::npos);
+  CHECK(status.find("\"sample_ms\":[10,11,12]") != std::string::npos);
+  CHECK(status.find("\"boot_id\":0") != std::string::npos);
   CHECK(status.find("\"present_mask\":7,\"valid_mask\":5") != std::string::npos);
   CHECK(status.find("\"motion_certified\":false") != std::string::npos);
   // At 350ms source age a previously valid optional direction may still
