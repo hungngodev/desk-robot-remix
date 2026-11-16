@@ -27,6 +27,9 @@ trials_file = "../data/physical-trials.jsonl"
 
 [[robots]]
 id = "robot-01"
+# Must match the flashed dock beacon NEC command (0x30 + ID).
+# This is ONLY identity filtering; physical charging remains disabled.
+dock_beacon_id = 1
 name = "Pip"
 head_url = "http://192.168.1.101:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_01_TOKEN"
@@ -51,6 +54,9 @@ nfc_interactions_qualified = false  # toy tag IDs are not authentication or perm
 
 [[robots]]
 id = "robot-02"
+# Must match the flashed dock beacon NEC command (0x30 + ID).
+# This is ONLY identity filtering; physical charging remains disabled.
+dock_beacon_id = 2
 name = "Dot"
 head_url = "http://192.168.1.102:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_02_TOKEN"
@@ -75,6 +81,9 @@ nfc_interactions_qualified = false  # toy tag IDs are not authentication or perm
 
 [[robots]]
 id = "robot-03"
+# Must match the flashed dock beacon NEC command (0x30 + ID).
+# This is ONLY identity filtering; physical charging remains disabled.
+dock_beacon_id = 3
 name = "Chip"
 head_url = "http://192.168.1.103:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_03_TOKEN"
@@ -99,6 +108,9 @@ nfc_interactions_qualified = false  # toy tag IDs are not authentication or perm
 
 [[robots]]
 id = "robot-04"
+# Must match the flashed dock beacon NEC command (0x30 + ID).
+# This is ONLY identity filtering; physical charging remains disabled.
+dock_beacon_id = 4
 name = "Byte"
 head_url = "http://192.168.1.104:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_04_TOKEN"
@@ -123,6 +135,9 @@ nfc_interactions_qualified = false  # toy tag IDs are not authentication or perm
 
 [[robots]]
 id = "robot-05"
+# Must match the flashed dock beacon NEC command (0x30 + ID).
+# This is ONLY identity filtering; physical charging remains disabled.
+dock_beacon_id = 5
 name = "Bob"
 head_url = "http://192.168.1.105:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_05_TOKEN"
