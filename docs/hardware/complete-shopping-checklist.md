@@ -1,5 +1,19 @@
 # Buy this for the full five desk pets
 
+## November 16 critical dock hardware omissions corrected in machine-readable plan
+
+The sole procurement source now includes **three previously missing hardware roles** for the five docking stations. Earlier complete shopping rows were not complete. These are **HOLD design slots**, NOT validated orderable carrier SKUs.
+
+| Dock part | Per robot/dock | Fleet total | Exact upstream evidence and blocker |
+| --- | ---: | ---: | --- |
+| Dual independent 38kHz IR demodulated receiver, Vishay TSOP38438 reference | 2 | 10 | https://www.vishay.com/docs/82491/tsop382.pdf (verify chosen TSOP38438 official revision and pin layout); WROOM GPIO36/39 with 3.3V, active-low NEC RMT decoder exists; optical aim, level, AGC and shielding unmeasured |
+| Powered programmable NEC 38kHz dock beacon MCU/controller | 1 | 5 | Reuse candidate https://github.com/Arduino-IRremote/Arduino-IRremote (MIT, sendNEC, AVR platforms); https://github.com/makerspet/oomwoo-pcb/tree/main/kicad/charging-dock (Apache-2.0 dock circuit design, **20V/4S NOT portable**). No target MCU, flash image or loaded dock schematic qualified |
+| Two separately aimed 940nm infrared LED transmitter channels with appropriately rated transistor, resistor and protective circuitry | 2 | 10 | OOMWOO IR BEACON schematic: https://github.com/makerspet/oomwoo-pcb/blob/main/kicad/charging-dock/IR%20Beacon.kicad_sch . Its six LEDs and 20V current limiting cannot be copied into a 5V dock unchanged; choose final diode count and transistor from current, optics, thermal and 3.3/5V logic design |
+
+The existing `dock_contacts` kit must include TWO separate normally closed position contacts and independently sensed charger power-good status. These are not the same parts as the IR receivers. Terminal detection must remain read-only and independently verified before any charging current is connected. A stock IR remote control cannot serve as a continuous, robot-specific unattended dock beacon without protocol and synchronization tests.
+
+**Critical source reuse distinction:** OOMWOO publishes schematics and a very different power architecture; its repository is not an integrated firmware source for our dock. Arduino-IRremote has a compatible NEC sender API but has NOT been installed, flashed or qualified for a final docking controller. Do not infer complete autonomous docking from WROOM's read-only NEC decoder. The added 10 receivers, 5 controllers and 10 emitter channels must be accounted for before claiming a complete five-dock shopping list.
+
 ## Irreversible-purchase engineering release gate: November 16, 2026
 
 **CURRENT DECISION: NO FULL-FLEET PURCHASE AUTHORIZED.** All quantities below represent five fully equipped *design slots*, not validated final checkout items. A popular generic chip is not a guaranteed compatible carrier, and code compilation is not physically proven functionality. Do not transform a generic name into a merchant order without PCB revision, regulator, pinout, 3.3 V pullup, supply limit, fit, schematic and test evidence. A single borrowed/returnable sample can be used for qualification; the current user-owned hardware must be evaluated first.
