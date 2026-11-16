@@ -239,3 +239,41 @@ def test_hardware_side_source_rejects_conflicting_imu_boot_identity():
                                 sample_ms=(500, 500, 500), boot_id=17),
                            now=1.4, near_mm=170,
                            require_hardware_identity=True) == []
+
+
+def test_twelve_valid_reboots_recover_without_retired_identity_replay():
+    """Never brick read-only proximity after eight boots or reuse retired data."""
+    tracker = SideRangeEvents()
+
+    def sample(distance, acquisition, boot_id):
+        return body(mm=(distance, 600, 600),
+                    sample_ms=(acquisition, acquisition, acquisition),
+                    boot_id=boot_id)
+
+    for index in range(12):
+        boot_id = 5000 + index
+        t = index * 2.0 + 1.0
+        assert tracker.observe(sample(600, 100, boot_id), now=t,
+                               near_mm=170, require_hardware_identity=True) == []
+        assert tracker.observe(sample(90, 200, boot_id), now=t + .1,
+                               near_mm=170, require_hardware_identity=True) == []
+        assert tracker.observe(sample(95, 300, boot_id), now=t + .2,
+                               near_mm=170,
+                               require_hardware_identity=True) == [("left", 95)]
+        # An old boot packet is never permission to generate a new observation
+        # or to reset the active boot's proximity transition history.
+        for retired in range(5000, boot_id):
+            assert tracker.observe(sample(88, 400, retired), now=t + .3,
+                                   near_mm=170,
+                                   require_hardware_identity=True) == []
+        assert tracker.active_boot_id == boot_id
+        assert len(tracker.retired_boot_ids) == index
+        assert tracker.observe(sample(600, 400, boot_id), now=t + .4,
+                               near_mm=170, require_hardware_identity=True) == []
+        assert tracker.observe(sample(600, 500, boot_id), now=t + .5,
+                               near_mm=170, require_hardware_identity=True) == []
+        assert tracker.observe(sample(100, 600, boot_id), now=t + .6,
+                               near_mm=170, require_hardware_identity=True) == []
+        assert tracker.observe(sample(95, 700, boot_id), now=t + .7,
+                               near_mm=170,
+                               require_hardware_identity=True) == [("left", 95)]
