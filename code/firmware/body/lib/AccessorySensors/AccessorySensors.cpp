@@ -1,5 +1,6 @@
 #include "AccessorySensors.h"
-#if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
+#if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
+    (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 namespace desk_robot {
 bool AccessorySensors::mux(std::uint8_t address, std::uint8_t mask) {
   wire_->beginTransmission(address);
