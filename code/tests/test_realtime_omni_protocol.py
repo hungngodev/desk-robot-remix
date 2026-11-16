@@ -471,3 +471,11 @@ def test_native_listen_epoch_rejects_stale_silence_after_interrupt():
     assert not wire.model_listen_current({
         "type": "response.listen", "epoch": 2, "response_id": "unknown",
     })
+    wire.handle_event({"type": "response.listen", "epoch": 4})
+    assert wire._server_epoch_seen == 4
+    assert not wire.model_listen_current({
+        "type": "response.listen", "epoch": 3,
+    })
+    assert wire.model_listen_current({
+        "type": "response.listen", "epoch": 4,
+    })

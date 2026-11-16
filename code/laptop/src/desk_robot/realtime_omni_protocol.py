@@ -239,6 +239,13 @@ class OmniDuplexWire:
             self._input_after_interrupt = False
             self.accept_output = True
             return None
+        if kind == "response.listen":
+            # Model-native silence can arrive without response.created. Its
+            # accepted epoch still advances the monotonic session fence, so
+            # a delayed older listen cannot later count as a fresh decision.
+            if self.model_listen_current(event):
+                self._server_epoch_seen = event["epoch"]
+            return None
         if kind == "response.created":
             # A queued response from before an interruption must not restart
             # physical speech while the new human turn is still being heard.
