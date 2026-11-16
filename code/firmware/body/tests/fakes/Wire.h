@@ -31,6 +31,9 @@ class TwoWire {
   bool range_mux_stuck = false;
   bool optional_mux_stuck = false;
   bool fail_optional_mux_write = false;
+  bool fail_cap_register_write = false;
+  unsigned cap_register_end_calls = 0;
+  unsigned cap_register_requests = 0;
   bool optional_mux_installed = true;
   bool range_mux_write_nack = false;
   bool range_mux_read_nack = false;
@@ -51,6 +54,7 @@ class TwoWire {
   }
   std::size_t write(std::uint8_t v) {
     if (fail_optional_mux_write && current_address == 0x71) return 0;
+    if (fail_cap_register_write && current_address == 0x28) return 0;
     outbound.push_back(v);
     return 1;
   }
@@ -75,6 +79,7 @@ class TwoWire {
   std::uint8_t endTransmission(bool stop = true) {
     (void)stop;
     ++transactions;
+    if (current_address == 0x28) ++cap_register_end_calls;
     if (!connected(current_address)) return 4;
     if (current_address == 0x70) {
       if (outbound.empty()) return 0; // address-only I2C ACK probe
@@ -109,6 +114,7 @@ class TwoWire {
     ++transactions;
     inbound.clear();
     pos = 0;
+    if (addr == 0x28) ++cap_register_requests;
     if (!connected(addr)) return 0;
     if (addr == 0x70) {
       if (range_mux_read_nack) return 0;
