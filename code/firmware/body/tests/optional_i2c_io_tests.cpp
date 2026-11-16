@@ -59,6 +59,34 @@ int main() {
     CHECK(!stuck_extra_touch.begin(stuck_extra_touch_wire));
     CHECK(!stuck_extra_touch.verified());
     CHECK(stuck_extra_touch_wire.extras == 0);
+    // MAX30102 shares the same optional lane. It must enforce the same
+    // verified 0x70 quiescence and 0x71 isolation as CAP1188.
+    TwoWire stuck_range_pulse_wire;
+    stuck_range_pulse_wire.ranges = 1;
+    stuck_range_pulse_wire.range_mux_stuck = true;
+    desk_robot::PulsePad stuck_range_pulse;
+    CHECK(!stuck_range_pulse.begin(stuck_range_pulse_wire));
+    CHECK(stuck_range_pulse_wire.extras == 0);
+    CHECK(!stuck_range_pulse_wire.unsafe_parallel_mux);
+    TwoWire bad_range_pulse_wire;
+    bad_range_pulse_wire.range_mux_bad_readback = true;
+    desk_robot::PulsePad bad_range_pulse;
+    CHECK(!bad_range_pulse.begin(bad_range_pulse_wire));
+    CHECK(bad_range_pulse_wire.extras == 0);
+    TwoWire stuck_extra_pulse_wire;
+    stuck_extra_pulse_wire.optional_mux_stuck = true;
+    desk_robot::PulsePad stuck_extra_pulse;
+    CHECK(!stuck_extra_pulse.begin(stuck_extra_pulse_wire));
+    CHECK(stuck_extra_pulse_wire.extras == 0);
+    TwoWire late_bad_mux_pulse_wire;
+    desk_robot::PulsePad late_bad_mux_pulse;
+    CHECK(late_bad_mux_pulse.begin(late_bad_mux_pulse_wire));
+    CHECK(late_bad_mux_pulse.poll(0));
+    CHECK(late_bad_mux_pulse.sample().valid);
+    late_bad_mux_pulse_wire.range_mux_bad_readback = true;
+    CHECK(!late_bad_mux_pulse.poll(100));
+    CHECK(!late_bad_mux_pulse.sample().valid);
+    CHECK(late_bad_mux_pulse_wire.extras == 0);
     std::uint8_t bits = 0;
     for (std::uint32_t now_ms = 0; now_ms < 1600; now_ms += 12) {
       accessories.poll(now_ms);
