@@ -339,7 +339,9 @@ class Runtime:
         # before tearing down per-pet camera and context owners.
         self._room_stop.set()
         if self._room_task is not None:
-            await step("Shared room USB", self._room_task, 1.0)
+            async def wait_room_shutdown():
+                await self._room_task
+            await step("Shared room USB", wait_room_shutdown(), 1.0)
             self._room_task = None
         unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
         if unconfirmed:
