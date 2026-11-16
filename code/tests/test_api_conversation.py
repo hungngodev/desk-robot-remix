@@ -1017,3 +1017,74 @@ async def test_pet_pause_stall_cannot_skip_native_operator_speech_stop(
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+@pytest.mark.parametrize("reply", [
+    {},
+    {"device_id": "head02", "interrupted": True, "head_flush_requested": True},
+    {"device_id": "head01", "interrupted": False, "head_flush_requested": True},
+    {"device_id": "head01", "interrupted": True, "head_flush_requested": False},
+    {"device_id": "head01", "interrupted": 1, "head_flush_requested": True},
+])
+async def test_kokoro_monitor_stop_requires_exact_head_flush_receipt(reply, monkeypatch):
+    """HTTP success alone is not a verified Xiaozhi STOP request receipt."""
+    from types import SimpleNamespace
+
+    settings = SimpleNamespace(
+        speech_bridge_url="http://test-bridge.invalid",
+        speech_bridge_token_env="DESK_ROBOT_TEST_BRIDGE_TOKEN",
+    )
+    monkeypatch.setenv(settings.speech_bridge_token_env, "z" * 32)
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return reply
+
+    class Client:
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs.get("json")))
+            return Response()
+
+    speaker = KokoroHeadSpeaker(settings, Client())
+    with pytest.raises(RuntimeError, match="monitor STOP request unconfirmed"):
+        await speaker.monitor_lost(SimpleNamespace(device_id="head01"))
+    assert len(calls) == 1
+    assert calls[0][0].endswith("/interrupt")
+    assert calls[0][1] == {
+        "device_id": "head01", "monitor_unavailable": True,
+    }
+
+
+async def test_kokoro_monitor_stop_accepts_request_without_claiming_acoustic_ack(monkeypatch):
+    from types import SimpleNamespace
+
+    settings = SimpleNamespace(
+        speech_bridge_url="http://test-bridge.invalid",
+        speech_bridge_token_env="DESK_ROBOT_TEST_BRIDGE_TOKEN",
+    )
+    monkeypatch.setenv(settings.speech_bridge_token_env, "z" * 32)
+    receipt = {
+        "device_id": "head01", "interrupted": True,
+        "head_flush_requested": True,
+        "head_flush_acknowledged": False, "audible_stop_verified": False,
+    }
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return receipt
+
+    class Client:
+        async def post(self, url, **kwargs):
+            return Response()
+
+    speaker = KokoroHeadSpeaker(settings, Client())
+    assert await speaker.monitor_lost(SimpleNamespace(device_id="head01")) == receipt
+    assert receipt["head_flush_acknowledged"] is False
+    assert receipt["audible_stop_verified"] is False

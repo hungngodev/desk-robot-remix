@@ -260,12 +260,21 @@ class KokoroHeadSpeaker:
 
         This does NOT alter the operator's persistent quiet or pause choice.
         """
-        return await self._bridge(
+        receipt = await self._bridge(
             "/interrupt", {
                 "device_id": robot.device_id,
                 "monitor_unavailable": True,
             },
         )
+        # HTTP 200 is not a receipt for a different head or a rejected
+        # bridge operation. This acknowledges the STOP REQUEST only.
+        # Physical decoder completion and acoustic silence remain unverified.
+        if (not isinstance(receipt, dict)
+                or receipt.get("device_id") != robot.device_id
+                or receipt.get("interrupted") is not True
+                or receipt.get("head_flush_requested") is not True):
+            raise RuntimeError("Xiaozhi monitor STOP request unconfirmed")
+        return receipt
 
     async def operator_stop(self, robot: RobotConfig):
         """Explicit operator quiet/pause, distinct from an ordinary barge.
