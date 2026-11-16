@@ -102,7 +102,7 @@ def test_canonical_driver_statuses_match_current_source_without_claiming_hardwar
     full = (root / "firmware/body/platformio.ini").read_text()
     main = (root / "firmware/body/src/main.cpp").read_text()
     assert "dock_status(now_ms)" in extra
-    assert "++dock.sample_seq" in extra
+    assert "dock.sample_seq = next_nonzero_sensor_sequence(dock.sample_seq)" in extra
     assert "dock_telemetry_bad(now_ms)" in body
     assert "const bool contact = dock.input_good || dock.left_seated ||" in body
     assert "dock.right_seated || dock.charge_indicated" in body
@@ -150,3 +150,21 @@ def test_live_dock_ir_requires_real_receiver_and_beacon_purchase_slots():
     assert "motor_authorized = false" in body_ir
     assert "charging_authorized = false" in body_ir
 
+
+
+def test_complete_robot_is_default_without_losing_guarded_dc_variant():
+    """Building the default must not ship the old five-channel test profile."""
+    root = Path(__file__).resolve().parents[1]
+    pio = (root / "firmware/body/platformio.ini").read_text()
+    main = (root / "firmware/body/src/main.cpp").read_text()
+    body = (root / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    assert "default_envs = esp32_full" in pio
+    assert "-DDESK_ROBOT_EXTRA_RANGERS=1" in pio
+    assert "-DDESK_ROBOT_REQUIRE_DOCK_MONITOR=1" in pio
+    assert "[env:esp32_dc_full]" in pio
+    assert "-DDESK_ROBOT_FULL_SENSORS=1" in pio
+    assert "BodyProfile::DcGuarded" in main
+    assert "control.require_dock_monitor(true)" in main
+    assert "control.require_imu_for_motion(true)" in main
+    assert "guarded_motion_profile()" in body
+    assert 'profile_ == BodyProfile::DcGuarded ? "dc_pwm_guarded"' in body
