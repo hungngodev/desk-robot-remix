@@ -70,6 +70,7 @@ class Coordinator:
         self.tasks: dict[str, asyncio.Task] = {}
         self.closed = False
         self.permits: dict[str, float] = {}
+        self.shutdown_stop_failures: dict[str, str] = {}
         self._permit_epoch = {r.id: 0 for r in settings.robots}
 
     def robot(self, robot_id):
@@ -237,6 +238,7 @@ class Coordinator:
             )
             for robot_id, result in zip(ids, receipts):
                 if isinstance(result, BaseException):
+                    self.shutdown_stop_failures[robot_id] = type(result).__name__
                     for job in self.jobs.values():
                         if job.robot_id == robot_id and job.state in {"queued", "running"}:
                             job.state = "failed"

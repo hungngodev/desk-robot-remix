@@ -1041,6 +1041,7 @@ async def test_hardware_close_stalled_peer_does_not_starve_other_body(settings):
         assert sent.is_set()
         assert c.closed
         assert second.commands == ["stop"]
+        assert c.shutdown_stop_failures["robot-01"] == "TimeoutError"
         assert not release.is_set()
     finally:
         release.set()

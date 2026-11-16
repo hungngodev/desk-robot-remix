@@ -290,6 +290,14 @@ class Runtime:
             except Exception as exc:
                 errors.append(exc)
         await step("WROOM motion", self.coordinator.close(), 4.0)
+        unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
+        if unconfirmed:
+            # An idle robot can still have an uncertain prior motor pulse.
+            # Surface each failed physical STOP after attempting all cleanup.
+            errors.append(RuntimeError(
+                "WROOM shutdown STOP unconfirmed for "
+                + ", ".join(sorted(unconfirmed))
+            ))
 
         if self._voice_task is not None:
             task = self._voice_task
