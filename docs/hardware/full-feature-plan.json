@@ -12,7 +12,8 @@
       "per_robot": 1,
       "reported_owned_total": 0,
       "notes": "At least one ordered; do not duplicate order",
-      "group": "pet"
+      "group": "pet",
+      "ordered_unreceived_total": 1
     },
     {
       "id": "wroom",
@@ -35,16 +36,18 @@
       "name": "28BYJ48 5V stepper motor",
       "per_robot": 2,
       "reported_owned_total": 5,
-      "notes": "5 reported owned; buy 5 additional for five",
-      "group": "pet"
+      "notes": "5 reported owned; do not order missing five until loaded drivetrain selection",
+      "group": "pet",
+      "shopping_decision": "hold_until_drivetrain_selected_and_physically_tested"
     },
     {
       "id": "uln2003",
       "name": "ULN2003 driver for 28BYJ48",
       "per_robot": 2,
       "reported_owned_total": 5,
-      "notes": "5 reported owned; buy 5 additional",
-      "group": "pet"
+      "notes": "5 reported owned; do not order missing five until loaded drivetrain selection",
+      "group": "pet",
+      "shopping_decision": "hold_until_drivetrain_selected_and_physically_tested"
     },
     {
       "id": "mg90s",
@@ -52,7 +55,8 @@
       "per_robot": 2,
       "reported_owned_total": 0,
       "notes": "About 10 estimated owned; recount before buying",
-      "group": "pet"
+      "group": "pet",
+      "estimated_owned_total": 10
     },
     {
       "id": "imu",
@@ -76,7 +80,8 @@
       "per_robot": 1,
       "reported_owned_total": 0,
       "notes": "Original user HTML says this is APPROVED as a robot-mounted paw pad and claims about five are already owned. Independent photo audit did not establish exact stock. No purchase before recount and module voltage check. Use WROOM I2C 0x57, not Sense GPIO41/42 PDM mic.",
-      "group": "pet"
+      "group": "pet",
+      "estimated_owned_total": 5
     },
     {
       "id": "cliff_obstacle",
@@ -679,7 +684,8 @@
         "id": "room_controller",
         "name": "Station controller with timestamped USB serial protocol, reuse owned Feather nRF52840 if feasible",
         "quantity_per_room": 1,
-        "location": "ventilated stationary USB enclosure; no motor or charge authority"
+        "location": "ventilated stationary USB enclosure; no motor or charge authority; owned Feather nRF52840 is a candidate, not yet an approved controller",
+        "estimated_owned_total": 1
       }
     ],
     "transport": "Room pod presents timestamped named readings to Mac over USB; no safety or motor control and no assumption that a missing pod means a person is present.",
