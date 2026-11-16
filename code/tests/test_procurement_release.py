@@ -164,7 +164,7 @@ def test_entire_shopping_csv_and_two_lists_match_authoritative_source():
     import json
     plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
     report = mod.generate(plan)
-    root = mod.PLAN.parents[1]
+    root = mod.PLAN.parents[2]
     expected_csv = mod.render_csv(report)
     expected_md = mod.render_markdown(report)
     assert (root / "docs/hardware/fleet-components.csv").read_text(
