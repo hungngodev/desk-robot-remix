@@ -4321,3 +4321,45 @@ def test_optional_sensor_uint32_freshness_wrap_and_replay():
     assert _sensor_counter_advance(1, 0xffffffff) == 2
     assert _sensor_counter_advance(0xffffffff, 0xfffffffe) == 1
     assert _sensor_counter_advance(0x80000001, 1) == 0
+
+
+async def test_touch_stale_nonzero_counter_cannot_replay_firmware_gesture(
+    fleet, tmp_path,
+):
+    """A delayed older body response cannot rewind a valid tap baseline."""
+    reports = iter([
+        (10, 0, 0, 0),  # first baseline
+        (11, 1, 0, 0),  # real tap
+        (9, 0, 0, 0),   # delayed earlier status is not a reboot
+        (11, 1, 0, 0),  # same acknowledged event cannot replay
+        (12, 2, 0, 0),  # genuinely new tap still works
+    ])
+
+    class ReplayHead:
+        async def status(self):
+            count, tap, double, hold = next(reports)
+            return {
+                "robot_id": "robot-01",
+                "touch": {
+                    "active": False, "count": count,
+                    "tap_count": tap, "double_count": double,
+                    "hold_count": hold,
+                },
+            }
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": ReplayHead()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 4, True
+    try:
+        for expected in (0, 1, 1, 1, 2):
+            await pet._touch_from_body("robot-01", 4)
+            assert sum(m.kind == "touch_tap" for m in memory.recent("robot-01")) == expected
+        assert state.last_touch_count == 12
+    finally:
+        state.enabled = False
+        await pet.close()

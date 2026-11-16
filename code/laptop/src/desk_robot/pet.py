@@ -1235,10 +1235,15 @@ class PetController:
         if not isinstance(touch, dict):
             return
         count = touch.get("count")
-        if type(count) is not int or count < 0:
+        if type(count) is not int or not 0 <= count <= 0xffffffff:
             return
         state = self.states[robot_id]
         previous_count = state.last_touch_count
+        if previous_count is not None and 0 < count < previous_count:
+            # Firmware reboot resets the count to zero. A delayed old nonzero
+            # status must not rewind the active event baseline and replay a
+            # tap or quiet-mode hold on the next authenticated status read.
+            return
         state.last_touch_count = count
 
         # This field set is emitted by the WROOM gesture classifier, not by a
@@ -1246,7 +1251,8 @@ class PetController:
         keys = ("tap_count", "double_count", "hold_count")
         if all(key in touch for key in keys):
             counters = {key: touch[key] for key in keys}
-            if any(type(v) is not int or v < 0 for v in counters.values()):
+            if any(type(v) is not int or not 0 <= v <= 0xffffffff
+                   for v in counters.values()):
                 return
             old = state.last_touch_events
             state.last_touch_events = counters
