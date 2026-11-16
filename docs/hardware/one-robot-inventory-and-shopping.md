@@ -1,3 +1,5 @@
+> **Historical one-unit photo and inventory reference, not five-unit checkout authority.** Use the [canonical full five-robot owned and buying lists](complete-shopping-checklist.md), generated from [the physical-gated machine plan](full-feature-plan.json). No one-robot row is proof that a component is delivered, fitted, powered or safe to duplicate.
+
 # One robot, one table: reported inventory and purchase needs
 
 **One robot only.** The five-pet architecture is retained in [product definition](../product-definition.md); do not multiply anything by five here. This is a simple one-item-per-row index so photos or purchase links can be attached after physically confirming the exact module. All reference photos shown in chat are stock reference photos, **not** the user's saved photos.
