@@ -1,3 +1,7 @@
+## November 16 failed MJPEG replacement stream regression
+
+Owner Robot Integration Fixes. Test commit 4ff1c7bfae89fabf8f2e58c8d33273ba28aba7ec adds a failed HTTP 503 reconnect race with a still alive old camera stream. It asserts no stale camera frame, no revived connection and no snapshot after the old stream resumes. This is a test only, NOT an executed pass. GitHub checkout blocked by DNS exit 128. Run focused pytest then inspect camera supervisor retry lifecycle. Avoid overlapping transport edits and preserve current stream generation fence. PR #17 remains draft.
+
 ## November 15 camera boot replay test fixture correction
 
 Owner Robot Integration Fixes. PR #17 test commit 2f02f14f42f96c0b583897fa4332b3769afe79af corrects one leftover ASCII escaped JPEG marker assertion in test_mjpeg_stream_rejects_old_boot_replay_after_real_head_reset. Verification ledger commit 5597cb27ce2fcc1ceebe9e79d35b0307699d3d03. No production code changed. No pytest run or physical verification. Next owner should run code/tests/test_transport_calibration.py with -k old_boot_replay_after_real_head_reset and verify stream replacement failure/reconnect behavior. Avoid duplicate fixture edits.
