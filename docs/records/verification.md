@@ -1,4 +1,4 @@
-
+## November 15 XIAO MJPEG reconnect stream ownership fence\n\nOwner: Robot Integration Fixes. Initial PR #17 head 39cb7dd8a3d771a374286ed4e1cc85f6e502ec2d. Source e902e2c61b8683c103cb88618f928af8b0868c7c fences live camera state by stream generation; regression 0fb57d6566bab8b3ec021ad4937ec0d821b93c88 checks old stream cannot overwrite or clear a newer stream. Handoff 876b065ce84242931d72b48dacf2fc98d0907061. STATUS SOURCE_AND_TEST_COMMITTED_NOT_EXECUTED. Actual local git ls-remote failed github.com DNS resolution exit 128. Required: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_transport_calibration.py -k replaced_mjpeg_stream, then full suite. No firmware, camera hardware, motion or charging verification. PR remains draft.\n\n
 
 ## November 15 proactive alternate speaker mid-send consent revocation
 
