@@ -215,7 +215,10 @@ class HttpHead:
         async with self.lock:
             data = _response_object(await self._request("GET", "/api/ir"))
             try:
-                return validate_ir(data, self.config.id)
+                return validate_ir(
+                    data, self.config.id,
+                    expected_dock_id=self.config.dock_beacon_id,
+                )
             except ValueError as exc:
                 raise HeadError(str(exc)) from exc
 
