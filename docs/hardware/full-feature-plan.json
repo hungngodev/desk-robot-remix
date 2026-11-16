@@ -295,11 +295,35 @@
       "group": "pet"
     },
     {
+      "id": "dock_ir_receivers",
+      "name": "Two 38 kHz demodulated IR receivers, Vishay TSOP38438 reference, mounted behind separate directional baffles",
+      "per_robot": 2,
+      "reported_owned_total": 0,
+      "notes": "One receiver to WROOM GPIO36 and one to GPIO39; 3.3V supply, active LOW, external bias and the correct physical TSOP pin order. Reuse reference Vishay TSOP38438 datasheet and ESP32 RMT receiver source. Receiver chip candidate only, no measured sunlight immunity, range or fit.",
+      "group": "pet"
+    },
+    {
+      "id": "dock_ir_beacon_controller",
+      "name": "Independent powered 38 kHz classic NEC dock beacon controller and programmable board",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "One per dock, not a second robot MCU. Source reuse candidate: Arduino-IRremote MIT sendNEC on supported AVR, or design adaptation of Apache-2.0 OOMWOO CH32V003 dock PCB. OOMWOO's 20V 4S power and contact switching CANNOT be reused for this robot's 1S/5V charger. Exact MCU module, flashing/debug provision, firmware and output carrier must be selected and verified; no final purchase SKU.",
+      "group": "pet"
+    },
+    {
+      "id": "dock_ir_emitter_channels",
+      "name": "Two independently aimed 940 nm 38 kHz infrared LED emitter channels with rated transistor driver and current limiting per dock",
+      "per_robot": 2,
+      "reported_owned_total": 0,
+      "notes": "Two per dock for left/right code and optical steering, based on OOMWOO IR BEACON KiCad Apache-2.0 reference; number of LEDs per channel, driver, resistor and final 5V supply must be dimensioned, no naked LED wired to MCU pin. Protocol and baffle must be measured against WROOM dual receiver RMT NEC decoder, never authorize charging by light.",
+      "group": "pet"
+    },
+    {
       "id": "dock_contacts",
       "name": "Keyed charging contacts and alignment switch set",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "Charge controller input only, never directly to bare cell",
+      "notes": "Matched protected 1S charger INPUT only, never directly to bare cell. Include two independent normally closed seat/position switches and independently sampled charger PGOOD, with protected unpowered recessed contacts until safe charger netlist is reviewed.",
       "group": "pet"
     },
     {
