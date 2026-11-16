@@ -715,3 +715,52 @@ async def test_authenticated_transport_rejects_malformed_json_as_head_error(
                 await getattr(head, method)()
         assert len(seen) == 1
         assert seen[0][1] == path
+
+
+async def test_failed_replacement_mjpeg_stream_cannot_revive_old_reader(settings, tokens):
+    """Failed reconnect must leave camera unavailable, not restore old frames."""
+    import asyncio
+
+    release_old = asyncio.Event()
+    old_frame = b"\xff\xd8old\xff\xd9"
+    calls = 0
+
+    class OldFeed(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield _stream_part(1, old_frame)
+            await release_old.wait()
+            yield _stream_part(2, b"\xff\xd8stale\xff\xd9")
+
+        async def aclose(self):
+            pass
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                200,
+                headers={"content-type": "multipart/x-mixed-replace; boundary=deskrobotframe"},
+                stream=OldFeed(),
+            )
+        return httpx.Response(503)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        head.require_stream()
+        old = head.stream_frames()
+        assert (await anext(old))[0] == old_frame
+        replacement = head.stream_frames()
+        with pytest.raises(HeadError, match="camera stream unavailable"):
+            await anext(replacement)
+        assert not head._stream_connected
+        assert head._stream_latest is None
+        release_old.set()
+        with pytest.raises(HeadError, match="Superseded"):
+            await anext(old)
+        await old.aclose()
+        assert not head._stream_connected
+        assert head._stream_latest is None
+        with pytest.raises(HeadError, match="not connected"):
+            await head.snapshot()
+        assert calls == 2
