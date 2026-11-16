@@ -1442,8 +1442,10 @@ class MultimodalOrchestrator:
                         + list(self._head_snapshot_tasks.values())):
             task.cancel()
         pending = tasks + list(self._proactive_snapshots.values())
+        # Cancellation is advisory: a camera or stream adapter can continue
+        # running after it catches CancelledError. Bound shutdown even then.
         if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.wait(set(pending), timeout=0.5)
         # A head adapter may suppress cancellation while its physical JPEG
         # request is still running. Do not erase that ownership on shutdown.
         # Keep the close bounded and retire each slot only when it truly exits.
@@ -1460,10 +1462,20 @@ class MultimodalOrchestrator:
                         if self._head_snapshot_tasks.get(rid) is done else None
                     )
                 )
-        self._capture_tasks.clear()
-        self._stream_tasks.clear()
-        self._sensor_tasks.clear()
-        self._look_tasks.clear()
-        self._proactive_snapshots.clear()
+        # Keep unfinished owners visible until their actual completion.
+        # An old completion must never retire a newer task for the same pet.
+        for registry in (self._capture_tasks, self._stream_tasks,
+                         self._sensor_tasks, self._look_tasks,
+                         self._proactive_snapshots):
+            for robot_id, task in tuple(registry.items()):
+                if task.done():
+                    registry.pop(robot_id, None)
+                else:
+                    task.add_done_callback(
+                        lambda done, rid=robot_id, owner=registry: (
+                            owner.pop(rid, None)
+                            if owner.get(rid) is done else None
+                        )
+                    )
         self.hub.close()
         self._preprocess_pool.shutdown(wait=False, cancel_futures=True)
