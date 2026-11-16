@@ -247,46 +247,34 @@ class KokoroHeadSpeaker:
         finally:
             await self._bridge("/session", {"device_ids": ids, "enabled": False})
 
-    async def interrupt(self, robot: RobotConfig):
-        """Request immediate head abort rather than only cancelling a Python task.
-
-        The head's code resets its decoder generation but does not yet provide
-        an I2S DMA completion acknowledgement or an acoustic A2 guarantee.
-        """
-        return await self._bridge("/interrupt", {"device_id": robot.device_id})
-
-    async def monitor_lost(self, robot: RobotConfig):
-        """Stop native output until Mac VAD monitoring is authenticated again.
-
-        This does NOT alter the operator's persistent quiet or pause choice.
-        """
+    async def _confirmed_flush_request(
+        self, robot: RobotConfig, **intent: bool,
+    ) -> dict:
+        """Verify exact authenticated head STOP request, not physical audio end."""
         receipt = await self._bridge(
-            "/interrupt", {
-                "device_id": robot.device_id,
-                "monitor_unavailable": True,
-            },
+            "/interrupt", {"device_id": robot.device_id, **intent},
         )
-        # HTTP 200 is not a receipt for a different head or a rejected
-        # bridge operation. This acknowledges the STOP REQUEST only.
-        # Physical decoder completion and acoustic silence remain unverified.
         if (not isinstance(receipt, dict)
                 or receipt.get("device_id") != robot.device_id
                 or receipt.get("interrupted") is not True
                 or receipt.get("head_flush_requested") is not True):
-            raise RuntimeError("Xiaozhi monitor STOP request unconfirmed")
+            raise RuntimeError("Xiaozhi STOP request unconfirmed")
         return receipt
 
-    async def operator_stop(self, robot: RobotConfig):
-        """Explicit operator quiet/pause, distinct from an ordinary barge.
+    async def interrupt(self, robot: RobotConfig):
+        """Human barge invalidates audio but never changes persistent quiet."""
+        return await self._confirmed_flush_request(robot)
 
-        A human voice interrupt cancels the current reply; it must NEVER
-        secretly change the pet's autonomy policy for subsequent turns.
-        """
-        return await self._bridge(
-            "/interrupt", {
-                "device_id": robot.device_id,
-                "revoke_initiative": True,
-            },
+    async def monitor_lost(self, robot: RobotConfig):
+        """Cancel native output on VAD monitor loss without changing consent."""
+        return await self._confirmed_flush_request(
+            robot, monitor_unavailable=True,
+        )
+
+    async def operator_stop(self, robot: RobotConfig):
+        """Explicit operator revoke, separate from momentary human barge."""
+        return await self._confirmed_flush_request(
+            robot, revoke_initiative=True,
         )
 
     async def say(

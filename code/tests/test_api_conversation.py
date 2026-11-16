@@ -1088,3 +1088,41 @@ async def test_kokoro_monitor_stop_accepts_request_without_claiming_acoustic_ack
     assert await speaker.monitor_lost(SimpleNamespace(device_id="head01")) == receipt
     assert receipt["head_flush_acknowledged"] is False
     assert receipt["audible_stop_verified"] is False
+
+
+@pytest.mark.parametrize("route", ["interrupt", "operator_stop", "monitor_lost"])
+async def test_kokoro_all_stop_routes_require_device_bound_receipts(
+    route, monkeypatch,
+):
+    """A successful HTTP response from the wrong head is not STOP evidence."""
+    from types import SimpleNamespace
+
+    settings = SimpleNamespace(
+        speech_bridge_url="http://test-bridge.invalid",
+        speech_bridge_token_env="DESK_ROBOT_TEST_BRIDGE_TOKEN",
+    )
+    monkeypatch.setenv(settings.speech_bridge_token_env, "z" * 32)
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "device_id": "head-other", "interrupted": True,
+                "head_flush_requested": True,
+            }
+
+    class Client:
+        async def post(self, url, **kwargs):
+            calls.append(kwargs["json"])
+            return Response()
+
+    speaker = KokoroHeadSpeaker(settings, Client())
+    with pytest.raises(RuntimeError, match="STOP request unconfirmed"):
+        await getattr(speaker, route)(SimpleNamespace(device_id="head01"))
+    assert len(calls) == 1
+    assert calls[0]["device_id"] == "head01"
+    assert calls[0].get("monitor_unavailable", False) is (route == "monitor_lost")
+    assert calls[0].get("revoke_initiative", False) is (route == "operator_stop")
