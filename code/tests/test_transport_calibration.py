@@ -332,7 +332,7 @@ async def test_mjpeg_stream_rejects_old_boot_replay_after_real_head_reset(
         frames = head.stream_frames()
         try:
             assert (await anext(frames))[0].startswith(b"\xff\xd8")
-            assert (await anext(frames))[0].startswith(b"\\xff\\xd8")
+            assert (await anext(frames))[0].startswith(b"\xff\xd8")
             with pytest.raises(HeadError, match="retired boot"):
                 await anext(frames)
             assert head._last_camera == (13, 1, 1000)
