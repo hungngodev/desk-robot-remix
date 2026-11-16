@@ -1,6 +1,7 @@
 #pragma once
 
-#if defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER
+#if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
+    (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 
 // Five critical ST VL53L4CD measurements via TCA9548A channels 0..4.
 // Full-feature profile adds three extra diagnostic directions on channels 5..7.
