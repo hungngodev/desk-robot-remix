@@ -640,34 +640,46 @@
     "compute": "Reuse the owned Feather nRF52840 by USB as a stationary room pod if it has a suitable UART and I2C allocation; otherwise one generic ESP32C3 module, not five new MCUs.",
     "modules": [
       {
+        "id": "scd40",
         "name": "SCD40 real CO2",
         "quantity_per_room": 1,
         "location": "ventilated stationary desk"
       },
       {
+        "id": "bme688",
         "name": "BME688 VOC gas and ambient",
         "quantity_per_room": 1,
         "location": "ventilated stationary desk"
       },
       {
+        "id": "ld2410c",
         "name": "LD2410C mmWave presence module",
         "quantity_per_room": 1,
         "location": "fixed room pod UART"
       },
       {
+        "id": "soil_probe",
         "name": "Capacitive soil probe",
         "quantity_per_room": 1,
         "location": "external plant accessory"
       },
       {
+        "id": "nfc_game_props",
         "name": "NFC game tags and magnets",
         "quantity_per_room": 10,
         "location": "shared interactive toys"
       },
       {
+        "id": "amg8833",
         "name": "AMG8833 thermal array",
         "quantity_per_room": 1,
         "location": "optional separate thermal station; not needed for core camera vision"
+      },
+      {
+        "id": "room_controller",
+        "name": "Station controller with timestamped USB serial protocol, reuse owned Feather nRF52840 if feasible",
+        "quantity_per_room": 1,
+        "location": "ventilated stationary USB enclosure; no motor or charge authority"
       }
     ],
     "transport": "Room pod presents timestamped named readings to Mac over USB; no safety or motor control and no assumption that a missing pod means a person is present.",
