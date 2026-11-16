@@ -655,6 +655,13 @@ class PetController:
                     state.aux_read_task = None
                 pending = asyncio.create_task(getter())
                 state.aux_read_task = pending
+                # Even a child that ignores cancellation can fail long after
+                # pause or shutdown. Observe its eventual error without ever
+                # treating the late payload as a new authenticated sample.
+                pending.add_done_callback(
+                    lambda finished: None if finished.cancelled()
+                    else finished.exception()
+                )
                 done, _ = await asyncio.wait({pending}, timeout=1.5)
                 if not done:
                     pending.cancel()
