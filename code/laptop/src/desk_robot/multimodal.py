@@ -1444,11 +1444,26 @@ class MultimodalOrchestrator:
         pending = tasks + list(self._proactive_snapshots.values())
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+        # A head adapter may suppress cancellation while its physical JPEG
+        # request is still running. Do not erase that ownership on shutdown.
+        # Keep the close bounded and retire each slot only when it truly exits.
+        snapshots = set(self._head_snapshot_tasks.values())
+        if snapshots:
+            await asyncio.wait(snapshots, timeout=0.5)
+        for robot_id, snapshot in tuple(self._head_snapshot_tasks.items()):
+            if snapshot.done():
+                self._head_snapshot_tasks.pop(robot_id, None)
+            else:
+                snapshot.add_done_callback(
+                    lambda done, rid=robot_id: (
+                        self._head_snapshot_tasks.pop(rid, None)
+                        if self._head_snapshot_tasks.get(rid) is done else None
+                    )
+                )
         self._capture_tasks.clear()
         self._stream_tasks.clear()
         self._sensor_tasks.clear()
         self._look_tasks.clear()
         self._proactive_snapshots.clear()
-        self._head_snapshot_tasks.clear()
         self.hub.close()
         self._preprocess_pool.shutdown(wait=False, cancel_futures=True)
