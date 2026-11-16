@@ -90,6 +90,14 @@ def _initiative_evidence(change: SceneChange) -> bool:
     return change.kind in _PHYSICAL_INITIATIVE_KINDS and change.confidence >= 0.95
 
 
+def _sensor_counter_advance(current: int, previous: int | None) -> int | None:
+    """32-bit forward-only sample steps; zero means replay or backward frame."""
+    if previous is None:
+        return None
+    delta = (current - previous) & 0xffffffff
+    return delta if delta < 0x80000000 else 0
+
+
 @dataclass
 class PetState:
     enabled: bool = False
@@ -703,10 +711,10 @@ class PetController:
                 and paw["present"] and paw["valid"]
                 and paw["part_id"] == 0x15 and paw["age_ms"] <= 250
                 and type(seq) is int and seq > 0):
-            previous = state.last_paw_seq
-            if previous is not None and seq == previous:
-                pass  # Replayed HTTP response; do not reset or confirm contact.
-            elif previous is None or seq < previous or seq - previous > 1000:
+            advance = _sensor_counter_advance(seq, state.last_paw_seq)
+            if advance == 0:
+                pass  # Replayed or backwards sample cannot reset a live baseline.
+            elif advance is None or advance > 1000:
                 # First valid sample after reconnect is only a baseline.
                 state.last_paw_contact = paw["ir"] >= threshold
                 state.paw_contact_streak = state.paw_release_streak = 0
@@ -729,7 +737,8 @@ class PetController:
                 if state.paw_release_streak >= 2:
                     state.last_paw_contact = False
                     state.paw_release_streak = 0
-            state.last_paw_seq = seq
+            if advance != 0:
+                state.last_paw_seq = seq
         else:
             state.last_paw_seq = None
             state.last_paw_contact = None
@@ -751,11 +760,10 @@ class PetController:
                 and type(ambient.get("age_ms")) is int
                 and 0 <= ambient["age_ms"] < 1000):
             current_ambient = (ambient["temp_centi"], ambient["rh_centi"])
-            previous_seq = state.last_ambient_seq
-            if previous_seq is not None and ambient_seq == previous_seq:
-                pass  # Replayed HTTP frame cannot erase a real pending change.
-            elif (previous_seq is None or ambient_seq < previous_seq
-                  or ambient_seq - previous_seq > 1000
+            advance = _sensor_counter_advance(ambient_seq, state.last_ambient_seq)
+            if advance == 0:
+                pass  # Replayed or backwards frame cannot erase a pending change.
+            elif (advance is None or advance > 1000
                   or state.ambient_baseline is None):
                 state.ambient_baseline = current_ambient
                 state.ambient_streak = 0
@@ -779,7 +787,8 @@ class PetController:
                     changes.append(SceneChange("ambient_shift", description, 1.0))
                     state.ambient_baseline = current_ambient
                     state.ambient_streak = 0
-            state.last_ambient_seq = ambient_seq
+            if advance != 0:
+                state.last_ambient_seq = ambient_seq
         else:
             state.last_ambient_seq = None
             state.ambient_baseline = None
@@ -799,10 +808,10 @@ class PetController:
                 and type(bmp.get("age_ms")) is int
                 and 0 <= bmp["age_ms"] < 2000):
             pressure = bmp["pressure_pa"]
-            prior = state.last_bmp_seq
-            if prior is not None and bmp_seq == prior:
-                pass  # identical HTTP replay cannot produce a second event
-            elif (prior is None or bmp_seq < prior or bmp_seq - prior > 1000
+            advance = _sensor_counter_advance(bmp_seq, state.last_bmp_seq)
+            if advance == 0:
+                pass  # old or identical acquisition cannot reset baseline
+            elif (advance is None or advance > 1000
                   or state.bmp_baseline_pa is None):
                 state.bmp_baseline_pa = pressure
                 state.bmp_streak = 0
@@ -819,7 +828,8 @@ class PetController:
                     ))
                     state.bmp_baseline_pa = pressure
                     state.bmp_streak = 0
-            state.last_bmp_seq = bmp_seq
+            if advance != 0:
+                state.last_bmp_seq = bmp_seq
         else:
             state.last_bmp_seq = None
             state.bmp_baseline_pa = None
@@ -837,21 +847,22 @@ class PetController:
             # The hardware increments scan_seq only after a complete CRC
             # checked RF result. An event count cannot advance without an
             # independently new actual PN532 scan, including after reconnect.
-            if prior_scan is not None and current_scan == prior_scan:
-                pass  # a replay never awards or erases a tag transition
-            elif (prior_scan is not None and current_scan > prior_scan
-                  and prior_events is not None
-                  and 0 < current_events - prior_events
-                  <= min(3, current_scan - prior_scan)
+            scan_advance = _sensor_counter_advance(current_scan, prior_scan)
+            event_advance = _sensor_counter_advance(current_events, prior_events)
+            if scan_advance == 0:
+                pass  # replay/backwards scan never awards or erases a transition
+            elif (scan_advance is not None and prior_events is not None
+                  and event_advance is not None
+                  and 0 < event_advance <= min(3, scan_advance)
                   and nfc["t"] != 0):
                 changes.append(SceneChange(
                     "nfc_tag",
                     f"My NFC toy accessory with game token {nfc['t']:08x} was presented",
                     1.0,
                 ))
-            if prior_scan is None or current_scan != prior_scan:
-                # Restart, backward counter or skipped scans become a new
-                # baseline. Only one genuine event per confirmed scan.
+            if scan_advance != 0:
+                # A genuine fresh scan advances the per-pet baseline. A stale
+                # packet must never rewind it and manufacture a new toy event.
                 state.last_nfc_events = current_events
                 state.last_nfc_scan_seq = current_scan
         else:

@@ -1875,6 +1875,8 @@ async def test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold(flee
         await observe(1, 1000)  # initial optical baseline never announces touch
         await observe(2, 30000)
         await observe(2, 30000)  # HTTP replay does not count twice
+        await observe(1, 30000)  # backward replay cannot rewind FIFO history
+        assert state.last_paw_seq == 2
         assert not any(m.kind == "paw_contact" for m in memory.recent("robot-01"))
         await observe(3, 33000)
         assert sum(m.kind == "paw_contact" for m in memory.recent("robot-01")) == 1
@@ -1970,6 +1972,8 @@ async def test_sht41_ambient_change_requires_fresh_distinct_samples(fleet, tmp_p
         await observe(20, 2200, 5000)  # environmental baseline only
         await observe(21, 2440, 5000)
         await observe(21, 2440, 5000)  # replay cannot confirm a change
+        await observe(20, 2200, 5000)  # backward replay must not reset streak
+        assert state.last_ambient_seq == 21
         assert not any(m.kind == "ambient_shift" for m in memory.recent("robot-01"))
         await observe(22, 2450, 5000)
         assert sum(m.kind == "ambient_shift" for m in memory.recent("robot-01")) == 1
@@ -2024,6 +2028,8 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
         await pet._observe_aux("robot-01", 14, report(9, 0x12345678, seq=41))
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
         await pet._observe_aux("robot-01", 14, report(9, 0x12345678, seq=41))
+        await pet._observe_aux("robot-01", 14, report(8, 0, seq=40))
+        assert state.last_nfc_scan_seq == 41
         await pet._observe_aux("robot-01", 14, report(10, 0x12345678, seq=41))
         # The same completed hardware scan cannot authorize a second arrival.
         await pet._observe_aux("robot-01", 14, report(11, 0x12345678, seq=42))
@@ -3240,6 +3246,8 @@ async def test_bmp280_air_pressure_events_require_distinct_measurements_and_opt_
         await pet._observe_aux("robot-01", 19, report(4, 100000))
         await pet._observe_aux("robot-01", 19, report(5, 100500))
         await pet._observe_aux("robot-01", 19, report(5, 100500))
+        await pet._observe_aux("robot-01", 19, report(4, 100000))
+        assert state.last_bmp_seq == 5
         assert memory.count("robot-01") == 0
         await pet._observe_aux("robot-01", 19, report(6, 100600))
         records = memory.recent("robot-01")
@@ -4301,3 +4309,15 @@ async def test_optional_aux_read_never_duplicates_cancel_resistant_adapter(
         if state.aux_read_task is not None:
             await asyncio.wait_for(state.aux_read_task, timeout=1)
         await pet.close()
+
+
+def test_optional_sensor_uint32_freshness_wrap_and_replay():
+    from desk_robot.pet import _sensor_counter_advance
+
+    assert _sensor_counter_advance(1, None) is None
+    assert _sensor_counter_advance(12, 11) == 1
+    assert _sensor_counter_advance(11, 11) == 0
+    assert _sensor_counter_advance(10, 11) == 0
+    assert _sensor_counter_advance(1, 0xffffffff) == 2
+    assert _sensor_counter_advance(0xffffffff, 0xfffffffe) == 1
+    assert _sensor_counter_advance(0x80000001, 1) == 0
