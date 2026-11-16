@@ -28,6 +28,7 @@ from .vision import SceneChange, VisualChangeGate
 
 _PET_SPEECH_ABORT_TIMEOUT_S = 2.5
 _PET_OBSERVER_CANCEL_TIMEOUT_S = 2.0
+_PROACTIVE_TOOL_TIMEOUT_S = 1.5
 
 
 class SceneComparator(Protocol):
@@ -1583,7 +1584,9 @@ class PetController:
             raise RuntimeError("Selected head read-only tool unavailable")
         pending = asyncio.create_task(read())
         try:
-            done, _ = await asyncio.wait({pending}, timeout=1.5)
+            done, _ = await asyncio.wait(
+                {pending}, timeout=_PROACTIVE_TOOL_TIMEOUT_S
+            )
             if not done:
                 raise TimeoutError("Optional proactive read-only tool timed out")
             result = await pending

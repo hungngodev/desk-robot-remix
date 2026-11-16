@@ -4036,7 +4036,7 @@ async def test_proactive_optional_tool_timeout_ignoring_cancel_does_not_block_sp
     fleet, tmp_path, monkeypatch,
 ):
     """No late WROOM status can delay the optional tool boundary forever."""
-    import types
+    monkeypatch.setattr("desk_robot.pet._PROACTIVE_TOOL_TIMEOUT_S", 0.05)
 
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
@@ -4056,15 +4056,6 @@ async def test_proactive_optional_tool_timeout_ignoring_cancel_does_not_block_sp
     pet = PetController(
         fleet, {"robot-01": head}, conversation, memory, KeyScene(),
     )
-    # Patch only the global wait timeout for this test's read; use a fake
-    # loop clock by advancing elapsed time through a small temporary wrapper.
-    original_wait = asyncio.wait
-    async def short_wait(tasks, *, timeout=None, **kwargs):
-        if timeout == 1.5:
-            timeout = 0.05
-        return await original_wait(tasks, timeout=timeout, **kwargs)
-
-    monkeypatch.setattr("desk_robot.pet.asyncio.wait", short_wait)
     try:
         with pytest.raises(TimeoutError, match="Optional proactive read-only tool timed out"):
             await asyncio.wait_for(
