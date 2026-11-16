@@ -139,6 +139,13 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                             raise RuntimeError(
                                 "Native duplex response failed, cancelled or malformed"
                             )
+                        if not output:
+                            # A completed text-only or empty model response is
+                            # not evidence of native audio generation. Deliberate
+                            # quiet must arrive as response.listen instead.
+                            raise RuntimeError(
+                                "Native duplex completed without generated speech"
+                            )
                         model_decision = "speak"
                         return
                 raise RuntimeError("Native duplex socket ended before response.done")

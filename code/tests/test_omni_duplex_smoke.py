@@ -536,3 +536,66 @@ async def test_quiet_mic_video_unit_accepts_intentional_listen_or_real_speech(
     assert stats["actual_playback_acknowledged"] is False
 
 
+
+
+async def test_native_av_smoke_refuses_empty_completed_response_as_speech():
+    """The backend must emit actual PCM or an intentional model listen event."""
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    smoke = smoke_module()
+
+    async def server_socket(request):
+        socket = web.WebSocketResponse()
+        await socket.prepare(request)
+        async for msg in socket:
+            event = json.loads(msg.data)
+            if event["type"] == "session.update":
+                await socket.send_json({
+                    "type": "session.created",
+                    "session": {
+                        "model": "openbmb/MiniCPM-o-4_5",
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "audio": {
+                            "input": {"sample_rate_hz": 16000},
+                            "output": {"format": {"type": "audio/pcm", "rate": 24000}},
+                        },
+                        "capabilities": {
+                            "implementation_level": "model_native_duplex",
+                            "supports_input_append": True,
+                            "supports_barge_in": True,
+                            "chunk_period_ms": 1000,
+                        },
+                    },
+                })
+            elif (event["type"] == "input_audio_buffer.append"
+                  and event.get("video_frames")):
+                await socket.send_json({
+                    "type": "response.created", "response_id": "empty1",
+                    "response": {
+                        "id": "empty1",
+                        "metadata": {"duplex_event": {"epoch": 0}},
+                    },
+                })
+                await socket.send_json({
+                    "type": "response.done", "response_id": "empty1",
+                    "response": {"id": "empty1", "status": "completed"},
+                })
+        return socket
+
+    app = web.Application()
+    app.router.add_get("/v1/realtime", server_socket)
+    jpeg = b"\xff\xd8" + b"synthetic-frame" + b"\xff\xd9"
+    async with TestServer(app) as server:
+        url = str(server.make_url("/v1/realtime?duplex=1")).replace(
+            "http://", "ws://",
+        )
+        with pytest.raises(RuntimeError, match="without generated speech"):
+            await asyncio.wait_for(
+                smoke.probe(
+                    url, "openbmb/MiniCPM-o-4_5",
+                    bytes(32000), jpeg, deadline=5,
+                ),
+                timeout=8,
+            )
