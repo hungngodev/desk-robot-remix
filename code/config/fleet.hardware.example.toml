@@ -16,6 +16,13 @@ voice_memory_tools_enabled = false
 # robot's private SQLite memory. Never stores PCM/JPEG or implies speaker ID.
 # Requires voice_memory_tools_enabled=true and a model that emits ASR events.
 voice_transcript_memory_enabled = false
+# One shared room station over the existing owned Feather nRF52840 USB.
+# Never a new motor controller, never copies one pet memory to another.
+# Needs installed pyserial: pip install '.[room]' inside code.
+room_station_enabled = false
+room_station_context_enabled = false
+# Set to the actual inspected Mac /dev/cu.usbmodem* path when connected.
+# room_station_port = "/dev/cu.usbmodemVERIFIED"
 fleet_text_sharing_enabled = false
 # Opt-in, measured five-pet interaction. Requires fleet_text_sharing_enabled=true.
 # Only two enabled, unmuted pets talk for two short turns about a witnessed
