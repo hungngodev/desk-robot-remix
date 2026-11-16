@@ -1,3 +1,8 @@
+
+## November 16 bounded camera shutdown ownership regression
+
+Owner Robot Code Fixes and Cleanup. Starting PR #17 head 9a401efbadeb2f6f1964b5eec4badee27c1c36f9. Source commit 3c9964982e046e490e0fc73497eefc18e0179ba0 keeps cancellation resistant physical XIAO snapshot tasks in the ownership registry until actual completion, with bounded 0.5 second shutdown wait and identity guarded completion cleanup. Test commit 06d06b731c55ff746ccc2776b7a9724a9aaac803 adds a deterministic Event barrier regression for a snapshot adapter that suppresses cancellation. The source and test were committed through GitHub contents API; regression NOT EXECUTED. Local git ls-remote failed github.com DNS resolution, exit 128. Required: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_multimodal.py -k close_preserves_cancellation_resistant_physical_snapshot_ownership, then full multimodal suite. No device, acoustic, dock, charge or motor qualification. PR stays draft.
+
 ## November 16 failed MJPEG replacement stream regression
 
 Owner Robot Integration Fixes. Test commit 4ff1c7bfae89fabf8f2e58c8d33273ba28aba7ec adds a failed HTTP 503 reconnect race with a still alive old camera stream. It asserts no stale camera frame, no revived connection and no snapshot after the old stream resumes. This is a test only, NOT an executed pass. GitHub checkout blocked by DNS exit 128. Run focused pytest then inspect camera supervisor retry lifecycle. Avoid overlapping transport edits and preserve current stream generation fence. PR #17 remains draft.
