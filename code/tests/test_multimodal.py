@@ -2163,6 +2163,44 @@ async def test_close_preserves_cancellation_resistant_physical_snapshot_ownershi
         await asyncio.gather(caller, return_exceptions=True)
 
 
+async def test_close_uses_one_deadline_for_stream_and_physical_snapshot():
+    """Two independent stubborn adapters must not double shutdown latency."""
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = asyncio.Event()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def stubborn(index):
+        entered[index].set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    stream = asyncio.create_task(stubborn(0))
+    snapshot = asyncio.create_task(stubborn(1))
+    visual._stream_tasks["robot-01"] = stream
+    visual._head_snapshot_tasks["robot-02"] = snapshot
+    try:
+        await asyncio.gather(*(event.wait() for event in entered))
+        start = asyncio.get_running_loop().time()
+        await asyncio.wait_for(visual.close(), 1.5)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert elapsed < 0.85, f"shutdown waited twice: {elapsed:.3f}s"
+        assert visual._stream_tasks["robot-01"] is stream
+        assert visual._head_snapshot_tasks["robot-02"] is snapshot
+        release.set()
+        await asyncio.gather(stream, snapshot)
+        await asyncio.sleep(0)
+        assert "robot-01" not in visual._stream_tasks
+        assert "robot-02" not in visual._head_snapshot_tasks
+    finally:
+        release.set()
+        await asyncio.gather(stream, snapshot, return_exceptions=True)
+
+
 async def test_close_bounds_cancellation_resistant_stream_worker():
     """A stubborn stream worker cannot hang shutdown or lose ownership."""
     entered, release = asyncio.Event(), asyncio.Event()
