@@ -4459,3 +4459,48 @@ async def test_visual_memory_write_is_retracted_after_camera_generation_changes(
         release.set()
         await asyncio.gather(work, return_exceptions=True)
         await pet.close()
+
+
+async def test_reconnected_camera_retracts_peer_fanout_and_original(
+    fleet, tmp_path,
+):
+    """Camera restart in peer SQLite fanout leaves no stale eyewitness copies."""
+    import threading
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    entered, release = threading.Event(), threading.Event()
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    actual = memory.remember
+
+    def delaying_peer(*args, **kwargs):
+        if args[0] == "robot-02":
+            entered.set()
+            assert release.wait(timeout=3)
+        return actual(*args, **kwargs)
+
+    memory.remember = delaying_peer
+    hub = CameraFrameHub([robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory
+        ), memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    epoch = hub._generation["robot-01"]
+    task = asyncio.create_task(pet._store_observation(
+        "robot-01", SceneChange("key", "An old camera scene appeared", 0.99),
+        camera_derived=True, camera_generation=epoch,
+    ))
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(entered.wait), timeout=1)
+        hub.discard_video("robot-01")
+        release.set()
+        await asyncio.wait_for(task, timeout=2)
+        assert all(memory.recent(robot.id) == [] for robot in fleet.robots)
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        await pet.close()

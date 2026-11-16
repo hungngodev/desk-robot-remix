@@ -465,6 +465,10 @@ class PetController:
             return inserted
 
         inserted = await asyncio.to_thread(persist_eyewitness)
+        if not inserted:
+            # A late revoked observation or duplicate cannot be shared just
+            # because camera consent changed back before this await resumed.
+            return
         if (not current_visual_epoch()
                 or (camera_derived and self.settings.mode == "hardware"
                     and not self.settings.voice_vision_tools_enabled)):
@@ -544,6 +548,12 @@ class PetController:
                     await asyncio.to_thread(
                         self.memory.forget_episode, peer_id, event_id
                     )
+            # A reconnect during the peer copy loop invalidates the source
+            # eyewitness as well as every newly inserted secondhand copy.
+            if not current_visual_epoch():
+                await asyncio.to_thread(
+                    self.memory.forget_episode, robot_id, event_id
+                )
 
     async def share_with_peer(
         self, from_robot: str, to_robot: str, event_id: str
