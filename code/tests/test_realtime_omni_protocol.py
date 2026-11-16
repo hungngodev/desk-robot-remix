@@ -479,3 +479,30 @@ def test_native_listen_epoch_rejects_stale_silence_after_interrupt():
     assert wire.model_listen_current({
         "type": "response.listen", "epoch": 4,
     })
+
+
+def test_late_output_clear_cannot_mute_recovered_native_response():
+    wire = OmniDuplexWire()
+    wire.handle_event({
+        "type": "response.created", "response_id": "old",
+        "response": {"id": "old", "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    assert wire.handle_event(delta("old", epoch=0)) is not None
+    wire.interrupt()
+    # STOP and output clear each advance the native server generation.
+    wire.append_audio(b"\\0" * 32000, speech=False)
+    wire.handle_event({
+        "type": "response.created", "response_id": "new",
+        "response": {"id": "new", "metadata": {"duplex_event": {"epoch": 2}}},
+    })
+    assert wire.handle_event(delta("new", epoch=2)) is not None
+    # Delayed old clear, including the anonymous OpenAI-compatible form,
+    # cannot mute a fresh response. Explicit current response clear can.
+    wire.handle_event({"type": "output_audio_buffer.cleared",
+                       "response_id": "old"})
+    assert wire.handle_event(delta("new", epoch=2)) is not None
+    wire.handle_event({"type": "output_audio_buffer.cleared"})
+    assert wire.handle_event(delta("new", epoch=2)) is not None
+    wire.handle_event({"type": "output_audio_buffer.cleared",
+                       "response_id": "new"})
+    assert wire.handle_event(delta("new", epoch=2)) is None

@@ -331,7 +331,14 @@ class OmniDuplexWire:
         if kind == "response.done" and event.get("response_id") == self.response_id:
             self.accept_output = False
         if kind == "output_audio_buffer.cleared":
-            self.accept_output = False
+            cleared_id = event.get("response_id")
+            # Upstream clear acknowledgements can arrive after a newer
+            # response.created. An old or unidentifiable acknowledgement
+            # cannot revoke that newer response's physical speaker lease.
+            # Our own interrupt() already stops output synchronously.
+            if (self.response_id is None
+                    or cleared_id == self.response_id):
+                self.accept_output = False
         return None
 
     def model_listen_current(self, event: dict) -> bool:
