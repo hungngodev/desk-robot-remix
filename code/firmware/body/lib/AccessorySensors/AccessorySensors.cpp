@@ -258,7 +258,7 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   if (fresh) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
-    if (ads_channel_ == 1) f.jaw_sample_seq = advance_jaw_sample_seq(f.jaw_sample_seq);
+    if (ads_channel_ == 1) f.jaw_sample_seq = next_nonzero_sensor_sequence(f.jaw_sample_seq);
     f.at_ms = now_ms;
   } else {
     f.valid_mask &= static_cast<std::uint8_t>(~(1U << ads_channel_));
@@ -294,8 +294,7 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
     c.temp_centi = sht_temp_centi(t);
     c.humidity_centi = sht_humidity_centi(h);
     c.at_ms = now_ms;
-    ++c.sample_seq;
-    if (c.sample_seq == 0U) ++c.sample_seq;
+    c.sample_seq = next_nonzero_sensor_sequence(c.sample_seq);
   }
   sht_pending_ = false;
 }
@@ -316,8 +315,7 @@ void AccessorySensors::barometer(std::uint32_t now_ms) {
                               b.temp_centi, b.pressure_pa);
   if (b.valid) {
     b.at_ms = now_ms;
-    ++b.sample_seq;
-    if (b.sample_seq == 0U) ++b.sample_seq; // reserve 0 as unobserved
+    b.sample_seq = next_nonzero_sensor_sequence(b.sample_seq);
   }
 }
 
@@ -357,7 +355,7 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
   dock.input_good = (bits & 0x04U) == 0;
   dock.charge_indicated = (bits & 0x08U) == 0 && dock.input_good;
   dock.at_ms = now_ms;
-  ++dock.sample_seq;  // only a completed independent physical GPIOA read
+  dock.sample_seq = next_nonzero_sensor_sequence(dock.sample_seq); // fresh GPIOA read
 }
 
 
@@ -370,7 +368,7 @@ void AccessorySensors::optional_gpio(std::uint32_t now_ms) {
   extra.reed_closed = (bits & 0x01U) == 0; // external 3.3V switch to GND
   extra.pir_active = (bits & 0x02U) != 0;  // verified 3.3V output
   extra.at_ms = now_ms;
-  ++extra.sample_seq;
+  extra.sample_seq = next_nonzero_sensor_sequence(extra.sample_seq);
 }
 
 bool AccessorySensors::nfc_write(
@@ -487,8 +485,7 @@ void AccessorySensors::nfc_poll(std::uint32_t now_ms) {
       if (result == Pn532TagResult::Invalid) { fail(); return; }
       tag.present = tag.valid = true;
       tag.at_ms = now_ms;
-      ++tag.scan_seq;
-      if (tag.scan_seq == 0U) ++tag.scan_seq;
+      tag.scan_seq = next_nonzero_sensor_sequence(tag.scan_seq);
       if (result == Pn532TagResult::Present) {
         if (!tag.tag_visible || tag.tag_token != token) {
           ++tag.tag_events;

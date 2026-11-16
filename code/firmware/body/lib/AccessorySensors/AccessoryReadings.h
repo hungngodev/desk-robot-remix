@@ -51,8 +51,8 @@ struct BarometerRaw {
   std::uint32_t at_ms = 0;
   std::uint32_t sample_seq = 0; // successive independently spaced BMP280 conversions
 };
-// Zero means no completed hardware conversion. Preserve it across uint32 wrap.
-constexpr std::uint32_t advance_jaw_sample_seq(std::uint32_t previous) {
+// Zero denotes no completed conversion. Preserve that sentinel at uint32 wrap.
+constexpr std::uint32_t next_nonzero_sensor_sequence(std::uint32_t previous) {
   return previous == 0xffffffffU ? 1U : previous + 1U;
 }
 
