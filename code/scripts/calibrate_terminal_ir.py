@@ -22,7 +22,8 @@ from desk_robot.dock_ir import validate_ir
 LABELS = ("left", "center", "right")
 
 
-def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20) -> dict:
+def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
+            expected_dock_id: int | None = None) -> dict:
     if not robot_id or not 10 <= min_per_position <= 500:
         raise ValueError("Invalid robot ID or minimum real sample count")
     data: dict[str, list[dict]] = {name: [] for name in LABELS}
@@ -31,7 +32,8 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20) -> d
     for row in rows:
         if not isinstance(row, dict) or row.get("label") not in LABELS:
             raise ValueError("Explicitly labeled left/center/right records required")
-        reading = validate_ir(row.get("ir"), robot_id)
+        reading = validate_ir(row.get("ir"), robot_id,
+                              expected_dock_id=expected_dock_id)
         stamp = row.get("received_monotonic")
         if type(stamp) not in (int, float) or not math.isfinite(stamp) or stamp <= last_at:
             raise ValueError("Strictly increasing recorded receive timestamps required")
@@ -84,7 +86,8 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20) -> d
 
 
 async def capture(base_url: str, token: str, robot_id: str,
-                  label: str, count: int, interval_s: float) -> list[dict]:
+                  label: str, count: int, interval_s: float,
+                  expected_dock_id: int | None = None) -> list[dict]:
     if (label not in LABELS or not 20 <= count <= 500
             or not .05 <= interval_s <= 2
             or not token or len(token) < 24):
@@ -99,7 +102,8 @@ async def capture(base_url: str, token: str, robot_id: str,
         for i in range(count):
             response = await client.get(f"/v1/robots/{robot_id}/dock/ir")
             response.raise_for_status()
-            reading = validate_ir(response.json(), robot_id)
+            reading = validate_ir(response.json(), robot_id,
+                                  expected_dock_id=expected_dock_id)
             rows.append({
                 "label": label, "received_monotonic": time.monotonic(),
                 "ir": reading,
@@ -112,6 +116,8 @@ async def capture(base_url: str, token: str, robot_id: str,
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--robot", required=True)
+    parser.add_argument("--dock-id", type=int, choices=range(1, 6),
+                        help="Required actual physical beacon ID 1 through 5 for live capture")
     parser.add_argument("--input", type=Path, help="Read previously labeled JSONL")
     parser.add_argument("--out", type=Path, help="Append new labeled JSONL evidence")
     parser.add_argument("--label", choices=LABELS)
@@ -125,15 +131,19 @@ def main() -> None:
     if args.input:
         rows = [json.loads(line) for line in args.input.read_text().splitlines()
                 if line.strip()]
-        print(json.dumps(analyze(rows, args.robot), indent=2))
+        print(json.dumps(analyze(
+            rows, args.robot, expected_dock_id=args.dock_id,
+        ), indent=2))
         return
     if not args.out or args.label is None:
         parser.error("Supply --input for analysis or --out and --label for real capture")
+    if args.dock_id is None:
+        parser.error("Live optical calibration requires --dock-id 1 through 5")
     # The user must move an UNPOWERED robot to three stationary positions.
     # No motion, camera, battery or charging endpoint is ever requested.
     rows = asyncio.run(capture(
         args.api, os.environ.get(args.token_env, ""), args.robot,
-        args.label, args.samples, args.interval,
+        args.label, args.samples, args.interval, args.dock_id,
     ))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("a", encoding="utf-8") as file:
