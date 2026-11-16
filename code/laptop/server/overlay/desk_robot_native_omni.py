@@ -1982,6 +1982,26 @@ class NativeOmniSession:
                 )
                 sent_audio = sent_audio or delivered
                 fully_sent = fully_sent and delivered
+                if not delivered:
+                    # Once a physical Opus frame is refused, never resume
+                    # this same reply mid-sentence after VAD/consent changes.
+                    # Human barge may already own STOP under a new generation.
+                    if generation == self._generation:
+                        stopped = await self._send_device_state(
+                            "stop", generation
+                        )
+                        if (stopped is not False
+                                and response_id == self._tool_audio_response_id):
+                            self._tool_speech_turn = None
+                    self._tool_reply_pending.pop(response_id, None)
+                    self._native_output_words.pop(response_id, None)
+                    dropped_response_id = response_id
+                    pending.clear()
+                    resample_state = None
+                    current_response = None
+                    sent_audio = False
+                    fully_sent = True
+                    break
 
     async def _send_device_state(self, state: str, generation: int) -> bool:
         global _output_owner

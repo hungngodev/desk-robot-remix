@@ -3916,7 +3916,8 @@ async def test_native_tts_start_stop_without_opus_never_writes_spoken_history(
     worker = asyncio.create_task(session._play())
     try:
         await asyncio.wait_for(done.wait(), timeout=1)
-        assert len(attempts) >= 2
+        # Once any packet is refused, no later gap-filled PCM is attempted.
+        assert len(attempts) == (2 if first_packet_allowed else 1)
         assert states == ["start", "stop"]
         assert session.native_tool_audio_sent == 0
         assert not session._tool_dialogue
