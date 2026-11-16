@@ -178,6 +178,8 @@ class HttpHead:
         async with self.lock:
             response = await self._request("POST", "/api/command", json={"command": command})
             data = response.json()
+            if not isinstance(data, dict):
+                raise HeadError("Malformed motor command ACK payload")
             reply = data.get("reply", "")
             if data.get("ok") is not True or data.get("robot_id") != self.config.id or reply != expected:
                 raise HeadError("Unmatched or failed command ACK; movement not retried")
@@ -186,7 +188,7 @@ class HttpHead:
     async def status(self) -> dict:
         async with self.lock:
             data = (await self._request("GET", "/api/status")).json()
-            if data.get("robot_id") != self.config.id:
+            if not isinstance(data, dict) or data.get("robot_id") != self.config.id:
                 raise HeadError("Status robot identity mismatch")
             return data
 

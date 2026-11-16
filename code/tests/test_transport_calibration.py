@@ -665,3 +665,24 @@ async def test_head_command_ack_requires_json_boolean_true(settings, tokens, ok)
         with pytest.raises(HeadError, match="Unmatched or failed command ACK"):
             await head.command("drive 20 20 100")
         assert len(calls) == 1
+
+
+@pytest.mark.parametrize("payload", [[], ["yes"], "OK", 1, True, None])
+@pytest.mark.parametrize("endpoint", ["/api/status", "/api/command"])
+async def test_head_rejects_nonobject_status_or_motion_ack(
+    settings, tokens, payload, endpoint,
+):
+    """Typed JSON payloads are mandatory before any ACK can be trusted."""
+    import httpx
+
+    def handler(request):
+        assert request.url.path == endpoint
+        return httpx.Response(200, json=payload)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client)
+        with pytest.raises(HeadError):
+            if endpoint == "/api/status":
+                await head.status()
+            else:
+                await head.command("drive 20 20 100")
