@@ -15,28 +15,31 @@ from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
 
 
-async def _bounded_body_stop(head: Head) -> dict:
-    """Attempt one STOP without waiting for a cancellation-resistant adapter.
-
-    Transport acceptance is not motor or acoustic evidence. On timeout the
-    WROOM watchdog remains independent; a late ACK cannot retroactively make
-    the timed-out operator/job STOP successful.
-    """
-    task = asyncio.create_task(head.command("stop"))
+async def _bounded_head_reply(coro: Awaitable[dict], *, seconds: float,
+                              timeout_message: str) -> dict:
+    """Bound even adapters that suppress task cancellation; ignore late replies."""
+    task = asyncio.create_task(coro)
     try:
-        done, _ = await asyncio.wait({task}, timeout=1.0)
+        done, _ = await asyncio.wait({task}, timeout=seconds)
         if not done:
-            raise TimeoutError("WROOM STOP transport acknowledgement unconfirmed")
+            raise TimeoutError(timeout_message)
         return await task
     finally:
         if not task.done():
             task.cancel()
-            # Unlike wait_for, asyncio.wait never waits for cancellation to be
-            # honored. Observe a late error so it cannot escape as a lost task.
-            def observe_late_stop(completed: asyncio.Task) -> None:
-                if not completed.cancelled():
-                    completed.exception()
-            task.add_done_callback(observe_late_stop)
+            # A late transport failure must be observed, never accepted as a
+            # delayed body STOP or as an authorization from a stale status.
+            task.add_done_callback(
+                lambda done: None if done.cancelled() else done.exception()
+            )
+
+
+async def _bounded_body_stop(head: Head) -> dict:
+    """Transport receipt only; local WROOM watchdog remains authoritative."""
+    return await _bounded_head_reply(
+        head.command("stop"), seconds=1.0,
+        timeout_message="WROOM STOP transport acknowledgement unconfirmed",
+    )
 
 
 class OperationError(RuntimeError):
@@ -84,7 +87,10 @@ class Coordinator:
         """
         if self.settings.mode != "hardware":
             return
-        status = await self.heads[robot_id].status()
+        status = await _bounded_head_reply(
+            self.heads[robot_id].status(), seconds=2.5,
+            timeout_message="WROOM preflight status timeout",
+        )
         if not isinstance(status, dict) or status.get("robot_id") != robot_id:
             raise OperationError("Hardware preflight: body identity missing or mismatched")
         if status.get("backend") != "stepper_28byj48" or status.get("armed") is not False:
@@ -347,7 +353,10 @@ class Coordinator:
         """
         # Exploration has no overall job deadline. An alternate head adapter
         # holding this status request must not keep the WROOM armed forever.
-        body = await asyncio.wait_for(self.heads[robot_id].status(), timeout=2.5)
+        body = await _bounded_head_reply(
+            self.heads[robot_id].status(), seconds=2.5,
+            timeout_message="WROOM active health status timeout",
+        )
         if not isinstance(body, dict) or body.get("armed") is not True:
             raise OperationError("Operation stopped: body disarmed or unavailable")
         if self.settings.mode != "hardware":

@@ -886,3 +886,69 @@ async def test_latest_operator_arm_wins_over_older_delayed_preflight(settings):
     finally:
         release.set()
         await c.close()
+
+
+async def test_uncooperative_preflight_times_out_without_permit(settings):
+    """An alternate status adapter can ignore cancellation but cannot arm."""
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = head.status
+
+    async def unresponsive_status():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            return await original()
+
+    head.status = unresponsive_status
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(TimeoutError, match="preflight status timeout"):
+            await asyncio.wait_for(c.operator_arm("robot-01"), timeout=3.5)
+        assert entered.is_set()
+        assert c.permits.get("robot-01") is None
+        release.set()
+        await asyncio.sleep(0)
+        assert c.permits.get("robot-01") is None
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+        await c.close()
+
+
+async def test_exploration_uncooperative_status_timeout_stops_motion(settings):
+    """A status adapter ignoring cancellation cannot hang persistent explore."""
+    c, head = make(settings)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = head.status
+
+    async def unresponsive_status():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            return await original()
+
+    try:
+        await c.operator_arm("robot-01")
+        head.status = unresponsive_status
+        job = c.explore("robot-01")
+        await asyncio.wait_for(c.tasks[job.id], timeout=3.5)
+        assert entered.is_set()
+        assert job.state == "failed"
+        assert "active health status timeout" in (job.error or "")
+        assert not any(command.startswith("drive ") for command in head.commands)
+        assert head.commands[-1] == "stop"
+        release.set()
+        await asyncio.sleep(0)
+        assert job.state == "failed"
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+        await c.close()
