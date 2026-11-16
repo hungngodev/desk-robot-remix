@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from .config import Settings
     from .transport import Head
     from .vision import OllamaScene
+from .room_station import RoomObservation
 
 TEMPORAL_WORDS = re.compile(
     r"\b(chang(?:e|ed|ing)|mov(?:e|ed|ing)|happen(?:ed|ing)?|"
@@ -161,6 +162,19 @@ class CameraFrameHub:
         self.heard_history = {
             robot: deque(maxlen=4) for robot in robot_ids
         }
+        # One shared, volatile USB measurement; NEVER copied to any pet memory
+        # or treated as an eyewitness, VAD, tool receipt or motor permit.
+        self.shared_room: RoomObservation | None = None
+
+    def remember_room(self, observation: RoomObservation) -> None:
+        if not isinstance(observation, RoomObservation) or not _finite(
+            observation.received_at
+        ):
+            raise ValueError("Room provenance must come from validated USB source")
+        previous = self.shared_room
+        if previous is not None and observation.received_at <= previous.received_at:
+            return  # An older asynchronous serial callback cannot regress state.
+        self.shared_room = observation
 
     def _check(self, robot_id: str) -> None:
         if robot_id not in self.robots:
@@ -474,6 +488,18 @@ class CameraFrameHub:
         if not _finite(now) or type(limit) is not int or not 1 <= limit <= 16:
             raise ValueError("Invalid interaction timeline clock or limit")
         items = []
+        room = self.shared_room
+        if room is not None and 0 <= now - room.received_at <= 12:
+            items.append((room.received_at, {
+                "channel": "room_station",
+                "kind": "shared_room_raw_measurement",
+                "age_ms": round(1000 * (now - room.received_at)),
+                "source": room.source,
+                "content": room.summary,
+                "shared_not_robot_eyewitness": True,
+                "identity_verified": False,
+                "physical_action_verified": False,
+            }))
         for kind, stamp in self.event_history[robot_id]:
             if 0 <= now - stamp <= 8:
                 items.append((stamp, {
@@ -547,7 +573,7 @@ class CameraFrameHub:
         # Retain each present modality's LATEST event, then use remaining
         # capacity for recent detail. Never turn a frame into a sighting.
         modalities = ("human_voice", "human_transcript", "tool",
-                      "sensor", "robot_speech", "camera")
+                      "sensor", "room_station", "robot_speech", "camera")
         required: set[int] = set()
         for channel in modalities:
             if len(required) >= limit:
@@ -620,6 +646,7 @@ class CameraFrameHub:
         self.quiet_until[robot_id] = -math.inf
 
     def close(self) -> None:
+        self.shared_room = None
         for robot_id in self.robots:
             self.clear(robot_id)
 
