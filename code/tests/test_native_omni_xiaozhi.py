@@ -7776,3 +7776,43 @@ async def test_native_counts_only_current_model_listen_after_barge(native):
     await asyncio.wait_for(session._receive_model(), timeout=0.4)
     assert session.native_listen_decisions == 1
     assert session.model_chunks == 0
+
+
+@pytest.mark.asyncio
+async def test_native_worker_shutdown_does_not_wait_for_cancellation_resistant_media(
+    native, monkeypatch,
+):
+    """Physical STOP must not be blocked behind a wedged socket worker."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    monkeypatch.setattr(module, "_NATIVE_WORKER_CANCEL_TIMEOUT_S", 0.05)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def cancellation_resistant_worker():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    task = asyncio.create_task(cancellation_resistant_worker())
+    session._tasks = [task]
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await asyncio.wait_for(session._cancel_workers(), timeout=0.3)
+        assert task.cancelling()
+        assert not task.done()
+        assert "cleanup exceeded timeout" in (session.last_error or "")
+        release.set()
+        await asyncio.wait_for(task, timeout=0.3)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

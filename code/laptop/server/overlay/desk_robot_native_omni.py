@@ -57,6 +57,8 @@ _speaker_handoff_lock = asyncio.Lock()
 _terminal_errors: dict[str, str] = {}
 _retry_after: dict[str, float] = {}
 
+_NATIVE_WORKER_CANCEL_TIMEOUT_S = 0.8
+
 
 def approved_backend_url(url: str) -> str:
     """No microphone plaintext may leave this Mac over an arbitrary LAN URL."""
@@ -2208,6 +2210,30 @@ class NativeOmniSession:
         events = await self._invalidate_head_first()
         await self._cancel_remote(events)
 
+    async def _cancel_workers(self) -> None:
+        """Do not block physical decoder STOP behind ignored cancellations."""
+        workers = [*self._tasks, *self._pending_cancels]
+        for task in workers:
+            if not task.done():
+                task.cancel()
+        if not workers:
+            return
+        done, pending = await asyncio.wait(
+            workers, timeout=_NATIVE_WORKER_CANCEL_TIMEOUT_S
+        )
+        for task in done:
+            if not task.cancelled():
+                task.exception()
+        if pending:
+            self.last_error = (
+                self.last_error or "Native worker cleanup exceeded timeout"
+            )
+            for task in pending:
+                task.add_done_callback(
+                    lambda finished: None if finished.cancelled()
+                    else finished.exception()
+                )
+
     async def run(self) -> None:
         global _output_owner, _output_owner_unverified
         try:
@@ -2267,13 +2293,7 @@ class NativeOmniSession:
             self.connected = False
             self.closed = True
             self._generation += 1
-            for task in (*self._tasks, *self._pending_cancels):
-                task.cancel()
-            if self._tasks or self._pending_cancels:
-                await asyncio.gather(
-                    *self._tasks, *self._pending_cancels,
-                    return_exceptions=True,
-                )
+            await self._cancel_workers()
             # This native session can exit while Mac proactive speech owns
             # the SAME authenticated decoder. Native teardown must not call
             # that Mac speech a failed STOP or take over its separate lease.
