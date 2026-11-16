@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -31,11 +33,30 @@ class YoloWorldVision:
     def __init__(self, weights: Path | None):
         self.weights = weights
         self.model = None
-        self.lock = asyncio.Lock()
+        # Cancelling an asyncio awaiter does not stop an Ultralytics CPU call.
+        # Keep ownership until the real native worker returns, not until the
+        # cancelled coroutine drops its asyncio lock.
+        self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desk-yolo")
+        self._inference_slot = threading.BoundedSemaphore(1)
 
     async def detect(self, jpeg: bytes, label: str) -> list[Detection]:
-        async with self.lock:
-            return await asyncio.to_thread(self._detect, jpeg, label)
+        if not self._inference_slot.acquire(blocking=False):
+            raise RuntimeError("YOLO detector still busy")
+        try:
+            work = self._worker.submit(self._detect, jpeg, label)
+        except BaseException:
+            self._inference_slot.release()
+            raise
+
+        def worker_finished(done) -> None:
+            try:
+                if not done.cancelled():
+                    done.exception()  # Drain late model failures after cancellation.
+            finally:
+                self._inference_slot.release()
+
+        work.add_done_callback(worker_finished)
+        return await asyncio.wrap_future(work)
 
     def _detect(self, jpeg: bytes, label: str) -> list[Detection]:
         if self.weights is None or not self.weights.is_file():
