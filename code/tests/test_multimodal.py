@@ -2161,3 +2161,36 @@ async def test_close_preserves_cancellation_resistant_physical_snapshot_ownershi
         if not caller.done():
             caller.cancel()
         await asyncio.gather(caller, return_exceptions=True)
+
+
+async def test_close_bounds_cancellation_resistant_stream_worker():
+    """A stubborn stream worker cannot hang shutdown or lose ownership."""
+    entered, release = asyncio.Event(), asyncio.Event()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def stubborn_stream():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    worker = asyncio.create_task(stubborn_stream())
+    visual._stream_tasks["robot-01"] = worker
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        await asyncio.wait_for(visual.close(), 2)
+        assert not worker.done()
+        assert visual._stream_tasks["robot-01"] is worker
+        release.set()
+        await asyncio.wait_for(worker, 1)
+        await asyncio.sleep(0)
+        assert "robot-01" not in visual._stream_tasks
+    finally:
+        release.set()
+        if not worker.done():
+            worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
