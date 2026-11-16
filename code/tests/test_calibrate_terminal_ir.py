@@ -120,3 +120,34 @@ async def test_capture_uses_authenticated_mac_read_only_ir_endpoint(monkeypatch)
 
 async def fast_sleep(_seconds):
     return None
+
+
+
+def test_labeled_trial_rejects_dock_from_another_physical_robot():
+    rows = position_records()  # robot 01 currently observes dock 04
+    assert cal.analyze(rows, "robot-01", expected_dock_id=4)[
+        "candidate_differential_signal"
+    ]
+    with pytest.raises(ValueError, match="Foreign NEC dock beacon"):
+        cal.analyze(rows, "robot-01", expected_dock_id=1)
+
+
+async def test_capture_rejects_foreign_assigned_dock_at_http_boundary(monkeypatch):
+    monkeypatch.setattr(cal.asyncio, "sleep", fast_sleep)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        frame = position_records()[20]["ir"]  # both sides fresh, dock 04
+        return httpx.Response(200, json=frame)
+
+    actual = httpx.AsyncClient
+
+    def create_client(*args, **kwargs):
+        return actual(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(cal.httpx, "AsyncClient", create_client)
+    with pytest.raises(ValueError, match="Foreign NEC dock beacon"):
+        await cal.capture("http://localhost:8765", "S" * 40,
+                          "robot-01", "center", 20, .05, 1)
+    assert len(calls) == 1
