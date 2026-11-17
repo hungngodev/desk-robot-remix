@@ -352,6 +352,7 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
         "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
         "image_width_px": 640, "image_height_px": 480,
         "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
+        "camera_sensor_pid": "OV5640",
     }))
     robot.dock_calibration = path
     controller, head = make(settings)
@@ -741,3 +742,44 @@ async def test_dock_rejects_foreign_body_identity_after_camera_before_turn(
         assert head.commands == []
     finally:
         await coordinator.close()
+
+
+
+async def test_unidentified_or_wrong_sensor_cannot_steer_real_dock(
+    settings, monkeypatch,
+):
+    """A camera profile string cannot bypass live ESP32 sensor identity."""
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration
+    from desk_robot.simulator import SimulatedHead
+
+    settings.mode = "hardware"
+    head = SimulatedHead("robot-01")
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+
+    async def healthy(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(controller, "_assert_armed_health", healthy)
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1,
+        camera_sensor_pid="OV5640",
+    )
+    try:
+        with pytest.raises(OperationError, match="live sensor identity unavailable"):
+            await controller._dock_approach(
+                Job("camera-id", "robot-01", "dock_approach"), camera, 200, 1, 1,
+            )
+        assert head.commands == []
+
+        async def wrong_sensor():
+            return "OV3660"
+
+        monkeypatch.setattr(head, "camera_identity", wrong_sensor, raising=False)
+        with pytest.raises(OperationError, match="sensor PID differs"):
+            await controller._dock_approach(
+                Job("camera-id", "robot-01", "dock_approach"), camera, 200, 1, 1,
+            )
+        assert head.commands == []
+    finally:
+        await controller.close()
