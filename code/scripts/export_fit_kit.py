@@ -26,6 +26,7 @@ GAUGES = (
     "battery_boost_tray", "dock_contact_recess_gauge",
     "jaw_calibration_coupon",
 )
+SPEAKER_FITS = ("speaker_rect_fit_gauge",)
 DOCKS = ("dock_passive_fit",)
 
 
@@ -83,6 +84,7 @@ def export_kit(
     sources = (
         ("adapter_stls", source_dir / "one_robot_adapter_kit.scad", ADAPTERS),
         ("fit_stls", source_dir / "remaining_fit_gauges.scad", GAUGES),
+        ("fit_stls", source_dir / "speaker_rect_fit_gauge.scad", SPEAKER_FITS),
         ("dock_stls", source_dir / "dock/dock_passive_fit.scad", DOCKS),
     )
     for _, source, _ in sources:
