@@ -629,3 +629,47 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
     invalid["supplemental_decisions"]["ghost_charger"] = {}
     with pytest.raises(ValueError, match="Unknown supplemental"):
         mod.generate(plan, invalid)
+
+
+def test_linked_subassembly_plan_is_not_deletable():
+    """The source JSON must carry all 14 details, not only the side register."""
+    import copy
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    linked = {item["id"]: item for item in plan["linked_subassemblies"]}
+    assert set(linked) == set(mod.SUPPLEMENTAL_DECISIONS)
+    assert len(linked) == 14
+    for ident, (parent, count) in mod.SUPPLEMENTAL_DECISIONS.items():
+        assert linked[ident]["parent_role"] == parent
+        assert linked[ident]["fleet_quantity"] == count
+        assert linked[ident]["name"].strip()
+
+    removed = copy.deepcopy(plan)
+    removed["linked_subassemblies"] = [
+        item for item in removed["linked_subassemblies"]
+        if item["id"] != "protected_ntc_pack"
+    ]
+    report = mod.generate(removed)
+    assert "missing_or_reduced_linked_subassembly:protected_ntc_pack" in (
+        report["missing_system_evidence"])
+
+    smaller = copy.deepcopy(plan)
+    next(item for item in smaller["linked_subassemblies"]
+         if item["id"] == "dock_ir_transistor_channels")["fleet_quantity"] = 1
+    assert "missing_or_reduced_linked_subassembly:dock_ir_transistor_channels" in (
+        mod.generate(smaller)["missing_system_evidence"])
+
+    phantom = copy.deepcopy(plan)
+    phantom["linked_subassemblies"].append({
+        "id": "new_undocumented_charger", "parent_role": "cap_power",
+        "fleet_quantity": 5, "name": "mystery charger",
+    })
+    with pytest.raises(ValueError, match="Unexpected linked subassembly"):
+        mod.generate(phantom)
+
+    duplicate = copy.deepcopy(plan)
+    duplicate["linked_subassemblies"].append(
+        copy.deepcopy(duplicate["linked_subassemblies"][0]))
+    with pytest.raises(ValueError, match="Duplicate linked subassembly"):
+        mod.generate(duplicate)
