@@ -40,6 +40,9 @@ class TwoWire {
   bool range_mux_bad_readback = false;
   std::uint16_t tof_register = 0;
   unsigned tof_samples = 0;
+  bool tof_ready = true;
+  std::uint8_t tof_raw_status = 11;
+  std::uint16_t tof_force_mm = 0; // zero keeps per-lane nominal 45/300 mm
   unsigned imu_probe_attempts = 0;
 
   void begin(int, int, int) {}
@@ -123,11 +126,13 @@ class TwoWire {
       inbound = {extras};
     } else if (addr == 0x29) {
       if (tof_register == 0x13 && count == 1) {
-        inbound = {0x07}; // VL53L0X result interrupt ready
+        inbound = {static_cast<std::uint8_t>(tof_ready ? 0x07 : 0)};
+        // A missing conversion must NOT manufacture freshness.
       } else if (tof_register == 0x14 && count == 12) {
         inbound.assign(12, 0);
-        inbound[0] = 0x58; // raw device status 11: range valid
-        const unsigned mm = ranges == 16 ? 300 : 45;
+        inbound[0] = static_cast<std::uint8_t>(tof_raw_status << 3);
+        const unsigned mm = tof_force_mm != 0 ? tof_force_mm :
+                            (ranges == 16 ? 300 : 45);
         inbound[10] = static_cast<std::uint8_t>(mm >> 8);
         inbound[11] = static_cast<std::uint8_t>(mm);
         ++tof_samples;
