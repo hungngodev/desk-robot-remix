@@ -5,6 +5,19 @@
   "decision": "selected_full_five_pet_electrical_and_module_architecture_not_physically_qualified",
   "fixed_scope": "Five autonomous tracked desk pets with distinct memory and speech, natural interruption, OLED, camera, touch and handling, lift/grip, exploration, games and optional physical accessory modules. One fully featured core repeated five times.",
   "architecture": "Mac owner for fleet/memory/AI; XIAO ESP32S3 Sense for camera, microphone, display, speaker and facial response; WROOM32 local actuator/safety controller; two isolated I2C multiplexers and reusable plug-in sensor harness.",
+  "range_breakout_power_contract": {
+    "selected_chip": "VL53L0X",
+    "generic_module_family": "GY-530",
+    "mux_address_7bit": 112,
+    "modules_per_robot": 8,
+    "module_vin_v": 3.3,
+    "tca9548a_vcc_v": 3.3,
+    "upstream_pullup_target_v": 3.3,
+    "downstream_pullup_target_v": 3.3,
+    "exact_vendor_pcb_verified": false,
+    "physical_release": "HOLD for actual GY-530 board revision, pin order, soldered pullup rail, 3.3V sourcing and powered edge trials",
+    "references": ["https://www.st.com/resource/en/datasheet/vl53l0x.pdf", "https://www.ti.com/product/TCA9548A", "https://www.espboards.dev/sensors/gy530/"]
+  },
   "audio_output_power_contract": {
     "amplifier_ic": "MAX98357A",
     "amplifier_vdd_v": 5.0,
