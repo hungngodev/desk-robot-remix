@@ -25,6 +25,11 @@ is 68 x 35 x 14 mm and is **not a validated final chassis**.
 | [BatterySpace PR CU R512, JST SHR 30AWG](https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx) | 68 x 50 x 7 mm | 4 A cell claim | **0.86 A connector and leads** published | **NO**: both 50 mm width and insufficient cable |
 
 All values above are manufacturer website claims, not independent measurements.
+A published **maximum discharge** is not by itself a verified continuous
+current rating at the actual operating temperature and connector. The source
+screen therefore treats continuous pack capability as unknown, rather than
+converting these manufacturers' maximum ratings to a guaranteed sustained
+current.
 None establishes the final polarity or a mounted charger connection. A 4 A
 cell rating does **not** override 2.2 A or 0.86 A harness ratings.
 
@@ -41,9 +46,10 @@ and margin 1.3:
 
 Under just this illustrative 1 A peak load, 2 A LP103650 is already below the
 computed required peak. BatterySpace's 2.2 A and 0.86 A assembled connector
-variants are also below 2.55 A even when their 4 A cell is adequate.
-LPHD7430085's advertised 5 A cell value clears these *hypothetical*
-electrical values, but its long pack and unqualified harness remain blockers.
+variants are also below 2.55 A even when their cell's **published maximum**
+is 4 A. LPHD7430085's published 5 A maximum exceeds this *hypothetical peak*,
+but the continuous thermal/current rating of the assembled pack is **not
+separately established**; its length and unqualified harness also block it.
 **Do not treat the illustrative current as a measured motor, audio or radio
 load. The actual peaks could be higher.**
 
