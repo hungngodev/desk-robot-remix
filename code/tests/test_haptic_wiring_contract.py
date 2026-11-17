@@ -55,3 +55,22 @@ def test_only_one_owner_of_haptic_output_and_dock_status_precedes_it():
     assert 'control.state().touch_raw_active' in main
     assert "CD74HC123" in docs and "GPB0" in docs and "GPB1" in docs
     assert "NOT a buy approval" in docs
+
+
+def test_generated_robot_harness_matches_live_wiring_emitter():
+    import importlib.util
+
+    script = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("wiring_manifest", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan = json.loads((ROOT / module.PLAN).read_text())
+    output = module.render(
+        plan, (ROOT / module.BODY_PINS).read_text(),
+        (ROOT / module.HEAD_PINS).read_text()
+    )
+    checked_in = (HARDWARE / "one-robot-signal-harness.generated.md").read_text()
+    assert output.rstrip() == checked_in.rstrip()
+    assert "MCP23017 GPB2" in output
+    assert "CD74HC123 rising-edge haptic trigger" in output
