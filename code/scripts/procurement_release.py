@@ -42,6 +42,7 @@ SYSTEM_GATES = (
     "battery_pack_actual_length_and_enclosure_clearance",
     "amplifier_speaker_power_limit_and_thermal_trial",
     "dock_contacts_recess_reverse_polarity_and_current_limit",
+    "fuel_gauge_single_owner_and_telemetry_contract",
     "user_approved_costed_exact_carrier_bill_of_materials",
     "source_first_upstream_reuse_and_license_audit",
 )
@@ -370,10 +371,17 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     # fuel gauge. Refuse a second separate MAX17048 design by default;
     # both gauge ICs are legitimate but their telemetry paths are different.
     power = approvals.get("cap_power", {})
-    if (isinstance(power, dict)
-            and str(power.get("sku", "")).replace("-", "").upper() == "PRT13777"
-            and any(x["id"] == "max17048" and x["per_robot"] for x in rows)):
-        missing_system.append("duplicate_bq27441_and_max17048_gauges")
+    if isinstance(power, dict):
+        sku = str(power.get("sku", "")).replace("-", "").upper()
+        # A generic carrier may include the same BQ27441/MAX17048 even if
+        # it is not SparkFun PRT-13777. Inspect its schematic and declare
+        # the gauge chip rather than relying on brand or SKU alone.
+        gauge = str(power.get("integrated_fuel_gauge_ic", "")).strip().upper()
+        if gauge and gauge not in ("NONE", "BQ27441", "MAX17048"):
+            missing_system.append("unrecognized_integrated_fuel_gauge")
+        if (sku == "PRT13777" or gauge in ("BQ27441", "MAX17048")) and any(
+                x["id"] == "max17048" and x["per_robot"] for x in rows):
+            missing_system.append("duplicate_bq27441_and_max17048_gauges")
     approved = (not missing_system
                 and all(row["approved_for_fleet_purchase"] for row in rows)
                 and all(row["approved_for_fleet_purchase"] for row in room))
