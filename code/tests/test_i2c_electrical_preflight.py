@@ -116,6 +116,28 @@ def test_invalid_pullup_and_capacitance_inputs_rejected(value):
         tool.screen_selected_segment(upstream, downstream)
 
 
+@pytest.mark.parametrize("ohms", [1e-320, 1e308])
+def test_pathological_parallel_resistors_fail_closed_without_division_crashes(ohms):
+    upstream, downstream = segment()
+    downstream["sda"]["pullup_ohms"] = [ohms]
+    if ohms < 1:
+        with pytest.raises(ValueError, match="pullup network"):
+            tool.screen_selected_segment(upstream, downstream)
+    else:
+        report = tool.screen_selected_segment(upstream, downstream)
+        assert report["selected_branch_paper_pass"]
+        assert report["lines"]["sda"]["installed_pullups"] == 3
+
+
+@pytest.mark.parametrize("reading", [True, "0.3", -0.1, float("nan"),
+                                     float("inf"), 10**1000])
+def test_malformed_measured_low_level_cannot_crash_safety_review(reading):
+    upstream, downstream = segment()
+    downstream["scl"]["measured_low_v"] = reading
+    with pytest.raises(ValueError, match="measured_low_v invalid"):
+        tool.screen_selected_segment(upstream, downstream)
+
+
 def test_lane_mutations_fail_before_part_selection():
     import json
     plan = json.loads(tool.PLAN.read_text())
