@@ -531,6 +531,19 @@ void Bridge::AddTools() {
         if (!reply.ok) return std::unexpected(reply.text);
         return reply.text;
     };
+    // Reuse the existing authenticated WROOM status transaction for the
+    // upstream-inspired self.pet sensory MCP schema. This is deliberately a
+    // read-only alias, NOT a second UART owner, a cached guessed sensation,
+    // a motion permit or a trigger to wake Xiaozhi. The body owns cliff
+    // latches and marks unqualified physical measurements in its JSON.
+    mcp.AddTool(
+        "self.pet.get_sensory_state",
+        "Read the current WROOM cliff safety, front and floor ranges, touch, "
+        "IMU, battery and accessory observations. Values may be unavailable "
+        "or physically unqualified. Never interpret status as motor permission, "
+        "charging proof or proof of a camera sighting.",
+        PropertyList(),
+        [call](const PropertyList&) -> ToolResult { return call("status"); });
 #ifdef CONFIG_DESK_ROBOT_DIRECT_MOTION_TOOLS
     mcp.AddTool("self.robot.drive", "One wheel pulse, maximum 250 ms; requires operator arm, never auto-arms.",
         PropertyList({Property("left", kPropertyTypeInteger, -100, 100), Property("right", kPropertyTypeInteger, -100, 100),
