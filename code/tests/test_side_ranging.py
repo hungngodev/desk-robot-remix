@@ -2,6 +2,8 @@
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore
@@ -277,3 +279,13 @@ def test_twelve_valid_reboots_recover_without_retired_identity_replay():
         assert tracker.observe(sample(95, 700, boot_id), now=t + .7,
                                near_mm=170,
                                require_hardware_identity=True) == [("left", 95)]
+
+
+@pytest.mark.parametrize("now", [10 ** 1000, -(10 ** 1000)])
+def test_unrepresentably_large_side_event_clock_fails_closed(now):
+    """One malformed host clock must not crash the five-pet side observer."""
+    tracker = SideRangeEvents()
+    with pytest.raises(ValueError, match="finite clock"):
+        tracker.observe(body(), now=now, near_mm=170)
+    # The next real timestamp must remain a baseline and not invent motion.
+    assert tracker.observe(body(), now=1.0, near_mm=170) == []
