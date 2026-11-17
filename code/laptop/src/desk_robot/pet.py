@@ -79,8 +79,8 @@ def _initiative_evidence(change: SceneChange) -> bool:
             or not isinstance(change.description, str)
             or not change.description.strip()
             or type(change.confidence) not in (int, float)
-            or not math.isfinite(change.confidence)
-            or not 0.0 <= change.confidence <= 1.0):
+            or not 0.0 <= change.confidence <= 1.0
+            or not math.isfinite(change.confidence)):
         return False
     threshold = _VISUAL_INITIATIVE_MIN_CONFIDENCE.get(change.kind)
     if threshold is not None:
@@ -1827,8 +1827,8 @@ class PetController:
             if isinstance(battery, dict):
                 percent = battery.get("percent")
                 if (type(percent) in (int, float)
-                        and math.isfinite(percent)
-                        and 0 <= percent <= 100):
+                        and 0 <= percent <= 100
+                        and math.isfinite(percent)):
                     selected["battery"] = {
                         "percent": percent, "physically_qualified": False,
                     }
