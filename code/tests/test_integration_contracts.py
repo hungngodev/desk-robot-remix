@@ -473,7 +473,9 @@ def test_wroom_motor_and_servo_ledc_timers_do_not_collide():
     servos = channels("kServoChannels")
     # Treat any accidental PWM timer collision as a regression, even when
     # the channel numbers themselves happen to remain distinct.
-    timer = lambda channel: (channel % 8) // 2
+    def timer(channel):
+        return (channel % 8) // 2
+
     assert motors == [0, 1, 2, 3]
     assert servos == [4, 5]
     assert not ({timer(c) for c in motors} & {timer(c) for c in servos})
