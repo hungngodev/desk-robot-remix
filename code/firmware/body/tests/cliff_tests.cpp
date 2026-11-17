@@ -89,6 +89,16 @@ void invalid_configuration() {
   CHECK(!guard.configure(value));
   value = config(); value.freshness_ms = 0;
   CHECK(!guard.configure(value));
+  value = config(); value.freshness_ms = 29;
+  CHECK(!guard.configure(value)); // Reject NVS below local cal command minimum
+  value = config(); value.freshness_ms = 30;
+  CHECK(guard.configure(value));
+  value = config(); value.freshness_ms = 200;
+  CHECK(guard.configure(value));
+  value = config(); value.freshness_ms = 201;
+  CHECK(!guard.configure(value)); // Reject NVS with overly permissive stale window
+  value = config(); value.freshness_ms = 1000;
+  CHECK(!guard.configure(value)); // Old guard wrongly accepted this on restore
   value = config(); value.freshness_ms = 1001;
   CHECK(!guard.configure(value));
   value = config(); value.freshness_ms = 0x80000000U;
