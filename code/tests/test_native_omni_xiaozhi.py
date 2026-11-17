@@ -5751,6 +5751,10 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
                 "voice_monitor_ready": True,
+                # The loopback Mac must affirmatively retain the pet's
+                # operator speech/autonomy policy, not silently revoke it.
+                "pet_quiet": False,
+                "pet_autonomy_enabled": True,
             }
 
     class Mac:
@@ -5837,6 +5841,10 @@ async def test_native_live_context_expiry_restores_base_model_instructions(nativ
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
                 "voice_monitor_ready": True,
+                # The loopback Mac must affirmatively retain the pet's
+                # operator speech/autonomy policy, not silently revoke it.
+                "pet_quiet": False,
+                "pet_autonomy_enabled": True,
             }
 
     class Mac:
@@ -5909,6 +5917,10 @@ async def test_native_context_send_is_not_counted_without_backend_ack(native):
                 "memory_tools_enabled": False,
                 "transcript_memory_enabled": False,
                 "voice_monitor_ready": True,
+                # The loopback Mac must affirmatively retain the pet's
+                # operator speech/autonomy policy, not silently revoke it.
+                "pet_quiet": False,
+                "pet_autonomy_enabled": True,
             }
 
     class Mac:
