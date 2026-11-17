@@ -43,12 +43,15 @@ int main() {
   using desk_robot_room::decode_thermal_pixel;
   using desk_robot_room::read_thermal_chunk;
   float c = 900.0f;
+  assert(decode_thermal_pixel(0x00, 0x00, c) && c == 0.0f);
   assert(decode_thermal_pixel(0x64, 0x00, c) && c == 25.0f);
-  assert(decode_thermal_pixel(0xff, 0x0f, c) && c == -0.25f);
-  assert(decode_thermal_pixel(0x60, 0x0f, c) && c == -40.0f);
-  assert(decode_thermal_pixel(0xf4, 0x01, c) && c == 125.0f);
-  assert(!decode_thermal_pixel(0x00, 0x08, c) && c == -512.0f);
-  assert(!decode_thermal_pixel(0xff, 0x07, c) && c == 511.75f);
+  assert(decode_thermal_pixel(0x40, 0x01, c) && c == 80.0f);
+  assert(!decode_thermal_pixel(0x41, 0x01, c) && c == 80.0f);
+  assert(!decode_thermal_pixel(0xff, 0x0f, c) && c == 80.0f);
+  assert(!decode_thermal_pixel(0x60, 0x0f, c) && c == 80.0f);
+  assert(!decode_thermal_pixel(0xf4, 0x01, c) && c == 80.0f);
+  assert(!decode_thermal_pixel(0x00, 0x08, c) && c == 80.0f);
+  assert(!decode_thermal_pixel(0xff, 0x07, c) && c == 80.0f);
 
   FakeWire bus;
   for (int i = 0; i < 8; ++i) {
@@ -80,8 +83,14 @@ int main() {
   bus.invalid_byte = true;
   assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
   bus.invalid_byte = false;
-  bus.data[0] = 0xff;
-  bus.data[1] = 0x07;  // invalid 511.75 C
+  // Last pixel invalid: the chunk must not partially overwrite old data.
+  bus.data[14] = 0x41;
+  bus.data[15] = 0x01;  // 80.25 C is outside AMG8833 high-gain spec.
   assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
-  std::cout << "PASS room thermal 8x16 I2C chunks, faults and signed pixels\n";
+  for (float pixel : frame) assert(pixel == 25.0f);
+  bus.data[14] = 0x40;
+  bus.data[15] = 0x01;
+  assert(read_thermal_chunk(bus, 0x69, 0, frame.data()));
+  assert(frame[7] == 80.0f);
+  std::cout << "PASS room thermal 8x16 I2C chunks, bounded AMG8833 pixels, atomic chunk and faults\n";
 }
