@@ -142,6 +142,10 @@ class CameraFrameHub:
         self.event_history = {
             robot: deque(maxlen=12) for robot in robot_ids
         }
+        # A local WROOM disarm must not be evicted by a dozen routine touch
+        # edges within its eight-second context lifetime. This is a cached
+        # observation timestamp, never an independent motion authority.
+        self.latest_safety_fault = {robot: -math.inf for robot in robot_ids}
         # Ephemeral successful tool interpretations accompany sensor cues,
         # not raw JPEG/PCM or persistent user memories. One existing owner.
         self.tool_history = {
@@ -186,6 +190,10 @@ class CameraFrameHub:
             raise ValueError("Unknown physical event or invalid time")
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
+        if kind == "safety_fault":
+            self.latest_safety_fault[robot_id] = max(
+                self.latest_safety_fault[robot_id], now
+            )
         if kind == "human_voice":
             self.voice_started_at[robot_id] = max(self.voice_started_at[robot_id], now)
             # Real Xiaozhi speech_end (or explicit disconnect/clear) owns
@@ -522,6 +530,19 @@ class CameraFrameHub:
                     "content": None,
                     "physical_action_verified": False,
                 }))
+        # The generic bounded event deque can overflow during a sensor burst.
+        # Preserve one authentic local fault until its original TTL expires,
+        # but never fabricate another observation or extend the timestamp.
+        fault_at = self.latest_safety_fault[robot_id]
+        if (0 <= now - fault_at <= 8
+                and not any(kind == "safety_fault" and stamp == fault_at
+                            for kind, stamp in self.event_history[robot_id])):
+            items.append((fault_at, {
+                "channel": "sensor", "kind": "safety_fault",
+                "age_ms": round(1000 * (now - fault_at)),
+                "source": "wroom_event", "content": None,
+                "physical_action_verified": False,
+            }))
         for frame in self.frames[robot_id]:
             if 0 <= now - frame.received_at <= 6:
                 items.append((frame.received_at, {
@@ -672,6 +693,7 @@ class CameraFrameHub:
         self.native_spoken_ids[robot_id].clear()
         self.heard_history[robot_id].clear()
         self.event_history[robot_id].clear()
+        self.latest_safety_fault[robot_id] = -math.inf
         self.voice_until[robot_id] = -math.inf
         self.quiet_until[robot_id] = -math.inf
 
