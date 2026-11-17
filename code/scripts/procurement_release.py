@@ -336,17 +336,23 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     # level-shift to VIN, so using a nominal 5V VIN can kill the ESP32 pin.
     # This is a selected wiring topology only, never actual PCB acceptance.
     tof_voltage = plan.get("range_breakout_power_contract")
-    if not isinstance(tof_voltage, dict) or any(
-            type(tof_voltage.get(key)) not in (int, float)
-            or tof_voltage[key] != 3.3 for key in (
-                "module_vin_v", "tca9548a_vcc_v",
-                "upstream_pullup_target_v", "downstream_pullup_target_v")) \
-            or tof_voltage.get("selected_chip") != "VL53L0X" \
-            or tof_voltage.get("generic_module_family") != "GY-530" \
-            or type(tof_voltage.get("mux_address_7bit")) is not int \
-            or tof_voltage.get("mux_address_7bit") != 0x70 \
-            or type(tof_voltage.get("modules_per_robot")) is not int \
-            or tof_voltage.get("modules_per_robot") != 8:
+    voltage_suitable = (
+        isinstance(tof_voltage, dict)
+        and all(
+            type(tof_voltage.get(key)) in (int, float)
+            and tof_voltage[key] == 3.3
+            for key in ("module_vin_v", "tca9548a_vcc_v",
+                        "upstream_pullup_target_v",
+                        "downstream_pullup_target_v")
+        )
+        and tof_voltage.get("selected_chip") == "VL53L0X"
+        and tof_voltage.get("generic_module_family") == "GY-530"
+        and type(tof_voltage.get("mux_address_7bit")) is int
+        and tof_voltage["mux_address_7bit"] == 0x70
+        and type(tof_voltage.get("modules_per_robot")) is int
+        and tof_voltage["modules_per_robot"] == 8
+    )
+    if not voltage_suitable:
         missing_system.append("unsafe_gy530_voltage_or_pin_contract")
 
 
