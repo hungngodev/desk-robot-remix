@@ -5,6 +5,9 @@ Generated from docs/hardware/full-feature-plan.json and the actual
 BodyPins.h and head/sense/config.h symbols. Regenerate after any pin edit.
 Signal-only list. Never infer a power source from a logic voltage.
 
+**Motor variants are mutually exclusive:** `esp32_full` uses ULN2003 steppers;
+`esp32_dc_full` uses DRV8833 DC motors. Never connect both motor drivers.
+
 | Source | Destination | Signal | Evidence |
 | --- | --- | --- | --- |
 | WROOM GPIO13 | left ULN2003 IN1 | 3.3V phase control | Source allocated |
@@ -15,6 +18,8 @@ Signal-only list. Never infer a power source from a logic voltage.
 | WROOM GPIO32 | right ULN2003 IN2 | 3.3V phase control | Source allocated |
 | WROOM GPIO33 | right ULN2003 IN3 | 3.3V phase control | Source allocated |
 | WROOM GPIO23 | right ULN2003 IN4 | 3.3V phase control | Source allocated |
+| WROOM GPIO25 + GPIO26 | left DRV8833 AIN1/AIN2 (DC FULL only) | 3.3V motor PWM signals, alternative to left ULN2003 | Guarded DC profile; physical load unqualified |
+| WROOM GPIO27 + GPIO32 | right DRV8833 BIN1/BIN2 (DC FULL only) | 3.3V motor PWM signals, alternative to right ULN2003 | Guarded DC profile; physical load unqualified |
 | WROOM GPIO18 | MG90S lift signal | 3.3V PWM signal only | Source allocated |
 | WROOM GPIO19 | MG90S jaw signal | 3.3V PWM signal only | Source allocated |
 | XIAO GPIO2 TX | WROOM GPIO16 RX | UART 115200, 3.3V | Source allocated |
