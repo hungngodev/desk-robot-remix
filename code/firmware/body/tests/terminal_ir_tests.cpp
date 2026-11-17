@@ -212,7 +212,7 @@ int main() {
     CHECK(queue.finish(0, 1, true, true)); // later valid frame reacquires
     CHECK(queue.finish(1, 1, true, true));
     CHECK(queue.finish(1, 0, true));
-    CHECK(!queue.on_poll(400)); // old messages after a long stall are stale
+    CHECK(!queue.on_poll(426)); // 101ms after last poll exceeds 100ms freshness fence
     CHECK(queue.finish(0, 1, true) && queue.finish(1, 1, true));
     CHECK(queue.on_poll(450));
     CHECK(!queue.finish(0, 3, true)); // three packets mean ambiguous backlog
