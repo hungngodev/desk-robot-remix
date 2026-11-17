@@ -561,6 +561,154 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
 
 
 
+
+def first_robot_projection(report: dict) -> dict:
+    """One COMPLETE robot, its dock and the one shared station, no order permit.
+
+    The five-pet ledger remains authoritative. All 49 parent roles plus the
+    fourteen linked decisions remain visible, but five-pet spare stock must
+    never be mistaken for proof that a prototype part is physically in hand.
+    A blank motor decision cannot silently order legacy stepper hardware.
+    """
+    if report.get("fleet_robots") != 5 or report.get("room_stations") != 1:
+        raise ValueError("First robot must project from the canonical five-pet plan")
+    motor = report.get("physical_motor_variant_in_cart")
+    if motor not in {"stepper", "dc", "unresolved"}:
+        raise ValueError("Unknown physical drivetrain selection")
+    pet_rows = report["robots"]
+    station_rows = report["room_pod"]
+    station_ids = {row["id"] for row in station_rows}
+    pet_ids = {row["id"] for row in pet_rows}
+    rows = []
+    for scope, entries in (("pet or dock", pet_rows),
+                           ("shared station", station_rows)):
+        for part in entries:
+            ident = part["id"]
+            if scope == "pet or dock":
+                target = _count(part["per_robot"], ident + ".per_robot")
+                if part.get("excluded_from_order_as_alternative") or (
+                        motor == "unresolved"
+                        and ident in ("stepper", "uln2003")):
+                    target = 0
+            else:
+                target = _count(part["shared_total"], ident + ".shared_total")
+            # A five-robot ownership claim is only a MAXIMUM candidate stock
+            # allocation to the first unit, not verified possession.
+            available = target
+            allocations = {}
+            for key in ("reported_owned_not_verified",
+                        "estimated_owned_not_verified",
+                        "ordered_unreceived_not_verified"):
+                value = min(available, _count(part[key], ident + "." + key))
+                allocations[key] = value
+                available -= value
+            rows.append({
+                "id": ident, "name": part["name"], "scope": scope,
+                "prototype_target": target,
+                **allocations,
+                "conditional_remaining": available,
+                "reference_only": part.get("reference_only"),
+                "missing_part_evidence": part["missing_part_evidence"],
+                "decision": (
+                    "HOLD MOTOR CHOICE" if motor == "unresolved"
+                    and ident in ("stepper", "uln2003")
+                    else "EXCLUDED MOTOR ALTERNATIVE" if target == 0
+                    and ident in ("stepper", "uln2003")
+                    else "HOLD FIRST ROBOT QUALIFICATION"
+                ),
+            })
+    linked = []
+    for item in report["supplemental_decisions"]:
+        parent = item["parent_role"]
+        fleet_quantity = _count(item["fleet_quantity"], item["id"] + ".fleet_quantity")
+        if parent in pet_ids:
+            if fleet_quantity % 5:
+                raise ValueError("Pet linked subassembly must scale to one robot")
+            target = fleet_quantity // 5
+        elif parent in station_ids:
+            target = fleet_quantity
+        else:
+            raise ValueError("Unknown linked parent in prototype shopping")
+        linked.append({
+            "id": item["id"], "name": item["name"], "parent_role": parent,
+            "conditional_one_robot_quantity": target,
+            "reviewed": item["reviewed"], "disposition": item["disposition"],
+            "additive_purchase_authorized": False,
+        })
+    return {
+        "robot_count": 1, "dock_count": 1, "shared_station_count": 1,
+        "motor_variant": motor, "parent_role_count": len(rows),
+        "linked_decision_count": len(linked),
+        # Projection never turns the fleet physical receipts into a new
+        # permission to order a partly specified or nonfitted robot.
+        "purchase_approved": False,
+        "reason": ("Quantity projection, not a validated first-unit bill of "
+                   "materials. Verify exact sellers, safety, fit and actual "
+                   "owned stock before irreversible purchases."),
+        "roles": rows, "linked_decisions": linked,
+    }
+
+
+def render_first_robot_markdown(report: dict) -> str:
+    """Exactly two source-derived lists for the first complete robot."""
+    projection = first_robot_projection(report)
+
+    def cell(value: object) -> str:
+        return str(value).replace("|", r"\\|").replace("\\n", " ").strip()
+
+    lines = [
+        "# First complete desk robot, one dock and one room station",
+        "",
+        "**PROTOTYPE BUYING STATUS: HOLD.** This is the exact quantity "
+        "projection from the canonical five-pet source, not supplier or "
+        "physical acceptance. No new Adafruit hardware.",
+        "",
+        "## 1. Reported owned or ordered, still unverified",
+        "",
+        "| Role | Reported on hand | Estimated on hand | Ordered, not received |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for row in projection["roles"]:
+        if any(row[k] for k in (
+                "reported_owned_not_verified", "estimated_owned_not_verified",
+                "ordered_unreceived_not_verified")):
+            lines.append(
+                f"| {cell(row['name'])} | "
+                f"{row['reported_owned_not_verified']} | "
+                f"{row['estimated_owned_not_verified']} | "
+                f"{row['ordered_unreceived_not_verified']} |"
+            )
+    lines += [
+        "",
+        "## 2. First-unit remaining slots and conditional alternatives",
+        "",
+        "| Scope | Role | One-unit target | Remaining if stock verified | Decision |",
+        "| --- | --- | ---: | ---: | --- |",
+    ]
+    for row in projection["roles"]:
+        lines.append(
+            f"| {cell(row['scope'])} | {cell(row['name'])} | "
+            f"{row['prototype_target']} | {row['conditional_remaining']} | "
+            f"{row['decision']} |"
+        )
+    for item in projection["linked_decisions"]:
+        lines.append(
+            f"| linked detail, never additive | {cell(item['name'])} | "
+            f"{item['conditional_one_robot_quantity']} if selected | "
+            "not independently counted | "
+            f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} |"
+        )
+    lines += [
+        "",
+        "One unit is built and qualified before another four are ordered. "
+        "A reported or estimated owned quantity is not physical stock proof. "
+        "Linked parts are already owned by parent roles and must not be "
+        "summed into a cart; unresolved motors and charger parts are not "
+        "authorized purchases.",
+        "",
+    ]
+    return "\\n".join(lines)
+
 def _purchase_rows(report: dict):
     for row in report["robots"]:
         yield "pet or dock", row
