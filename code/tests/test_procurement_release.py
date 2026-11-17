@@ -742,15 +742,36 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
     assert "motor_driver_variant_mismatch" in opposite["missing_system_evidence"]
 
 
-    # Even with correct N20 + DRV8833 pairing, the unchanged legacy
-    # stepper quantities cannot be part of the same five-pet order.
+    # The original frozen 42-role baseline keeps legacy STEP entries for
+    # accounting, but a genuinely selected and reviewed N20+DRV8833
+    # alternative must be orderable WITHOUT charging for ten unused
+    # 28BYJ48 motors and ten unused ULN2003 drivers. Former code made
+    # qualified DC procurement logically impossible forever.
     both_selected = copy.deepcopy(evidence)
     for ident in ("n20_motor_candidate", "drv8833_driver_candidate"):
         both_selected["supplemental_decisions"][ident]["disposition"] = "selected"
-    duplicate = mod.generate(plan, both_selected)
-    assert not duplicate["order_released"]
-    assert "double_purchase_dc_and_stepper_drivetrains" in (
-        duplicate["missing_system_evidence"])
+    dc_report = mod.generate(plan, both_selected)
+    assert dc_report["order_released"]  # synthetic receipt fixture only
+    assert dc_report["physical_motor_variant_in_cart"] == "dc"
+    legacy = [row for row in dc_report["robots"]
+              if row["id"] in ("stepper", "uln2003")]
+    assert len(legacy) == 2
+    for row in legacy:
+        assert row["excluded_from_order_as_alternative"]
+        assert row["effective_selected_fleet_total"] == 0
+        assert row["remaining_if_reported_stock_works"] == 0
+        assert row["shopping_decision"].startswith("do_not_buy")
+    assert "EXCLUDED MOTOR ALTERNATIVE, DO NOT BUY" in (
+        mod.render_markdown(dc_report))
+    import csv
+    import io
+    csv_rows = {row["part_id"]: row for row in
+                csv.DictReader(io.StringIO(mod.render_csv(dc_report)))}
+    for ident in ("stepper", "uln2003"):
+        assert csv_rows[ident]["per_robot"] == "0"
+        assert csv_rows[ident]["fleet_total"] == "0"
+        assert csv_rows[ident]["remaining_if_all_reported_stock_works"] == "0"
+    assert mod.generate(plan, evidence)["physical_motor_variant_in_cart"] == "stepper"
 
     invalid = copy.deepcopy(evidence)
     invalid["supplemental_decisions"]["ghost_charger"] = {}
