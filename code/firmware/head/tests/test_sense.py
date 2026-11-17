@@ -237,7 +237,8 @@ class SenseSelectionTests(unittest.TestCase):
         assert "httpd_resp_send_chunk(req" in bridge
         assert "X-Desk-Camera-Sequence: %u" in bridge
         assert "X-Desk-Camera-Complete-Us: %lld" in bridge
-        assert "config.max_uri_handlers = 7;" in bridge
+        assert "config.max_uri_handlers = 8;" in bridge
+        assert '"/api/camera.identity", HTTP_GET' in bridge
 
     def test_vendor_stackchan_behavior_compiles_without_motor_framework(self):
         compiler = shutil.which("c++")
@@ -379,7 +380,8 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     header = (HEAD / "overlay/robot_bridge.h").read_text()
     board = (HEAD / "sense/desk_robot_sense.cc").read_text()
     assert '{"/api/face", HTTP_POST}' in bridge
-    assert 'config.max_uri_handlers = 7;' in bridge
+    assert 'config.max_uri_handlers = 8;' in bridge
+    assert '"/api/camera.identity", HTTP_GET' in bridge
     assert 'strcmp(event->valuestring, "person_detected") != 0' in bridge
     assert 'person_cue_pending_.store(true' in bridge
     assert 'person_cue_pending_.exchange(false' in bridge
