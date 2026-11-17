@@ -8,7 +8,7 @@ From the repository root, with OpenSCAD installed:
 python3 code/scripts/export_fit_kit.py
 ```
 
-This renders the seven existing adapter candidates to
+This renders seven adapter candidates including the rectangular speaker front to
 `docs/cad/remixes/adapter_stls/` for the Fusion scaffold and the
 three existing power, docking and jaw fit gauges to
 `docs/cad/remixes/fit_stls/`. Each STL is exported in deterministic binary
@@ -27,12 +27,14 @@ Source [one_robot_adapter_kit.scad](one_robot_adapter_kit.scad) is original CC0 
 | head_bridge | 1 | Centered slotted head/body spacer |
 | tof_adjustable | 8 | One VL53L0X GY-530 candidate bracket per direction |
 | oled_bezel | 1 | SSD1306 aperture |
-| speaker_grille | 1 | 20mm speaker front |
+| speaker_grille | 1 | Perforated front plate for current 20 x 16 mm Challenge 2 W rectangular speaker, not sealed soundbox |
 | fsr_jaw_pocket | 1 | Force pad jaw holder |
 | dock_tag_backplate | 1 | AprilTag marker frame |
 | wire_clip | as needed | Cable routing |
 
 Regenerate with `openscad -o head_bridge.stl -D 'part="head_bridge"' one_robot_adapter_kit.scad`, substitute each name. CAD was rendered locally as seven **watertight, single-body** STL meshes with provisional dimensions and packaged for this conversation. These parts are **not** a final fitted assembled robot.
+
+The rectangular front grille and [separate speaker pocket gauge](speaker_rect_fit_gauge.scad) follow the fixed Challenge Electronics CS20-02P110-04-1X 8 ohm 2 W envelope, 20 x 16 x 4.7 mm. The earlier round 20 mm 1 W front geometry was retired. Neither print provides the qualified one cubic centimeter sealed speaker enclosure, pad clearance, thermal testing or microphone double talk. These remain mandatory physical steps before ordering five speakers.
 
 **Fusion 360 workflow for complete robot**: follow [FUSION_ONE_ROBOT_ASSEMBLY.md](../FUSION_ONE_ROBOT_ASSEMBLY.md). Ground the original 28BYJ48 SMARS chassis, import existing wheel/track/lift/Bluino pinion and rack/Sparky head STL meshes individually in millimeters, assemble with real moving joints, and then insert these adapter meshes as candidate geometry. The head must face exactly forward; camera, mic, speaker and all 8 ToF lens sweeps need clear view. Measure real screw spacing, lens offsets, servo horn and pack before changing these parameters. Use **Mesh > Convert Mesh** only where an editable solid is needed. Native Fusion components for adapter plates are preferable to stretching the original gripper gear teeth.
 
