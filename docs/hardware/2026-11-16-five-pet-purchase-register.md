@@ -21,7 +21,7 @@ Fleet means **five fully featured robots and five independent docks** plus **one
 | `imu` | MPU6050 GY521 compatible six axis breakout; [Keyestudio KS0170 GY521 MPU6050](https://www.keyestudio.com/products/keyestudio-gy-521-mpu6050-3-axis-gyroscope-and-accelerometer-module-for-arduino) | 1 | 5 | 1 | 0 | 0 | 4 | 1 | $9.00 | PILOT I2C |
 | `head_touch` | AT42QT1010 momentary capacitive head touch; [SparkFun SEN 12041 AT42QT1010](https://www.sparkfun.com/sparkfun-capacitive-touch-breakout-at42qt1010.html) | 1 | 5 | 1 | 0 | 0 | 4 | 1 | $3.95 | SOURCE MATCH |
 | `max30102` | MAX30102 optical heartbeat paw pad breakout; NOT SELECTED Module/carrier selection required | 1 | 5 | 0 | 5 | 0 | 0 | 0 | Unquoted | SOURCE / FIT |
-| `cliff_obstacle` | VL53L4CD time of flight carrier; [Pololu #3692](https://www.pololu.com/product/3692/specs) | 8 | 40 | 0 | 0 | 0 | 40 | 8 | $11.81 | PILOT FIT |
+| `cliff_obstacle` | VL53L0X cheap GY-530 I2C breakout; [ST official chip](https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html) | 8 | 40 | 0 | 0 | 0 | 40 | 8 | Unquoted | CHEAP CARRIER 3.3V CHECK |
 | `i2c_mux` | TCA9548A 8 channel 3.3V compatible I2C multiplexer; [SparkFun BOB 16784](https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html) | 2 | 10 | 0 | 0 | 0 | 10 | 2 | $6.60 | PILOT FIT |
 | `amp` | MAX98357A I2S mono amplifier; [SparkFun DEV 14809](https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $7.50 | PIN CHECK |
 | `speaker` | 8 ohm 1 watt approximately 20 mm speaker; [SparkFun COM 26553](https://www.sparkfun.com/mini-speaker-1w-8-ohm.html) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $1.25 | FIT |
