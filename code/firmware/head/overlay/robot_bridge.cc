@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "cJSON.h"
+#include "esp_camera.h"  // Existing esp32-camera sensor identity, no new capture owner.
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -265,7 +266,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 7;
+    config.max_uri_handlers = 8;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -277,7 +278,8 @@ void Bridge::Start() {
              {"/api/ir", HTTP_GET},
              {"/api/command", HTTP_POST}, {"/api/face", HTTP_POST},
              {"/api/camera.jpg", HTTP_GET},
-             {"/api/camera.mjpg", HTTP_GET}}) {
+             {"/api/camera.mjpg", HTTP_GET},
+             {"/api/camera.identity", HTTP_GET}}) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
         uri.method = entry.second;
@@ -510,6 +512,26 @@ void Bridge::CameraStreamTask(void* context) {
 
 esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
+    if (strcmp(req->uri, "/api/camera.identity") == 0) {
+        // Read only the actual sensor ID from Espressif's initialized
+        // upstream camera driver. No new camera task, JPEG or UART owner.
+        // This authenticated identity is checked against the frame boot
+        // nonce and the measured offline calibration before dock movement.
+        if (!camera_) return Json(req, 503, Envelope(false, "camera unavailable"));
+        const sensor_t* sensor = esp_camera_sensor_get();
+        if (!sensor) return Json(req, 503, Envelope(false, "camera sensor unavailable"));
+        const auto pid = sensor->id.PID;
+        const char* model = pid == OV3660_PID ? "OV3660" :
+                            pid == OV5640_PID ? "OV5640" : nullptr;
+        if (!model) return Json(req, 503, Envelope(false, "unsupported camera PID"));
+        JsonPtr identity(cJSON_CreateObject(), cJSON_Delete);
+        if (!identity) return Json(req, 503, Envelope(false, "camera metadata unavailable"));
+        cJSON_AddStringToObject(identity.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddStringToObject(identity.get(), "camera_sensor_pid", model);
+        cJSON_AddNumberToObject(identity.get(), "camera_pid_raw", pid);
+        cJSON_AddNumberToObject(identity.get(), "boot", boot_nonce_);
+        return Json(req, 200, Encode(identity.get()));
+    }
     if (strcmp(req->uri, "/api/camera.mjpg") == 0) {
         if (!camera_) return Json(req, 503, Envelope(false, "camera unavailable"));
         if (camera_busy_.exchange(true))
