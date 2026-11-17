@@ -1,4 +1,4 @@
-"""Debounced interactions from the THREE existing read-only VL53L4CD extras.
+"""Debounced interactions from the THREE existing read-only VL53L0X extras.
 
 The WROOM already samples mux channels 5..7 as side_ranges left/right/rear.
 This source is NOT a new sensor driver, cliff guard or movement permission.
