@@ -44,7 +44,7 @@ Other reported spares are not interchangeable with chosen modules: BerryIMU, MAX
 | pet or dock | TCA9548A 8 channel 3.3V compatible I2C multiplexer | 10 | 10 | HOLD | SparkFun BOB-16784: https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html |
 | pet or dock | MAX98357A I2S mono amplifier | 5 | 5 | HOLD | SparkFun DEV-14809: https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html |
 | pet or dock | 8 ohm 1 watt approximately 20 mm speaker | 5 | 5 | HOLD | SparkFun COM-26553: https://www.sparkfun.com/mini-speaker-1w-8-ohm.html |
-| pet or dock | CAP1188 8 zone capacitive touch breakout | 5 | 5 | HOLD | Choose 3.3V I2C board with selectable 0x28; MPR121 chip archived |
+| pet or dock | CAP1188 8 zone capacitive touch breakout | 5 | 5 | HOLD | Choose generic 3.3V CAP1188 I2C breakout at common 0x29 or strapped 0x28; range 0x70 mux is verified off before 0x71 lane0 opens |
 | pet or dock | Copper tape touch electrode and insulating backing set | 5 | 5 | HOLD | Eight zones per pet, not more controllers |
 | pet or dock | APDS9960 gesture proximity color light module | 5 | 5 | HOLD | One multifunction optical sensor |
 | pet or dock | FSR402 type force sensing resistor | 10 | 10 | HOLD | One belly, one gripper; not proof of loaded grip without calibration |
