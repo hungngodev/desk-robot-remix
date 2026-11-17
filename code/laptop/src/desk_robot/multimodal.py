@@ -361,6 +361,11 @@ class CameraFrameHub:
                 and not any(k == "safety_fault" and t == fault_at
                             for k, t in events)):
             events.append(("safety_fault", fault_at))
+        voice_at = self.voice_started_at[robot_id]
+        if (0 <= now - voice_at <= 8.0
+                and not any(k == "human_voice" and t == voice_at
+                            for k, t in events)):
+            events.append(("human_voice", voice_at))
         events.sort(key=lambda event: event[1])
         required: set[int] = set()
         for required_kind in ("safety_fault", "human_voice"):
@@ -717,6 +722,7 @@ class CameraFrameHub:
         self.heard_history[robot_id].clear()
         self.event_history[robot_id].clear()
         self.latest_safety_fault[robot_id] = -math.inf
+        self.voice_started_at[robot_id] = -math.inf
         self.voice_until[robot_id] = -math.inf
         self.quiet_until[robot_id] = -math.inf
 
