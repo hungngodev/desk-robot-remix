@@ -1087,6 +1087,12 @@ static void status_readiness_matches_local_arm_interlocks() {
   CHECK(send(body, "status", 3).find("\\"fault\\":\\"imu_missing_or_stale\\"") !=
         std::string::npos);
   CHECK(send(body, "arm", 3) == "ERR arm imu_missing_or_stale");
+  // Even if both a missing IMU and a touch are present, retain the true
+  // high priority local cliff fault in the shared safety context.
+  body.sample_touch_input(true);
+  guard.bus_fault();
+  CHECK(send(body, "status", 4).find("\\"fault\\":\\"bus_failure\\"") !=
+        std::string::npos);
 
   desk_robot::CliffGuard dock_guard;
   CHECK(dock_guard.configure(config()));
