@@ -124,7 +124,32 @@ int main() {
       CHECK(Wire.ranges == 0 && Wire.extras == 0);
       CHECK(!Wire.unsafe_parallel_mux);
     }
-    // A busy ADS1115 must not turn a cached old register into new jaw data.
+    // Rejected I2C register writes must still finish the attempted Wire
+    // transaction. Otherwise an incomplete MCP23017 GPIOA read may leave
+    // the bus active and a stale charger seat status falsely usable.
+    TwoWire rejected_mcp_wire;
+    desk_robot::AccessorySensors rejected_mcp;
+    CHECK(rejected_mcp.begin(rejected_mcp_wire));
+    for (std::uint32_t ms = 0; ms < 720; ms += 12)
+      rejected_mcp.poll(ms);
+    CHECK(rejected_mcp.readings().dock.valid);
+    const auto old_seq = rejected_mcp.readings().dock.sample_seq;
+    const auto old_mcp_ends = rejected_mcp_wire.mcp_terminated_transmissions;
+    rejected_mcp_wire.fail_mcp_register_write = true;
+    for (std::uint32_t ms = 720; ms < 1600; ms += 12)
+      rejected_mcp.poll(ms);
+    CHECK(rejected_mcp_wire.failed_mcp_writes > 0);
+    CHECK(rejected_mcp_wire.mcp_terminated_transmissions - old_mcp_ends >=
+          rejected_mcp_wire.failed_mcp_writes);
+    CHECK(!rejected_mcp.readings().dock.valid);
+    CHECK(rejected_mcp.readings().dock.sample_seq == old_seq);
+    CHECK(rejected_mcp_wire.ranges == 0 && rejected_mcp_wire.extras == 0);
+    rejected_mcp_wire.fail_mcp_register_write = false;
+    for (std::uint32_t ms = 1608; ms < 2200; ms += 12)
+      rejected_mcp.poll(ms);
+    CHECK(rejected_mcp.readings().dock.valid);
+    CHECK(rejected_mcp.readings().dock.sample_seq > old_seq);
+        // A busy ADS1115 must not turn a cached old register into new jaw data.
     const auto prior_jaw_seq = accessories.readings().force.jaw_sample_seq;
     CHECK(prior_jaw_seq > 0U);
     Wire.ads_conversion_ready = false;
