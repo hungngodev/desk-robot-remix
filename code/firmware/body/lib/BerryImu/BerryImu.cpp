@@ -28,7 +28,9 @@ bool BerryImu::read_bytes(std::uint8_t address, std::uint8_t reg,
                          std::uint8_t* data, std::uint8_t length) {
   if (wire_ == nullptr || data == nullptr || length == 0 || length > 14) return false;
   wire_->beginTransmission(address);
-  if (wire_->write(reg) != 1 || wire_->endTransmission(false) != 0) return false;
+  const bool wrote = wire_->write(reg) == 1;
+  const bool acknowledged = wire_->endTransmission(!wrote) == 0;
+  if (!wrote || !acknowledged) return false;
   if (wire_->requestFrom(address, static_cast<size_t>(length), true) != length)
     return false;
   for (std::uint8_t i = 0; i < length; ++i) {
@@ -43,8 +45,9 @@ bool BerryImu::write_byte(std::uint8_t address, std::uint8_t reg,
                          std::uint8_t value) {
   if (wire_ == nullptr) return false;
   wire_->beginTransmission(address);
-  return wire_->write(reg) == 1 && wire_->write(value) == 1 &&
-         wire_->endTransmission(true) == 0;
+  const bool wrote = wire_->write(reg) == 1 && wire_->write(value) == 1;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return wrote && acknowledged;
 }
 
 bool BerryImu::begin(TwoWire& wire, BerryModel model,
