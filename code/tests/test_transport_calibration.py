@@ -806,7 +806,7 @@ async def test_person_face_cue_rejects_wrong_robot_or_missing_ack(
     ):
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(
-                lambda req: httpx.Response(200, json=response)
+                lambda req, captured=response: httpx.Response(200, json=captured)
             )
         ) as client:
             head = HttpHead(robot, client)
