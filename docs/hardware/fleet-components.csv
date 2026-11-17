@@ -12,7 +12,7 @@ pet or dock,cliff_obstacle,VL53L0X generic GY-530 I2C module,8,40,0,0,0,40,NO,Ge
 pet or dock,i2c_mux,TCA9548A 8 channel 3.3V compatible I2C multiplexer,2,10,0,0,0,10,NO,SparkFun,BOB-16784,https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html,hold_until_qualified,"One at 0x70 for optical, one at 0x71 for interaction"
 pet or dock,amp,MAX98357A I2S mono amplifier,1,5,0,0,0,5,NO,SparkFun,DEV-14809,https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html,hold_until_qualified,Direct Sense audio; do not buy an analog DAC for owned PAM8403
 pet or dock,speaker,8 ohm 1 watt approximately 20 mm speaker,1,5,0,0,0,5,NO,SparkFun,COM-26553,https://www.sparkfun.com/mini-speaker-1w-8-ohm.html,hold_until_qualified,Output across amp differential terminals; acoustic cavity pending fit
-pet or dock,cap1188,CAP1188 8 zone capacitive touch breakout,1,5,0,0,0,5,NO,,,,hold_until_qualified,Choose 3.3V I2C board with selectable 0x28; MPR121 chip archived
+pet or dock,cap1188,CAP1188 8 zone capacitive touch breakout,1,5,0,0,0,5,NO,,,,hold_until_qualified,Choose generic 3.3V CAP1188 I2C breakout at common 0x29 or strapped 0x28; range 0x70 mux is verified off before 0x71 lane0 opens
 pet or dock,touch_electrodes,Copper tape touch electrode and insulating backing set,1,5,0,0,0,5,NO,,,,hold_until_qualified,"Eight zones per pet, not more controllers"
 pet or dock,apds9960,APDS9960 gesture proximity color light module,1,5,0,0,0,5,NO,,,,hold_until_qualified,One multifunction optical sensor
 pet or dock,fsr,FSR402 type force sensing resistor,2,10,0,0,0,10,NO,,,,hold_until_qualified,"One belly, one gripper; not proof of loaded grip without calibration"
