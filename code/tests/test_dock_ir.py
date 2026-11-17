@@ -164,3 +164,15 @@ async def test_http_head_rejects_foreign_dock_using_existing_get_boundary(monkey
         with pytest.raises(HeadError, match="Foreign NEC dock beacon"):
             await head.ir_status()
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("code", [
+    0x00000001, 0xffffffff, 0xcf30ed12, 0xc936ed12,
+    0xce31ef12, 0xce31ed13,
+])
+def test_matched_beacon_rejects_unknown_or_malformed_nec_codes(code):
+    # Agreement between two receivers cannot legitimize a non-fleet code.
+    reading = evidence()
+    reading["code"] = code
+    with pytest.raises(ValueError, match="Unknown NEC dock beacon code"):
+        validate_ir(reading, "robot-01")
