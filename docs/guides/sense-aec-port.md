@@ -1,7 +1,9 @@
 # Sense echo-cancellation port: reuse the existing audio engine
 
-Source review, 2026-11-03. **Feasible integration direction, not implemented or
-physically qualified.** Keep the purchased Sense and its existing pins. Reuse
+Original source review, 2026-11-03. **Reference PCM adapter is now implemented
+and firmware compiled in the selected Sense overlay, but microphone and
+speaker acoustics are NOT physically qualified.** Keep the purchased Sense
+and its existing pins. Reuse
 RIO's playback-reference/delay-calibration approach; let Xiaozhi's existing
 ESP-IDF audio front end perform cancellation. Do not stack RIO's entire AEC,
 noise suppressor, voice detector and residual gate on top of the existing engine.
@@ -51,6 +53,36 @@ reconnect. Clearing software queues does not cancel a blocking write or flush
 TX DMA. Keep reference for any tail that really plays; discard reference for
 audio canceled before playback. The Mac [flush contract](live-conversation.md)
 must reach this device path and receive actual playback-completion information.
+
+## Reference buffer integrity and observable failure
+
+The selected `SenseReferenceCodec` now reads real mono PDM input and
+interleaves it with a bounded 24 kHz to 16 kHz speaker reference before
+Xiaozhi's existing ESP-SR AFE. It uses a generation fence on cancellation,
+post-volume reference samples and short ring copies under a mutex; actual
+blocking I2S reads and writes run outside that mutex. This software path
+is implemented, not a simulated microphone or proof of a real acoustic
+tail flush.
+
+The codec records saturated lifetime counts of reference underrun
+reads, ring-overwrite reads and stale post-cancellation writes. If a
+complete ring capacity of reference samples is published between
+microphone reads, the newest read does not silently claim a valid
+time-aligned history. It substitutes silence, marks A2 reference
+integrity failed and warns only for the first occurrence or every 32
+new such errors. A sustained 32-read underflow or stale
+post-cancellation playback publish also marks integrity failure.
+`GetReferenceDiagnostics()` returns these counts and the sticky
+`integrity_failed` flag under the codec mutex. `ClearReference()`
+resets session indices but **does not erase the lifetime failure**.
+
+**This is an internal device diagnostic, not yet a remote health
+endpoint or an acoustic performance metric.** Any nonzero
+`integrity_failed` blocks an A2 qualification claim; even a clean
+counter does not prove measured ERLE, delay/clock compensation,
+cancellation of already buffered TX DMA or preservation of real human
+speech during double talk. The operator must still record the actual
+audio and hardware timing tests from the mandatory barge-in guide.
 
 ## Configuration and verification
 
