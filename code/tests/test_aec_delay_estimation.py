@@ -22,6 +22,8 @@ def test_estimates_positive_lag_from_correlated_playback():
     assert report["sample_lag"] == 1120
     assert report["reference_delay_ms"] == 70.0
     assert report["normalized_correlation"] > 0.8
+    assert report["esp_idf_delay_setting_applicable"]
+    assert report["esp_idf_delay_max_ms"] == 250
     assert not report["aec_physically_verified"]
     assert not report["natural_barge_in_verified"]
 
@@ -100,3 +102,15 @@ def test_sudden_latency_step_is_not_mislabeled_as_clock_drift():
             mic[i] = source[i - lag]
     with pytest.raises(ValueError, match="not a stable clock drift"):
         estimate_clock_drift(source, mic)
+
+
+def test_large_acoustic_delay_is_diagnostic_only_not_copyable_to_idf():
+    rng = np.random.default_rng(284)
+    speaker = rng.normal(0, 0.2, 16000)
+    mic = np.concatenate([np.zeros(4800), speaker])[:16000]
+    report = estimate_delay(speaker, mic, max_delay_ms=400)
+    assert report["sample_lag"] == 4800
+    assert report["reference_delay_ms"] == 300
+    assert not report["esp_idf_delay_setting_applicable"]
+    assert report["esp_idf_delay_max_ms"] == 250
+    assert not report["aec_physically_verified"]
