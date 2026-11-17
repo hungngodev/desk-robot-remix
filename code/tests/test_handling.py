@@ -296,16 +296,19 @@ def test_same_boot_timestamp_regression_cannot_reseed_calibration():
     # A delayed old packet has the same boot identity but a lower timestamp.
     assert qualified(gate, sample(sample_ms=1002), 100.9,
                      new_sample=False) == ()
-    assert gate.reference is None
+    assert gate.reference is not None
     assert gate.last_sample_ms == 1007
+    last_at = gate.last_at
     for i in range(8):
         assert qualified(gate, sample(sample_ms=1002),
                          101.0 + i * .1, new_sample=False) == ()
+    assert gate.reference is not None
+    assert gate.last_at == last_at
     assert gate.startup_samples == []
-    # A genuinely newer conversion may begin a new baseline.
+    # A genuine forward polling gap still invalidates the pose.
     assert qualified(gate, sample(sample_ms=1008), 101.9,
                      new_sample=False) == ()
-    assert len(gate.startup_samples) == 1
+    assert gate.reference is None
 
 
 def test_near_uint32_wrap_still_requires_new_stationary_baseline():

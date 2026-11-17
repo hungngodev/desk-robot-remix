@@ -151,9 +151,8 @@ class HandlingGate:
                 # A backward sample from the same boot must not be treated as
                 # a new conversion or become the new calibration baseline.
                 if not (self.last_sample_ms >= 0xffff0000 and sample_ms <= 0xffff):
-                    previous = (self.last_boot_id, self.last_sample_ms)
-                    self.reset()
-                    self.last_boot_id, self.last_sample_ms = previous
+                    # A delayed conversion cannot invalidate a newer pose.
+                    # Real boot changes and forward host gaps still reset it.
                     return ()
                 self.reset()
             elif sample_ms - self.last_sample_ms > 0x7fffffff:
