@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -253,18 +254,46 @@ class RoomSerialFeed:
                 except ValueError:
                     self.rejected += 1
                     continue
+                # A cancellation may arrive while readline is blocked. Never
+                # deliver that completed read into a retired connection epoch.
+                if not running():
+                    break
                 self.received += 1
                 self.on_observation(evidence)
 
     async def run(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
+            reader_stop = threading.Event()
+            worker = asyncio.create_task(asyncio.to_thread(
+                self._read_port,
+                lambda: not stop.is_set() and not reader_stop.is_set(),
+            ))
+            cancelled = False
             try:
-                await asyncio.to_thread(self._read_port, lambda: not stop.is_set())
+                # Cancelling asyncio.to_thread does not stop its OS thread.
+                # Keep ownership until the serial port is actually closed.
+                while not worker.done():
+                    try:
+                        await asyncio.shield(worker)
+                    except asyncio.CancelledError:
+                        cancelled = True
+                        reader_stop.set()
+                if cancelled:
+                    # Consume any simultaneous serial error before propagating
+                    # cancellation; no old reader may survive into a restart.
+                    try:
+                        worker.result()
+                    except Exception:
+                        pass
+                    raise asyncio.CancelledError
+                worker.result()
                 self.last_error = None
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 self.last_error = type(exc).__name__
+            finally:
+                reader_stop.set()
             if not stop.is_set():
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=1.0)
