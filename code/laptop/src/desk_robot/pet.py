@@ -1062,6 +1062,22 @@ class PetController:
         state = self.states[robot_id]
         previous = state.last_safety_fault
         state.last_safety_fault = fault
+        # Normal human head-touch doubles as the WROOM's immediate physical
+        # motion stop. Revoke Mac motion authority, but do not fabricate a
+        # second autobiographical "latched fault" for an ordinary petting
+        # interaction; the genuine touch counter has its own event path.
+        if fault == "touch_active":
+            if (previous is not None and previous != fault
+                    and safety["ready"] is False and state.enabled
+                    and state.generation == generation
+                    and self.on_local_fault is not None):
+                try:
+                    await self.on_local_fault(robot_id)
+                except Exception as exc:
+                    state.last_error = (
+                        f"Local touch stop: {type(exc).__name__}: {str(exc)[:80]}"
+                    )
+            return
         if (
             previous is None or previous == fault or
             fault in ("none", "not_required") or
