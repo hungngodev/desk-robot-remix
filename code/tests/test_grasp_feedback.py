@@ -114,8 +114,11 @@ async def test_local_disarm_never_bypassed_to_release_jaw(monkeypatch):
             raise OperationError("Body disarmed")
         return {"armed": True}
 
-    with pytest.raises(OperationError, match="Body disarmed"):
+    # Overforce is the original failure. The subsequent body disarm must
+    # prevent any attempted relief, not replace the overforce diagnosis.
+    with pytest.raises(OperationError, match="force ceiling exceeded"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=intermittent_health)
+    assert calls >= 3
     assert head.commands == ["grip 65"]
 
 
@@ -158,7 +161,9 @@ async def test_uncertain_transport_failure_does_not_override_local_disarm(monkey
             raise OperationError("WROOM disarmed")
         return {"armed": True}
 
-    with pytest.raises(OSError, match="ADC bus timed out"):
+    # The local health check disarms BEFORE another ADC read is permitted.
+    # Do not manufacture an ADC timeout or send an unauthorized relief pulse.
+    with pytest.raises(OperationError, match="WROOM disarmed"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=status)
     assert head.commands == ["grip 65"]
 
