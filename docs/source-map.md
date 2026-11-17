@@ -1,3 +1,5 @@
+> **November 16 current source correction:** The selected cheap sensor is VL53L0X GY-530 with pinned Pololu vl53l0x-arduino v1.3.1 in full WROOM safety firmware. Older dated audits discussing VL53L4CD below are historical and do NOT authorize a premium sensor purchase. CAP1188 firmware now probes the common 0x29 and strapped 0x28 addresses only behind verified mux isolation. A project cited in this source map is a design reference unless docs/ATTRIBUTION.md and actual code show a copied/installed dependency. OOMWOO is still in hardware development and not a completed docking module to install.**
+
 # Source-to-feature register
 
 Updated 2026-11-04. Canonical index of supplied projects/videos, their intended
@@ -221,7 +223,7 @@ is a separate historical objective, not a robot dependency.
 | `S001` | VL6180X four downward | REQUIRED ROLE, PART RESEARCH | ST obsolete; qualify supported part and correct 4-corner geometry |
 | `S002` | VL53L0X forward | REQUIRED | Separate obstacle view; 0x29 on mux, no all-side coverage |
 | `S003` | VL53L1X alternative | COMPARISON | Different near-range constraints; not universal fix |
-| `S004` | VL53L4CD short-range replacement | QUALIFY SAMPLE | Vendor ULD and ST migration approach; cost and software/ranging trials |
+| `S004` | VL53L4CD short-range replacement | REJECT PREMIUM PURCHASE | Former alternative only; user selected generic VL53L0X; do not order or resurrect the expensive carrier |
 | `S005` | TCA9548A I2C switch | REQUIRED | Four floor + forward on channels 0–4, channels 5–7 reserved; bus health |
 | `S006` | TCRT5000 reflectance | ALTERNATIVE EXPERIMENT | ~millimeter height, surface sensitive; not equivalent drop-in 4-corner ToF |
 | `S007` | Pololu QTR reflectance | ALTERNATIVE EXPERIMENT | Low-mounted calibrated floor alternative, not automatic replacement |
