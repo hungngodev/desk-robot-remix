@@ -58,6 +58,12 @@ def verify(plan: dict, body: str, head: str) -> None:
         match = re.findall(rf"constexpr int {symbol}\[\] = \{{([\d, ]+)\}};", body)
         if len(match) != 1 or [int(x) for x in match[0].split(",")] != bus["body_gpio"][label]:
             raise ValueError(f"Stepper phase pin drift: {label}")
+    # Both motor backends are build-time alternatives and share GPIO pins.
+    # Verify the guarded DC firmware pins as well as the older stepper map.
+    for symbol, expected in (("kLeftIn1", 25), ("kLeftIn2", 26),
+                             ("kRightIn1", 27), ("kRightIn2", 32)):
+        if _pin(rf"constexpr int {symbol} = (\d+);", body, symbol) != expected:
+            raise ValueError(f"Guarded DC motor pin drift: {symbol}")
     for label, symbol in HEAD_SINGLE.items():
         actual = _pin(rf"#define {symbol} GPIO_NUM_(\d+)\b", head, symbol)
         if actual != bus["sense_gpio"][label]:
@@ -142,6 +148,12 @@ def render(plan: dict, body: str, head: str) -> str:
     for side in ("left", "right"):
         for phase, gpio in enumerate(bus["body_gpio"][f"{side}_stepper"], 1):
             row(f"WROOM GPIO{gpio}", f"{side} ULN2003 IN{phase}", "3.3V phase control")
+    row("WROOM GPIO25 + GPIO26", "left DRV8833 AIN1/AIN2 (DC FULL only)",
+        "3.3V motor PWM signals, alternative to left ULN2003",
+        "Guarded DC profile; physical load unqualified")
+    row("WROOM GPIO27 + GPIO32", "right DRV8833 BIN1/BIN2 (DC FULL only)",
+        "3.3V motor PWM signals, alternative to right ULN2003",
+        "Guarded DC profile; physical load unqualified")
     for signal, target in (("lift_servo", "MG90S lift signal"),
                            ("grip_servo", "MG90S jaw signal")):
         row(f"WROOM GPIO{bus['body_gpio'][signal]}", target, "3.3V PWM signal only")
@@ -197,6 +209,9 @@ def render(plan: dict, body: str, head: str) -> str:
         "Generated from docs/hardware/full-feature-plan.json and the actual",
         "BodyPins.h and head/sense/config.h symbols. Regenerate after any pin edit.",
         "Signal-only list. Never infer a power source from a logic voltage.",
+        "",
+        "**Motor variants are mutually exclusive:** `esp32_full` uses ULN2003 steppers;",
+        "`esp32_dc_full` uses DRV8833 DC motors. Never connect both motor drivers.",
         "",
         "| Source | Destination | Signal | Evidence |",
         "| --- | --- | --- | --- |", *rows, "",
