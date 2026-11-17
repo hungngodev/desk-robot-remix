@@ -54,6 +54,9 @@ class TwoWire {
   std::uint16_t tof_register = 0;
   unsigned tof_samples = 0;
   bool tof_ready = true;
+  bool fail_tof_register_write = false;
+  unsigned rejected_tof_register_writes = 0;
+  unsigned tof_register_stop_transmissions = 0;
   std::uint8_t tof_raw_status = 11;
   std::uint16_t tof_force_mm = 0; // zero keeps per-lane nominal 45/300 mm
   unsigned imu_probe_attempts = 0;
@@ -69,6 +72,11 @@ class TwoWire {
     outbound.clear();
   }
   std::size_t write(std::uint8_t v) {
+    if (fail_tof_register_write && current_address == 0x29 &&
+        ranges != 0 && extras == 0) {
+      ++rejected_tof_register_writes;
+      return 0;
+    }
     if (fail_optional_mux_write && current_address == 0x71) return 0;
     if (fail_pulse_register_write && current_address == 0x57) {
       ++failed_pulse_writes;
@@ -111,8 +119,9 @@ class TwoWire {
     }
   }
   std::uint8_t endTransmission(bool stop = true) {
-    (void)stop;
     ++transactions;
+    if (stop && current_address == 0x29 && ranges != 0 && extras == 0)
+      ++tof_register_stop_transmissions;
     if (current_address == 0x28 ||
         (current_address == 0x29 && extras == 1 && cap_uses_0x29))
       ++cap_register_end_calls;
