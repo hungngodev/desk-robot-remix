@@ -3145,6 +3145,23 @@ def test_native_completed_tool_fact_json_pack_keeps_all_requested_sources(native
     assert originals == prior  # model packing must not mutate durable memory
 
 
+def test_native_tool_fact_pack_retains_all_six_split_asr_results(native):
+    # Two completed ASR chunks can each request three independent tool
+    # reads in the SAME human turn. The native worker previously sent
+    # collected[:3] and silently erased the latter completed receipts.
+    module, _ = native
+    facts = [
+        {"source": f"tool_{i}", "sequence": i, "motor_authorized": False}
+        for i in range(6)
+    ]
+    packed = module.pack_grounded_facts(facts, limit=1800)
+    decoded = json.loads(packed)
+    assert decoded == facts
+    # Seven completed results cannot be silently reduced to six.
+    with pytest.raises(ValueError):
+        module.pack_grounded_facts(facts + [{"source": "seventh"}], limit=1800)
+
+
 def test_native_tool_fact_pack_fails_closed_not_dropping_last_receipt(native):
     module, _ = native
     with pytest.raises(ValueError, match="speech context budget"):
@@ -3154,7 +3171,7 @@ def test_native_tool_fact_pack_fails_closed_not_dropping_last_receipt(native):
              "interpretation_not_proof": "This is a tentative view"},
         ], limit=1800)
     for facts in (
-        [], [None], [{}] * 4,
+        [], [None], [{}] * 7,
         [{"source": "status", "value": float("nan")}],
     ):
         with pytest.raises(ValueError):
