@@ -145,7 +145,9 @@ def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
     harness_ok = (conn is not None and lead is not None and
                   conn >= peak and lead >= peak)
     reasons = []
-    if not fit:
+    if fit is None:
+        reasons.append("full_protected_pack_dimensions_unknown")
+    elif not fit:
         reasons.append("protected_pack_does_not_fit_existing_cavity")
     if not peak_ok:
         reasons.append("pack_max_discharge_below_peak_budget")
