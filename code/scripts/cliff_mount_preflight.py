@@ -135,6 +135,98 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
     }
 
 
+def screen_planar_cliff_coverage(
+    *, left_wheel_mm_s: float, right_wheel_mm_s: float,
+    track_width_mm: float, support_points_mm: list,
+    floor_sensor_points_mm: list, chassis_mount_above_desk_mm: float,
+    detection_latency_ms: float, measured_worst_braking_mm: float,
+    engineering_margin_mm: float = 10.0,
+    qualified_lateral_sensor_coverage_mm: float = 0.0,
+) -> dict:
+    """Necessary planar motion coverage for all 4 floor sensors.
+
+    Differential drive kinematics from IEEE RAS University:
+    v=(vR+vL)/2 and omega=(vR-vL)/track.
+    At chassis point (x,y): point velocity=(v-omega*y, omega*x).
+    Project each sensor AHEAD of a moving support point along its actual
+    tangent. A laterally distant sensor cannot protect an unrelated wheel.
+    Ref: https://www.ieee-ras.org/ras-university/?ras_page=docs%2Fchap2_sensing%2Fsensors-and-sensing
+
+    This is a conservative NECESSARY paper screen, not proof that any
+    floor sensor can see a partial cliff scene or that the robot can brake.
+    """
+    scalar = (left_wheel_mm_s, right_wheel_mm_s, track_width_mm,
+              chassis_mount_above_desk_mm, detection_latency_ms,
+              measured_worst_braking_mm, engineering_margin_mm,
+              qualified_lateral_sensor_coverage_mm)
+    if any(not _finite_real(x) for x in scalar):
+        raise ValueError("Motion, geometry and qualification inputs must be finite")
+    if (track_width_mm <= 0 or chassis_mount_above_desk_mm < 0
+            or detection_latency_ms < 0 or measured_worst_braking_mm < 0
+            or engineering_margin_mm < 0
+            or qualified_lateral_sensor_coverage_mm < 0):
+        raise ValueError("Invalid differential drive dimensions or stop budget")
+    if len(floor_sensor_points_mm) != 4 or len(support_points_mm) < 3:
+        raise ValueError("Need four floor sensors and every supporting contact")
+    for point in [*support_points_mm, *floor_sensor_points_mm]:
+        if (not isinstance(point, (list, tuple)) or len(point) != 2
+                or any(not _finite_real(c) for c in point)):
+            raise ValueError("Each measured body-frame point needs finite x,y")
+
+    h = (chassis_mount_above_desk_mm
+         + verify_source_contract()["lens_center_above_adapter_mount_mm"])
+    fov_rear_setback = h * math.tan(math.radians(ST_SYSTEM_FOV_DEG / 2))
+    # A vendor FoV alone does not guarantee lateral recognition. Default 0
+    # until a qualified actual surface/footprint measurement is supplied.
+    if qualified_lateral_sensor_coverage_mm > fov_rear_setback:
+        raise ValueError("Claimed lateral coverage exceeds nominal optical radius")
+    v = (left_wheel_mm_s + right_wheel_mm_s) / 2
+    omega = (right_wheel_mm_s - left_wheel_mm_s) / track_width_mm
+    cases = []
+    active = 0
+    for index, (x, y) in enumerate(support_points_mm):
+        dx_dt, dy_dt = v - omega * y, omega * x
+        speed = math.hypot(dx_dt, dy_dt)
+        if speed == 0:
+            cases.append({"support_index": index, "motion_mm_s": 0.0,
+                          "requires_cliff_coverage": False, "covered": True})
+            continue
+        active += 1
+        ux, uy = dx_dt / speed, dy_dt / speed
+        projected_leads = [
+            (sx - x)*ux + (sy - y)*uy
+            for sx, sy in floor_sensor_points_mm
+            if abs((sx - x)*uy - (sy - y)*ux)
+               <= qualified_lateral_sensor_coverage_mm
+        ]
+        best_lead = max(projected_leads) if projected_leads else None
+        required = (measured_worst_braking_mm + engineering_margin_mm
+                    + speed * detection_latency_ms / 1000
+                    + fov_rear_setback)
+        if not all(math.isfinite(z) for z in
+                   (speed, required, fov_rear_setback)):
+            raise ValueError("Turning geometry or latency overflow")
+        cases.append({
+            "support_index": index, "motion_mm_s": speed,
+            "requires_cliff_coverage": True,
+            "best_sensor_lead_mm": best_lead,
+            "required_sensor_lead_mm": required,
+            "covered": best_lead is not None and best_lead > required,
+        })
+    if active == 0:
+        raise ValueError("Evaluate a moving command, not a stationary robot")
+    return {
+        "body_translation_mm_s": v,
+        "body_turn_rate_rad_s": omega,
+        "manufacturer_fov_deg": ST_SYSTEM_FOV_DEG,
+        "nominal_fov_rear_footprint_mm": fov_rear_setback,
+        "support_checks": cases,
+        "necessary_planar_coverage_on_paper": all(c["covered"] for c in cases),
+        "actual_surface_and_motor_faults_verified": False,
+        "fully_safe_cliff_operation_proven": False,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mount-above-desk-mm", type=float, required=True)
