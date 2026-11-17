@@ -558,3 +558,32 @@ def test_round2_xiaozhi_jpeg_and_bounded_uart_reuse_existing_owners():
     # route and Mac read-only bridge. No extra VLLM or cloud agent required.
     assert "Intent: function_call" in config
     assert "LLM: OllamaLLM" in config
+
+def test_pinned_sense_sensor_tool_alias_is_only_readonly_live_wroom():
+    """Expose sensory context without granting the model motor authority.
+
+    The actual Sense ESP-IDF build will also compile this MCP registration.
+    This source contract cannot certify electrical, voice or sensor hardware.
+    """
+    bridge = (ROOT / "code/firmware/head/overlay/robot_bridge.cc").read_text()
+    sense = (ROOT / "code/firmware/head/sense/desk_robot_sense.cc").read_text()
+    user_tools = bridge.split("void Bridge::AddTools() {", 1)[1]
+    alias = user_tools.split(
+        'mcp.AddTool(\n        "self.pet.get_sensory_state",', 1
+    )[1].split("#ifdef CONFIG_DESK_ROBOT_DIRECT_MOTION_TOOLS", 1)[0]
+    assert 'return call("status");' in alias
+    assert "PropertyList()" in alias
+    assert "Read the current WROOM cliff safety" in alias
+    assert "motor permission" in alias
+    assert 'mcp.AddTool("self.robot.drive"' in user_tools
+    assert "#ifdef CONFIG_DESK_ROBOT_DIRECT_MOTION_TOOLS" in user_tools
+    assert 'self.pet.move' not in user_tools
+    assert 'self.pet.calibrate_sensors' not in user_tools
+    # Long sensor narratives are never sent as invalid wake-word detect
+    # payloads. The selected Sense board already reuses an opt-in Xiaozhi
+    # audio turn, which has independent human interruption and consent.
+    assert "WakeWordInvoke(" not in sense
+    assert "SendWakeWordDetected(" not in sense
+    assert "WakeWordInvoke(" not in bridge
+    assert "SendWakeWordDetected(" not in bridge
+    assert "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED" in sense
