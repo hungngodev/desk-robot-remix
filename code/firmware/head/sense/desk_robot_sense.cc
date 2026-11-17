@@ -210,14 +210,18 @@ private:
         // The pinned Xiaozhi Esp32Camera handles PIXFORMAT_JPEG natively.
         // Avoid VGA RGB565 copies and software JPEG compression on the S3:
         // leave CPU headroom for PDM AEC, Opus and emergency audio flush.
-        // One PSRAM frame buffer limits peak RAM and camera contention until
-        // real simultaneous microphone/camera stress measurements exist.
+        // Espressif esp32-camera uses continuous JPEG acquisition only with
+        // two or more framebuffers. LATEST discards queued old frames, so a
+        // fresh MJPEG subscription cannot inherit an old single-buffer image.
+        // Only one framebuffer is application-visible in LATEST mode.
+        // Real simultaneous mic/AEC/stream throughput and PSRAM pressure
+        // still require physical stress tests before camera acceptance.
         config.pixel_format = PIXFORMAT_JPEG;
         config.frame_size = FRAMESIZE_VGA;
         config.jpeg_quality = 12;
-        config.fb_count = 1;
+        config.fb_count = 2;
         config.fb_location = CAMERA_FB_IN_PSRAM;
-        config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+        config.grab_mode = CAMERA_GRAB_LATEST;
         camera_ = new Esp32Camera(config);
     }
 
