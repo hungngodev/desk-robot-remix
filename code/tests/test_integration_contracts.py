@@ -530,9 +530,13 @@ def test_round2_xiaozhi_jpeg_and_bounded_uart_reuse_existing_owners():
     body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
     config = (ROOT / "code/config/xiaozhi.local.example.yaml").read_text()
 
-    # XIAO Sense streams native JPEG using upstream Xiaozhi's ONE camera.
+    # XIAO Sense streams JPEG using the existing single upstream Xiaozhi
+    # camera. Two PSRAM frame buffers are necessary for Espressif's continuous
+    # JPEG acquisition; LATEST avoids handing a queued older frame to Mac.
+    # The single owner is a camera instance, not a single frame buffer.
     assert "config.pixel_format = PIXFORMAT_JPEG" in sense
-    assert "config.fb_count = 1;" in sense
+    assert "config.fb_count = 2;" in sense
+    assert "config.grab_mode = CAMERA_GRAB_LATEST;" in sense
     assert "config.fb_location = CAMERA_FB_IN_PSRAM" in sense
     assert "void Bridge::CameraStreamTask(" in bridge
     assert '"/api/camera.mjpg"' in bridge
