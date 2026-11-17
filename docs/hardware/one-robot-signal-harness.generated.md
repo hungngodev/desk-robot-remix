@@ -20,7 +20,7 @@ Signal-only list. Never infer a power source from a logic voltage.
 | WROOM GPIO23 | right ULN2003 IN4 | 3.3V phase control | Source allocated |
 | WROOM GPIO25 + GPIO26 | left DRV8833 AIN1/AIN2 (DC FULL only) | 3.3V motor PWM signals, alternative to left ULN2003 | Guarded DC profile; physical load unqualified |
 | WROOM GPIO27 + GPIO32 | right DRV8833 BIN1/BIN2 (DC FULL only) | 3.3V motor PWM signals, alternative to right ULN2003 | Guarded DC profile; physical load unqualified |
-| WROOM GPIO23 (DC only; same as STEP right coil 4) | CD74HC123 channel 2 B rising-edge input | CPU-only 15ms toggles, 3.3V; no LEDC, pull LOW at boot | Source exists only in esp32_dc_watchdog_lab; nSLEEP gate unqualified |
+| WROOM GPIO23 (DC only; same as STEP right coil 4) | CD74HC123 channel 2 B rising-edge input | CPU-only 15ms toggles, 3.3V; no LEDC, pull LOW at boot | Source in esp32_dc_watchdog_lab and esp32_dc_integrated_lab; nSLEEP gate unqualified |
 | WROOM GPIO18 | MG90S lift signal | 3.3V PWM signal only | Source allocated |
 | WROOM GPIO19 | MG90S jaw signal | 3.3V PWM signal only | Source allocated |
 | XIAO GPIO2 TX | WROOM GPIO16 RX | UART 115200, 3.3V | Source allocated |
