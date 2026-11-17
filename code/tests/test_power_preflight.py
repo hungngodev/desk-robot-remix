@@ -605,6 +605,7 @@ def test_protected_pack_envelope_and_current_screen_never_certifies_hardware():
         tray_length_mm=68, tray_width_mm=35, tray_height_mm=14,
         rated_peak_discharge_a=10, rated_continuous_discharge_a=6,
         pcm_overcurrent_trip_a=11,
+        connector_continuous_a=10, wire_and_crimp_continuous_a=10,
     )
     overlong = pack_screen(
         requirements, pack_length_mm=86, pack_width_mm=30,
@@ -630,6 +631,8 @@ def test_protected_pack_envelope_and_current_screen_never_certifies_hardware():
         pack_thickness_mm=10, **base,
     )
     assert sufficient_hypothetical["candidate_usable_on_paper"] is True
+    assert sufficient_hypothetical["connector_and_wire_ratings_complete"]
+    assert sufficient_hypothetical["connector_and_wire_current_sufficient_on_paper"]
     assert not sufficient_hypothetical["candidate_physically_qualified"]
     assert not sufficient_hypothetical["actual_pack_pcm_and_ntc_test_verified"]
     assert not sufficient_hypothetical["printed_assembly_and_wire_relief_verified"]
@@ -679,6 +682,9 @@ def test_protected_pack_incomplete_ratings_and_rotated_fit():
     ("pack_thickness_mm", float("nan")),
     ("rated_continuous_discharge_a", True),
     ("pcm_overcurrent_trip_a", float("inf")),
+    ("connector_continuous_a", float("nan")),
+    ("wire_and_crimp_continuous_a", True),
+    ("wire_and_crimp_continuous_a", -1),
 ])
 def test_protected_pack_bad_specs_fail_closed(field, value):
     requirements = tool(1.0, 0.6)
@@ -713,6 +719,8 @@ def test_pack_geometry_cli_rejects_an_overlong_cell_before_order(monkeypatch, ca
     # called qualified by the CLI even when every hypothetical rating fits.
     changed = list(base)
     changed[changed.index("--pack-length-mm") + 1] = "55"
+    changed += ["--pack-connector-continuous-a", "10",
+                "--pack-wire-crimp-continuous-a", "10"]
     monkeypatch.setattr(sys, "argv", changed)
     runpy.run_path(str(script), run_name="__main__")
     good = json.loads(capsys.readouterr().out)
@@ -755,3 +763,68 @@ def test_pack_pcm_rating_must_cover_its_own_advertised_peak(peak, continuous, tr
             rated_continuous_discharge_a=continuous,
             pcm_overcurrent_trip_a=trip,
         )
+
+
+def test_real_4a_cell_does_not_override_a_0_86a_or_2_2a_connector():
+    """BatterySpace supplies multiple actual connector ratings for one 4A cell.
+
+    These are illustrative manufacturer ratings, not approval to buy that pack.
+    At a hypothetical 5V 1A peak, minimum 1S input is 2.550A with margin.
+    """
+    demand = tool(1, .6)
+    assert demand["minimum_rated_cell_and_boost_input_a"] == 2.55
+    base = dict(pack_length_mm=55, pack_width_mm=30,
+                pack_thickness_mm=10, tray_length_mm=68,
+                tray_width_mm=35, tray_height_mm=14,
+                rated_peak_discharge_a=4, rated_continuous_discharge_a=4,
+                pcm_overcurrent_trip_a=5)
+    unknown = pack_screen(demand, **base)
+    assert unknown["pack_only_usable_on_paper"] is True
+    assert unknown["connector_and_wire_ratings_complete"] is False
+    assert unknown["candidate_usable_on_paper"] is None
+    for amps in (.86, 2.2):
+        report = pack_screen(
+            demand, connector_continuous_a=amps,
+            wire_and_crimp_continuous_a=amps, **base)
+        assert report["pack_only_usable_on_paper"] is True
+        assert report["connector_and_wire_current_sufficient_on_paper"] is False
+        assert report["candidate_usable_on_paper"] is False
+        assert report["candidate_physically_qualified"] is False
+    hypothetical = pack_screen(
+        demand, connector_continuous_a=4,
+        wire_and_crimp_continuous_a=4, **base)
+    assert hypothetical["candidate_usable_on_paper"] is True
+    assert hypothetical["candidate_physically_qualified"] is False
+
+
+def test_one_missing_harness_spec_and_cli_cannot_claim_compatible(monkeypatch, capsys):
+    import json
+    import sys
+    demand = tool(1, .6)
+    base = dict(pack_length_mm=55, pack_width_mm=30,
+                pack_thickness_mm=10, tray_length_mm=68,
+                tray_width_mm=35, tray_height_mm=14,
+                rated_peak_discharge_a=8, rated_continuous_discharge_a=5,
+                pcm_overcurrent_trip_a=9)
+    assert pack_screen(
+        demand, connector_continuous_a=8, **base)[
+        "candidate_usable_on_paper"] is None
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    args = [str(script), "--peak-5v-a", "1",
+            "--continuous-5v-a", ".6",
+            "--pack-length-mm", "55", "--pack-width-mm", "30",
+            "--pack-thickness-mm", "10", "--tray-length-mm", "68",
+            "--tray-width-mm", "35", "--tray-height-mm", "14",
+            "--pack-peak-discharge-a", "8",
+            "--pack-continuous-discharge-a", "5",
+            "--pack-pcm-trip-a", "9",
+            "--pack-connector-continuous-a", "8"]
+    monkeypatch.setattr(sys, "argv", args)
+    runpy.run_path(str(script), run_name="__main__")
+    result = json.loads(capsys.readouterr().out)
+    assert result["protected_pack_screen"]["candidate_usable_on_paper"] is None
+    args += ["--pack-wire-crimp-continuous-a", ".86"]
+    monkeypatch.setattr(sys, "argv", args)
+    runpy.run_path(str(script), run_name="__main__")
+    unsafe = json.loads(capsys.readouterr().out)
+    assert unsafe["protected_pack_screen"]["candidate_usable_on_paper"] is False
