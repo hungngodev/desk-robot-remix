@@ -32,6 +32,20 @@ target_include_directories(optional_i2c_io_tests PRIVATE
 target_compile_definitions(optional_i2c_io_tests PRIVATE DESK_ROBOT_STEPPER=1)
 target_compile_features(optional_i2c_io_tests PRIVATE cxx_std_11)
 target_compile_options(optional_i2c_io_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(haptic_pulse_tests tests/haptic_pulse_tests.cpp)
+target_include_directories(haptic_pulse_tests PRIVATE lib/AccessorySensors)
+target_compile_features(haptic_pulse_tests PRIVATE cxx_std_11)
+target_compile_options(haptic_pulse_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_executable(haptic_mcp_bus_tests tests/haptic_mcp_bus_tests.cpp
+  lib/AccessorySensors/AccessorySensors.cpp)
+target_include_directories(haptic_mcp_bus_tests PRIVATE
+  tests/fakes lib/AccessorySensors)
+target_compile_definitions(haptic_mcp_bus_tests PRIVATE
+  DESK_ROBOT_STEPPER=1 DESK_ROBOT_ENABLE_HAPTIC=1)
+target_compile_features(haptic_mcp_bus_tests PRIVATE cxx_std_11)
+target_compile_options(haptic_mcp_bus_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
 add_executable(terminal_ir_tests tests/terminal_ir_tests.cpp)
 target_include_directories(terminal_ir_tests PRIVATE lib/TerminalIr)
 target_compile_features(terminal_ir_tests PRIVATE cxx_std_11)
@@ -78,7 +92,7 @@ add_executable(guarded_body_tests tests/guarded_body_tests.cpp)
 target_link_libraries(guarded_body_tests PRIVATE body_control stepper_drive)
 target_compile_options(guarded_body_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 if(BODY_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-  foreach(target optional_i2c_io_tests terminal_ir_tests pn532_frames_tests accessory_math_tests pulse_raw_tests range_scan_tests tof_mux_tests berry_imu berry_imu_tests body_control body_tests stepper_drive stepper_tests cliff_guard cliff_tests guarded_body_tests)
+  foreach(target optional_i2c_io_tests haptic_pulse_tests haptic_mcp_bus_tests terminal_ir_tests pn532_frames_tests accessory_math_tests pulse_raw_tests range_scan_tests tof_mux_tests berry_imu berry_imu_tests body_control body_tests stepper_drive stepper_tests cliff_guard cliff_tests guarded_body_tests)
     target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=address,undefined)
   endforeach()
@@ -86,6 +100,8 @@ endif()
 
 enable_testing()
 add_test(NAME optional_sensor_bus_protocol COMMAND optional_i2c_io_tests)
+add_test(NAME haptic_edge_rate_and_fault_gating COMMAND haptic_pulse_tests)
+add_test(NAME haptic_mcp23017_dock_bus_gating COMMAND haptic_mcp_bus_tests)
 add_test(NAME pn532_bounded_read_only_protocol COMMAND pn532_frames_tests)
 add_test(NAME independent_nec_terminal_beacon_evidence COMMAND terminal_ir_tests)
 add_test(NAME optional_sensor_register_math COMMAND accessory_math_tests)
