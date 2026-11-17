@@ -85,9 +85,22 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   bool ok = read_reg(0x04, write_pointer) && read_reg(0x06, read_pointer);
   const std::uint8_t available =
       static_cast<std::uint8_t>((write_pointer - read_pointer) & 31U);
-  // Fixed max four samples/24B, short enough for the safety-first loop.
-  // A backlog larger than four is not silently counted as a new heartbeat.
-  const std::uint8_t n = available > 4 ? 4 : available;
+  // The MAX30102 FIFO_RD_PTR (0x06) is writable. If the body loop was
+  // delayed, the oldest four of a longer backlog are NOT fresh paw contact.
+  // Drop that backlog in one bounded register write instead of assigning
+  // now_ms to samples acquired before the pause. A new reading must arrive
+  // on a later poll before an event may be emitted.
+  if (ok && available > 4U) {
+    const bool discarded =
+        write_reg(0x06, static_cast<std::uint8_t>(write_pointer & 31U));
+    const bool closed = close();
+    sample_.valid = false;
+    (void)discarded;
+    (void)closed;
+    return false;
+  }
+  // At most four recent samples / 24 bytes in one safety-first iteration.
+  const std::uint8_t n = available;
   std::uint8_t data[24]{};
   if (ok && n > 0) ok = read_bytes(0x07, data, n * 6);
   const bool closed = close();
