@@ -123,7 +123,12 @@ def _valid_reading(sensor: str, data: dict, clock: int) -> bool:
         if (data["stationary"] or data["moving"]) and not data["presence"]:
             raise ValueError("Radar target contradicts absent presence")
     elif sensor == "soil":
-        _value(data, "raw_adc", 0, 4095)  # not calibrated moisture percent
+        # Firmware publishes only a bounded 12-bit integer from three ADC
+        # samples. Reject a saturated rail, bool or floating JSON number even
+        # if no optional wet/dry calibration has been provided by the owner.
+        raw = data.get("raw_adc")
+        if type(raw) is not int or not 1 <= raw <= 4094:
+            raise ValueError("Invalid or saturated raw soil ADC sample")
     else:
         pixels = data.get("pixels_c")
         if not isinstance(pixels, list) or len(pixels) != 64:
