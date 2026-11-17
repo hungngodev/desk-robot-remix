@@ -236,6 +236,8 @@ async def test_new_ina226_current_receipts_report_direction_without_charger_auth
     assert result["state"] == "charger_reports_active"
     assert result["stable_three_samples"]
     assert result["raw_pack_direction"] == expected
+    assert result["charger_indicator_net_discharge_conflict"] is (
+        raw_ma < -20)
     assert result["raw_pack_samples_fresh"] is True
     assert result["raw_pack_ma"] == [raw_ma] * 3
     assert result["battery_current_measured"] is False
