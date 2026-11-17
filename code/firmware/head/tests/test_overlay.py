@@ -83,6 +83,9 @@ class OverlayTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         paths = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc", "main/boards/common/camera.h", "main/boards/common/esp_video.h", "main/boards/common/esp_video.cc"]
+        # Sense overlays urgent-stop and the pinned Xiaozhi I2S writer; no
+        # shortcut synthetic codec is installed in the firmware clone.
+        paths += ["main/application.cc", "main/audio/codecs/no_audio_codec.cc"]
         paths += ["main/boards/common/esp32_camera.h", "main/boards/common/esp32_camera.cc"]
         paths += [p.relative_to(UPSTREAM).as_posix() for p in (UPSTREAM / "main/boards/m5stack/core-s3").iterdir() if p.is_file()]
         self.original = {}
@@ -151,6 +154,31 @@ class OverlayTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Requires Xiaozhi commit"):
                 overlay.apply(self.root)
         self.git.start()
+
+    def test_sense_reuses_upstream_i2s_writer_with_finite_stop_bound(self):
+        overlay.apply(self.root, "sense")
+        codec_path = "main/audio/codecs/no_audio_codec.cc"
+        source = (self.root / codec_path).read_text()
+        original = self.original[codec_path].decode()
+        self.assertIn("portMAX_DELAY", original)
+        self.assertIn("data_if_mutex_", original)
+        self.assertIn("#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3", source)
+        self.assertIn("pdMS_TO_TICKS(500)", source)
+        self.assertIn("size_t bytes_written = 0", source)
+        self.assertIn("return static_cast<int>(bytes_written / sizeof(int32_t))", source)
+        self.assertIn("#else", source)
+        self.assertIn("portMAX_DELAY", source)
+        self.assertNotIn("pdMS_TO_TICKS(500)", original)
+        app = (self.root / "main/application.cc").read_text()
+        self.assertIn("urgent_flush", app)
+        self.assertIn("audio_service_.ResetDecoder()", app)
+        self.assertIn("GetAudioCodec()->EnableOutput(false)", app)
+        self.assertIn('SenseReferenceCodec', (
+            self.root / overlay.BOARDS["sense"] / "desk_robot_sense.cc").read_text())
+        # The source checkout remains exact and the patch is reversible.
+        overlay.remove(self.root)
+        self.assertEqual((self.root / codec_path).read_bytes(),
+                         self.original[codec_path])
 
     def test_modular_variant_pins_camera_lock_and_independent_identity(self):
         overlay.apply(self.root, "modular")
