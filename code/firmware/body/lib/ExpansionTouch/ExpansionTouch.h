@@ -7,8 +7,9 @@
 
 namespace desk_robot {
 // Bounded, read-only CAP1188 8 electrode polling. Datasheet ID: 0xFD=0x50,
-// 0xFE=0x5D, sensor input register 0x03. Address 0x28 must be strapped on
-// the actual breakout before powering on (stock default is often 0x29).
+// 0xFE=0x5D, sensor input register 0x03. Prefer common breakout default
+// 0x29; also accept 0x28 only after real chip ID verification. The optional
+// 0x71 lane is isolated from range 0x70 before probing either address.
 // No local motor permission or stop override is implemented here.
 class ExpansionTouch {
  public:
@@ -19,7 +20,9 @@ class ExpansionTouch {
  private:
   static constexpr std::uint8_t kRangeMux = 0x70;
   static constexpr std::uint8_t kExpansionMux = 0x71;
-  static constexpr std::uint8_t kAddress = 0x28;
+  static constexpr std::uint8_t kPreferredAddress = 0x29;
+  static constexpr std::uint8_t kAlternativeAddress = 0x28;
+  std::uint8_t address_ = kPreferredAddress;
   TwoWire* wire_ = nullptr;
   bool present_ = false;
   bool verified_ = false;
