@@ -830,6 +830,7 @@ def test_critical_physical_evidence_gates_are_independent():
         "battery_pack_actual_length_and_enclosure_clearance",
         "amplifier_speaker_power_limit_and_thermal_trial",
         "dock_contacts_recess_reverse_polarity_and_current_limit",
+        "charger_out_full_voltage_range_to_fixed_5v_rail_physical_trial",
         "haptic_hc123_one_shot_stuck_i2c_and_motor_thermal_trial",
     } <= system
     assert "received_quantity_revision_and_owned_stock_inspection" in parts
