@@ -218,6 +218,23 @@ int main() {
       CHECK(Wire.imu_terminated_transmissions - before >= Wire.failed_imu_writes);
       CHECK(Wire.ranges == 0 && Wire.extras == 0);
     }
+    {
+      // A rejected VL53L0X register pointer must use I2C STOP, not a
+      // repeated START. All previous cliff evidence then becomes invalid.
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      const auto before = Wire.tof_register_stop_transmissions;
+      Wire.fail_tof_register_write = true;
+      bus.poll(guard, 60);
+      CHECK(Wire.rejected_tof_register_writes >= 1);
+      CHECK(Wire.tof_register_stop_transmissions > before);
+      faulted(guard);
+      Wire.fail_tof_register_write = false;
+      for (std::uint32_t at = 61; at < 66; ++at) bus.poll(guard, at);
+      CHECK(guard.try_rearm(70)); // requires five entirely new samples
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {
