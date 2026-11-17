@@ -147,7 +147,16 @@ def compose_brain_context(
             continue
         phrase = ""
         if channel == "sensor" and isinstance(kind, str):
-            phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
+            if kind == "safety_fault":
+                # An actual WROOM fault transition outranks idle VLM/memory
+                # context, but is NOT evidence of a measured desk drop, a
+                # physical motor halt, or a license to auto-rearm the body.
+                phrase = (
+                    "WROOM reported latched safety fault and local disarm; "
+                    "do not drive, reverse, rearm, or claim a measured cliff."
+                )
+            else:
+                phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
         elif channel == "room_station":
             reading = item.get("content")
             if (item.get("shared_not_robot_eyewitness") is True
@@ -227,7 +236,7 @@ def compose_brain_context(
                 phrase = label + _clean(result, limit=90)
         if phrase:
             seen_cues.add(identity)
-            priority = priorities[channel]
+            priority = -1 if channel == "sensor" and kind == "safety_fault" else priorities[channel]
             if channel == "human_transcript":
                 priority = 0 if heard_count == 0 else 5
                 heard_count += 1
