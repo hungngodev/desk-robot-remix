@@ -176,6 +176,43 @@ def screen_protected_pack(
     }
 
 
+def screen_bq2407x_output_path(
+    charger_variant: str,
+    *, regulator_min_input_v: float, regulator_max_input_v: float,
+    bypasses_5v_regulator: bool = False,
+) -> dict:
+    """Require a converter input rating that covers both docked and 1S power.
+
+    Manufacturer Rev N: BQ24074 OUT=4.3..4.5V, BQ24075 OUT=5.4..5.6V
+    when the input is sufficient for voltage regulation. On battery supply
+    OUT follows the Li-ion cell, with no guaranteed fixed 5V rail. The
+    conservative 3.0V lower bound is a design target, not a tested UVLO.
+    A passing range check NEVER qualifies a real charger, pack or boost.
+    """
+    if charger_variant not in ("BQ24074", "BQ24075"):
+        raise ValueError("Use a source-reviewed BQ24074 or BQ24075 variant")
+    if (not _finite_number(regulator_min_input_v)
+            or not _finite_number(regulator_max_input_v)
+            or regulator_min_input_v <= 0
+            or regulator_min_input_v >= regulator_max_input_v):
+        raise ValueError("Regulator input voltage ratings must be real and ordered")
+    if type(bypasses_5v_regulator) is not bool:
+        raise ValueError("Direct 5V rail bypass must be explicit")
+    docked_output_max_v = 4.5 if charger_variant == "BQ24074" else 5.6
+    return {
+        "charger_ic": charger_variant,
+        "docked_output_max_v": docked_output_max_v,
+        "conservative_low_cell_design_v": 3.0,
+        "regulator_covers_charger_output_on_paper": (
+            not bypasses_5v_regulator and regulator_min_input_v <= 3.0
+            and regulator_max_input_v >= docked_output_max_v
+        ),
+        "fixed_5v_direct_output_prohibited": True,
+        "real_docked_voltage_measured": False,
+        "charger_and_5v_rail_physically_qualified": False,
+    }
+
+
 def assess_docked_load(
     measured_idle_5v_a: float,
     requested_cell_charge_a: float,
