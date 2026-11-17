@@ -225,7 +225,8 @@ def test_obsolete_floor_sensor_is_not_an_active_purchase_item():
     assert "Sensor purchase hold" in parts
     assert "|[VL6180X breakout]" not in parts
     wiring = (DOCS / "hardware/wiring.md").read_text(encoding="utf-8")
-    assert "front-left downward VL53L4CD candidate" in wiring
+    assert "CH0 front-left floor VL53L0X 0x29" in wiring
+    assert "front-left downward VL53L4CD candidate" not in wiring
     assert "downward VL6180X" not in wiring
     assert not module("check_budget").budget(data)["purchase_ready"]
 
