@@ -3293,7 +3293,10 @@ async def test_bmp280_air_pressure_events_require_distinct_measurements_and_opt_
         await pet._observe_aux("robot-01", 19, report(1, 101100))
         await pet._observe_aux("robot-01", 19, report(1, 101100))
         assert memory.count("robot-01") == 1
-        await pet._observe_aux("robot-01", 19, report(2, 101600, age=2000))
+        # A 2 second old sample is invalid at the authenticated WROOM
+        # boundary, not merely an uninteresting local pressure event.
+        with pytest.raises(ValueError, match="Invalid optional BMP280 ambient sample"):
+            await pet._observe_aux("robot-01", 19, report(2, 101600, age=2000))
         assert memory.count("robot-01") == 1
     finally:
         state.enabled = False
