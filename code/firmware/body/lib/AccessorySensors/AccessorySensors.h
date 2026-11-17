@@ -7,6 +7,10 @@
 #include "Bmp280Math.h"
 #include "GestureDecoder.h"
 #include "Pn532Frames.h"
+#include "HapticPulse.h"
+#ifndef DESK_ROBOT_ENABLE_HAPTIC
+#define DESK_ROBOT_ENABLE_HAPTIC 0
+#endif
 namespace desk_robot {
 // One optional mux operation per 12ms after the critical ranging pass.
 // Reuses manufacturer register maps and Sensirion CRC, never Arduino libraries
@@ -16,12 +20,34 @@ class AccessorySensors {
   bool begin(TwoWire& wire);
   void poll(std::uint32_t now_ms);
   const AccessoryReadings& readings() const { return data_; }
+  // Local CAP1188 transition only. No speech/network motor commands.
+  // Available solely in the isolated hardware one-shot lab build.
+  bool request_haptic(std::uint32_t now_ms) {
+#if DESK_ROBOT_ENABLE_HAPTIC
+    return haptic_.request(now_ms);
+#else
+    (void)now_ms;
+    return false;
+#endif
+  }
+  bool haptic_ready() const {
+#if DESK_ROBOT_ENABLE_HAPTIC
+    return haptic_.ready();
+#else
+    return false;
+#endif
+  }
  private:
   TwoWire* wire_ = nullptr;
   bool mux_present_ = false;
   std::uint8_t next_lane_ = 1;
   std::uint32_t last_ms_ = 0;
   bool started_ = false;
+#if DESK_ROBOT_ENABLE_HAPTIC
+  HapticPulse haptic_{};
+  bool haptic_needs_low_ = false;
+  void haptic_step(std::uint32_t now_ms);
+#endif
   bool sht_pending_ = false;
   std::uint32_t sht_started_ = 0;
   bool ads_pending_ = false;
