@@ -690,10 +690,12 @@ static void inconsistent_dock_acquisition_requires_new_sample_to_recover() {
   // not only when a later command happens to call tick().
   CHECK(!body.state().armed);
   CHECK(body.state().left == 0 && body.state().right == 0);
-  CHECK(send(body, "arm", 44) == "ERR arm dock_gpio_missing_or_stale");
+  // An asserted CHG indication latches the motor-contact stop first;
+  // malformed provenance does not clear it without a new GPIOA sample.
+  CHECK(send(body, "arm", 44) == "ERR arm dock_power_connected");
   r.dock.charge_indicated = false; // replay of prior legitimate cache
   body.set_accessories(r, 45);
-  CHECK(send(body, "arm", 46) == "ERR arm dock_gpio_missing_or_stale");
+  CHECK(send(body, "arm", 46) == "ERR arm dock_power_connected");
   r.dock.sample_seq = 13;
   r.dock.at_ms = 47; // next true completed GPIOA acquisition
   body.set_accessories(r, 48);
