@@ -25,6 +25,9 @@ class TwoWire {
   bool fail_imu_register_write = false;
   unsigned failed_pulse_writes = 0;
   unsigned pulse_terminated_transmissions = 0;
+  // MAX30102 FIFO pointers are explicit in host trials.
+  std::uint8_t pulse_fifo_write_pointer = 4;
+  std::uint8_t pulse_fifo_read_pointer = 0;
   unsigned failed_imu_writes = 0;
   unsigned imu_terminated_transmissions = 0;
   unsigned failed_mcp_writes = 0;
@@ -143,6 +146,9 @@ class TwoWire {
       nfc_phase = 1; // deterministic ACK, then response on separate mux slots
     } else if (!outbound.empty()) {
       register_address = outbound[0];
+      if (current_address == 0x57 && outbound.size() == 2 &&
+          register_address == 0x06)
+        pulse_fifo_read_pointer = outbound[1] & 31U;
       if (current_address == 0x44 && outbound[0] == 0xFD)
         pending_sht = true;
       if (current_address == 0x48 && outbound.size() == 3 &&
@@ -225,8 +231,10 @@ class TwoWire {
     else if (addr == 0x28 && register_address == 0xFE) inbound = {0x5D};
     else if (addr == 0x28 && register_address == 0x03) inbound = {0xA5};
     else if (addr == 0x57 && register_address == 0xFF) inbound = {0x15};
-    else if (addr == 0x57 && register_address == 0x04) inbound = {4};
-    else if (addr == 0x57 && register_address == 0x06) inbound = {0};
+    else if (addr == 0x57 && register_address == 0x04)
+      inbound = {pulse_fifo_write_pointer};
+    else if (addr == 0x57 && register_address == 0x06)
+      inbound = {pulse_fifo_read_pointer};
     else if (addr == 0x57 && register_address == 0x07 && count <= 24 &&
              count % 6 == 0) {
       for (unsigned i = 0; i < count / 6; ++i) {
@@ -236,6 +244,8 @@ class TwoWire {
              static_cast<std::uint8_t>(ir >> 8),
              static_cast<std::uint8_t>(ir)});
       }
+      pulse_fifo_read_pointer =
+          static_cast<std::uint8_t>((pulse_fifo_read_pointer + count / 6) & 31U);
     } else if (addr == 0x39 && register_address == 0x92) inbound = {0xAB};
     else if (addr == 0x39 && register_address == 0x9C) inbound = {42};
     else if (addr == 0x36 && extras != 16 && register_address == 0x0B)
