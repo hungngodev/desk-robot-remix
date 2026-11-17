@@ -960,7 +960,7 @@ async def test_visual_question_uses_current_spoken_turn_not_recent_idle_photo():
         Vision(), asyncio.Lock(),
     )
 
-    async def paused_automatic_speech_camera(_robot_id):
+    async def paused_automatic_speech_camera(_robot_id, _turn):
         await asyncio.Event().wait()
 
     # Prevent the background VAD sampler from being the source of this frame;
@@ -991,7 +991,7 @@ async def test_fresh_frame_from_current_spoken_turn_is_reused_without_duplicatio
         Vision(), asyncio.Lock(),
     )
 
-    async def paused_automatic_speech_camera(_robot_id):
+    async def paused_automatic_speech_camera(_robot_id, _turn):
         await asyncio.Event().wait()
 
     service._speech_frames = paused_automatic_speech_camera
