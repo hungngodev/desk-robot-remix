@@ -38,6 +38,8 @@ SYSTEM_GATES = (
     "hardware_motor_driver_fails_low_after_cpu_stall",
     "four_cliff_sensor_surface_trials",
     "cliff_sensor_mount_height_and_stopping_geometry",
+    # Forward-only geometry cannot protect the side sweep on a pivot.
+    "four_floor_sensor_reverse_pivot_arc_sweep",
     "full_power_load_and_faults", "protected_1s_charger_and_dock_contacts",
     "charger_out_full_voltage_range_to_fixed_5v_rail_physical_trial",
     "real_dual_ir_terminal_docking", "lift_and_grip_calibration",
