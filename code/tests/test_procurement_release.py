@@ -629,6 +629,39 @@ def test_all_fourteen_addon_quantities_match_one_fleet():
     )
 
 
+def test_motor_selection_requires_both_independent_qualified_decisions():
+    # Frozen 28BYJ48 accounting rows are NOT positive evidence that a
+    # physically qualified stepper drivetrain has been selected.
+    import json
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    undecided = mod.generate(plan)
+    assert undecided["physical_motor_variant_in_cart"] == "unresolved"
+    assert not undecided["order_released"]
+    assert "motor_driver_variant_mismatch" in undecided["missing_system_evidence"]
+    assert all(
+        not row.get("excluded_from_order_as_alternative", False)
+        for row in undecided["robots"]
+        if row["id"] in ("stepper", "uln2003")
+    )
+
+    # Even selecting the new DC motor with a valid receipt cannot imply
+    # a complete motor/driver pair while the actual driver is undecided.
+    receipt = {"result": "pass", "evidence_url": "https://example.org/test-only",
+               "tested_on": "synthetic", "reviewer": "test"}
+    evidence = {"supplemental_decisions": {
+        "n20_motor_candidate": {
+            "parent_role": "stepper", "fleet_quantity": 10,
+            "disposition": "selected", "resolved_item": "N20",
+            "decision_receipt": receipt, "vendor": "generic", "sku": "N20",
+            "pcb_revision": "1",
+            **{gate: receipt for gate in mod.PART_GATES},
+        }
+    }}
+    partial = mod.generate(plan, evidence)
+    assert partial["physical_motor_variant_in_cart"] == "unresolved"
+    assert not partial["order_released"]
+
+
 def test_supplemental_decisions_reject_unresolved_real_subparts():
     """All 14 priced alternatives need decisions, not just the 49 parent roles."""
     import copy
