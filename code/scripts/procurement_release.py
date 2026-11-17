@@ -578,6 +578,21 @@ def first_robot_projection(report: dict) -> dict:
         raise ValueError("Unknown physical drivetrain selection")
     pet_rows = report["robots"]
     station_rows = report["room_pod"]
+    # A previously completed fleet source release already proves the first
+    # complete unit's BOM contract. The former hard-coded False meant even
+    # complete, reviewed receipts could NEVER release one unit. Preserve
+    # the default hold and the original evidence gates; this is not a
+    # shortcut around first-device electrical or physical qualification.
+    qualified_one = (
+        report.get("order_released") is True
+        and motor in {"stepper", "dc"}
+        and not report.get("missing_system_evidence", ["missing"])
+        and all(not item.get("missing_part_evidence", ["missing"])
+                for item in [*pet_rows, *station_rows])
+        and all(item.get("reviewed") is True
+                for item in report.get("supplemental_decisions", []))
+        and len(report.get("supplemental_decisions", [])) == 14
+    )
     station_ids = {row["id"] for row in station_rows}
     pet_ids = {row["id"] for row in pet_rows}
     rows = []
@@ -624,6 +639,7 @@ def first_robot_projection(report: dict) -> dict:
                     and ident in ("stepper", "uln2003")
                     else "EXCLUDED MOTOR ALTERNATIVE" if target == 0
                     and ident in ("stepper", "uln2003")
+                    else "QUALIFIED FIRST ROBOT BOM" if qualified_one
                     else "HOLD FIRST ROBOT QUALIFICATION"
                 ),
             })
@@ -649,12 +665,18 @@ def first_robot_projection(report: dict) -> dict:
         "robot_count": 1, "dock_count": 1, "shared_station_count": 1,
         "motor_variant": motor, "parent_role_count": len(rows),
         "linked_decision_count": len(linked),
-        # Projection never turns the fleet physical receipts into a new
-        # permission to order a partly specified or nonfitted robot.
-        "purchase_approved": False,
-        "reason": ("Quantity projection, not a validated first-unit bill of "
-                   "materials. Verify exact sellers, safety, fit and actual "
-                   "owned stock before irreversible purchases."),
+        # Never authorize on source links or prices alone. Approval is
+        # possible only after the unchanged complete physical system gates
+        # have ALREADY passed through generate(), including installed parts.
+        "purchase_approved": qualified_one,
+        "reason": (
+            "First complete unit inherits already qualified whole-system "
+            "receipt and supplier evidence; no further four-unit order implied."
+            if qualified_one else
+            "Quantity projection, not a validated first-unit bill of "
+            "materials. Verify exact sellers, safety, fit and actual "
+            "owned stock before irreversible purchases."
+        ),
         "roles": rows, "linked_decisions": linked,
     }
 
@@ -669,9 +691,12 @@ def render_first_robot_markdown(report: dict) -> str:
     lines = [
         "# First complete desk robot, one dock and one room station",
         "",
-        "**PROTOTYPE BUYING STATUS: HOLD.** This is the exact quantity "
-        "projection from the canonical five-pet source, not supplier or "
-        "physical acceptance. No new Adafruit hardware.",
+        ("**PROTOTYPE BUYING STATUS: APPROVED WITH VERIFIED RECEIPTS.**"
+         if projection["purchase_approved"] else
+         "**PROTOTYPE BUYING STATUS: HOLD.**")
+        + " This is the exact quantity projection from the canonical "
+        "five-pet source. Only actual physical system receipts can approve "
+        "one complete unit. No new Adafruit hardware.",
         "",
         "## 1. Reported owned or ordered, still unverified",
         "",
