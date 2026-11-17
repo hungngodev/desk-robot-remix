@@ -993,6 +993,73 @@ static void guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract() {
   CHECK(send(dc, "status", 5).find("dc_pwm_guarded") != std::string::npos);
 }
 
+
+static void full_dc_driver_nfault_is_fresh_sticky_and_usb_only() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcGuarded, &guard);
+  body.require_dc_driver_fault_monitor(true);
+
+  // Missing expander data is never fabricated as a healthy GPIOB pin.
+  CHECK(send(body, "arm", 100) == "ERR arm dc_driver_fault_interlock");
+  CHECK(send(body, "rearm", 100, true) ==
+        "ERR rearm dc_driver_fault_unhealthy");
+
+  desk_robot::AccessoryReadings readings{};
+  auto& fault = readings.optional_inputs;
+  fault.present = fault.valid = true;
+  fault.sample_seq = 1;
+  fault.at_ms = 100;
+  fault.driver_fault_active = false;
+  body.set_accessories(readings, 100);
+  CHECK(send(body, "arm", 100) == "ERR arm dc_driver_fault_interlock");
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "drive 40 40 200", 100) ==
+        "OK drive left=40 right=40 ms=200");
+  CHECK(body.state().servos_attached);
+
+  fault.driver_fault_active = true;
+  fault.sample_seq = 2;
+  fault.at_ms = 101;
+  body.set_accessories(readings, 101);
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0 && body.state().servos_attached);
+  const auto status = send(body, "status", 101);
+  CHECK(status.find("\"dc_driver_fault_latched\"") != std::string::npos);
+  CHECK(status.find("\"ready\":false") != std::string::npos);
+  CHECK(send(body, "rearm", 101, true) ==
+        "ERR rearm dc_driver_fault_unhealthy");
+
+  fault.driver_fault_active = false;
+  fault.sample_seq = 3;
+  fault.at_ms = 102;
+  body.set_accessories(readings, 102);
+  CHECK(send(body, "arm", 102) == "ERR arm dc_driver_fault_interlock");
+  CHECK(send(body, "rearm", 102) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 102, true) == "OK rearm");
+  CHECK(send(body, "arm", 102) == "OK arm");
+
+  // A stale sample cannot authorize continued drive after the 250 ms bound.
+  fresh(guard, 400);
+  body.tick(400);
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "arm", 400) == "ERR arm dc_driver_fault_interlock");
+  CHECK(send(body, "rearm", 400, true) ==
+        "ERR rearm dc_driver_fault_unhealthy");
+  fault.sample_seq = 4;
+  fault.at_ms = 401;
+  body.set_accessories(readings, 401);
+  fresh(guard, 401);
+  CHECK(send(body, "rearm", 401, true) == "OK rearm");
+  CHECK(send(body, "arm", 401) == "OK arm");
+  fault.valid = false;
+  body.set_accessories(readings, 402);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 402) == "ERR arm dc_driver_fault_interlock");
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -1007,6 +1074,7 @@ int main() {
     CHECK(status.find("\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract();
+    full_dc_driver_nfault_is_fresh_sticky_and_usb_only();
     std::cout << "PASS guarded DC uses same real cliff and USB recovery policy\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
     dock_removal_needs_new_fresh_real_gpio_sample();
