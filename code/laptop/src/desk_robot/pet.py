@@ -214,7 +214,7 @@ class PetController:
         # Same class alone is not an identity: two distinct keys appearing
         # in rapid succession must not be merged. Descriptions remain model
         # assessments, not measured spatial event identities.
-        self._event_kinds: dict[tuple[str, str], float] = {}
+        self._event_kinds: dict[tuple[str | None, str, str], float] = {}
         self._closed = False
 
     def set_voice_monitor_ready(self, ready: bool) -> None:
@@ -1647,7 +1647,18 @@ class PetController:
         # Restore content-aware cross-camera deduplication from the earlier
         # source prototype instead of suppressing all distinct "object" events.
         # This remains text-based, NOT calibrated multi-camera spatial tracking.
-        event_key = (change.kind, " ".join(change.description.casefold().split()))
+        # Two pets making the same physical contact are TWO real events.
+        # Deduplicate repeated camera descriptions across heads to avoid a
+        # chorus about one shared scene, but never conflate independent touch,
+        # bump, paw, tilt or other WROOM sensor events across pet identities.
+        physical_owner = (
+            robot_id if not camera_derived
+            and change.kind in _PHYSICAL_INITIATIVE_KINDS else None
+        )
+        event_key = (
+            physical_owner, change.kind,
+            " ".join(change.description.casefold().split()),
+        )
         previous = self._event_kinds.get(event_key, -math.inf)
         if len(self._event_kinds) >= 64:
             self._event_kinds = {
