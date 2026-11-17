@@ -17,7 +17,7 @@ PLAN = HARDWARE / "full-feature-plan.json"
 # decision and code change, not a silent edit to a Markdown shopping table.
 EXTRA = {
     "N20 100:1 MP 6V motors": (2, 10, "stepper", "alternative"),
-    "DRV8833 dual H bridge": (1, 5, "stepper", "alternative"),
+    "DRV8833 dual H bridge": (1, 5, "uln2003", "alternative"),
     "BQ24075 battery power path and BQ27441 gauge": (
         1, 5, "cap_power", "alternative"
     ),
@@ -36,6 +36,27 @@ EXTRA = {
     "Room thermal 8x8 array": (1, 1, "amg8833", "already_counted"),
     "Optional capacitive soil probe": (1, 1, "soil_probe", "already_counted"),
     "Optional NFC toy stickers": (10, 10, "nfc_game_props", "already_counted"),
+}
+
+
+# The 14 human sourcing rows have distinct canonical JSON decisions. A
+# component driver is not itself the motor, and duplicated parent inheritance
+# must not let an agent declare a wrong combination "fully checked".
+LINKED_IDS = {
+    "N20 100:1 MP 6V motors": "n20_motor_candidate",
+    "DRV8833 dual H bridge": "drv8833_driver_candidate",
+    "BQ24075 battery power path and BQ27441 gauge": "bq24075_charger_candidate",
+    "5V switching regulator": "boost_5v_candidate",
+    "Protected NTC 1S battery pack": "protected_ntc_pack",
+    "Independent 5V dock adapter": "dock_5v_adapter",
+    "Dock IR LED transistor/resistor driver channel": "dock_ir_transistor_channels",
+    "Shared room controller": "shared_room_controller",
+    "True room CO2 sensor": "room_scd40",
+    "Room gas/environment sensor": "room_bme688",
+    "Room presence radar": "room_ld2410c",
+    "Room thermal 8x8 array": "room_amg8833",
+    "Optional capacitive soil probe": "room_soil_probe",
+    "Optional NFC toy stickers": "room_nfc_game_tokens",
 }
 
 
@@ -65,8 +86,11 @@ def test_every_supplemental_purchase_row_has_one_parent_and_quantity():
 
     plan = json.loads(PLAN.read_text(encoding="utf-8"))
     rows = supplemental_rows()
-    assert len(rows) == len(EXTRA) == 14
-    assert set(rows) == set(EXTRA), "Unknown or forgotten supplementary purchase"
+    assert len(rows) == len(EXTRA) == len(LINKED_IDS) == 14
+    assert set(rows) == set(EXTRA) == set(LINKED_IDS), (
+        "Unknown or forgotten supplementary purchase")
+    linked = {entry["id"]: entry for entry in plan["linked_subassemblies"]}
+    assert set(linked) == set(LINKED_IDS.values())
     pet = {part["id"]: part for part in plan["parts"]}
     room = {part["id"]: part for part in plan["room_pod"]["modules"]}
     assert len(pet) == 42 and len(room) == 7
@@ -74,6 +98,10 @@ def test_every_supplemental_purchase_row_has_one_parent_and_quantity():
         cells = rows[name]
         assert (int(cells[2]), int(cells[3])) == (per, count), name
         assert 0 <= int(cells[5]) <= count, name
+        detail = linked[LINKED_IDS[name]]
+        assert detail["parent_role"] == parent, (
+            name, parent, detail["parent_role"])
+        assert detail["fleet_quantity"] == count, name
         assert cells[1], f"Missing source/candidate for {name}"
         assert cells[6], f"Missing qualification note for {name}"
         if disposition == "already_counted":
