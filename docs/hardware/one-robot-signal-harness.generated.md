@@ -38,8 +38,8 @@ Signal-only list. Never infer a power source from a logic voltage.
 | XIAO GPIO4 | MAX98357A BCLK | 3.3V head signal | Source allocated |
 | XIAO GPIO7 | MAX98357A LRC | 3.3V head signal | Source allocated |
 | XIAO GPIO8 | MAX98357A DIN | 3.3V head signal | Source allocated |
-| Rated, isolated 3.3V audio power rail | MAX98357A VDD/VIN | 3.3V selected; no direct XIAO 3V3 pin load until capacity measured | Design allocation only; audio rail peak, brownout and heat HOLD |
-| MAX98357A OUTP and OUTN | 8 ohm 1 W speaker + and - | Bridge tied differential outputs; NEVER connect either output to GND | Manufacturer 3.3V typical output reference; real speaker heat HOLD |
+| Rated, isolated 5V audio power rail | MAX98357A VDD/VIN | 5V for current 2W speaker; never parallel unisolated USB VBUS | Design allocation only; audio rail peaks, clipping and heat HOLD |
+| MAX98357A OUTP and OUTN | 8 ohm 2 W CS20-02P110-04-1X + and - | Bridge tied differential outputs; NEVER connect either output to GND | Manufacturer 5V 8ohm nominal 1.8W; real carrier/rectangular baffle heat HOLD |
 | XIAO onboard GPIO41 DIN + GPIO42 CLK | Sense PDM microphone | Integrated board pins, NOT connections to WROOM | Source allocated |
 | XIAO GPIO9 reserved | RGB heart data | Xiaozhi WS2812 driver compiled only with explicit opt-in; SD J3 and 5V level buffer still unqualified | Do NOT wire yet |
 | Range TCA9548A 0x70 CH0 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
