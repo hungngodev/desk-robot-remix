@@ -223,7 +223,8 @@ class CameraFrameHub:
         if now < self.voice_started_at[robot_id]:
             return
         self.voice_until[robot_id] = min(self.voice_until[robot_id], now)
-        self.quiet_until[robot_id] = now + 0.8
+        # Delayed duplicate speech_end must not shorten a newer quiet hold.
+        self.quiet_until[robot_id] = max(self.quiet_until[robot_id], now + 0.8)
 
     def spontaneous_floor_busy(self, now: float) -> bool:
         """No unsolicited pet speech until 800ms after the latest human VAD.
@@ -251,7 +252,10 @@ class CameraFrameHub:
             if robot_id in active:
                 self.voice_until[robot_id] = math.inf
             elif self.voice_until[robot_id] == math.inf:
+                # A real monitor snapshot can recover a missed speech_end,
+                # but should not let unsolicited speech start immediately.
                 self.voice_until[robot_id] = now
+                self.quiet_until[robot_id] = max(self.quiet_until[robot_id], now + 0.8)
 
     def user_active(self, robot_id: str, now: float) -> bool:
         self._check(robot_id)

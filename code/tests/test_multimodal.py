@@ -2314,3 +2314,26 @@ async def test_close_bounds_cancellation_resistant_stream_worker():
         if not worker.done():
             worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+def test_authenticated_snapshot_release_preserves_quiet_floor_and_delayed_end():
+    """Authenticated recovery must not let one of five pets talk over a pause."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-01", "human_voice", 100.0)
+    hub.reconcile_speech_snapshot(frozenset(), 101.0)
+    assert not hub.user_active("robot-01", 101.0)
+    assert hub.spontaneous_floor_busy(101.79)
+    assert not hub.spontaneous_floor_busy(101.81)
+
+    # A delayed duplicate end may not roll back a newer acoustic pause.
+    hub.notify("robot-02", "human_voice", 102.0)
+    hub.speech_ended("robot-02", 103.0)
+    hub.speech_ended("robot-02", 102.5)
+    assert not hub.user_active("robot-02", 103.0)
+    assert hub.spontaneous_floor_busy(103.79)
+    assert not hub.spontaneous_floor_busy(103.81)
+
+    # A new VAD start still blocks spontaneous speech, regardless of pause.
+    hub.notify("robot-01", "human_voice", 104.0)
+    assert hub.spontaneous_floor_busy(104.1)
+
