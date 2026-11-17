@@ -36,6 +36,9 @@ SYSTEM_GATES = (
     # Existing optional RGB/haptic source and disabled room soil firmware
     # must not quietly count as a finished five-pet purchase.
     "rgb_and_haptic_real_device_effects_and_power",
+    # The MCP23017 can hold GPIOB2 high across an I2C stall. A documented
+    # one-shot circuit is NOT proof until the real motor is seen to shut off.
+    "haptic_hc123_one_shot_stuck_i2c_and_motor_thermal_trial",
     "room_soil_probe_enabled_and_calibrated",
     "source_builds_and_tests",
     "battery_pack_ntc_to_charger_ts_thermal_fault_trial",
