@@ -40,6 +40,9 @@ SYSTEM_GATES = (
     "cliff_sensor_mount_height_and_stopping_geometry",
     # Forward-only geometry cannot protect the side sweep on a pivot.
     "four_floor_sensor_reverse_pivot_arc_sweep",
+    # TI TCA9548A fast-mode RC is a COMBINED upstream+selected branch
+    # electrical problem, not something each breakout can approve alone.
+    "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials",
     "full_power_load_and_faults",
     "xiao_usb_backfeed_diode_and_servo_brownout_trial",
     "protected_1s_charger_and_dock_contacts",
