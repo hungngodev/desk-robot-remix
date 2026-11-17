@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+from .soil_calibration import SoilCalibration
+
 STATION = "room-pod-01"
 SENSORS = ("scd40", "bme688", "ld2410c", "soil", "amg8833")
 MAX_FRAME_BYTES = 4096
@@ -131,7 +133,7 @@ def _valid_reading(sensor: str, data: dict, clock: int) -> bool:
     return True
 
 
-def _summary(readings: dict) -> str:
+def _summary(readings: dict, calibration: SoilCalibration | None = None) -> str:
     # No inference of humans, health, camera objects, VOC concentration,
     # physical permission or room-wide mapping from these raw samples.
     bits: list[str] = []
@@ -150,6 +152,9 @@ def _summary(readings: dict) -> str:
     soil = readings["soil"]
     if soil["valid"]:
         bits.append(f"Station soil probe raw ADC {soil['raw_adc']}")
+        if calibration is not None:
+            relative = calibration.percentage(soil["raw_adc"])
+            bits.append(f"Station relative soil moisture {relative}% from measured calibration")
     thermal = readings["amg8833"]
     if thermal["valid"]:
         bits.append("Station thermal array returned 64 unclassified temperatures")
@@ -157,7 +162,10 @@ def _summary(readings: dict) -> str:
 
 
 class RoomStationDecoder:
-    def __init__(self) -> None:
+    def __init__(self, soil_calibration: SoilCalibration | None = None) -> None:
+        if soil_calibration is not None and not isinstance(soil_calibration, SoilCalibration):
+            raise ValueError("Soil calibration must use validated measured endpoints")
+        self._soil_calibration = soil_calibration
         self._last_seq: int | None = None
         self._last_ms: int | None = None
 
@@ -206,7 +214,8 @@ class RoomStationDecoder:
         # create a NEW decoder instance only after actual port reopening.
         self._last_seq = seq
         self._last_ms = clock
-        return RoomObservation(seq, clock, float(now), readings, _summary(readings))
+        return RoomObservation(seq, clock, float(now), readings,
+                               _summary(readings, self._soil_calibration))
 
 
 class RoomSerialFeed:
@@ -215,11 +224,13 @@ class RoomSerialFeed:
     Port opens/reconnects are the only decoder epoch reset. Failed or stale
     frames are omitted; no old sample can reappear as a new room observation.
     """
-    def __init__(self, port: str, on_observation: Callable[[RoomObservation], None]):
+    def __init__(self, port: str, on_observation: Callable[[RoomObservation], None],
+                 soil_calibration: SoilCalibration | None = None):
         if not isinstance(port, str) or not port.startswith("/dev/"):
             raise ValueError("Room station requires an explicit local serial device")
         self.port = port
         self.on_observation = on_observation
+        self.soil_calibration = soil_calibration
         self.last_error: str | None = None
         self.received = 0
         self.rejected = 0
@@ -227,7 +238,7 @@ class RoomSerialFeed:
     def _read_port(self, running: Callable[[], bool]) -> None:
         import serial  # optional hardware-only pyserial package, no simulation
         with serial.Serial(self.port, baudrate=115200, timeout=.25) as port:
-            decoder = RoomStationDecoder()
+            decoder = RoomStationDecoder(soil_calibration=self.soil_calibration)
             while running():
                 line = port.readline(MAX_FRAME_BYTES + 1)
                 if not line:
