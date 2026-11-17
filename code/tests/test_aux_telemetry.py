@@ -149,3 +149,42 @@ def test_bmp280_bad_identity_stale_or_unqualified_claim_rejected(patch):
     d["bmp280"].update(patch)
     with pytest.raises(ValueError):
         validate_aux(d, "robot-01")
+
+
+@pytest.mark.parametrize("shunt_uv,pack_ma", [
+    (25, 5), (-100, -20), (40, 8), (0, 0),
+])
+def test_5milliohm_ina226_pack_current_calculation_not_charger_permission(
+    shunt_uv, pack_ma,
+):
+    data = sample()
+    data["power"].update({
+        "shunt_uv": shunt_uv, "pack_ma": pack_ma,
+        "pack_valid": True, "pack_seq": 42,
+        "current_calibrated": False,
+    })
+    assert validate_aux(data, "robot-01")["power"]["pack_ma"] == pack_ma
+    assert data["power"]["current_calibrated"] is False
+
+
+@pytest.mark.parametrize("patch", [
+    {"pack_valid": True, "pack_seq": 0},
+    {"pack_valid": 1},
+    {"pack_seq": True},
+    {"pack_ma": 19},
+    {"pack_ma": float("nan")},
+    {"pack_ma": 40000},
+    {"pack_valid": True, "pack_ma": 5, "shunt_uv": -25},
+    {"pack_valid": False, "pack_ma": 5},
+    {"pack_valid": True, "monitor_valid": False},
+    {"shunt_uv": 81920},
+])
+def test_uncalibrated_pack_current_never_accepts_replay_or_forgery(patch):
+    data = sample()
+    data["power"].update({
+        "shunt_uv": 25, "pack_ma": 5,
+        "pack_valid": True, "pack_seq": 42,
+    })
+    data["power"].update(patch)
+    with pytest.raises(ValueError, match="INA226|battery"):
+        validate_aux(data, "robot-01")
