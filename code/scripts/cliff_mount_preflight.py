@@ -181,8 +181,23 @@ def screen_planar_cliff_coverage(
                 or any(abs(c) > 1_000_000 for c in point)):
             raise ValueError("Each measured chassis point needs plausible finite x,y")
 
+    baseline = verify_source_contract()
     h = (chassis_mount_above_desk_mm
-         + verify_source_contract()["lens_center_above_adapter_mount_mm"])
+         + baseline["lens_center_above_adapter_mount_mm"])
+    # Motion coverage is not meaningful if the actual floor cannot produce
+    # an in-range reading across the nominal ST optical cone. This separate
+    # gate prevents a mechanically plausible wheel lead from masquerading
+    # as a usable cliff detector with a lens below firmware's 30 mm minimum.
+    half_fov = ST_SYSTEM_FOV_DEG / 2
+    near_angle = max(0.0, optical_tilt_deg - half_fov)
+    far_angle = optical_tilt_deg + half_fov
+    near_range = h / math.cos(math.radians(near_angle))
+    far_range = h / math.cos(math.radians(far_angle))
+    full_fov_range_ok = (
+        math.isfinite(near_range) and math.isfinite(far_range)
+        and baseline["firmware_valid_min_mm"] <= near_range
+        and far_range <= baseline["firmware_valid_max_mm"]
+    )
     # Until orientation of each mounted sensor is physically measured,
     # include the entire worst radial reach of a tilted FoV as potential
     # late tabletop support, rather than claiming early edge discovery.
@@ -242,8 +257,11 @@ def screen_planar_cliff_coverage(
         "manufacturer_fov_deg": ST_SYSTEM_FOV_DEG,
         "conservative_tilt_deg": optical_tilt_deg,
         "nominal_fov_rear_footprint_mm": fov_rear_setback,
+        "nominal_full_fov_floor_in_valid_range": full_fov_range_ok,
         "support_checks": cases,
-        "necessary_planar_coverage_on_paper": all(c["covered"] for c in cases),
+        "necessary_planar_coverage_on_paper": (
+            full_fov_range_ok and all(c["covered"] for c in cases)
+        ),
         "actual_surface_and_motor_faults_verified": False,
         "fully_safe_cliff_operation_proven": False,
     }
