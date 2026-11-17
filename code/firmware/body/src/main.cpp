@@ -358,9 +358,9 @@ void setup() {
   if (!tof.begin(body_pins::kSensorSda, body_pins::kSensorScl,
                  body_pins::kMuxReset)) {
     cliff_guard.bus_fault();
-    Serial.println("ERR sensor_init check_mux_0x70_and_five_vl53l4cd_channels");
+    Serial.println("ERR sensor_init check_mux_0x70_and_five_critical_vl53l0x_channels");
   } else {
-    Serial.println("OK sensor_init five_vl53l4cd_channels");
+    Serial.println("OK sensor_init five_critical_vl53l0x_channels_three_diagnostic");
   }
   // This is a required sensor for the selected physical robot core. No
   // optional board or stale sample is allowed to bypass the local arm gate.
