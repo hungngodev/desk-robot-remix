@@ -28,6 +28,7 @@ class TwoWire {
   // MAX30102 FIFO pointers are explicit in host trials.
   std::uint8_t pulse_fifo_write_pointer = 4;
   std::uint8_t pulse_fifo_read_pointer = 0;
+  std::uint8_t pulse_fifo_overflow = 0;
   unsigned failed_imu_writes = 0;
   unsigned imu_terminated_transmissions = 0;
   unsigned failed_mcp_writes = 0;
@@ -155,9 +156,12 @@ class TwoWire {
       nfc_phase = 1; // deterministic ACK, then response on separate mux slots
     } else if (!outbound.empty()) {
       register_address = outbound[0];
-      if (current_address == 0x57 && outbound.size() == 2 &&
-          register_address == 0x06)
-        pulse_fifo_read_pointer = outbound[1] & 31U;
+      if (current_address == 0x57 && outbound.size() == 2) {
+        if (register_address == 0x06)
+          pulse_fifo_read_pointer = outbound[1] & 31U;
+        if (register_address == 0x05)
+          pulse_fifo_overflow = outbound[1] & 31U;
+      }
       if (current_address == 0x44 && outbound[0] == 0xFD)
         pending_sht = true;
       if (current_address == 0x48 && outbound.size() == 3 &&
@@ -242,6 +246,8 @@ class TwoWire {
     else if (addr == 0x57 && register_address == 0xFF) inbound = {0x15};
     else if (addr == 0x57 && register_address == 0x04)
       inbound = {pulse_fifo_write_pointer};
+    else if (addr == 0x57 && register_address == 0x05)
+      inbound = {pulse_fifo_overflow};
     else if (addr == 0x57 && register_address == 0x06)
       inbound = {pulse_fifo_read_pointer};
     else if (addr == 0x57 && register_address == 0x07 && count <= 24 &&
