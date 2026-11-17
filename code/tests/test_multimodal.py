@@ -1902,6 +1902,12 @@ def test_native_sent_audio_receipts_enter_only_own_bounded_live_history():
     now = time.monotonic()
     identity = "omni_sent_" + "a" * 12 + "_" + "b" * 20
     assert hub.remember_native_spoken("robot-01", identity, "I noticed the mug", now)
+    # Even a known receipt ID cannot turn malformed text into an accepted
+    # API result. Validate before duplicate suppression, without creating
+    # any new per-pet speech or physical action evidence.
+    for invalid in ("bad\\x00text".replace("\\x00", "\x00"), "  ", "x" * 201):
+        with pytest.raises(ValueError, match="Invalid native model sent speech"):
+            hub.remember_native_spoken("robot-01", identity, invalid, now)
     assert not hub.remember_native_spoken("robot-01", identity, "replayed", now)
     timeline = hub.interaction_timeline("robot-01", now)
     speech = [item for item in timeline if item["channel"] == "robot_speech"]
