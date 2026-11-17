@@ -36,13 +36,16 @@ def test_overlong_five_amp_pack_and_compact_underrated_pack_rejected():
     screen = module("screen_vendor_battery_harness")
     demand = module("power_preflight").size_5v_supply(1.0, 0.6)
     long_pack = screen.evaluate("LPHD7430085", demand)
-    assert long_pack["pack_current_enough_on_paper"] is True
+    assert long_pack["pack_peak_within_published_max_on_paper"] is True
+    assert long_pack["pack_current_enough_on_paper"] is None
+    assert "manufacturer_continuous_discharge_rating_missing" in long_pack["blocking_reasons"]
     assert long_pack["pack_fits_current_tray_on_paper"] is False
     assert "exact_connector_or_lead_ampacity_missing" in long_pack["blocking_reasons"]
     compact = screen.evaluate("LP103650", demand)
-    assert compact["pack_current_enough_on_paper"] is False
+    assert compact["pack_peak_within_published_max_on_paper"] is False
+    assert compact["pack_current_enough_on_paper"] is None
     assert compact["pack_fits_current_tray_on_paper"] is False
-    assert "pack_current_rating_below_load_budget" in compact["blocking_reasons"]
+    assert "pack_max_discharge_below_peak_budget" in compact["blocking_reasons"]
 
 
 def test_same_4a_cell_but_different_pack_connector_current_limit():
@@ -51,7 +54,10 @@ def test_same_4a_cell_but_different_pack_connector_current_limit():
     bare = screen.evaluate("PR-CU-R512-22AWG", demand)
     jst30 = screen.evaluate("PR-CU-R512-JST-SHR", demand)
     molex26 = screen.evaluate("PR-CU-R512-Molex-26AWG", demand)
-    assert all(r["pack_current_enough_on_paper"] for r in (bare, jst30, molex26))
+    assert all(r["pack_peak_within_published_max_on_paper"]
+               for r in (bare, jst30, molex26))
+    assert all(r["pack_current_enough_on_paper"] is None
+               for r in (bare, jst30, molex26))
     assert "exact_connector_or_lead_ampacity_missing" in bare["blocking_reasons"]
     assert "exact_connector_or_lead_ampacity_insufficient" in jst30["blocking_reasons"]
     assert "exact_connector_or_lead_ampacity_insufficient" in molex26["blocking_reasons"]
