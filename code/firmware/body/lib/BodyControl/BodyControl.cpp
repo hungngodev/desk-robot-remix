@@ -440,8 +440,8 @@ void BodyControl::execute(const char* line, std::size_t length,
           !parse_integer(tokens[2], minimum) ||
           !parse_integer(tokens[3], maximum) ||
           channel < 0 || channel >= kFloorSensorCount ||
-          minimum < 1 || maximum < minimum || maximum > 1300) {
-        std::snprintf(reply, capacity, "ERR calfloor channel_0to3_min_max_1to1300");
+          minimum < 30 || maximum < minimum || maximum > 1300) {
+        std::snprintf(reply, capacity, "ERR calfloor channel_0to3_min_max_30to1300");
         return;
       }
       calibration_stage_.floor[channel].min_mm = static_cast<std::uint16_t>(minimum);
@@ -454,8 +454,8 @@ void BodyControl::execute(const char* line, std::size_t length,
       int near_mm = 0, far_mm = 0;
       if (!parse_integer(tokens[1], near_mm) ||
           !parse_integer(tokens[2], far_mm) ||
-          near_mm < 1 || far_mm <= near_mm || far_mm > 1300) {
-        std::snprintf(reply, capacity, "ERR calfront near_far_1to1300");
+          near_mm < 30 || far_mm <= near_mm || far_mm > 1300) {
+        std::snprintf(reply, capacity, "ERR calfront near_far_30to1300");
         return;
       }
       calibration_stage_.front_obstacle_mm = static_cast<std::uint16_t>(near_mm);
