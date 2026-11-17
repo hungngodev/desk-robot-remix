@@ -183,3 +183,28 @@ def test_third_party_notice_and_hardware_source_map_dont_reintroduce_premium_sen
     assert "vl53l4cd-arduino" not in pio
     assert "VL53L4CD short-range replacement | REJECT PREMIUM PURCHASE" in source_map
     assert "OOMWOO is still in hardware development" in source_map
+
+
+def test_active_product_docs_and_workflow_cannot_resurrect_premium_ranger():
+    """Historical research may retain VL53L4CD; current active guides may not."""
+    root = Path(__file__).resolve().parents[2]
+    current = [
+        ".github/workflows/host-verification.yml",
+        "code/laptop/src/desk_robot/side_ranging.py",
+        "code/scripts/calibrate_side_ranges.py",
+        "docs/guides/interfaces.md",
+        "docs/guides/pickup-and-two-robots.md",
+        "docs/guides/side-ranging-proactive-perception.md",
+        "docs/product-definition.md",
+        "docs/hardware/interaction-sensors.md",
+    ]
+    for rel in current:
+        body = (root / rel).read_text()
+        assert "VL53L4CD" not in body, rel
+        assert "VL53L0X" in body, rel
+    agents = (root / "AGENTS.md").read_text()
+    assert "Buy only cost-justified generic VL53L0X" in agents
+    wiring = (root / "docs/hardware/wiring.md").read_text()
+    assert "pinned MIT Pololu VL53L0X 1.3.1" in wiring
+    assert "expensive VL53L4CD boards" in wiring
+    assert "Historic VL6180X and VL53L0X suggestions are" not in wiring
