@@ -34,7 +34,9 @@ FIXED_SOURCE_SKUS = {
 # Each gate must carry a real, operator-reviewed evidence receipt, not a bool.
 SYSTEM_GATES = (
     "commercial_mechanical_license", "fitted_assembly_and_print",
-    "loaded_drive_and_stopping", "four_cliff_sensor_surface_trials",
+    "loaded_drive_and_stopping",
+    "hardware_motor_driver_fails_low_after_cpu_stall",
+    "four_cliff_sensor_surface_trials",
     "cliff_sensor_mount_height_and_stopping_geometry",
     "full_power_load_and_faults", "protected_1s_charger_and_dock_contacts",
     "charger_out_full_voltage_range_to_fixed_5v_rail_physical_trial",
