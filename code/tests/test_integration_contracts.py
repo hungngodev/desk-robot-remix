@@ -453,3 +453,64 @@ def test_full_dc_firmware_profiles_enable_external_motor_watchdog_heartbeat():
     for profile in ("esp32_dc_watchdog_lab", "esp32_dc_integrated_lab"):
         assert ini[f"env:{profile}"]["extends"] == "env:esp32_dc_full"
     assert "-DDESK_ROBOT_ENABLE_DC_WATCHDOG=1" not in ini["env:esp32_full"]["build_flags"]
+
+def test_wroom_motor_and_servo_ledc_timers_do_not_collide():
+    """Round 2 audit: preserve native WROOM LEDC isolation, not ESP32Servo.
+
+    This tests configured source channel ownership, not measured PWM waveforms.
+    Arduino ESP32 2.x binds each channel pair to one timer within its group.
+    """
+    pins = (ROOT / "code/firmware/body/include/BodyPins.h").read_text()
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    ini = (ROOT / "code/firmware/body/platformio.ini").read_text()
+
+    def channels(name):
+        match = re.search(rf"constexpr int {name}\[\] = \{{([^}}]+)\}};", pins)
+        assert match, name
+        return [int(value.strip()) for value in match.group(1).split(",")]
+
+    motors = channels("kMotorChannels")
+    servos = channels("kServoChannels")
+    # Treat any accidental PWM timer collision as a regression, even when
+    # the channel numbers themselves happen to remain distinct.
+    timer = lambda channel: (channel % 8) // 2
+    assert motors == [0, 1, 2, 3]
+    assert servos == [4, 5]
+    assert not ({timer(c) for c in motors} & {timer(c) for c in servos})
+    assert "kMotorFrequency = 20000" in pins
+    assert "kMotorResolution = 8" in pins
+    assert "kServoFrequency = 50" in pins
+    assert "kServoResolution = 16" in pins
+    assert "static_assert(kMotorChannels[0] == 0" in pins
+    assert "static_assert(kServoChannels[0] == 4" in pins
+    assert "platform = espressif32@6.9.0" in ini  # frozen Arduino core mapping
+    assert "#include <ESP32Servo.h>" not in main
+    assert "analogWrite(" not in main
+    for ch in range(4):
+        assert f"body_pins::kMotorChannels[{ch}]" in main
+    for ch in range(2):
+        assert main.count(f"body_pins::kServoChannels[{ch}]") >= 3
+
+
+def test_round2_safety_driver_preserves_all_eight_muxed_ready_checked_ranges():
+    """No two-XSHUT or two-sample cliff replacement can silently land."""
+    body = (ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp").read_text()
+    header = (ROOT / "code/firmware/body/lib/TofBus/TofBus.h").read_text()
+    guard = (ROOT / "code/firmware/body/lib/CliffGuard/CliffGuard.cpp").read_text()
+    plan = PLAN["bus"]
+    assert plan["mux_ranges"]["address"] == 0x70
+    assert len(plan["mux_ranges"]["channels"]) == 8
+    assert "kRangeCount = 5 + (DESK_ROBOT_EXTRA_RANGERS ? 3 : 0)" in header
+    assert "kSensorAddress = 0x29" in header
+    assert "read_register(0x13, &ready, 1)" in body
+    assert "read_register(0x14, result, kMaxSampleBytes)" in body
+    assert "sensor.startContinuous()" in body
+    assert "readRangeSingleMillimeters(" not in body
+    assert "readRangeContinuousMillimeters(" not in body
+    assert "guard.sample(channel, distance, accepted, now_ms)" in body
+    assert "if (configured_) latch(sample_fault(channel), channel)" in guard
+    assert "latch(CliffFault::BusFailure)" in guard
+    assert "bool CliffGuard::try_rearm" in guard
+    assert "GPIO_NUM_18" not in (
+        ROOT / "code/firmware/head/sense/config.h"
+    ).read_text().split("#define CAMERA_PIN_D2")[0]
