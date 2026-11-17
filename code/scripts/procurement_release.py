@@ -103,6 +103,28 @@ REQUIRED_ROOM_PER_STATION = {
     "room_controller": 1,
 }
 
+# Fourteen linked assembly parts or alternatives from the detailed purchasing
+# register. The main 49 roles do not authorize an unreviewed charger, motor,
+# dock contact driver, pack or station subpart. These are NOT 14 more automatic
+# purchases; each needs a human reviewed selection, reuse or rejection receipt.
+SUPPLEMENTAL_DECISIONS = {
+    "n20_motor_candidate": ("stepper", 10),
+    "drv8833_driver_candidate": ("uln2003", 5),
+    "bq24075_charger_candidate": ("cap_power", 5),
+    "boost_5v_candidate": ("cap_power", 5),
+    "protected_ntc_pack": ("cap_power", 5),
+    "dock_5v_adapter": ("dock_fixture", 5),
+    "dock_ir_transistor_channels": ("dock_ir_emitter_channels", 10),
+    "shared_room_controller": ("room_controller", 1),
+    "room_scd40": ("scd40", 1),
+    "room_bme688": ("bme688", 1),
+    "room_ld2410c": ("ld2410c", 1),
+    "room_amg8833": ("amg8833", 1),
+    "room_soil_probe": ("soil_probe", 1),
+    "room_nfc_game_tokens": ("nfc_game_props", 10),
+}
+
+
 
 def _count(v: object, name: str) -> int:
     if type(v) is not int or v < 0:
@@ -258,6 +280,53 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         missing_system.append("missing_or_reduced_full_feature_roles: " +
                               ", ".join(reduced))
 
+    # The human-priced register also has fourteen linked physical subparts.
+    # A fully approved 49-role abstract plan must not skip exact motor, cell,
+    # boost, charge, dock and station sourcing decisions. An alternative may
+    # be rejected, but its replacement and evidence must be recorded explicitly.
+    decisions = evidence.get("supplemental_decisions", {})
+    if not isinstance(decisions, dict):
+        raise ValueError("Invalid supplemental purchasing decisions")
+    unknown_decisions = set(decisions) - set(SUPPLEMENTAL_DECISIONS)
+    if unknown_decisions:
+        raise ValueError("Unknown supplemental purchasing decisions: " +
+                         ", ".join(sorted(unknown_decisions)))
+    approved_decisions = []
+    for ident, (parent, units) in SUPPLEMENTAL_DECISIONS.items():
+        declared = decisions.get(ident, {})
+        valid = isinstance(declared, dict) and (
+            declared.get("parent_role") == parent
+            and type(declared.get("fleet_quantity")) is int
+            and declared["fleet_quantity"] == units
+            and declared.get("disposition") in (
+                "selected", "reuse_existing", "included_in_parent",
+                "rejected_in_favor_of_qualified_alternative")
+            and isinstance(declared.get("resolved_item"), str)
+            and bool(declared["resolved_item"].strip())
+            and _receipt(declared.get("decision_receipt")))
+        if valid and declared.get("disposition") in ("selected", "reuse_existing"):
+            valid = (all(_receipt(declared.get(g)) for g in PART_GATES)
+                     and all(isinstance(declared.get(k), str)
+                             and declared[k].strip()
+                             for k in ("vendor", "sku", "pcb_revision"))
+                     and not _ad_fruit_new_hardware(
+                         declared.get("vendor"),
+                         units if declared.get("disposition") == "selected" else 0))
+        if valid and declared.get("disposition") in (
+                "included_in_parent", "rejected_in_favor_of_qualified_alternative"):
+            # No automatic approval from simply writing 'not selected'.
+            # The disposition receipt must link an independently reviewed
+            # qualified parent/alternate and name the physical replacement.
+            valid = (_receipt(declared.get("alternative_or_parent_receipt"))
+                     and isinstance(declared.get("replacement_sku"), str)
+                     and bool(declared["replacement_sku"].strip()))
+        approved_decisions.append({"id": ident, "parent_role": parent,
+                                   "fleet_quantity": units, "reviewed": valid,
+                                   "disposition": declared.get("disposition")
+                                   if isinstance(declared, dict) else None})
+        if not valid:
+            missing_system.append("unresolved_supplemental_part:" + ident)
+
     # The SparkFun PRT-13777 Battery Babysitter already carries a BQ27441
     # fuel gauge. Refuse a second separate MAX17048 design by default;
     # both gauge ICs are legitimate but their telemetry paths are different.
@@ -271,6 +340,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 and all(row["approved_for_fleet_purchase"] for row in room))
     return {"fleet_robots": fleet, "docks": fleet, "room_stations": 1,
             "order_released": approved, "order_release_is_not_an_electrical_guarantee": True,
+            "supplemental_decisions": approved_decisions,
             "known_one_head_ordered_unreceived": 1,
             "reported_mg90s_approximately_ten_not_counted_as_verified": True,
             "missing_system_evidence": missing_system, "robots": rows, "room_pod": room}
