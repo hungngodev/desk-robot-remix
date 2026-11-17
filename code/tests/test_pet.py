@@ -843,16 +843,21 @@ async def test_different_observations_of_same_kind_are_not_falsely_coalesced(
         await wait_for(lambda: pet.status("robot-01")["spontaneous_speech_turns"] == 1)
         await wait_for(lambda: pet._speech_task is None or pet._speech_task.done())
         pet._consider_speech("robot-01", second, generation)
-        await wait_for(lambda: pet.status("robot-01")["spontaneous_speech_turns"] == 2)
         await wait_for(lambda: pet._speech_task is None or pet._speech_task.done())
+        # The two events are distinct, but the test chat generated the SAME
+        # sentence. Do not make a companion repeat that line pointlessly.
+        assert pet.status("robot-01")["spontaneous_speech_turns"] == 1
+        assert pet.states["robot-01"].last_initiative_suppression == (
+            "repetitive_spontaneous_reply"
+        )
         # Matching semantic text with different case and whitespace is one event.
         pet._consider_speech(
             "robot-01", SceneChange("key", "  A   SILVER key appeared ", 0.95),
             generation,
         )
         await asyncio.sleep(.02)
-        assert len(speaker.spoken) == 2
-        assert pet.status("robot-01")["suppressed_speech_candidates"] == 1
+        assert len(speaker.spoken) == 1
+        assert pet.status("robot-01")["suppressed_speech_candidates"] == 2
         assert len(pet._event_kinds) == 2
     finally:
         await pet.close()
