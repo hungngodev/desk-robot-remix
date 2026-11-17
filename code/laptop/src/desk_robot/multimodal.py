@@ -348,15 +348,38 @@ class CameraFrameHub:
         self._check(robot_id)
         if not _finite(now):
             raise ValueError("Invalid event context time")
+        events = [
+            (kind, stamp) for kind, stamp in self.event_history[robot_id]
+            if 0 <= now - stamp <= 8.0
+        ]
+        # The small voice-context tool and the full timeline must agree on
+        # physical safety priority. A burst of petting must not hide a local
+        # WROOM disarm, and an authenticated human VAD must not disappear
+        # behind six lower-value sensor edges either.
+        fault_at = self.latest_safety_fault[robot_id]
+        if (0 <= now - fault_at <= 8.0
+                and not any(k == "safety_fault" and t == fault_at
+                            for k, t in events)):
+            events.append(("safety_fault", fault_at))
+        events.sort(key=lambda event: event[1])
+        required: set[int] = set()
+        for required_kind in ("safety_fault", "human_voice"):
+            for index in range(len(events) - 1, -1, -1):
+                if events[index][0] == required_kind:
+                    required.add(index)
+                    break
+        for index in range(len(events) - 1, -1, -1):
+            if len(required) >= 6:
+                break
+            required.add(index)
         return [
             {
-                "kind": kind,
-                "age_ms": round(1000 * (now - seen_at)),
-                "source": "xiaozhi_vad" if kind == "human_voice"
-                          else "wroom_sensed_event",
+                "kind": events[i][0],
+                "age_ms": round(1000 * (now - events[i][1])),
+                "source": ("xiaozhi_vad" if events[i][0] == "human_voice"
+                           else "wroom_sensed_event"),
             }
-            for kind, seen_at in list(self.event_history[robot_id])[-6:]
-            if 0 <= now - seen_at <= 8.0
+            for i in sorted(required)
         ]
 
     def remember_tool(self, robot_id: str, kind: str, summary: str,
