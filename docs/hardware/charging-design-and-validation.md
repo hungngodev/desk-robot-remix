@@ -8,6 +8,33 @@ Status November 10, 2026: **source-verified electrical design references, NOT an
 2. Adafruit published an open-source [BQ24074 reference PCB](https://github.com/adafruit/Adafruit-BQ24074-PCB) and [pinout/load-sharing guidance](https://learn.adafruit.com/adafruit-bq24074-universal-usb-dc-solar-charger-breakout?view=all). It is a useful *source/reference*, not a generic module certification. Its LOAD output is no more than about 4.4V and the board's load sharing budget is up to 1.5A. The vendor says its 2-pin battery connector is for its own compatible cells; do not assume generic JST polarity or safe substitution. Licenses and vendor notices are retained.
 3. [Pololu U3V70F5](https://www.pololu.com/product/2891/specs) is a 5V step-up regulator that can accept 2.9V input and has a 10A instantaneous input-current limit. This is **not** a guaranteed 5V output-current rating: thermal and input-voltage-dependent curves govern continuous load. Its published 0.6 by 1.6 inch footprint is a mechanical candidate only.
 
+## Critical BQ24074 versus BQ24075 output distinction
+
+The selected *source alternatives* are NOT interchangeable 5V supplies. TI
+BQ2407x Rev N table 6 and electrical characteristics explicitly specify
+BQ24074 OUT nominal **4.4V** (4.3..4.5V) and BQ24075 OUT nominal **5.5V**
+(5.4..5.6V) when the input is sufficient. With input absent, OUT can follow
+the battery near 3V through the power-path FET. Therefore **neither variant
+is a regulated fixed 5V rail**. A BQ24075 VOUT pad MUST NOT be wired
+directly into a 5V-only WROOM, Sense, servo or amplifier supply. A
+source-verified *step-up/step-down* regulator with input acceptance covering
+the actual entire power-path range, and real protected contact/thermal
+tests, is required. With an ordinary 5V dock supply, the BQ24075 may not
+reach 5.5V because headroom is limited; do not use that circumstance as
+proof that a later adapter or fault cannot expose the higher rail rating.
+Primary manufacturer: https://www.ti.com/lit/ds/symlink/bq24074.pdf .
+
+The SparkFun PRT-13777 Battery Babysitter specifically uses **BQ24075**
+plus **BQ27441-G1A** (not BQ24074); SparkFun documents a 3.0..5.5V
+power-path output: https://learn.sparkfun.com/tutorials/battery-babysitter-hookup-guide/all .
+That board's I2C fuel gauge must not be duplicated by a separate MAX17048.
+Its published TS 10k bypass is not proof of actual external protected pack
+NTC monitoring. No board, pack or energized dock is selected by this
+comparison. A fail-closed software regulator-input screen is implemented
+at `code/scripts/power_preflight.py::screen_bq2407x_output_path`; a
+passing screen is only part of source qualification and cannot certify
+an assembled battery or regulator.
+
 ## Single-robot block architecture requiring review
 
 ```text
