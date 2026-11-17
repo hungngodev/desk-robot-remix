@@ -7,6 +7,7 @@ read-only decisions. Keep the router conservative and unit-test directly.
 from __future__ import annotations
 
 import re
+import json
 
 def _advice_only_request(text: str) -> bool:
     """Keep how-to advice in natural conversation, not sensor/tool routing."""
@@ -230,6 +231,68 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
         return (whole,) if whole is not None else tuple(found)
     return tuple(found)
 
+
+
+
+def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
+    """Pack ALL completed tool facts as one valid, bounded JSON value.
+
+    Source: Qwen Live Harness's tool-continuation receipt boundary and
+    Pipecat's ordered data/control frame distinction (design adaptation).
+    Never slice a serialized fact into invalid JSON or silently erase the
+    third tool from a compound human question. Preserve the original
+    tool order and typed sensor fields; only shorten free-form model
+    interpretations and historical memory excerpts if necessary.
+    """
+    if (type(limit) is not int or not 256 <= limit <= 4096
+            or not isinstance(facts, list) or not 1 <= len(facts) <= 3
+            or any(not isinstance(fact, dict) for fact in facts)):
+        raise ValueError("Expected one to three grounded facts and bounded budget")
+
+    try:
+        # JSON round-trip deliberately strips mutable references to source
+        # objects before any summarization. No arbitrary repr or Python
+        # object reaches model instructions.
+        values = json.loads(json.dumps(
+            facts, ensure_ascii=True, allow_nan=False,
+            separators=(",", ":"),
+        ))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Tool facts must be JSON values") from exc
+
+    def encode() -> str:
+        return json.dumps(values, ensure_ascii=True, allow_nan=False,
+                          separators=(",", ":"))
+
+    result = encode()
+    if len(result) <= limit:
+        return result
+
+    # Only untrusted natural-language content may be shortened. Never
+    # reduce numeric readings, source identity, verification flags, or the
+    # number/order of tool receipts to squeeze them into the speech budget.
+    # A tool response is data, not a source of further instructions.
+    def shrink(node: object, maximum: int) -> None:
+        if isinstance(node, list):
+            for item in node:
+                shrink(item, maximum)
+        elif isinstance(node, dict):
+            for key, item in node.items():
+                if (key in {"interpretation_not_proof", "untrusted_summary",
+                            "summary"} and isinstance(item, str)
+                        and len(item) > maximum):
+                    node[key] = item[:maximum]
+                else:
+                    shrink(item, maximum)
+
+    for cap in (180, 120, 80, 48, 24):
+        shrink(values, cap)
+        result = encode()
+        if len(result) <= limit:
+            return result
+    # A large fact tree without compressible text means the source's typed
+    # contract changed. Silence is safer than an invented or partial answer.
+    raise ValueError("Complete tool facts do not fit the speech context budget")
 
 
 def native_grounded_fact(route: str, result: dict) -> dict | None:
