@@ -132,6 +132,16 @@ def test_low_cost_vl53l0x_is_the_production_cliff_driver():
     assert "distance >= 30" in production
     assert "VL53L4CD" not in production
 
+def test_boot_range_diagnostics_name_real_chip_and_guard_coverage():
+    """A cheap VL53L0X fault must not tell the builder to buy VL53L4CD."""
+    source = (Path(__file__).resolve().parents[1] /
+              "firmware/body/src/main.cpp").read_text()
+    assert "five_critical_vl53l0x_channels" in source
+    assert "five_critical_vl53l0x_channels_three_diagnostic" in source
+    assert "five_vl53l4cd_channels" not in source
+    assert "check_mux_0x70" in source
+
+
 def test_live_dock_ir_requires_real_receiver_and_beacon_purchase_slots():
     """A double demodulator in firmware still needs a real transmitting dock."""
     p = load()
