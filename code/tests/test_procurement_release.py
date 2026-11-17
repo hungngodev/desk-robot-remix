@@ -139,6 +139,19 @@ def test_battery_babysitter_and_second_fuel_gauge_not_bought_together():
     evidence["parts"]["cap_power"]["sku"] = "charger_without_gauge"
     assert "duplicate_bq27441_and_max17048_gauges" not in (
         mod.generate(p, evidence)["missing_system_evidence"])
+    evidence["parts"]["cap_power"]["integrated_fuel_gauge_ic"] = "BQ27441"
+    assert "duplicate_bq27441_and_max17048_gauges" in (
+        mod.generate(p, evidence)["missing_system_evidence"])
+    evidence["parts"]["cap_power"]["integrated_fuel_gauge_ic"] = "MAX17048"
+    assert "duplicate_bq27441_and_max17048_gauges" in (
+        mod.generate(p, evidence)["missing_system_evidence"])
+    evidence["parts"]["cap_power"]["integrated_fuel_gauge_ic"] = "none"
+    assert "duplicate_bq27441_and_max17048_gauges" not in (
+        mod.generate(p, evidence)["missing_system_evidence"])
+    evidence["parts"]["cap_power"]["integrated_fuel_gauge_ic"] = "mystery"
+    assert "unrecognized_integrated_fuel_gauge" in (
+        mod.generate(p, evidence)["missing_system_evidence"])
+
 
 
 def test_shared_station_and_controller_must_be_in_release_scope():
