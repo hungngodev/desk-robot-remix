@@ -131,25 +131,6 @@ SUPPLEMENTAL_DECISIONS = {
 
 
 
-# Human-readable linked details, not extra counted robot slots.
-SUPPLEMENTAL_DISPLAY = {
-    "n20_motor_candidate": "N20 100:1 MP 6V motor alternative",
-    "drv8833_driver_candidate": "DRV8833 dual H bridge alternative",
-    "bq24075_charger_candidate": "BQ24075 power path plus BQ27441 gauge alternative",
-    "boost_5v_candidate": "5V switching regulator",
-    "protected_ntc_pack": "Protected 1S pack with connected NTC",
-    "dock_5v_adapter": "Independent rated 5V dock adapter",
-    "dock_ir_transistor_channels": "Dock IR transmitter transistor and resistor channels",
-    "shared_room_controller": "Shared room controller actual board",
-    "room_scd40": "Shared station SCD40",
-    "room_bme688": "Shared station BME688",
-    "room_ld2410c": "Shared station LD2410C",
-    "room_amg8833": "Shared station AMG8833",
-    "room_soil_probe": "Shared station soil probe",
-    "room_nfc_game_tokens": "Shared NFC toy tokens",
-}
-
-
 def _count(v: object, name: str) -> int:
     if type(v) is not int or v < 0:
         raise ValueError(f"{name} must be a nonnegative integer")
@@ -304,6 +285,31 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         missing_system.append("missing_or_reduced_full_feature_roles: " +
                               ", ".join(reduced))
 
+    # The same fourteen details have their labels, parent identities and
+    # quantities in the canonical hardware JSON. The code's independent
+    # minimum contract protects against accidental deletion or reduction.
+    linked = plan.get("linked_subassemblies", [])
+    if not isinstance(linked, list):
+        raise ValueError("Invalid linked subassembly plan")
+    linked_plan = {}
+    for detail in linked:
+        if not isinstance(detail, dict) or not isinstance(detail.get("id"), str):
+            raise ValueError("Malformed linked subassembly")
+        ident = detail["id"]
+        if ident in linked_plan:
+            raise ValueError("Duplicate linked subassembly: " + ident)
+        linked_plan[ident] = detail
+    if set(linked_plan) - set(SUPPLEMENTAL_DECISIONS):
+        raise ValueError("Unexpected linked subassembly ID")
+    for ident, (parent, units) in SUPPLEMENTAL_DECISIONS.items():
+        detail = linked_plan.get(ident, {})
+        if (detail.get("parent_role") != parent
+                or type(detail.get("fleet_quantity")) is not int
+                or detail["fleet_quantity"] != units
+                or not isinstance(detail.get("name"), str)
+                or not detail["name"].strip()):
+            missing_system.append("missing_or_reduced_linked_subassembly:" + ident)
+
     # The human-priced register also has fourteen linked physical subparts.
     # A fully approved 49-role abstract plan must not skip exact motor, cell,
     # boost, charge, dock and station sourcing decisions. An alternative may
@@ -344,8 +350,9 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             valid = (_receipt(declared.get("alternative_or_parent_receipt"))
                      and isinstance(declared.get("replacement_sku"), str)
                      and bool(declared["replacement_sku"].strip()))
-        approved_decisions.append({"id": ident, "parent_role": parent,
-                                   "fleet_quantity": units, "reviewed": valid,
+        approved_decisions.append({"id": ident, "name": linked_plan.get(ident, {}).get("name", ident),
+                                   "parent_role": parent, "fleet_quantity": units,
+                                   "reviewed": valid,
                                    "disposition": declared.get("disposition")
                                    if isinstance(declared, dict) else None})
         if not valid:
@@ -467,7 +474,7 @@ def render_markdown(report: dict) -> str:
     # role. Expose all of them in the SAME remaining-components list without
     # double counting either physical quantities or automatic purchases.
     for detail in report["supplemental_decisions"]:
-        name = SUPPLEMENTAL_DISPLAY[detail["id"]]
+        name = detail["name"]
         status = ("REVIEWED DECISION, CHECK DISPOSITION" if detail["reviewed"]
                   else "HOLD SUBASSEMBLY DECISION")
         output.append(
