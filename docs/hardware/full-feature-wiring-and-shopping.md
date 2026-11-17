@@ -2,7 +2,7 @@
 
 # Final selected full five-pet hardware architecture
 
-**Decision:** This is the selected complete-feature electrical and sensor allocation for five identical core pets. It is not a stripped-down robot. Exact board carrier, battery and printed fit are not physically qualified. The original $50 total prototype cap is incompatible with the selected ranging carriers; do not invent a false price.
+**Decision:** This is the selected complete-feature electrical and sensor allocation for five identical core pets. It is not a stripped-down robot. Exact board carrier, battery and printed fit are not physically qualified. The original $50 prototype cap remains unproven for the *entire* robot. Ranging is now explicitly the low-cost generic VL53L0X GY-530; do not reinstate premium carrier pricing.
 
 **Use one Mac plus five identical Sense heads and WROOM bodies.** Reuse the owned motors and MG90S before buying duplicates. No second camera, additional onboard microphone, Raspberry Pi, or unrelated motor driver is required.
 
@@ -207,7 +207,7 @@ Do **not** buy another BerryIMU, extra camera, separate microphone, Pi, duplicat
 - https://www.analog.com/en/products/max17048.html
 - https://sensirion.com/products/catalog/SHT41
 - https://www.nxp.com/products/MPR121
-- https://www.pololu.com/product/3692
+- https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html
 - https://www.analog.com/media/en/technical-documentation/data-sheets/AS5600_DS000365_5-00.pdf
 
 The accompanying [machine-readable plan](full-feature-plan.json) is the source for parts quantities and lane allocations. It deliberately records unqualified hardware instead of pretending a zero physical-trial count is a pass.
