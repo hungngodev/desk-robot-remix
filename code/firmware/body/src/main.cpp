@@ -9,6 +9,12 @@
 #if DESK_ROBOT_STEPPER && !DESK_ROBOT_FULL_SENSORS
 #error Stepper backend requires the full sensor guard
 #endif
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+#if DESK_ROBOT_STEPPER || !DESK_ROBOT_FULL_SENSORS
+#error Motor watchdog lab requires full sensors with DC drive pins
+#endif
+#include "MotorHeartbeat.h"
+#endif
 #if DESK_ROBOT_FULL_SENSORS
 #include "CliffGuard.h"
 #include "BerryImu.h"
@@ -28,6 +34,9 @@ desk_robot::CliffGuard cliff_guard;
 desk_robot::BodyControl control(
     DESK_ROBOT_STEPPER ? desk_robot::BodyProfile::StepperGuarded :
                          desk_robot::BodyProfile::DcGuarded, &cliff_guard);
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+desk_robot::MotorHeartbeat motor_heartbeat;
+#endif
 #if DESK_ROBOT_STEPPER
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
@@ -315,6 +324,13 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool loca
 void setup() {
   // The first hardware action disables every motor/phase input, before UART.
   all_motor_inputs_low();
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+  // Pin must stay LOW until the first complete local safety and dock pass.
+  // The external CD74HC123 Q, not this GPIO, may drive DRV8833 nSLEEP.
+  digitalWrite(body_pins::kDcHeartbeatPin, LOW);
+  pinMode(body_pins::kDcHeartbeatPin, OUTPUT);
+  motor_heartbeat.reset();
+#endif
   // This is observation identity only, not cryptographic authentication.
   // New WROOM boots must not reuse the last IMU observation session.
   control.set_boot_epoch(esp_random() | 1U);
@@ -483,6 +499,16 @@ void loop() {
 #endif
 #endif
   control.tick(millis());
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+  // CPU code toggles this ONLY after a full fresh sensor and dock pass.
+  // Never use autonomous LEDC hardware PWM as the heartbeat: PWM can keep
+  // oscillating when the main CPU stops executing its safety loop.
+  const auto& drive = control.state();
+  const bool allow_heartbeat = pwm_ready && drive.armed &&
+      (drive.left != 0 || drive.right != 0);
+  digitalWrite(body_pins::kDcHeartbeatPin,
+      motor_heartbeat.update(millis(), allow_heartbeat) ? HIGH : LOW);
+#endif
   apply_outputs();
   process_input(head_uart, head_receiver, false);
   process_input(Serial, usb_receiver, true);
