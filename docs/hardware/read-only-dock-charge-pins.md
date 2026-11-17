@@ -8,6 +8,8 @@ The hardware plan allocates MCP23017 at WROOM accessory mux 0x71 lane 5, I2C add
 
 The WROOM reports these four bools through the existing read only `aux` path. The Sense bridge and Mac validator type-check them, reject fictional `charging_verified=true`, and never enable the charger or drive actuators.
 
+CHG active with PGOOD active but **neither independent seat switch confirming contact** is a contradiction and now reports `charge_signal_without_seat_fault`, not the routine `charger_input_without_seat` state. Three fresh matching pin readings still cannot establish actual charging current or authorize charging. The corresponding host regression was added to the existing dock test file; repository CI and physical validation are not yet proven.
+
 Power path proposal for review, **not verified electronics**: a protected compatible 1S cell with pack protection and temperature monitoring, a current and thermally qualified boost converter for the 5V body/head motors, a separately selected single-cell power-path charger operating from a short protected dock input, and correctly fused keyed recessed contacts. A BQ24074 is a useful *reference design* with dynamic power-path management, but has max 1.5A charge current and must not be mistaken for a 5V high current boost output or protection of arbitrary bare 18650 cells. Vendor data: https://www.ti.com/product/BQ24074.
 
 The actual battery, boost, charger board, NTC wiring, input charge contact current limit, thermal load, chassis geometry, shore power, and exposed contact safety remain unselected and cannot be called verified until built and measured. Do not energize exposed metal contacts from this file.
