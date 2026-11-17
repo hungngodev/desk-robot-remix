@@ -76,8 +76,8 @@ def test_generated_robot_harness_matches_live_wiring_emitter():
     assert "CD74HC123 rising-edge haptic trigger" in output
 
 
-def test_amplifier_supply_is_fixed_to_three_point_three_for_retained_one_watt():
-    """Don't silently wire a 5V / 1.8W capable amplifier to a 1W speaker."""
+def test_amplifier_supply_matches_current_two_watt_speaker():
+    """Do not approve a retired 1W speaker on the current 5V output."""
     import copy
     import importlib.util
     import pytest
@@ -91,16 +91,16 @@ def test_amplifier_supply_is_fixed_to_three_point_three_for_retained_one_watt():
     body = (ROOT / generator.BODY_PINS).read_text()
     head = (ROOT / generator.HEAD_PINS).read_text()
     output = generator.render(plan, body, head)
-    assert "Rated, isolated 3.3V audio power rail" in output
+    assert "Rated, isolated 5V audio power rail" in output
     assert "MAX98357A VDD/VIN" in output
     assert "MAX98357A OUTP and OUTN" in output
     assert "NEVER connect either output to GND" in output
-    assert "audio rail peak, brownout and heat HOLD" in output
+    assert "audio rail peaks, clipping and heat HOLD" in output
     assert output.rstrip() == (HARDWARE /
         "one-robot-signal-harness.generated.md").read_text().rstrip()
     for field, wrong in (
-        ("amplifier_vdd_v", 5), ("amplifier_vdd_v", True),
-        ("speaker_nominal_rating_w", 2),
+        ("amplifier_vdd_v", 3.3), ("amplifier_vdd_v", True),
+        ("speaker_nominal_rating_w", 1),
         ("speaker_nominal_impedance_ohm", 4),
         ("amplifier_ic", "other"),
         ("physical_release", "approved"),
