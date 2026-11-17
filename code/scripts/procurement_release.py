@@ -21,30 +21,6 @@ SOURCE_REFERENCES = {
     "i2c_mux": ("Generic", "TCA9548A", "https://www.ti.com/product/TCA9548A"),
     "mcp23017": ("Generic", "MCP23017", "https://www.microchip.com/en-us/product/MCP23017"),
     "amp": ("Generic", "MAX98357A", "https://www.analog.com/en/products/max98357a.html"),
-    "i2c_mux": (
-        "TCA9548A 8 channel 3.3V compatible I2C multiplexer",
-        "ElectroPeak", "COM-05-067",
-        "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
-        2, None),  # Seller displays GBP; do not fabricate USD conversion.
-    "cap1188": (
-        "CAP1188 8 zone capacitive touch breakout",
-        "ElectroPeak", "SEN-25-020",
-        "https://electropeak.com/cap1188-capacitive-touch-module", 1, 6.95),
-    "apds9960": (
-        "APDS9960 gesture proximity color light module",
-        "ElectroPeak", "SEN-24-027",
-        "https://electropeak.com/apds-9960-infrared-gesture-sensor-module",
-        1, 2.25),
-    "ads1115": (
-        "ADS1115 4 channel ADC breakout",
-        "ElectroPeak", "COM-05-045",
-        "https://electropeak.com/ads1115-16-bit-adc-4-channel-programmable-gain-amplifier-b00soy52cu",
-        1, None),  # Seller displays GBP.
-    "mcp23017": (
-        "MCP23017 16 channel I2C GPIO expander",
-        "ElectroPeak", "COM-05-093",
-        "https://electropeak.com/mcp23017-e-ss-16-channel-i-o-expansion-module-i2c-interface",
-        1, 4.50),
     "speaker": ("Challenge Electronics", "CS20-02P110-04-1X", "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069"),
 }
 
@@ -748,6 +724,30 @@ PILOT_SAMPLE_PRODUCTS = {
     "cliff_obstacle": ("VL53L0X GY-530 small carrier candidate ElectroPeak SEN-19-006",
                        "ElectroPeak", "SEN-19-006",
                        "https://electropeak.com/gy-530-vl53l0x-laser-range-finder", 8, 1.76),
+    "i2c_mux": (
+        "TCA9548A 8 channel 3.3V compatible I2C multiplexer",
+        "ElectroPeak", "COM-05-067",
+        "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
+        2, None),  # Seller displays GBP; do not fabricate USD conversion.
+    "cap1188": (
+        "CAP1188 8 zone capacitive touch breakout",
+        "ElectroPeak", "SEN-25-020",
+        "https://electropeak.com/cap1188-capacitive-touch-module", 1, 6.95),
+    "apds9960": (
+        "APDS9960 gesture proximity color light module",
+        "ElectroPeak", "SEN-24-027",
+        "https://electropeak.com/apds-9960-infrared-gesture-sensor-module",
+        1, 2.25),
+    "ads1115": (
+        "ADS1115 4 channel ADC breakout",
+        "ElectroPeak", "COM-05-045",
+        "https://electropeak.com/ads1115-16-bit-adc-4-channel-programmable-gain-amplifier-b00soy52cu",
+        1, None),  # Seller displays GBP.
+    "mcp23017": (
+        "MCP23017 16 channel I2C GPIO expander",
+        "ElectroPeak", "COM-05-093",
+        "https://electropeak.com/mcp23017-e-ss-16-channel-i-o-expansion-module-i2c-interface",
+        1, 4.50),
     "speaker": ("Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker",
                 "Challenge Electronics", "CS20-02P110-04-1X",
                 "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069", 1, 3.24),
