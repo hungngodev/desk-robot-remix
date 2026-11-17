@@ -1,10 +1,10 @@
-# All eight VL53L4CD directions: real sensor telemetry to proactive perception
+# All eight VL53L0X directions: real sensor telemetry to proactive perception
 
 Status November 10 2026. The body firmware ALREADY operates a real TCA9548A 0x70 with five critical cliff/forward channels (0..4) plus three supplemental read-only channels (5..7, left/right/rear) in the `esp32_full` profile. The new work uses those **actual** three readings in Mac pet behavior rather than inventing another driver, assuming all eight are one safety policy, or treating a shopping list as a hardware test.
 
 ## Reused existing code
 
-* `code/firmware/body/lib/TofBus/TofBus.cpp` reuses pinned Pololu VL53L4CD initialization and nonblocking checked I2C reads. `DESK_ROBOT_EXTRA_RANGERS` determines whether the three extras are present.
+* `code/firmware/body/lib/TofBus/TofBus.cpp` reuses pinned Pololu VL53L0X initialization and nonblocking checked I2C reads. `DESK_ROBOT_EXTRA_RANGERS` determines whether the three extras are present.
 * `code/firmware/body/src/main.cpp` forwards fresh extra raw distance, validity and timestamp to WROOM `BodyControl::sample_side_range`. It also compares the shared `TofBus` error counter before and after each poll and invalidates **all three published optional valid flags immediately** when a new mux or I2C fault occurs. Raw values and prior presence remain diagnostic only; the Mac source gate already resets invalid channels rather than treating cached samples as new events.
 * `code/firmware/body/lib/BodyControl/BodyControl.cpp` already publishes an authenticated read-only `side_ranges` block: `mm[3]`, `age_ms[3]`, `present_mask`, `valid_mask`, `motion_certified=false`.
 * `code/laptop/src/desk_robot/side_ranging.py` now parses those original values, requires real valid samples younger than 350 ms, at least 60 ms between independent estimated physical readings and two consecutive near samples to generate a change. Two clearly far samples rearm a channel. Missing, stale, malformed or disconnected channels reset that channel's baseline.
@@ -34,7 +34,7 @@ A camera/VLM may describe the triggered image but cannot claim a motor can safel
 
 ## Acceptance tests and limits
 
-`code/tests/test_side_ranging.py` tests independently updated real time samples, no double counting of one body status frame, invalid masks, reconnection baseline, hysteresis rearm and strict no-motor observation. That is **mock evidence only**, not real VL53L4CD geometry or sensor reliability.
+`code/tests/test_side_ranging.py` tests independently updated real time samples, no double counting of one body status frame, invalid masks, reconnection baseline, hysteresis rearm and strict no-motor observation. That is **mock evidence only**, not real VL53L0X geometry or sensor reliability.
 
 At physical acceptance, confirm the original safety five still fail closed when the optional mux bus NACKs, present/valid mask and 350ms age from real serial, and at least 20 left/right/rear approach/retraction trials per direction. Check known surface materials, reflectivity, side walls and angles before enabling proactive camera prompts. Do not multiply by five purchased sets until one full pet is validated.
 
