@@ -682,17 +682,20 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !dock_unhealthy && !bumper_hit && !touch_hit &&
         (!imu_motion_required_ || imu_valid);
+    // A critical cliff/bus fault takes precedence over a simultaneous
+    // cosmetic or optional-input event in the Mac's multimodal context.
     const char* local_fault =
         dc_fault_latched_ ? "dc_driver_fault_latched" :
         dc_driver_fault_bad(now_ms) ? "dc_driver_fault_unavailable" :
+        guarded_motion_profile() && !cliff_ready ?
+            guard_ == nullptr ? "missing_guard" :
+            CliffGuard::fault_name(guard_->fault()) :
         dock_power_lockout_ ? "dock_power_connected" :
         dock_telemetry_bad(now_ms) ? "dock_gpio_missing_or_stale" :
         bumper_hit ? "bumper_active" :
         touch_hit ? "touch_active" :
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
-        !guarded_motion_profile() ? "not_required" :
-        guard_ == nullptr ? "missing_guard" :
-        CliffGuard::fault_name(guard_->fault());
+        !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
