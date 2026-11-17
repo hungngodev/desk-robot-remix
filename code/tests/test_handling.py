@@ -165,7 +165,7 @@ def test_same_acquisition_never_counts_twice_for_calibration_or_tilt():
                      101.7, new_sample=False) == ("handling_tilt",)
 
 
-def test_boot_change_and_source_clock_rollover_reestablish_baseline():
+def test_boot_change_and_fake_clock_wrap_cannot_erase_new_baseline():
     gate = HandlingGate()
     calibrated(gate)
     assert qualified(gate, sample(boot_id=2, sample_ms=5),
@@ -177,11 +177,16 @@ def test_boot_change_and_source_clock_rollover_reestablish_baseline():
         assert qualified(gate, sample(boot_id=2, sample_ms=6 + i),
                          102.15 + .15 * i, new_sample=False) == ()
     assert gate.reference == (0, 0, 1)
+    # A huge forward clock jump is not a believable immediate rollover.
+    # Keep the real new-boot baseline and reject both this implausible
+    # packet and the ensuing old acquisition, instead of resetting pose.
     assert qualified(gate, sample(boot_id=2, sample_ms=0xfffffffe),
                      103.4, new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
     assert qualified(gate, sample(boot_id=2, sample_ms=2),
                      103.55, new_sample=False) == ()
-    assert gate.reference is None
+    assert gate.reference == (0, 0, 1)
+    assert gate.last_sample_ms == 12
 
 
 def test_missing_or_malformed_imu_source_identity_fails_quiet():
