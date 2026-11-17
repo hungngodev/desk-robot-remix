@@ -45,6 +45,65 @@ PART_GATES = (
 )
 
 
+# Frozen minimum scope for the user-selected full feature build. A plan edit
+# cannot silently remove a robot feature or reduce its quantity and then
+# release an otherwise fully signed purchasing ledger. Revising these minima
+# is a separate reviewed architecture decision, not a cart optimization.
+REQUIRED_PET_PER_ROBOT = {
+    "xiao_sense": 1,
+    "wroom": 1,
+    "oled": 1,
+    "stepper": 2,
+    "uln2003": 2,
+    "mg90s": 2,
+    "imu": 1,
+    "head_touch": 1,
+    "max30102": 1,
+    "cliff_obstacle": 8,
+    "i2c_mux": 2,
+    "amp": 1,
+    "speaker": 1,
+    "cap1188": 1,
+    "touch_electrodes": 1,
+    "apds9960": 1,
+    "fsr": 2,
+    "ads1115": 1,
+    "rgb": 1,
+    "logic_level": 1,
+    "as5600": 3,
+    "encoder_magnets": 3,
+    "ina226": 1,
+    "max17048": 1,
+    "cap_power": 1,
+    "sensor_3v3": 1,
+    "switch_power": 1,
+    "bumper": 2,
+    "reed": 1,
+    "pir": 1,
+    "bmp280": 1,
+    "sht41": 1,
+    "pn532": 1,
+    "mcp23017": 1,
+    "haptic_motor": 1,
+    "haptic_driver": 1,
+    "dock_ir_receivers": 2,
+    "dock_ir_beacon_controller": 1,
+    "dock_ir_emitter_channels": 2,
+    "dock_contacts": 1,
+    "dock_fixture": 1,
+    "assembly": 1,
+}
+REQUIRED_ROOM_PER_STATION = {
+    "scd40": 1,
+    "bme688": 1,
+    "ld2410c": 1,
+    "soil_probe": 1,
+    "nfc_game_props": 10,
+    "amg8833": 1,
+    "room_controller": 1,
+}
+
+
 def _count(v: object, name: str) -> int:
     if type(v) is not int or v < 0:
         raise ValueError(f"{name} must be a nonnegative integer")
@@ -186,6 +245,19 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                      "missing_part_evidence": missing})
     if set(room_evidence) - room_ids:
         raise ValueError("Evidence refers to nonexistent shared station part IDs")
+    selected_pet = {row["id"]: row["per_robot"] for row in rows}
+    selected_room = {row["id"]: row["shared_total"] for row in room}
+    reduced = [
+        "pet:" + ident for ident, minimum in REQUIRED_PET_PER_ROBOT.items()
+        if selected_pet.get(ident, -1) < minimum
+    ] + [
+        "room:" + ident for ident, minimum in REQUIRED_ROOM_PER_STATION.items()
+        if selected_room.get(ident, -1) < minimum
+    ]
+    if reduced:
+        missing_system.append("missing_or_reduced_full_feature_roles: " +
+                              ", ".join(reduced))
+
     # The SparkFun PRT-13777 Battery Babysitter already carries a BQ27441
     # fuel gauge. Refuse a second separate MAX17048 design by default;
     # both gauge ICs are legitimate but their telemetry paths are different.
