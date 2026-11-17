@@ -9,6 +9,12 @@
 #if DESK_ROBOT_STEPPER && !DESK_ROBOT_FULL_SENSORS
 #error Stepper backend requires the full sensor guard
 #endif
+// A guarded DC image must not silently omit its CPU-stall motor cutoff.
+// The historical unguarded DC bench remains separate from full-sensor motion.
+#if !DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && \
+    (!defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) || !DESK_ROBOT_ENABLE_DC_WATCHDOG)
+#error Full-sensor DC motion requires the independent motor watchdog heartbeat
+#endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
 #if DESK_ROBOT_STEPPER || !DESK_ROBOT_FULL_SENSORS
 #error Motor watchdog lab requires full sensors with DC drive pins
