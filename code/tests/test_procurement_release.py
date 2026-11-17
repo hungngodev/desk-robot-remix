@@ -1172,3 +1172,50 @@ def test_first_robot_projection_rejects_wrong_scope_and_variant():
     with pytest.raises(ValueError):
         mod.first_robot_projection(unknown)
 
+
+
+
+def test_first_robot_bench_samples_do_not_require_completed_robot_first():
+    """A sample procurement gate breaks the prototype acceptance deadlock."""
+    report = mod.generate(fixture())
+    pilot = mod.first_robot_pilot_samples(report)
+    rows = {item["id"]: item for item in pilot["roles"]}
+    assert len(rows) == 49
+    assert pilot["pilot_sample_count"] == 15
+    assert pilot["pilot_historical_quoted_subtotal_usd"] == 26.57
+    assert not pilot["whole_first_robot_purchase_approved"]
+    assert not pilot["lithium_charging_or_motor_motion_authorized"]
+    assert not pilot["actual_current_landed_cost_verified"]
+    assert rows["cliff_obstacle"]["pilot_sample_quantity"] == 8
+    assert rows["cliff_obstacle"]["source_sku"] == "SEN-19-006"
+    assert rows["speaker"]["source_sku"] == "CS20-02P110-04-1X"
+    assert rows["xiao_sense"]["pilot_sample_quantity"] == 0
+    assert rows["xiao_sense"]["pilot_action"] == "VERIFY_OWNED_OR_INCOMING_STOCK"
+    for ident in (
+        "cap_power", "ina226", "max17048", "switch_power",
+        "dock_contacts", "assembly", "as5600",
+    ):
+        assert rows[ident]["pilot_sample_quantity"] == 0
+        assert rows[ident]["pilot_action"] == "HOLD_POWER_MOTION_OR_FIT_SELECTION"
+    assert "protected_ntc_pack" in pilot["unresolved_linked_decisions"]
+    text = mod.render_first_robot_pilot_samples(report)
+    assert text.count("## 1.") == 1
+    assert text.count("## 2.") == 1
+    assert "SEN-19-006" in text
+    assert "26.57" in text
+    assert "not a physically qualified robot" in text
+
+
+def test_pilot_sample_cannot_inherit_approved_sku_from_replaced_sensor():
+    """A source-locked sample is never an automatic chip substitution permit."""
+    import copy
+    bad = copy.deepcopy(fixture())
+    next(x for x in bad["parts"] if x["id"] == "cliff_obstacle")[
+        "name"
+    ] = "expensive replacement VL53L4CD"
+    pilot = mod.first_robot_pilot_samples(mod.generate(bad))
+    range_row = next(x for x in pilot["roles"] if x["id"] == "cliff_obstacle")
+    assert range_row["pilot_action"] == "HOLD_CHANGED_PART_IDENTITY"
+    assert range_row["pilot_sample_quantity"] == 0
+    assert range_row["source_url"] is None
+    assert not pilot["whole_first_robot_purchase_approved"]
