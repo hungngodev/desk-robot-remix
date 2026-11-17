@@ -375,6 +375,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     audio = plan.get("audio_output_power_contract")
     audio_suitable = (
         isinstance(speaker_selected, dict)
+        and isinstance(speaker_selected.get("name"), str)
         and "CS20-02P110-04-1X" in speaker_selected["name"]
         and "2 watt" in speaker_selected["name"]
         and isinstance(audio, dict)
