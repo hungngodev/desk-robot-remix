@@ -605,6 +605,15 @@ def first_robot_projection(report: dict) -> dict:
             rows.append({
                 "id": ident, "name": part["name"], "scope": scope,
                 "prototype_target": target,
+                # Full reported inventory remains visible even if no first
+                # robot slot currently uses this variant. Do not erase the
+                # user's five owned steppers just because DC is undecided.
+                "fleet_reported_owned_not_verified": part[
+                    "reported_owned_not_verified"],
+                "fleet_estimated_owned_not_verified": part[
+                    "estimated_owned_not_verified"],
+                "fleet_ordered_unreceived_not_verified": part[
+                    "ordered_unreceived_not_verified"],
                 **allocations,
                 "conditional_remaining": available,
                 "reference_only": part.get("reference_only"),
@@ -665,18 +674,23 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
         "## 1. Reported owned or ordered, still unverified",
         "",
-        "| Role | Reported on hand | Estimated on hand | Ordered, not received |",
-        "| --- | ---: | ---: | ---: |",
+        "| Role | All reported on hand | All estimated on hand | All ordered, unreceived | Allocated to first unit |",
+        "| --- | ---: | ---: | ---: | ---: |",
     ]
     for row in projection["roles"]:
         if any(row[k] for k in (
+                "fleet_reported_owned_not_verified",
+                "fleet_estimated_owned_not_verified",
+                "fleet_ordered_unreceived_not_verified")):
+            first_allocated = sum(row[k] for k in (
                 "reported_owned_not_verified", "estimated_owned_not_verified",
-                "ordered_unreceived_not_verified")):
+                "ordered_unreceived_not_verified"))
             lines.append(
                 f"| {cell(row['name'])} | "
-                f"{row['reported_owned_not_verified']} | "
-                f"{row['estimated_owned_not_verified']} | "
-                f"{row['ordered_unreceived_not_verified']} |"
+                f"{row['fleet_reported_owned_not_verified']} | "
+                f"{row['fleet_estimated_owned_not_verified']} | "
+                f"{row['fleet_ordered_unreceived_not_verified']} | "
+                f"{first_allocated} |"
             )
     lines += [
         "",
