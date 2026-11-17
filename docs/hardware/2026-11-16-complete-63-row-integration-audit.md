@@ -90,3 +90,16 @@ This report deliberately distinguishes a source path from real compatibility. A 
 ## Verification receipts and next review
 
 The current script `code/scripts/procurement_release.py` refuses fleet release until source and physical evidence receipts are supplied. The new `code/tests/test_full_purchase_register_integrity.py` adds structural checks for all 14 supplement names, parent count, 42 plus 7 primary roles and unselected pilot amounts. Source parsing in this audit was performed against the live GitHub content. Do not claim the host `pytest`, PlatformIO, ESP-IDF, physical charger, source fit or fleet trial passed merely because this table was generated.
+
+## 2026-11-16 price correction for one room thermal sensor
+
+The currently quoted SparkFun SEN-14607 is **$49.95** for one shared AMG8833 8 by 8 array, not five robot units. Same chip candidates located in primary seller listings:
+
+| Exact seller candidate | Public listed unit price | URL | Status |
+| --- | ---: | --- | --- |
+| SparkFun SEN-14607 | $49.95 | https://www.sparkfun.com/sparkfun-grid-eye-infrared-array-breakout-amg8833-qwiic.html | Original comparison quote, not automatic order |
+| ElectroPeak GY-AMG8833 SEN-05-022 | $21.95 | https://electropeak.com/gy-amg8833-ir-8x8-infrared-thermal-imaging-array-sensor-module | Lower cost candidate; landed shipping and PCB pullup evidence absent |
+| Seeed Grove AMG8833 101020557 | $29.00 | https://www.seeedstudio.com/Grove-Infrared-Temperature-Sensor-Array-AMG8833.html | Midprice alternative; Grove socket/PCB fit requires review |
+| ShillehTek AMG8833 NB146 | $27.99 | https://shillehtek.com/products/amg8833-ir-thermal-camera-sensor-arduino-esp32 | Soldered header option, shipping and exact electrical fit still unknown |
+
+The pinned firmware uses the original AMG8833 I2C register layout and assumes the board is strapped to address 0x69. **Do not buy based on chip name and quoted price alone**. The exact listing PCB, actual voltage rail and SDA/SCL pullups, ADO address state, optical mounting and total delivered cost remain unverified. These four are candidate comparisons, not four additional bill of materials lines. Do not purchase an Adafruit branded sensor board.
