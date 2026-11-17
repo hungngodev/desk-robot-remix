@@ -812,3 +812,67 @@ async def test_person_face_cue_rejects_wrong_robot_or_missing_ack(
             head = HttpHead(robot, client)
             with pytest.raises(HeadError, match="Cosmetic face cue"):
                 await head.face_event("person_detected")
+
+
+async def test_actual_xiao_camera_pid_is_bound_to_authenticated_jpeg_boot(settings, tokens):
+    requests = []
+
+    async def handler(request):
+        requests.append(request.url.path)
+        if request.url.path == "/api/camera.jpg":
+            return httpx.Response(200, headers={
+                "X-Desk-Camera-Boot": "41",
+                "X-Desk-Camera-Sequence": "1",
+                "X-Desk-Camera-Complete-Us": "9000",
+            }, content=b"\xff\xd8camera\xff\xd9")
+        if request.url.path == "/api/camera.identity":
+            return httpx.Response(200, json={
+                "robot_id": settings.robots[0].id,
+                "camera_sensor_pid": "OV5640",
+                "camera_pid_raw": 0x5640,
+                "boot": 41,
+            })
+        raise AssertionError("Unexpected camera request")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        assert (await head.snapshot()).startswith(b"\xff\xd8")
+        assert await head.camera_identity() == "OV5640"
+        assert requests == ["/api/camera.jpg", "/api/camera.identity"]
+
+
+@pytest.mark.parametrize("override", [
+    {"camera_sensor_pid": "OV3660", "camera_pid_raw": 0x5640},
+    {"camera_sensor_pid": "OV2640", "camera_pid_raw": 0x2642},
+    {"camera_sensor_pid": "OV5640", "camera_pid_raw": True},
+    {"camera_sensor_pid": "OV5640", "camera_pid_raw": 0x3660},
+    {"camera_sensor_pid": "OV5640", "boot": 42},
+    {"camera_sensor_pid": "OV5640", "boot": True},
+    {"robot_id": "another-robot"},
+])
+async def test_camera_identity_mismatch_never_qualifies_dock_sensor(
+    settings, tokens, override,
+):
+    async def handler(request):
+        if request.url.path == "/api/camera.jpg":
+            return httpx.Response(200, headers={
+                "X-Desk-Camera-Boot": "41",
+                "X-Desk-Camera-Sequence": "1",
+                "X-Desk-Camera-Complete-Us": "9000",
+            }, content=b"\xff\xd8camera\xff\xd9")
+        if request.url.path == "/api/camera.identity":
+            body = {
+                "robot_id": settings.robots[0].id,
+                "camera_sensor_pid": "OV5640",
+                "camera_pid_raw": 0x5640,
+                "boot": 41,
+            }
+            body.update(override)
+            return httpx.Response(200, json=body)
+        raise AssertionError("Unexpected request")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        await head.snapshot()
+        with pytest.raises(HeadError, match="Camera (sensor PID|identity)"):
+            await head.camera_identity()
