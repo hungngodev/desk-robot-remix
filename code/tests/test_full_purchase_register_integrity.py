@@ -17,7 +17,7 @@ PLAN = HARDWARE / "full-feature-plan.json"
 EXTRA = {
     "N20 100:1 MP 6V motors": (2, 10, "stepper", "alternative"),
     "DRV8833 dual H bridge": (1, 5, "uln2003", "alternative"),
-    "BQ24075 battery power path and BQ27441 gauge": (
+    "BQ24075 power-path source, NO second SoC gauge": (
         1, 5, "cap_power", "alternative"
     ),
     "5V switching regulator": (1, 5, "cap_power", "candidate"),
@@ -44,7 +44,7 @@ EXTRA = {
 LINKED_IDS = {
     "N20 100:1 MP 6V motors": "n20_motor_candidate",
     "DRV8833 dual H bridge": "drv8833_driver_candidate",
-    "BQ24075 battery power path and BQ27441 gauge": "bq24075_charger_candidate",
+    "BQ24075 power-path source, NO second SoC gauge": "bq24075_charger_candidate",
     "5V switching regulator": "boost_5v_candidate",
     "Protected NTC 1S battery pack": "protected_ntc_pack",
     "Independent 5V dock adapter": "dock_5v_adapter",
