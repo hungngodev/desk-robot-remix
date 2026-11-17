@@ -1496,7 +1496,10 @@ async def test_proactive_model_deadline_releases_only_fleet_initiative_task(
         )
         await asyncio.wait_for(entered.wait(), timeout=.6)
         await wait_for(lambda: pet._speech_task is None, timeout=1.5)
-        assert chat.cancelled is True
+        # Releasing the proactive lease schedules cancellation of the
+        # underlying optional model task. Its CancelledError handler runs
+        # on a later asyncio tick and is not an atomic part of lease release.
+        await wait_for(lambda: chat.cancelled is True, timeout=.5)
         assert state.last_initiative_suppression == "event_expired_during_reasoning"
         assert state.spoken == 0
         assert pet._group_last_spoken == float("-inf")
