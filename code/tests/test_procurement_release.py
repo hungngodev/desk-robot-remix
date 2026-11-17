@@ -542,8 +542,12 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
             "supplemental_decisions": {
                 ident: {
                     "parent_role": parent, "fleet_quantity": count,
-                    "disposition": "selected",
+                    "disposition": ("rejected_in_favor_of_qualified_alternative"
+                                    if ident in ("n20_motor_candidate", "drv8833_driver_candidate")
+                                    else "selected"),
                     "resolved_item": "simulated selected subpart",
+                    "replacement_sku": "qualified legacy stepper assembly",
+                    "alternative_or_parent_receipt": receipt,
                     "decision_receipt": receipt, **dict(passed),
                 }
                 for ident, (parent, count)
@@ -653,8 +657,12 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
         "system": {gate: receipt for gate in mod.SYSTEM_GATES},
         "supplemental_decisions": {
             name: {"parent_role": parent, "fleet_quantity": qty,
-                   "disposition": "selected",
+                   "disposition": ("rejected_in_favor_of_qualified_alternative"
+                                   if name in ("n20_motor_candidate", "drv8833_driver_candidate")
+                                   else "selected"),
                    "resolved_item": "synthetic subcomponent",
+                   "replacement_sku": "qualified 28BYJ48 and ULN2003",
+                   "alternative_or_parent_receipt": receipt,
                    "decision_receipt": receipt,
                    **dict(approved_part)}
             for name, (parent, qty) in mod.SUPPLEMENTAL_DECISIONS.items()
@@ -686,7 +694,8 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
         ("boost_5v_candidate", lambda e: e["supplemental_decisions"]
             ["boost_5v_candidate"].update(disposition="not_selected")),
         ("drv8833_driver_candidate", lambda e: e["supplemental_decisions"]
-            ["drv8833_driver_candidate"].update(vendor="Adafruit")),
+            ["drv8833_driver_candidate"].update(
+                disposition="selected", vendor="Adafruit")),
     ):
         altered = copy.deepcopy(evidence)
         mutator(altered)
@@ -703,6 +712,8 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
     )
     # A qualified STEP motor combined with a selected DRV8833 DC driver is
     # still an impossible assembly. It must never release a mixed cart.
+    altered["supplemental_decisions"]["drv8833_driver_candidate"][
+        "disposition"] = "selected"
     mixed = mod.generate(plan, altered)
     assert not mixed["order_released"]
     assert "motor_driver_variant_mismatch" in mixed["missing_system_evidence"]
@@ -719,6 +730,8 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
     # In the opposite direction, a selected DC motor cannot be authorized
     # with a legacy ULN2003 stepper driver merely because each has a receipt.
     motor_dc_driver_step = copy.deepcopy(evidence)
+    motor_dc_driver_step["supplemental_decisions"]["n20_motor_candidate"][
+        "disposition"] = "selected"
     motor_dc_driver_step["supplemental_decisions"]["drv8833_driver_candidate"].update(
         disposition="rejected_in_favor_of_qualified_alternative",
         replacement_sku="already qualified ULN2003 STEP driver",
@@ -727,6 +740,17 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
     opposite = mod.generate(plan, motor_dc_driver_step)
     assert not opposite["order_released"]
     assert "motor_driver_variant_mismatch" in opposite["missing_system_evidence"]
+
+
+    # Even with correct N20 + DRV8833 pairing, the unchanged legacy
+    # stepper quantities cannot be part of the same five-pet order.
+    both_selected = copy.deepcopy(evidence)
+    for ident in ("n20_motor_candidate", "drv8833_driver_candidate"):
+        both_selected["supplemental_decisions"][ident]["disposition"] = "selected"
+    duplicate = mod.generate(plan, both_selected)
+    assert not duplicate["order_released"]
+    assert "double_purchase_dc_and_stepper_drivetrains" in (
+        duplicate["missing_system_evidence"])
 
     invalid = copy.deepcopy(evidence)
     invalid["supplemental_decisions"]["ghost_charger"] = {}
