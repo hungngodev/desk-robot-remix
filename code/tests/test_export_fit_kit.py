@@ -67,7 +67,8 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     source = module()
     folder = tmp_path / "docs/cad/remixes"
     folder.mkdir(parents=True)
-    for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad"):
+    for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
+                 "speaker_rect_fit_gauge.scad"):
         (folder / name).write_text("cube([1,1,1]);\n")
     (folder / "dock").mkdir()
     (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
@@ -86,11 +87,12 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     rendered = tmp_path / "rendered"
     report = source.export_kit(tmp_path, output_dir=rendered)
     assert len(commands) == (
-        len(source.ADAPTERS) + len(source.GAUGES) + len(source.DOCKS)
-    ) == 11
-    assert len(report["parts"]) == 11
+        len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS) + len(source.DOCKS)
+    ) == 12
+    assert len(report["parts"]) == 12
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
+    assert (rendered / "fit_stls/speaker_rect_fit_gauge.stl").is_file()
     assert (rendered / "dock_stls/dock_passive_fit.stl").is_file()
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
@@ -106,7 +108,8 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     source = module()
     folder = tmp_path / "docs/cad/remixes"
     folder.mkdir(parents=True)
-    for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad"):
+    for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
+                 "speaker_rect_fit_gauge.scad"):
         (folder / name).write_text("cube([1,1,1]);\n")
     (folder / "dock").mkdir()
     (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
@@ -127,6 +130,36 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     assert not list(output.rglob("*.stl"))
     assert not (output / "fit_kit_manifest.json").exists()
 
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_exact_2w_rectangular_speaker_coupon_is_watertight_and_unqualified(tmp_path):
+    """Manufacturer dimensions produce a printable fit TEST, not final acoustics."""
+    from struct import unpack_from
+    source = ROOT / "docs/cad/remixes/speaker_rect_fit_gauge.scad"
+    text = source.read_text(encoding="utf-8")
+    assert "CS20-02P110-04-1X" in text
+    assert "speaker_l=20;" in text and "speaker_w=16;" in text
+    assert "speaker_h=4.7;" in text
+    output = tmp_path / "speaker.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o",
+        str(output), str(source),
+    ], check=True, timeout=60)
+    assert module().closed_mesh_edges(output) > 0
+    blob = output.read_bytes()
+    triangles = unpack_from("<I", blob, 80)[0]
+    points = [
+        unpack_from("<3f", blob, 84 + i*50 + 12 + j*12)
+        for i in range(triangles) for j in range(3)
+    ]
+    bounds = [
+        max(vertex[axis] for vertex in points) -
+        min(vertex[axis] for vertex in points) for axis in range(3)
+    ]
+    assert 24.0 < bounds[0] < 27.0
+    assert 20.0 < bounds[1] < 23.0
+    assert 7.0 <= bounds[2] < 9.0
 
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
