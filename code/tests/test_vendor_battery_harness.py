@@ -16,17 +16,21 @@ def module(name):
     return mod
 
 
-def test_exact_five_vendor_variants_and_unchanged_power_sizing_source():
+def test_exact_nine_vendor_variants_and_unchanged_power_sizing_source():
     screen = module("screen_vendor_battery_harness")
     sizing = module("power_preflight")
     demand = sizing.size_5v_supply(1.0, 0.6)
-    assert len(screen.catalog()) == 5
+    assert len(screen.catalog()) == 9
     assert demand["minimum_rated_cell_and_boost_input_a"] == 2.55
     for model in screen.catalog():
         report = screen.evaluate(model, demand)
         assert report["vendor_source"].startswith("https://")
         assert report["protected"] is True
-        assert report["ntc"] == "10k"
+        if model != "THOR-18650-1S2P-5200":
+            assert report["ntc"] == "10k"
+        else:
+            assert report["ntc"] == "optional"
+            assert "pcm_current_limit_and_connector_configuration_unselected" in report["blocking_reasons"]
         assert report["complete_power_path_safe_to_buy"] is False
         assert "charger_ntc_circuit_not_qualified" in report["blocking_reasons"]
         assert "physical_power_and_fit_trials_not_executed" in report["blocking_reasons"]
@@ -95,3 +99,43 @@ def test_unknown_pack_and_invalid_tray_dimensions_rejected():
     for dims in ((True, 35, 14), (0, 35, 14), (68, -35, 14), (68, 35, float("inf"))):
         with pytest.raises(ValueError):
             screen.evaluate("LPHD7430085", demand, tray_mm=dims)
+
+
+def test_new_verified_large_pack_continuous_ratings_reject_false_10a_claims():
+    """Two parallel cells can still ship with a 2A or 2.5A PCM.
+
+    A bare cell's advertised 10.4A theoretical maximum is NOT the actual
+    protection circuit, connector or whole assembled pack continuous rate.
+    """
+    screen = module("screen_vendor_battery_harness")
+    supply = module("power_preflight").size_5v_supply(2.0, 1.2)
+    assert supply["minimum_rated_cell_and_boost_input_a"] > 5
+    varta = screen.evaluate("VARTA-VAR56653502013", supply,
+                            tray_mm=(115, 55, 30))
+    litech = screen.evaluate("LITECH-LP1S2P2A2AL005", supply,
+                             tray_mm=(115, 55, 30))
+    for report, sustained in ((varta, 2.5), (litech, 2.0)):
+        assert report["pack_fits_current_tray_on_paper"]
+        assert report["pack_peak_within_published_max_on_paper"] is False
+        assert report["pack_current_enough_on_paper"] is False
+        assert "pack_max_discharge_below_peak_budget" in report["blocking_reasons"]
+        assert "pack_current_rating_below_load_budget" in report["blocking_reasons"]
+        assert report["complete_power_path_safe_to_buy"] is False
+    thor = screen.evaluate("THOR-18650-1S2P-5200", supply,
+                           tray_mm=(115, 55, 30))
+    assert thor["pack_peak_within_published_max_on_paper"]
+    assert thor["pack_current_enough_on_paper"] is None
+    assert thor["ntc"] == "optional"
+    assert "pack_ntc_10k_not_fitted_in_exact_variant" in thor["blocking_reasons"]
+    assert "bare_cell_envelope_not_complete_protected_pack" in thor["blocking_reasons"]
+
+
+def test_wider_batteryspace_3000mah_does_not_fit_old_tray_or_claim_5a_continuous():
+    screen = module("screen_vendor_battery_harness")
+    supply = module("power_preflight").size_5v_supply(1, .6)
+    report = screen.evaluate("BATTERYSPACE-CU-JAS427", supply)
+    assert report["pack_fits_current_tray_on_paper"] is False
+    assert report["pack_current_enough_on_paper"] is None
+    assert report["pack_peak_within_published_max_on_paper"]
+    assert report["harness_ampacity_enough_on_paper"] is False
+    assert report["complete_power_path_safe_to_buy"] is False
