@@ -95,7 +95,7 @@ def test_bona_fide_receipts_are_operator_provided_not_inferred():
               "vendor": "Sensirion", "sku": "SCD40", "pcb_revision": "1",
               **{k: receipt for k in mod.PART_GATES},
           }}}
-    assert mod.generate(p, ev)["order_released"]
+    assert not mod.generate(p, ev)["order_released"]
     ev["system"]["protected_1s_charger_and_dock_contacts"] = {"result": "pass"}
     assert not mod.generate(p, ev)["order_released"]
 
@@ -113,7 +113,7 @@ def test_new_adafruit_hardware_is_never_approved_even_with_receipts():
     e = {"parts": {x["id"]: dict(good) for x in p["parts"]},
          "room_pod": {"scd40": dict(good)},
          "system": {gate: receipt for gate in mod.SYSTEM_GATES}}
-    assert mod.generate(p, e)["order_released"]
+    assert not mod.generate(p, e)["order_released"]
     e["parts"]["cliff_obstacle"]["vendor"] = "Adafruit Industries"
     r = mod.generate(p, e)
     assert not r["order_released"]
@@ -159,7 +159,7 @@ def test_shared_station_and_controller_must_be_in_release_scope():
     assert "exact_vendor_sku_and_pcb_revision" in (
         mod.generate(p, ev)["room_pod"][0]["missing_part_evidence"])
     ev["room_pod"] = {"scd40": passed}
-    assert mod.generate(p, ev)["order_released"]
+    assert not mod.generate(p, ev)["order_released"]
     ev["room_pod"]["scd40"] = {"vendor": "X", "sku": "Y", "pcb_revision": "1"}
     assert not mod.generate(p, ev)["order_released"]
 
@@ -383,3 +383,58 @@ def test_current_high_markup_sensor_rows_are_generic_and_unapproved():
         assert "Unquoted" in row, part_id
         fields = [x.strip() for x in row.strip().strip("|").split("|")]
         assert fields[8] == "0", part_id
+
+
+def test_full_feature_scope_cannot_be_deleted_for_release():
+    """Simulated receipts can release a COMPLETE plan, not a reduced cart.
+
+    These are fabricated test fixtures, not electrical or physical proof.
+    """
+    import copy
+    import json
+
+    selected = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    selected["qualified_assumptions"] = True
+    selected["physical_trial_count"] = 1
+    selected["prices_complete"] = True
+    receipt = {"result": "pass", "evidence_url": "https://example.org/simulated",
+               "tested_on": "simulated", "reviewer": "fixture"}
+    passed = {"vendor": "generic", "sku": "simulated", "pcb_revision": "1",
+              **{gate: receipt for gate in mod.PART_GATES}}
+
+    def evidence_for(plan):
+        return {
+            "parts": {part["id"]: dict(passed) for part in plan["parts"]},
+            "room_pod": {item["id"]: dict(passed)
+                         for item in plan["room_pod"]["modules"]},
+            "system": {gate: receipt for gate in mod.SYSTEM_GATES},
+        }
+
+    assert mod.generate(selected, evidence_for(selected))["order_released"]
+    attempts = []
+    without_touch = copy.deepcopy(selected)
+    without_touch["parts"] = [part for part in without_touch["parts"]
+                              if part["id"] != "cap1188"]
+    attempts.append((without_touch, "pet:cap1188"))
+
+    fewer_cliffs = copy.deepcopy(selected)
+    next(part for part in fewer_cliffs["parts"]
+         if part["id"] == "cliff_obstacle")["per_robot"] = 7
+    attempts.append((fewer_cliffs, "pet:cliff_obstacle"))
+
+    without_station = copy.deepcopy(selected)
+    without_station["room_pod"]["modules"] = [
+        item for item in without_station["room_pod"]["modules"]
+        if item["id"] != "room_controller"
+    ]
+    attempts.append((without_station, "room:room_controller"))
+
+    fewer_game_tokens = copy.deepcopy(selected)
+    next(item for item in fewer_game_tokens["room_pod"]["modules"]
+         if item["id"] == "nfc_game_props")["quantity_per_room"] = 9
+    attempts.append((fewer_game_tokens, "room:nfc_game_props"))
+
+    for plan, expected in attempts:
+        report = mod.generate(plan, evidence_for(plan))
+        assert not report["order_released"]
+        assert any(expected in gate for gate in report["missing_system_evidence"])
