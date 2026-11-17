@@ -33,6 +33,27 @@ current.
 None establishes the final polarity or a mounted charger connection. A 4 A
 cell rating does **not** override 2.2 A or 0.86 A harness ratings.
 
+## Five additional actual manufacturer variants, not silent replacements
+
+The source catalog now contains TEN exact manufacturer configurations including
+these five additional vendor models. At the same deliberately illustrative
+2.55A peak cell demand and 1.53A sustained cell demand, the full 68 x 35 x
+14mm envelope **still accepts none**.
+
+| Exact model and manufacturer | Published protection and current | Assembled body envelope | Sourcing decision |
+| --- | --- | --- | --- |
+| [NX MGL00850 1S2P 6.7Ah](https://www.allbatteries.co.uk/li-ion-battery-2x-18650-1s2p-st1-3-6v-6-7ah-22awg-ntc-10k-mgl00850.html) | 10k NTC, PCM, **3.4A continuous**, 22AWG 100mm | 68.9 x 37.4 x 19.3 mm | Current on paper only for illustrative case, but no terminal ampacity, no US landed quote, too large, and 3.4A fails illustrative higher 5.1A peak |
+| [VARTA 56653502013 1S2P 5.2Ah](https://resources.anglia.com/pdf/product/var/datasheets/56653502013.pdf) | 10k NTC, PCM, **2.5A continuous** despite two cells, Molex 5264 0300 | 70 x 38 x 21 mm | Fails 2.55A illustrative peak and cavity; no entire harness rating; often OEM sourcing |
+| [LiTech LP1S2P2A2AL005 5.2Ah](https://litechpower.com/product/litech-power-1s2p-3-7v-5-2ah-battery-pack-lp1s2p2a2al005/) | 10k NTC, protected, **2A continuous / 3A peak** published | 66 x 39 x 20 mm | Both protection/wire and tray need qualification; 3A peak fails realistic higher stress cases |
+| [BatterySpace CU JAS427 3Ah](https://www.batteryspace.com/polymer-li-ion-battery-pack-3-7v-3000mah-11-1wh-5a-rate.aspx) | 10k NTC/PCM, **5A maximum only**, 22AWG open ends | 66.5 x 37.5 x 14.5 mm with tolerance | No published separate continuous pack/terminated current, cannot claim connector rating or fit |
+| [THOR 18650 1S2P 5.2Ah](https://thorbattery.com/product/thor-18650-1s2p-5200/) | Bare cell 10.4A claim, **optional** PCM/NTC and connector selection | 65 x 37 x 18.4 mm **incomplete bare pack only** | Fit is **UNKNOWN** even if a revised tray accepts bare cells; must include protector, NTC and cable exit before quoting |
+
+Run `code/scripts/screen_vendor_battery_harness.py` for the full ten variant
+screen. The exact blob was independently copied and checked against GitHub
+SHA `f2cf1b78c8acd288cc71d73bcf1213e4830d78d5`, Python compiled, and
+all ten negative purchase checks were executed locally. This is a genuine
+source execution, **not a full robot test**.
+
 ## Bounded illustrative load calculation, not a measured robot current
 
 Using the preexisting power sizing formula with **hypothetical** 5 V peak
