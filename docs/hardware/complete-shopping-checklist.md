@@ -43,7 +43,7 @@ Other reported spares are not interchangeable with chosen modules: BerryIMU, MAX
 | pet or dock | VL53L0X generic GY-530 I2C module | 40 | 40 | HOLD | Generic GY-530 VL53L0X: https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html |
 | pet or dock | TCA9548A 8 channel 3.3V compatible I2C multiplexer | 10 | 10 | HOLD | Generic TCA9548A: https://www.ti.com/product/TCA9548A |
 | pet or dock | MAX98357A I2S mono amplifier | 5 | 5 | HOLD | Generic MAX98357A: https://www.analog.com/en/products/max98357a.html |
-| pet or dock | 8 ohm 1 watt approximately 20 mm speaker | 5 | 5 | HOLD | SparkFun COM-26553: https://www.sparkfun.com/mini-speaker-1w-8-ohm.html |
+| pet or dock | Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker | 5 | 5 | HOLD | Challenge Electronics CS20-02P110-04-1X: https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069 |
 | pet or dock | CAP1188 8 zone capacitive touch breakout | 5 | 5 | HOLD | Choose generic 3.3V CAP1188 I2C breakout at common 0x29 or strapped 0x28; range 0x70 mux is verified off before 0x71 lane0 opens |
 | pet or dock | Copper tape touch electrode and insulating backing set | 5 | 5 | HOLD | Eight zones per pet, not more controllers |
 | pet or dock | APDS9960 gesture proximity color light module | 5 | 5 | HOLD | One multifunction optical sensor |
