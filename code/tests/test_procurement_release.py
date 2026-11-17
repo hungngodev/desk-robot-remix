@@ -101,6 +101,46 @@ def test_bona_fide_receipts_are_operator_provided_not_inferred():
 
 
 
+def test_new_adafruit_hardware_is_never_approved_even_with_receipts():
+    p = fixture()
+    p["qualified_assumptions"] = True
+    p["physical_trial_count"] = 1
+    p["prices_complete"] = True
+    receipt = {"result": "pass", "evidence_url": "https://example.org/real-trial",
+               "tested_on": "sample A", "reviewer": "operator"}
+    good = {"vendor": "generic", "sku": "tested", "pcb_revision": "A",
+            **{gate: receipt for gate in mod.PART_GATES}}
+    e = {"parts": {x["id"]: dict(good) for x in p["parts"]},
+         "room_pod": {"scd40": dict(good)},
+         "system": {gate: receipt for gate in mod.SYSTEM_GATES}}
+    assert mod.generate(p, e)["order_released"]
+    e["parts"]["cliff_obstacle"]["vendor"] = "Adafruit Industries"
+    r = mod.generate(p, e)
+    assert not r["order_released"]
+    assert "no_new_adafruit_hardware" in next(
+        x for x in r["robots"] if x["id"] == "cliff_obstacle"
+    )["missing_part_evidence"]
+    e["parts"]["cliff_obstacle"]["vendor"] = "generic"
+    e["room_pod"]["scd40"]["vendor"] = "Adafruit"
+    assert not mod.generate(p, e)["order_released"]
+
+
+def test_battery_babysitter_and_second_fuel_gauge_not_bought_together():
+    p = fixture()
+    p["parts"].extend([
+        {"id": "cap_power", "name": "1S power module", "per_robot": 1,
+         "reported_owned_total": 0, "group": "pet"},
+        {"id": "max17048", "name": "MAX17048", "per_robot": 1,
+         "reported_owned_total": 0, "group": "pet"}])
+    evidence = {"parts": {"cap_power": {"vendor": "SparkFun",
+              "sku": "PRT-13777", "pcb_revision": "A"}}}
+    r = mod.generate(p, evidence)
+    assert "duplicate_bq27441_and_max17048_gauges" in r["missing_system_evidence"]
+    evidence["parts"]["cap_power"]["sku"] = "charger_without_gauge"
+    assert "duplicate_bq27441_and_max17048_gauges" not in (
+        mod.generate(p, evidence)["missing_system_evidence"])
+
+
 def test_shared_station_and_controller_must_be_in_release_scope():
     """Every listed room module is needed for the requested complete build."""
     p = fixture()
