@@ -1228,7 +1228,12 @@ async def test_jpeg_resize_worker_cannot_block_new_vad_on_event_loop(monkeypatch
         service.voice_started("robot-02")
         assert service.hub.user_active("robot-02", time.monotonic())
         release.set()
-        await asyncio.wait_for(pending, 1)
+        # A human on another pet preempts the entire acoustic floor. The
+        # old camera worker may finish decoding but MUST NOT publish its
+        # obsolete frame into a later conversational generation.
+        with pytest.raises(RuntimeError, match="Camera capture superseded"):
+            await asyncio.wait_for(pending, 1)
+        assert not service.hub.frames["robot-01"]
     finally:
         release.set()
         await service.close()
