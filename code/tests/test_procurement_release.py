@@ -1021,6 +1021,10 @@ def test_one_robot_cart_projects_all_linked_quantities_without_order_approval():
     # selected and no new missing stepper motors appear as purchases.
     assert pet["stepper"]["prototype_target"] == 0
     assert pet["uln2003"]["prototype_target"] == 0
+    # A motor decision cannot erase actual reported stock from owned list.
+    assert pet["stepper"]["fleet_reported_owned_not_verified"] == 5
+    assert pet["uln2003"]["fleet_reported_owned_not_verified"] == 5
+    assert pet["stepper"]["reported_owned_not_verified"] == 0
     assert pet["stepper"]["decision"] == "HOLD MOTOR CHOICE"
     assert room["nfc_game_props"]["prototype_target"] == 10
     linked = {item["id"]: item for item in one["linked_decisions"]}
