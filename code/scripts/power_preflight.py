@@ -180,9 +180,12 @@ def screen_protected_pack(
                               for v in interconnect_ratings)
     # Unlike the legacy pack-only indication, this field covers the complete
     # exact wired battery assembly and cannot pass without both ratings.
-    complete_harness_usable = (fits_flat and current_ok and interconnect_ok
-                               if ratings_complete and interconnect_complete
-                               else None)
+    # If any known hard bound fails, the answer is definitively NO even
+    # when another supplier specification is missing. Otherwise an unknown
+    # connector MUST remain unknown, never a misleading qualified YES.
+    complete_harness_usable = (
+        False if not fits_flat or current_ok is False or interconnect_ok is False
+        else True if ratings_complete and interconnect_complete else None)
     return {
         "assembled_pack_fits_tray_on_paper": fits_flat,
         "current_ratings_complete": ratings_complete,
