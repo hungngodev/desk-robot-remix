@@ -48,6 +48,28 @@ def test_no_expensive_sensor_substitution_in_canonical_order():
         mod.generate(p)
 
 
+
+def test_missing_speaker_model_is_a_purchase_hold_not_a_crash():
+    """An incomplete candidate listing cannot break the full cart audit."""
+    p = fixture()
+    p["parts"].append({
+        "id": "speaker", "name": None, "per_robot": 1,
+        "reported_owned_total": 0, "group": "pet",
+    })
+    p["audio_output_power_contract"] = {
+        "amplifier_ic": "MAX98357A", "amplifier_vdd_v": 5.0,
+        "speaker_nominal_impedance_ohm": 8,
+        "speaker_nominal_rating_w": 2,
+        "physical_release": "HOLD pending real speaker thermal measurement",
+    }
+    result = mod.generate(p)
+    assert result["order_released"] is False
+    assert "unresolved_current_two_watt_speaker_contract" in (
+        result["missing_system_evidence"]
+    )
+
+
+
 def test_verification_requires_receipts_not_boolean_assertions():
     p = fixture()
     p["qualified_assumptions"] = True
