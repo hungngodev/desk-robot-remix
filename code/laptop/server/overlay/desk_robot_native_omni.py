@@ -2777,7 +2777,7 @@ async def preempt_others_for_human(source_device: str) -> None:
                     else completed.exception()
                 )
     safely_invalidated: set[str] = set()
-    for (device, session), task in zip(peers, attempts):
+    for (device, session), task in zip(peers, attempts, strict=True):
         if task not in done or task.cancelled():
             continue  # A failed or timed-out STOP is not physical acceptance.
         try:
