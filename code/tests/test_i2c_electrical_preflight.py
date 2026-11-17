@@ -46,7 +46,9 @@ def test_each_source_lane_proves_no_i2c_address_conflict_within_one_channel():
     assert [d["address"] for d in lanes[0]["devices"]] == [0x29]
     # Duplicate AS5600 0x36 devices across isolated branches ARE allowed.
     assert [lanes[9]["devices"][1]["address"],
-            lanes[12]["devices"][1]["address"]] == [0x36, 0x36] if False else True
+            lanes[12]["devices"][1]["address"],
+            lanes[14]["devices"][0]["address"],
+            lanes[15]["devices"][0]["address"]] == [0x36] * 4
     assert {0x36} <= {d["address"] for lane in lanes
                       for d in lane["devices"]}
 
@@ -56,7 +58,7 @@ def test_three_4k7_pullups_across_live_bus_have_valid_fast_mode_window():
     report = tool.screen_selected_segment(upstream, downstream)
     assert report["selected_branch_paper_pass"]
     assert report["lines"]["sda"]["combined_ohms"] == pytest.approx(1566.667, abs=.001)
-    assert report["lines"]["sda"]["estimated_rise_ns"] == pytest.approx(159.325, abs=.01)
+    assert report["lines"]["sda"]["estimated_rise_ns"] == pytest.approx(159.2924, abs=.01)
     assert report["lines"]["sda"]["estimated_sink_ma"] == pytest.approx(1.851, abs=.01)
     assert not report["qualified_hardware"]
 
