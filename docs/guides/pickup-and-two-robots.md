@@ -1,6 +1,6 @@
 > Updated 2026-11-03: this describes existing supervised pickup software.
 > The new stepper/Sense/cliff/pet system is tracked in the [build plan](../PLAN.md).
-> Five-channel VL53L4CD acquisition and local interlocks exist in firmware, but physical optical
+> Five-channel VL53L0X acquisition and local interlocks exist in firmware, but physical optical
 > calibration, servo fit, power, real pickup and controlled placement have not passed trials.
 > Use a contained setup before operating any hardware.
 
