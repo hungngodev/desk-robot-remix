@@ -34,6 +34,7 @@ def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
         ),
         image_width_px=data.get("image_width_px"),
         image_height_px=data.get("image_height_px"),
+        camera_sensor_pid=data.get("camera_sensor_pid"),
         mount_lateral_offset_mm=data.get("mount_lateral_offset_mm"),
         mount_yaw_deg=data.get("mount_yaw_deg"),
     )
