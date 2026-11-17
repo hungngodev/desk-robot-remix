@@ -23,12 +23,12 @@ bool ExpansionTouch::select() {
 }
 bool ExpansionTouch::close() { return mux(kExpansionMux, 0); }
 bool ExpansionTouch::read(std::uint8_t reg, std::uint8_t& value) {
-  wire_->beginTransmission(kAddress);
+  wire_->beginTransmission(address_);
   const bool wrote = wire_->write(reg) == 1;
   // Always terminate the attempted register transaction, including a failed write.
   const bool acknowledged = wire_->endTransmission(false) == 0;
   if (!wrote || !acknowledged) return false;
-  if (wire_->requestFrom(kAddress, static_cast<std::size_t>(1), true) != 1 ||
+  if (wire_->requestFrom(address_, static_cast<std::size_t>(1), true) != 1 ||
       wire_->available() < 1) return false;
   const int result = wire_->read();
   if (result < 0) return false;
@@ -44,10 +44,19 @@ bool ExpansionTouch::begin(TwoWire& wire) {
   present_ = wire_->endTransmission(true) == 0;
   if (!present_) return false;
   if (!select()) { close(); return false; }
-  std::uint8_t product = 0, manufacturer = 0;
-  const bool recognized =
-      read(0xFD, product) && read(0xFE, manufacturer) &&
-      product == 0x50 && manufacturer == 0x5D;
+  // The range mux is positively verified OFF before address probes.
+  // Use chip identity instead of an ACK; never talk to the ToF sensor
+  // at 0x29 and misinterpret it as an 8-pad touch controller.
+  bool recognized = false;
+  for (const std::uint8_t candidate : {kPreferredAddress, kAlternativeAddress}) {
+    address_ = candidate;
+    std::uint8_t product = 0, manufacturer = 0;
+    if (read(0xFD, product) && read(0xFE, manufacturer) &&
+        product == 0x50 && manufacturer == 0x5D) {
+      recognized = true;
+      break;
+    }
+  }
   if (!close()) return false;
   verified_ = recognized;
   return verified_;
