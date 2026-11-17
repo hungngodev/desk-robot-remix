@@ -332,6 +332,123 @@ def assess_docked_load(
         "candidate_physically_qualified": False,
     }
 
+def screen_one_cell_power_stack(
+    *,
+    active_peak_5v_a: float,
+    active_sustained_5v_a: float,
+    dock_idle_5v_a: float,
+    charge_request_a: float,
+    pack_mm: tuple[float, float, float],
+    tray_mm: tuple[float, float, float],
+    pack_peak_a: float | None,
+    pack_sustained_a: float | None,
+    pcm_trip_a: float | None,
+    connector_a: float | None,
+    wire_crimp_a: float | None,
+    boost_input_max_a: float | None,
+    boost_input_continuous_a: float | None,
+    boost_output_at_3v_continuous_a: float | None,
+    boost_regulator_min_input_v: float,
+    boost_regulator_max_input_v: float,
+    charger_input_limit_a: float | None,
+    charger_thermal_input_a: float | None,
+    dock_adapter_continuous_a: float | None,
+    pack_charge_max_a: float | None,
+    docked_sys_v: float,
+    charge_temperature_sensor_connected: bool,
+    charger_ts_fixed_resistor_removed: bool,
+    dock_motors_disarmed: bool,
+    charger_variant: str = "BQ24075",
+    boost_efficiency_low_cell: float = 0.85,
+    boost_efficiency_docked: float = 0.85,
+) -> dict:
+    """Join existing 1S equations into ONE real purchase architecture screen.
+
+    Do not misuse a 3A-at-5V regulator label as 3A-at-3V proof; require
+    derated data at the worst battery voltage. Source references include TI
+    BQ2407x Rev N and exact candidate regulator datasheets and load graphs.
+    A returned paper pass is NEVER PCB, thermal, protection or dock approval.
+    """
+    if any(type(v) is not bool for v in (
+            charge_temperature_sensor_connected,
+            charger_ts_fixed_resistor_removed,
+            dock_motors_disarmed)):
+        raise ValueError("Real TS and motor-disarm modes must be explicit booleans")
+    if not isinstance(pack_mm, (tuple, list)) or len(pack_mm) != 3 or (
+            not isinstance(tray_mm, (tuple, list)) or len(tray_mm) != 3):
+        raise ValueError("Require exact assembled pack and tray 3D envelopes")
+    if charger_input_limit_a is not None and (
+            not _finite_number(charger_input_limit_a)
+            or charger_input_limit_a > 1.5):
+        raise ValueError("BQ2407x maximum dock charger input is not above 1.5A")
+    # Source of truth: do not silently add a new third power-supply formula.
+    undocked = size_5v_supply(
+        active_peak_5v_a, active_sustained_5v_a,
+        cell_low_v=3.0, measured_boost_efficiency=boost_efficiency_low_cell,
+        boost_max_input_a=boost_input_max_a,
+        boost_continuous_input_a=boost_input_continuous_a,
+        boost_continuous_output_a=boost_output_at_3v_continuous_a,
+        protected_cell_continuous_a=pack_sustained_a)
+    protected = screen_protected_pack(
+        undocked,
+        pack_length_mm=pack_mm[0], pack_width_mm=pack_mm[1],
+        pack_thickness_mm=pack_mm[2],
+        tray_length_mm=tray_mm[0], tray_width_mm=tray_mm[1],
+        tray_height_mm=tray_mm[2],
+        rated_peak_discharge_a=pack_peak_a,
+        rated_continuous_discharge_a=pack_sustained_a,
+        pcm_overcurrent_trip_a=pcm_trip_a,
+        connector_continuous_a=connector_a,
+        wire_and_crimp_continuous_a=wire_crimp_a)
+    vpath = screen_bq2407x_output_path(
+        charger_variant,
+        regulator_min_input_v=boost_regulator_min_input_v,
+        regulator_max_input_v=boost_regulator_max_input_v)
+    docked = assess_docked_load(
+        dock_idle_5v_a, charge_request_a,
+        measured_sys_v=docked_sys_v,
+        measured_boost_efficiency=boost_efficiency_docked,
+        charger_input_limit_a=charger_input_limit_a,
+        charger_board_thermal_input_a=charger_thermal_input_a,
+        dock_adapter_continuous_a=dock_adapter_continuous_a,
+        rated_5v_boost_continuous_a=boost_output_at_3v_continuous_a,
+        protected_pack_max_charge_a=pack_charge_max_a,
+        motors_confirmed_disarmed=dock_motors_disarmed,
+        charger_variant=charger_variant)
+    gates = {
+        "charger_out_to_regulated_5v_covers_3v_cell_and_dock": (
+            vpath["regulator_covers_charger_output_on_paper"]),
+        "regulator_current_and_pack_low_cell_budget": (
+            undocked["candidate_electrically_sufficient_on_paper"] is True),
+        "whole_protected_cell_pcm_cable_and_tray": (
+            protected["candidate_usable_on_paper"] is True),
+        "docked_idle_plus_cell_charge_in_same_1_5a_budget": (
+            docked["candidate_docked_load_on_paper"] is True),
+        "charger_ts_is_connected_to_actual_pack_ntc": (
+            charge_temperature_sensor_connected and
+            charger_ts_fixed_resistor_removed),
+        "physical_motor_commands_inhibited_on_dock": dock_motors_disarmed,
+    }
+    return {
+        "source_of_equations": "existing power_preflight.py",
+        "charger_variant": charger_variant,
+        "minimum_5v_peak_a_including_margin": (
+            undocked["minimum_rated_5v_output_a"]),
+        "minimum_1s_peak_a_including_margin": (
+            undocked["minimum_rated_cell_and_boost_input_a"]),
+        "manufacturer_derated_at_3v_boost_amperes_supplied": (
+            boost_output_at_3v_continuous_a),
+        "checks": gates,
+        "all_power_stages_compatible_on_paper": all(gates.values()),
+        "all_power_stages_physically_verified": False,
+        "qualified_1s_dock_safe_to_buy": False,
+        "undocked": undocked,
+        "battery_and_harness": protected,
+        "voltage_path": vpath,
+        "docked": docked,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--peak-5v-a", type=float)
