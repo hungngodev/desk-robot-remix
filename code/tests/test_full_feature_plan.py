@@ -208,3 +208,15 @@ def test_active_product_docs_and_workflow_cannot_resurrect_premium_ranger():
     assert "pinned MIT Pololu VL53L0X 1.3.1" in wiring
     assert "expensive VL53L4CD boards" in wiring
     assert "Historic VL6180X and VL53L0X suggestions are" not in wiring
+
+
+def test_audio_speaker_cannot_implicitly_accept_full_gain_i2s_amp():
+    p = load()
+    speaker = next(x for x in p["parts"] if x["id"] == "speaker")
+    assert "MAX98357A 5V output" in speaker["notes"]
+    assert "1.8W" in speaker["notes"]
+    register = (PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text()
+    row = next(x for x in register.splitlines()
+               if x.startswith("| " + chr(96) + "speaker" + chr(96) + " |"))
+    fields = [v.strip() for v in row.strip().strip("|").split("|")]
+    assert fields[8] == "0" and "HOLD OUTPUT POWER MISMATCH" in row
