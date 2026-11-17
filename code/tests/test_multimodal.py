@@ -2337,3 +2337,20 @@ def test_authenticated_snapshot_release_preserves_quiet_floor_and_delayed_end():
     hub.notify("robot-01", "human_voice", 104.0)
     assert hub.spontaneous_floor_busy(104.1)
 
+
+
+
+def test_missed_vad_start_snapshot_rejects_stale_end_and_preserves_epoch():
+    """A recovered human turn is protected even without a speech_start edge."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.reconcile_speech_snapshot(frozenset({"robot-02"}), 100.0)
+    assert hub.voice_started_at["robot-02"] == 100.0
+    hub.reconcile_speech_snapshot(frozenset({"robot-02"}), 101.0)
+    assert hub.voice_started_at["robot-02"] == 100.0
+    hub.speech_ended("robot-02", 99.0)
+    assert hub.user_active("robot-02", 101.0)
+    assert hub.spontaneous_floor_busy(101.0)
+    hub.reconcile_speech_snapshot(frozenset(), 102.0)
+    assert not hub.user_active("robot-02", 102.0)
+    assert hub.spontaneous_floor_busy(102.79)
+    assert not hub.spontaneous_floor_busy(102.81)
