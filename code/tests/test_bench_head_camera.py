@@ -114,7 +114,7 @@ async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http
 
     head = StreamingHead()
     result = await bench.measure(
-        head, "robot-01", seconds=.21, status_period_s=.035, stream=True
+        head, "robot-01", seconds=.21, status_period_s=.05, stream=True
     )
     assert result["camera_acquisition_mode"] == "persistent_mjpeg"
     assert result["camera_frames_received"] >= 4
@@ -145,7 +145,7 @@ async def test_stalled_continuous_mjpeg_is_reported_not_mistaken_for_live():
     report = await asyncio.wait_for(
         bench.measure(
             head, "robot-01", seconds=.12,
-            status_period_s=.04, stream=True,
+            status_period_s=.05, stream=True,
         ), timeout=1.5
     )
     assert report["camera_frames_received"] == 0
