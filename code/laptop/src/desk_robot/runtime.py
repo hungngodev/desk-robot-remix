@@ -184,6 +184,18 @@ class Runtime:
         if failures:
             raise RuntimeError("Unable to preempt one or more pet speakers") from failures[0]
 
+    async def _stop_autonomous_roaming_for_voice(self) -> None:
+        """Human VAD or monitor loss stops active exploration, not manual jobs.
+
+        The coordinator already owns WROOM STOP and local watchdog recovery.
+        It must be dispatched alongside the urgent speaker stop, never
+        serially behind a slow audio or camera task.
+        """
+        coordinator = getattr(self, "coordinator", None)
+        stop = getattr(coordinator, "stop_active_exploration", None)
+        if callable(stop):
+            await stop()
+
     async def _on_voice_snapshot(self, active: frozenset[str]) -> None:
         if getattr(self, "_closed", False):
             return
@@ -218,12 +230,21 @@ class Runtime:
             if callable(prepare):
                 for robot_id in sorted(missing_starts):
                     prepare(robot_id, end_expected=True)
-            try:
-                await self._preempt_audio_floor()
-            except Exception as exc:
-                # An unresolved physical STOP must remain an error, but it
-                # cannot erase the authenticated human's live camera turn.
-                preempt_error = exc
+            # A recovered VAD snapshot can be the FIRST evidence of a
+            # speaking human. Both speech and roaming stop concurrently.
+            outcomes = await asyncio.gather(
+                self._preempt_audio_floor(),
+                self._stop_autonomous_roaming_for_voice(),
+                return_exceptions=True,
+            )
+            failures = [
+                result for result in outcomes
+                if isinstance(result, BaseException)
+            ]
+            if failures:
+                # Unconfirmed audio or body STOP remains visible; camera
+                # VAD reconciliation still occurs below.
+                preempt_error = failures[0]
             if getattr(self, "_closed", False):
                 return
             for robot_id in sorted(missing_starts):
@@ -254,6 +275,10 @@ class Runtime:
         # Re-enable spontaneous voice only after a successful authenticated
         # event-stream bootstrap or ordered poll, never on a guessed timeout.
         self.pet.set_voice_monitor_ready(ready)
+        if not ready:
+            # A robot cannot keep autonomous roaming when the user has lost
+            # the ability to interrupt it through the voice monitor.
+            await self._stop_autonomous_roaming_for_voice()
 
     async def _on_voice_global(self, reason: str) -> None:
         if getattr(self, "_closed", False):
@@ -281,7 +306,10 @@ class Runtime:
             and callable(stop) else []
         )
         outcomes = await asyncio.gather(
-            self._preempt_audio_floor(), *native_stops, return_exceptions=True,
+            self._preempt_audio_floor(),
+            self._stop_autonomous_roaming_for_voice(),
+            *native_stops,
+            return_exceptions=True,
         )
         failures = [result for result in outcomes
                     if isinstance(result, BaseException)]
@@ -311,11 +339,15 @@ class Runtime:
         # Human speech cancels one shared five-pet speech floor once. The
         # authenticated human camera must still start if audio STOP fails,
         # without treating the unresolved speaker lease as a success.
-        preempt_error = None
-        try:
-            await self._preempt_audio_floor()
-        except Exception as exc:
-            preempt_error = exc
+        outcomes = await asyncio.gather(
+            self._preempt_audio_floor(),
+            self._stop_autonomous_roaming_for_voice(),
+            return_exceptions=True,
+        )
+        failures = [
+            result for result in outcomes if isinstance(result, BaseException)
+        ]
+        preempt_error = failures[0] if failures else None
         if getattr(self, "_closed", False):
             return  # A late STOP completion must not reopen camera workers.
         if visual is not None:
