@@ -320,7 +320,7 @@
       "name": "AO3400 haptic driver with CD74HC123 hardware one-shot, flyback and pulldown",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "MCP23017 GPB2 triggers a generic 3.3V HC123 hardware one-shot into a MOSFET motor stage; CAP1188 local petting event, dock-first source gating and OLATB readback are implemented in opt-in esp32_full_haptic_lab, NOT production power-qualified. Verify exact timer board, pulse bound, motor current/thermal and fail-off during I2C stall. See docs/hardware/haptic-one-shot-wiring.md.",
+      "notes": "MCP23017 GPB2 triggers a generic 3.3V HC123 hardware one-shot into a MOSFET motor stage; CAP1188 local petting event, dock-first source gating and OLATB readback are implemented in opt-in esp32_full_haptic_lab and esp32_dc_integrated_lab, NOT production power-qualified. Verify exact timer board, pulse bound, motor current/thermal and fail-off during I2C stall. See docs/hardware/haptic-one-shot-wiring.md.",
       "group": "pet"
     },
     {
