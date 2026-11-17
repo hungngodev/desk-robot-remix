@@ -79,6 +79,64 @@ def estimate_delay(
     }
 
 
+def estimate_clock_drift(
+    reference: np.ndarray, microphone: np.ndarray, *,
+    sample_rate: int = 16000, max_delay_ms: float = 250,
+) -> dict:
+    """Estimate relative clock slip from four disjoint audio time windows.
+
+    A single global cross-correlation lag cannot expose gradual speaker to
+    microphone drift. Windows share the same original sample timeline; never
+    re-align them before calculating the slope. An irregular lag trajectory
+    is NOT a clock estimate and must fail rather than silently fit a line.
+    This is diagnostic only, not verified hardware AEC or barge-in.
+    """
+    if (sample_rate != 16000 or type(max_delay_ms) not in (int, float)
+            or not math.isfinite(max_delay_ms)
+            or not 10 <= max_delay_ms <= 400
+            or not isinstance(reference, np.ndarray)
+            or not isinstance(microphone, np.ndarray)
+            or reference.ndim != 1 or microphone.ndim != 1
+            or len(reference) != len(microphone)
+            or not 4 * sample_rate <= len(reference) <= 10 * sample_rate):
+        raise ValueError("Clock drift needs 4-10 seconds of aligned 16 kHz recordings")
+    if not np.isfinite(reference).all() or not np.isfinite(microphone).all():
+        raise ValueError("Nonfinite clock drift input")
+    window = sample_rate * 3 // 2
+    span = len(reference) - window
+    starts = [0, span // 3, 2 * span // 3, span]
+    lags = []
+    correlations = []
+    for start in starts:
+        result = estimate_delay(
+            reference[start:start + window],
+            microphone[start:start + window],
+            sample_rate=sample_rate, max_delay_ms=max_delay_ms,
+        )
+        lags.append(result["sample_lag"])
+        correlations.append(result["normalized_correlation"])
+    # Least-squares slope in samples of lag per sample of recording time.
+    t = np.asarray(starts, dtype=np.float64)
+    y = np.asarray(lags, dtype=np.float64)
+    centered = t - t.mean()
+    slope = float(np.dot(centered, y - y.mean()) / np.dot(centered, centered))
+    predicted = y.mean() + slope * centered
+    residual = float(np.max(np.abs(predicted - y)))
+    if not math.isfinite(slope) or residual > 3.0:
+        raise ValueError("Changing acoustic delay is not a stable clock drift")
+    ppm = slope * 1_000_000.0
+    return {
+        "clock_drift_ppm_estimate": round(ppm, 1),
+        "clock_drift_window_lags_samples": lags,
+        "clock_drift_min_correlation": round(min(correlations), 4),
+        "clock_drift_max_fit_residual_samples": round(residual, 2),
+        "clock_drift_needs_hardware_review": abs(ppm) > 100,
+        "clock_drift_status": "offline_estimate_not_hardware_qualified",
+        "aec_physically_verified": False,
+        "natural_barge_in_verified": False,
+    }
+
+
 def main() -> None:
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--speaker", required=True, type=Path)
@@ -89,10 +147,24 @@ def main() -> None:
     microphone, mic_rate = read_wav(args.microphone)
     if mic_rate != 16000:
         raise ValueError("Microphone recording must be 16 kHz")
+    reference = resample_reference(speaker, speaker_rate)
     report = estimate_delay(
-        resample_reference(speaker, speaker_rate), microphone,
-        max_delay_ms=args.max_delay_ms,
+        reference, microphone, max_delay_ms=args.max_delay_ms,
     )
+    try:
+        report.update(estimate_clock_drift(
+            reference, microphone, max_delay_ms=args.max_delay_ms,
+        ))
+    except ValueError as exc:
+        # No drift number is better than a fabricated estimate from silence,
+        # unequal clips, abrupt latency jumps or insufficient evidence.
+        report.update({
+            "clock_drift_ppm_estimate": None,
+            "clock_drift_status": "unavailable",
+            "clock_drift_reason": str(exc),
+            "aec_physically_verified": False,
+            "natural_barge_in_verified": False,
+        })
     print(json.dumps(report, indent=2))
 
 
