@@ -434,11 +434,16 @@ class CameraFrameHub:
                 or re.fullmatch(r"omni_sent_[0-9a-f]{12}_[0-9a-f]{20}", event_id)
                     is None):
             raise ValueError("Invalid native sent audio receipt")
-        if event_id in self.native_spoken_ids[robot_id]:
-            return False
+        # A replayed event ID is harmless only when its attached timestamp
+        # remains valid. Validate source time BEFORE idempotent deduplication:
+        # otherwise an attacker or misbehaving voice bridge could replay a
+        # previously accepted ID with an ancient or future timestamp and get
+        # a misleading HTTP 200 rather than an invalid-receipt rejection.
         if (not _finite(sent_at)
                 or not 0 <= time.monotonic() - sent_at <= 5):
             raise ValueError("Stale or future native audio receipt")
+        if event_id in self.native_spoken_ids[robot_id]:
+            return False
         self.remember_spoken(
             robot_id, text, sent_at,
             source="native_model_text_opus_sent_playback_unverified",
