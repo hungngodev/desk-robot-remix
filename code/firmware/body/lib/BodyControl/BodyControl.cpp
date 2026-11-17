@@ -669,6 +669,30 @@ void BodyControl::execute(const char* line, std::size_t length,
         side_valid_mask |= 1U << i;
     }
     const bool imu_valid = imu_fresh(now_ms);
+    // Report actual LOCAL motion readiness. A healthy optical guard alone
+    // cannot make the robot ready while its dock, IMU, touch or physical
+    // driver fault interlock would reject an ARM request.
+    const bool cliff_ready = guarded_motion_profile() && guard_ != nullptr &&
+        guard_->evaluate(now_ms);
+    const bool driver_unhealthy = dc_fault_latched_ || dc_driver_fault_bad(now_ms);
+    const bool dock_unhealthy = dock_power_lockout_ || dock_telemetry_bad(now_ms);
+    const bool bumper_hit = (state_.extra_mask & 1U) != 0U &&
+        (state_.bumper_raw || state_.bumper_active);
+    const bool touch_hit = state_.touch_active || state_.touch_raw_active;
+    const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
+        !dock_unhealthy && !bumper_hit && !touch_hit &&
+        (!imu_motion_required_ || imu_valid);
+    const char* local_fault =
+        dc_fault_latched_ ? "dc_driver_fault_latched" :
+        dc_driver_fault_bad(now_ms) ? "dc_driver_fault_unavailable" :
+        dock_power_lockout_ ? "dock_power_connected" :
+        dock_telemetry_bad(now_ms) ? "dock_gpio_missing_or_stale" :
+        bumper_hit ? "bumper_active" :
+        touch_hit ? "touch_active" :
+        imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
+        !guarded_motion_profile() ? "not_required" :
+        guard_ == nullptr ? "missing_guard" :
+        CliffGuard::fault_name(guard_->fault());
     const int written = std::snprintf(
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
@@ -721,13 +745,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(imu_.valid ? imu_.at_ms : 0U),
         static_cast<unsigned long>(boot_epoch_),
         guarded_motion_profile() ? "true" : "false",
-        guarded_motion_profile() && guard_ != nullptr &&
-            guard_->evaluate(now_ms) && !dc_fault_latched_ &&
-            !dc_driver_fault_bad(now_ms) ? "true" : "false",
-        dc_fault_latched_ ? "dc_driver_fault_latched" :
-            dc_driver_fault_bad(now_ms) ? "dc_driver_fault_unavailable" :
-            !guarded_motion_profile() ? "not_required" :
-            guard_ == nullptr ? "missing_guard" : CliffGuard::fault_name(guard_->fault()),
+        local_motion_ready ? "true" : "false",
+        local_fault,
         static_cast<unsigned>(guard_ == nullptr ? kNoFaultSensor : guard_->fault_sensor()),
         static_cast<unsigned>(ranges[0].distance_mm),
         static_cast<unsigned>(ranges[1].distance_mm),
