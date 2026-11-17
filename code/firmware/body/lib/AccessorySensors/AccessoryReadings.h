@@ -119,6 +119,10 @@ struct DockPinRaw {
 struct McpOptionalRaw {
   bool present = false, valid = false;
   bool reed_closed = false, pir_active = false;
+  // DRV8833 nFAULT, active LOW, wired to MCP23017 GPB3 on the DC profile.
+  // Physical wire health requires an external far-end pullup and near-end
+  // pulldown; a GPIO read alone cannot certify a connected fault wire.
+  bool driver_fault_active = false;
   std::uint32_t at_ms = 0, sample_seq = 0;
 };
 struct NfcRaw {
