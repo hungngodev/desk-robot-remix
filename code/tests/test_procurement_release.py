@@ -34,7 +34,7 @@ def test_full_fleet_quantities_never_grant_purchase():
     assert (r["fleet_robots"], r["docks"], r["room_stations"]) == (5, 5, 1)
     d = {p["id"]: p for p in r["robots"]}
     assert d["cliff_obstacle"]["fleet_total"] == 40
-    assert d["cliff_obstacle"]["reference_only"]["sku"] == "GY-530 VL53L0X"
+    assert d["cliff_obstacle"]["reference_only"]["sku"] == "SEN-19-006"
     assert d["stepper"]["remaining_if_reported_stock_works"] == 5
     assert d["mg90s"]["remaining_if_reported_stock_works"] == 10
     assert not r["order_released"]
