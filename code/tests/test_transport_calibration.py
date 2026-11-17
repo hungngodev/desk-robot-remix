@@ -764,3 +764,51 @@ async def test_failed_replacement_mjpeg_stream_cannot_revive_old_reader(settings
         with pytest.raises(HeadError, match="not connected"):
             await head.snapshot()
         assert calls == 2
+
+
+async def test_authenticated_person_face_cue_is_cosmetic_and_identity_bound(
+    settings, tokens,
+):
+    calls = []
+    robot = settings.robots[0]
+
+    async def handler(request):
+        calls.append(request)
+        assert request.url.path == "/api/face"
+        assert request.method == "POST"
+        assert request.headers["Authorization"] == (
+            "Bearer " + tokens[robot.token_env]
+        )
+        assert json.loads(request.content) == {"event": "person_detected"}
+        return httpx.Response(
+            200, json={"ok": True, "reply": "person cue queued",
+                       "robot_id": robot.id},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(robot, client)
+        await head.face_event("person_detected")
+        assert len(calls) == 1
+        for unsupported in ("person_lost", "arm", "move", "", None, 1):
+            with pytest.raises(ValueError, match="Unsupported cosmetic"):
+                await head.face_event(unsupported)
+        assert len(calls) == 1
+
+
+async def test_person_face_cue_rejects_wrong_robot_or_missing_ack(
+    settings, tokens,
+):
+    robot = settings.robots[0]
+    for response in (
+        {"ok": True, "reply": "person cue queued", "robot_id": "robot-02"},
+        {"ok": False, "reply": "person cue queued", "robot_id": robot.id},
+        {"ok": True, "reply": "wrong text", "robot_id": robot.id},
+    ):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda req: httpx.Response(200, json=response)
+            )
+        ) as client:
+            head = HttpHead(robot, client)
+            with pytest.raises(HeadError, match="Cosmetic face cue"):
+                await head.face_event("person_detected")

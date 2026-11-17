@@ -265,7 +265,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 6;
+    config.max_uri_handlers = 7;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -275,7 +275,8 @@ void Bridge::Start() {
     for (const auto& entry : std::vector<std::pair<const char*, httpd_method_t>>{
              {"/api/status", HTTP_GET}, {"/api/aux", HTTP_GET},
              {"/api/ir", HTTP_GET},
-             {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET},
+             {"/api/command", HTTP_POST}, {"/api/face", HTTP_POST},
+             {"/api/camera.jpg", HTTP_GET},
              {"/api/camera.mjpg", HTTP_GET}}) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
@@ -290,6 +291,10 @@ void Bridge::Start() {
         }
     }
     AddTools();
+}
+
+bool Bridge::TakePersonCue() {
+    return person_cue_pending_.exchange(false, std::memory_order_acq_rel);
 }
 
 Reply Bridge::Transact(const std::string& text, bool operator_control) {
@@ -568,7 +573,18 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (body.find('\0') != std::string::npos || body.find("\\u0000") != std::string::npos) return Json(req, 400, Envelope(false, "embedded null"));
     auto json = Parse(body);
     if (!json || !cJSON_IsObject(json.get()) || cJSON_GetArraySize(json.get()) != 1)
-        return Json(req, 400, Envelope(false, "expected one command field"));
+        return Json(req, 400, Envelope(false, "expected one event or command field"));
+    if (strcmp(req->uri, "/api/face") == 0) {
+        // The authenticated Mac can offer a bounded *visual* cue only. A
+        // language model, OCR frame or tool response cannot send motor text
+        // through this route. Latest event wins; no unbounded HTTP queue.
+        auto event = cJSON_GetObjectItemCaseSensitive(json.get(), "event");
+        if (!cJSON_IsString(event) || !event->valuestring ||
+            strcmp(event->valuestring, "person_detected") != 0)
+            return Json(req, 400, Envelope(false, "unsupported face event"));
+        person_cue_pending_.store(true, std::memory_order_release);
+        return Json(req, 200, Envelope(true, "person cue queued"));
+    }
     auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "command");
     if (!cJSON_IsString(item) || !item->valuestring)
         return Json(req, 400, Envelope(false, "command must be a string"));

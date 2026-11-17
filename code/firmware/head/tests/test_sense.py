@@ -328,3 +328,21 @@ class SenseSelectionTests(unittest.TestCase):
             self.assertEqual((board / 'config.private.json').stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads((board / 'config.json').read_text()), source)
             self.assertFalse((root / 'firmware/head/build/xiaozhi-modular').exists())
+
+
+def test_authenticated_mac_person_face_cue_is_cosmetic_only():
+    """Verify overlay contract; firmware compile tests the actual C++ path."""
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    header = (HEAD / "overlay/robot_bridge.h").read_text()
+    board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    assert '{"/api/face", HTTP_POST}' in bridge
+    assert 'config.max_uri_handlers = 7;' in bridge
+    assert 'strcmp(event->valuestring, "person_detected") != 0' in bridge
+    assert 'person_cue_pending_.store(true' in bridge
+    assert 'person_cue_pending_.exchange(false' in bridge
+    assert 'bool TakePersonCue();' in header
+    assert 'body_bridge_->TakePersonCue()' in board
+    assert 'Event(EventType::kPersonDetected)' in board
+    assert 'person_cue_active ? "surprised" : "neutral"' in board
+    assert 'board->body_fault_active_ ? "sad" :' in board
+    assert 'Transact(event' not in bridge  # never send cue to WROOM

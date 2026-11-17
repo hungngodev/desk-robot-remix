@@ -4568,3 +4568,61 @@ def test_oversized_visual_confidence_never_schedules_spontaneous_speech():
     assert _initiative_evidence(SceneChange(
         "key", "A real brass key appeared near the robot", 0.96
     ))
+
+
+async def test_person_face_cue_needs_fresh_credible_live_source(fleet, tmp_path):
+    """No motor authority: a mock head only receives the one cosmetic cue."""
+    from types import SimpleNamespace
+
+    class HeadWithFace:
+        def __init__(self):
+            self.cues = []
+
+        async def face_event(self, event):
+            self.cues.append(event)
+
+    head = HeadWithFace()
+    # Exercise the real helper without requiring an external VLM service.
+    pet = object.__new__(PetController)
+    pet.settings = SimpleNamespace(
+        mode="hardware", voice_vision_tools_enabled=True,
+        robots=[fleet.robots[0]],
+    )
+    pet.heads = {fleet.robots[0].id: head}
+    pet.states = {fleet.robots[0].id: __import__(
+        "desk_robot.pet", fromlist=["PetState"]
+    ).PetState(enabled=True, generation=3)}
+    pet._closed = False
+    pet._vision_preemption_epoch = 2
+    pet.multimodal = None
+    robot_id = fleet.robots[0].id
+    fresh = time.monotonic()
+    pet.max_observation_age = 5.0
+    await pet._cue_person_face(
+        robot_id, SceneChange("person", "A person approached", .92),
+        3, fresh, 2,
+    )
+    assert head.cues == ["person_detected"]
+    # Repeated frames, poor confidence, stale generation or stale capture
+    # must not make the local eyes strobe or resurrect an old face reaction.
+    await pet._cue_person_face(
+        robot_id, SceneChange("person", "A person approached", .92),
+        3, fresh, 2,
+    )
+    await pet._cue_person_face(
+        robot_id, SceneChange("person", "Maybe someone", .5),
+        3, fresh, 2,
+    )
+    await pet._cue_person_face(
+        robot_id, SceneChange("person", "Old clip", .99),
+        3, fresh - 100, 2,
+    )
+    await pet._cue_person_face(
+        robot_id, SceneChange("person", "Wrong generation", .99),
+        2, fresh, 2,
+    )
+    await pet._cue_person_face(
+        robot_id, SceneChange("person", "Old voice epoch", .99),
+        3, fresh, 1,
+    )
+    assert head.cues == ["person_detected"]

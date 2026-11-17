@@ -111,6 +111,7 @@ class PetState:
     stale_camera_events: int = 0
     last_event: str | None = None
     last_scene_frame_at: float | None = None  # latest processed Mac receipt, this robot only
+    last_person_face_cue_at: float = -math.inf  # cosmetic cue cooldown, not speech
     last_hub_generation: int | None = None  # rejects cross-reconnect scene inference
     last_error: str | None = None
     last_touch_count: int | None = None
@@ -1550,6 +1551,10 @@ class PetController:
                                 self.multimodal.hub._generation[robot_id] != hub_generation):
                             state.stale_camera_events += 1
                             continue
+                        await self._cue_person_face(
+                            robot_id, change, generation, received,
+                            preemption_epoch,
+                        )
                         if (self.settings.mode != "hardware"
                                 or self.settings.voice_vision_tools_enabled):
                             # A revoked camera guess may not even become a
@@ -1585,6 +1590,36 @@ class PetController:
                 )
             else:
                 await asyncio.sleep(self.interval)
+
+    async def _cue_person_face(
+        self, robot_id: str, change: SceneChange,
+        generation: int, captured_at: float, preemption_epoch: int,
+    ) -> None:
+        """Animate this head only for a fresh, credible live person observation.
+
+        Never infer identity, wake the mic, retry a physical command, or
+        permit an obsolete camera comparison to affect the OLED.
+        """
+        state = self.states[robot_id]
+        now = time.monotonic()
+        if (self.settings.mode != "hardware"
+                or change.kind != "person"
+                or not _initiative_evidence(change)
+                or not state.enabled or state.generation != generation
+                or self._closed or not self.settings.voice_vision_tools_enabled
+                or self._vision_preemption_epoch != preemption_epoch
+                or self._human_active_in_fleet(now)
+                or now - captured_at > self.max_observation_age
+                or now - state.last_person_face_cue_at < 10.0):
+            return
+        cue = getattr(self.heads.get(robot_id), "face_event", None)
+        if not callable(cue):
+            return
+        state.last_person_face_cue_at = now
+        try:
+            await asyncio.wait_for(cue("person_detected"), timeout=1.0)
+        except (HeadError, TimeoutError, OSError) as error:
+            state.last_error = f"Head cosmetic cue unavailable: {type(error).__name__}"
 
     def _human_active_in_fleet(self, now: float) -> bool:
         """Human VAD and brief post-turn quiet protect the fleet speech floor.

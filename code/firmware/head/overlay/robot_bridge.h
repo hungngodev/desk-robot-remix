@@ -28,6 +28,9 @@ public:
     void Start();
     // One bounded local status transaction, no motor authority or second UART.
     BodyInteraction PollInteraction();
+    // One cosmetic face cue, consumed ONLY by the local face task.
+    // No motor, tool, speech or Xiaozhi conversation authority.
+    bool TakePersonCue();
 
 private:
     Camera* camera_;
@@ -36,6 +39,7 @@ private:
     bool uart_ready_ = false;
     bool enabled_ = false;
     std::atomic<bool> camera_busy_{false};
+    std::atomic<bool> person_cue_pending_{false};
     std::uint32_t camera_sequence_ = 0; // camera_busy ensures one producer
     std::uint32_t boot_nonce_ = 0; // changes across physical Sense reboots
     // Owned by the one Sense face task, not shared with HTTP handlers.

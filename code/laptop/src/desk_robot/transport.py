@@ -194,6 +194,22 @@ class HttpHead:
                 raise HeadError("Unmatched or failed command ACK; movement not retried")
             return data
 
+    async def face_event(self, event: str) -> None:
+        """Send an explicitly bounded cosmetic face cue to THIS robot's head.
+
+        This is not an actuator, speech, wake, or motor command. The head
+        validates the same per-device bearer token as the other endpoints.
+        """
+        if event != "person_detected":
+            raise ValueError("Unsupported cosmetic face event")
+        response = await self._request(
+            "POST", "/api/face", json={"event": event}
+        )
+        data = _response_object(response)
+        if (data.get("ok") is not True or data.get("robot_id") != self.config.id
+                or data.get("reply") != "person cue queued"):
+            raise HeadError("Cosmetic face cue not acknowledged by this robot")
+
     async def status(self) -> dict:
         async with self.lock:
             data = _response_object(await self._request("GET", "/api/status"))

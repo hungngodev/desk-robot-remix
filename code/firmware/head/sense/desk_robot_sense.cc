@@ -62,6 +62,8 @@ private:
         uint32_t last_body_poll_ms = 0;
         bool last_rendered_fault = false;
         bool last_was_idle = false;
+        bool last_person_cue_active = false;
+        uint32_t person_cue_until_ms = 0;
         while (true) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
             // Stackchan-agent already defines kTouched. Supply the actual
@@ -87,6 +89,13 @@ private:
                     // Network or UART status loss never creates fake touches.
                     board->body_fault_active_ = true;
                 }
+            }
+            // Consume an authenticated Mac visual cue on the face task:
+            // no HSM cross-thread push, no movement and no extra AI stack.
+            if (board->body_bridge_ && board->body_bridge_->TakePersonCue()) {
+                person_cue_until_ms = now_ms + 1500U;
+                board->face_behavior_.pushEvent(
+                    Event(EventType::kPersonDetected));
             }
             auto& app = Application::GetInstance();
             const auto device_state = app.GetDeviceState();
@@ -118,19 +127,27 @@ private:
             // Stackchan idle picker may update the existing OLED only when
             // the device is idle; never write its motion actions to the body.
             const bool idle = device_state == kDeviceStateIdle;
+            const bool person_cue_active =
+                person_cue_until_ms != 0U &&
+                static_cast<int32_t>(person_cue_until_ms - now_ms) > 0 &&
+                !board->body_fault_active_;
             if (idle && board->display_ != nullptr) {
                 // Update only on a change or return from conversation, not
                 // through 10 redundant LVGL/I2C writes every second.
                 if (board->body_fault_active_ != last_rendered_fault ||
+                    person_cue_active != last_person_cue_active ||
                     !last_was_idle) {
                     board->display_->SetEmotion(
-                        board->body_fault_active_ ? "sad" : "neutral");
+                        board->body_fault_active_ ? "sad" :
+                        person_cue_active ? "surprised" : "neutral");
                     last_rendered_fault = board->body_fault_active_;
-                } else if (!board->body_fault_active_ && action.set_mood) {
+                } else if (!board->body_fault_active_ && !person_cue_active &&
+                           action.set_mood) {
                     board->display_->SetEmotion(MoodName(action.mood));
                 }
             }
             last_was_idle = idle;
+            last_person_cue_active = person_cue_active;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
