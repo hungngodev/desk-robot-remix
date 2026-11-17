@@ -194,6 +194,17 @@ class Coordinator:
             for jid, task in self.tasks.items()
             if self.jobs[jid].robot_id == robot_id and not task.done()
         ]
+        # Revoke the software operation immediately, even if a cancelled
+        # third-party task catches CancelledError and refuses to finish.
+        # The UI must not display "running" during an urgent STOP request.
+        active_job_ids = [
+            jid for jid, task in self.tasks.items()
+            if self.jobs[jid].robot_id == robot_id and not task.done()
+        ]
+        for jid in active_job_ids:
+            if self.jobs[jid].state in {"queued", "running"}:
+                self.jobs[jid].state = "cancelled"
+                self.jobs[jid].error = "STOP requested; WROOM acknowledgement pending"
         for task in running:
             task.cancel()
         # Stop physical wheels FIRST. A canceled job can be stuck in camera,
@@ -201,6 +212,15 @@ class Coordinator:
         # stop command despite an urgent operator or human request.
         try:
             acknowledgement = await _bounded_body_stop(self.heads[robot_id])
+        except BaseException:
+            # A transport failure is not physical evidence of stopped wheels,
+            # regardless of whether the cancelled job's Python task exited.
+            for jid in active_job_ids:
+                self.jobs[jid].state = "failed"
+                self.jobs[jid].error = (
+                    "WROOM physical STOP unconfirmed; rely on local watchdog"
+                )
+            raise
         finally:
             if running:
                 # asyncio.wait_for(gather(...)) is NOT bounded if a task
