@@ -673,3 +673,43 @@ def test_linked_subassembly_plan_is_not_deletable():
         copy.deepcopy(duplicate["linked_subassemblies"][0]))
     with pytest.raises(ValueError, match="Duplicate linked subassembly"):
         mod.generate(duplicate)
+
+
+def test_noninteger_physical_trial_counts_cannot_release_cart():
+    """A truthy bool or negative count is not evidence of any prototype trial."""
+    for invalid in (True, False, -1, 0, 1.0, "tested", None, {}):
+        p = fixture()
+        p["physical_trial_count"] = invalid
+        p["qualified_assumptions"] = True
+        p["prices_complete"] = True
+        result = mod.generate(p)
+        assert "plan_unqualified_or_price_incomplete" in (
+            result["missing_system_evidence"]), invalid
+    p = fixture()
+    p["physical_trial_count"] = 1
+    p["qualified_assumptions"] = True
+    p["prices_complete"] = True
+    assert "plan_unqualified_or_price_incomplete" not in (
+        mod.generate(p)["missing_system_evidence"])
+
+
+def test_critical_physical_evidence_gates_are_independent():
+    """One generic checklist receipt cannot stand in for safety proof."""
+    system = set(mod.SYSTEM_GATES)
+    parts = set(mod.PART_GATES)
+    assert {
+        "battery_pack_ntc_to_charger_ts_thermal_fault_trial",
+        "battery_pack_actual_length_and_enclosure_clearance",
+        "amplifier_speaker_power_limit_and_thermal_trial",
+        "dock_contacts_recess_reverse_polarity_and_current_limit",
+    } <= system
+    assert "received_quantity_revision_and_owned_stock_inspection" in parts
+    p = fixture()
+    result = mod.generate(p)
+    for gate in (
+        "battery_pack_ntc_to_charger_ts_thermal_fault_trial",
+        "battery_pack_actual_length_and_enclosure_clearance",
+        "amplifier_speaker_power_limit_and_thermal_trial",
+        "dock_contacts_recess_reverse_polarity_and_current_limit",
+    ):
+        assert gate in result["missing_system_evidence"]
