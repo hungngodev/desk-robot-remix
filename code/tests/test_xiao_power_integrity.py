@@ -37,7 +37,7 @@ def test_harness_and_generator_match_isolated_usb_and_actuator_power():
         assert marker in generator
         assert marker in harness
     assert "NEVER via XIAO 3V3 or USB/diode" in harness
-    assert "470uF proven on cgro00 XIAO servos" in harness
+    assert "470uF documented in cgro00 V2 servo wiring" in harness
     assert "NOT sufficient-rating proof for this robot" in harness
 
 
