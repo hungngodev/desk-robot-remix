@@ -48,7 +48,8 @@ bool ExpansionTouch::begin(TwoWire& wire) {
   // Use chip identity instead of an ACK; never talk to the ToF sensor
   // at 0x29 and misinterpret it as an 8-pad touch controller.
   bool recognized = false;
-  for (const std::uint8_t candidate : {kPreferredAddress, kAlternativeAddress}) {
+  const std::uint8_t candidates[] = {kPreferredAddress, kAlternativeAddress};
+  for (const std::uint8_t candidate : candidates) {
     address_ = candidate;
     std::uint8_t product = 0, manufacturer = 0;
     if (read(0xFD, product) && read(0xFE, manufacturer) &&
