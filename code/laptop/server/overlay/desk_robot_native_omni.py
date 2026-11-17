@@ -1456,7 +1456,7 @@ class NativeOmniSession:
                     # read-only lookup that has already completed.
                     pending = asyncio.create_task(self._speak_tool_results(
                         chat_http, self._tool_question,
-                        collected[:3], epoch, request_turn,
+                        collected, epoch, request_turn,
                     ))
                     self._readonly_inflight = pending
                     try:
