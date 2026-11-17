@@ -42,6 +42,7 @@ Signal-only list. Never infer a power source from a logic voltage.
 | MAX98357A OUTP and OUTN | 8 ohm 2 W CS20-02P110-04-1X + and - | Bridge tied differential outputs; NEVER connect either output to GND | Manufacturer 5V 8ohm nominal 1.8W; real carrier/rectangular baffle heat HOLD |
 | XIAO onboard GPIO41 DIN + GPIO42 CLK | Sense PDM microphone | Integrated board pins, NOT connections to WROOM | Source allocated |
 | XIAO GPIO9 reserved | RGB heart data | Xiaozhi WS2812 driver compiled only with explicit opt-in; SD J3 and 5V level buffer still unqualified | Do NOT wire yet |
+| Rated regulated 3.3V expansion rail | eight GY-530 VL53L0X VIN pins and TCA9548A 0x70 VCC | 3.3V ONLY in selected design; 5V VIN can raise SDA/SCL to 5V | Exact seller board pullup and every upstream/downstream HIGH rail UNTESTED |
 | Range TCA9548A 0x70 CH0 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
 | Range TCA9548A 0x70 CH1 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
 | Range TCA9548A 0x70 CH2 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
