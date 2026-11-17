@@ -247,6 +247,14 @@ int main() {
     CHECK(read.gauge.monitor_present && read.gauge.monitor_valid);
     CHECK(read.gauge.bus_mv == 5120);
     CHECK(read.gauge.shunt_uv == 40);
+    CHECK(read.gauge.monitor_sample_seq > 0U);
+#if defined(DESK_ROBOT_PACK_SHUNT_MOHM) && DESK_ROBOT_PACK_SHUNT_MOHM == 5
+    CHECK(read.gauge.pack_current_valid);
+    CHECK(read.gauge.pack_current_ma == 8); // 40uV / 5mOhm = +8mA
+#else
+    CHECK(!read.gauge.pack_current_valid);
+    CHECK(read.gauge.pack_current_ma == 0);
+#endif
     CHECK(read.dock.present && read.dock.valid);
     CHECK(read.dock.sample_seq == Wire.dock_gpio_reads);
     CHECK(read.dock.sample_seq >= 2);
