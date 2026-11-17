@@ -390,9 +390,10 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
         decision = selected[ident][10]
         assert ("NO PURCHASE" in decision or decision.startswith(
             ("HOLD CHEAP GENERIC EXACT CARRIER",
-             "SHUNT VALUE/SKU FIXED, BREAKOUT HOLD",
-             "ONE SoC GAUGE ONLY:")
-        )), ident
+             "SHUNT VALUE/SKU FIXED, BREAKOUT HOLD")
+        ) or (ident == "max17048" and
+              decision.startswith("ONE SoC GAUGE ONLY:") and
+              "HOLD" in decision)), ident
     # Separate candidate subsystem is not a hidden second approved shopping list.
     assert "BQ24075 power-path source, NO second SoC gauge" in register
     assert "MAX17048" in register
