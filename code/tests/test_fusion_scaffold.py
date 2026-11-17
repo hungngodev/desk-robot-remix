@@ -34,3 +34,20 @@ def test_fusion_source_manifest_is_complete_and_not_a_fake_assembly():
     assert "DirectDesignType" in script
     assert "occurrences.addNewComponent" in script
     assert "Interference" in script
+
+
+def test_mechanical_sheet_never_approves_premium_ranger_or_mismatched_pack():
+    """Mechanical shopping gate needs the current generic sensor and real fit."""
+    sheet = (ROOT / "docs/cad/FUSION_MEASUREMENT_SHEET.md").read_text(
+        encoding="utf-8"
+    )
+    gauge = (ROOT / "docs/cad/remixes/remaining_fit_gauges.scad").read_text(
+        encoding="utf-8"
+    )
+    assert "VL53L0X GY-530" in sheet
+    assert "VL53L4CD" not in sheet
+    # 86 mm provisional protected pack is NOT proof of fit in the
+    # 68 mm default gauge; the documents must preserve that blocker.
+    assert "power_l = 68;" in gauge
+    assert "86 mm" in sheet and "68" in sheet
+    assert "does not fit" in sheet
