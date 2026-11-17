@@ -559,6 +559,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"physically_verified\":false},"
         "\"power\":{\"cell_mv\":%u,\"soc_centi\":%u,\"bus_mv\":%u,"
         "\"shunt_uv\":%d,\"fuel_valid\":%s,\"monitor_valid\":%s,"
+        "\"pack_ma\":%d,\"pack_valid\":%s,\"pack_seq\":%lu,"
         "\"current_calibrated\":false},"
         "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"physically_qualified\":false},"
         "\"dock\":{\"present\":%s,\"valid\":%s,\"left_seated\":%s,\"right_seated\":%s,"
@@ -597,6 +598,10 @@ void BodyControl::execute(const char* line, std::size_t length,
         a.gauge.cell_mv, a.gauge.soc_centi, a.gauge.bus_mv,
         a.gauge.shunt_uv, fuel_fresh ? "true" : "false",
         monitor_fresh ? "true" : "false",
+        monitor_fresh && a.gauge.pack_current_valid ?
+            a.gauge.pack_current_ma : 0,
+        monitor_fresh && a.gauge.pack_current_valid ? "true" : "false",
+        static_cast<unsigned long>(a.gauge.monitor_sample_seq),
         static_cast<unsigned>(a.proximity.raw),
         proximity_fresh ? "true" : "false",
         static_cast<unsigned>(a.proximity.gesture_direction),
