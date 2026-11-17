@@ -128,6 +128,9 @@ def test_new_verified_large_pack_continuous_ratings_reject_false_10a_claims():
     assert thor["ntc"] == "optional"
     assert "pack_ntc_10k_not_fitted_in_exact_variant" in thor["blocking_reasons"]
     assert "bare_cell_envelope_not_complete_protected_pack" in thor["blocking_reasons"]
+    assert thor["pack_fits_current_tray_on_paper"] is None
+    assert "full_protected_pack_dimensions_unknown" in thor["blocking_reasons"]
+    assert "protected_pack_does_not_fit_existing_cavity" not in thor["blocking_reasons"]
 
 
 def test_wider_batteryspace_3000mah_does_not_fit_old_tray_or_claim_5a_continuous():
