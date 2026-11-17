@@ -171,7 +171,7 @@ int main() {
       CHECK(bus.probe_imu().family == 0); // this fake has no physical IMU
       CHECK(Wire.imu_probe_attempts > 0); // only after proven disconnect
     }
-    std::cout << "PASS TCA9548A selected-channel readback and fail-closed cliff paths\n";
+    std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {
     std::cerr << "FAIL mux verification: " << ex.what() << '\n';
