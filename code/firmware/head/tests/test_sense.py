@@ -182,6 +182,28 @@ class SenseOverlayTests(unittest.TestCase):
         # A diagnostic must not unilaterally mark hardware AEC as qualified.
         self.assertNotIn("aec_physically_verified = true", code)
 
+    def test_reference_ring_lap_is_a_failed_aec_integrity_event(self):
+        """Source contract for real codec counters, not an acoustic result."""
+        header = (HEAD / "sense/sense_reference_codec.h").read_text()
+        code = (HEAD / "sense/sense_reference_codec.cc").read_text()
+        self.assertIn("uint32_t reference_overwrite_reads_ = 0;", header)
+        self.assertIn("bool reference_integrity_failed_ = false;", header)
+        self.assertIn("GetReferenceDiagnostics()", header)
+        self.assertIn("GetReferenceDiagnostics()", code)
+        self.assertIn(
+            "write_index_ - last_reference_read_write_index_ >= kRingSize", code
+        )
+        self.assertIn("reference_integrity_failed_ = true;", code)
+        self.assertIn("++reference_overwrite_reads_;", code)
+        self.assertIn("newly_overwritten = overwrite_count != previous_overwrites;", code)
+        self.assertIn("last_reference_read_write_index_ = 0;", code)
+        # Cancellation resets session tracking, not lifetime failures.
+        clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1].split(
+            "SenseReferenceCodec::ReferenceDiagnostics", 1
+        )[0]
+        self.assertNotIn("reference_overwrite_reads_ = 0;", clear)
+        self.assertNotIn("reference_integrity_failed_ = false;", clear)
+
     def test_sense_reinstall_drift_and_exact_restore(self):
         overlay.apply(self.root, 'sense')
         overlay.apply(self.root, 'sense')
