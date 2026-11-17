@@ -149,4 +149,4 @@ def test_active_two_watt_speaker_register_and_wiring_are_one_fixed_selection():
     assert "Rated, isolated 5V audio power rail" in harness
     assert "8 ohm 2 W CS20-02P110-04-1X" in harness
     assert "NEVER connect either output to GND" in harness
-    assert "speaker heat HOLD" not in harness or "heat HOLD" in harness
+    assert "real carrier/rectangular baffle heat HOLD" in harness
