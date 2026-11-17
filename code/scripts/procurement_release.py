@@ -716,6 +716,144 @@ def first_robot_projection(report: dict) -> dict:
     }
 
 
+
+# An exact low-energy sample can be ordered for bench characterization before
+# a complete robot exists. This does NOT lift lithium/motion/charging gates.
+# All SKUs and historical quotes come from the existing November 16 register.
+PILOT_SAMPLE_PRODUCTS = {
+    "cliff_obstacle": ("VL53L0X GY-530 small carrier candidate ElectroPeak SEN-19-006",
+                       "ElectroPeak", "SEN-19-006",
+                       "https://electropeak.com/gy-530-vl53l0x-laser-range-finder", 8, 1.76),
+    "speaker": ("Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker",
+                "Challenge Electronics", "CS20-02P110-04-1X",
+                "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069", 1, 3.24),
+    "sensor_3v3": ("Dedicated regulated 3.3V expansion sensor supply",
+                   "Pololu", "2873", "https://www.pololu.com/product/2873", 1, 5.47),
+    "rgb": ("Single diffused WS2812B RGB pixel", "SparkFun", "BOB-13282",
+            "https://www.sparkfun.com/sparkfun-rgb-led-breakout-ws2812b.html", 1, 1.50),
+    "dock_ir_receivers": (
+        "Two 38 kHz demodulated IR receivers, Vishay TSOP38438 reference, mounted behind separate directional baffles",
+        "Vishay", "TSOP38438", "https://www.vishay.com/en/product/82491/", 2, 0.79),
+    "dock_ir_emitter_channels": (
+        "Two independently aimed 940 nm 38 kHz infrared LED emitter channels with rated transistor driver and current limiting per dock",
+        "Vishay", "TSAL6200",
+        "https://www.digikey.com/en/products/detail/vishay-semiconductor-opto-division/TSAL6200/1681339", 2, 0.35),
+}
+
+PILOT_PHYSICAL_SELECTION_HOLDS = frozenset({
+    "stepper", "uln2003", "cap_power", "switch_power", "ina226",
+    "max17048", "dock_contacts", "dock_fixture", "assembly",
+    "as5600", "encoder_magnets", "haptic_driver", "dock_ir_beacon_controller",
+})
+
+
+def first_robot_pilot_samples(report: dict) -> dict:
+    """Separate purchasing low-voltage bench samples from production release.
+
+    An exact named module can be a test sample even before final acceptance.
+    It must NOT be called fit, movement or charging qualified. Source-lock
+    both ID and name so a substituted chip cannot inherit permission.
+    """
+    one = first_robot_projection(report)
+    decisions = []
+    for part in one["roles"]:
+        ident, remaining = part["id"], part["conditional_remaining"]
+        source = PILOT_SAMPLE_PRODUCTS.get(ident)
+        if not remaining:
+            action = ("VERIFY_OWNED_OR_INCOMING_STOCK" if part["prototype_target"]
+                      else "EXCLUDED_MOTOR_ALTERNATIVE")
+        elif ident in PILOT_PHYSICAL_SELECTION_HOLDS:
+            action = "HOLD_POWER_MOTION_OR_FIT_SELECTION"
+        elif source is not None:
+            action = ("SAMPLE_ONLY_FOR_BENCH_VERIFICATION"
+                      if part["name"] == source[0]
+                      else "HOLD_CHANGED_PART_IDENTITY")
+        else:
+            action = "HOLD_EXACT_CARRIER_AND_VENDOR_SELECTION"
+        source = (source if action == "SAMPLE_ONLY_FOR_BENCH_VERIFICATION"
+                  else None)
+        qty = min(remaining, source[4]) if source else 0
+        decisions.append({
+            "id": ident, "name": part["name"], "scope": part["scope"],
+            "first_robot_target": part["prototype_target"],
+            "possible_stock_not_verified": part["prototype_target"] - remaining,
+            "conditional_remaining": remaining, "pilot_action": action,
+            "pilot_sample_quantity": qty,
+            "source_vendor": source[1] if source else None,
+            "source_sku": source[2] if source else None,
+            "source_url": source[3] if source else None,
+            "historical_unit_quote_usd": source[5] if source else None,
+        })
+    return {
+        "purpose": "First robot bench samples, not five robot release",
+        "pilot_sample_count": sum(x["pilot_sample_quantity"] for x in decisions),
+        "pilot_historical_quoted_subtotal_usd": round(sum(
+            x["pilot_sample_quantity"] * x["historical_unit_quote_usd"]
+            for x in decisions if x["pilot_sample_quantity"]
+        ), 2),
+        "actual_current_landed_cost_verified": False,
+        "whole_first_robot_purchase_approved": one["purchase_approved"],
+        "lithium_charging_or_motor_motion_authorized": False,
+        "unresolved_linked_decisions": [
+            item["id"] for item in one["linked_decisions"] if not item["reviewed"]
+        ],
+        "roles": decisions,
+    }
+
+
+def render_first_robot_pilot_samples(report: dict) -> str:
+    """Two visible lists, with source-locked bench samples and all holds."""
+    p = first_robot_pilot_samples(report)
+    lines = [
+        "# First robot: bench component purchase versus final release",
+        "",
+        "These exact samples are for low-energy bench experiments, not a "
+        "physically qualified robot, motor drive, Li-ion battery or live dock. "
+        "Every quote is historical and excludes shipping and tax.",
+        "",
+        "## 1. Reported owned or incoming, not yet inspected",
+        "",
+        "| Component | Possible first-unit stock |",
+        "| --- | ---: |",
+    ]
+    for x in p["roles"]:
+        if x["possible_stock_not_verified"]:
+            lines.append(
+                f"| {x['name']} | {x['possible_stock_not_verified']} |"
+            )
+    lines.extend([
+        "",
+        "## 2. Remaining: experimental samples versus unresolved physical choices",
+        "",
+        "| Component | Needed | Pilot sample quantity | Decision | Verified historical source candidate |",
+        "| --- | ---: | ---: | --- | --- |",
+    ])
+    for x in p["roles"]:
+        if not x["conditional_remaining"]:
+            continue
+        source = (
+            f"{x['source_vendor']} {x['source_sku']}: {x['source_url']} "
+            f"(USD {x['historical_unit_quote_usd']:.2f} per unit, old quote)"
+            if x["pilot_sample_quantity"] else
+            "Exact PCB, harness or mechanical selection still required"
+        )
+        lines.append(
+            f"| {x['name']} | {x['conditional_remaining']} | "
+            f"{x['pilot_sample_quantity']} | {x['pilot_action']} | {source} |"
+        )
+    lines.extend([
+        "",
+        "Pilot historical sample subtotal USD "
+        + str(p["pilot_historical_quoted_subtotal_usd"])
+        + " before tax and shipping.",
+        "Do not add the 14 linked subassemblies as duplicate line items. "
+        "Full one-robot or five-robot purchasing still requires receipt "
+        "evidence and exact assembled electrical and mechanical decisions.",
+        "",
+    ])
+    return "\n".join(lines)
+
+
 def render_first_robot_markdown(report: dict) -> str:
     """Exactly two source-derived lists for the first complete robot."""
     projection = first_robot_projection(report)
