@@ -97,7 +97,14 @@ class BodyControl {
   // Only the full guarded DRV8833 DC build enables this input at startup.
   // A missing, stale or LOW nFAULT sample latches wheel shutdown, requiring
   // fresh HIGH hardware evidence and local USB rearm, never an AI command.
-  void require_dc_driver_fault_monitor(bool required) { dc_fault_required_ = required; }
+  void require_dc_driver_fault_monitor(bool required) {
+    dc_fault_required_ = required;
+    // Even if an early arm request arrives before the first GPIOB poll,
+    // startup is a latched unqualified condition. Fresh HIGH nFAULT and a
+    // deliberate LOCAL USB rearm are required to enter motion for the first
+    // time. Never treat a late healthy read as automatic recovery.
+    if (required) dc_fault_latched_ = true;
+  }
   // Left/right/rear read-only ToF samples never grant motor permission.
   void sample_side_range(std::uint8_t index, std::uint16_t mm,
                          bool valid, std::uint32_t now_ms);
