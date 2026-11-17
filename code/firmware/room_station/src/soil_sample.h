@@ -28,6 +28,11 @@ SoilSample read_soil_sample(Read read) {
   // physical calibration or disconnection guarantee.
   if (largest - smallest > 256) return {};
   const int median = a + b + c - smallest - largest;
-  return {true, static_cast<std::uint16_t>(median)};
+  // The pinned nRF52 Arduino core still compiles with C++11, where a type
+  // with default member initializers cannot use this aggregate return form.
+  SoilSample sample;
+  sample.valid = true;
+  sample.raw_adc = static_cast<std::uint16_t>(median);
+  return sample;
 }
 }  // namespace desk_robot_room
