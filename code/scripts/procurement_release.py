@@ -293,6 +293,32 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     if reduced:
         missing_system.append("missing_or_reduced_full_feature_roles: " +
                               ", ".join(reduced))
+    # Checking only the shopping row's model name is insufficient: a parallel
+    # agent could silently put premium VL53L4CD lanes into the wiring plan.
+    # Every actual 0x70 lane must remain the chosen inexpensive VL53L0X at
+    # 7-bit 0x29 before a five-pet purchasing release is possible.
+    ranges = plan.get("bus", {}).get("mux_ranges", {}) if isinstance(
+        plan.get("bus", {}), dict) else {}
+    lanes = ranges.get("channels", []) if isinstance(ranges, dict) else []
+    cheap_range_layout = (
+        isinstance(ranges, dict)
+        and type(ranges.get("address")) is int
+        and ranges["address"] == 0x70
+        and isinstance(lanes, list)
+        and len(lanes) == 8
+        and all(isinstance(lane, dict)
+                and type(lane.get("channel")) is int
+                and lane["channel"] == index
+                and isinstance(lane.get("devices"), list)
+                and len(lane["devices"]) == 1
+                and isinstance(lane["devices"][0], dict)
+                and lane["devices"][0].get("name") == "VL53L0X"
+                and type(lane["devices"][0].get("address")) is int
+                and lane["devices"][0]["address"] == 0x29
+                for index, lane in enumerate(lanes)))
+    if not cheap_range_layout:
+        missing_system.append("invalid_selected_cheap_range_mux_layout")
+
 
     # The same fourteen details have their labels, parent identities and
     # quantities in the canonical hardware JSON. The code's independent
