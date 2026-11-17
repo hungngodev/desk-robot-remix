@@ -98,6 +98,10 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/thermal_pixels_tests.cpp -o /tmp/desk-room-thermal-test
           /tmp/desk-room-thermal-test
+      - name: Verify optional soil ADC samples fail closed under faults
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/soil_sample_tests.cpp -o /tmp/desk-room-soil-test
+          /tmp/desk-room-soil-test
 
   sense-idf:
     name: XIAO Sense ESP-IDF 6.1 firmware compile
