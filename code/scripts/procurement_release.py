@@ -354,6 +354,31 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     )
     if not voltage_suitable:
         missing_system.append("unsafe_gy530_voltage_or_pin_contract")
+    # The old round 1W speaker was replaced by a SINGLE currently fixed
+    # rectangular 2W candidate, not an alternative additive purchase. Keep
+    # the selected source model and the 5V MAX98357A rail in agreement with
+    # the generated harness and printable fit plate. Even a passing source
+    # contract must still be accompanied by independent physical receipts.
+    speaker_selected = next((row for row in rows if row["id"] == "speaker"), None)
+    audio = plan.get("audio_output_power_contract")
+    audio_suitable = (
+        isinstance(speaker_selected, dict)
+        and "CS20-02P110-04-1X" in speaker_selected["name"]
+        and "2 watt" in speaker_selected["name"]
+        and isinstance(audio, dict)
+        and audio.get("amplifier_ic") == "MAX98357A"
+        and type(audio.get("amplifier_vdd_v")) in (int, float)
+        and audio["amplifier_vdd_v"] == 5.0
+        and type(audio.get("speaker_nominal_impedance_ohm")) is int
+        and audio["speaker_nominal_impedance_ohm"] == 8
+        and type(audio.get("speaker_nominal_rating_w")) in (int, float)
+        and audio["speaker_nominal_rating_w"] == 2
+        and isinstance(audio.get("physical_release"), str)
+        and bool(audio["physical_release"].strip())
+    )
+    if not audio_suitable:
+        missing_system.append("unresolved_current_two_watt_speaker_contract")
+
 
 
 
