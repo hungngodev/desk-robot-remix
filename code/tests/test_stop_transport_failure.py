@@ -51,7 +51,7 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
                 return {"ok": True}
 
         coordinator = object.__new__(Coordinator)
-        coordinator.settings = SimpleNamespace(robot=lambda robot_id: object(), max_job_seconds=10)
+        coordinator.settings = SimpleNamespace(robot=lambda robot_id: object(), mode="simulation", max_job_seconds=10)
         coordinator.heads = {"robot-01": FakeHead()}
         coordinator.locks = {"robot-01": asyncio.Lock()}
         coordinator.jobs = {"job-01": Job("job-01", "robot-01", "pickup")}
