@@ -902,3 +902,34 @@ def test_inexpensive_gy530_power_and_mux_levels_are_fleet_purchase_invariant():
         assert "unsafe_gy530_voltage_or_pin_contract" in (
             report["missing_system_evidence"]), field
         assert not report["order_released"]
+
+
+def test_current_speaker_sku_and_five_volt_amplifier_cannot_drift():
+    """Old round 1W speaker and contradictory VDD must never pass the cart."""
+    import copy
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    assert "unresolved_current_two_watt_speaker_contract" not in (
+        mod.generate(plan)["missing_system_evidence"])
+    mutations = []
+    old_round = copy.deepcopy(plan)
+    next(x for x in old_round["parts"] if x["id"] == "speaker")[
+        "name"] = "8 ohm 1 watt 20 mm round speaker"
+    mutations.append(old_round)
+    for field, value in (
+        ("amplifier_vdd_v", 3.3),
+        ("amplifier_vdd_v", True),
+        ("speaker_nominal_rating_w", 1),
+        ("speaker_nominal_impedance_ohm", 4),
+        ("amplifier_ic", "unreviewed"),
+        ("physical_release", ""),
+    ):
+        altered = copy.deepcopy(plan)
+        altered["audio_output_power_contract"][field] = value
+        mutations.append(altered)
+    for altered in mutations:
+        report = mod.generate(altered)
+        assert "unresolved_current_two_watt_speaker_contract" in (
+            report["missing_system_evidence"])
+        assert not report["order_released"]
