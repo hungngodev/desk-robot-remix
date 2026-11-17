@@ -59,13 +59,24 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
              measured_p95_stopping_distance_mm: float,
              remaining_vision_or_sensor_latency_ms: float,
              measured_travel_speed_mm_s: float,
-             engineering_margin_mm: float = 10.0) -> dict:
+             engineering_margin_mm: float = 10.0,
+             measured_worst_stopping_distance_mm: float | None = None) -> dict:
+    # The historical p95 parameter is kept for existing diagnostics but
+    # MUST NOT authorize a desk-edge geometry. A 95th percentile ignores
+    # the slowest 5% of stopping trials. Accept only a separately named
+    # observed worst-case distance with a nondecreasing bound.
     vals = (chassis_mount_above_desk_mm, optical_tilt_deg,
             leading_wheel_behind_sensor_mm, measured_p95_stopping_distance_mm,
             remaining_vision_or_sensor_latency_ms, measured_travel_speed_mm_s,
             engineering_margin_mm)
     if any(not _finite_real(v) for v in vals):
         raise ValueError("Every geometry value must be a finite measured number")
+    worst_supplied = measured_worst_stopping_distance_mm is not None
+    if worst_supplied and (
+            not _finite_real(measured_worst_stopping_distance_mm)
+            or measured_worst_stopping_distance_mm <
+            measured_p95_stopping_distance_mm):
+        raise ValueError("Worst observed stop must be finite and at least p95")
     if (chassis_mount_above_desk_mm < 0
             # The forward cone extremity must intersect the floor. A beam
             # at or above the horizon has no finite horizontal footprint.
@@ -102,7 +113,8 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
     rear_floor_setback = max(
         0.0, -height * math.tan(math.radians(rear_angle))
     )
-    stopping = (measured_p95_stopping_distance_mm
+    stopping = ((measured_worst_stopping_distance_mm if worst_supplied
+                 else measured_p95_stopping_distance_mm)
                 + remaining_vision_or_sensor_latency_ms
                 * measured_travel_speed_mm_s / 1000.0
                 + engineering_margin_mm)
@@ -127,8 +139,11 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
         "required_stopping_clearance_mm": stopping,
         "required_wheel_behind_sensor_mm": required_physical_lead,
         "wheel_behind_sensor_mm": leading_wheel_behind_sensor_mm,
-        "nominal_stopping_geometry_possible": clearance_ok,
-        "candidate_geometry_possible_on_paper": full_cone_range_ok and clearance_ok,
+        "worst_observed_stop_supplied": worst_supplied,
+        "nominal_stopping_geometry_possible": clearance_ok and worst_supplied,
+        "candidate_geometry_possible_on_paper": (
+            full_cone_range_ok and clearance_ok and worst_supplied
+        ),
         "actual_dark_glossy_surface_and_edge_trials": False,
         "sensor_mount_and_optical_alignment_physically_verified": False,
         "40_sensor_fleet_purchase_approved": False,
@@ -272,7 +287,8 @@ def main():
     parser.add_argument("--mount-above-desk-mm", type=float, required=True)
     parser.add_argument("--tilt-deg", type=float, required=True)
     parser.add_argument("--sensor-ahead-of-wheel-mm", type=float, required=True)
-    parser.add_argument("--measured-stopping-mm", type=float, required=True)
+    parser.add_argument("--measured-worst-stopping-mm", type=float, required=True,
+                        help="Highest observed loaded stop, never p95 alone")
     parser.add_argument("--latency-ms", type=float, required=True)
     parser.add_argument("--speed-mm-s", type=float, required=True)
     args = parser.parse_args()
@@ -280,7 +296,8 @@ def main():
         chassis_mount_above_desk_mm=args.mount_above_desk_mm,
         optical_tilt_deg=args.tilt_deg,
         leading_wheel_behind_sensor_mm=args.sensor_ahead_of_wheel_mm,
-        measured_p95_stopping_distance_mm=args.measured_stopping_mm,
+        measured_p95_stopping_distance_mm=args.measured_worst_stopping_mm,
+        measured_worst_stopping_distance_mm=args.measured_worst_stopping_mm,
         remaining_vision_or_sensor_latency_ms=args.latency_ms,
         measured_travel_speed_mm_s=args.speed_mm_s,
     ), indent=2))
