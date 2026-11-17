@@ -220,13 +220,26 @@ def test_active_product_docs_and_workflow_cannot_resurrect_premium_ranger():
     assert "Historic VL6180X and VL53L0X suggestions are" not in wiring
 
 
-def test_audio_speaker_cannot_implicitly_accept_full_gain_i2s_amp():
+def test_full_fleet_speaker_source_is_exact_2w_and_remains_physical_hold():
+    """Replace the unsafe 1W cart entry, not the thermal/fit acceptance gate."""
     p = load()
     speaker = next(x for x in p["parts"] if x["id"] == "speaker")
+    assert "CS20-02P110-04-1X" in speaker["name"]
+    assert "8 ohm 2 watt" in speaker["name"]
     assert "MAX98357A 5V output" in speaker["notes"]
     assert "1.8W" in speaker["notes"]
+    assert "1cc sealed enclosure" in speaker["notes"]
     register = (PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text()
     row = next(x for x in register.splitlines()
                if x.startswith("| " + chr(96) + "speaker" + chr(96) + " |"))
     fields = [v.strip() for v in row.strip().strip("|").split("|")]
-    assert fields[8] == "0" and "HOLD OUTPUT POWER MISMATCH" in row
+    assert fields[8] == "0" and "EXACT SKU SOURCE SELECTED, NOT RELEASED" in row
+    from pathlib import Path
+    fit = Path(__file__).resolve().parents[2] / (
+        "docs/cad/remixes/speaker_rect_fit_gauge.scad"
+    )
+    source = fit.read_text(encoding="utf-8")
+    assert "CS20-02P110-04-1X" in source
+    assert "speaker_l=20;" in source
+    assert "speaker_w=16;" in source
+    assert "speaker_h=4.7;" in source
