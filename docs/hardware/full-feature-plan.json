@@ -109,10 +109,10 @@
     },
     {
       "id": "speaker",
-      "name": "8 ohm 1 watt approximately 20 mm speaker",
+      "name": "Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "8 ohm 1W speaker is NOT power-safe at unrestricted MAX98357A 5V output (up to about 1.8W into 8 ohm). Need either verified max-volume/gain restriction and thermal/acoustic test or physically fitted 8 ohm >=2W speaker with verified impedance and enclosure. Speaker + and - go to differential amplifier outputs, neither to GND. No purchase/signoff from codec source alone.",
+      "notes": "Current fixed source candidate is active Challenge Electronics CS20-02P110-04-1X, 8 ohm rated 2W, 20 x 16 x 4.7 mm, DigiKey 2603-CS20-02P110-04-1X-ND. MAX98357A 5V output can deliver about 1.8W into 8 ohm, within 2W nominal rating but still needs verified volume, transients, thermal and acoustic baffle. Manufacturer performance quotes 1cc sealed enclosure, not the existing open 20mm round grille. The rectangular geometry and lead routing are only a printed prototype fit until physically measured. Differential speaker + and - must NEVER be grounded. Manufacturer datasheet: https://www.challengeelectronics.com/speakers/pdf/CS20-02P110-04-1X.pdf",
       "group": "pet"
     },
     {
