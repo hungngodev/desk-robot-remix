@@ -10,14 +10,18 @@ the latest source before reimplementing any proposed feature.
 
 The PR conversation had 157 top-level comments at this audit. GitHub's
 available connected comment API exposes edit and review-thread resolution
-but not comment deletion. Four materially misleading earlier notes have
-been edited in place with a SUPERSEDED/HISTORICAL banner while preserving
-their original reasoning:
+but not comment deletion. Nine materially misleading earlier notes have been edited in place
+with SUPERSEDED/HISTORICAL banners while preserving their original reasoning:
 * 6827922199: old premium VL53L4CD hardware direction; no longer selected
 * 6826600053: old BQ24074 current assumption; corrected in 6829660823
 * 6829510138: zero-step CI incident; later real jobs executed
 * 6822424469: old AprilTag native detector semaphore release race; current
   detector holds its slot until its actual executor Future completes
+* 6835889751: old runner and premium ToF purchase checkpoint
+* 6836764600: obsolete VL53L4CD purchase qualification references
+* 6859729090: outdated Pololu VL53L4CD breakout selection
+* 6863547287: earlier zero-step CI no longer the latest runner state
+* 6938790774: obsolete one-watt speaker selection and CI note
 
 Inline source review threads F1 (CAP1188 register transaction), F2 (AMG8833
 temperature band), R2 (USB rejection counters) and R1 (room callback contract)
