@@ -356,6 +356,11 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
     robot.dock_calibration = path
     controller, head = make(settings)
     try:
+        # One permission must not paper over another: missing assigned NEC
+        # beacon remains a separate hard stop, even before operator permit.
+        with pytest.raises(OperationError, match="assigned physical NEC beacon"):
+            controller.dock("robot-01")
+        robot.dock_beacon_id = 1
         with pytest.raises(OperationError, match="permit"):
             controller.dock("robot-01")
         assert head.commands == []
