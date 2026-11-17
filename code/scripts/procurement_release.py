@@ -1062,7 +1062,8 @@ def main() -> int:
     parser.add_argument("--require-release", action="store_true",
                         help="Exit 2 unless every part and system receipt has passed")
     parser.add_argument("--format", choices=(
-        "json", "csv", "markdown", "first-robot-json", "first-robot-markdown"
+        "json", "csv", "markdown", "first-robot-json", "first-robot-markdown",
+        "pilot-samples-json", "pilot-samples-markdown"
     ), default="json", help="Project the canonical ledger without buying permits")
     args = parser.parse_args()
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
@@ -1077,6 +1078,10 @@ def main() -> int:
         print(json.dumps(first_robot_projection(report), indent=2))
     elif args.format == "first-robot-markdown":
         print(render_first_robot_markdown(report), end="")
+    elif args.format == "pilot-samples-json":
+        print(json.dumps(first_robot_pilot_samples(report), indent=2))
+    elif args.format == "pilot-samples-markdown":
+        print(render_first_robot_pilot_samples(report), end="")
     else:
         print(json.dumps(report, indent=2))
     return 2 if args.require_release and not report["order_released"] else 0
