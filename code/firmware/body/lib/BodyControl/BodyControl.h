@@ -15,7 +15,7 @@ namespace desk_robot {
 // See ../../THIRD_PARTY_NOTICES.md. This controller adds a control lease and
 // deliberately omits upstream commands that could bypass speed/time limits.
 constexpr std::size_t kMaxLineLength = 95;
-constexpr std::size_t kReplyCapacity = 1536;  // worst-case status JSON; under the 1664-byte Sense bridge limit
+constexpr std::size_t kReplyCapacity = 1600;  // 1566-byte worst-case full-width JSON plus margin; below Sense's 1664-byte reply and 2048-byte UART ring
 constexpr std::uint32_t kWatchdogMs = 500;
 constexpr std::uint32_t kMaxDriveMs = 250;
 constexpr int kSpeedLimitPercent = 40;
