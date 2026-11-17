@@ -316,7 +316,7 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
     # Audit the *entire* hand-curated 42-role purchase table, not only its
     # headline totals. In particular HOLD or zero pilot does not erase a
     # physical fleet shortage (previously wrong for steppers and 1S power).
-    for ident, item in parts.items():
+    for ident, _item in parts.items():
         cells = selected[ident]
         report = machine[ident]
         expected = (
@@ -605,7 +605,7 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
                 part["id"]: {
                     **dict(passed),
                     **(dict(zip(("vendor", "sku"),
-                                mod.FIXED_SOURCE_SKUS[part["id"]]))
+                                mod.FIXED_SOURCE_SKUS[part["id"]], strict=True))
                        if part["id"] in mod.FIXED_SOURCE_SKUS else {}),
                 }
                 for part in plan["parts"]
@@ -770,7 +770,7 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
         "parts": {
             p["id"]: {
                 **dict(approved_part),
-                **(dict(zip(("vendor", "sku"), mod.FIXED_SOURCE_SKUS[p["id"]]))
+                **(dict(zip(("vendor", "sku"), mod.FIXED_SOURCE_SKUS[p["id"]], strict=True))
                    if p["id"] in mod.FIXED_SOURCE_SKUS else {}),
             }
             for p in plan["parts"]
