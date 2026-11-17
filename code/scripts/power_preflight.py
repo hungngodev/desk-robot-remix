@@ -136,6 +136,10 @@ def screen_protected_pack(
                pcm_overcurrent_trip_a)
     if any(r is not None and (not _finite_number(r) or r <= 0) for r in ratings):
         raise ValueError("Pack discharge and PCM ratings must be positive real amperes")
+    if all(r is not None for r in ratings):
+        if (rated_continuous_discharge_a > rated_peak_discharge_a
+                or pcm_overcurrent_trip_a < rated_peak_discharge_a):
+            raise ValueError("Contradictory protected pack peak, continuous or PCM ratings")
     fits_flat = (
         pack_thickness_mm + 2 * side_clearance_mm <= tray_height_mm
         and any(
