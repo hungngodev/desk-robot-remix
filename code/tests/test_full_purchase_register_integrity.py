@@ -114,3 +114,39 @@ def test_supplemental_subassemblies_do_not_count_as_extra_robots():
             or "5 eventual" in rows[name][6].casefold()
             or "current and switching" in rows[name][6].casefold()
         )
+
+
+def test_active_two_watt_speaker_register_and_wiring_are_one_fixed_selection():
+    """Reject the exact mismatch recently introduced by parallel PR edits.
+
+    This tests consistency of the CURRENT active selection, not a measured
+    5V amplifier, speaker enclosure or any physical purchasing acceptance.
+    """
+    import json
+
+    plan = json.loads(PLAN.read_text(encoding="utf-8"))
+    speaker = next(p for p in plan["parts"] if p["id"] == "speaker")
+    amp = next(p for p in plan["parts"] if p["id"] == "amp")
+    audio = plan["audio_output_power_contract"]
+    assert "MAX98357A" in amp["name"]
+    assert "CS20-02P110-04-1X" in speaker["name"]
+    assert "8 ohm 2 watt" in speaker["name"]
+    assert audio["amplifier_ic"] == "MAX98357A"
+    assert audio["speaker_nominal_impedance_ohm"] == 8
+    assert audio["speaker_nominal_rating_w"] == 2
+    assert audio["amplifier_vdd_v"] == 5
+    assert "HOLD" in audio["physical_release"]
+
+    text = REGISTER.read_text(encoding="utf-8")
+    rows = [line for line in text.splitlines() if line.startswith("| `speaker` |")]
+    assert len(rows) == 1
+    assert "CS20-02P110-04-1X" in rows[0]
+    assert "2 watt" in rows[0]
+    assert "HOLD" in rows[0] or "NOT RELEASED" in rows[0]
+    assert "formerly proposed 1 W" not in speaker["name"]
+
+    harness = (HARDWARE / "one-robot-signal-harness.generated.md").read_text()
+    assert "Rated, isolated 5V audio power rail" in harness
+    assert "8 ohm 2 W CS20-02P110-04-1X" in harness
+    assert "NEVER connect either output to GND" in harness
+    assert "speaker heat HOLD" not in harness or "heat HOLD" in harness
