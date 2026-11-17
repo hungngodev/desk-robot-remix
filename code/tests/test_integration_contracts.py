@@ -434,3 +434,21 @@ def test_wiring_manifest_rejects_swapped_cliff_mux_channels(group):
     head = (ROOT / module.HEAD_PINS).read_text()
     with pytest.raises(ValueError, match="Critical cliff/obstacle sensor channel mapping drift"):
         module.verify(plan, body, head)
+
+
+def test_full_dc_firmware_profiles_enable_external_motor_watchdog_heartbeat():
+    """Every full DC profile must emit the GPIO23 CPU-liveness pulse.
+
+    This checks build configuration only, not physical CD74HC123 cutoff.
+    """
+    import configparser
+
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.read(ROOT / "code/firmware/body/platformio.ini")
+    full = ini["env:esp32_dc_full"]["build_flags"]
+    assert "-DDESK_ROBOT_STEPPER=0" in full
+    assert "-DDESK_ROBOT_FULL_SENSORS=1" in full
+    assert "-DDESK_ROBOT_ENABLE_DC_WATCHDOG=1" in full
+    for profile in ("esp32_dc_watchdog_lab", "esp32_dc_integrated_lab"):
+        assert ini[f"env:{profile}"]["extends"] == "env:esp32_dc_full"
+    assert "-DDESK_ROBOT_ENABLE_DC_WATCHDOG=1" not in ini["env:esp32_full"]["build_flags"]
