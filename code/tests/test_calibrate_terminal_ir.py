@@ -21,21 +21,21 @@ def position_records():
     now = 1000.0
     for label in ("left", "center", "right"):
         for _ in range(20):
-            l = label in ("left", "center")
+            left_seen = label in ("left", "center")
             r = label in ("center", "right")
-            if l:
+            if left_seen:
                 left_seq += 1
             if r:
                 right_seq += 1
             rows.append({
                 "label": label, "received_monotonic": now,
                 "ir": {
-                    "robot_id": "robot-01", "left_valid": l,
-                    "right_valid": r, "match": l and r,
+                    "robot_id": "robot-01", "left_valid": left_seen,
+                    "right_valid": r, "match": left_seen and r,
                     "left_seq": left_seq, "right_seq": right_seq,
-                    "left_age_ms": 20 if l else 0xffffffff,
+                    "left_age_ms": 20 if left_seen else 0xffffffff,
                     "right_age_ms": 20 if r else 0xffffffff,
-                    "code": 0xCB34ED12 if l and r else 0,
+                    "code": 0xCB34ED12 if left_seen and r else 0,
                     "motor_authorized": False,
                     "charging_authorized": False,
                     "physical_qualified": False,
