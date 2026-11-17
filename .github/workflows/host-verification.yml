@@ -69,7 +69,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Compile guarded stepper firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
-      - name: Compile full eight VL53L4CD robot firmware
+      - name: Compile full eight low-cost VL53L0X robot firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full
       - name: Compile full guarded DRV8833 DC drivetrain firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_full
