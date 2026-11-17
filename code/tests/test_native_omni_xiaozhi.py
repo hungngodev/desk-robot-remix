@@ -7390,7 +7390,7 @@ async def test_decoder_stop_from_replaced_xiao_socket_never_clears_owner(
     """A send on an old connection is not proof the new head was stopped."""
     module, bridge = native
     old, _ = connection()
-    fresh, _ = connection()
+    fresh, fresh_sent = connection()
     fresh.session_id = "new-authenticated-head"
     bridge.connections["mac-01"] = old
     module._output_owner = "mac-01"
@@ -7427,7 +7427,19 @@ async def test_decoder_stop_from_replaced_xiao_socket_never_clears_owner(
     assert bridge.connections["mac-01"] is fresh
     assert module._output_owner == "mac-01"
     assert module._output_owner_unverified == "mac-01"
-    assert not await module.begin_external_speech(fresh)
+    # The old socket's STOP is not proof. Recovery is allowed only after
+    # an independent STOP reaches the NEW authenticated connection. This
+    # preserves the fleet audio lease while avoiding a permanent lockout.
+    assert fresh_sent == []
+    assert await module.begin_external_speech(fresh)
+    assert len(fresh_sent) == 1
+    assert json.loads(fresh_sent[0]) == {
+        "type": "tts", "state": "stop", "flush": True,
+        "session_id": "new-authenticated-head",
+    }
+    assert module._output_owner_unverified is None
+    assert module._external_speaker_owner == "mac-01"
+    await module.end_external_speech(fresh, stop_confirmed=True)
 
 
 async def test_mac_claim_during_native_startup_lock_wait_preserves_speaker(
