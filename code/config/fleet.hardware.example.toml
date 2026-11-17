@@ -23,6 +23,14 @@ room_station_enabled = false
 room_station_context_enabled = false
 # Set to the actual inspected Mac /dev/cu.usbmodem* path when connected.
 # room_station_port = "/dev/cu.usbmodemVERIFIED"
+# Only AFTER connecting one electrically verified 3.3V analog capacitive
+# soil probe to the owned Feather A0 / D14 / nRF P0.04, enable the probe
+# in the explicit ROOM_SOIL_FITTED=1 firmware build and measure TWO actual
+# raw 12-bit references with this same probe in genuinely dry and wet media.
+# Both fields must be specified together, must be 1..4094 and differ by >=100.
+# No synthetic dry/wet numbers are supplied: do not copy sample thresholds.
+# room_station_soil_dry_adc = MEASURED_DRY_INTEGER
+# room_station_soil_wet_adc = MEASURED_WET_INTEGER
 fleet_text_sharing_enabled = false
 # Opt-in, measured five-pet interaction. Requires fleet_text_sharing_enabled=true.
 # Only two enabled, unmuted pets talk for two short turns about a witnessed
