@@ -1177,7 +1177,8 @@ def test_first_robot_projection_rejects_wrong_scope_and_variant():
 
 def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     """A sample procurement gate breaks the prototype acceptance deadlock."""
-    report = mod.generate(fixture())
+    import json
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
     pilot = mod.first_robot_pilot_samples(report)
     rows = {item["id"]: item for item in pilot["roles"]}
     assert len(rows) == 49
@@ -1217,7 +1218,8 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
 def test_pilot_sample_cannot_inherit_approved_sku_from_replaced_sensor():
     """A source-locked sample is never an automatic chip substitution permit."""
     import copy
-    bad = copy.deepcopy(fixture())
+    import json
+    bad = copy.deepcopy(json.loads(mod.PLAN.read_text(encoding="utf-8")))
     next(x for x in bad["parts"] if x["id"] == "cliff_obstacle")[
         "name"
     ] = "expensive replacement VL53L4CD"
