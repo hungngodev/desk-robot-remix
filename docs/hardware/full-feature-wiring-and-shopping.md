@@ -137,7 +137,7 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 
 | Lane | Module and address | Purpose |
 | --- | --- | --- |
-| 0 | CAP1188 (0x28), MAX30102 (0x57) | Petting electrodes and user-approved heartbeat pad |
+| 0 | CAP1188 (0x29), MAX30102 (0x57) | Petting electrodes and user-approved heartbeat pad |
 | 1 | APDS9960 (0x39), AS5600 nose (0x36) | gesture + twist nose |
 | 2 | ADS1115 (0x48) | force feedback |
 | 3 | SHT41 (0x44), BMP280 (0x76) | humidity + reported pressure board |
@@ -150,7 +150,7 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 
 **MAX30102 correction:** The original HTML approved one **robot-mounted** heartbeat paw pad and reported a box of around five MAX30102 boards. Photo confirmation is missing, so count stock before purchasing. Reserve WROOM 0x71 mux lane 0 at 0x57, share lane with CAP1188 0x28 after voltage and breakout checks. **Never** use XIAO Sense GPIO41/42 because those are the PDM microphone wires. Opt-in playful feedback only, not medical use.
 
-**CAP1188 rather than MPR121:** Microchip marks CAP1188 in production, whereas NXP archives MPR121. Use a CAP1188 I2C breakout configured to **0x28**, not its common breakout default 0x29, so it cannot share the same address as the optical modules even if a mux lane is left selected. Its 8 electrodes cover head, back and belly; retain the existing dedicated AT42QT1010 as the **local physical stop touch**, never routed through an optional mux. Check actual breakout address-selection circuitry before ordering.
+**CAP1188 rather than MPR121:** Microchip marks CAP1188 in production, whereas NXP archives MPR121. Use a cheap CAP1188 breakout at its common default **0x29**, with legacy strapped **0x28** also recognized by chip ID. Safety mux 0x70 must report NO selected lanes before touch mux 0x71 CH0 opens, and all optional channels must be closed before a critical range read. Equal 0x29 addresses are permitted only behind those isolated muxes, not on the same I2C segment. Actual stuck-bus electrical tests are still required. Its 8 electrodes cover head, back and belly; retain the existing dedicated AT42QT1010 as the **local physical stop touch**, never routed through an optional mux. Check actual breakout address-selection circuitry before ordering.
 
 **MCP23017:** the implemented source reads physical dock seat and charger status pins only. PN532 now uses bounded nonblocking I2C ready-byte and frame reads on the same mux lane without driving optional expander IRQ/reset pins; an actual carrier may require a reset and must be measured before the final wiring is frozen. Haptic switching and the expander output pin assignments are **not implemented** and must not be described as working. All future outputs need hardware-safe default pull resistors. Never put motor phases, servo lift/grip outputs, emergency stops, required head touch or optical cliff timing through the expander.
 
@@ -215,7 +215,7 @@ The accompanying [machine-readable plan](full-feature-plan.json) is the source f
 
 ## Active CAP1188 telemetry pipeline, November 10
 
-A new bounded WROOM adapter reads Microchip CAP1188 ID 0xFD = 0x50 and manufacturer 0xFE = 0x5D on expansion mux 0x71 lane 0, address 0x28 after its address strap is verified. It reads actual 8-bit touch status at register 0x03 every 80ms, temporarily disconnecting the range mux and closing the optional mux before leaving. Missing and wrong-ID devices cannot forge touch reports. `BodyControl` tracks zone mask, source validity and observed rising-zone counters, without granting motor authority or replacing the independent AT42QT1010 stop pad. The existing authenticated Mac head-status poll now stores qualifying rising contacts as private firsthand petting memories, ignoring first samples, reconnect resets and malformed deltas. Both C++ and Python tests were added; these are software tests only. The physical electrode geometry and through-case capacitance still require trials.
+A new bounded WROOM adapter reads Microchip CAP1188 ID 0xFD = 0x50 and manufacturer 0xFE = 0x5D on expansion mux 0x71 lane 0, default address 0x29, or address 0x28 on a strapped carrier, after both required manufacturer and product IDs are verified. It reads actual 8-bit touch status at register 0x03 every 80ms, temporarily disconnecting the range mux and closing the optional mux before leaving. Missing and wrong-ID devices cannot forge touch reports. `BodyControl` tracks zone mask, source validity and observed rising-zone counters, without granting motor authority or replacing the independent AT42QT1010 stop pad. The existing authenticated Mac head-status poll now stores qualifying rising contacts as private firsthand petting memories, ignoring first samples, reconnect resets and malformed deltas. Both C++ and Python tests were added; these are software tests only. The physical electrode geometry and through-case capacitance still require trials.
 
 
 ## Additional left, right and rear VL53L0X source reuse
