@@ -103,6 +103,20 @@ def test_room_station_soil_calibration_requires_a_real_pair_and_live_source():
                  room_station_soil_wet_adc=1300)
 
 
+@pytest.mark.parametrize("pixel,valid", [
+    (0.0, True), (80.0, True), (-0.25, False), (80.25, False),
+    (-40.0, False), (125.0, False),
+])
+def test_amg8833_high_gain_pixel_range_matches_panasonic(pixel, valid):
+    payload = frame()
+    payload["readings"]["amg8833"]["pixels_c"][0] = pixel
+    if valid:
+        assert accept(payload).readings["amg8833"]["pixels_c"][0] == pixel
+    else:
+        with pytest.raises(ValueError, match="out of range"):
+            accept(payload)
+
+
 def test_full_read_only_room_frame_has_provenance_not_actuator_authority():
     evidence = accept(frame())
     assert evidence.seq == 1
