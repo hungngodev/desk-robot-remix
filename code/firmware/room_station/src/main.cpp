@@ -130,31 +130,38 @@ void soil_observation(uint32_t now) {
   Serial.print('}');
 }
 // The pinned Adafruit AMG88xx readPixels() returns void and its underlying
-// I2C read discards transfer failure. Reject a partial/failed pixel frame
-// instead of reporting whatever happens to be in the old pixel array.
-// Reuse its normal init and Panasonic/Adafruit 0x80+2*n register layout.
-// Pixel temperature is a signed 12-bit two's complement value, 0.25 C/LSB.
-// This bounded one-second room-only read has no robot motion authority.
-bool checked_amg_pixel(uint8_t pixel, float& temperature) {
-  if (pixel >= AMG88xx_PIXEL_ARRAY_SIZE) return false;
-  const uint8_t reg = static_cast<uint8_t>(0x80U + 2U * pixel);
+// I2C read discards transfer failure. Reject a partial/failed pixel frame.
+// Retain Adafruit's normal device initialization and its contiguous pixel
+// register layout, but use 8 checked 16-byte reads (below the usual 32-byte
+// Wire receive buffer) instead of 64 separate I2C transactions.
+// This shared stationary sensor never authorizes motor or charging commands.
+bool checked_amg_chunk(uint8_t chunk, float* destination) {
+  constexpr uint8_t kBytes = 16;  // eight neighboring 12-bit pixels
+  if (chunk >= AMG88xx_PIXEL_ARRAY_SIZE / 8U || !destination) return false;
+  const uint8_t reg = static_cast<uint8_t>(0x80U + kBytes * chunk);
   Wire.beginTransmission(kAmgAddress);
   const bool wrote = Wire.write(reg) == 1;
   const int ack = Wire.endTransmission(!wrote);
   if (!wrote || ack != 0) return false;
-  if (Wire.requestFrom(kAmgAddress, static_cast<uint8_t>(2), true) != 2 ||
-      Wire.available() < 2) return false;
-  const int lo = Wire.read();
-  const int hi = Wire.read();
-  if (lo < 0 || hi < 0) return false;
-  return desk_robot_room::decode_thermal_pixel(
-      static_cast<uint8_t>(lo), static_cast<uint8_t>(hi), temperature);
+  if (Wire.requestFrom(kAmgAddress, kBytes, true) != kBytes ||
+      Wire.available() < kBytes) return false;
+  uint8_t raw[kBytes]{};
+  for (uint8_t i = 0; i < kBytes; ++i) {
+    const int byte = Wire.read();
+    if (byte < 0) return false;
+    raw[i] = static_cast<uint8_t>(byte);
+  }
+  for (uint8_t i = 0; i < kBytes / 2U; ++i) {
+    if (!desk_robot_room::decode_thermal_pixel(
+            raw[2U * i], raw[2U * i + 1U], destination[i])) return false;
+  }
+  return true;
 }
 void thermal_observation(uint32_t now) {
   bool valid = amg_started;
   if (valid) {
-    for (uint8_t i = 0; i < AMG88xx_PIXEL_ARRAY_SIZE; ++i) {
-      if (!checked_amg_pixel(i, thermal[i])) {
+    for (uint8_t chunk = 0; chunk < AMG88xx_PIXEL_ARRAY_SIZE / 8U; ++chunk) {
+      if (!checked_amg_chunk(chunk, thermal + 8U * chunk)) {
         valid = false;
         break;
       }
