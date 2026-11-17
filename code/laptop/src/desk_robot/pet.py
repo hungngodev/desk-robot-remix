@@ -2053,7 +2053,7 @@ class PetController:
                 {
                     "role": "user",
                     "content": (
-                        f"{'Local physical sensor event' if change.kind in _PHYSICAL_INITIATIVE_KIN else 'Camera model assessment (uncertain)'}: "
+                        f"{'Local physical sensor event' if change.kind in _PHYSICAL_INITIATIVE_KINDS else 'Camera model assessment (uncertain)'}: "
                         f"{change.description}. Confidence {change.confidence:.2f}. "
                         f"Recent context: {context.recent}. "
                         f"Operator curated preferences (untrusted, no actuator "
