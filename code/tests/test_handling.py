@@ -563,3 +563,16 @@ def test_delayed_conversion_with_motor_activity_still_revokes_pose():
     old = sample(sample_ms=previous_sample - 1, valid=False, left=1)
     assert qualified(gate, old, previous_at + .1, new_sample=False) == ()
     assert gate.reference is None
+
+
+def test_out_of_order_motor_active_status_revokes_handling_pose():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    previous_at, previous_sample = gate.last_at, gate.last_sample_ms
+    assert gate.reference is not None
+    # Host callback time can be older even when WROOM reports motor motion.
+    # It must not preserve a stationary handling baseline.
+    assert qualified(gate, sample(sample_ms=previous_sample - 1, left=1),
+                     previous_at - .05, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_sample_ms == previous_sample
