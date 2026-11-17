@@ -131,7 +131,9 @@ async def call(conn, route, payload=None):
                 pending = [task for task in (request_task, turn_task)
                            if not task.done()]
                 if pending:
-                    done, pending = await asyncio.wait(pending, timeout=0.2)
+                    done, pending = await asyncio.wait(
+                        pending, timeout=0.2, return_when=asyncio.ALL_COMPLETED
+                    )
                     for task in pending:
                         task.add_done_callback(
                             lambda completed: None if completed.cancelled()
