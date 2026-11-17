@@ -410,7 +410,7 @@ async def test_live_sensor_edge_reuses_stream_and_never_starts_competing_snapsho
                 await asyncio.sleep(.01)
         assert visual.hub.frames["robot-01"][-1].source == "proactive"
         assert head.captures == 0
-        assert [kind for kind, _ in visual.hub.recent_events(
+        assert [event["kind"] for event in visual.hub.recent_events(
             "robot-01", time.monotonic()
         )][-2:] == ["paw_contact", "petting_zone"]
         # No stream frame or reconnection is a license to fall back to
