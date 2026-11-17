@@ -1013,6 +1013,48 @@ async def test_local_wroom_fault_transition_cancels_mac_motion_authority(fleet, 
         await pet.close()
 
 
+
+async def test_human_touch_stops_mac_without_false_latched_fault_memory(
+    fleet, tmp_path,
+):
+    stopped = []
+
+    async def local_stop(robot_id):
+        stopped.append(robot_id)
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(),
+                                memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        on_local_fault=local_stop,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 4
+
+    def status(fault, ready=False):
+        return {"safety": {"required": True, "ready": ready,
+                           "fault": fault, "sensor": 255}}
+
+    try:
+        await pet._observe_body_safety("robot-01", 4, status("none", True))
+        await pet._observe_body_safety("robot-01", 4, status("touch_active"))
+        await pet._observe_body_safety("robot-01", 4, status("touch_active"))
+        assert stopped == ["robot-01"]
+        assert state.safety_fault_events == 0
+        assert not [m for m in memory.recent("robot-01")
+                    if m.kind == "safety_fault"]
+        await pet._observe_body_safety("robot-01", 4, status("none", True))
+        await pet._observe_body_safety("robot-01", 4, status("bus_failure"))
+        assert stopped == ["robot-01", "robot-01"]
+        assert state.safety_fault_events == 1
+        assert len([m for m in memory.recent("robot-01")
+                    if m.kind == "safety_fault"]) == 1
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_wroom_stop_callback_runs_before_any_safety_camera_request(
     fleet, tmp_path,
 ):
