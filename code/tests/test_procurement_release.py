@@ -208,6 +208,9 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
         assert int(cells[2]) == item["per_robot"], ident
         assert int(cells[3]) == 5 * item["per_robot"], ident
         assert int(cells[8]) >= 0, ident
+    for ident in ("oled", "imu", "head_touch", "reed", "pir", "bmp280",
+                  "haptic_motor"):
+        assert selected[ident][8] == "0", "Do not rebuy reported owned " + ident
     assert "VL53L0X" in selected["cliff_obstacle"][1]
     assert "VL53L4CD" not in register
     # An expensive comparison board is not an authorized pilot purchase.
