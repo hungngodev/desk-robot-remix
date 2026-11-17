@@ -3053,9 +3053,14 @@ async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
                 "hand_wave", "My local gesture sensor noticed a wave", 1.0
             ), 2,
         )
-        await wait_for(lambda: pet.states["robot-01"].spoken == 2)
-        assert len(speaker.spoken) == 3
-        assert speaker.spoken[-1][0] == "robot-01"
+        await wait_for(lambda: pet._speech_task is None)
+        # Social cooldown prevents another peer dialogue and duplicate
+        # generated text is not repeated as a low-value lone remark.
+        assert pet.states["robot-01"].spoken == 1
+        assert len(speaker.spoken) == 2
+        assert pet.states["robot-01"].last_initiative_suppression == (
+            "repetitive_spontaneous_reply"
+        )
     finally:
         for state in pet.states.values():
             state.enabled = False
