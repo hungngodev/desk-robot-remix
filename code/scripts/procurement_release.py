@@ -35,6 +35,7 @@ FIXED_SOURCE_SKUS = {
 SYSTEM_GATES = (
     "commercial_mechanical_license", "fitted_assembly_and_print",
     "loaded_drive_and_stopping", "four_cliff_sensor_surface_trials",
+    "cliff_sensor_mount_height_and_stopping_geometry",
     "full_power_load_and_faults", "protected_1s_charger_and_dock_contacts",
     "real_dual_ir_terminal_docking", "lift_and_grip_calibration",
     "sense_speaker_mic_double_talk", "five_robot_integration",
