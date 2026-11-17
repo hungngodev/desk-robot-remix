@@ -111,7 +111,14 @@ class HandlingGate:
             # Old stationary observations cannot replace newer calibration.
             # An explicit motor-active status must still revoke the pose:
             # host callback ordering is not a motor safety interlock.
-            if (isinstance(body, dict)
+            if (isinstance(imu, dict)
+                    and type(imu.get("boot_id")) is int
+                    and self.last_boot_id is not None
+                    and imu["boot_id"] != self.last_boot_id):
+                # A new WROOM boot revokes the old pose even when its host
+                # callback timestamp precedes the last delivered callback.
+                pass
+            elif (isinstance(body, dict)
                     and type(body.get("left")) is int and body["left"] == 0
                     and type(body.get("right")) is int and body["right"] == 0
                     and type(body.get("drive_ms")) is int

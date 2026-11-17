@@ -576,3 +576,21 @@ def test_out_of_order_motor_active_status_revokes_handling_pose():
                      previous_at - .05, new_sample=False) == ()
     assert gate.reference is None
     assert gate.last_sample_ms == previous_sample
+
+
+def test_new_boot_with_older_host_timestamp_revokes_calibration():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    previous_at, previous_sample = gate.last_at, gate.last_sample_ms
+    assert gate.reference is not None
+    # Host callbacks may be delivered out of order across a WROOM reboot.
+    # A new boot must never retain the previous boot's handling pose.
+    assert qualified(gate, sample(boot_id=2, sample_ms=1),
+                     previous_at - .05, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_boot_id == 2
+    assert 1 in gate.retired_boot_ids
+    # Delayed previous-boot samples cannot revive the old calibration.
+    assert qualified(gate, sample(boot_id=1, sample_ms=previous_sample + 1),
+                     previous_at + .15, new_sample=False) == ()
+    assert gate.reference is None
