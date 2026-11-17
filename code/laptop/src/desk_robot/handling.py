@@ -107,7 +107,11 @@ class HandlingGate:
         if (isinstance(imu, dict) and type(imu.get("boot_id")) is int
                 and imu["boot_id"] in self.retired_boot_ids):
             return ()
-        if self.last_at is not None and (now <= self.last_at or now - self.last_at > 1.0):
+        if self.last_at is not None and now <= self.last_at:
+            # An out-of-order host callback cannot invalidate a newer pose.
+            # Only a forward host polling gap can indicate a reconnect.
+            return ()
+        if self.last_at is not None and now - self.last_at > 1.0:
             # Host reconnect invalidates calibration, not source identity.
             previous = (self.last_boot_id, self.last_sample_ms)
             self.reset()
