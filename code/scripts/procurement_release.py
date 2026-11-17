@@ -478,15 +478,25 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                    and motor_choice.get("disposition") in dc_selected)
     driver_is_dc = (isinstance(driver_choice, dict)
                     and driver_choice.get("disposition") in dc_selected)
+    reviewed = {item["id"]: item["reviewed"] for item in approved_decisions}
+    motor_pair_reviewed = (reviewed["n20_motor_candidate"]
+                           and reviewed["drv8833_driver_candidate"])
     if motor_is_dc != driver_is_dc:
         missing_system.append("motor_driver_variant_mismatch")
+    # An absence of DC evidence is NOT affirmative selection of a STEP motor.
+    # Before both linked decisions have qualified receipts there is no
+    # chosen physical drivetrain, even when the old 28BYJ48 rows remain in
+    # the fixed 42-role accounting baseline. This is critical for the first
+    # robot cart: do not recommend a second set of stepper motors by default.
+    if not motor_pair_reviewed or motor_is_dc != driver_is_dc:
+        physical_motor_variant = "unresolved"
+    else:
+        physical_motor_variant = "dc" if motor_is_dc else "stepper"
     # Keep the 42 frozen conceptual feature IDs so agents cannot delete
     # mobility to bypass requirements. They are NOT 42 additive purchase
     # lines: the two legacy stepper rows are mutually exclusive alternatives
     # to selected N20+DRV8833. Never require a purchased DC drivetrain AND
     # a purchased stepper drivetrain in the same robot.
-    physical_motor_variant = "dc" if motor_is_dc and driver_is_dc else (
-        "stepper" if not motor_is_dc and not driver_is_dc else "unresolved")
     if physical_motor_variant == "dc":
         for row in rows:
             if row["id"] in ("stepper", "uln2003"):
