@@ -111,6 +111,19 @@ class HandlingGate:
             # An out-of-order host callback cannot invalidate a newer pose.
             # Only a forward host polling gap can indicate a reconnect.
             return ()
+        # A valid late conversion must not impersonate a polling outage.
+        # Invalid current telemetry still falls through to fail closed.
+        if (self.last_boot_id is not None and isinstance(imu, dict)
+                and imu.get("boot_id") == self.last_boot_id
+                and type(imu.get("sample_ms")) is int
+                and self.last_sample_ms is not None
+                and raw_mpu6050(body) is not None):
+            stamp = imu["sample_ms"]
+            if stamp == self.last_sample_ms or (
+                    stamp < self.last_sample_ms
+                    and not (self.last_sample_ms >= 0xffff0000
+                             and stamp <= 0xffff)):
+                return ()
         if self.last_at is not None and now - self.last_at > 1.0:
             # Host reconnect invalidates calibration, not source identity.
             previous = (self.last_boot_id, self.last_sample_ms)
