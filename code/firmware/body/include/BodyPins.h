@@ -46,6 +46,15 @@ constexpr int kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn1, kRightIn2};
 constexpr int kMotorChannels[] = {0, 1, 2, 3};
 constexpr int kMotorFrequency = 20000;
 constexpr int kMotorResolution = 8;
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+// GPIO23 is intentionally used by the STEP drive. Only the DC alternative
+// frees it. Tie GPIO23 to the second half of the existing CD74HC123 timer;
+// NEVER directly tie GPIO23 to the motor driver's nSLEEP input.
+constexpr int kDcHeartbeatPin = 23;
+static_assert(kDcHeartbeatPin != kLeftIn1 && kDcHeartbeatPin != kLeftIn2 &&
+              kDcHeartbeatPin != kRightIn1 && kDcHeartbeatPin != kRightIn2,
+              "CPU heartbeat cannot share a DC PWM input");
+#endif
 #endif
 constexpr int kLiftServo = 18;
 constexpr int kGripServo = 19;
