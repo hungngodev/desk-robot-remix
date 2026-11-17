@@ -21,6 +21,17 @@ TOF = ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp"
 ST_SYSTEM_FOV_DEG = 25.0
 
 
+def _finite_real(value: object) -> bool:
+    # int is unbounded in Python: math.isfinite(10**1000) raises
+    # OverflowError. Malformed host/CLI telemetry must fail closed.
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def verify_source_contract() -> dict:
     """Detect critical CAD or driver changes rather than silently assuming them."""
     import re
@@ -53,8 +64,7 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
             leading_wheel_behind_sensor_mm, measured_p95_stopping_distance_mm,
             remaining_vision_or_sensor_latency_ms, measured_travel_speed_mm_s,
             engineering_margin_mm)
-    if any(isinstance(v, bool) or not isinstance(v, (int, float))
-           or not math.isfinite(v) for v in vals):
+    if any(not _finite_real(v) for v in vals):
         raise ValueError("Every geometry value must be a finite measured number")
     if (chassis_mount_above_desk_mm < 0
             # The forward cone extremity must intersect the floor. A beam
