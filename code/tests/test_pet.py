@@ -18,7 +18,7 @@ from desk_robot.pet import PetController, _initiative_evidence
 from desk_robot.simulator import SimulatedSpeaker
 from desk_robot.vision import OllamaScene, SceneChange, VisualChangeGate
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 def jpeg(color: str) -> bytes:
@@ -33,7 +33,16 @@ def fleet():
 
 
 WHITE = jpeg("white")
-RED = jpeg("red")
+# An ENTIRE frame turning red is a lighting/exposure shift, not a key
+# appearing on the desk. The real production motion filter deliberately
+# suppresses global brightness changes; use a localized actual object
+# fixture so these tests exercise the intended proactive event instead
+# of demanding the robot announce every camera exposure adjustment.
+_object_image = Image.new("RGB", (128, 96), "white")
+ImageDraw.Draw(_object_image).rectangle((40, 26, 78, 65), fill=(220, 20, 20))
+_object_bytes = BytesIO()
+_object_image.save(_object_bytes, "JPEG")
+RED = _object_bytes.getvalue()
 
 
 class ChangingCamera:
