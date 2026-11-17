@@ -227,7 +227,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     failed(guard);
     return;
   }
-  // VL53L0X is 8-bit-register addressed, unlike VL53L4CD (16 bit).
+  // VL53L0X uses a single-byte register address, not the older 16-bit map.
   // Poll readiness once; never block waiting for an optical conversion.
   std::uint8_t ready = 0;
   if (!read_register(0x13, &ready, 1)) {
