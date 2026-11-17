@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <initializer_list>
 
 using desk_robot::ina226_shunt_uv;
 using desk_robot::ina226_pack_current_ma;
