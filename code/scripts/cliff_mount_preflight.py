@@ -108,6 +108,11 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
                 + engineering_margin_mm)
     required_physical_lead = stopping + rear_floor_setback
     effective_lead = leading_wheel_behind_sensor_mm - rear_floor_setback
+    if any(not math.isfinite(v) for v in (
+            height, slant, nearest_slant, farthest_slant,
+            rear_floor_setback, stopping, required_physical_lead,
+            effective_lead)):
+        raise ValueError("Geometry computation overflowed its safe range")
     clearance_ok = leading_wheel_behind_sensor_mm > required_physical_lead
     return {
         **baseline,
