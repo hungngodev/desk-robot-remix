@@ -486,3 +486,26 @@ def test_exhausted_boot_history_revokes_active_pose_without_evicting_replay_fenc
     assert qualified(gate, sample(boot_id=1, sample_ms=500),
                      104.1, new_sample=False) == ()
     assert gate.last_boot_id == 9
+
+
+def test_out_of_order_host_callback_does_not_erase_newer_pose():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    last_at = gate.last_at
+    last_sample = gate.last_sample_ms
+    assert gate.reference == (0, 0, 1)
+    # An older callback can arrive after a newer physical conversion.
+    # It must neither reset calibration nor advance source ownership.
+    assert qualified(gate, sample(sample_ms=last_sample - 1),
+                     last_at - .05, new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
+    assert gate.last_at == last_at
+    assert gate.last_sample_ms == last_sample
+    # A subsequent current conversion still belongs to the same pose.
+    assert qualified(gate, sample(sample_ms=last_sample + 1),
+                     last_at + .15, new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
+    # A genuine forward polling gap still invalidates calibration.
+    assert qualified(gate, sample(sample_ms=last_sample + 2),
+                     last_at + 1.5, new_sample=False) == ()
+    assert gate.reference is None
