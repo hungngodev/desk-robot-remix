@@ -1,0 +1,144 @@
+"""Manufacturer sourced 1S candidates versus the robot's whole harness.
+
+This screen purposely cannot authorize an order. It uses the pre-existing
+power_preflight sizing math and refuses to assume a high discharge pack also
+has a high current connector, wire or correctly fitted PCM/NTC.
+No battery vendor listed here is a recommendation to buy without trials.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import runpy
+from pathlib import Path
+
+_PACKS = {
+    "LP103650": {
+        "source": "https://www.lipobattery.us/3-7v-lipo-battery-lp103650-2000mah-7-4wh-with-pcm-and-wires-and-ntc-and-2510-3p/",
+        "size_mm": (51.0, 36.0, 10.0),
+        "continuous_a": 2.0, "max_discharge_a": 2.0,
+        "ntc": "10k", "pcm": True,
+        "connector": "2510-3P", "connector_continuous_a": None,
+        "lead_continuous_a": None,
+    },
+    "LPHD7430085": {
+        "source": "https://lipo-battery.com/high-rate-discharge-lipo-battery-lphd7430085-5a-3-7v-2000mah-7-4wh/",
+        "size_mm": (86.0, 30.0, 7.4),
+        "continuous_a": 5.0, "max_discharge_a": 5.0,
+        "ntc": "10k", "pcm": True,
+        "connector": "Molex 43645-0300", "connector_continuous_a": None,
+        "lead_continuous_a": None,
+    },
+    "PR-CU-R512-22AWG": {
+        "source": "https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx",
+        "size_mm": (68.0, 50.0, 7.0),
+        "continuous_a": 4.0, "max_discharge_a": 4.0,
+        "ntc": "10k", "pcm": True,
+        "connector": "open ends CU-J484", "connector_continuous_a": None,
+        "lead_continuous_a": 4.0,
+    },
+    "PR-CU-R512-JST-SHR": {
+        "source": "https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx",
+        "size_mm": (68.0, 50.0, 7.0),
+        "continuous_a": 4.0, "max_discharge_a": 4.0,
+        "ntc": "10k", "pcm": True,
+        "connector": "JST SHR-03V-S 30AWG", "connector_continuous_a": 0.86,
+        "lead_continuous_a": 0.86,
+    },
+    "PR-CU-R512-Molex-26AWG": {
+        "source": "https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx",
+        "size_mm": (68.0, 50.0, 7.0),
+        "continuous_a": 4.0, "max_discharge_a": 4.0,
+        "ntc": "10k", "pcm": True,
+        "connector": "Molex 51021-0300 26AWG", "connector_continuous_a": 2.2,
+        "lead_continuous_a": 2.2,
+    },
+}
+
+
+def catalog() -> dict:
+    return {key: dict(value) for key, value in _PACKS.items()}
+
+
+def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
+             wire_relief_mm=8.0, clearance_mm=1.0) -> dict:
+    if model not in _PACKS:
+        raise ValueError("Unknown sourced protected pack model")
+    src = _PACKS[model]
+    # The existing demand source is the single owner of boost input sizing.
+    if not isinstance(demand, dict) or not all(
+        isinstance(demand.get(key), (float, int)) and
+        not isinstance(demand.get(key), bool) and
+        demand[key] > 0 and demand[key] < 100
+        for key in ("minimum_rated_cell_and_boost_input_a",
+                    "minimum_continuous_cell_input_a")
+    ):
+        raise ValueError("No valid measured-load power preflight")
+    a, b, h = src["size_mm"]
+    lt, wt, ht = tray_mm
+    dims = (lt, wt, ht, wire_relief_mm, clearance_mm)
+    if not all(type(v) in (int, float) and 0 <= v < 1000 for v in dims):
+        raise ValueError("Invalid physical tray or clearance")
+    if min(lt, wt, ht) <= 0:
+        raise ValueError("Empty battery envelope")
+    fit = (h + 2 * clearance_mm <= ht and
+           ((a + wire_relief_mm + 2 * clearance_mm <= lt and
+             b + 2 * clearance_mm <= wt) or
+            (b + wire_relief_mm + 2 * clearance_mm <= lt and
+             a + 2 * clearance_mm <= wt)))
+    peak = demand["minimum_rated_cell_and_boost_input_a"]
+    cont = demand["minimum_continuous_cell_input_a"]
+    pack_ok = (src["continuous_a"] >= cont and
+               src["max_discharge_a"] >= peak)
+    # A proven cell is still unsafe with a narrower connector/lead assembly.
+    conn = src["connector_continuous_a"]
+    lead = src["lead_continuous_a"]
+    harness_ok = (conn is not None and lead is not None and
+                  conn >= peak and lead >= peak)
+    reasons = []
+    if not fit:
+        reasons.append("protected_pack_does_not_fit_existing_cavity")
+    if not pack_ok:
+        reasons.append("pack_current_rating_below_load_budget")
+    if conn is None or lead is None:
+        reasons.append("exact_connector_or_lead_ampacity_missing")
+    elif not harness_ok:
+        reasons.append("exact_connector_or_lead_ampacity_insufficient")
+    reasons += ["charger_ntc_circuit_not_qualified",
+                "physical_power_and_fit_trials_not_executed"]
+    return {
+        "model": model, "vendor_source": src["source"],
+        "protected": src["pcm"], "ntc": src["ntc"],
+        "connector_variant": src["connector"],
+        "assembled_pack_mm": src["size_mm"],
+        "pack_fits_current_tray_on_paper": fit,
+        "pack_current_enough_on_paper": pack_ok,
+        "harness_ampacity_enough_on_paper": harness_ok,
+        "complete_power_path_safe_to_buy": False,
+        "blocking_reasons": reasons,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--peak-5v-a", required=True, type=float)
+    parser.add_argument("--continuous-5v-a", required=True, type=float)
+    parser.add_argument("--tray-length-mm", type=float, default=68)
+    parser.add_argument("--tray-width-mm", type=float, default=35)
+    parser.add_argument("--tray-height-mm", type=float, default=14)
+    args = parser.parse_args()
+    sizing = runpy.run_path(
+        str(Path(__file__).with_name("power_preflight.py")))
+    demand = sizing["size_5v_supply"](
+        args.peak_5v_a, args.continuous_5v_a)
+    tray = (args.tray_length_mm, args.tray_width_mm, args.tray_height_mm)
+    print(json.dumps({
+        "load_source": "hypothetical until operator measured",
+        "sizing": demand,
+        "candidates": [evaluate(name, demand, tray_mm=tray)
+                       for name in _PACKS],
+    }, indent=2))
+
+
+if __name__ == "__main__":
+    main()
