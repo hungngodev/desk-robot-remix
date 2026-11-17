@@ -390,11 +390,13 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
         decision = selected[ident][10]
         assert ("NO PURCHASE" in decision or decision.startswith(
             ("HOLD CHEAP GENERIC EXACT CARRIER",
-             "SHUNT VALUE/SKU FIXED, BREAKOUT HOLD")
+             "SHUNT VALUE/SKU FIXED, BREAKOUT HOLD",
+             "ONE SoC GAUGE ONLY:")
         )), ident
     # Separate candidate subsystem is not a hidden second approved shopping list.
-    assert "BQ27441" in register and "MAX17048" in register
-    assert "Duplicate with separate MAX17048" in register
+    assert "BQ24075 power-path source, NO second SoC gauge" in register
+    assert "MAX17048" in register
+    assert "SparkFun Battery Babysitter with BQ27441 is EXCLUDED" in register
     assert "Owned 28BYJ48 must be load tested first" in register
 
 def test_canonical_full_fleet_plan_has_all_forty_nine_roles():
@@ -518,7 +520,7 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
     role = {
         "N20 100:1 MP 6V motors": "stepper",
         "DRV8833 dual H bridge": "uln2003",
-        "BQ24075 battery power path and BQ27441 gauge": "cap_power",
+        "BQ24075 power-path source, NO second SoC gauge": "cap_power",
         "5V switching regulator": "cap_power",
         "Protected NTC 1S battery pack": "cap_power",
         "Independent 5V dock adapter": "dock_fixture",
@@ -553,7 +555,7 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
     expected = {
         "N20 100:1 MP 6V motors": (2, 10),
         "DRV8833 dual H bridge": (1, 5),
-        "BQ24075 battery power path and BQ27441 gauge": (1, 5),
+        "BQ24075 power-path source, NO second SoC gauge": (1, 5),
         "5V switching regulator": (1, 5),
         "Protected NTC 1S battery pack": (1, 5),
         "Independent 5V dock adapter": (1, 5),
@@ -577,7 +579,7 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
         assert int(values[5]) <= actual[1], name
     assert rows["N20 100:1 MP 6V motors"][5] == "0"
     assert rows["DRV8833 dual H bridge"][5] == "0"
-    assert rows["BQ24075 battery power path and BQ27441 gauge"][5] == "0"
+    assert rows["BQ24075 power-path source, NO second SoC gauge"][5] == "0"
     assert "Reuse reportedly owned spare DRV8833" in rows["DRV8833 dual H bridge"][6]
 
 
@@ -717,7 +719,7 @@ def test_all_fourteen_addon_quantities_match_one_fleet():
     expected = {
         "N20 100:1 MP 6V motors": (2, 10),
         "DRV8833 dual H bridge": (1, 5),
-        "BQ24075 battery power path and BQ27441 gauge": (1, 5),
+        "BQ24075 power-path source, NO second SoC gauge": (1, 5),
         "5V switching regulator": (1, 5),
         "Protected NTC 1S battery pack": (1, 5),
         "Independent 5V dock adapter": (1, 5),
