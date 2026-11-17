@@ -41,6 +41,35 @@ def test_full_fleet_quantities_never_grant_purchase():
     assert "plan_unqualified_or_price_incomplete" in r["missing_system_evidence"]
 
 
+
+def test_outdated_s3cam_c3_architecture_cannot_be_buy_approved():
+    """A generic role ID cannot authorize a different board or GPIO budget."""
+    import copy
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    assert "unqualified_xiao_sense_wroom_architecture_substitution" not in (
+        mod.generate(plan)["missing_system_evidence"]
+    )
+    cases = (
+        ("architecture", "ESP32 S3CAM + ESP32 C3 two-sensor XSHUT"),
+        ("xiao_sense", "Generic ESP32 S3CAM N16R8 OV2640"),
+        ("wroom", "Generic ESP32 C3 SuperMini"),
+    )
+    for ident, replacement in cases:
+        altered = copy.deepcopy(plan)
+        if ident == "architecture":
+            altered["architecture"] = replacement
+        else:
+            next(p for p in altered["parts"] if p["id"] == ident)["name"] = replacement
+        report = mod.generate(altered)
+        assert not report["order_released"]
+        assert "unqualified_xiao_sense_wroom_architecture_substitution" in (
+            report["missing_system_evidence"]
+        )
+
+
+
 def test_no_expensive_sensor_substitution_in_canonical_order():
     p = fixture()
     p["parts"][0]["name"] = "VL53L4CD premium carrier"
