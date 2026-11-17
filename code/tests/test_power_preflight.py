@@ -13,6 +13,36 @@ docked = runpy.run_path(str(
 ))["assess_docked_load"]
 
 
+def test_bq24074_and_bq24075_are_not_interchangeable_five_volt_rails():
+    """Read the actual TI Rev N output voltage rows, not the IC family label."""
+    screen = runpy.run_path(str(
+        Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    ))["screen_bq2407x_output_path"]
+    dock75 = screen("BQ24075", regulator_min_input_v=2.8,
+                    regulator_max_input_v=5.0)
+    assert dock75["docked_output_max_v"] == 5.6
+    assert not dock75["regulator_covers_charger_output_on_paper"]
+    enough = screen("BQ24075", regulator_min_input_v=2.8,
+                    regulator_max_input_v=22.0)
+    assert enough["regulator_covers_charger_output_on_paper"]
+    assert not enough["charger_and_5v_rail_physically_qualified"]
+    assert not enough["real_docked_voltage_measured"]
+    assert not screen("BQ24075", regulator_min_input_v=2.8,
+                      regulator_max_input_v=22.0,
+                      bypasses_5v_regulator=True)[
+                      "regulator_covers_charger_output_on_paper"]
+    dock74 = screen("BQ24074", regulator_min_input_v=2.8,
+                    regulator_max_input_v=5.0)
+    assert dock74["docked_output_max_v"] == 4.5
+    assert dock74["regulator_covers_charger_output_on_paper"]
+    with pytest.raises(ValueError):
+        screen("BQ24073", regulator_min_input_v=2.8,
+               regulator_max_input_v=22.0)
+    with pytest.raises(ValueError):
+        screen("BQ24075", regulator_min_input_v=True,
+               regulator_max_input_v=22.0)
+
+
 def test_full_one_pet_load_derates_low_single_cell_voltage():
     report = tool(3, 1.8)
     assert report["minimum_rated_5v_output_a"] == 3.9
