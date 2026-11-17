@@ -5,6 +5,17 @@
   "decision": "selected_full_five_pet_electrical_and_module_architecture_not_physically_qualified",
   "fixed_scope": "Five autonomous tracked desk pets with distinct memory and speech, natural interruption, OLED, camera, touch and handling, lift/grip, exploration, games and optional physical accessory modules. One fully featured core repeated five times.",
   "architecture": "Mac owner for fleet/memory/AI; XIAO ESP32S3 Sense for camera, microphone, display, speaker and facial response; WROOM32 local actuator/safety controller; two isolated I2C multiplexers and reusable plug-in sensor harness.",
+  "audio_output_power_contract": {
+    "amplifier_ic": "MAX98357A",
+    "amplifier_vdd_v": 3.3,
+    "speaker_nominal_impedance_ohm": 8,
+    "speaker_nominal_rating_w": 1,
+    "selection": "retain_user_selected_amp_and_speaker_run_amplifier_on_rated_3v3_audio_rail",
+    "rail_source": "qualified 3.3 V power regulator, never the XIAO 3V3 pin without capacity proof",
+    "output_connection": "bridge_tied_OUTP_to_speaker_plus_OUTN_to_speaker_minus_neither_to_ground",
+    "physical_release": "HOLD until exact 3.3 V rail thermal, amp PCB gain, peak/clipping and 8 ohm 1 W speaker temperature measurements",
+    "silicon_reference": "https://www.analog.com/media/en/technical-documentation/data-sheets/max98357a-max98357b.pdf"
+  },
   "parts": [
     {
       "id": "xiao_sense",
