@@ -786,3 +786,37 @@ def test_critical_physical_evidence_gates_are_independent():
         "dock_contacts_recess_reverse_polarity_and_current_limit",
     ):
         assert gate in result["missing_system_evidence"]
+
+
+def test_premium_or_malformed_eight_range_mux_cannot_be_approved():
+    """No expensive or wrong-address chip can be hidden behind a cheap cart row."""
+    import copy
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    assert "invalid_selected_cheap_range_mux_layout" not in (
+        mod.generate(plan)["missing_system_evidence"])
+    mutants = []
+    wrong_chip = copy.deepcopy(plan)
+    wrong_chip["bus"]["mux_ranges"]["channels"][0]["devices"][0]["name"] = "VL53L4CD"
+    mutants.append(wrong_chip)
+    wrong_addr = copy.deepcopy(plan)
+    wrong_addr["bus"]["mux_ranges"]["channels"][7]["devices"][0]["address"] = 0x52
+    mutants.append(wrong_addr)
+    dropped_lane = copy.deepcopy(plan)
+    dropped_lane["bus"]["mux_ranges"]["channels"].pop()
+    mutants.append(dropped_lane)
+    duplicate_lane = copy.deepcopy(plan)
+    duplicate_lane["bus"]["mux_ranges"]["channels"][1]["channel"] = 0
+    mutants.append(duplicate_lane)
+    wrong_mux = copy.deepcopy(plan)
+    wrong_mux["bus"]["mux_ranges"]["address"] = 0x71
+    mutants.append(wrong_mux)
+    floating_address = copy.deepcopy(plan)
+    floating_address["bus"]["mux_ranges"]["address"] = 112.0
+    mutants.append(floating_address)
+    for mutant in mutants:
+        actual = mod.generate(mutant)
+        assert "invalid_selected_cheap_range_mux_layout" in (
+            actual["missing_system_evidence"])
+        assert not actual["order_released"]
