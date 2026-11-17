@@ -20,6 +20,7 @@ Signal-only list. Never infer a power source from a logic voltage.
 | WROOM GPIO23 | right ULN2003 IN4 | 3.3V phase control | Source allocated |
 | WROOM GPIO25 + GPIO26 | left DRV8833 AIN1/AIN2 (DC FULL only) | 3.3V motor PWM signals, alternative to left ULN2003 | Guarded DC profile; physical load unqualified |
 | WROOM GPIO27 + GPIO32 | right DRV8833 BIN1/BIN2 (DC FULL only) | 3.3V motor PWM signals, alternative to right ULN2003 | Guarded DC profile; physical load unqualified |
+| WROOM GPIO23 (DC only; same as STEP right coil 4) | CD74HC123 channel 2 B rising-edge input | CPU-only 15ms toggles, 3.3V; no LEDC, pull LOW at boot | Source exists only in esp32_dc_watchdog_lab; nSLEEP gate unqualified |
 | WROOM GPIO18 | MG90S lift signal | 3.3V PWM signal only | Source allocated |
 | WROOM GPIO19 | MG90S jaw signal | 3.3V PWM signal only | Source allocated |
 | XIAO GPIO2 TX | WROOM GPIO16 RX | UART 115200, 3.3V | Source allocated |
@@ -73,6 +74,9 @@ Signal-only list. Never infer a power source from a logic voltage.
 * XIAO Sense camera/SD expansion J3 must be physically isolated
   and continuity-checked before GPIO7/8 I2S and GPIO9 RGB use.
   SD card slot disabled and empty; verify shipped PCB revision.
+* DC-only GPIO23 heartbeat is NOT the DRV8833 motor driver nSLEEP.
+  It needs the independent second HC123 channel, verified Q timeout
+  and a fail-LOW interface against any onboard VM-to-nSLEEP pullup.
 * Haptic MCP23017 GPB2 drives only a generic HC123 one-shot trigger,
   not the coin motor. Verify active-HIGH edge, 3.3V rail, timed Q and
   low-side MOSFET/flyback current; production effect stays disabled.
