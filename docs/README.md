@@ -23,14 +23,14 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | Check reported stock and historical prototype quote | [Owned inventory](hardware/fleet-inventory.json) and [historical prototype BOM](hardware/bom.json) |
 | Start the first physical check | [Gripper fit and bench guide](guides/first-gripper-test.md) |
 
-**Reproducible wiring export:** Run `python3 code/scripts/emit_wiring_manifest.py` from the repo root for the current WROOM, XIAO, motor phase and all sixteen sensor mux-lane connections, verified against the source GPIO symbols. The generated output intentionally refuses to act as a final battery/charger schematic. Its source and tests are [the harness generator](../code/scripts/emit_wiring_manifest.py) and [contract tests](../code/tests/test_assembly_harness.py). Real electrical and mechanical acceptance remains open.
+**Purchasing safeguard:** `code/scripts/procurement_release.py` now blocks fleet release if any of the 42 selected pet/dock roles or seven shared room station roles is omitted or reduced below the current design minimum, even if the remaining components have receipts. The regression test uses simulated approval data, not measured parts. Cheap generic VL53L0X GY-530 is the selected ranging candidate, not a verified breakout or approval to buy forty sensors. No new Adafruit hardware is authorized.\n\n**Reproducible wiring export:** Run `python3 code/scripts/emit_wiring_manifest.py` from the repo root for the current WROOM, XIAO, motor phase and all sixteen sensor mux-lane connections, verified against the source GPIO symbols. The generated output intentionally refuses to act as a final battery/charger schematic. Its source and tests are [the harness generator](../code/scripts/emit_wiring_manifest.py) and [contract tests](../code/tests/test_assembly_harness.py). Real electrical and mechanical acceptance remains open.
 
 **Next step.** First settle the day-zero architecture, part variant, final fit and full delivered cost gates, then check one MG90S servo in the saved gripper before printing the whole robot. Keep robot motion disabled during fit work.
 
-**Current status, 2026-11-12.** All integrated sensor, five-pet audio,
+**Current status, 2026-11-16.** All integrated sensor, five-pet audio,
 vision and autonomous social source work belongs in one draft
 [PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17). Its source now
-contains four local cliff VL53L4CD channels, one front clearance channel and
+contains four low-cost generic VL53L0X floor channels, one front clearance channel and
 three additional read-only directions; MPU6050/BerryIMU options, touch/gesture,
 FSR, rotary angle, climate, battery, optical paw and a bounded PN532 toy tag
 reader. New physical sensor events can request the existing camera asynchronously,
