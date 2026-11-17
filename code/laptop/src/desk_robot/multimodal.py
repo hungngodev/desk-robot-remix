@@ -250,6 +250,14 @@ class CameraFrameHub:
             raise ValueError("Untrusted VAD snapshot or invalid time")
         for robot_id in self.robots:
             if robot_id in active:
+                if self.voice_until[robot_id] != math.inf:
+                    # This trusted snapshot may be the first evidence of a
+                    # human turn after reconnect. Bind its recovered start to
+                    # this lease, so a late earlier speech_end cannot clear it.
+                    # Do not shift the epoch on repeated active snapshots.
+                    self.voice_started_at[robot_id] = max(
+                        self.voice_started_at[robot_id], now
+                    )
                 self.voice_until[robot_id] = math.inf
             elif self.voice_until[robot_id] == math.inf:
                 # A real monitor snapshot can recover a missed speech_end,
