@@ -45,6 +45,11 @@ private:
     std::mutex reference_mutex_;
     std::array<int16_t, kRingSize> reference_{};
     uint64_t write_index_ = 0;
+    // Bump when playback is cancelled/reset. A blocked I2S writer must not
+    // publish its old accepted frames after ClearReference() reset the ring.
+    // Guarded by reference_mutex_, not a competing audio task/driver.
+    uint64_t reference_generation_ = 0;
+    uint32_t stale_publish_discards_ = 0;
     int64_t last_write_us_ = 0;
     int16_t filter_last1_ = 0;
     int16_t filter_last2_ = 0;
