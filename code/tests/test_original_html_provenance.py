@@ -45,6 +45,10 @@ def test_original_known_hardware_corrections_are_not_lost():
     assert items["head_touch"]["reported_owned_total"] >= 1
     assert items["imu"]["reported_owned_total"] >= 1
     assert plan["bus"]["mux_extras"]["channels"][0]["devices"] == [
-        {"name": "CAP1188", "address": 0x28},
+        # Default 0x29 CAP1188 now shares an address with VL53L0X only
+        # ACROSS isolated muxes. Firmware first closes range 0x70, selects
+        # 0x71 lane zero, and validates CAP1188 product/manufacturer ID.
+        # Strapped 0x28 remains a separately probed alternative.
+        {"name": "CAP1188", "address": 0x29},
         {"name": "MAX30102 paw pad", "address": 0x57},
     ]
