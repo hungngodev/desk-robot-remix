@@ -9,7 +9,7 @@ import pytest
 from desk_robot.brain_context import compose_brain_context, repeated_spontaneous_line
 from desk_robot.conversation import Conversation
 from desk_robot.memory import CoreFact, Memory, MemoryStore
-from desk_robot.multimodal import CameraFrameHub
+from desk_robot.multimodal import CameraEvidence, CameraFrameHub
 from desk_robot.pet import PetController
 from desk_robot.simulator import SimulatedSpeaker
 from desk_robot.vision import SceneChange
