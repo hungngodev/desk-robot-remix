@@ -170,6 +170,9 @@ def render(plan: dict, body: str, head: str) -> str:
         "3.3V input; closes LOW to GND", "Source polled; physically unqualified")
     row("MCP23017 GPB1", "optional PIR output",
         "3.3V input; active HIGH", "Source polled; physically unqualified")
+    row("MCP23017 GPB2", "CD74HC123 rising-edge haptic trigger",
+        "3.3V lab-only edge, not motor current; external defined LOW at boot",
+        "Source gated in esp32_full_haptic_lab; physical one-shot NOT qualified")
     row("WROOM GPIO36 reserved", "left 38kHz IR demodulator",
         "Demodulated NEC burst input, external bias; ESP32 erratum",
         "Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet")
@@ -227,6 +230,9 @@ def render(plan: dict, body: str, head: str) -> str:
         "* XIAO Sense camera/SD expansion J3 must be physically isolated",
         "  and continuity-checked before GPIO7/8 I2S and GPIO9 RGB use.",
         "  SD card slot disabled and empty; verify shipped PCB revision.",
+        "* Haptic MCP23017 GPB2 drives only a generic HC123 one-shot trigger,",
+        "  not the coin motor. Verify active-HIGH edge, 3.3V rail, timed Q and",
+        "  low-side MOSFET/flyback current; production effect stays disabled.",
         "* Reed/PIR now have slow MCP23017 GPIOB input source, freeing",
         "  GPIO36/39 for dual IR. Real timing, optical baffles, RTC/ADC erratum",
         "  filtering and final homing remain entirely unqualified.",
