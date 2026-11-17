@@ -108,6 +108,8 @@ def screen_protected_pack(
     rated_peak_discharge_a: float | None = None,
     rated_continuous_discharge_a: float | None = None,
     pcm_overcurrent_trip_a: float | None = None,
+    connector_continuous_a: float | None = None,
+    wire_and_crimp_continuous_a: float | None = None,
 ) -> dict:
     """Screen a REAL assembled protected pack against the selected tray.
 
@@ -134,6 +136,10 @@ def screen_protected_pack(
         raise ValueError("Unrepresentable physical pack/tray envelope")
     ratings = (rated_peak_discharge_a, rated_continuous_discharge_a,
                pcm_overcurrent_trip_a)
+    interconnect_ratings = (connector_continuous_a, wire_and_crimp_continuous_a)
+    if any(r is not None and (not _finite_number(r) or r <= 0)
+           for r in interconnect_ratings):
+        raise ValueError("Actual connector and wire/crimp current rating must be positive")
     if any(r is not None and (not _finite_number(r) or r <= 0) for r in ratings):
         raise ValueError("Pack discharge and PCM ratings must be positive real amperes")
     if all(r is not None for r in ratings):
@@ -162,11 +168,29 @@ def screen_protected_pack(
             and Decimal(str(pcm_overcurrent_trip_a)) >= Decimal(str(
                 supply["minimum_rated_cell_and_boost_input_a"]))
         )
+    # A 4A cell can ship with a 0.86A JST harness. Current through the
+    # terminated connector and wires is NOT the cell's printed 4A rating.
+    # Without a separately published pulse rating, conservatively compare
+    # even short motor stalls to the connector's continuous ampacity.
+    interconnect_complete = all(v is not None for v in interconnect_ratings)
+    interconnect_ok = None
+    if interconnect_complete:
+        demanded = Decimal(str(supply["minimum_rated_cell_and_boost_input_a"]))
+        interconnect_ok = all(Decimal(str(v)) >= demanded
+                              for v in interconnect_ratings)
+    # Unlike the legacy pack-only indication, this field covers the complete
+    # exact wired battery assembly and cannot pass without both ratings.
+    complete_harness_usable = (fits_flat and current_ok and interconnect_ok
+                               if ratings_complete and interconnect_complete
+                               else None)
     return {
         "assembled_pack_fits_tray_on_paper": fits_flat,
         "current_ratings_complete": ratings_complete,
         "current_sufficient_on_paper": current_ok,
-        "candidate_usable_on_paper": fits_flat and current_ok if ratings_complete else None,
+        "candidate_usable_on_paper": complete_harness_usable,
+        "pack_only_usable_on_paper": fits_flat and current_ok if ratings_complete else None,
+        "connector_and_wire_ratings_complete": interconnect_complete,
+        "connector_and_wire_current_sufficient_on_paper": interconnect_ok,
         "minimum_cell_peak_a": supply["minimum_rated_cell_and_boost_input_a"],
         "minimum_cell_continuous_a": supply["minimum_continuous_cell_input_a"],
         "actual_pack_pcm_and_ntc_test_verified": False,
@@ -345,6 +369,10 @@ def main() -> None:
     parser.add_argument("--pack-peak-discharge-a", type=float)
     parser.add_argument("--pack-continuous-discharge-a", type=float)
     parser.add_argument("--pack-pcm-trip-a", type=float)
+    parser.add_argument("--pack-connector-continuous-a", type=float,
+                        help="Manufacturer current rating for the exact polarized plug and pins")
+    parser.add_argument("--pack-wire-crimp-continuous-a", type=float,
+                        help="Actual terminated leads and crimp current rating")
     args = parser.parse_args()
     pack_dimensions = (
         args.pack_length_mm, args.pack_width_mm, args.pack_thickness_mm,
@@ -353,6 +381,8 @@ def main() -> None:
     pack_ratings = (
         args.pack_peak_discharge_a, args.pack_continuous_discharge_a,
         args.pack_pcm_trip_a,
+        args.pack_connector_continuous_a,
+        args.pack_wire_crimp_continuous_a,
     )
     pack_requested = any(x is not None for x in pack_dimensions + pack_ratings)
     if pack_requested and any(x is None for x in pack_dimensions):
@@ -407,6 +437,8 @@ def main() -> None:
                 rated_peak_discharge_a=args.pack_peak_discharge_a,
                 rated_continuous_discharge_a=args.pack_continuous_discharge_a,
                 pcm_overcurrent_trip_a=args.pack_pcm_trip_a,
+                connector_continuous_a=args.pack_connector_continuous_a,
+                wire_and_crimp_continuous_a=args.pack_wire_crimp_continuous_a,
             )
     print(json.dumps(result, indent=2))
 
