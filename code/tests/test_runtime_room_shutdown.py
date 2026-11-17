@@ -1,6 +1,7 @@
 """Shared room USB reader ownership on bounded runtime shutdown."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -29,6 +30,9 @@ def test_room_shutdown_timeout_keeps_live_reader_owned():
         runtime.multimodal = None
         runtime._voice_task = None
         runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime._room_dispatch_enqueued = False
         task = asyncio.create_task(stalled_reader())
         runtime._room_task = task
         await entered.wait()
@@ -39,6 +43,7 @@ def test_room_shutdown_timeout_keeps_live_reader_owned():
             assert runtime._room_stop.is_set()
             assert runtime._room_task is task
             assert not task.done()
+            assert task.cancelling() == 0  # timeout must not cancel reader
         finally:
             release.set()
             await task
