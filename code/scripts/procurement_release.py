@@ -367,6 +367,20 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         if not valid:
             missing_system.append("unresolved_supplemental_part:" + ident)
 
+    # The guarded DC backend needs N20-class motors AND a compatible
+    # DRV8833 controller; the legacy stepper backend needs 28BYJ48 AND
+    # ULN2003. Two individually reviewed candidate rows are not permission
+    # to mix motor types and drivers, or to buy both architectures by default.
+    dc_selected = {"selected", "reuse_existing"}
+    motor_choice = decisions.get("n20_motor_candidate", {})
+    driver_choice = decisions.get("drv8833_driver_candidate", {})
+    motor_is_dc = (isinstance(motor_choice, dict)
+                   and motor_choice.get("disposition") in dc_selected)
+    driver_is_dc = (isinstance(driver_choice, dict)
+                    and driver_choice.get("disposition") in dc_selected)
+    if motor_is_dc != driver_is_dc:
+        missing_system.append("motor_driver_variant_mismatch")
+
     # The SparkFun PRT-13777 Battery Babysitter already carries a BQ27441
     # fuel gauge. Refuse a second separate MAX17048 design by default;
     # both gauge ICs are legitimate but their telemetry paths are different.
