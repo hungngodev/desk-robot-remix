@@ -39,14 +39,14 @@ Signal-only list. Never infer a power source from a logic voltage.
 | XIAO GPIO8 | MAX98357A DIN | 3.3V head signal | Source allocated |
 | XIAO onboard GPIO41 DIN + GPIO42 CLK | Sense PDM microphone | Integrated board pins, NOT connections to WROOM | Source allocated |
 | XIAO GPIO9 reserved | RGB heart data | Xiaozhi WS2812 driver compiled only with explicit opt-in; SD J3 and 5V level buffer still unqualified | Do NOT wire yet |
-| Range TCA9548A 0x70 CH0 SDA/SCL | VL53L4CD (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
-| Range TCA9548A 0x70 CH1 SDA/SCL | VL53L4CD (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
-| Range TCA9548A 0x70 CH2 SDA/SCL | VL53L4CD (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
-| Range TCA9548A 0x70 CH3 SDA/SCL | VL53L4CD (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
-| Range TCA9548A 0x70 CH4 SDA/SCL | VL53L4CD (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
-| Range TCA9548A 0x70 CH5 SDA/SCL | VL53L4CD (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
-| Range TCA9548A 0x70 CH6 SDA/SCL | VL53L4CD (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
-| Range TCA9548A 0x70 CH7 SDA/SCL | VL53L4CD (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
+| Range TCA9548A 0x70 CH0 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
+| Range TCA9548A 0x70 CH1 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
+| Range TCA9548A 0x70 CH2 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
+| Range TCA9548A 0x70 CH3 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
+| Range TCA9548A 0x70 CH4 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
+| Range TCA9548A 0x70 CH5 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
+| Range TCA9548A 0x70 CH6 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
+| Range TCA9548A 0x70 CH7 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
 | Accessory TCA9548A 0x71 CH0 SDA/SCL | CAP1188 (0x28), MAX30102 paw pad (0x57) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
 | Accessory TCA9548A 0x71 CH1 SDA/SCL | APDS9960 (0x39), AS5600 nose (0x36) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
 | Accessory TCA9548A 0x71 CH2 SDA/SCL | ADS1115 (0x48) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
@@ -73,7 +73,7 @@ Signal-only list. Never infer a power source from a logic voltage.
   GPIO36/39 for dual IR. Real timing, optical baffles, RTC/ADC erratum
   filtering and final homing remain entirely unqualified.
 * Breakout VCC and I2C pullups, connector pin order and cable gauge.
-* All eight VL53L4CD carriers: identify PCB revision and verify VIN
+* All eight VL53L0X carriers: identify PCB revision and verify VIN
   plus upstream/downstream SDA/SCL HIGH voltages with motors OFF.
   Do NOT energize any ToF lane until 5V WROOM exposure is excluded.
 * Printed fit, local cliff geometry, audio and charger bench trials.
