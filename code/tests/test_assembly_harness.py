@@ -52,6 +52,7 @@ def test_full_wroom_xiao_signal_harness_matches_real_firmware():
     assert "| WROOM GPIO36 reserved | left 38kHz IR demodulator |" in page
     assert "| WROOM GPIO39 reserved | right 38kHz IR demodulator |" in page
     assert "VL53L0X (0x29)" in page
+    assert "CAP1188 (0x29), MAX30102 paw pad (0x57)" in page
     # All eight Pololu-style carrier lanes are UNPOWERED until actual
     # VIN and pullup levels are measured, not merely firmware allocated.
     assert page.count(
