@@ -571,6 +571,19 @@ class CameraFrameHub:
                 "source": "wroom_event", "content": None,
                 "physical_action_verified": False,
             }))
+        # Keep the authenticated voice-start edge for its original short TTL
+        # even if routine sensor traffic filled the shared deque. This is
+        # audio event provenance, not a new ASR guess or a speech permit.
+        voice_at = self.voice_started_at[robot_id]
+        if (0 <= now - voice_at <= 8
+                and not any(kind == "human_voice" and stamp == voice_at
+                            for kind, stamp in self.event_history[robot_id])):
+            items.append((voice_at, {
+                "channel": "human_voice", "kind": "human_voice",
+                "age_ms": round(1000 * (now - voice_at)),
+                "source": "authenticated_xiaozhi_vad", "content": None,
+                "physical_action_verified": False,
+            }))
         for frame in self.frames[robot_id]:
             if 0 <= now - frame.received_at <= 6:
                 items.append((frame.received_at, {
