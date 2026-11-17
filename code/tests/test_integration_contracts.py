@@ -450,6 +450,17 @@ def test_full_dc_firmware_profiles_enable_external_motor_watchdog_heartbeat():
     assert "-DDESK_ROBOT_STEPPER=0" in full
     assert "-DDESK_ROBOT_FULL_SENSORS=1" in full
     assert "-DDESK_ROBOT_ENABLE_DC_WATCHDOG=1" in full
+    # DC fault latching also needs a physical MCP23017 GPB3 connection.
+    # Source ownership matters: a declaration alone cannot stop the wheels.
+    assert "-DDESK_ROBOT_REQUIRE_DC_NFAULT=1" in full
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    body = (ROOT / "code/firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    inputs = (ROOT / "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp").read_text()
+    assert "control.require_dc_driver_fault_monitor(true)" in main
+    assert "extra.driver_fault_active = (bits & 0x08U) == 0" in inputs
+    assert "dc_driver_fault_bad(now_ms)" in body
+    assert "ERR arm dc_driver_fault_interlock" in body
+    assert "ERR rearm dc_driver_fault_unhealthy" in body
     for profile in ("esp32_dc_watchdog_lab", "esp32_dc_integrated_lab"):
         assert ini[f"env:{profile}"]["extends"] == "env:esp32_dc_full"
     assert "-DDESK_ROBOT_ENABLE_DC_WATCHDOG=1" not in ini["env:esp32_full"]["build_flags"]
