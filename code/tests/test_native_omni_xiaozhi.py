@@ -3105,6 +3105,60 @@ def test_native_memory_tool_preserves_eyewitness_and_peer_provenance(native):
     }]
 
 
+def test_native_completed_tool_fact_json_pack_keeps_all_requested_sources(native):
+    import copy
+
+    module, _ = native
+    originals = [
+        {"source": "local_camera_model_guess",
+         "interpretation_not_proof": "camera saw maybe a cup " * 130},
+        {"source": "private_opt_in_memory_not_current_sight",
+         "recollections": [
+             {"summary": "remembering a shared old story " * 50,
+              "kind": "heard_human", "source_robot": "robot-01",
+              "witnessed": True, "historical_untrusted_text": True},
+             {"summary": "a different conversation about a key " * 50,
+              "kind": "peer_utterance", "source_robot": "robot-02",
+              "witnessed": False, "historical_untrusted_text": True},
+         ]},
+        {"source": "validated_wroom_raw_aux_not_calibrated",
+         "physical_acceptance_verified": False,
+         "sht41": {"temp_centi": 2234, "humidity_centi": 4532},
+         "fuel_gauge": {"reported_soc_centi": 4200, "qualified": False}},
+    ]
+    prior = copy.deepcopy(originals)
+    packed = module.pack_grounded_facts(originals, limit=1800)
+    assert len(packed) <= 1800
+    parsed = json.loads(packed)  # the old arbitrary 1800 character slice broke JSON
+    assert [item["source"] for item in parsed] == [
+        item["source"] for item in originals
+    ]
+    assert parsed[1]["recollections"][0]["source_robot"] == "robot-01"
+    assert parsed[1]["recollections"][1]["witnessed"] is False
+    assert parsed[2]["sht41"] == originals[2]["sht41"]
+    assert parsed[2]["fuel_gauge"]["reported_soc_centi"] == 4200
+    assert len(parsed[0]["interpretation_not_proof"]) < len(
+        originals[0]["interpretation_not_proof"]
+    )
+    assert originals == prior  # model packing must not mutate durable memory
+
+
+def test_native_tool_fact_pack_fails_closed_not_dropping_last_receipt(native):
+    module, _ = native
+    with pytest.raises(ValueError, match="speech context budget"):
+        module.pack_grounded_facts([
+            {"source": "wroom_status", "unexpected_raw": {"binary": "x" * 5000}},
+            {"source": "local_camera_model_guess",
+             "interpretation_not_proof": "This is a tentative view"},
+        ], limit=1800)
+    for facts in (
+        [], [None], [{}] * 4,
+        [{"source": "status", "value": float("nan")}],
+    ):
+        with pytest.raises(ValueError):
+            module.pack_grounded_facts(facts)
+
+
 async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     native,
 ):
