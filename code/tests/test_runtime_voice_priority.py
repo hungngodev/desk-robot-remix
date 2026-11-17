@@ -1034,3 +1034,44 @@ async def test_hardware_runtime_close_stops_all_native_speakers(failed_peer):
     assert events.index(("native_stop", "robot-01")) > events.index(("close", "owner"))
     assert ("close", "conversation") in events
     assert ("close", "http") in events
+
+
+def test_room_usb_thread_callback_does_not_schedule_after_mac_shutdown():
+    """A late read-only USB frame cannot reopen a closed Mac event loop."""
+    runtime = Runtime.__new__(Runtime)
+    events = []
+    observation = object()
+    runtime._closed = False
+    runtime._on_room_observation = lambda value: events.append(value)
+
+    class Loop:
+        def call_soon_threadsafe(self, callback, value):
+            events.append("scheduled")
+            callback(value)
+
+    runtime._queue_room_observation(Loop(), observation)
+    assert events == ["scheduled", observation]
+    events.clear()
+
+    class ClosedLoop:
+        def call_soon_threadsafe(self, callback, value):
+            events.append("called_after_close")
+            raise RuntimeError("Event loop is closed")
+
+    runtime._closed = True
+    runtime._queue_room_observation(ClosedLoop(), observation)
+    assert not events  # do not call the dead event loop at all
+
+    # A loop can close between checking the flag and scheduling. Ignore only
+    # that genuine committed-shutdown race, not arbitrary active failures.
+    class RacingLoop:
+        def call_soon_threadsafe(self, callback, value):
+            runtime._closed = True
+            raise RuntimeError("Event loop is closed")
+
+    runtime._closed = False
+    runtime._queue_room_observation(RacingLoop(), observation)
+    assert not events
+    runtime._closed = False
+    with pytest.raises(RuntimeError, match="Event loop is closed"):
+        runtime._queue_room_observation(ClosedLoop(), observation)
