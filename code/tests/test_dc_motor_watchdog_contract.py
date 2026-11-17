@@ -10,7 +10,7 @@ BODY = ROOT / "code/firmware/body"
 HARDWARE = ROOT / "docs/hardware"
 
 
-def test_watchdog_is_a_explicit_lab_profile_not_automatically_bought_or_enabled():
+def test_guarded_full_dc_must_compile_with_cpu_watchdog_even_outside_lab():
     ini = (BODY / "platformio.ini").read_text(encoding="utf-8")
     assert "default_envs = esp32_full" in ini
 
@@ -22,9 +22,15 @@ def test_watchdog_is_a_explicit_lab_profile_not_automatically_bought_or_enabled(
     lab = section("esp32_dc_watchdog_lab")
     assert "extends = env:esp32_dc_full" in lab
     assert "-DDESK_ROBOT_ENABLE_DC_WATCHDOG=1" in lab
-    for ordinary in ("esp32_full", "esp32_dc_full", "esp32_stepper",
-                     "esp32_full_haptic_lab"):
-        assert "DESK_ROBOT_ENABLE_DC_WATCHDOG=1" not in section(ordinary)
+    # Full-sensor DC drive must never build without the independent CPU
+    # heartbeat. The old test wrongly insisted the guarded DC profile omit
+    # it, contradicting the fail-closed D15 firmware compile guard.
+    assert "-DDESK_ROBOT_ENABLE_DC_WATCHDOG=1" in section("esp32_dc_full")
+    for non_dc in ("esp32_full", "esp32_stepper", "esp32_full_haptic_lab"):
+        assert "DESK_ROBOT_ENABLE_DC_WATCHDOG=1" not in section(non_dc)
+    firmware = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    assert "#error Full-sensor DC motion requires the independent motor watchdog heartbeat" in firmware
+    assert "!defined(DESK_ROBOT_ENABLE_DC_WATCHDOG)" in firmware
 
 
 def test_gpio23_is_cpu_only_and_cannot_share_stepper_phase_or_ledc():
