@@ -161,6 +161,13 @@ def test_increasing_tilt_reduces_available_cliff_margin_on_a_turn_or_drive():
 @pytest.mark.parametrize("update", [
     {"track_width_mm": 0},
     {"track_width_mm": 10**1000},
+    {"support_points_mm": None},
+    {"floor_sensor_points_mm": None},
+    {"support_points_mm": [[1e308, 0], [0, 0], [0, 10]]},
+    {"floor_sensor_points_mm": [[1e308, 0], [-1e308, 0],
+                                [0, 1e308], [0, -1e308]]},
+    {"left_wheel_mm_s": 1e308, "right_wheel_mm_s": 1e308},
+    {"left_wheel_mm_s": 1e308, "right_wheel_mm_s": -1e308},
     {"left_wheel_mm_s": 10**1000},
     {"left_wheel_mm_s": 0, "right_wheel_mm_s": 0},
     {"optical_tilt_deg": 77.5},
