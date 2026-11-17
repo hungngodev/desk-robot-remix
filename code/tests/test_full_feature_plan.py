@@ -112,23 +112,25 @@ def test_canonical_driver_statuses_match_current_source_without_claiming_hardwar
     assert p["physical_trial_count"] == 0
 
 
-def test_vl53l0x_probe_is_isolated_from_production_cliff_driver():
-    """A low-cost range experiment must never silently change the safety build."""
+def test_low_cost_vl53l0x_is_the_production_cliff_driver():
+    """The cheap sensor is selected for all guarded motor profiles."""
     root = Path(__file__).resolve().parents[1]
     pio = (root / "firmware/body/platformio.ini").read_text()
     probe = (root / "firmware/body/src/vl53l0x_bench.cpp").read_text()
     production = (root / "firmware/body/lib/TofBus/TofBus.cpp").read_text()
+    header = (root / "firmware/body/lib/TofBus/TofBus.h").read_text()
     assert "build_src_filter = +<*> -<vl53l0x_bench.cpp>" in pio
     assert "build_src_filter = -<*> +<vl53l0x_bench.cpp>" in pio
-    assert "https://github.com/pololu/vl53l0x-arduino.git#1.3.1" in pio
-    assert "https://github.com/pololu/vl53l4cd-arduino.git#bc865905" in pio
+    assert pio.count("https://github.com/pololu/vl53l0x-arduino.git#1.3.1") >= 4
+    assert "vl53l4cd-arduino.git" not in pio
     assert "#include <VL53L0X.h>" in probe
-    assert "BENCH_ONLY" in probe and "digitalWrite(pin, LOW)" in probe
-    assert "Wire.read() == (1U << kSensorChannel)" in probe
-    assert "readRangeContinuousMillimeters()" in probe
-    assert "sensor.setTimeout(80)" in probe
-    assert "VL53L4CD" in production and "read_register(0x0089" in production
-    assert "VL53L0X" not in production
+    assert "#include <VL53L0X.h>" in header
+    assert "sensor.init()" in production
+    assert "read_register(0x13" in production
+    assert "read_register(0x14" in production
+    assert "write_byte(0x0B, 0x01)" in production
+    assert "distance >= 30" in production
+    assert "VL53L4CD" not in production
 
 def test_live_dock_ir_requires_real_receiver_and_beacon_purchase_slots():
     """A double demodulator in firmware still needs a real transmitting dock."""
