@@ -317,16 +317,18 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     # purchase approval from this frozen five-pet source.
     named = {row["id"]: row.get("name") for row in rows}
     architecture = plan.get("architecture")
+    # Require the exact frozen identities, not a substring an incompatible
+    # candidate can append to pass. Free-form "XIAO ... + generic C3" labels
+    # and unreviewed hybrid pinout proposals do not qualify a sourced board.
     canonical_owners = (
-        isinstance(architecture, str)
-        and "XIAO ESP32S3 Sense" in architecture
-        and "WROOM32" in architecture
-        and "Mac owner" in architecture
-        and "two isolated I2C multiplexers" in architecture
-        and isinstance(named.get("xiao_sense"), str)
-        and "XIAO ESP32S3 Sense" in named["xiao_sense"]
-        and isinstance(named.get("wroom"), str)
-        and "ESP32 WROOM32" in named["wroom"]
+        architecture == (
+            "Mac owner for fleet/memory/AI; XIAO ESP32S3 Sense for camera, "
+            "microphone, display, speaker and facial response; WROOM32 local "
+            "actuator/safety controller; two isolated I2C multiplexers and "
+            "reusable plug-in sensor harness."
+        )
+        and named.get("xiao_sense") == "XIAO ESP32S3 Sense camera + microphone"
+        and named.get("wroom") == "ESP32 WROOM32 development board"
     )
     if not canonical_owners:
         missing_system.append("unqualified_xiao_sense_wroom_architecture_substitution")
