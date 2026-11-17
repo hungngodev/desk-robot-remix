@@ -1070,7 +1070,7 @@ async def test_kokoro_monitor_stop_requires_exact_head_flush_receipt(reply, monk
             return Response()
 
     speaker = KokoroHeadSpeaker(settings, Client())
-    with pytest.raises(RuntimeError, match="monitor STOP request unconfirmed"):
+    with pytest.raises(RuntimeError, match="Xiaozhi STOP request unconfirmed"):
         await speaker.monitor_lost(SimpleNamespace(device_id="head01"))
     assert len(calls) == 1
     assert calls[0][0].endswith("/interrupt")
