@@ -276,7 +276,13 @@ int main() {
         desk_robot::CliffGuard guard;
         CHECK(guard.configure(calibration()));
         bus.poll(guard, 50);
-        faulted(guard);
+        // MissingSample is already latched on configured guards. The failed
+        // bus cannot replace that first fault with BusFailure or grant rearm.
+        CHECK(guard.fault() != desk_robot::CliffFault::None);
+        CHECK(!guard.evaluate(50));
+        CHECK(!guard.try_rearm(50));
+        for (std::uint8_t lane = 0; lane < 5; ++lane)
+          CHECK(!guard.diagnostic(lane, 50).present);
       }
     }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
