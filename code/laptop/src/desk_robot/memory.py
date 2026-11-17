@@ -157,10 +157,13 @@ class MemoryStore:
             raise ValueError("Invalid observation clock")
         if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
             raise ValueError("Confidence outside [0,1]")
-        if not 0 <= confidence <= 1:
-            raise ValueError("Confidence outside [0,1]")
+        # NaN does not compare within any numeric interval. Report it as
+        # nonfinite before the finite [0,1] range check so invalid data
+        # cannot masquerade as an ordinary low-confidence observation.
         if not math.isfinite(when) or not math.isfinite(confidence):
             raise ValueError("Nonfinite timestamp or confidence")
+        if not 0 <= confidence <= 1:
+            raise ValueError("Confidence outside [0,1]")
         with self._connect(robot_id) as db:
             cursor = db.execute(
                 """INSERT OR IGNORE INTO memories
