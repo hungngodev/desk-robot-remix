@@ -49,6 +49,10 @@ class TwoWire {
   bool optional_mux_stuck = false;
   bool fail_optional_mux_write = false;
   bool fail_cap_register_write = false;
+  bool fail_cap_clear_write = false;
+  std::uint8_t cap_main_control = 0x01;
+  std::uint8_t cap_multi_touch_block = 0xff;
+  unsigned cap_interrupt_clears = 0;
   bool cap_uses_0x29 = false; // common generic breakout address
   unsigned cap_register_end_calls = 0;
   unsigned cap_failed_write_stops = 0;
@@ -100,8 +104,11 @@ class TwoWire {
       ++failed_mcp_writes;
       return 0;
     }
-    if (fail_cap_register_write && (current_address == 0x28 ||
-        (current_address == 0x29 && extras == 1 && cap_uses_0x29))) return 0;
+    const bool cap_target = current_address == 0x28 ||
+        (current_address == 0x29 && extras == 1 && cap_uses_0x29);
+    if (fail_cap_register_write && cap_target) return 0;
+    if (fail_cap_clear_write && cap_target && outbound.size() == 1 &&
+        outbound[0] == 0x00) return 0;
     outbound.push_back(v);
     return 1;
   }
@@ -139,6 +146,15 @@ class TwoWire {
         current_address == 0x1c || current_address == 0x1d ||
         current_address == 0x1e) ++imu_terminated_transmissions;
     if (!connected(current_address)) return 4;
+    const bool cap_target = current_address == 0x28 ||
+        (current_address == 0x29 && extras == 1 && cap_uses_0x29);
+    if (cap_target && outbound.size() == 2) {
+      if (outbound[0] == 0x2a) cap_multi_touch_block = outbound[1];
+      if (outbound[0] == 0x00) {
+        cap_main_control = outbound[1];
+        ++cap_interrupt_clears;
+      }
+    }
     if (current_address == 0x70) {
       if (outbound.empty()) return 0; // address-only I2C ACK probe
       if (outbound.size() != 1) return 4;
@@ -201,6 +217,7 @@ class TwoWire {
       if (register_address == 0xFD) inbound = {0x50};
       else if (register_address == 0xFE) inbound = {0x5D};
       else if (register_address == 0x03) inbound = {0xA5};
+      else if (register_address == 0x00) inbound = {cap_main_control};
     } else if (addr == 0x29) {
       if (tof_register == 0x13 && count == 1) {
         inbound = {static_cast<std::uint8_t>(tof_ready ? 0x07 : 0)};
@@ -262,6 +279,7 @@ class TwoWire {
     } else if (addr == 0x28 && register_address == 0xFD) inbound = {0x50};
     else if (addr == 0x28 && register_address == 0xFE) inbound = {0x5D};
     else if (addr == 0x28 && register_address == 0x03) inbound = {0xA5};
+    else if (addr == 0x28 && register_address == 0x00) inbound = {cap_main_control};
     else if (addr == 0x57 && register_address == 0xFF) inbound = {0x15};
     else if (addr == 0x57 && register_address == 0x04)
       inbound = {pulse_fifo_write_pointer};

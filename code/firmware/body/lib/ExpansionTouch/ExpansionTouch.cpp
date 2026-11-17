@@ -37,6 +37,17 @@ bool ExpansionTouch::read(std::uint8_t reg, std::uint8_t& value) {
   value = static_cast<std::uint8_t>(result);
   return true;
 }
+// Preserve the exact single-register CAP1188 configuration sequence from
+// Adafruit's BSD-licensed CAP1188 library, without copying its unbounded
+// transport or choosing branded hardware. See:
+// https://github.com/adafruit/Adafruit_CAP1188_Library
+bool ExpansionTouch::write(std::uint8_t reg, std::uint8_t value) {
+  wire_->beginTransmission(address_);
+  const bool wrote = wire_->write(reg) == 1 && wire_->write(value) == 1;
+  // Always terminate a rejected write before returning to safety ranging.
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return wrote && acknowledged;
+}
 bool ExpansionTouch::begin(TwoWire& wire) {
   wire_ = &wire;  // existing 400kHz/15ms bounded bus, never begin twice
   present_ = false;
@@ -60,8 +71,12 @@ bool ExpansionTouch::begin(TwoWire& wire) {
       break;
     }
   }
-  if (!close()) return false;
-  verified_ = recognized;
+  // Upstream CAP1188 init clears MTBLK (0x2A) for simultaneous electrodes.
+  // Apply only after exact chip identity and while the optional mux is
+  // isolated; unlike the upstream adapter, a failed write is explicit.
+  const bool configured = recognized && write(0x2A, 0x00);
+  const bool closed = close();
+  verified_ = configured && closed;
   return verified_;
 }
 bool ExpansionTouch::poll(std::uint32_t now_ms, std::uint8_t& zones) {
@@ -71,8 +86,17 @@ bool ExpansionTouch::poll(std::uint32_t now_ms, std::uint8_t& zones) {
   if (!select()) { close(); verified_ = false; return false; }
   std::uint8_t bits = 0;
   const bool sample_ok = read(0x03, bits);
+  // Follow the upstream touched() behavior: acknowledged contact needs
+  // MAIN.INT bit 0 cleared for subsequent touch interrupts. Preserve all
+  // other MAIN bits and fail closed on either failed I2C transaction.
+  bool cleared = true;
+  if (sample_ok && bits != 0U) {
+    std::uint8_t main_control = 0;
+    cleared = read(0x00, main_control) &&
+              write(0x00, static_cast<std::uint8_t>(main_control & ~0x01U));
+  }
   const bool closed = close();
-  if (!sample_ok || !closed) { verified_ = false; return false; }
+  if (!sample_ok || !cleared || !closed) { verified_ = false; return false; }
   zones = bits;
   return true;
 }

@@ -40,9 +40,24 @@ int main() {
     desk_robot::ExpansionTouch generic_touch;
     CHECK(generic_touch.begin(generic_touch_wire));
     CHECK(generic_touch.verified());
+    // Upstream multi-electrode init is now adopted on the isolated mux.
+    CHECK(generic_touch_wire.cap_multi_touch_block == 0);
     std::uint8_t generic_zones = 0;
     CHECK(generic_touch.poll(100, generic_zones));
     CHECK(generic_zones == 0xA5);
+    CHECK(generic_touch_wire.cap_main_control == 0);
+    CHECK(generic_touch_wire.cap_interrupt_clears == 1);
+    // A lost MAIN.INT write must not publish the cached contact zone.
+    TwoWire failed_clear_wire;
+    desk_robot::ExpansionTouch failed_clear;
+    CHECK(failed_clear.begin(failed_clear_wire));
+    failed_clear_wire.fail_cap_clear_write = true;
+    std::uint8_t unchanged = 0x5a;
+    CHECK(!failed_clear.poll(100, unchanged));
+    CHECK(!failed_clear.verified());
+    CHECK(unchanged == 0x5a);
+    CHECK(failed_clear_wire.ranges == 0 && failed_clear_wire.extras == 0);
+    CHECK(!failed_clear_wire.unsafe_parallel_mux);
     CHECK(generic_touch_wire.ranges == 0 && generic_touch_wire.extras == 0);
     CHECK(!generic_touch_wire.unsafe_parallel_mux);
     // An ACK is not proof that the safety mux actually disabled its 0x29

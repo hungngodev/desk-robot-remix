@@ -32,6 +32,7 @@ class ExpansionTouch {
   bool select();
   bool close();
   bool read(std::uint8_t reg, std::uint8_t& value);
+  bool write(std::uint8_t reg, std::uint8_t value);
 };
 } // namespace desk_robot
 #endif
