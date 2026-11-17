@@ -10,6 +10,7 @@ source = runpy.run_path(str(
 ))
 estimate_delay = source["estimate_delay"]
 resample_reference = source["resample_reference"]
+estimate_clock_drift = source["estimate_clock_drift"]
 
 
 def test_estimates_positive_lag_from_correlated_playback():
@@ -47,3 +48,55 @@ def test_sample_rate_and_window_are_strict():
     with pytest.raises(ValueError):
         resample_reference(signal, 48000)
     assert len(resample_reference(np.zeros(24000), 24000)) == 16000
+
+
+def test_multiwindow_drift_estimates_real_sample_slip_not_global_latency():
+    """A known clock slope is distinct from the initial acoustic delay."""
+    rng = np.random.default_rng(281)
+    speaker = rng.normal(0, 0.15, 160000)
+    positions = np.arange(len(speaker), dtype=np.float64)
+    for drift_ppm in (0, 200, -200):
+        mic = np.interp(
+            positions - 1120 - positions * drift_ppm / 1_000_000,
+            positions, speaker, left=0, right=0,
+        )
+        result = estimate_clock_drift(speaker, mic)
+        assert result["clock_drift_ppm_estimate"] == pytest.approx(
+            drift_ppm, abs=25
+        )
+        assert len(result["clock_drift_window_lags_samples"]) == 4
+        assert result["clock_drift_min_correlation"] > 0.15
+        assert result["clock_drift_max_fit_residual_samples"] <= 3
+        assert result["clock_drift_needs_hardware_review"] == (
+            abs(drift_ppm) > 100
+        )
+        assert not result["aec_physically_verified"]
+        assert not result["natural_barge_in_verified"]
+
+
+def test_clock_drift_requires_long_aligned_correlated_recordings():
+    rng = np.random.default_rng(282)
+    source = rng.normal(size=160000)
+    for a, b in (
+        (source[:32000], source[:32000]),
+        (source, source[:-1]),
+        (source, np.zeros_like(source)),
+    ):
+        with pytest.raises(ValueError):
+            estimate_clock_drift(a, b)
+    with pytest.raises(ValueError):
+        estimate_clock_drift(source, source, sample_rate=24000)
+    with pytest.raises(ValueError):
+        estimate_clock_drift(source, source, max_delay_ms=float("nan"))
+
+
+def test_sudden_latency_step_is_not_mislabeled_as_clock_drift():
+    rng = np.random.default_rng(283)
+    source = rng.normal(0, 0.15, 160000)
+    mic = np.zeros_like(source)
+    for i in range(160000):
+        lag = 1120 if i < 80000 else 1180
+        if i >= lag:
+            mic[i] = source[i - lag]
+    with pytest.raises(ValueError, match="not a stable clock drift"):
+        estimate_clock_drift(source, mic)
