@@ -168,7 +168,9 @@ def screen_planar_cliff_coverage(
             or engineering_margin_mm < 0
             or qualified_lateral_sensor_coverage_mm < 0):
         raise ValueError("Invalid differential drive dimensions or stop budget")
-    if len(floor_sensor_points_mm) != 4 or len(support_points_mm) < 3:
+    if (not isinstance(floor_sensor_points_mm, (list, tuple))
+            or not isinstance(support_points_mm, (list, tuple))
+            or len(floor_sensor_points_mm) != 4 or len(support_points_mm) < 3):
         raise ValueError("Need four floor sensors and every supporting contact")
     for point in [*support_points_mm, *floor_sensor_points_mm]:
         if (not isinstance(point, (list, tuple)) or len(point) != 2
@@ -185,15 +187,21 @@ def screen_planar_cliff_coverage(
     # A vendor FoV alone does not guarantee lateral recognition. Default 0
     # until a qualified actual surface/footprint measurement is supplied.
     nominal_lateral_radius = h * math.tan(math.radians(ST_SYSTEM_FOV_DEG / 2))
-    if qualified_lateral_sensor_coverage_mm > nominal_lateral_radius:
-        raise ValueError("Claimed lateral coverage exceeds nominal optical radius")
+    if (not math.isfinite(fov_rear_setback)
+            or not math.isfinite(nominal_lateral_radius)
+            or qualified_lateral_sensor_coverage_mm > nominal_lateral_radius):
+        raise ValueError("Cliff optical coverage exceeds finite manufacturer geometry")
     v = (left_wheel_mm_s + right_wheel_mm_s) / 2
     omega = (right_wheel_mm_s - left_wheel_mm_s) / track_width_mm
+    if not math.isfinite(v) or not math.isfinite(omega):
+        raise ValueError("Differential wheel speed overflow")
     cases = []
     active = 0
     for index, (x, y) in enumerate(support_points_mm):
         dx_dt, dy_dt = v - omega * y, omega * x
         speed = math.hypot(dx_dt, dy_dt)
+        if not math.isfinite(speed):
+            raise ValueError("Support contact speed overflow")
         if speed == 0:
             cases.append({"support_index": index, "motion_mm_s": 0.0,
                           "requires_cliff_coverage": False, "covered": True})
@@ -207,6 +215,8 @@ def screen_planar_cliff_coverage(
                <= qualified_lateral_sensor_coverage_mm
         ]
         best_lead = max(projected_leads) if projected_leads else None
+        if any(not math.isfinite(lead) for lead in projected_leads):
+            raise ValueError("Projected floor sensor lead overflow")
         required = (measured_worst_braking_mm + engineering_margin_mm
                     + speed * detection_latency_ms / 1000
                     + fov_rear_setback)
