@@ -181,6 +181,47 @@ def test_shared_station_rejects_duplicate_and_phantom_modules():
 
 
 
+
+def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilots():
+    """The hand-curated price comparison must not silently replace a chip.
+
+    Candidate register is not a second quantity owner or purchase approval.
+    """
+    import json
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    parts = {p["id"]: p for p in plan["parts"]}
+    register = (mod.PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text(
+        encoding="utf-8")
+    selected = {}
+    for line in register.splitlines():
+        if not line.startswith("| \`"):
+            continue
+        columns = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(columns) != 11:
+            raise AssertionError("Incorrect buying register row: " + line)
+        part_id = columns[0].strip("`")
+        assert part_id not in selected, "Duplicate candidate component"
+        selected[part_id] = columns
+    assert set(selected) == set(parts), "Missing or invented selected purchasing role"
+    for ident, item in parts.items():
+        cells = selected[ident]
+        assert int(cells[2]) == item["per_robot"], ident
+        assert int(cells[3]) == 5 * item["per_robot"], ident
+        assert int(cells[8]) >= 0, ident
+    assert "VL53L0X" in selected["cliff_obstacle"][1]
+    assert "VL53L4CD" not in register
+    # An expensive comparison board is not an authorized pilot purchase.
+    for ident in ("cap1188", "fsr", "ads1115", "as5600", "encoder_magnets",
+                  "max17048", "ina226", "pn532", "sht41"):
+        assert selected[ident][8] == "0", ident
+        assert "NO PURCHASE" in selected[ident][10], ident
+    assert "NO NEW ADAFRUIT HARDWARE" not in register.upper() or (
+        "Adafruit hardware purchases are not required" in register)
+    # Separate candidate subsystem is not a hidden second approved shopping list.
+    assert "BQ27441" in register and "MAX17048" in register
+    assert "Duplicate with separate MAX17048" in register
+    assert "Owned 28BYJ48 must be load tested first" in register
+
 def test_canonical_full_fleet_plan_has_all_forty_nine_roles():
     import json
     plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
