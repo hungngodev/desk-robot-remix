@@ -37,6 +37,7 @@ SYSTEM_GATES = (
     "loaded_drive_and_stopping", "four_cliff_sensor_surface_trials",
     "cliff_sensor_mount_height_and_stopping_geometry",
     "full_power_load_and_faults", "protected_1s_charger_and_dock_contacts",
+    "charger_out_full_voltage_range_to_fixed_5v_rail_physical_trial",
     "real_dual_ir_terminal_docking", "lift_and_grip_calibration",
     "sense_speaker_mic_double_talk", "five_robot_integration",
     "room_pod_usb_serial_and_five_pet_observers",
