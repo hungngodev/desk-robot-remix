@@ -474,9 +474,12 @@ class Coordinator:
                 media = self.multimodal
                 if (media is None
                         or not media.settings.voice_vision_tools_enabled
-                        or not media.stream_owns_camera(job.robot_id)):
+                        or not media.stream_owns_camera(job.robot_id)
+                        or not media.status(job.robot_id)["camera_stream_connected"]):
+                    # A reconnecting worker is NOT a live camera socket,
+                    # even if its asyncio task has not exited.
                     raise OperationError(
-                        "Hardware exploration requires live XIAO camera stream"
+                        "Hardware exploration requires connected live XIAO camera stream"
                     )
 
                 def newest():
@@ -499,9 +502,12 @@ class Coordinator:
                         raise OperationError("Live exploration camera stalled")
                     frame = newest()
                 if (frame is None or not media.stream_owns_camera(job.robot_id)
-                        or not media.settings.voice_vision_tools_enabled):
+                        or not media.settings.voice_vision_tools_enabled
+                        or not media.status(job.robot_id)["camera_stream_connected"]):
+                    # Connection can drop during frame preparation. A
+                    # recently cached receipt cannot certify a live stream.
                     raise OperationError(
-                        "Hardware exploration camera frame expired"
+                        "Hardware exploration camera frame expired or disconnected"
                     )
                 last_live_frame_at = frame.received_at
                 jpeg = frame.jpeg
