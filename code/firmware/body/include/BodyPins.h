@@ -28,7 +28,9 @@ constexpr int kTouchOutput = 34;
 constexpr int kBumperInput = 35;
 // Proposed two demodulated 38kHz terminal dock IR receiver inputs.
 // Input-only, external pullups/active receiver output; no internal bias.
-// Reserved only: no NEC decoder, final homing or charge authorizer exists.
+// A bounded NEC receiver decoder is implemented behind the lab/full flag.
+// Its evidence is read-only: no qualified dock homing, bearing estimate,
+// contact charging authorizer or calibrated IR path exists.
 // ESP32 GPIO36/39 RTC/ADC glitch erratum needs RMT filtering and bench tests.
 constexpr int kTerminalIrLeftInput = 36;
 constexpr int kTerminalIrRightInput = 39;
