@@ -25,8 +25,10 @@ bool ExpansionTouch::close() { return mux(kExpansionMux, 0); }
 bool ExpansionTouch::read(std::uint8_t reg, std::uint8_t& value) {
   wire_->beginTransmission(address_);
   const bool wrote = wire_->write(reg) == 1;
-  // Always terminate the attempted register transaction, including a failed write.
-  const bool acknowledged = wire_->endTransmission(false) == 0;
+  // Preserve repeated START after a successful register write, but send
+  // STOP after a failed write so a rejected CAP1188 transaction cannot
+  // leave the shared bus open across safety-critical ranging polls.
+  const bool acknowledged = wire_->endTransmission(!wrote) == 0;
   if (!wrote || !acknowledged) return false;
   if (wire_->requestFrom(address_, static_cast<std::size_t>(1), true) != 1 ||
       wire_->available() < 1) return false;
