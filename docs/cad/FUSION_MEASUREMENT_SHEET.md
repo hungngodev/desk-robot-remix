@@ -15,11 +15,13 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | WROOM dev board assembled envelope and USB service clearance | | wroom_w / l / usb_clearance |
 | Battery and charge/boost enclosure width / length / height | | power_w / l / h |
 | TCA9548A and ULN2003 board physical widths | | mux_w, driver_w |
-| VL53L4CD chosen carrier length, width and lens center | | tof_l / w / lens_offset |
+| Generic VL53L0X GY-530 I2C carrier length, width, lens center and 3.3 V pullup verification | | tof_l / w / lens_offset |
 | Sensor lens to floor nominal measured standoff | | tof_floor_height |
 | Dock track guide clear width | | dock_clear_width |
 | AprilTag printed black square size and camera height | | tag_square_mm, tag_center_height |
 | Key and candy actual width and thickness | | object_w / h |
 | Actual printer minimum wall and hole clearance | | print_wall, clearance_xy |
+
+**Current battery candidate does not fit the provisional gauge.** The LPHD7430085 protected 1S pack is listed as 86 mm long plus leads, but `docs/cad/remixes/remaining_fit_gauges.scad` still has `power_l = 68` mm. Do not treat that gauge as an acceptable enclosure for the candidate pack. A selected cell, NTC connector, protection board, DC boost and strain relief must be measured and fitted together before changing final printed geometry. Also check actual speaker power rating and enclosure size: a MAX98357A on 5 V can overdrive the currently listed 1 W / 8 ohm speaker; a 2 W alternative is not automatically a 20 mm fit.
 
 Do not fabricate all 15 dimensions to claim print-ready geometry.
