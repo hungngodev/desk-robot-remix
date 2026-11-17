@@ -56,8 +56,16 @@ def _uint(value: object, *, zero: bool = True) -> int:
 
 
 def _number(value: object, low: float, high: float) -> float:
-    if type(value) not in (float, int) or not math.isfinite(value):
+    if type(value) not in (float, int):
         raise ValueError("Invalid room sensor number")
+    # Python may raise OverflowError while converting a large JSON integer
+    # to float for isfinite(). A malformed USB sample is a rejected frame,
+    # never a reason to tear down the station reader and reconnect.
+    try:
+        if not math.isfinite(value):
+            raise ValueError("Invalid room sensor number")
+    except OverflowError as exc:
+        raise ValueError("Invalid room sensor number") from exc
     if not low <= value <= high:
         raise ValueError("Room sensor reading out of range")
     return float(value)
@@ -154,7 +162,13 @@ class RoomStationDecoder:
         self._last_ms: int | None = None
 
     def accept(self, line: bytes | str, *, now: float) -> RoomObservation:
-        if type(now) not in (float, int) or not math.isfinite(now):
+        if type(now) not in (float, int):
+            raise ValueError("Finite Mac receive clock is required")
+        try:
+            finite_now = math.isfinite(now)
+        except OverflowError:
+            finite_now = False
+        if not finite_now:
             raise ValueError("Finite Mac receive clock is required")
         if isinstance(line, bytes):
             if len(line) > MAX_FRAME_BYTES:
