@@ -36,21 +36,73 @@ std::string Encode(cJSON* value) {
     return result;
 }
 bool StatusValid(cJSON* json) {
-    if (!cJSON_IsObject(json) || !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(json, "armed"))) return false;
-    auto motor = cJSON_GetObjectItemCaseSensitive(json, "motor");
-    auto servo = cJSON_GetObjectItemCaseSensitive(json, "servo");
-    if (!cJSON_IsObject(motor) || !cJSON_IsObject(servo)) return false;
-    for (const char* name : {"m0", "m1"}) {
-        auto n = cJSON_GetObjectItemCaseSensitive(motor, name);
-        if (!cJSON_IsNumber(n) || n->valuedouble != n->valueint || n->valueint < -40 || n->valueint > 40) return false;
+    // A partial status can contain plausible motor numbers but omit local
+    // safety evidence. Reject it before forwarding sensory MCP observations.
+    const auto get = [](cJSON* parent, const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(parent, key);
+    };
+    const auto integer = [](cJSON* item, double low, double high) {
+        return cJSON_IsNumber(item) && std::isfinite(item->valuedouble) &&
+               item->valuedouble == std::floor(item->valuedouble) &&
+               item->valuedouble >= low && item->valuedouble <= high;
+    };
+    const auto array_of = [get, integer](
+        cJSON* obj, const char* key, int count, double low, double high) {
+        auto array = get(obj, key);
+        if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != count) return false;
+        for (int i = 0; i < count; ++i)
+            if (!integer(cJSON_GetArrayItem(array, i), low, high)) return false;
+        return true;
+    };
+    if (!cJSON_IsObject(json) || !cJSON_IsBool(get(json, "armed")) ||
+        !integer(get(json, "watchdog_ms"), 0, 500) ||
+        !integer(get(json, "protocol"), 2, 2)) return false;
+    auto motor = get(json, "motor");
+    auto servo = get(json, "servo");
+    auto safety = get(json, "safety");
+    auto ranges = get(json, "ranges");
+    auto touch = get(json, "touch");
+    auto imu = get(json, "imu");
+    if (!cJSON_IsObject(motor) || !cJSON_IsObject(servo) ||
+        !cJSON_IsObject(safety) || !cJSON_IsObject(ranges) ||
+        !cJSON_IsObject(touch) || !cJSON_IsObject(imu)) return false;
+    for (const char* name : {"m0", "m1"})
+        if (!integer(get(motor, name), -40, 40)) return false;
+    for (const char* name : {"lift", "grip", "lift_target", "grip_target"})
+        if (!integer(get(servo, name), 0, 180)) return false;
+    if (!cJSON_IsBool(get(servo, "attached"))) return false;
+    auto position_source = get(servo, "position_source");
+    if (!cJSON_IsString(position_source) || !position_source->valuestring ||
+        std::strcmp(position_source->valuestring, "commanded") != 0) return false;
+    auto fault = get(safety, "fault");
+    if (!cJSON_IsBool(get(safety, "required")) ||
+        !cJSON_IsBool(get(safety, "ready")) ||
+        !integer(get(safety, "sensor"), 0, 255) ||
+        !cJSON_IsString(fault) || !fault->valuestring ||
+        std::strlen(fault->valuestring) == 0 ||
+        std::strlen(fault->valuestring) > 48) return false;
+    auto present_mask = get(ranges, "present_mask");
+    auto valid_mask = get(ranges, "valid_mask");
+    if (!integer(present_mask, 0, 31) || !integer(valid_mask, 0, 31) ||
+        (valid_mask->valueint & ~present_mask->valueint) != 0 ||
+        !array_of(ranges, "mm", 5, 0, 65535) ||
+        !array_of(ranges, "age_ms", 5, 0, 4294967295.0)) return false;
+    for (int i = 0; i < 5; ++i) {
+        if ((valid_mask->valueint & (1 << i)) == 0) continue;
+        const double mm = cJSON_GetArrayItem(get(ranges, "mm"), i)->valuedouble;
+        const double age = cJSON_GetArrayItem(get(ranges, "age_ms"), i)->valuedouble;
+        if (mm < 30 || mm > 1300 || age >= 200) return false;
     }
-    for (const char* name : {"lift", "grip"}) {
-        auto n = cJSON_GetObjectItemCaseSensitive(servo, name);
-        if (!cJSON_IsNumber(n) || n->valuedouble != n->valueint || n->valueint < 0 || n->valueint > 180) return false;
-    }
-    auto watchdog = cJSON_GetObjectItemCaseSensitive(json, "watchdog_ms");
-    return cJSON_IsNumber(watchdog) && watchdog->valuedouble == watchdog->valueint &&
-           watchdog->valueint >= 0 && watchdog->valueint <= 500;
+    if (!cJSON_IsBool(get(touch, "active")) ||
+        !integer(get(touch, "count"), 0, 4294967295.0) ||
+        !cJSON_IsBool(get(imu, "valid")) ||
+        !integer(get(imu, "family"), 0, 4) ||
+        !array_of(imu, "acc", 3, -32768, 32767) ||
+        !array_of(imu, "gyro", 3, -32768, 32767) ||
+        !integer(get(imu, "age_ms"), 0, 4294967295.0))
+        return false;
+    // Validation is read-only; local WROOM latching remains authoritative.
+    return true;
 }
 
 bool IrValid(cJSON* json) {
