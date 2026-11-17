@@ -268,6 +268,29 @@ def test_canonical_full_fleet_plan_has_all_forty_nine_roles():
     assert not report["order_released"]
 
 
+def test_requested_effects_and_soil_cannot_be_silently_excluded_from_release():
+    """Preserved BOM slots are not the same as completed physical features."""
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan)
+    requirements = (
+        "rgb_and_haptic_real_device_effects_and_power",
+        "room_soil_probe_enabled_and_calibrated",
+    )
+    for requirement in requirements:
+        assert requirement in mod.SYSTEM_GATES
+        assert requirement in report["missing_system_evidence"]
+    assert not report["order_released"]
+
+    station_ini = (
+        mod.PLAN.parents[2] / "code/firmware/room_station/platformio.ini"
+    ).read_text(encoding="utf-8")
+    # This is deliberately a guard on the CURRENT unqualified profile.
+    # Replacing 0 with 1 alone would not make physical soil calibration pass.
+    assert "-DROOM_SOIL_FITTED=0" in station_ini
+
+
 def test_entire_shopping_csv_and_two_lists_match_authoritative_source():
     import csv
     import io
