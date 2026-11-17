@@ -538,3 +538,28 @@ def test_late_valid_conversion_after_host_gap_cannot_erase_pose():
     assert qualified(gate, sample(sample_ms=previous_sample + 1),
                      previous_at + 2.1, new_sample=False) == ()
     assert gate.reference is None
+
+
+def test_corrupted_delayed_conversion_does_not_revoke_newer_pose():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    previous_at, previous_sample = gate.last_at, gate.last_sample_ms
+    old = sample(sample_ms=previous_sample - 1, valid=False)
+    assert qualified(gate, old, previous_at + 2, new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
+    assert gate.last_at == previous_at
+    assert gate.last_sample_ms == previous_sample
+    # A malformed CURRENT conversion is not a harmless old callback.
+    current = sample(sample_ms=previous_sample + 1, valid=False)
+    assert qualified(gate, current, previous_at + 2.1,
+                     new_sample=False) == ()
+    assert gate.reference is None
+
+
+def test_delayed_conversion_with_motor_activity_still_revokes_pose():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    previous_at, previous_sample = gate.last_at, gate.last_sample_ms
+    old = sample(sample_ms=previous_sample - 1, valid=False, left=1)
+    assert qualified(gate, old, previous_at + .1, new_sample=False) == ()
+    assert gate.reference is None

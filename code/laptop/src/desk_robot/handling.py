@@ -111,6 +111,25 @@ class HandlingGate:
             # An out-of-order host callback cannot invalidate a newer pose.
             # Only a forward host polling gap can indicate a reconnect.
             return ()
+        # An older acquisition with an intact stationary safety envelope
+        # cannot revoke a newer pose merely because its IMU payload was
+        # corrupted in transit. Invalid CURRENT acquisitions still fail closed.
+        stationary = (isinstance(body, dict)
+                      and type(body.get("left")) is int and body["left"] == 0
+                      and type(body.get("right")) is int and body["right"] == 0
+                      and type(body.get("drive_ms")) is int
+                      and body["drive_ms"] == 0)
+        if (stationary and self.last_boot_id is not None
+                and isinstance(imu, dict)
+                and type(imu.get("boot_id")) is int
+                and imu["boot_id"] == self.last_boot_id
+                and type(imu.get("sample_ms")) is int
+                and 0 <= imu["sample_ms"] <= 0xffffffff
+                and self.last_sample_ms is not None
+                and imu["sample_ms"] < self.last_sample_ms
+                and not (self.last_sample_ms >= 0xffff0000
+                         and imu["sample_ms"] <= 0xffff)):
+            return ()
         # A valid late conversion must not impersonate a polling outage.
         # Invalid current telemetry still falls through to fail closed.
         if (self.last_boot_id is not None and isinstance(imu, dict)
