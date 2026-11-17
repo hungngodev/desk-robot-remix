@@ -399,6 +399,11 @@ void setup() {
   const bool accessory_mux = accessories.begin(Wire);
   Serial.println(accessory_mux ? "INFO optional_accessory_bus_probed" :
                                  "INFO optional_accessory_bus_unavailable");
+#if DESK_ROBOT_ENABLE_HAPTIC
+  Serial.println(accessories.haptic_ready() ?
+      "INFO haptic_edge_source_ready_external_one_shot_required" :
+      "WARN haptic_edge_source_disabled_or_unverified");
+#endif
   // Both demodulated IR receiver inputs are optional observed evidence.
   // The main WROOM motor guard never consumes this signal to arm itself.
 #if defined(DESK_ROBOT_ENABLE_TERMINAL_IR) && DESK_ROBOT_ENABLE_TERMINAL_IR
@@ -458,6 +463,18 @@ void loop() {
   }
   paw_pulse.poll(millis());
   control.set_paw_pulse(paw_pulse.sample());
+#if DESK_ROBOT_ENABLE_HAPTIC
+  // React only to a genuine fresh CAP1188 rising touch zone, not a boot
+  // baseline, microphone/LLM request, or arbitrary remote motor command.
+  static std::uint32_t last_haptic_cap_events = 0;
+  const std::uint32_t cap_events = control.state().cap_events;
+  if (cap_events != last_haptic_cap_events) {
+    last_haptic_cap_events = cap_events;
+    if (control.state().cap_valid && control.state().cap_mask != 0U &&
+        !control.state().touch_raw_active)
+      accessories.request_haptic(millis());
+  }
+#endif
   accessories.poll(millis());
   control.set_accessories(accessories.readings(), millis());
 #if defined(DESK_ROBOT_ENABLE_TERMINAL_IR) && DESK_ROBOT_ENABLE_TERMINAL_IR
