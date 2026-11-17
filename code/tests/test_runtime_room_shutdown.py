@@ -86,3 +86,44 @@ def test_cancelled_reader_keeps_cleanup_order_and_reports_unconfirmed_stop():
         runtime.client.aclose.assert_awaited_once()
 
     asyncio.run(scenario())
+
+
+def test_room_consumer_failure_does_not_break_subsequent_delivery(caplog):
+    """An optional room context failure must not poison later USB evidence."""
+    async def scenario():
+        received = []
+        recovered = asyncio.Event()
+
+        def remember_room(observation):
+            received.append(observation)
+            if len(received) == 1:
+                raise RuntimeError("transient room context failure")
+            recovered.set()
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(room_station_context_enabled=True)
+        runtime.multimodal = SimpleNamespace(
+            hub=SimpleNamespace(remember_room=remember_room)
+        )
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime._room_dispatch_enqueued = False
+        runtime.room_context_failures = 0
+        runtime._closed = False
+
+        loop = asyncio.get_running_loop()
+        first, second = object(), object()
+        runtime._queue_room_observation(loop, first)
+        await asyncio.sleep(0)
+        assert received == [first]
+        assert runtime.room_context_failures == 1
+        assert not runtime._room_dispatch_enqueued
+
+        runtime._queue_room_observation(loop, second)
+        await asyncio.wait_for(recovered.wait(), timeout=1)
+        assert received == [first, second]
+        assert runtime.room_context_failures == 1
+        assert not runtime._room_dispatch_enqueued
+
+    asyncio.run(scenario())
+    assert "Room context consumer failed (1 total)" in caplog.text

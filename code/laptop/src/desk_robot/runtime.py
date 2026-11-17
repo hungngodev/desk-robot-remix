@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 
@@ -95,6 +96,7 @@ class Runtime:
         self._room_dispatch_lock = threading.Lock()
         self._room_dispatch_pending: RoomObservation | None = None
         self._room_dispatch_enqueued = False
+        self.room_context_failures = 0
         self._closed = False
 
     def _on_room_observation(self, observation: RoomObservation) -> None:
@@ -114,7 +116,17 @@ class Runtime:
             self._room_dispatch_pending = None
             self._room_dispatch_enqueued = False
         if observation is not None:
-            self._on_room_observation(observation)
+            try:
+                self._on_room_observation(observation)
+            except Exception:
+                # An optional context consumer must never fault the event-loop
+                # callback or prevent the next fresh USB observation arriving.
+                self.room_context_failures = getattr(self, "room_context_failures", 0) + 1
+                if self.room_context_failures == 1 or self.room_context_failures % 100 == 0:
+                    logging.getLogger(__name__).exception(
+                        "Room context consumer failed (%d total)",
+                        self.room_context_failures,
+                    )
 
     def _queue_room_observation(self, loop, observation: RoomObservation) -> None:
         """Bound the USB-to-Mac handoff to one scheduled callback per runtime.
