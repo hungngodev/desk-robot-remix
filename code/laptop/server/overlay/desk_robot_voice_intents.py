@@ -245,9 +245,9 @@ def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
     interpretations and historical memory excerpts if necessary.
     """
     if (type(limit) is not int or not 256 <= limit <= 4096
-            or not isinstance(facts, list) or not 1 <= len(facts) <= 3
+            or not isinstance(facts, list) or not 1 <= len(facts) <= 6
             or any(not isinstance(fact, dict) for fact in facts)):
-        raise ValueError("Expected one to three grounded facts and bounded budget")
+        raise ValueError("Expected one to six grounded facts and bounded budget")
 
     try:
         # JSON round-trip deliberately strips mutable references to source
