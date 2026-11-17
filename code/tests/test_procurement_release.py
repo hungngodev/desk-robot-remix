@@ -1341,3 +1341,20 @@ def test_one_robot_power_register_excludes_duplicate_soc_board():
     assert len(gauge_rows) == 1
     assert "ONE SoC GAUGE ONLY" in gauge_rows[0]
     assert "separate INA226 is a signed current monitor" in gauge_rows[0]
+
+
+def test_pilot_supplier_cart_rejects_malformed_source_url(monkeypatch):
+    """An HTTPS prefix alone must not authorize a supplier cart link."""
+    import json
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan)
+    original = mod.PILOT_SAMPLE_PRODUCTS["cliff_obstacle"]
+    for invalid in ("https://", "https:///missing-host",
+                    "https://user@vendor.example/part",
+                    "https://vendor.example:invalid/part"):
+        monkeypatch.setitem(mod.PILOT_SAMPLE_PRODUCTS, "cliff_obstacle",
+                            (*original[:3], invalid, *original[4:]))
+        with pytest.raises(ValueError, match="Missing exact supplier"):
+            mod.pilot_supplier_cart(report)
+    monkeypatch.setitem(mod.PILOT_SAMPLE_PRODUCTS, "cliff_obstacle", original)
+    assert mod.pilot_supplier_cart(report)["exact_sku_count"] == 13

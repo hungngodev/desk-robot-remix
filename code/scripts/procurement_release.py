@@ -875,7 +875,7 @@ def pilot_supplier_cart(report: dict) -> dict:
             raise ValueError("Unreviewed role in supplier cart")
         seller, sku, url = role["source_vendor"], role["source_sku"], role["source_url"]
         if not all(isinstance(x, str) and x.strip()
-                   for x in (seller, sku, url)) or not url.startswith("https://"):
+                   for x in (seller, sku, url)) or not _evidence_https_url(url):
             raise ValueError("Missing exact supplier and linked product")
         if (seller, sku) in seen:
             raise ValueError("Duplicate source SKU")
