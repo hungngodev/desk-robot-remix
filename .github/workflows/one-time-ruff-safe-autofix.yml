@@ -1,0 +1,31 @@
+name: One time safe Ruff autofix
+on:
+  push:
+    branches:
+      - impl/mac-hardware-safety-preflight-2026-11-10
+permissions:
+  contents: write
+jobs:
+  safe-ruff:
+    if: github.event.head_commit.message == 'chore: run Ruff safe fixes once'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install existing locked tooling
+        run: cd code && uv sync --locked
+      - name: Apply only safe Ruff changes
+        run: |
+          cd code
+          uv run ruff check . --fix || true
+          echo "Safe Ruff changed:"
+          git diff --stat
+      - name: Commit safe fixes, no forced push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add code/
+          if ! git diff --cached --quiet; then
+            git commit -m "style: apply Ruff safe fixes across existing code"
+            git push origin "HEAD:impl/mac-hardware-safety-preflight-2026-11-10"
+          fi
