@@ -89,8 +89,8 @@ async def test_native_visual_question_huge_confidence_fails_closed_without_crash
     for confidence in (10 ** 1000, -(10 ** 1000)):
         client.confidence = confidence
         with pytest.raises(ValueError, match="Unbounded or malformed"):
-            await vision.answer("What do you see?", [b"\\xff\\xd8jpeg"])
+            await vision.answer("What do you see?", [bytes((0xff, 0xd8)) + b"jpeg"])
     client.confidence = 0.91
-    assert await vision.answer("What do you see?", [b"\\xff\\xd8jpeg"]) == (
+    assert await vision.answer("What do you see?", [bytes((0xff, 0xd8)) + b"jpeg"]) == (
         "A key is visible on the desk."
     )
