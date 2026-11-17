@@ -3140,6 +3140,8 @@ def test_native_completed_tool_fact_json_pack_keeps_all_requested_sources(native
     assert len(parsed[0]["interpretation_not_proof"]) < len(
         originals[0]["interpretation_not_proof"]
     )
+    assert parsed[0]["interpretation_not_proof"].endswith("...")
+    assert parsed[1]["recollections"][0]["summary"].endswith("...")
     assert originals == prior  # model packing must not mutate durable memory
 
 
