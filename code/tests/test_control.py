@@ -2,7 +2,8 @@ import asyncio
 import time
 
 import pytest
-from desk_robot.controller import Coordinator, OperationError
+from desk_robot.controller import Coordinator, Job, OperationError
+from types import SimpleNamespace
 from desk_robot.simulator import SimulatedHead, SimulationVision
 
 
@@ -1124,3 +1125,79 @@ async def test_bounded_head_reply_disregards_uncooperative_late_success():
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+async def test_hardware_exploration_needs_existing_continuous_camera_owner(settings):
+    c, head = make(settings)
+    settings.mode = "hardware"
+    async def healthy(_robot_id, *, require_front_clearance=False):
+        return {"armed": True}
+    c._assert_armed_health = healthy
+    try:
+        with pytest.raises(OperationError, match="live XIAO camera stream"):
+            await c._explore(Job("live-missing", "robot-01", "exploration"))
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+    finally:
+        await c.close()
+
+
+async def test_hardware_exploration_uses_live_hub_frames_not_individual_snapshot(settings):
+    c, head = make(settings)
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    jpeg = await head.snapshot()
+    async def forbidden_snapshot():
+        raise AssertionError("A second camera capture duplicated the active live feed")
+    head.snapshot = forbidden_snapshot
+    await head.command("arm")
+    async def healthy(_robot_id, *, require_front_clearance=False):
+        return {"armed": True}
+    c._assert_armed_health = healthy
+    frames = [SimpleNamespace(
+        source="proactive", jpeg=jpeg, received_at=time.monotonic()
+    )]
+    async def no_new_frame(_robot_id, _after, *, timeout_s):
+        return False
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _robot_id: True,
+        hub=SimpleNamespace(frames={"robot-01": frames}),
+        wait_for_proactive_frame=no_new_frame,
+    )
+    try:
+        # A new frame permits one physically guarded pulse; the same
+        # cached JPEG cannot be reused for a SECOND pulse afterward.
+        with pytest.raises(OperationError, match="camera stalled"):
+            await c._explore(Job("live-only", "robot-01", "exploration"))
+        assert head.commands.count("drive 20 20 100") == 1
+        assert head.commands.count("stop") == 1
+    finally:
+        await c.close()
+
+
+async def test_hardware_exploration_rejects_stale_stream_receipt_before_drive(settings):
+    c, head = make(settings)
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    jpeg = await head.snapshot()
+    head.fail_snapshot = True
+    async def healthy(_robot_id, *, require_front_clearance=False):
+        return {"armed": True}
+    c._assert_armed_health = healthy
+    frames = [SimpleNamespace(
+        source="proactive", jpeg=jpeg, received_at=time.monotonic() - 15.0
+    )]
+    async def stale_stream(_robot_id, _after, *, timeout_s):
+        return False
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _robot_id: True,
+        hub=SimpleNamespace(frames={"robot-01": frames}),
+        wait_for_proactive_frame=stale_stream,
+    )
+    try:
+        with pytest.raises(OperationError, match="camera stalled"):
+            await c._explore(Job("stale-video", "robot-01", "exploration"))
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+    finally:
+        await c.close()
