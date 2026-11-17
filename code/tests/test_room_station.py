@@ -203,7 +203,7 @@ def test_shared_room_is_one_short_lived_context_not_robot_memory_or_vision():
         assert room[0]["identity_verified"] is False
         assert room[0]["physical_action_verified"] is False
         bundle = compose_brain_context([], [], timeline)
-        assert "shared room USB station" in bundle.interaction.lower()
+        assert "shared room usb station" in bundle.interaction.lower()
         assert "not my own sight" in bundle.interaction.lower()
         assert "630 ppm" in bundle.interaction
     assert all(not hub.tool_history[ident] for ident in ids)
@@ -337,7 +337,9 @@ def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatc
         received.append(observation.seq)
 
     feed.on_observation = callback
-    feed._read_port(lambda: bool(opened) and opened[0].reads < 3 or not opened)
+    # The consumer remains live while the final packet is delivered; a real
+    # cancellation between readline and callback must still suppress delivery.
+    feed._read_port(lambda: not opened or opened[0].reads < 4)
     assert len(opened) == 1
     assert attempts == [1, 2]
     assert received == [2]
