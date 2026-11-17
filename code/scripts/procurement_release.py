@@ -38,6 +38,10 @@ SYSTEM_GATES = (
     "rgb_and_haptic_real_device_effects_and_power",
     "room_soil_probe_enabled_and_calibrated",
     "source_builds_and_tests",
+    "battery_pack_ntc_to_charger_ts_thermal_fault_trial",
+    "battery_pack_actual_length_and_enclosure_clearance",
+    "amplifier_speaker_power_limit_and_thermal_trial",
+    "dock_contacts_recess_reverse_polarity_and_current_limit",
     "user_approved_costed_exact_carrier_bill_of_materials",
     "source_first_upstream_reuse_and_license_audit",
 )
@@ -47,6 +51,7 @@ PART_GATES = (
     "mechanical_fit_receipt", "functional_or_fault_trial",
     "alternative_comparison",
     "verified_landed_unit_price",
+    "received_quantity_revision_and_owned_stock_inspection",
 )
 
 
