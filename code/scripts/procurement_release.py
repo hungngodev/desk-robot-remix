@@ -848,6 +848,102 @@ def first_robot_pilot_samples(report: dict) -> dict:
     }
 
 
+
+def pilot_supplier_cart(report: dict) -> dict:
+    """Exact-source first-robot evaluation cart; never a whole robot release."""
+    pilot = first_robot_pilot_samples(report)
+    items = []
+    seen = set()
+    for role in pilot["roles"]:
+        qty = role["pilot_sample_quantity"]
+        if not qty:
+            continue
+        if role["pilot_action"] != "SAMPLE_ONLY_FOR_BENCH_VERIFICATION":
+            raise ValueError("Unreviewed role in supplier cart")
+        seller, sku, url = role["source_vendor"], role["source_sku"], role["source_url"]
+        if not all(isinstance(x, str) and x.strip()
+                   for x in (seller, sku, url)) or not url.startswith("https://"):
+            raise ValueError("Missing exact supplier and linked product")
+        if (seller, sku) in seen:
+            raise ValueError("Duplicate source SKU")
+        seen.add((seller, sku))
+        quote = role["historical_unit_quote_usd"]
+        items.append({
+            "id": role["id"], "name": role["name"], "vendor": seller,
+            "sku": sku, "product_url": url, "quantity": qty,
+            "historical_unit_quote_usd": quote,
+            "historical_line_quote_usd": round(qty * quote, 2)
+            if quote is not None else None,
+            "sample_is_complete_functional_channel":
+                role["sample_is_complete_functional_channel"],
+            "missing_for_functional_channel":
+                role["missing_for_functional_channel"],
+        })
+    items.sort(key=lambda x: (x["vendor"].casefold(), x["sku"]))
+    qty_sum = sum(x["quantity"] for x in items)
+    known_subtotal = round(sum(x["historical_line_quote_usd"]
+                               for x in items
+                               if x["historical_line_quote_usd"] is not None), 2)
+    if qty_sum != pilot["pilot_sample_count"] or (
+            known_subtotal != pilot["pilot_historical_quoted_subtotal_usd"]):
+        raise ValueError("Supplier cart differs from single authoritative plan")
+    return {
+        "source": "first_robot_pilot_samples",
+        "exact_sku_count": len(items),
+        "component_quantity": qty_sum,
+        "historical_priced_partial_subtotal_usd": known_subtotal,
+        "unpriced_skus": [x["sku"] for x in items
+                          if x["historical_unit_quote_usd"] is None],
+        "landed_total_verified": False,
+        "complete_robot_purchase_approved": pilot[
+            "whole_first_robot_purchase_approved"],
+        "lithium_charging_or_motor_motion_authorized": False,
+        "unresolved_roles": [
+            x["id"] for x in pilot["roles"]
+            if x["conditional_remaining"] and not x["pilot_sample_quantity"]
+        ],
+        "items": items,
+    }
+
+
+def render_pilot_supplier_cart(report: dict) -> str:
+    """A single copyable purchase worksheet for bench samples."""
+    cart = pilot_supplier_cart(report)
+    lines = [
+        "# Source-locked first robot evaluation cart",
+        "",
+        "Not a ready-to-assemble robot or a fleet order. Historical prices are "
+        "not live checkout quotes and exclude tax, shipping, conversion and "
+        "stock checks. No lithium charging or motor motion is authorized.",
+        "",
+        "| Seller | SKU | Part | Qty | Historical USD each | Link |",
+        "| --- | --- | --- | ---: | ---: | --- |",
+    ]
+    for x in cart["items"]:
+        quote = ("$" + format(x["historical_unit_quote_usd"], ".2f")
+                 if x["historical_unit_quote_usd"] is not None
+                 else "not verified")
+        lines.append(
+            f"| {x['vendor']} | {x['sku']} | "
+            f"{str(x['name']).replace('|', '/')} | "
+            f"{x['quantity']} | {quote} | {x['product_url']} |"
+        )
+    lines += [
+        "",
+        f"{cart['exact_sku_count']} SKUs; {cart['component_quantity']} items.",
+        "Priced-only historical subtotal USD "
+        + format(cart["historical_priced_partial_subtotal_usd"], ".2f"),
+        f"{len(cart['unpriced_skus'])} SKUs have unknown comparable USD price. "
+        "There is no verified landed total.",
+        "Bare TSAL6200 IR emitters are NOT complete driven dock channels. "
+        "They need separate rated transistors and current limiting.",
+        "Unlisted parts remain required in the canonical full-feature plan. "
+        "Do not omit safety, power or fit requirements.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def render_first_robot_pilot_samples(report: dict) -> str:
     """Two visible lists, with source-locked bench samples and all holds."""
     p = first_robot_pilot_samples(report)
@@ -1113,7 +1209,8 @@ def main() -> int:
                         help="Exit 2 unless every part and system receipt has passed")
     parser.add_argument("--format", choices=(
         "json", "csv", "markdown", "first-robot-json", "first-robot-markdown",
-        "pilot-samples-json", "pilot-samples-markdown"
+        "pilot-samples-json", "pilot-samples-markdown",
+        "pilot-cart-json", "pilot-cart-markdown"
     ), default="json", help="Project the canonical ledger without buying permits")
     args = parser.parse_args()
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
@@ -1132,6 +1229,10 @@ def main() -> int:
         print(json.dumps(first_robot_pilot_samples(report), indent=2))
     elif args.format == "pilot-samples-markdown":
         print(render_first_robot_pilot_samples(report), end="")
+    elif args.format == "pilot-cart-json":
+        print(json.dumps(pilot_supplier_cart(report), indent=2))
+    elif args.format == "pilot-cart-markdown":
+        print(render_pilot_supplier_cart(report), end="")
     else:
         print(json.dumps(report, indent=2))
     return 2 if args.require_release and not report["order_released"] else 0

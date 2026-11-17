@@ -1270,3 +1270,37 @@ def test_pilot_supplier_rows_never_mutate_canonical_fleet_source_references():
     assert mod.SOURCE_REFERENCES["i2c_mux"][0] == "Generic"
     assert mod.SOURCE_REFERENCES["mcp23017"][0] == "Generic"
     assert mod.PILOT_SAMPLE_PRODUCTS["i2c_mux"][2] == "COM-05-067"
+
+
+def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
+    import json
+    from collections import Counter
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    cart = mod.pilot_supplier_cart(mod.generate(plan))
+    assert cart["exact_sku_count"] == 13
+    assert cart["component_quantity"] == 24
+    assert cart["historical_priced_partial_subtotal_usd"] == 40.27
+    assert not cart["landed_total_verified"]
+    assert not cart["complete_robot_purchase_approved"]
+    assert not cart["lithium_charging_or_motor_motion_authorized"]
+    assert {"COM-05-067", "DFR0954"} <= set(cart["unpriced_skus"])
+    assert len(set((x["vendor"], x["sku"]) for x in cart["items"])) == 13
+    assert Counter(x["vendor"] for x in cart["items"])["ElectroPeak"] == 6
+    rows = {x["id"]: x for x in cart["items"]}
+    assert rows["cliff_obstacle"]["quantity"] == 8
+    assert rows["i2c_mux"]["quantity"] == 2
+    assert rows["dock_ir_emitter_channels"]["quantity"] == 2
+    assert rows["dock_ir_emitter_channels"][
+        "sample_is_complete_functional_channel"] is False
+    assert "rated_transistor_driver" in rows[
+        "dock_ir_emitter_channels"]["missing_for_functional_channel"]
+    assert "cap_power" in cart["unresolved_roles"]
+    assert "dock_contacts" in cart["unresolved_roles"]
+    rendered = mod.render_pilot_supplier_cart(mod.generate(plan))
+    assert "13 SKUs; 24 items." in rendered
+    assert "Priced-only historical subtotal" in rendered
+    assert "not verified" in rendered
+    assert "NOT complete driven dock channels" in rendered
+
+
