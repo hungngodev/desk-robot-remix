@@ -119,14 +119,14 @@ def verify(plan: dict, body: str, head: str) -> None:
                 or {(d.get("name"), d["address"]) for d in devices} != expected):
             raise ValueError(f"Accessory lane {channel} battery/wheel identity drift")
     ranges = bus["mux_ranges"]["channels"]
-    # Each selected TCA9548A lane isolates one VL53L4CD at its native
+    # Each selected TCA9548A lane isolates one VL53L0X at its native
     # 7-bit address. Reject a manifest that silently substitutes another
     # device or claims multiple same-address range sensors on one lane.
     for lane in ranges:
         devices = lane["devices"]
-        if (len(devices) != 1 or devices[0].get("name") != "VL53L4CD"
+        if (len(devices) != 1 or devices[0].get("name") != "VL53L0X"
                 or devices[0]["address"] != 0x29):
-            raise ValueError("Range lane must contain exactly one named VL53L4CD at 0x29")
+            raise ValueError("Range lane must contain exactly one named VL53L0X at 0x29")
     expected_roles = (
         "floor_front_left", "floor_front_right", "floor_rear_left",
         "floor_rear_right", "front_obstacle", "left_obstacle",
@@ -189,7 +189,7 @@ def render(plan: dict, body: str, head: str) -> str:
             devices = ", ".join(
                 f"{d['name']} (0x{d['address']:02X})" for d in lane["devices"]
             )
-            # The selected Pololu VL53L4CD carrier may pull external
+            # The selected low-cost VL53L0X carrier may pull external
             # SDA/SCL HIGH toward its VIN. A 5V VIN is not a 3.3V-safe
             # WROOM/mux connection just because the sensor carrier powers on.
             # This is a hard assembly hold, never a measured voltage claim.
@@ -231,7 +231,7 @@ def render(plan: dict, body: str, head: str) -> str:
         "  GPIO36/39 for dual IR. Real timing, optical baffles, RTC/ADC erratum",
         "  filtering and final homing remain entirely unqualified.",
         "* Breakout VCC and I2C pullups, connector pin order and cable gauge.",
-        "* All eight VL53L4CD carriers: identify PCB revision and verify VIN",
+        "* All eight VL53L0X carriers: identify PCB revision and verify VIN",
         "  plus upstream/downstream SDA/SCL HIGH voltages with motors OFF.",
         "  Do NOT energize any ToF lane until 5V WROOM exposure is excluded.",
         "* Printed fit, local cliff geometry, audio and charger bench trials.",
