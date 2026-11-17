@@ -70,6 +70,9 @@ class Coordinator:
         self.settings = settings
         self.heads = heads
         self.vision = vision
+        # Runtime injects its EXISTING continuous camera owner. Never create
+        # an independent physical video client for exploration.
+        self.multimodal = None
         self.locks = {r.id: asyncio.Lock() for r in settings.robots}
         self.jobs: dict[str, Job] = {}
         self.tasks: dict[str, asyncio.Task] = {}
@@ -460,12 +463,54 @@ class Coordinator:
 
     async def _explore(self, job: Job) -> dict:
         head = self.heads[job.robot_id]
+        last_live_frame_at = float("-inf")
 
         async def observe_camera() -> None:
-            jpeg = await _bounded_head_reply(
-                head.snapshot(), seconds=2.0,
-                timeout_message="Camera snapshot timeout",
-            )
+            nonlocal last_live_frame_at
+            if self.settings.mode == "hardware":
+                # Hardware exploration MUST consume a genuinely NEW
+                # authenticated XIAO frame from the one Mac MJPEG owner.
+                # A successful but stale snapshot is not motion evidence.
+                media = self.multimodal
+                if (media is None
+                        or not media.settings.voice_vision_tools_enabled
+                        or not media.stream_owns_camera(job.robot_id)):
+                    raise OperationError(
+                        "Hardware exploration requires live XIAO camera stream"
+                    )
+
+                def newest():
+                    return next((
+                        frame for frame in reversed(media.hub.frames[job.robot_id])
+                        if frame.source == "proactive"
+                        and frame.received_at > last_live_frame_at
+                        and 0 <= time.monotonic() - frame.received_at <= 1.0
+                    ), None)
+
+                frame = newest()
+                if frame is None:
+                    received = await _bounded_head_reply(
+                        media.wait_for_proactive_frame(
+                            job.robot_id, last_live_frame_at, timeout_s=2.0
+                        ), seconds=2.5,
+                        timeout_message="Live exploration camera stalled",
+                    )
+                    if not received:
+                        raise OperationError("Live exploration camera stalled")
+                    frame = newest()
+                if (frame is None or not media.stream_owns_camera(job.robot_id)
+                        or not media.settings.voice_vision_tools_enabled):
+                    raise OperationError(
+                        "Hardware exploration camera frame expired"
+                    )
+                last_live_frame_at = frame.received_at
+                jpeg = frame.jpeg
+            else:
+                # Simulation retains its historical synthetic snapshot.
+                jpeg = await _bounded_head_reply(
+                    head.snapshot(), seconds=2.0,
+                    timeout_message="Camera snapshot timeout",
+                )
             # An HTTP success with an empty, partial or non-JPEG response
             # is not evidence of a functioning XIAO camera stream.
             if (not isinstance(jpeg, bytes) or not 4 <= len(jpeg) <= 512000
