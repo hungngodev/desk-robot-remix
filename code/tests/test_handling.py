@@ -512,3 +512,20 @@ def test_out_of_order_host_callback_does_not_erase_newer_pose():
     assert qualified(gate, sample(sample_ms=last_sample + 2),
                      last_at + 1.5, new_sample=False) == ()
     assert gate.reference is None
+
+
+def test_late_valid_conversion_after_host_gap_cannot_erase_pose():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    assert gate.reference == (0, 0, 1)
+    previous_at, previous_sample = gate.last_at, gate.last_sample_ms
+    # Delivery after a long host delay is not a new physical conversion.
+    assert qualified(gate, sample(sample_ms=previous_sample - 1),
+                     previous_at + 2.0, new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
+    assert gate.last_at == previous_at
+    assert gate.last_sample_ms == previous_sample
+    # A genuinely newer conversion after that gap must revoke the pose.
+    assert qualified(gate, sample(sample_ms=previous_sample + 1),
+                     previous_at + 2.1, new_sample=False) == ()
+    assert gate.reference is None
