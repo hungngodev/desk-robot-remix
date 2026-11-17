@@ -43,11 +43,11 @@ one pin arrangement, not an unidentified generic module:
 | Haptic pulse Q | Active-HIGH 1Q pin 13 to AO3400 gate through suitably chosen gate resistor; external 100 kΩ gate pulldown to GND |
 | Unused inverse Q | Pin 4 no load |
 | Pulse RC | Pin 15 REXT/CEXT via 180 kΩ nominal timing resistor to 3V3; 1 µF nominal ceramic capacitor between pin 15 and pin 14 CEXT; pin 14 to ground |
-| Unused channel two | Tie all second-channel logic inputs to defined inactive levels following the exact manufacturer's datasheet; no floating CMOS inputs |
+| Channel two (DC only) | Reserved as a CPU heartbeat motor cutoff candidate in [dc-motor-independent-watchdog.md](dc-motor-independent-watchdog.md). Tie channel two inactive in STEP builds; only wire its independent 2B/2Q timer if the DC motor cutoff schematic is accepted. Do not connect it simultaneously to a STEP phase GPIO23 |
 | Motor circuit | Motor positive to verified regulated motor supply, motor negative to AO3400 drain, AO3400 source to GND, flyback diode cathode to motor positive and anode to drain |
 
-The manufacturer approximation for HC123 is `t = 0.45 * R * C`.
-The **nominal** 180 kΩ and 1 µF values imply about 81 ms. This is **not a
+TI specifies its approximate HC123 relation `t = 0.45 * R * C` **at 5 V**.
+The 180 kΩ and 1 µF example would imply about 81 ms **at that specified voltage**, not a proven 81 ms at the proposed 3.3 V logic rail. This is **not a
 verified upper bound**: capacitor derating, tolerance, startup, noise and
 retrigger behavior must be measured with the actual board. Check that a
 continuous GPB2 HIGH and an abruptly disconnected I2C bus cause **one short
