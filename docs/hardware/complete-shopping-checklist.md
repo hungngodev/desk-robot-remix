@@ -41,8 +41,8 @@ Other reported spares are not interchangeable with chosen modules: BerryIMU, MAX
 | pet or dock | AT42QT1010 momentary capacitive head touch | 5 | 4 | HOLD | At least one photographed; retain as independent local stop |
 | pet or dock | MAX30102 optical heartbeat paw pad breakout | 5 | 0 | HOLD | Original user HTML says this is APPROVED as a robot-mounted paw pad and claims about five are already owned. Independent photo audit did not establish exact stock. No purchase before recount and module voltage check. Use WROOM I2C 0x57, not Sense GPIO41/42 PDM mic. |
 | pet or dock | VL53L0X generic GY-530 I2C module | 40 | 40 | HOLD | Generic GY-530 VL53L0X: https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html |
-| pet or dock | TCA9548A 8 channel 3.3V compatible I2C multiplexer | 10 | 10 | HOLD | SparkFun BOB-16784: https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html |
-| pet or dock | MAX98357A I2S mono amplifier | 5 | 5 | HOLD | SparkFun DEV-14809: https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html |
+| pet or dock | TCA9548A 8 channel 3.3V compatible I2C multiplexer | 10 | 10 | HOLD | Generic TCA9548A: https://www.ti.com/product/TCA9548A |
+| pet or dock | MAX98357A I2S mono amplifier | 5 | 5 | HOLD | Generic MAX98357A: https://www.analog.com/en/products/max98357a.html |
 | pet or dock | 8 ohm 1 watt approximately 20 mm speaker | 5 | 5 | HOLD | SparkFun COM-26553: https://www.sparkfun.com/mini-speaker-1w-8-ohm.html |
 | pet or dock | CAP1188 8 zone capacitive touch breakout | 5 | 5 | HOLD | Choose generic 3.3V CAP1188 I2C breakout at common 0x29 or strapped 0x28; range 0x70 mux is verified off before 0x71 lane0 opens |
 | pet or dock | Copper tape touch electrode and insulating backing set | 5 | 5 | HOLD | Eight zones per pet, not more controllers |
@@ -64,7 +64,7 @@ Other reported spares are not interchangeable with chosen modules: BerryIMU, MAX
 | pet or dock | BMP280 pressure and temperature module | 5 | 4 | HOLD | One photographed; do not mistake for humidity sensor |
 | pet or dock | SHT41 humidity and temperature module | 5 | 5 | HOLD | Breath reaction with condensation resistant mounting |
 | pet or dock | PN532 I2C NFC reader module with IRQ/reset pins | 5 | 5 | HOLD | Select genuine 3.3V I2C PN532 breakout at 0x24; WROOM already has bounded read-only Seeed-derived SAM and tag polling. Current source polls without controlling reset/IRQ pins through MCP23017. Verify the exact carrier mode straps, startup/reset requirements, I2C readiness and mechanical antenna fit before physical qualification. |
-| pet or dock | MCP23017 16 channel I2C GPIO expander | 5 | 5 | HOLD | Waveshare 15391: https://www.waveshare.com/mcp23017-io-expansion-board.htm |
+| pet or dock | MCP23017 16 channel I2C GPIO expander | 5 | 5 | HOLD | Generic MCP23017: https://www.microchip.com/en-us/product/MCP23017 |
 | pet or dock | 3V coin vibration motor | 5 | 4 | HOLD | One photographed; buy further units after count |
 | pet or dock | AO3400 class logic MOSFET, flyback diode and pulldown | 5 | 5 | HOLD | MCP23017 optional output drives rated low-side switch |
 | pet or dock | Two 38 kHz demodulated IR receivers, Vishay TSOP38438 reference, mounted behind separate directional baffles | 10 | 10 | HOLD | One receiver to WROOM GPIO36 and one to GPIO39; 3.3V supply, active LOW, external bias and the correct physical TSOP pin order. Reuse reference Vishay TSOP38438 datasheet and ESP32 RMT receiver source. Receiver chip candidate only, no measured sunlight immunity, range or fit. |
