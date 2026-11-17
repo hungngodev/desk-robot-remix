@@ -235,6 +235,50 @@ int main() {
       for (std::uint32_t at = 61; at < 66; ++at) bus.poll(guard, at);
       CHECK(guard.try_rearm(70)); // requires five entirely new samples
     }
+    {
+      // The near-field floor minimum is inclusive: 15/29 fail, 30 passes.
+      for (const std::uint16_t too_close : {15U, 29U}) {
+        Wire = TwoWire{};
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        Wire.tof_force_mm = too_close;
+        bus.poll(guard, 60); // diagnostic side lane
+        bus.poll(guard, 61); // safety-critical floor lane
+        CHECK(guard.fault() == desk_robot::CliffFault::InvalidSample);
+        CHECK(!guard.evaluate(61));
+        CHECK(!guard.try_rearm(61));
+      }
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      Wire.tof_force_mm = 30;
+      bus.poll(guard, 60);
+      bus.poll(guard, 61);
+      CHECK(guard.fault() == desk_robot::CliffFault::None);
+      CHECK(guard.evaluate(61));
+    }
+    {
+      // A mux ACK cannot qualify an uninitialized optical device.
+      // Four independent Pololu startup failure paths must fail closed.
+      for (int failure = 0; failure < 4; ++failure) {
+        Wire = TwoWire{};
+        bool& injected = failure == 0 ? VL53L0X::fail_init() :
+                         failure == 1 ? VL53L0X::fail_timeout() :
+                         failure == 2 ? VL53L0X::fail_timing_budget() :
+                                        VL53L0X::fail_start_status();
+        injected = true;
+        desk_robot::TofBus bus;
+        CHECK(!bus.begin(21, 22, -1));
+        CHECK(!bus.ready());
+        injected = false;
+        desk_robot::CliffGuard guard;
+        CHECK(guard.configure(calibration()));
+        bus.poll(guard, 50);
+        faulted(guard);
+      }
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {
