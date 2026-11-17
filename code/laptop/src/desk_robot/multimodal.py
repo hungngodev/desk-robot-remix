@@ -722,6 +722,7 @@ class MultimodalOrchestrator:
                 "model_latency_last_ms": None,
                 "sensor_triggers": 0, "sensor_bursts": 0,
                 "sensor_coalesced": 0, "sensor_deferred_human": 0,
+                "sensor_stream_reuses": 0,
                 "sensor_trigger_to_first_jpeg_last_ms": None,
                 "sensor_followup_frames": 0, "proactive_camera_preemptions": 0,
                 "native_speech_camera_reuses": 0,
@@ -959,6 +960,19 @@ class MultimodalOrchestrator:
             self._metrics[robot_id]["sensor_deferred_human"] += 1
             return  # any live human voice owns the fleet's camera priority
         self._cancel_proactive_snapshot(robot_id)
+        # The selected Sense hardware runs one *continuous* authenticated
+        # MJPEG stream. A sensor edge labels RAM context immediately; the next
+        # streamed frame already reaches the pet's visual change gate. Starting
+        # a second /camera.jpg "confirmation burst" races that same physical
+        # sensor and returns busy, even when the stream temporarily reconnects.
+        # Keep snapshot confirmation only for test/legacy heads without a
+        # persistent feed. Stream outage must fail closed, not trigger pulls.
+        if self.stream_owns_camera(robot_id):
+            pending = self._sensor_tasks.get(robot_id)
+            if pending is not None and not pending.done():
+                pending.cancel()
+            self._metrics[robot_id]["sensor_stream_reuses"] += 1
+            return
         pending = self._sensor_tasks.get(robot_id)
         if (pending is not None and not pending.done()
                 or now - self._last_sensor_request[robot_id] < 0.8):
