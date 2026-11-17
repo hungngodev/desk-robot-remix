@@ -33,7 +33,7 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
     assert [job[0] for job in verify.steps("dock", tmp_path)] == [
         "dock-01", "dock-02", "dock-03", "dock-04", "dock-05"
     ]
-    assert len(verify.steps("all", tmp_path)) == 21
+    assert len(verify.steps("all", tmp_path)) == 20
     with pytest.raises(ValueError):
         verify.steps("physical-accepted-by-a-badge", tmp_path)
 
