@@ -356,3 +356,17 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
     assert rows["BQ24075 battery power path and BQ27441 gauge"][5] == "0"
     assert "Reuse reportedly owned spare DRV8833" in rows["DRV8833 dual H bridge"][6]
 
+
+
+def test_dock_uses_generic_nano_not_brand_premium():
+    """Dock beacon must match the existing Arduino Nano firmware target."""
+    register = (mod.PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text()
+    row = next(line for line in register.splitlines()
+               if line.startswith("| " + chr(96) + "dock_ir_beacon_controller" +
+                                  chr(96) + " |"))
+    assert "Generic classic Arduino Nano" in row
+    assert "Seeeduino Nano" not in row
+    assert "Unquoted" in row
+    firmware = (mod.PLAN.parents[2] / "code/firmware/dock/platformio.ini").read_text()
+    assert "board = nanoatmega328" in firmware
+    assert "Arduino-IRremote.git#v4.7.1" in firmware
