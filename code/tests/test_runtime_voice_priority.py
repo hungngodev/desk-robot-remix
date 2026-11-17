@@ -218,6 +218,11 @@ async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
         async with asyncio.timeout(2):
             while heads["robot-01"].captures < 1:
                 await asyncio.sleep(.01)
+        # A snapshot() call started does not mean its JPEG was decoded and
+        # committed to the shared hub. Wait for the actual speech receipt.
+        async with asyncio.timeout(2):
+            while not visual.hub.frames["robot-01"]:
+                await asyncio.sleep(.01)
         assert visual.hub.frames["robot-01"][-1].source == "speech"
     finally:
         release.set()
@@ -582,7 +587,11 @@ async def test_autonomous_observation_starts_without_voice_or_motor_authority(
     )
     runtime._voice_task = None
     runtime.voice_events = None
+    runtime._room_task = None
+    runtime._closed = False
+    runtime.multimodal = None
     runtime.pet = Pet()
+    runtime.settings.room_station_enabled = False
     try:
         await runtime.start()
         assert events == [
