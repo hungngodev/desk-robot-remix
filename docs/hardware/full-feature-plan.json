@@ -115,7 +115,7 @@
       "name": "MAX98357A I2S mono amplifier",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "Direct Sense audio; do not buy an analog DAC for owned PAM8403 Candidate wiring frozen to a measured current-rated 3.3V audio supply for selected 8ohm 1W speaker; never assume 5V amp power or XIAO 3V3 pin capacity.",
+      "notes": "Direct Sense audio; do not buy an analog DAC for owned PAM8403",
       "group": "pet"
     },
     {
