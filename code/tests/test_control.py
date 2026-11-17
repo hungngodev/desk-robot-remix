@@ -1161,6 +1161,7 @@ async def test_hardware_exploration_uses_live_hub_frames_not_individual_snapshot
     c.multimodal = SimpleNamespace(
         settings=settings,
         stream_owns_camera=lambda _robot_id: True,
+        status=lambda _robot_id: {"camera_stream_connected": True},
         hub=SimpleNamespace(frames={"robot-01": frames}),
         wait_for_proactive_frame=no_new_frame,
     )
@@ -1192,6 +1193,7 @@ async def test_hardware_exploration_rejects_stale_stream_receipt_before_drive(se
     c.multimodal = SimpleNamespace(
         settings=settings,
         stream_owns_camera=lambda _robot_id: True,
+        status=lambda _robot_id: {"camera_stream_connected": True},
         hub=SimpleNamespace(frames={"robot-01": frames}),
         wait_for_proactive_frame=stale_stream,
     )
@@ -1199,5 +1201,32 @@ async def test_hardware_exploration_rejects_stale_stream_receipt_before_drive(se
         with pytest.raises(OperationError, match="camera stalled"):
             await c._explore(Job("stale-video", "robot-01", "exploration"))
         assert not any(cmd.startswith("drive ") for cmd in head.commands)
+    finally:
+        await c.close()
+
+
+async def test_hardware_exploration_rejects_reconnecting_camera_task(settings):
+    # A long-lived MJPEG worker may be in its reconnect/backoff loop while
+    # stream_owns_camera still returns True. No fresh physical socket means
+    # a cached JPEG is not a navigation permission.
+    c, head = make(settings)
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    jpeg = await head.snapshot()
+    async def healthy(_robot_id, *, require_front_clearance=False):
+        return {"armed": True}
+    c._assert_armed_health = healthy
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _robot_id: True,
+        status=lambda _robot_id: {"camera_stream_connected": False},
+        hub=SimpleNamespace(frames={"robot-01": [SimpleNamespace(
+            source="proactive", jpeg=jpeg, received_at=time.monotonic()
+        )]}),
+    )
+    try:
+        with pytest.raises(OperationError, match="connected live XIAO"):
+            await c._explore(Job("reconnect-video", "robot-01", "exploration"))
+        assert not any(command.startswith("drive ") for command in head.commands)
     finally:
         await c.close()
