@@ -13,6 +13,7 @@ from .memory import MemoryStore
 from .multimodal import MultimodalOrchestrator
 from .pet import PetController
 from .room_station import RoomObservation, RoomSerialFeed
+from .soil_calibration import SoilCalibration
 from .simulator import (
     SimulatedChat,
     SimulatedHead,
@@ -128,11 +129,17 @@ class Runtime:
                     "Room station requires pip install '.[room]' for pyserial"
                 ) from exc
             loop = asyncio.get_running_loop()
+            dry = self.settings.room_station_soil_dry_adc
+            soil_calibration = (
+                SoilCalibration(dry, self.settings.room_station_soil_wet_adc)
+                if dry is not None else None
+            )
             self.room_feed = RoomSerialFeed(
                 self.settings.room_station_port,
                 lambda observation: self._queue_room_observation(
                     loop, observation
                 ),
+                soil_calibration=soil_calibration,
             )
             self._room_task = asyncio.create_task(
                 self.room_feed.run(self._room_stop),
