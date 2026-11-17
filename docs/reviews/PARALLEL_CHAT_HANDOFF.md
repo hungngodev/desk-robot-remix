@@ -1,3 +1,102 @@
+# Current active audit and comment disposition, November 17 2026
+
+This is the **current entry point** for canonical draft PR #17. Older notes
+below remain historical snapshots of the commit they inspected, NOT current
+implementation instructions or proof of present test status. Preserve the
+original audits and exact historical CI evidence, but reconcile against
+the latest source before reimplementing any proposed feature.
+
+## PR comment cleanup and review dispositions
+
+The PR conversation had 157 top-level comments at this audit. GitHub's
+available connected comment API exposes edit and review-thread resolution
+but not comment deletion. Four materially misleading earlier notes have
+been edited in place with a SUPERSEDED/HISTORICAL banner while preserving
+their original reasoning:
+* 6827922199: old premium VL53L4CD hardware direction; no longer selected
+* 6826600053: old BQ24074 current assumption; corrected in 6829660823
+* 6829510138: zero-step CI incident; later real jobs executed
+* 6822424469: old AprilTag native detector semaphore release race; current
+  detector holds its slot until its actual executor Future completes
+
+Inline source review threads F1 (CAP1188 register transaction), F2 (AMG8833
+temperature band), R2 (USB rejection counters) and R1 (room callback contract)
+are currently marked **resolved**. R1 is resolved as a *production callback
+contract*: Runtime uses a call_soon_threadsafe one-pending-observation handoff
+and the RoomSerialFeed docstring explicitly REQUIRES alternate callbacks
+never to block. Python cannot forcibly unwind arbitrary third-party code that
+hangs in a foreign callback; that theoretical limitation is retained, not
+silently reported eliminated. The D15 DC motor heartbeat thread remains
+**open for physical acceptance**. The full DC PlatformIO profile now defines
+the heartbeat and main.cpp rejects unsafe full-sensor DC variants without
+the macro, but the external CD74HC123 Q2 to DRV8833 nSLEEP CPU-halt cutoff
+has not been measured on an actual board.
+
+## Attached audit adjudication: do not replace the selected build
+
+The latest external suggested plan includes useful references to Xiaozhi,
+ESP-SR, Pipecat, LiveKit, Qwen, Frigate and proven peripheral libraries.
+These are design references to consider through compatible adapters, not
+authority to reinstall a second speech server, replace the active single
+Xiaozhi speaker owner, or invent a second memory database. Review exact
+upstream source and license before copying anything.
+
+**Rejected as contradictory or unsafe until a separate reviewed design
+change:** swapping the owned/ordered XIAO ESP32S3 Sense head plus existing
+WROOM32 guarded body for a generic S3CAM + C3; reducing eight selected
+inexpensive VL53L0X lanes (0x29 via TCA9548A 0x70) to only two XSHUT
+renumbered sensors; accepting two repeated invalid desk-edge samples before
+stopping instead of the existing local fail-closed guard; blindly assigning
+unverified ESP32 GPIO maps; assuming every GY-530 breakout has 5 V-safe
+ESP32 I2C pullups; or allowing voice-model MCP tools to send unsupervised
+motor PWM. The second 0x71 TCA9548A is the separately owned accessory bus.
+Mac remains the central intelligence, per-pet memory and fleet speech
+scheduler. One physical complete robot must qualify before four more copies.
+
+**Actual source guard added:** purchase generator commit `8bd8c2f` refuses
+the architecture string or board identities silently changing to generic
+S3CAM/C3 while preserving old abstract purchasing IDs. Regression commit
+`c4745e7` covers the three substitution cases. Existing mux/sensor
+purchase gates retain all eight cheap VL53L0X. This gate prevents a mistaken
+sourcing approval; it does not make the selected architecture physically
+qualified.
+
+**Additional source correction:** `abd0562` documents the required
+nonblocking RoomSerialFeed callback contract, consistent with the already
+committed latest-only Runtime handoff. No new listener, USB port or worker
+was created.
+
+## Remaining active blockers, do not close as historical
+
+* Full current-head Python/host pytest and native voice integration have
+  not passed; a completed older run 44135807561 had 2,131 Python passes,
+  90 failures and one error while C++ sanitizer and firmware compile jobs
+  succeeded on that older SHA only. Inspect current run logs before
+  updating this claim.
+* Actual XIAO AEC double-talk, barge-in to speaker DMA/audio silence,
+  native completed tool facts in live conversation, real playback ACK,
+  context consent and five-pet acoustic arbitration require physical tests.
+  Current native MiniCPM fallback narration is not proven same-KV duplex
+  tool consumption.
+* The 42 robot/dock primary roles, 7 shared room roles and 14 non-additive
+  detail decisions are NOT 63 automatically additive purchases. Supplier
+  PCB revision, 3.3 V pullups, eight-lane cliff optics, loaded stop geometry,
+  DC watchdog, protected 1S pack, BQ charger and boost ratings, fitted
+  gripper/chassis, contact-safe docking and thermal/audio load remain HOLD.
+  The canonical full-feature plan records `physical_trial_count=0` and
+  `prices_complete=false`. Never authorize the whole first-unit cart or
+  five-unit fleet based on source-only tests.
+* No new Adafruit purchases. Use established upstream and generic parts
+  already integrated when the performance, reliability, cost and license
+  evidence supports them. Avoid unsupported installs of Mem0, Cognee and
+  Obsidian services as mandatory runtime dependencies.
+
+The new source/test commits in this entry were accepted by GitHub but
+have NOT been executed through full Python pytest or real hardware in this
+audit. Continue small verified commits to the SAME PR, not a new PR.
+
+---
+
 
 
 ### November 17 handling host callback ordering fence
