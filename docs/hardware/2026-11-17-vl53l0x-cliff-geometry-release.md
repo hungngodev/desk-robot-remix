@@ -83,6 +83,49 @@ cannot prevent falling, even if its range reading is perfect. The firmware
 `CliffGuard` latches invalid readings or out of range but hardware placement
 and stopping inertia remain physical proof obligations.
 
+## All-direction stopping, not just a forward ray
+
+A forward lead calculation still cannot clear reverse, turn-in-place or
+curved commands. The actual WROOM body source permits independent positive
+and negative wheel speeds. For a differential drive with measured separation
+`B` and left/right ground speeds `vL, vR`, the center translational
+speed is `(vR+vL)/2`, the rotation rate is `(vR-vL)/B`, and a point
+`(x,y)` on the chassis has instantaneous planar velocity
+`(v - omega*y, omega*x)`. This is the standard publicly documented model
+at [IEEE RAS University](https://www.ieee-ras.org/ras-university/?ras_page=docs%2Fchap2_sensing%2Fsensors-and-sensing)
+and [York University's differential drive lab](https://www.eecs.yorku.ca/course_archive/2019-20/W/1011/labs/7/differential-drive-robot.html).
+The pure Python `screen_planar_cliff_coverage` function in the EXISTING
+`code/scripts/cliff_mount_preflight.py` implements these identities
+without replacing any robot motor controller.
+
+For every moving wheel or caster/other supporting contact, it calculates
+that point's movement direction and speed, then checks whether at least one
+of the **four downward** optical sensor positions is sufficiently ahead
+along the point's actual movement tangent. It checks source-bound 25 degree
+FoV rearward tabletop setback, observed worst braking distance, remaining
+detection latency, and margin. Its strict default gives **zero lateral
+coverage credit** absent qualified coverage measurements. An owner may
+supply real lateral coverage, but cannot claim more than the sensor's
+nominal optical footprint radius.
+
+Run this pure function for the full set of reversible, straight, spin,
+and maximum-curvature motor cases using the same actual on-chassis
+sensor and support coordinates. An arrangement that passes straight
+forward can fail on reverse or a zero-translation pivot. Example
+regressions reproduce both patterns and require failure when exposed.
+**It does NOT certify every possible curved trajectory or an actual
+desk edge.** The four sensors need measured geometry, tilt, packet
+freshness, return behavior and actual motor stop results before the design
+may use their readings to permit near-edge motion.
+
+The positions of **every load-bearing wheel/caster, corner and gripper
+overhang** must be recorded, not only the two drive wheels. Overhanging
+parts require their own collision/drop assessment; a fixed-body point
+velocity alone does not model articulated gripper sweep. Mechanical CAD
+interference, power path, communication fault and actuator stalls must
+be separately checked. No wheel command or camera inference overrides a
+local cliff stop.
+
 ## Exact breakout electronics, no inferred five volt tolerance
 
 The [ElectroPeak SEN-19-006 product page](https://electropeak.com/gy-530-vl53l0x-laser-range-finder)
