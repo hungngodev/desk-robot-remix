@@ -1,3 +1,52 @@
+## November 17 source edge-case burn-down: vision, cliff telemetry, procurement
+
+This checkpoint implements three missing acceptance details identified after rereading
+the original long-form requirements and uploaded 61 KB architecture audit.
+Only existing PR #17 and its canonical Mac + XIAO Sense + WROOM design were modified.
+Source and regression commits, each applied with an expected-head lease:
+
+1. `987855c8`: `VisualChangeGate` now rejects NaN, Infinity, nonnumeric or
+   boolean frame change thresholds and confirmation counts, and bounds the
+   positive integer confirmation count to 16. Regression:
+   `code/tests/test_pet.py::test_visual_change_gate_rejects_invalid_confirmation_budget`
+   and change fraction variants. This prevents accidental one-frame triggering
+   or silent never-trigger behavior; actual motion optical calibration is
+   still unmeasured.
+2. `da53b76a`: `CliffGuard::diagnostic` now reports `valid=false` when a
+   sample reaches its configured freshness deadline, while retaining
+   `present`, raw distance and age for fault diagnosis. Previously the
+   physical guard rejected stale values but the JSON `ranges.valid_mask`
+   could still describe them as valid. The local STOP latch and rearm
+   authority were not modified. Regression:
+   `code/firmware/body/tests/cliff_tests.cpp::diagnostics_expire_validity_without_clearing_raw_or_latched_fault`
+   covers the exact deadline, preserved raw sample, read-only behavior and
+   uint32 timer rollover.
+3. `f49219b4`: procurement blocks Adafruit branded **new** hardware when
+   the evidence names a generic reseller but the SKU, brand, product name,
+   product URL, resolved item or revision still identifies Adafruit.
+   Previously only the vendor string was checked. The same guard applies to
+   pet roles, shared room parts and selected linked decisions.
+   Regression: `code/tests/test_procurement_release.py::test_adafruit_brand_hidden_behind_generic_reseller_is_still_blocked`.
+   Already-owned boards and software library reuse are not prohibited.
+
+**Verification status:** source changes and regression files are committed and
+read back through GitHub. These tests have NOT been reported green on the
+new exact head by this checkpoint. Previous successful software CI run
+`44166153833` belongs to historical commit `b7ec77fc`, not these edits.
+Recheck GitHub Actions for the exact current commit, including Python tests,
+C++ sanitizers, XIAO Sense ESP-IDF firmware and WROOM PlatformIO build;
+never carry an older PASS forward to a newer SHA.
+
+**Physical and purchasing gates remain HOLD.**
+`docs/hardware/full-feature-plan.json` still records
+`physical_trial_count=0`, `prices_complete=false` and
+`qualified_assumptions=false`. Real loaded stopping distance, external
+CD74HC123 to DRV8833 nSLEEP cutoff with CPU-halt trial, 3.3 V carrier
+electrical tests, device AEC and audio flush, full charger/pack/dock/IR
+power trials, fitted CAD and grasp validation cannot be certified from
+source or simulated test passes. No new PR, board swap, extra audio
+framework, new Adafruit purchase or automated unsafe cliff recovery.
+
 
 
 ### November 17 handling callback order regression, execution pending
