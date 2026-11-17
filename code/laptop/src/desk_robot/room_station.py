@@ -231,6 +231,15 @@ class RoomSerialFeed:
 
     Port opens/reconnects are the only decoder epoch reset. Failed or stale
     frames are omitted; no old sample can reappear as a new room observation.
+
+    Callback contract: on_observation MUST return promptly, perform no slow
+    I/O, and must not block on model inference, locks, UI or async futures.
+    It runs synchronously in the owned serial reader thread. An arbitrary
+    permanently blocked third-party callback cannot be cancelled safely by
+    Python and prevents confirmation of worker shutdown. Production Runtime
+    satisfies this contract through a short call_soon_threadsafe handoff and
+    one coalesced latest-only event loop callback, not work in this thread.
+    Alternate consumers must supply their own similarly bounded handoff.
     """
     def __init__(self, port: str, on_observation: Callable[[RoomObservation], None],
                  soil_calibration: SoilCalibration | None = None):
