@@ -37,7 +37,7 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
             raise ValueError("Strictly increasing recorded receive timestamps required")
         last_at = stamp
         sequences = (reading["left_seq"], reading["right_seq"])
-        if any(after < before for after, before in zip(sequences, previous)):
+        if any(after < before for after, before in zip(sequences, previous, strict=True)):
             raise ValueError("Reboot or out-of-order receiver sequences: restart trial")
         if sequences == previous and any(reading[f"{side}_valid"] for side in ("left", "right")):
             # A repeated HTTP status cannot count as a fresh optical sample.
