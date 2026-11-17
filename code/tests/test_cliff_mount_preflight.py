@@ -93,6 +93,10 @@ def test_late_braking_fails_even_with_feasible_lens_height():
 
 @pytest.mark.parametrize("kwargs", [
     {"chassis_mount_above_desk_mm": float("nan")},
+    {"chassis_mount_above_desk_mm": 10 ** 1000},
+    {"remaining_vision_or_sensor_latency_ms": 10 ** 1000},
+    {"remaining_vision_or_sensor_latency_ms": 1e308,
+     "measured_travel_speed_mm_s": 1e308},
     {"chassis_mount_above_desk_mm": True},
     {"chassis_mount_above_desk_mm": -1},
     {"optical_tilt_deg": 90},
