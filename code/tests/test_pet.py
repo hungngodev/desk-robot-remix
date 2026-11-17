@@ -2405,6 +2405,11 @@ async def test_proactive_speech_rechecks_all_human_vad_after_slow_model(
         def user_active(self, robot_id, now):
             return robot_id in self.active
 
+        def interaction_timeline(self, robot_id, now, limit=10):
+            # The real hub always exposes a bounded context timeline.
+            # This VAD fake deliberately has no additional observations.
+            return []
+
         def discard_video(self, robot_id):
             pass
 
