@@ -31,6 +31,17 @@ inline unsigned ina226_bus_mv(std::uint16_t raw) {
 inline int ina226_shunt_uv(std::int16_t raw) {
   return static_cast<int>(raw) * 5 / 2;
 }
+inline bool ina226_pack_current_ma(int signed_shunt_uv,
+                                   unsigned shunt_milliohm, int& out_ma) {
+  // TI INA226: +/-81.92mV, 2.5uV LSB. Choose exactly one physically
+  // inspected 5mOhm / 2W Kelvin-sensed shunt for pack-line measurements.
+  // uV / mOhm = mA. Never guess current from a breakout board's
+  // uninspected built-in shunt, nor from CHG/PGOOD indicator pins.
+  if (shunt_milliohm != 5U ||
+      signed_shunt_uv <= -81920 || signed_shunt_uv >= 81920) return false;
+  out_ma = signed_shunt_uv / static_cast<int>(shunt_milliohm);
+  return true;
+}
 struct AngleRaw {
   bool present = false, valid = false;
   std::uint16_t angle = 0;
@@ -76,6 +87,13 @@ struct GaugeRaw {
   bool monitor_present = false, monitor_valid = false;
   unsigned bus_mv = 0;
   int shunt_uv = 0;
+  // Sign convention only if real pack wiring has charger BAT upstream
+  // of the 5mOhm shunt and protected PACK+ downstream: positive = charge.
+  // This is calculated raw current, not physical shunt calibration or proof
+  // of charging, and is OFF unless a dedicated lab build selects shunt=5.
+  int pack_current_ma = 0;
+  bool pack_current_valid = false;
+  std::uint32_t monitor_sample_seq = 0;
   std::uint32_t at_ms = 0;
 };
 struct ProximityRaw {
