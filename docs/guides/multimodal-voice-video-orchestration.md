@@ -661,6 +661,20 @@ speaker lease is released. Existing native transport and tool executor
 are unchanged. Source regressions are in the current native omni tests.
 The isolated helper has passed Python checks, not a full repository suite.
 
+**November 17 live exploration source correction:** The guarded hardware
+exploration loop no longer opens its own repeated XIAO `head.snapshot()`
+requests while the Mac already holds one continuous MJPEG stream. Runtime
+passes its existing MultimodalOrchestrator to Coordinator, which accepts
+only a fresh proactive frame from the same three-frame RAM hub, tracks the
+last consumed receipt, and requires a NEW frame after each short movement
+pulse. No media owner, camera socket or motor authorization is created.
+If the stream is offline, revoked, stale or no next frame arrives, the
+existing exploration job stops under its existing WROOM safety watchdog
+and does not start another drive. Simulation retains its synthetic capture
+tests. New regressions in code/tests/test_control.py cover missing stream,
+one-pulse reuse refusal and stale stream frames. These are committed SOURCE
+tests, not yet full pytest or physical loaded exploration qualification.
+
 Physical AEC, speaker STOP and unplayed transcript truncation, live
 MiniCPM incorporation of prior tool results, five robot speaker
 arbitration, actual camera arrival latency, and complete desk/dock
