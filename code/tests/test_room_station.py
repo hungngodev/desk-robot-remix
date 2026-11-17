@@ -10,6 +10,7 @@ from desk_robot.brain_context import compose_brain_context
 from desk_robot.config import RobotConfig, Settings
 from desk_robot.multimodal import CameraFrameHub
 from desk_robot.room_station import RoomStationDecoder
+from desk_robot.soil_calibration import SoilCalibration
 
 
 def frame(seq=1, clock=1000):
@@ -40,6 +41,54 @@ def accept(payload, *, decoder=None, now=1.0):
     return (decoder or RoomStationDecoder()).accept(
         json.dumps(payload).encode(), now=now,
     )
+
+
+def test_measured_soil_calibration_flows_into_shared_room_observation():
+    payload = frame(seq=2, clock=5000)
+    payload["readings"]["soil"] = {
+        "valid": True, "sample_ms": 5000, "raw_adc": 2250,
+    }
+    raw = RoomStationDecoder().accept(json.dumps(payload), now=10.0)
+    assert "Station soil probe raw ADC 2250" in raw.summary
+    assert "relative soil moisture" not in raw.summary
+
+    decoder = RoomStationDecoder(soil_calibration=SoilCalibration(3200, 1300))
+    observation = decoder.accept(json.dumps(payload), now=10.0)
+    assert "Station soil probe raw ADC 2250" in observation.summary
+    assert "relative soil moisture 50% from measured calibration" in observation.summary
+    assert not observation.motion_authorized
+    assert not observation.charging_authorized
+    assert not observation.person_identified
+
+    payload["readings"]["soil"] = {"valid": False}
+    payload["seq"], payload["at_ms"] = 3, 6000
+    no_soil = decoder.accept(json.dumps(payload), now=11.0)
+    assert "relative soil moisture" not in no_soil.summary
+
+
+def test_room_station_soil_calibration_requires_a_real_pair_and_live_source():
+    robots = [RobotConfig(id="robot-01", name="Pip", token_env="A")]
+    port = "/dev/cu.usbmodemTEST"
+    setting = Settings(robots=robots, room_station_enabled=True,
+                       room_station_port=port,
+                       room_station_soil_dry_adc=3200,
+                       room_station_soil_wet_adc=1300)
+    assert (setting.room_station_soil_dry_adc,
+            setting.room_station_soil_wet_adc) == (3200, 1300)
+    with pytest.raises(ValueError, match="both measured"):
+        Settings(robots=robots, room_station_enabled=True,
+                 room_station_port=port, room_station_soil_dry_adc=3200)
+    with pytest.raises(ValueError, match="requires a real enabled"):
+        Settings(robots=robots, room_station_soil_dry_adc=3200,
+                 room_station_soil_wet_adc=1300)
+    with pytest.raises(ValueError, match="too close"):
+        Settings(robots=robots, room_station_enabled=True,
+                 room_station_port=port, room_station_soil_dry_adc=2000,
+                 room_station_soil_wet_adc=2050)
+    with pytest.raises(ValueError):
+        Settings(robots=robots, room_station_enabled=True,
+                 room_station_port=port, room_station_soil_dry_adc=True,
+                 room_station_soil_wet_adc=1300)
 
 
 def test_full_read_only_room_frame_has_provenance_not_actuator_authority():
