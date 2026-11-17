@@ -52,6 +52,12 @@ async def test_qualified_real_wroom_imu_tilt_reaches_only_own_memory(tmp_path):
         def clear(self, robot_id):
             assert robot_id in {r.id for r in settings.robots}
 
+        def discard_video(self, robot_id):
+            # Pet cleanup always clears transient camera evidence. This
+            # sensor-only test hub has no stored images but must honor the
+            # same identity-scoped invalidation contract.
+            assert robot_id in {r.id for r in settings.robots}
+
     pet.multimodal = SimpleNamespace(hub=Events())
     state = pet.states["robot-01"]
     state.enabled = True
