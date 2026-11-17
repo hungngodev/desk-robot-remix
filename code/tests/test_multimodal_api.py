@@ -1349,7 +1349,8 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
         assert "uncertain transcription" in text
         assert "I observed: Hello" not in text
         peer_text = other.json()["instructions"]
-        assert "I heard robot-01 say: I saw a pink key" in peer_text
+        assert "robot-01 said (peer report, not my sighting): I saw a pink key" in peer_text
+        assert "I heard robot-01 say" not in peer_text
         assert "favorite_game" not in peer_text
         assert "Hello, my little friend" not in peer_text
         settings.voice_memory_tools_enabled = False
