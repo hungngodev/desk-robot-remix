@@ -21,6 +21,30 @@ SOURCE_REFERENCES = {
     "i2c_mux": ("Generic", "TCA9548A", "https://www.ti.com/product/TCA9548A"),
     "mcp23017": ("Generic", "MCP23017", "https://www.microchip.com/en-us/product/MCP23017"),
     "amp": ("Generic", "MAX98357A", "https://www.analog.com/en/products/max98357a.html"),
+    "i2c_mux": (
+        "TCA9548A 8 channel 3.3V compatible I2C multiplexer",
+        "ElectroPeak", "COM-05-067",
+        "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
+        2, None),  # Seller displays GBP; do not fabricate USD conversion.
+    "cap1188": (
+        "CAP1188 8 zone capacitive touch breakout",
+        "ElectroPeak", "SEN-25-020",
+        "https://electropeak.com/cap1188-capacitive-touch-module", 1, 6.95),
+    "apds9960": (
+        "APDS9960 gesture proximity color light module",
+        "ElectroPeak", "SEN-24-027",
+        "https://electropeak.com/apds-9960-infrared-gesture-sensor-module",
+        1, 2.25),
+    "ads1115": (
+        "ADS1115 4 channel ADC breakout",
+        "ElectroPeak", "COM-05-045",
+        "https://electropeak.com/ads1115-16-bit-adc-4-channel-programmable-gain-amplifier-b00soy52cu",
+        1, None),  # Seller displays GBP.
+    "mcp23017": (
+        "MCP23017 16 channel I2C GPIO expander",
+        "ElectroPeak", "COM-05-093",
+        "https://electropeak.com/mcp23017-e-ss-16-channel-i-o-expansion-module-i2c-interface",
+        1, 4.50),
     "speaker": ("Challenge Electronics", "CS20-02P110-04-1X", "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069"),
 }
 
@@ -790,6 +814,7 @@ def first_robot_pilot_samples(report: dict) -> dict:
         "pilot_historical_quoted_subtotal_usd": round(sum(
             x["pilot_sample_quantity"] * x["historical_unit_quote_usd"]
             for x in decisions if x["pilot_sample_quantity"]
+            and x["historical_unit_quote_usd"] is not None
         ), 2),
         "actual_current_landed_cost_verified": False,
         "whole_first_robot_purchase_approved": one["purchase_approved"],
@@ -831,12 +856,13 @@ def render_first_robot_pilot_samples(report: dict) -> str:
     for x in p["roles"]:
         if not x["conditional_remaining"]:
             continue
-        source = (
-            f"{x['source_vendor']} {x['source_sku']}: {x['source_url']} "
-            f"(USD {x['historical_unit_quote_usd']:.2f} per unit, old quote)"
-            if x["pilot_sample_quantity"] else
-            "Exact PCB, harness or mechanical selection still required"
-        )
+        source = "Exact PCB, harness or mechanical selection still required"
+        if x["pilot_sample_quantity"]:
+            quote = (f"USD {x['historical_unit_quote_usd']:.2f} per unit, old quote"
+                     if x["historical_unit_quote_usd"] is not None
+                     else "currency or landed USD quote not verified")
+            source = (f"{x['source_vendor']} {x['source_sku']}: "
+                      f"{x['source_url']} ({quote})")
         lines.append(
             f"| {x['name']} | {x['conditional_remaining']} | "
             f"{x['pilot_sample_quantity']} | {x['pilot_action']} | {source} |"
