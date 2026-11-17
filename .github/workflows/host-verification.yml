@@ -10,11 +10,13 @@ on:
 permissions:
   contents: read
 
-# Only the newest PR head needs the expensive full firmware and host suite.
-# Preserve all verification jobs while cancelling superseded checkouts.
+# Continuous PR updates must not cancel a running long firmware build.
+# GitHub keeps one running and the most recent pending run per group;
+# intermediate pending revisions may be replaced, but completed runs
+# preserve executable evidence for their exact commit SHA.
 concurrency:
   group: host-verification-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   python-and-head-host:
