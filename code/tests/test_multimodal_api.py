@@ -472,7 +472,10 @@ def test_real_wroom_power_tool_reports_raw_gauge_only_without_charging_claim(
             "fuel_valid": True, "cell_mv": 3800, "soc_centi": 6000
         }}
         invalid = client.get(url, headers=headers)
-        assert invalid.status_code != 200
+        # A foreign WROOM reading is a hardware source failure, not a valid
+        # current robot measurement nor a request-level motor conflict.
+        assert invalid.status_code == 503
+        assert "robot identity mismatch" in invalid.json()["error"]
         settings.mode = "simulation"
         assert client.get(url, headers=headers).status_code == 403
 
