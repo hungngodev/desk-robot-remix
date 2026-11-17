@@ -43,6 +43,16 @@ def accept(payload, *, decoder=None, now=1.0):
     )
 
 
+@pytest.mark.parametrize("raw", [0, 4095, -1, 5000, True, 2250.0, "2250"])
+def test_soil_adc_contract_rejects_saturation_and_noninteger_without_calibration(raw):
+    payload = frame(seq=4, clock=5000)
+    payload["readings"]["soil"] = {
+        "valid": True, "sample_ms": 5000, "raw_adc": raw,
+    }
+    with pytest.raises(ValueError, match="Invalid or saturated raw soil ADC"):
+        RoomStationDecoder().accept(json.dumps(payload), now=10.0)
+
+
 def test_measured_soil_calibration_flows_into_shared_room_observation():
     payload = frame(seq=2, clock=5000)
     payload["readings"]["soil"] = {
