@@ -370,7 +370,7 @@ class Conversation:
                 # consent for a second pet to durably retain that speaker's
                 # words. Each pet may still retain its own sent speech.
                 continue
-            def persist_with_consent_cleanup() -> None:
+            def persist_with_consent_cleanup(peer=peer) -> None:
                 inserted = self.memory.remember(
                     peer.id,
                     event_id,
