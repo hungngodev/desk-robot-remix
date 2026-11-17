@@ -994,3 +994,60 @@ def test_current_speaker_sku_and_five_volt_amplifier_cannot_drift():
         assert "unresolved_current_two_watt_speaker_contract" in (
             report["missing_system_evidence"])
         assert not report["order_released"]
+
+
+def test_one_robot_cart_projects_all_linked_quantities_without_order_approval():
+    import json
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    fleet = mod.generate(plan)
+    one = mod.first_robot_projection(fleet)
+    assert (one["robot_count"], one["dock_count"],
+            one["shared_station_count"]) == (1, 1, 1)
+    assert one["parent_role_count"] == 49
+    assert one["linked_decision_count"] == 14
+    assert one["motor_variant"] == "unresolved"
+    assert one["purchase_approved"] is False
+    pet = {r["id"]: r for r in one["roles"] if r["scope"] == "pet or dock"}
+    room = {r["id"]: r for r in one["roles"] if r["scope"] == "shared station"}
+    assert pet["cliff_obstacle"]["prototype_target"] == 8
+    assert pet["cliff_obstacle"]["conditional_remaining"] == 8
+    assert pet["i2c_mux"]["prototype_target"] == 2
+    assert pet["xiao_sense"]["prototype_target"] == 1
+    # One ordered head is NOT delivered stock and must not be reordered
+    # for the first unit while its actual arrival is checked.
+    assert pet["xiao_sense"]["ordered_unreceived_not_verified"] == 1
+    assert pet["xiao_sense"]["conditional_remaining"] == 0
+    # Crucial motor decision: old available steppers are NOT automatically
+    # selected and no new missing stepper motors appear as purchases.
+    assert pet["stepper"]["prototype_target"] == 0
+    assert pet["uln2003"]["prototype_target"] == 0
+    assert pet["stepper"]["decision"] == "HOLD MOTOR CHOICE"
+    assert room["nfc_game_props"]["prototype_target"] == 10
+    linked = {item["id"]: item for item in one["linked_decisions"]}
+    assert linked["n20_motor_candidate"]["conditional_one_robot_quantity"] == 2
+    assert linked["drv8833_driver_candidate"]["conditional_one_robot_quantity"] == 1
+    assert linked["protected_ntc_pack"]["conditional_one_robot_quantity"] == 1
+    assert linked["dock_ir_transistor_channels"]["conditional_one_robot_quantity"] == 2
+    assert linked["room_nfc_game_tokens"]["conditional_one_robot_quantity"] == 10
+    assert not any(d["additive_purchase_authorized"] for d in one["linked_decisions"])
+    text = mod.render_first_robot_markdown(fleet)
+    assert text.count("## 1.") == 1
+    assert text.count("## 2.") == 1
+    assert "PROTOTYPE BUYING STATUS: HOLD" in text
+    assert "VL53L0X" in text
+
+
+def test_first_robot_projection_rejects_wrong_scope_and_variant():
+    import copy
+    import json
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan)
+    different_fleet = copy.deepcopy(report)
+    different_fleet["fleet_robots"] = 4
+    with pytest.raises(ValueError):
+        mod.first_robot_projection(different_fleet)
+    unknown = copy.deepcopy(report)
+    unknown["physical_motor_variant_in_cart"] = "fantasy"
+    with pytest.raises(ValueError):
+        mod.first_robot_projection(unknown)
+
