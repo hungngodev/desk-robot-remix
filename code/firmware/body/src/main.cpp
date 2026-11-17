@@ -434,6 +434,13 @@ void setup() {
   Serial.println(ir_ready ? "INFO dual_nec_rmt_rx_ready_read_only" :
                             "WARN dual_nec_rmt_rx_unavailable_motion_unchanged");
 #endif
+#if defined(DESK_ROBOT_REQUIRE_DC_NFAULT) && DESK_ROBOT_REQUIRE_DC_NFAULT
+  // Full guarded DC build demands fresh LOW-active DRV8833 nFAULT evidence
+  // on MCP23017 GPB3, not merely a toggling CPU heartbeat. Absence holds
+  // motor outputs off until real GPIOB evidence and local USB rearm.
+  control.require_dc_driver_fault_monitor(true);
+  Serial.println("INFO dc_driver_nfault_gpb3_required_unqualified_hardware");
+#endif
 #if defined(DESK_ROBOT_REQUIRE_DOCK_MONITOR) && DESK_ROBOT_REQUIRE_DOCK_MONITOR
   control.require_dock_monitor(true);
   Serial.println(accessories.readings().dock.present ?
