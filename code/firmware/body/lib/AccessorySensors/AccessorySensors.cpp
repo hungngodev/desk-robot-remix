@@ -455,6 +455,10 @@ void AccessorySensors::optional_gpio(std::uint32_t now_ms) {
   if (!extra.valid) return;
   extra.reed_closed = (bits & 0x01U) == 0; // external 3.3V switch to GND
   extra.pir_active = (bits & 0x02U) != 0;  // verified 3.3V output
+  // B3 is a separate read-only driver fault. MCP pullup B3 is disabled:
+  // require a 3.3V far-end pullup on DRV8833 nFAULT and a weak pulldown
+  // at the expander input, so an unplugged lead reads as a FAULT.
+  extra.driver_fault_active = (bits & 0x08U) == 0;
   extra.at_ms = now_ms;
   extra.sample_seq = next_nonzero_sensor_sequence(extra.sample_seq);
 }
