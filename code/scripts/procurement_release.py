@@ -836,8 +836,9 @@ def render_first_robot_pilot_samples(report: dict) -> str:
         "",
         "These exact samples are for low-energy bench experiments, not a "
         "physically qualified robot, motor drive, Li-ion battery or live dock. "
-        "Every quote is historical and excludes shipping and tax. Bare dock IR
-        "emitters are NOT complete transistor and current-limited driver channels.",
+        "Every quote is historical and excludes shipping and tax. "
+        "Bare dock IR emitters are NOT complete transistor drivers or "
+        "current-limited channels.",
         "",
         "## 1. Reported owned or incoming, not yet inspected",
         "",
