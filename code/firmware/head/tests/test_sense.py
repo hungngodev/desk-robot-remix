@@ -111,6 +111,14 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('head_touch_edges_.Observe(current)', bridge)
         self.assertIn('body_cap_edges_.Observe(', bridge)
         self.assertIn('body_cap_edges_.Reset()', bridge)
+        # A truncated WROOM JSON reply must never become sensory MCP
+        # evidence merely because its motors and watchdog look plausible.
+        self.assertIn('bool StatusValid(cJSON* json)', bridge)
+        for group in ('safety', 'ranges', 'touch', 'imu'):
+            self.assertIn('auto ' + group + ' = get(json, "' + group + '");', bridge)
+        self.assertIn('valid_mask->valueint & ~present_mask->valueint', bridge)
+        self.assertIn('age >= 200', bridge)
+        self.assertIn('!cJSON_IsBool(get(safety, "ready"))', bridge)
         self.assertIn('device_state == kDeviceStateIdle', source)
         self.assertIn('board->display_->SetEmotion(MoodName(action.mood))', source)
         self.assertIn('Stackchan', (board / 'stackchan_behavior.hpp').read_text())
