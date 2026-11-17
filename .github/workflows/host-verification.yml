@@ -77,6 +77,8 @@ jobs:
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_full
       - name: Compile DC only GPIO23 external watchdog lab firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_watchdog_lab
+      - name: Compile entire guarded DC plus haptic plus independent watchdog together
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_integrated_lab
       - name: Compile one shared Feather room station with pinned upstream drivers
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_bench
       - name: Compile full Feather room station including soil analog ADC
