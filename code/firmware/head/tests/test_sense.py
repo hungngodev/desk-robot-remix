@@ -165,6 +165,23 @@ class SenseOverlayTests(unittest.TestCase):
         )
         self.assertIn('physical TX silence unverified', writer)
 
+    def test_reference_underflow_diagnostics_are_rate_limited(self):
+        """Source-level diagnostic coverage, not acoustic qualification."""
+        header = (HEAD / "sense/sense_reference_codec.h").read_text()
+        code = (HEAD / "sense/sense_reference_codec.cc").read_text()
+        self.assertIn("bool ReadReferenceLocked(int16_t* dest, int frames);", header)
+        self.assertIn("uint32_t missing_reference_reads_ = 0;", header)
+        self.assertIn("uint32_t consecutive_missing_reference_reads_ = 0;", header)
+        self.assertIn("required > kRingSize || write_index_ < required", code)
+        self.assertIn("++missing_reference_reads_;", code)
+        self.assertIn("++consecutive_missing_reference_reads_;", code)
+        self.assertIn("std::fill_n(dest, frames, 0);", code)
+        self.assertIn("consecutive_missing_reference_reads_ = 0;", code)
+        self.assertIn("consecutive_missing >= 32", code)
+        self.assertIn("(consecutive_missing - 32U) % 256U == 0U", code)
+        # A diagnostic must not unilaterally mark hardware AEC as qualified.
+        self.assertNotIn("aec_physically_verified = true", code)
+
     def test_sense_reinstall_drift_and_exact_restore(self):
         overlay.apply(self.root, 'sense')
         overlay.apply(self.root, 'sense')
