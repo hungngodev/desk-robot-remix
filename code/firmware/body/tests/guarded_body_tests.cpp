@@ -1069,29 +1069,29 @@ static void status_readiness_matches_local_arm_interlocks() {
   fresh(guard, 0);
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   CHECK(send(body, "rearm", 0, true) == "OK rearm");
-  CHECK(send(body, "status", 0).find("\\"ready\\":true") != std::string::npos);
+  CHECK(send(body, "status", 0).find("\"ready\":true") != std::string::npos);
   body.sample_touch_input(true);
-  CHECK(send(body, "status", 1).find("\\"ready\\":false") != std::string::npos);
-  CHECK(send(body, "status", 1).find("\\"fault\\":\\"touch_active\\"") !=
+  CHECK(send(body, "status", 1).find("\"ready\":false") != std::string::npos);
+  CHECK(send(body, "status", 1).find("\"fault\":\"touch_active\"") !=
         std::string::npos);
   CHECK(send(body, "arm", 1) == "ERR arm touch_active");
   body.sample_touch_input(false);
 
   body.sample_optional_inputs(1U, true, false, false);
-  CHECK(send(body, "status", 2).find("\\"fault\\":\\"bumper_active\\"") !=
+  CHECK(send(body, "status", 2).find("\"fault\":\"bumper_active\"") !=
         std::string::npos);
   CHECK(send(body, "arm", 2) == "ERR arm bumper_active");
   body.sample_optional_inputs(0U, false, false, false);
 
   body.require_imu_for_motion(true);
-  CHECK(send(body, "status", 3).find("\\"fault\\":\\"imu_missing_or_stale\\"") !=
+  CHECK(send(body, "status", 3).find("\"fault\":\"imu_missing_or_stale\"") !=
         std::string::npos);
   CHECK(send(body, "arm", 3) == "ERR arm imu_missing_or_stale");
   // Even if both a missing IMU and a touch are present, retain the true
   // high priority local cliff fault in the shared safety context.
   body.sample_touch_input(true);
   guard.bus_fault();
-  CHECK(send(body, "status", 4).find("\\"fault\\":\\"bus_failure\\"") !=
+  CHECK(send(body, "status", 4).find("\"fault\":\"bus_failure\"") !=
         std::string::npos);
 
   desk_robot::CliffGuard dock_guard;
@@ -1101,20 +1101,20 @@ static void status_readiness_matches_local_arm_interlocks() {
   CHECK(send(dock_body, "rearm", 0, true) == "OK rearm");
   dock_body.require_dock_monitor(true);
   CHECK(send(dock_body, "status", 1).find(
-      "\\"fault\\":\\"dock_gpio_missing_or_stale\\"") != std::string::npos);
+      "\"fault\":\"dock_gpio_missing_or_stale\"") != std::string::npos);
   CHECK(send(dock_body, "arm", 1) == "ERR arm dock_gpio_missing_or_stale");
   desk_robot::AccessoryReadings readings{};
   readings.dock.present = readings.dock.valid = true;
   readings.dock.sample_seq = 1;
   readings.dock.at_ms = 2;
   dock_body.set_accessories(readings, 2);
-  CHECK(send(dock_body, "status", 2).find("\\"ready\\":true") != std::string::npos);
+  CHECK(send(dock_body, "status", 2).find("\"ready\":true") != std::string::npos);
   readings.dock.left_seated = true;
   readings.dock.sample_seq = 2;
   readings.dock.at_ms = 3;
   dock_body.set_accessories(readings, 3);
   CHECK(send(dock_body, "status", 3).find(
-      "\\"fault\\":\\"dock_power_connected\\"") != std::string::npos);
+      "\"fault\":\"dock_power_connected\"") != std::string::npos);
   CHECK(send(dock_body, "arm", 3) == "ERR arm dock_power_connected");
 }
 
