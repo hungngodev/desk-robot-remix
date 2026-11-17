@@ -668,7 +668,10 @@ passes its existing MultimodalOrchestrator to Coordinator, which accepts
 only a fresh proactive frame from the same three-frame RAM hub, tracks the
 last consumed receipt, and requires a NEW frame after each short movement
 pulse. No media owner, camera socket or motor authorization is created.
-If the stream is offline, revoked, stale or no next frame arrives, the
+A reconnecting camera worker is NOT a connected MJPEG socket; the
+controller now requires the actual head stream connected status as well as
+the worker lifetime, and rechecks after awaiting the frame. If the
+stream is offline, revoked, stale or no next frame arrives, the
 existing exploration job stops under its existing WROOM safety watchdog
 and does not start another drive. Simulation retains its synthetic capture
 tests. New regressions in code/tests/test_control.py cover missing stream,
