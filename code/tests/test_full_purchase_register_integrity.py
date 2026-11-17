@@ -150,3 +150,20 @@ def test_active_two_watt_speaker_register_and_wiring_are_one_fixed_selection():
     assert "8 ohm 2 W CS20-02P110-04-1X" in harness
     assert "NEVER connect either output to GND" in harness
     assert "real carrier/rectangular baffle heat HOLD" in harness
+
+
+def test_instructional_buy_wire_and_print_docs_do_not_name_retired_speaker():
+    """The 63-entry cart and active assembly instructions are one design."""
+    root = HARDWARE.parents[1]
+    buying = (HARDWARE / "parts.md").read_text(encoding="utf-8")
+    wiring = (HARDWARE / "wiring.md").read_text(encoding="utf-8")
+    fusion = (root / "docs/cad/FUSION_ONE_ROBOT_ASSEMBLY.md").read_text(
+        encoding="utf-8")
+    adapter = (root / "docs/cad/remixes/one_robot_adapter_kit.scad").read_text(
+        encoding="utf-8")
+    for source in (buying, wiring, fusion, adapter):
+        assert "CS20-02P110-04-1X" in source
+    assert "20mm8ohm1W is the existing candidate" not in buying
+    assert "set volume for the 8 Ω / 1 W speaker" not in wiring
+    assert "speaker diameter/depth" not in fusion
+    assert "speaker_od=20;" not in adapter
