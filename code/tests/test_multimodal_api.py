@@ -1399,17 +1399,22 @@ def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cros
             "/v1/robots/robot-02/jobs/latest-pickup", headers=tool
         )
         assert peer.json()["id"] == "peer"
+        # The simulation fixture has exactly two registered robot identities.
+        # Clearing a peer's recorded job tests a real configured robot with
+        # no pickup, not a forged third identity accidentally accepted as 200.
+        del jobs["peer"]
         untouched = client.get(
-            "/v1/robots/robot-03/jobs/latest-pickup", headers=tool
+            "/v1/robots/robot-02/jobs/latest-pickup", headers=tool
         )
         assert untouched.status_code == 200
         assert untouched.json() == {
-            "robot_id": "robot-03", "available": False,
+            "robot_id": "robot-02", "available": False,
             "physical_grasp_verified": False,
         }
-        assert client.get(
-            "/v1/robots/unknown/jobs/latest-pickup", headers=tool
-        ).status_code == 404
+        for unknown in ("robot-03", "unknown"):
+            assert client.get(
+                f"/v1/robots/{unknown}/jobs/latest-pickup", headers=tool
+            ).status_code == 404
         # The old operator job-by-id API remains authoritative and intact.
         assert client.get(
             "/v1/jobs/first", headers=tool
