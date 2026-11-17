@@ -368,10 +368,34 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
         rows[fields[0]] = fields
     assert set(rows) == set(role), "New alternatives require source-role review"
     assert set(role.values()) <= robot | room
+    # Fourteen subcomponent rows must have exact physical quantities. A
+    # comparison table must not accidentally multiply ONE room station by
+    # five pets or turn a half-pair driver into ten unnecessary purchases.
+    expected = {
+        "N20 100:1 MP 6V motors": (2, 10),
+        "DRV8833 dual H bridge": (1, 5),
+        "BQ24075 battery power path and BQ27441 gauge": (1, 5),
+        "5V switching regulator": (1, 5),
+        "Protected NTC 1S battery pack": (1, 5),
+        "Independent 5V dock adapter": (1, 5),
+        "Dock IR LED transistor/resistor driver channel": (2, 10),
+        "Shared room controller": (1, 1),
+        "True room CO2 sensor": (1, 1),
+        "Room gas/environment sensor": (1, 1),
+        "Room presence radar": (1, 1),
+        "Room thermal 8x8 array": (1, 1),
+        "Optional capacitive soil probe": (1, 1),
+        "Optional NFC toy stickers": (10, 10),
+    }
+    assert set(expected) == set(role)
     for name, values in rows.items():
-        assert int(values[2]) >= 0
-        assert int(values[3]) >= int(values[2])
+        actual = tuple(int(v) for v in values[2:4])
+        assert actual == expected[name], (
+            f"{name}: subcomponent quantities {actual} do not match "
+            f"the one robot or one shared station role {expected[name]}"
+        )
         assert int(values[5]) >= 0
+        assert int(values[5]) <= actual[1], name
     assert rows["N20 100:1 MP 6V motors"][5] == "0"
     assert rows["DRV8833 dual H bridge"][5] == "0"
     assert rows["BQ24075 battery power path and BQ27441 gauge"][5] == "0"
