@@ -583,6 +583,31 @@ def test_protected_pack_envelope_and_current_screen_never_certifies_hardware():
     assert not sufficient_hypothetical["printed_assembly_and_wire_relief_verified"]
 
 
+def test_identified_5a_86mm_pack_fails_conservative_three_amp_five_volt_case():
+    """Manufacturer 5A MAX is not a guaranteed 5V 3A robot power solution.
+
+    The 3A load is a stated design stress case, not a claimed measurement.
+    Even if one OPTIMISTICALLY treats 5A as its sustained and PCM limit,
+    its discharge rating and physical 68mm tray are insufficient.
+    """
+    demand = tool(3.0, 1.8, cell_low_v=3.0,
+                  measured_boost_efficiency=0.85, margin=1.3)
+    assert demand["minimum_rated_cell_and_boost_input_a"] > 7.64
+    assert 5.0 < demand["minimum_rated_cell_and_boost_input_a"]
+    result = pack_screen(
+        demand, pack_length_mm=86.0, pack_width_mm=30.0,
+        pack_thickness_mm=7.4, tray_length_mm=68.0,
+        tray_width_mm=35.0, tray_height_mm=14.0,
+        rated_peak_discharge_a=5.0,
+        rated_continuous_discharge_a=5.0,
+        pcm_overcurrent_trip_a=5.0,
+    )
+    assert result["assembled_pack_fits_tray_on_paper"] is False
+    assert result["current_sufficient_on_paper"] is False
+    assert result["candidate_usable_on_paper"] is False
+    assert result["candidate_physically_qualified"] is False
+
+
 def test_protected_pack_incomplete_ratings_and_rotated_fit():
     requirements = tool(1.0, 0.6)
     base = dict(pack_length_mm=30, pack_width_mm=55,
