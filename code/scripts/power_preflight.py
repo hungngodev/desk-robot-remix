@@ -285,7 +285,8 @@ def assess_docked_load(
     if any(v is not None and (not _finite_number(v) or v <= 0)
            for v in ratings):
         raise ValueError("Positive real component ratings are required")
-    decimal = lambda x: Decimal(str(x))
+    def decimal(x):
+        return Decimal(str(x))
     boost_input = (Decimal("5") * decimal(measured_idle_5v_a)
                    / (decimal(measured_sys_v)
                       * decimal(measured_boost_efficiency)))
