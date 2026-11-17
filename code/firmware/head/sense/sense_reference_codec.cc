@@ -82,10 +82,26 @@ bool SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames) {
         if (missing_reference_reads_ != UINT32_MAX) ++missing_reference_reads_;
         if (consecutive_missing_reference_reads_ != UINT32_MAX)
             ++consecutive_missing_reference_reads_;
+        if (consecutive_missing_reference_reads_ >= 32)
+            reference_integrity_failed_ = true;
         std::fill_n(dest, frames, 0);
         return false;
     }
     consecutive_missing_reference_reads_ = 0;
+    // If playback advanced by a whole ring between microphone reads, the
+    // unseen reference interval has been overwritten. Do not align an
+    // apparently fresh echo to a reference history that no longer exists.
+    // This is conservative: even a long idle period needs realignment.
+    const bool lapped = reference_read_seen_ &&
+        write_index_ - last_reference_read_write_index_ >= kRingSize;
+    last_reference_read_write_index_ = write_index_;
+    reference_read_seen_ = true;
+    if (lapped) {
+        if (reference_overwrite_reads_ != UINT32_MAX) ++reference_overwrite_reads_;
+        reference_integrity_failed_ = true;
+        std::fill_n(dest, frames, 0);
+        return false;
+    }
     const uint64_t start = write_index_ - required;
     for (int i = 0; i < frames; ++i) {
         dest[i] = reference_[(start + i) & (kRingSize - 1)];
@@ -109,11 +125,20 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     }
     bool reference_ready = false;
     uint32_t consecutive_missing = 0;
+    uint32_t overwrite_count = 0;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
         FillSilenceLocked(esp_timer_get_time());
         reference_ready = ReadReferenceLocked(reference.data(), frames);
         consecutive_missing = consecutive_missing_reference_reads_;
+        overwrite_count = reference_overwrite_reads_;
+    }
+    // Log outside the codec ring mutex. An actual overwrite must never be
+    // silently reclassified as clean aligned AEC simply by filling zeroes.
+    if (overwrite_count != 0 &&
+        (overwrite_count == 1 || (overwrite_count % 32U) == 0U)) {
+        ESP_LOGW("SenseAEC", "reference ring overwritten; %u compromised microphone reads; A2 integrity FAILED",
+                 static_cast<unsigned>(overwrite_count));
     }
     // Initial silence after boot/reset is normal. Warn only for a
     // prolonged unavailable reference, at most once per 256 more reads.
@@ -152,7 +177,9 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         } else {
             // The physical TX DMA may have accepted some old audio. It must
             // NOT be relabeled as current-generation echo reference.
-            stale_discards = ++stale_publish_discards_;
+            if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;
+            stale_discards = stale_publish_discards_;
+            reference_integrity_failed_ = true;
             log_stale = stale_discards == 1 || (stale_discards % 32U) == 0;
         }
     }
@@ -169,6 +196,10 @@ void SenseReferenceCodec::ClearReference() {
     // this reset. Never reset this generation with the ring write index.
     ++reference_generation_;
     consecutive_missing_reference_reads_ = 0;
+    reference_read_seen_ = false;
+    last_reference_read_write_index_ = 0;
+    // Keep lifetime integrity failure and counters across cancellation.
+    // A reset is not evidence that an audible stale TX tail vanished.
     reference_.fill(0);
     write_index_ = 0;
     last_write_us_ = 0;
@@ -176,6 +207,14 @@ void SenseReferenceCodec::ClearReference() {
     filter_last2_ = 0;
     last_filtered_ = 0;
     phase_ = 0.0f;
+}
+
+SenseReferenceCodec::ReferenceDiagnostics
+SenseReferenceCodec::GetReferenceDiagnostics() {
+    std::lock_guard<std::mutex> lock(reference_mutex_);
+    return ReferenceDiagnostics{
+        missing_reference_reads_, reference_overwrite_reads_,
+        stale_publish_discards_, reference_integrity_failed_};
 }
 
 void SenseReferenceCodec::EnableOutput(bool enable) {
