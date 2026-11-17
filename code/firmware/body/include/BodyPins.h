@@ -52,6 +52,12 @@ constexpr int kMotorResolution = 8;
 // GPIO23 is intentionally used by the STEP drive. Only the DC alternative
 // frees it. Tie GPIO23 to the second half of the existing CD74HC123 timer;
 // NEVER directly tie GPIO23 to the motor driver's nSLEEP input.
+// Guarded DRV8833 full DC build: MCP23017 at 0x71 lane 5 GPB3 reads
+// nFAULT (open drain, active LOW). Wire a ~4.7k 3.3V pullup at the
+// DRV8833 end and a 100k pulldown at the GPB3 end, with B3 internal
+// pullup OFF. Disconnected nFAULT harness must measure LOW/fault; verify
+// actual carrier exposes nFAULT and its logic before connecting motors.
+// Do not connect a 5V pullup to MCP23017 3.3V GPIO.
 constexpr int kDcHeartbeatPin = 23;
 static_assert(kDcHeartbeatPin != kLeftIn1 && kDcHeartbeatPin != kLeftIn2 &&
               kDcHeartbeatPin != kRightIn1 && kDcHeartbeatPin != kRightIn2,
