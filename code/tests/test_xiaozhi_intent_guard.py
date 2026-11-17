@@ -143,6 +143,15 @@ async def test_pinned_intent_remembers_generation_before_slow_llm_detection(
         return True
 
     conn = SimpleNamespace(device_id="head-01", intent_type="other")
+    bridge.connections = {"head-01": conn}
+    # The installed upstream overlay awaits this existing Mac context
+    # adapter BEFORE the slow intent classifier. Provide it in the isolated
+    # fake module, so this test can verify true generation fencing instead
+    # of crashing a detached task on AttributeError and timing out.
+    async def add_live_context(_conn):
+        assert _conn is conn
+
+    bridge.inject_live_context_into_legacy_llm = add_live_context
     namespace = {
         "json": json,
         "check_direct_exit": lambda *args: asyncio.sleep(0, result=False),
