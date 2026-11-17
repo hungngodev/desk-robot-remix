@@ -4504,3 +4504,14 @@ async def test_reconnected_camera_retracts_peer_fanout_and_original(
         release.set()
         await asyncio.gather(task, return_exceptions=True)
         await pet.close()
+
+
+def test_oversized_visual_confidence_never_schedules_spontaneous_speech():
+    """Malformed local VLM integers fail before float conversion or speech."""
+    for confidence in (10 ** 1000, -(10 ** 1000)):
+        assert not _initiative_evidence(SceneChange(
+            "key", "A real brass key appeared near the robot", confidence
+        ))
+    assert _initiative_evidence(SceneChange(
+        "key", "A real brass key appeared near the robot", 0.96
+    ))
