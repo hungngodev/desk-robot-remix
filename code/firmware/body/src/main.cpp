@@ -262,17 +262,17 @@ void apply_outputs() {
     zero_motor_pwm();
     delayMicroseconds(100);  // short dead-time before reversing polarity
   }
-  write_motor_pair(0, 1, state.left);
-  write_motor_pair(2, 3, state.right);
+  write_motor_pair(body_pins::kMotorChannels[0], body_pins::kMotorChannels[1], state.left);
+  write_motor_pair(body_pins::kMotorChannels[2], body_pins::kMotorChannels[3], state.right);
   applied_left = state.left;
   applied_right = state.right;
 #endif
   if (state.servos_attached && !servo_attached) {
     // Program duty before attaching: never emit a default zero-width command.
-    ledcWrite(4, servo_duty(state.lift));
-    ledcWrite(5, servo_duty(state.grip));
-    ledcAttachPin(body_pins::kLiftServo, 4);
-    ledcAttachPin(body_pins::kGripServo, 5);
+    ledcWrite(body_pins::kServoChannels[0], servo_duty(state.lift));
+    ledcWrite(body_pins::kServoChannels[1], servo_duty(state.grip));
+    ledcAttachPin(body_pins::kLiftServo, body_pins::kServoChannels[0]);
+    ledcAttachPin(body_pins::kGripServo, body_pins::kServoChannels[1]);
     servo_attached = true;
     applied_lift = state.lift;
     applied_grip = state.grip;
@@ -287,11 +287,11 @@ void apply_outputs() {
     applied_grip = -1;
   }
   if (servo_attached && state.lift != applied_lift) {
-    ledcWrite(4, servo_duty(state.lift));
+    ledcWrite(body_pins::kServoChannels[0], servo_duty(state.lift));
     applied_lift = state.lift;
   }
   if (servo_attached && state.grip != applied_grip) {
-    ledcWrite(5, servo_duty(state.grip));
+    ledcWrite(body_pins::kServoChannels[1], servo_duty(state.grip));
     applied_grip = state.grip;
   }
 }
