@@ -847,6 +847,7 @@ def test_critical_physical_evidence_gates_are_independent():
     parts = set(mod.PART_GATES)
     assert {
         "cliff_sensor_mount_height_and_stopping_geometry",
+        "four_floor_sensor_reverse_pivot_arc_sweep",
         "battery_pack_ntc_to_charger_ts_thermal_fault_trial",
         "battery_pack_actual_length_and_enclosure_clearance",
         "amplifier_speaker_power_limit_and_thermal_trial",
@@ -859,6 +860,7 @@ def test_critical_physical_evidence_gates_are_independent():
     result = mod.generate(p)
     for gate in (
         "cliff_sensor_mount_height_and_stopping_geometry",
+        "four_floor_sensor_reverse_pivot_arc_sweep",
         "battery_pack_ntc_to_charger_ts_thermal_fault_trial",
         "battery_pack_actual_length_and_enclosure_clearance",
         "amplifier_speaker_power_limit_and_thermal_trial",
