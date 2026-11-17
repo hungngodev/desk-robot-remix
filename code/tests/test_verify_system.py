@@ -18,10 +18,22 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
     names = [name for name, *_ in jobs]
     assert names == [
         "python-tests", "python-lint", "body-cmake", "body-compile",
-        "body-ctest", "wroom-esp32_full", "wroom-esp32_stepper",
-        "wroom-esp32dev", "sense-build",
+        "body-ctest", "wroom-esp32_full", "wroom-esp32_full_haptic_lab",
+        "wroom-esp32_dc_full", "wroom-esp32_dc_watchdog_lab",
+        "wroom-esp32_stepper", "wroom-esp32dev",
+        "wroom-esp32_vl53l0x_bench", "sense-build",
+        "room-feather_nrf52840_room_bench",
+        "room-feather_nrf52840_room_full",
+        "dock-01", "dock-02", "dock-03", "dock-04", "dock-05",
     ]
     assert verify.steps("body", tmp_path)[-1][0] == "body-ctest"
+    assert [job[0] for job in verify.steps("room", tmp_path)] == [
+        "room-feather_nrf52840_room_bench", "room-feather_nrf52840_room_full"
+    ]
+    assert [job[0] for job in verify.steps("dock", tmp_path)] == [
+        "dock-01", "dock-02", "dock-03", "dock-04", "dock-05"
+    ]
+    assert len(verify.steps("all", tmp_path)) == 21
     with pytest.raises(ValueError):
         verify.steps("physical-accepted-by-a-badge", tmp_path)
 
