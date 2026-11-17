@@ -340,15 +340,17 @@ def test_unrepresentable_detector_timing_rejected_before_cv2(field):
         detect_apriltag(b"jpeg", calibration(), **options)
 
 
-@pytest.mark.parametrize(("cx", "cy"), [
-    (640, 240), (320, 480), (10 ** 1000, 240),
-    (320, 10 ** 1000),
+@pytest.mark.parametrize(("cx", "cy", "error"), [
+    pytest.param(640, 240, "optical center", id="cx-outside-frame"),
+    pytest.param(320, 480, "optical center", id="cy-outside-frame"),
+    pytest.param(10 ** 1000, 240, "cx must be finite", id="cx-overflow"),
+    pytest.param(320, 10 ** 1000, "cy must be finite", id="cy-overflow"),
 ])
-def test_measured_dock_optical_center_must_be_inside_capture(cx, cy):
-    """A mismatched principal point cannot be used for contact approach."""
+def test_measured_dock_optical_center_must_be_inside_capture(cx, cy, error):
+    """Invalid principal points cannot authorize contact approach."""
     from dataclasses import replace
 
-    with pytest.raises(ValueError, match="optical center"):
+    with pytest.raises(ValueError, match=error):
         replace(calibration(), image_width_px=640, image_height_px=480,
                 cx=cx, cy=cy)
     assessment = assess_dock(None, now=1, target_distance_mm=120)
