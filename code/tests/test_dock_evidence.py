@@ -91,7 +91,8 @@ async def test_asymmetric_switch_or_changing_input_refuses_seated_claim(monkeypa
     (False, False, False, False, "not_seated"),
     (True, True, False, False, "seated_but_unpowered"),
     (True, True, True, False, "input_present_not_charging"),
-    (False, False, True, True, "charger_input_without_seat"),
+    (False, False, True, True, "charge_signal_without_seat_fault"),
+    (False, False, True, False, "charger_input_without_seat"),
     (False, False, False, True, "charge_signal_without_input_fault"),
     (True, True, False, True, "charge_signal_without_input_fault"),
 ])
@@ -100,6 +101,24 @@ def test_independent_input_truth_table(left, right, good, charging, state):
     dock.update(left_seated=left, right_seated=right,
                 input_good=good, charge_indicated=charging)
     assert classify_dock(dock) == state
+
+
+async def test_active_charger_with_no_seat_is_fault_not_routine_input(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for record in samples:
+        record["dock"]["left_seated"] = False
+        record["dock"]["right_seated"] = False
+    head = FakeHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["state"] == "charge_signal_without_seat_fault"
+    assert result["stable_three_samples"] is True
+    assert result["charging_verified"] is False
+    assert result["charging_authorized"] is False
+    assert result["motor_authorized"] is False
+    assert head.commands == []
 
 
 async def test_dock_evidence_refuses_forged_battery_charge_and_robot_identity():
