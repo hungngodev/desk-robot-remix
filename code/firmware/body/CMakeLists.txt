@@ -99,6 +99,16 @@ target_compile_definitions(tof_mux_tests PRIVATE DESK_ROBOT_STEPPER=1
 target_link_libraries(tof_mux_tests PRIVATE cliff_guard berry_imu)
 target_compile_features(tof_mux_tests PRIVATE cxx_std_11)
 target_compile_options(tof_mux_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+# Exercise the real Arduino-guarded LSM9DS0 register writes with a host Wire fake.
+# This is not physical calibration or a validation of the selected MPU6050.
+add_executable(berry_imu_register_tests
+  tests/berry_imu_register_tests.cpp
+  lib/BerryImu/BerryImu.cpp)
+target_include_directories(berry_imu_register_tests PRIVATE
+  tests/imu_fakes lib/BerryImu)
+target_compile_definitions(berry_imu_register_tests PRIVATE ARDUINO=1)
+target_compile_features(berry_imu_register_tests PRIVATE cxx_std_11)
+target_compile_options(berry_imu_register_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_executable(berry_imu_tests tests/berry_imu_tests.cpp)
 target_link_libraries(berry_imu_tests PRIVATE body_control berry_imu)
 target_compile_options(berry_imu_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -115,7 +125,7 @@ add_executable(guarded_body_tests tests/guarded_body_tests.cpp)
 target_link_libraries(guarded_body_tests PRIVATE body_control stepper_drive)
 target_compile_options(guarded_body_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 if(BODY_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-  foreach(target optional_i2c_pack_shunt_tests pack_current_tests motor_heartbeat_tests optional_i2c_io_tests haptic_pulse_tests haptic_mcp_bus_tests terminal_ir_tests pn532_frames_tests accessory_math_tests pulse_raw_tests range_scan_tests tof_mux_tests berry_imu berry_imu_tests body_control body_tests stepper_drive stepper_tests cliff_guard cliff_tests guarded_body_tests)
+  foreach(target berry_imu_register_tests optional_i2c_pack_shunt_tests pack_current_tests motor_heartbeat_tests optional_i2c_io_tests haptic_pulse_tests haptic_mcp_bus_tests terminal_ir_tests pn532_frames_tests accessory_math_tests pulse_raw_tests range_scan_tests tof_mux_tests berry_imu berry_imu_tests body_control body_tests stepper_drive stepper_tests cliff_guard cliff_tests guarded_body_tests)
     target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=address,undefined)
   endforeach()
@@ -135,6 +145,7 @@ add_test(NAME paw_pulse_fifo_parser COMMAND pulse_raw_tests)
 add_test(NAME safety_priority_ranging_schedule COMMAND range_scan_tests)
 add_test(NAME verified_tca_selected_channel_cliff_safety COMMAND tof_mux_tests)
 add_test(NAME berry_imu_identity_and_telemetry COMMAND berry_imu_tests)
+add_test(NAME lsm9ds0_six_axis_block_data_update COMMAND berry_imu_register_tests)
 add_test(NAME stepper_phase_and_timing COMMAND stepper_tests)
 add_test(NAME cliff_fault_policy COMMAND cliff_tests)
 add_test(NAME guarded_body_integration COMMAND guarded_body_tests)
