@@ -241,7 +241,8 @@ class RoomSerialFeed:
         self.soil_calibration = soil_calibration
         self.last_error: str | None = None
         self.received = 0
-        self.rejected = 0
+        self.rejected = 0  # Invalid USB frames only, not application failures
+        self.callback_failures = 0
 
     def _read_port(self, running: Callable[[], bool]) -> None:
         import serial  # optional hardware-only pyserial package, no simulation
@@ -268,7 +269,7 @@ class RoomSerialFeed:
                     # Application callback failure is not a USB disconnect.
                     # Keep the decoder replay fence and serial epoch intact.
                     self.last_error = f"Room observation callback failed: {type(exc).__name__}: {exc}"
-                    self.rejected += 1
+                    self.callback_failures += 1
                 else:
                     self.received += 1
 
