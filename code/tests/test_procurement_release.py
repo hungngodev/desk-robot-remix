@@ -41,6 +41,13 @@ def test_full_fleet_quantities_never_grant_purchase():
     assert "plan_unqualified_or_price_incomplete" in r["missing_system_evidence"]
 
 
+def test_no_expensive_sensor_substitution_in_canonical_order():
+    p = fixture()
+    p["parts"][0]["name"] = "VL53L4CD premium carrier"
+    with pytest.raises(ValueError, match="approved low-cost VL53L0X"):
+        mod.generate(p)
+
+
 def test_verification_requires_receipts_not_boolean_assertions():
     p = fixture()
     p["qualified_assumptions"] = True
