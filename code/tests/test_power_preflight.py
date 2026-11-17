@@ -13,6 +13,28 @@ docked = runpy.run_path(str(
 ))["assess_docked_load"]
 
 
+def test_real_docked_load_formula_accepts_correct_bq24075_sys_voltage_only():
+    """BQ24075 5.5V output is not automatically an overvoltage measurement."""
+    assess = runpy.run_path(str(
+        Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    ))["assess_docked_load"]
+    base = dict(measured_sys_v=5.5, measured_boost_efficiency=0.85,
+                motors_confirmed_disarmed=True)
+    with pytest.raises(ValueError):
+        assess(0.3, 0.2, **base)  # legacy BQ24074 default maximum 4.5 V
+    report = assess(0.3, 0.2, charger_variant="BQ24075", **base)
+    assert report["charger_variant"] == "BQ24075"
+    assert report["charger_variant_max_docked_out_v"] == 5.6
+    assert report["fixed_5v_rail_requires_separate_converter"]
+    assert report["candidate_docked_load_on_paper"] is None
+    assert report["candidate_physically_qualified"] is False
+    with pytest.raises(ValueError):
+        assess(0.3, 0.2, charger_variant="BQ24073", **base)
+    with pytest.raises(ValueError):
+        assess(0.3, 0.2, charger_variant="BQ24075",
+               measured_sys_v=5.7, measured_boost_efficiency=0.85)
+
+
 def test_bq24074_and_bq24075_are_not_interchangeable_five_volt_rails():
     """Read the actual TI Rev N output voltage rows, not the IC family label."""
     screen = runpy.run_path(str(
