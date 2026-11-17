@@ -28,6 +28,17 @@ public:
     void ClearReference();
     void EnableOutput(bool enable) override;
 
+    // Read-only integrity counters for A2 diagnostics, not an acoustic pass.
+    // Counters persist across speech cancellation. A physical qualification
+    // requires an independently measured echo/double-talk trial.
+    struct ReferenceDiagnostics {
+        uint32_t underflow_reads;
+        uint32_t overwrite_reads;
+        uint32_t discarded_stale_writes;
+        bool integrity_failed;
+    };
+    ReferenceDiagnostics GetReferenceDiagnostics();
+
 protected:
     int Read(int16_t* dest, int samples) override;
     int Write(const int16_t* data, int samples) override;
@@ -54,6 +65,10 @@ private:
     // missing windows and warn only on prolonged consecutive underflow.
     uint32_t missing_reference_reads_ = 0;
     uint32_t consecutive_missing_reference_reads_ = 0;
+    uint32_t reference_overwrite_reads_ = 0;
+    bool reference_integrity_failed_ = false;
+    bool reference_read_seen_ = false;
+    uint64_t last_reference_read_write_index_ = 0;
     int64_t last_write_us_ = 0;
     int16_t filter_last1_ = 0;
     int16_t filter_last2_ = 0;
