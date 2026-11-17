@@ -55,7 +55,7 @@ This report deliberately distinguishes a source path from real compatibility. A 
 | Shared station | `ld2410c` | 1 | [source](../../code/firmware/room_station/src/main.cpp) | Station UART source | 256000 UART, voltage and no person identity |
 | Shared station | `soil_probe` | 1 | [firmware](../../code/firmware/room_station/src/main.cpp), [bounded ADC](../../code/firmware/room_station/src/soil_sample.h), [real calibration](../../code/laptop/src/desk_robot/soil_calibration.py), [wiring](../../code/firmware/room_station/README.md) | Three-sample median and rail/noise rejection implemented; Mac measured two-point relative calibration and five-pet shared read-only context integrated; OFF in default build | Actual 3.3V probe board, A0 voltage, genuine dry/wet measured ADC endpoints, corrosion/waterproofing, source build and on-device test |
 | Shared station | `nfc_game_props` | 10 | [source](../../code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp) | PN532 read only source | Tag RF read geometry and toy durability |
-| Shared station | `amg8833` | 1 | [source](../../code/firmware/room_station/src/main.cpp) | Checked read source, no device test | Exact sensor I2C bus and thermal validity |
+| Shared station | `amg8833` | 1 | [source](../../code/firmware/room_station/src/main.cpp) | Checked AMG8833 high-gain 0..80 C firmware and Mac decoder, no device test | Panasonic AMG8833 high gain (not AMG8834 low gain), exact sensor I2C bus, thermal validity and physical qualification still open |
 | Shared station | `room_controller` | 1 | [source](../../code/firmware/room_station/src/main.cpp) | Feather candidate firmware source | Actual owned board and connector pin map |
 
 ## Additional fourteen rows, without duplicate buying
