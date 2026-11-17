@@ -406,6 +406,16 @@ class Runtime:
                 if not done:
                     raise TimeoutError(f"{label} shutdown unconfirmed")
                 await task
+            except asyncio.CancelledError as exc:
+                # A child owner may cancel itself independently of shutdown.
+                # Never let that skip STOP attempts for the other four pets,
+                # camera, speech and HTTP. An externally cancelled shutdown
+                # still propagates, rather than masquerading as cleanup.
+                if asyncio.current_task().cancelling():
+                    raise
+                errors.append(RuntimeError(
+                    f"{label} shutdown task cancelled without confirmation"
+                ))
             except Exception as exc:
                 errors.append(exc)
             finally:
