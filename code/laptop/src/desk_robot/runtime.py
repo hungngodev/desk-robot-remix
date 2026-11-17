@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import httpx
@@ -90,6 +91,11 @@ class Runtime:
         self._room_stop = asyncio.Event()
         self._room_task: asyncio.Task | None = None
         self.room_feed: RoomSerialFeed | None = None
+        # The USB thread may emit faster than the Mac can consume room context.
+        # One coalesced, latest-only callback cannot crowd out live human VAD.
+        self._room_dispatch_lock = threading.Lock()
+        self._room_dispatch_pending: RoomObservation | None = None
+        self._room_dispatch_enqueued = False
         self._closed = False
 
     def _on_room_observation(self, observation: RoomObservation) -> None:
@@ -98,18 +104,41 @@ class Runtime:
                 and self.multimodal is not None):
             self.multimodal.hub.remember_room(observation)
 
-    def _queue_room_observation(self, loop, observation: RoomObservation) -> None:
-        """Never schedule late USB observations onto an already-closed loop.
+    def _deliver_room_observation(self) -> None:
+        """Consume the latest room measurement, not every intermediate sample.
 
-        The serial reader is a real worker thread; call_soon_threadsafe can
-        race Mac shutdown after the reader sampled the last USB frame.
-        Only ignore the closing-loop exception after shutdown is committed.
+        Only the event-loop thread calls this method. The serial reader never
+        waits for environmental prompt assembly, inference or other UI work.
         """
-        if self._closed:
-            return
+        with self._room_dispatch_lock:
+            observation = self._room_dispatch_pending
+            self._room_dispatch_pending = None
+            self._room_dispatch_enqueued = False
+        if observation is not None:
+            self._on_room_observation(observation)
+
+    def _queue_room_observation(self, loop, observation: RoomObservation) -> None:
+        """Bound the USB-to-Mac handoff to one scheduled callback per runtime.
+
+        The station provides replaceable read-only environmental snapshots,
+        not discrete safety or motor events. Under a burst, the latest valid
+        observation wins, so a noisy USB producer cannot queue thousands of
+        callbacks ahead of human voice and camera tasks. A closing event loop
+        must not silently schedule into a new connection epoch.
+        """
+        with self._room_dispatch_lock:
+            if self._closed:
+                return
+            self._room_dispatch_pending = observation
+            if self._room_dispatch_enqueued:
+                return
+            self._room_dispatch_enqueued = True
         try:
-            loop.call_soon_threadsafe(self._on_room_observation, observation)
+            loop.call_soon_threadsafe(self._deliver_room_observation)
         except RuntimeError:
+            with self._room_dispatch_lock:
+                self._room_dispatch_pending = None
+                self._room_dispatch_enqueued = False
             if not self._closed:
                 raise
 
@@ -366,6 +395,8 @@ class Runtime:
         # A timed out voice monitor might still be alive. Never authorize
         # a second listener on this runtime after shutdown has begun.
         self._closed = True
+        with self._room_dispatch_lock:
+            self._room_dispatch_pending = None
         errors: list[Exception] = []
 
         async def step(label: str, operation, deadline: float) -> None:
