@@ -44,9 +44,17 @@ def test_bq24074_and_bq24075_are_not_interchangeable_five_volt_rails():
                     regulator_max_input_v=5.0)
     assert dock75["docked_output_max_v"] == 5.6
     assert not dock75["regulator_covers_charger_output_on_paper"]
+    # Wide VIN is not enough: a boost-only converter cannot reduce a
+    # possible BQ24075 5.6 V SYS node to the required regulated 5 V.
+    wrong_topology = screen("BQ24075", regulator_min_input_v=2.8,
+                            regulator_max_input_v=22.0)
+    assert not wrong_topology["topology_supports_regulating_5v_both_modes"]
+    assert not wrong_topology["regulator_covers_charger_output_on_paper"]
     enough = screen("BQ24075", regulator_min_input_v=2.8,
-                    regulator_max_input_v=22.0)
+                    regulator_max_input_v=22.0,
+                    regulator_topology="buck_boost")
     assert enough["regulator_covers_charger_output_on_paper"]
+    assert enough["topology_supports_regulating_5v_both_modes"]
     assert not enough["charger_and_5v_rail_physically_qualified"]
     assert not enough["real_docked_voltage_measured"]
     assert not screen("BQ24075", regulator_min_input_v=2.8,
@@ -63,6 +71,13 @@ def test_bq24074_and_bq24075_are_not_interchangeable_five_volt_rails():
     with pytest.raises(ValueError):
         screen("BQ24075", regulator_min_input_v=True,
                regulator_max_input_v=22.0)
+    with pytest.raises(ValueError, match="topology"):
+        screen("BQ24075", regulator_min_input_v=2.8,
+               regulator_max_input_v=22.0, regulator_topology="buck_only")
+    with pytest.raises(ValueError, match="topology"):
+        screen("BQ24075", regulator_min_input_v=2.8,
+               regulator_max_input_v=22.0, regulator_topology=True)
+
 
 
 def test_full_one_pet_load_derates_low_single_cell_voltage():
@@ -848,6 +863,7 @@ def plausible_hypothetical_one_cell_stack():
         boost_input_max_a=12, boost_input_continuous_a=10,
         boost_output_at_3v_continuous_a=3,
         boost_regulator_min_input_v=2.8, boost_regulator_max_input_v=22,
+        regulator_topology="buck_boost",
         charger_input_limit_a=1.4, charger_thermal_input_a=1.4,
         dock_adapter_continuous_a=2.0, pack_charge_max_a=1.0,
         docked_sys_v=5.5,
@@ -875,6 +891,16 @@ def test_stack_rejects_wrong_regulator_only_rated_at_five_volts():
     assert not one_stack(**cfg)["all_power_stages_compatible_on_paper"]
     cfg["boost_output_at_3v_continuous_a"] = 0.5
     assert not one_stack(**cfg)["all_power_stages_compatible_on_paper"]
+
+
+def test_stack_rejects_boost_only_even_with_wide_input_rating():
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["regulator_topology"] = "boost_only"
+    result = one_stack(**cfg)
+    assert not result["voltage_path"]["topology_supports_regulating_5v_both_modes"]
+    assert not result["checks"]["charger_out_to_regulated_5v_covers_3v_cell_and_dock"]
+    assert not result["all_power_stages_compatible_on_paper"]
+    assert not result["qualified_1s_dock_safe_to_buy"]
 
 
 def test_stack_rejects_5v_only_regulator_on_bq24075_dock():
