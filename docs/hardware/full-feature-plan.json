@@ -7,13 +7,13 @@
   "architecture": "Mac owner for fleet/memory/AI; XIAO ESP32S3 Sense for camera, microphone, display, speaker and facial response; WROOM32 local actuator/safety controller; two isolated I2C multiplexers and reusable plug-in sensor harness.",
   "audio_output_power_contract": {
     "amplifier_ic": "MAX98357A",
-    "amplifier_vdd_v": 3.3,
+    "amplifier_vdd_v": 5.0,
     "speaker_nominal_impedance_ohm": 8,
-    "speaker_nominal_rating_w": 1,
-    "selection": "retain_user_selected_amp_and_speaker_run_amplifier_on_rated_3v3_audio_rail",
-    "rail_source": "qualified 3.3 V power regulator, never the XIAO 3V3 pin without capacity proof",
+    "speaker_nominal_rating_w": 2,
+    "selection": "fixed_active_challenge_CS20_02P110_04_1X_2W_with_max98357a_5V_supply_pending_physical_trial",
+    "rail_source": "qualified isolated and current-rated 5 V audio supply, never a directly paralleled USB VBUS or an MCU GPIO power pin",
     "output_connection": "bridge_tied_OUTP_to_speaker_plus_OUTN_to_speaker_minus_neither_to_ground",
-    "physical_release": "HOLD until exact 3.3 V rail thermal, amp PCB gain, peak/clipping and 8 ohm 1 W speaker temperature measurements",
+    "physical_release": "HOLD until exact 5 V audio regulator and amplifier PCB gain, peak distortion, 2 W speaker temperature, acoustic enclosure and cable thermal trials",
     "silicon_reference": "https://www.analog.com/media/en/technical-documentation/data-sheets/max98357a-max98357b.pdf"
   },
   "parts": [
