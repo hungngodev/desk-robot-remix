@@ -160,10 +160,13 @@ class MemoryStore:
         # NaN does not compare within any numeric interval. Report it as
         # nonfinite before the finite [0,1] range check so invalid data
         # cannot masquerade as an ordinary low-confidence observation.
-        if not math.isfinite(when) or not math.isfinite(confidence):
-            raise ValueError("Nonfinite timestamp or confidence")
+        # Bound before isfinite(): converting a hostile huge JSON integer to
+        # float can raise OverflowError instead of the expected ValueError.
+        # The observation clock was bounded above, but confidence was not.
         if not 0 <= confidence <= 1:
             raise ValueError("Confidence outside [0,1]")
+        if not math.isfinite(when) or not math.isfinite(confidence):
+            raise ValueError("Nonfinite timestamp or confidence")
         with self._connect(robot_id) as db:
             cursor = db.execute(
                 """INSERT OR IGNORE INTO memories
