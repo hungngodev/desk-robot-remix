@@ -40,7 +40,7 @@ Other reported spares are not interchangeable with chosen modules: BerryIMU, MAX
 | pet or dock | MPU6050 GY521 compatible six axis breakout | 5 | 4 | HOLD | At least one reported; BerryIMU preserved as spare |
 | pet or dock | AT42QT1010 momentary capacitive head touch | 5 | 4 | HOLD | At least one photographed; retain as independent local stop |
 | pet or dock | MAX30102 optical heartbeat paw pad breakout | 5 | 0 | HOLD | Original user HTML says this is APPROVED as a robot-mounted paw pad and claims about five are already owned. Independent photo audit did not establish exact stock. No purchase before recount and module voltage check. Use WROOM I2C 0x57, not Sense GPIO41/42 PDM mic. |
-| pet or dock | VL53L0X generic GY-530 I2C module | 40 | 40 | HOLD | Generic GY-530 VL53L0X: https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html |
+| pet or dock | VL53L0X GY-530 small carrier candidate ElectroPeak SEN-19-006 | 40 | 40 | HOLD | ElectroPeak SEN-19-006: https://electropeak.com/gy-530-vl53l0x-laser-range-finder |
 | pet or dock | TCA9548A 8 channel 3.3V compatible I2C multiplexer | 10 | 10 | HOLD | Generic TCA9548A: https://www.ti.com/product/TCA9548A |
 | pet or dock | MAX98357A I2S mono amplifier | 5 | 5 | HOLD | Generic MAX98357A: https://www.analog.com/en/products/max98357a.html |
 | pet or dock | Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker | 5 | 5 | HOLD | Challenge Electronics CS20-02P110-04-1X: https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069 |
