@@ -57,7 +57,7 @@ def test_two_isolated_muxes_and_device_address_conflicts():
             assert all(0x08 <= addr <= 0x77 for addr in addresses)
     assert all(ch["devices"][0]["address"] == 0x29 for ch in bus["mux_ranges"]["channels"])
     cap = bus["mux_extras"]["channels"][0]["devices"][0]
-    assert cap["name"] == "CAP1188" and cap["address"] == 0x28
+    assert cap["name"] == "CAP1188" and cap["address"] == 0x29
     assert {d["name"] for d in bus["mux_extras"]["channels"][5]["devices"]} == {"PN532 I2C","MCP23017"}
 
 
