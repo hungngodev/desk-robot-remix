@@ -1757,8 +1757,12 @@ async def test_operator_interrupt_reuses_native_generation_flush_not_duplicate_s
                 "device_id": "mac-01", "revoke_initiative": True,
             }
         )
-    assert response.status == 200
-    assert (await response.json())["interrupted"] is True
+        assert response.status == 200
+        # Consume the response while its aiohttp client connection is alive.
+        # Reading after the context exits reports Connection closed despite
+        # a successful authenticated bridge interruption (HTTP 200).
+        result = await response.json()
+    assert result["interrupted"] is True
     assert stopped == [{
         "source": "native_cancelled_generation",
         "device": "mac-01",
