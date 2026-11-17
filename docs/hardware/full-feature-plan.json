@@ -248,7 +248,7 @@
       "name": "Rated switch, fuse, power leads, JST style keyed connectors, decoupling",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "One rated assembly kit; no high current DuPont wires",
+      "notes": "One rated assembly kit; no high current DuPont wires. Include a rated Schottky diode only in the external 5V feed to XIAO Sense (anode on fused robot boost, cathode on XIAO 5V) so USB flashing cannot backfeed servos. Source reuse: Seeed official XIAO external 5V instructions and MIT cgro00/desk-robot 1N5817 diode plus 470uF local 5V servo bulk. These are reference components, NOT proof this robot\u0027s two motor plus two servo supply is adequately sized. Design a local MAX98357A 0.1uF plus 10uF bypass per manufacturer, separately verify diode current and heat, power rail ripple, connector polarity and boost transients.",
       "group": "pet"
     },
     {
