@@ -19,6 +19,10 @@ def dock_beacon_code(dock_id: int) -> int:
     return ((command ^ 0xff) << 24) | (command << 16) | (0xed << 8) | 0x12
 
 
+# Only five classic NEC transmitters are configured for this fleet.
+# An agreed nonzero code is not sufficient evidence of a known dock.
+_KNOWN_DOCK_CODES = frozenset(dock_beacon_code(i) for i in range(1, 6))
+
 def validate_ir(data: dict, robot_id: str, *,
                 expected_dock_id: int | None = None) -> dict:
     if expected_dock_id is not None:
@@ -48,6 +52,8 @@ def validate_ir(data: dict, robot_id: str, *,
             raise ValueError("Two physically independent fresh NEC frames required")
     elif data["code"] != 0:
         raise ValueError("Mismatched or stale NEC frames must not identify a beacon")
+    if data["match"] and data["code"] not in _KNOWN_DOCK_CODES:
+        raise ValueError("Unknown NEC dock beacon code")
     if data["match"] and expected_code is not None and data["code"] != expected_code:
         # A valid code from robot-04's dock is not robot-01's dock.
         # Never let calibration or an observer silently accept a foreign dock.
