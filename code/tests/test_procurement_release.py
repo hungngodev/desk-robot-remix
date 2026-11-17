@@ -453,6 +453,16 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
             "room_pod": {item["id"]: dict(passed)
                          for item in plan["room_pod"]["modules"]},
             "system": {gate: receipt for gate in mod.SYSTEM_GATES},
+            "supplemental_decisions": {
+                ident: {
+                    "parent_role": parent, "fleet_quantity": count,
+                    "disposition": "selected",
+                    "resolved_item": "simulated selected subpart",
+                    "decision_receipt": receipt, **dict(passed),
+                }
+                for ident, (parent, count)
+                in mod.SUPPLEMENTAL_DECISIONS.items()
+            },
         }
 
     assert mod.generate(selected, evidence_for(selected))["order_released"]
@@ -527,3 +537,68 @@ def test_all_fourteen_addon_quantities_match_one_fleet():
         "A hidden or miscounted motor, protected cell, charger, dock driver, "
         "or room station component would change the real shopping list"
     )
+
+
+def test_supplemental_decisions_reject_unresolved_real_subparts():
+    """All 14 priced alternatives need decisions, not just the 49 parent roles."""
+    import copy
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    plan["qualified_assumptions"] = True
+    plan["prices_complete"] = True
+    plan["physical_trial_count"] = 1
+    receipt = {"result": "pass", "evidence_url": "https://example.org/fake",
+               "tested_on": "test-only", "reviewer": "fixture"}
+    approved_part = {"vendor": "generic", "sku": "test-only",
+                     "pcb_revision": "1",
+                     **{gate: receipt for gate in mod.PART_GATES}}
+    evidence = {
+        "parts": {p["id"]: dict(approved_part) for p in plan["parts"]},
+        "room_pod": {p["id"]: dict(approved_part)
+                     for p in plan["room_pod"]["modules"]},
+        "system": {gate: receipt for gate in mod.SYSTEM_GATES},
+        "supplemental_decisions": {
+            name: {"parent_role": parent, "fleet_quantity": qty,
+                   "disposition": "selected",
+                   "resolved_item": "synthetic subcomponent",
+                   "decision_receipt": receipt,
+                   **dict(approved_part)}
+            for name, (parent, qty) in mod.SUPPLEMENTAL_DECISIONS.items()
+        },
+    }
+    assert len(evidence["supplemental_decisions"]) == 14
+    assert mod.generate(plan, evidence)["order_released"]  # test fixture only
+
+    for changed_name, mutator in (
+        ("protected_ntc_pack", lambda e: e["supplemental_decisions"].pop(
+            "protected_ntc_pack")),
+        ("dock_ir_transistor_channels", lambda e: e["supplemental_decisions"]
+            ["dock_ir_transistor_channels"].update(fleet_quantity=1)),
+        ("boost_5v_candidate", lambda e: e["supplemental_decisions"]
+            ["boost_5v_candidate"].update(disposition="not_selected")),
+        ("drv8833_driver_candidate", lambda e: e["supplemental_decisions"]
+            ["drv8833_driver_candidate"].update(vendor="Adafruit")),
+    ):
+        altered = copy.deepcopy(evidence)
+        mutator(altered)
+        actual = mod.generate(plan, altered)
+        assert not actual["order_released"], changed_name
+        assert any("unresolved_supplemental_part:" + changed_name in issue
+                   for issue in actual["missing_system_evidence"]), changed_name
+
+    altered = copy.deepcopy(evidence)
+    altered["supplemental_decisions"]["n20_motor_candidate"].update(
+        disposition="rejected_in_favor_of_qualified_alternative",
+        replacement_sku="already qualified STEP backend",
+        alternative_or_parent_receipt=receipt,
+    )
+    assert mod.generate(plan, altered)["order_released"]
+    altered["supplemental_decisions"]["n20_motor_candidate"].pop(
+        "alternative_or_parent_receipt")
+    assert not mod.generate(plan, altered)["order_released"]
+
+    invalid = copy.deepcopy(evidence)
+    invalid["supplemental_decisions"]["ghost_charger"] = {}
+    with pytest.raises(ValueError, match="Unknown supplemental"):
+        mod.generate(plan, invalid)
