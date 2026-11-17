@@ -684,3 +684,32 @@ arbitration, actual camera arrival latency, and complete desk/dock
 acceptance remain OPEN. The native adapter has a bounded same-model
 text/audio result narration fallback, not true native duplex tool KV
 integration. These gaps must not be relabeled completed or purchase safe.
+
+
+### November 17 cross-modal fairness and input backpressure
+
+The shared read-only room station previously scheduled one Mac event-loop callback
+per valid USB observation, even when the previous environmental reading was
+still pending. The current Runtime owns **one** coalesced callback and replaces
+the pending snapshot with the newest valid receipt under a short thread lock.
+The serial reader does not await model/context handling; new human VAD and
+camera work are not queued behind unbounded stale room callbacks. Shutdown
+discards pending room data, and a closed loop cannot admit a new room epoch.
+The raw serial replay fence remains owned by RoomSerialFeed and is unchanged.
+See `code/tests/test_room_context_backpressure.py`.
+
+Physical pet events and shared visual changes have different identities.
+Two robots reporting identical legitimate touch, bumper, or paw descriptions
+are now independently eligible for initiative after the existing shared
+speech-floor cooldown; they cannot be mistaken for one physical interaction.
+Repeated camera model descriptions across different heads remain eligible
+for cross-camera deduplication. Neither change relaxes human speech preemption,
+physical motion interlocks, consent, or maximum spontaneous speaking rate.
+See `code/tests/test_proactive_fleet_event_identity.py`.
+
+These are source changes with new regression cases, **not executed hardware,
+firmware, full pytest or acoustic acceptance**. Qwen Live Harness and Pipecat
+remain priority/backpressure design references; no second agent framework,
+camera or microphone transport was installed. The independent room callback
+blocking contract remains open for arbitrary third-party consumers; the
+production Runtime callback uses a short event-loop handoff.
