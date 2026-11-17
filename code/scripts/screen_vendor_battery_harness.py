@@ -16,7 +16,7 @@ _PACKS = {
     "LP103650": {
         "source": "https://www.lipobattery.us/3-7v-lipo-battery-lp103650-2000mah-7-4wh-with-pcm-and-wires-and-ntc-and-2510-3p/",
         "size_mm": (51.0, 36.0, 10.0),
-        "continuous_a": 2.0, "max_discharge_a": 2.0,
+        "continuous_a": None, "max_discharge_a": 2.0,
         "ntc": "10k", "pcm": True,
         "connector": "2510-3P", "connector_continuous_a": None,
         "lead_continuous_a": None,
@@ -24,7 +24,7 @@ _PACKS = {
     "LPHD7430085": {
         "source": "https://lipo-battery.com/high-rate-discharge-lipo-battery-lphd7430085-5a-3-7v-2000mah-7-4wh/",
         "size_mm": (86.0, 30.0, 7.4),
-        "continuous_a": 5.0, "max_discharge_a": 5.0,
+        "continuous_a": None, "max_discharge_a": 5.0,
         "ntc": "10k", "pcm": True,
         "connector": "Molex 43645-0300", "connector_continuous_a": None,
         "lead_continuous_a": None,
@@ -32,7 +32,7 @@ _PACKS = {
     "PR-CU-R512-22AWG": {
         "source": "https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx",
         "size_mm": (68.0, 50.0, 7.0),
-        "continuous_a": 4.0, "max_discharge_a": 4.0,
+        "continuous_a": None, "max_discharge_a": 4.0,
         "ntc": "10k", "pcm": True,
         "connector": "open ends CU-J484", "connector_continuous_a": None,
         "lead_continuous_a": 4.0,
@@ -40,7 +40,7 @@ _PACKS = {
     "PR-CU-R512-JST-SHR": {
         "source": "https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx",
         "size_mm": (68.0, 50.0, 7.0),
-        "continuous_a": 4.0, "max_discharge_a": 4.0,
+        "continuous_a": None, "max_discharge_a": 4.0,
         "ntc": "10k", "pcm": True,
         "connector": "JST SHR-03V-S 30AWG", "connector_continuous_a": 0.86,
         "lead_continuous_a": 0.86,
@@ -48,7 +48,7 @@ _PACKS = {
     "PR-CU-R512-Molex-26AWG": {
         "source": "https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx",
         "size_mm": (68.0, 50.0, 7.0),
-        "continuous_a": 4.0, "max_discharge_a": 4.0,
+        "continuous_a": None, "max_discharge_a": 4.0,
         "ntc": "10k", "pcm": True,
         "connector": "Molex 51021-0300 26AWG", "connector_continuous_a": 2.2,
         "lead_continuous_a": 2.2,
@@ -88,8 +88,12 @@ def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
              a + 2 * clearance_mm <= wt)))
     peak = demand["minimum_rated_cell_and_boost_input_a"]
     cont = demand["minimum_continuous_cell_input_a"]
-    pack_ok = (src["continuous_a"] >= cont and
-               src["max_discharge_a"] >= peak)
+    # "Maximum discharge current" is not a published continuous rating.
+    # All listed manufacturers require a confirmed thermal duty rating for
+    # the actual terminal configuration before sustained robot operation.
+    peak_ok = src["max_discharge_a"] >= peak
+    pack_ok = (None if src["continuous_a"] is None else
+               src["continuous_a"] >= cont and peak_ok)
     # A proven cell is still unsafe with a narrower connector/lead assembly.
     conn = src["connector_continuous_a"]
     lead = src["lead_continuous_a"]
@@ -98,7 +102,11 @@ def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
     reasons = []
     if not fit:
         reasons.append("protected_pack_does_not_fit_existing_cavity")
-    if not pack_ok:
+    if not peak_ok:
+        reasons.append("pack_max_discharge_below_peak_budget")
+    if pack_ok is None:
+        reasons.append("manufacturer_continuous_discharge_rating_missing")
+    elif not pack_ok:
         reasons.append("pack_current_rating_below_load_budget")
     if conn is None or lead is None:
         reasons.append("exact_connector_or_lead_ampacity_missing")
@@ -112,6 +120,7 @@ def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
         "connector_variant": src["connector"],
         "assembled_pack_mm": src["size_mm"],
         "pack_fits_current_tray_on_paper": fit,
+        "pack_peak_within_published_max_on_paper": peak_ok,
         "pack_current_enough_on_paper": pack_ok,
         "harness_ampacity_enough_on_paper": harness_ok,
         "complete_power_path_safe_to_buy": False,
