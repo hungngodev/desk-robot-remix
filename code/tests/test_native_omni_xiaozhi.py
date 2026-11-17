@@ -6005,7 +6005,11 @@ async def test_native_unsupported_context_keeps_polling_mac_consent_without_send
             while not checks:
                 await asyncio.sleep(.005)
         await asyncio.sleep(.01)
-        assert sent == []  # No impossible MiniCPM instruction change.
+        # Missing explicit quiet/autonomy policy must revoke optional audio,
+        # but must not issue an unsupported MiniCPM session instruction.
+        assert [event["type"] for event in sent] == [
+            "response.cancel", "output_audio_buffer.clear",
+        ]
         assert session.native_context_updates == 0
         assert session.connected and not session.closed
     finally:
@@ -6067,7 +6071,11 @@ async def test_native_live_context_refuses_cross_robot_and_stale_turn_data(nativ
         session._video_turn += 1  # real new human voice while HTTP is pending
         release.set()
         await asyncio.sleep(.02)
-        assert sent == []
+        # Stale context is never installed. Safe cancellation of previous
+        # audio is permitted when Mac omits affirmative speech policy.
+        assert [event["type"] for event in sent] == [
+            "response.cancel", "output_audio_buffer.clear",
+        ]
         assert session.native_context_updates == 0
     finally:
         session.closed = True
