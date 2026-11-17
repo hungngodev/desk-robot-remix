@@ -1679,6 +1679,10 @@ def test_pet_quiet_and_pause_stop_motors_before_unavailable_voice_bridge(
 
     settings.mode = "hardware"
     robot = settings.robots[0]
+    # Physical speaker STOP is conditional on an actual assigned Xiaozhi
+    # device identity. Without one the production API correctly does not
+    # transmit any native stop packet; this fixture must opt into that path.
+    robot.device_id = "test-xiao-head-01"
     events = []
 
     class Pet:
@@ -1743,6 +1747,10 @@ def test_failed_body_stop_still_revokes_native_speech_and_pet_autonomy(
 
     settings.mode = "hardware"
     robot = settings.robots[0]
+    # Physical speaker STOP is conditional on an actual assigned Xiaozhi
+    # device identity. Without one the production API correctly does not
+    # transmit any native stop packet; this fixture must opt into that path.
+    robot.device_id = "test-xiao-head-01"
     events = []
 
     class Pet:
