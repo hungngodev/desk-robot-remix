@@ -126,6 +126,34 @@ interference, power path, communication fault and actuator stalls must
 be separately checked. No wheel command or camera inference overrides a
 local cliff stop.
 
+## Real upstream driver and ST status semantics
+
+The current WROOM bus is a justified remix rather than an invented second
+VL53L0X driver. Pinned [Pololu VL53L0X Arduino source](https://github.com/pololu/vl53l0x-arduino/blob/master/VL53L0X.cpp)
+initializes the device, sets the 0.25 MCPS final signal-rate threshold,
+sets the 33 ms measurement budget, starts back-to-back continuous mode,
+then waits on `RESULT_INTERRUPT_STATUS` (0x13), reads distance at
+`RESULT_RANGE_STATUS + 10` (0x1e), and clears the interrupt (0x0b).
+Our `TofBus` uses that same register sequence without blocking the safety
+loop waiting for optical conversion.
+
+**Do not confuse two different ST statuses.** Raw hardware device
+status **11** indicates a good range before PAL processing, as documented in
+[ST-derived VL53L0X API core source](https://android.googlesource.com/kernel/msm/+/f85e7d37509bbd17326f5281616a2425941a0ae8/drivers/input/misc/vl53L0/src/vl53l0_api_core.c).
+The [official ST API UM2039](https://www.st.com/resource/en/user_manual/um2039-world-smallest-timeofflight-ranging-and-gesture-detection-sensor-application-programming-interface-stmicroelectronics.pdf)
+exposes a processed RangeStatus **0** for a valid result, which can
+also depend on signal and sigma checks. Thus the code's raw 11 check is
+not an instruction to replace it with raw 0, **but neither is raw 11
+a full guarantee** of trustworthy partial-field black-table results.
+Rejecting raw non-11, no-target 8190 mm and out-of-band samples is a
+necessary fail-closed behavior, not a manufacturer-certified cliff detector.
+
+The final design MUST measure false-valid and false-invalid rates at
+desk edges under partial FoV, black/gloss surfaces, strong ambient IR,
+multiple simultaneously active neighboring VL53L0X sensors and hard
+turning. An ST typical-range chart or an upstream library compile cannot
+substitute for those observations. Retain physical checkout hold.
+
 ## Exact breakout electronics, no inferred five volt tolerance
 
 The [ElectroPeak SEN-19-006 product page](https://electropeak.com/gy-530-vl53l0x-laser-range-finder)
