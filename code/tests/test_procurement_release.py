@@ -284,7 +284,9 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
                   "haptic_motor"):
         assert selected[ident][8] == "0", "Do not rebuy reported owned " + ident
     assert "VL53L0X" in selected["cliff_obstacle"][1]
-    assert "VL53L4CD" not in register
+    # Historical rejection of the overpriced alternative is useful to
+    # preserve; only the actual selected purchase row must exclude it.
+    assert "VL53L4CD" not in selected["cliff_obstacle"][1]
     # The first unknown $2-style GY-530 carrier is for optical/electrical
     # qualification, NOT the complete 8-piece robot or 40-piece fleet.
     assert selected["cliff_obstacle"][8] == "1"
@@ -600,6 +602,11 @@ def test_all_fourteen_addon_quantities_match_one_fleet():
     sub = register.split(
         "## Explicit drivetrain, 1S power path and one shared station add-ons", 1
     )[1].split("## Price and source-first purchase overrides", 1)[0]
+    # The adjacent three-column source ownership table is not another
+    # purchase table. The 14 physical alternatives must retain seven columns.
+    sub = sub.split(
+        "## Actual source owner for every linked assembly detail", 1
+    )[0]
     expected = {
         "N20 100:1 MP 6V motors": (2, 10),
         "DRV8833 dual H bridge": (1, 5),
