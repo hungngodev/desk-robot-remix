@@ -21,6 +21,17 @@ def test_all_physical_roles_and_linked_decisions_have_exact_source_owners():
     assert len(plan["parts"]) == 42
     assert len(plan["room_pod"]["modules"]) == 7
     assert len(plan["linked_subassemblies"]) == 14
+    # CAD and electrical schematic references are legitimate physical role
+    # owners, but may not masquerade as executable drivers or tests.
+    non_code_sources = {
+        ("pet_roles", "speaker"): "docs/cad/remixes/speaker_rect_fit_gauge.scad",
+        ("pet_roles", "touch_electrodes"): "docs/cad/remixes/one_robot_adapter_kit.scad",
+        ("pet_roles", "encoder_magnets"): "docs/cad/remixes/one_robot_adapter_kit.scad",
+        ("pet_roles", "haptic_driver"): "docs/hardware/haptic-one-shot-wiring.md",
+        ("pet_roles", "dock_fixture"): "docs/cad/remixes/dock/dock_passive_fit.scad",
+        ("pet_roles", "assembly"): "docs/cad/remixes/fusion_assembly_scaffold.py",
+        ("linked_roles", "drv8833_driver_candidate"): "docs/hardware/dc-motor-independent-watchdog.md",
+    }
     for section, entries in (
         ("pet_roles", plan["parts"]),
         ("room_roles", plan["room_pod"]["modules"]),
@@ -36,7 +47,13 @@ def test_all_physical_roles_and_linked_decisions_have_exact_source_owners():
             assert len(row["remaining_qualification"]) >= 12, id_
             for key in ("source", "host_test"):
                 path = row[key]
-                assert isinstance(path, str) and path.startswith("code/")
+                assert isinstance(path, str)
+                if key == "host_test":
+                    assert path.startswith("code/tests/"), (id_, path)
+                elif (section, id_) in non_code_sources:
+                    assert path == non_code_sources[(section, id_)], (id_, path)
+                else:
+                    assert path.startswith("code/"), (id_, path)
                 actual = (ROOT / path).resolve()
                 assert actual.is_relative_to(ROOT.resolve()), id_
                 assert actual.is_file(), (id_, key, path)
