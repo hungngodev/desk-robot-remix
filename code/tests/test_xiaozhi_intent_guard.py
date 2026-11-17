@@ -159,6 +159,9 @@ async def test_pinned_intent_remembers_generation_before_slow_llm_detection(
         "remove_punctuation_and_length": lambda text: (None, text),
         "analyze_intent_with_llm": analyze,
         "process_intent_result": handle,
+        # This compiled real upstream function expects uuid from its original
+        # module globals; isolated fixture must preserve that dependency.
+        "uuid": uuid,
     }
     exec(source_function("handle_user_intent"), namespace)
     task = asyncio.create_task(namespace["handle_user_intent"](
