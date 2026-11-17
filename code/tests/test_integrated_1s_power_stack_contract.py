@@ -50,8 +50,11 @@ def test_actual_ina226_measurement_is_one_fresh_owner_with_an_opt_in_build():
                   "g.pack_current_valid = ina226_pack_current_ma",
                   "g.pack_current_valid = false"):
         assert token in bus
-    for token in ('"\\\"pack_ma\\\":%d', '"\\\"pack_valid\\\":%s',
-                  '"\\\"pack_seq\\\":%lu'):
+    # Source-level wire format check: C++ string literals escape every
+    # embedded quote, so look for the field and its actual printf format,
+    # not an extra unmatched opening C++ string delimiter.
+    for token in (r'pack_ma\":%d', r'pack_valid\":%s',
+                  r'pack_seq\":%lu'):
         assert token in body
     assert ini.count("-DDESK_ROBOT_PACK_SHUNT_MOHM=5") == 1
     assert "[env:esp32_dc_integrated_lab]" in ini
@@ -70,7 +73,10 @@ def test_mac_does_not_equate_chg_status_pin_with_net_battery_charge():
     assert '"battery_current_measured": False' in dock
     assert '"charging_verified": False' in dock
     assert '"charging_authorized": False' in dock
-    for needle in ('power.get("pack_valid"', '"pack_seq"',
+    # The optional signed-current fields are first checked for completeness,
+    # then indexed only after that gate. Requiring .get here was a stale
+    # textual test and would weaken the established complete-record check.
+    for needle in ('power["pack_valid"]', '"pack_seq"',
                    'power["pack_ma"] != int(power["shunt_uv"] / 5)'):
         assert needle in parser
     assert "test_raw_pack_replay_cannot_forge_three_current_conversions" in tests
