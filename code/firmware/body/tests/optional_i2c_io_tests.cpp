@@ -88,6 +88,27 @@ int main() {
     CHECK(cap_failed_write_wire.ranges == 0);
     CHECK(cap_failed_write_wire.extras == 0);
     CHECK(!cap_failed_write_wire.unsafe_parallel_mux);
+    // A delayed WROOM poll must not convert old MAX30102 FIFO backlog
+    // into a newly timestamped petting event. Discard >4 pending samples.
+    TwoWire stale_pulse_wire;
+    stale_pulse_wire.pulse_fifo_write_pointer = 9;
+    desk_robot::PulsePad stale_pulse;
+    CHECK(stale_pulse.begin(stale_pulse_wire));
+    CHECK(!stale_pulse.poll(0));
+    CHECK(!stale_pulse.sample().valid);
+    CHECK(stale_pulse.sample().sample_seq == 0U);
+    CHECK(stale_pulse_wire.pulse_fifo_read_pointer == 9);
+    CHECK(stale_pulse_wire.ranges == 0 && stale_pulse_wire.extras == 0);
+    // Two fresh samples after the flush can qualify a new interaction.
+    stale_pulse_wire.pulse_fifo_write_pointer = 11;
+    CHECK(stale_pulse.poll(100));
+    CHECK(stale_pulse.sample().valid);
+    CHECK(stale_pulse.sample().sample_seq == 1U);
+    CHECK(stale_pulse_wire.pulse_fifo_read_pointer == 11);
+    CHECK(stale_pulse_wire.ranges == 0 && stale_pulse_wire.extras == 0);
+    // No new conversion must not increment the source sequence.
+    CHECK(!stale_pulse.poll(200));
+    CHECK(stale_pulse.sample().sample_seq == 1U);
     // A rejected MAX30102 register write/read must still finish the Wire
     // transaction and must invalidate an old optical sample.
     TwoWire pulse_write_fault_wire;
