@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# Only the newest PR head needs the expensive full firmware and host suite.
+# Preserve all verification jobs while cancelling superseded checkouts.
+concurrency:
+  group: host-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python-and-head-host:
     name: Python and head host tests
