@@ -1555,6 +1555,23 @@ class PetController:
                             robot_id, change, generation, received,
                             preemption_epoch,
                         )
+                        # The cosmetic HTTP request may take a full second.
+                        # A newer human turn, disabled camera consent or a
+                        # replaced observation generation must win before
+                        # even a passive event reaches the speech scheduler.
+                        if (not state.enabled or state.generation != generation
+                                or self._closed
+                                or self._vision_preemption_epoch != preemption_epoch
+                                or (hub_generation is not None and
+                                    self.multimodal.hub._generation[robot_id] != hub_generation)
+                                or (self.settings.mode == "hardware"
+                                    and not self.settings.voice_vision_tools_enabled)
+                                or self._human_active_in_fleet(time.monotonic())
+                                or (callable(voice_started_at)
+                                    and received <= voice_started_at())
+                                or time.monotonic() - received > self.max_observation_age):
+                            state.stale_camera_events += 1
+                            continue
                         if (self.settings.mode != "hardware"
                                 or self.settings.voice_vision_tools_enabled):
                             # A revoked camera guess may not even become a
