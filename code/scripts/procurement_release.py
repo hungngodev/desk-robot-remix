@@ -381,21 +381,33 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     if motor_is_dc != driver_is_dc:
         missing_system.append("motor_driver_variant_mismatch")
 
-    # The SparkFun PRT-13777 Battery Babysitter already carries a BQ27441
-    # fuel gauge. Refuse a second separate MAX17048 design by default;
-    # both gauge ICs are legitimate but their telemetry paths are different.
+    # The SparkFun PRT-13777 Battery Babysitter integrates BQ27441.
+    # A separate MAX17048 would duplicate the gauge. Inspect BOTH the
+    # primary power assembly and the selected charger subpart: the fourteen
+    # detailed purchasing rows must not bypass the core duplicate check.
     power = approvals.get("cap_power", {})
-    if isinstance(power, dict):
-        sku = str(power.get("sku", "")).replace("-", "").upper()
-        # A generic carrier may include the same BQ27441/MAX17048 even if
-        # it is not SparkFun PRT-13777. Inspect its schematic and declare
-        # the gauge chip rather than relying on brand or SKU alone.
-        gauge = str(power.get("integrated_fuel_gauge_ic", "")).strip().upper()
+    charger_detail = decisions.get("bq24075_charger_candidate", {})
+    gauge_candidates = [power]
+    if (isinstance(charger_detail, dict)
+            and charger_detail.get("disposition") in ("selected", "reuse_existing")):
+        gauge_candidates.append(charger_detail)
+    duplicate_gauge = False
+    unknown_gauge = False
+    for carrier in gauge_candidates:
+        if not isinstance(carrier, dict):
+            continue
+        sku = "".join(c for c in str(carrier.get("sku", "")).upper()
+                      if c.isalnum())
+        gauge = str(carrier.get("integrated_fuel_gauge_ic", "")).strip().upper()
         if gauge and gauge not in ("NONE", "BQ27441", "MAX17048"):
-            missing_system.append("unrecognized_integrated_fuel_gauge")
-        if (sku == "PRT13777" or gauge in ("BQ27441", "MAX17048")) and any(
-                x["id"] == "max17048" and x["per_robot"] for x in rows):
-            missing_system.append("duplicate_bq27441_and_max17048_gauges")
+            unknown_gauge = True
+        if sku == "PRT13777" or gauge in ("BQ27441", "MAX17048"):
+            duplicate_gauge = True
+    if unknown_gauge:
+        missing_system.append("unrecognized_integrated_fuel_gauge")
+    if duplicate_gauge and any(x["id"] == "max17048" and x["per_robot"]
+                               for x in rows):
+        missing_system.append("duplicate_bq27441_and_max17048_gauges")
     approved = (not missing_system
                 and all(row["approved_for_fleet_purchase"] for row in rows)
                 and all(row["approved_for_fleet_purchase"] for row in room))
