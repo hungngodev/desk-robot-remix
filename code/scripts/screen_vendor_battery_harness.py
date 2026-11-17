@@ -45,6 +45,14 @@ _PACKS = {
         "connector": "JST SHR-03V-S 30AWG", "connector_continuous_a": 0.86,
         "lead_continuous_a": 0.86,
     },
+    "NX-MGL00850-1S2P": {
+        "source": "https://www.allbatteries.co.uk/li-ion-battery-2x-18650-1s2p-st1-3-6v-6-7ah-22awg-ntc-10k-mgl00850.html",
+        "size_mm": (68.9, 37.4, 19.3),
+        "continuous_a": 3.4, "max_discharge_a": 3.4,
+        "ntc": "10k", "pcm": True,
+        "connector": "22AWG 100mm lead; exact terminal and polarity unknown",
+        "connector_continuous_a": None, "lead_continuous_a": None,
+    },
     "VARTA-VAR56653502013": {
         "source": "https://my.avnet.com/wcm/connect/ccae6ad7-8e6a-4cc7-a362-0c6336823708/AvA-Standard-Batteries-EN-Brochure.pdf",
         "size_mm": (70.0, 38.0, 21.0),
