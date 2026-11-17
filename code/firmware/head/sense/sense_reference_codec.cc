@@ -74,15 +74,23 @@ void SenseReferenceCodec::PublishAcceptedLocked(
     last_write_us_ = now_us;
 }
 
-void SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames) {
-    if (write_index_ < kDelaySamples + static_cast<uint32_t>(frames)) {
+bool SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames) {
+    const uint32_t required = kDelaySamples + static_cast<uint32_t>(frames);
+    if (required > kRingSize || write_index_ < required) {
+        // A missing reference is silence only, not proof that AEC aligned.
+        // Count it without logging inside the audio ring mutex.
+        if (missing_reference_reads_ != UINT32_MAX) ++missing_reference_reads_;
+        if (consecutive_missing_reference_reads_ != UINT32_MAX)
+            ++consecutive_missing_reference_reads_;
         std::fill_n(dest, frames, 0);
-        return;
+        return false;
     }
-    const uint64_t start = write_index_ - kDelaySamples - frames;
+    consecutive_missing_reference_reads_ = 0;
+    const uint64_t start = write_index_ - required;
     for (int i = 0; i < frames; ++i) {
         dest[i] = reference_[(start + i) & (kRingSize - 1)];
     }
+    return true;
 }
 
 int SenseReferenceCodec::Read(int16_t* dest, int samples) {
@@ -99,10 +107,20 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     if (mic_read != frames) {
         return 0; // AudioCodec::InputData is boolean; reject partial frames.
     }
+    bool reference_ready = false;
+    uint32_t consecutive_missing = 0;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
         FillSilenceLocked(esp_timer_get_time());
-        ReadReferenceLocked(reference.data(), frames);
+        reference_ready = ReadReferenceLocked(reference.data(), frames);
+        consecutive_missing = consecutive_missing_reference_reads_;
+    }
+    // Initial silence after boot/reset is normal. Warn only for a
+    // prolonged unavailable reference, at most once per 256 more reads.
+    if (!reference_ready && consecutive_missing >= 32 &&
+        (consecutive_missing - 32U) % 256U == 0U) {
+        ESP_LOGW("SenseAEC", "reference unavailable for %u consecutive microphone reads; AEC alignment unverified",
+                 static_cast<unsigned>(consecutive_missing));
     }
     for (int i = 0; i < frames; ++i) {
         dest[2 * i] = microphone[i];
@@ -150,6 +168,7 @@ void SenseReferenceCodec::ClearReference() {
     // Invalidate writes that entered the inherited blocking I2S path before
     // this reset. Never reset this generation with the ring write index.
     ++reference_generation_;
+    consecutive_missing_reference_reads_ = 0;
     reference_.fill(0);
     write_index_ = 0;
     last_write_us_ = 0;
