@@ -74,6 +74,10 @@ def estimate_delay(
         "reference_delay_ms": round(lag * 1000 / sample_rate, 3),
         "sample_lag": lag,
         "normalized_correlation": round(confidence, 4),
+        # Sense Kconfig only accepts 0..250 ms. Larger measured delays
+        # remain useful diagnostics but cannot be copied into the build.
+        "esp_idf_delay_setting_applicable": lag <= sample_rate // 4,
+        "esp_idf_delay_max_ms": 250,
         "aec_physically_verified": False,
         "natural_barge_in_verified": False,
     }
