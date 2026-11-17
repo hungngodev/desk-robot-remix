@@ -589,3 +589,81 @@ A targeted upstream and current branch review found the following integration fa
 **Fast camera intent:** local safety and body touch are always higher priority than JPEG and VLM. User VAD preempts unsolicited speech and stale inference. A qualified physical sensor event coalesces requests through the existing per-robot camera hub; image processing is performed away from the audio loop; one global VLM lock avoids multiple expensive model calls. Multi-robot conversations are context-triggered, not random greeting timers. All five still require real microphone, camera, display and measured peak load trials.
 
 **Verification order:** first resolve [the GitHub Actions pre-step failure](../reviews/CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md), then actually run the host regression suite and pinned builds. After that, instrument real XIAO mic to speaker interruption, VAD recovery, five-robot dialogue scheduling, visual capture-to-model age, dock safety and calibration. Source tests alone cannot certify physical acoustic or charging performance.
+
+
+## November 17 tool fact packing and multimodal priority
+
+Keep Xiaozhi as the one physical microphone, Opus and speaker owner.
+Keep the existing Mac MultimodalOrchestrator as the one JPEG stream
+consumer, PetController as the initiative scheduler, Conversation as the
+speaker allocator, MemoryStore as each pet's opt-in local SQLite, and
+WROOM as the motor safety authority. Do not install another realtime
+transport, agent framework or media worker just to imitate another product.
+
+### Deterministic priority and provenance
+
+1. A local safety stop and physical interlock outrank everything. Neither
+   a model instruction nor any read-only result can grant movement or charge.
+2. Authenticated current Xiaozhi human speech and operator consent outrank
+   pending TTS, ongoing optional vision inference, peer chatter and pet
+   initiative. Clear stale turns before delivering another tool response.
+3. A completed source-checked read-only tool result outranks a model guess,
+   but is DATA, not a system instruction or a physical acceptance certificate.
+   For compound voice questions, preserve the original request order and
+   all completed distinct results regardless of completion order.
+4. Raw WROOM sensor values, authenticated Mac JPEG receipt timestamps, VLM
+   guesses, ASR transcripts, persistent memory and peer hearsay remain
+   separate provenance types. No invented camera exposure timestamp, identity
+   verification or heard-audio ACK is permitted.
+5. An idle desk pet should use bounded sensor and change gates to decide
+   whether to be curious, check fresh read-only state, speak once or stay
+   silent. Never create low-value periodic commentary or unqualified drive
+   commands. Autonomous exploration may start only through the existing
+   operator-enabled and physically qualified WROOM motion path.
+
+### Source references and remix status
+
+* [Qwen Live Harness](https://github.com/QwenLM/Qwen-Live-Harness)
+  uses a separate fast audio conversation, slower tools and bounded
+  announced results after human speech and playback settle. Apache 2.0
+  project. Adapt its priority and completed-receipt concepts, not its
+  hosted Qwen model or desktop audio runtime.
+* [LiveKit Agents](https://docs.livekit.io/agents/logic/turns/)
+  documents interruption/turn handling and dynamic pause adaptation.
+  Design reference only: Xiaozhi already owns our actual microphone and
+  XIAO speaker decoder.
+* [Pipecat frame model](https://github.com/pipecat-ai/docs/blob/main/api-reference/server/frames/overview.mdx)
+  distinguishes urgent system events from cancellable media and LLM data.
+  Design reference only, no second pipeline installed.
+* [LangGraph checkpoint/store separation](https://docs.langchain.com/oss/python/langgraph/persistence)
+  distinguishes transient sessions from long-term memory. Our existing
+  per-pet SQLite and bounded camera hub retain that split without a new DB.
+* [Reachy Mini conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app)
+  combines realtime voice, VAD metrics, personality, camera and choreographed
+  robot interaction. Reference only: its head pose is not a desk-safe wheel
+  trajectory.
+* [Gemini Live reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/live-api)
+  demonstrates affective dialogue, proactive audio, barge-in and interleaved
+  16 kHz microphone and 1 FPS video. Capability benchmark, not the deployed
+  model. Do not claim MiniCPM has the same native tool-result KV ingestion.
+
+### Implementation change and exact limits
+
+Existing Xiaozhi native tool speech used to slice serialized Mac facts at
+an arbitrary 1800 characters. Three completed results could be malformed
+or partially omitted before the final text/audio model response.
+The shared pure voice intent module now packs one to three receipts in
+compact valid JSON. It preserves each requested result, its order, robot
+provenance, verified numeric fields and explicit physical-qualification
+flags. Only untrusted descriptive text may be excerpted. If the complete
+typed facts cannot fit, no model speech is generated and the optional
+speaker lease is released. Existing native transport and tool executor
+are unchanged. Source regressions are in the current native omni tests.
+The isolated helper has passed Python checks, not a full repository suite.
+
+Physical AEC, speaker STOP and unplayed transcript truncation, live
+MiniCPM incorporation of prior tool results, five robot speaker
+arbitration, actual camera arrival latency, and complete desk/dock
+acceptance remain OPEN. The native adapter has a bounded same-model
+text/audio result narration fallback, not true native duplex tool KV
+integration. These gaps must not be relabeled completed or purchase safe.
