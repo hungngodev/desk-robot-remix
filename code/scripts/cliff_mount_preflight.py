@@ -141,6 +141,7 @@ def screen_planar_cliff_coverage(
     floor_sensor_points_mm: list, chassis_mount_above_desk_mm: float,
     detection_latency_ms: float, measured_worst_braking_mm: float,
     engineering_margin_mm: float = 10.0,
+    optical_tilt_deg: float = 0.0,
     qualified_lateral_sensor_coverage_mm: float = 0.0,
 ) -> dict:
     """Necessary planar motion coverage for all 4 floor sensors.
@@ -158,10 +159,11 @@ def screen_planar_cliff_coverage(
     scalar = (left_wheel_mm_s, right_wheel_mm_s, track_width_mm,
               chassis_mount_above_desk_mm, detection_latency_ms,
               measured_worst_braking_mm, engineering_margin_mm,
-              qualified_lateral_sensor_coverage_mm)
+              optical_tilt_deg, qualified_lateral_sensor_coverage_mm)
     if any(not _finite_real(x) for x in scalar):
         raise ValueError("Motion, geometry and qualification inputs must be finite")
     if (track_width_mm <= 0 or chassis_mount_above_desk_mm < 0
+            or not 0 <= optical_tilt_deg < 90 - ST_SYSTEM_FOV_DEG / 2
             or detection_latency_ms < 0 or measured_worst_braking_mm < 0
             or engineering_margin_mm < 0
             or qualified_lateral_sensor_coverage_mm < 0):
@@ -175,10 +177,15 @@ def screen_planar_cliff_coverage(
 
     h = (chassis_mount_above_desk_mm
          + verify_source_contract()["lens_center_above_adapter_mount_mm"])
-    fov_rear_setback = h * math.tan(math.radians(ST_SYSTEM_FOV_DEG / 2))
+    # Until orientation of each mounted sensor is physically measured,
+    # include the entire worst radial reach of a tilted FoV as potential
+    # late tabletop support, rather than claiming early edge discovery.
+    fov_rear_setback = h * math.tan(math.radians(
+        optical_tilt_deg + ST_SYSTEM_FOV_DEG / 2))
     # A vendor FoV alone does not guarantee lateral recognition. Default 0
     # until a qualified actual surface/footprint measurement is supplied.
-    if qualified_lateral_sensor_coverage_mm > fov_rear_setback:
+    nominal_lateral_radius = h * math.tan(math.radians(ST_SYSTEM_FOV_DEG / 2))
+    if qualified_lateral_sensor_coverage_mm > nominal_lateral_radius:
         raise ValueError("Claimed lateral coverage exceeds nominal optical radius")
     v = (left_wheel_mm_s + right_wheel_mm_s) / 2
     omega = (right_wheel_mm_s - left_wheel_mm_s) / track_width_mm
@@ -219,6 +226,7 @@ def screen_planar_cliff_coverage(
         "body_translation_mm_s": v,
         "body_turn_rate_rad_s": omega,
         "manufacturer_fov_deg": ST_SYSTEM_FOV_DEG,
+        "conservative_tilt_deg": optical_tilt_deg,
         "nominal_fov_rear_footprint_mm": fov_rear_setback,
         "support_checks": cases,
         "necessary_planar_coverage_on_paper": all(c["covered"] for c in cases),
