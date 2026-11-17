@@ -586,6 +586,18 @@ class CameraFrameHub:
         modalities = ("human_voice", "human_transcript", "tool",
                       "sensor", "room_station", "robot_speech", "camera")
         required: set[int] = set()
+        # A physical WROOM safety fault outranks optional camera, idle pet
+        # remarks and routine sensor events in ANY bounded timeline. Without
+        # reserving it here, a newer touch could replace the sole sensor
+        # slot and erase a still-live, latched local disarm from the brain.
+        # This is context ordering only: the WROOM has already stopped and
+        # no model may use this evidence to rearm or issue a movement.
+        for index in range(len(items) - 1, -1, -1):
+            entry = items[index][1]
+            if (entry["channel"] == "sensor"
+                    and entry["kind"] == "safety_fault"):
+                required.add(index)
+                break
         for channel in modalities:
             if len(required) >= limit:
                 break
