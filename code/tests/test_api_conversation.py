@@ -903,12 +903,18 @@ def test_stop_api_does_not_hide_body_timeout_behind_pet_cleanup_failure(
             raise RuntimeError("pet shutdown failed")
 
         runtime.coordinator.stop = unavailable_body
+        original_pause = runtime.pet.pause
         runtime.pet.pause = failed_pet_cleanup
-        response = client.post("/v1/robots/robot-01/stop", headers=operator)
-        assert response.status_code == 503
-        assert "WROOM STOP transport acknowledgement unconfirmed" in (
-            response.json()["error"]
-        )
+        try:
+            response = client.post("/v1/robots/robot-01/stop", headers=operator)
+            assert response.status_code == 503
+            assert "WROOM STOP transport acknowledgement unconfirmed" in (
+                response.json()["error"]
+            )
+        finally:
+            # Do not poison the independent lifespan shutdown by leaving
+            # an intentionally broken test stub in its production cleanup.
+            runtime.pet.pause = original_pause
 
 
 async def test_conversation_stop_does_not_wait_forever_on_ignored_cancellation(
