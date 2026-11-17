@@ -16,11 +16,11 @@ def module(name):
     return mod
 
 
-def test_exact_nine_vendor_variants_and_unchanged_power_sizing_source():
+def test_exact_ten_vendor_variants_and_unchanged_power_sizing_source():
     screen = module("screen_vendor_battery_harness")
     sizing = module("power_preflight")
     demand = sizing.size_5v_supply(1.0, 0.6)
-    assert len(screen.catalog()) == 9
+    assert len(screen.catalog()) == 10
     assert demand["minimum_rated_cell_and_boost_input_a"] == 2.55
     for model in screen.catalog():
         report = screen.evaluate(model, demand)
@@ -139,3 +139,19 @@ def test_wider_batteryspace_3000mah_does_not_fit_old_tray_or_claim_5a_continuous
     assert report["pack_peak_within_published_max_on_paper"]
     assert report["harness_ampacity_enough_on_paper"] is False
     assert report["complete_power_path_safe_to_buy"] is False
+
+
+def test_nx_one_s_two_p_real_pcm_rating_is_not_bare_cell_and_not_harness():
+    screen = module("screen_vendor_battery_harness")
+    demand = module("power_preflight").size_5v_supply(1, 0.6)
+    result = screen.evaluate("NX-MGL00850-1S2P", demand)
+    assert result["pack_peak_within_published_max_on_paper"] is True
+    assert result["pack_current_enough_on_paper"] is True
+    assert result["pack_fits_current_tray_on_paper"] is False
+    assert result["harness_ampacity_enough_on_paper"] is False
+    assert "exact_connector_or_lead_ampacity_missing" in result["blocking_reasons"]
+    assert result["complete_power_path_safe_to_buy"] is False
+    demand = module("power_preflight").size_5v_supply(2, 1.2)
+    high = screen.evaluate("NX-MGL00850-1S2P", demand, tray_mm=(90, 46, 25))
+    assert high["pack_peak_within_published_max_on_paper"] is False
+    assert high["pack_current_enough_on_paper"] is False
