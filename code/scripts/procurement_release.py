@@ -24,6 +24,13 @@ SOURCE_REFERENCES = {
     "speaker": ("Challenge Electronics", "CS20-02P110-04-1X", "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069"),
 }
 
+# Never accept merely chip-compatible replacements for these exact carrier
+# choices in a fully signed cart. A substitution needs a reviewed BOM edit.
+FIXED_SOURCE_SKUS = {
+    "cliff_obstacle": ("ElectroPeak", "SEN-19-006"),
+    "speaker": ("Challenge Electronics", "CS20-02P110-04-1X"),
+}
+
 # Each gate must carry a real, operator-reviewed evidence receipt, not a bool.
 SYSTEM_GATES = (
     "commercial_mechanical_license", "fitted_assembly_and_print",
@@ -213,6 +220,10 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
         if _ad_fruit_new_hardware(ev.get("vendor"), max(needed - owned, 0)):
             missing.append("no_new_adafruit_hardware")
+        chosen = FIXED_SOURCE_SKUS.get(ident)
+        if chosen is not None and (
+                ev.get("vendor"), ev.get("sku")) != chosen:
+            missing.append("exact_frozen_vendor_and_sku_mismatch")
         vendor = SOURCE_REFERENCES.get(ident)
         rows.append({
             "id": ident, "name": part.get("name"), "per_robot": per,
