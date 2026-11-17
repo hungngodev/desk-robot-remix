@@ -238,6 +238,32 @@ class HttpHead:
             except ValueError as exc:
                 raise HeadError(str(exc)) from exc
 
+    async def camera_identity(self) -> str:
+        """Verify the initialized XIAO sensor against an authentic frame boot.
+
+        The offline camera calibration cannot authorize docking simply by
+        naming an OV module. This read-only endpoint uses Espressif's actual
+        sensor PID and the same boot nonce as the accepted JPEG receipt.
+        """
+        async with self.lock:
+            data = _response_object(
+                await self._request("GET", "/api/camera.identity")
+            )
+        if data.get("robot_id") != self.config.id:
+            raise HeadError("Camera identity robot mismatch")
+        pid = data.get("camera_sensor_pid")
+        expected_raw = {"OV3660": 0x3660, "OV5640": 0x5640}
+        if (type(pid) is not str or pid not in expected_raw
+                or type(data.get("camera_pid_raw")) is not int
+                or data["camera_pid_raw"] != expected_raw[pid]):
+            raise HeadError("Camera sensor PID mismatch or unsupported sensor")
+        boot = data.get("boot")
+        if (type(boot) is not int or not 0 <= boot <= 0xffffffff
+                or self._last_camera is None
+                or boot != self._last_camera[0]):
+            raise HeadError("Camera identity boot differs from accepted JPEG")
+        return pid
+
     def _accept_camera_identity(self, identity: tuple[int, int, int]) -> None:
         boot, sequence, completed = identity
         earlier = self._last_camera
