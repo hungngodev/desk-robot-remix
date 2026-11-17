@@ -58,7 +58,7 @@ the selected IC's exact datasheet; review unused channel termination too.
 ## Existing source behavior
 
 `DESK_ROBOT_ENABLE_HAPTIC=1` is available only in
-`esp32_full_haptic_lab`. The normal `esp32_full` and `esp32_dc_full` keep
+`esp32_full_haptic_lab` and `esp32_dc_integrated_lab`. The normal `esp32_full` and `esp32_dc_full` keep
 haptic power **OFF** by default until hardware acceptance.
 
 1. Boot writes zero to MCP23017 `OLATB` before configuring only GPB2 as an
