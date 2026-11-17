@@ -159,6 +159,38 @@ def test_live_asr_is_bounded_uncertain_and_keeps_visual_tool_provenance():
     assert hub.interaction_timeline("robot-01", now + 1) == []
 
 
+def test_latched_safety_fault_survives_tiny_live_context_and_newer_touch():
+    # A recent normal petting event must not hide a latched WROOM disarm
+    # simply because both use the same generic sensor channel. Physical
+    # STOP is already local; this test only governs truthful model context.
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-01", "safety_fault", now - 0.9)
+    hub.notify("robot-01", "touch_tap", now - 0.8)
+    hub.notify("robot-01", "human_voice", now - 0.7)
+    assert hub.remember_heard(
+        "robot-01", "safety_asr", "What happened near the edge?", now - 0.4
+    )
+    hub.remember_tool(
+        "robot-01", "robot_status", "WROOM safety is disarmed", now - 0.3
+    )
+    # Four slots, but five useful inputs. The local safety fault takes
+    # precedence over lower value routine touch and camera context.
+    timeline = hub.interaction_timeline("robot-01", now, limit=4)
+    assert sum(item["kind"] == "safety_fault" for item in timeline) == 1
+    assert not any(item["kind"] == "touch_tap" for item in timeline)
+    assert any(item["channel"] == "human_transcript" for item in timeline)
+    assert any(item["channel"] == "tool" for item in timeline)
+    prompt = compose_brain_context([], [], timeline).interaction
+    assert "latched safety fault" in prompt
+    assert "do not drive, reverse, rearm" in prompt
+    assert not any(item["kind"] == "safety_fault" for item in
+                   hub.interaction_timeline("robot-02", now, limit=4))
+    # Once stale, the fault event cannot be represented as a new observation.
+    assert not any(item["kind"] == "safety_fault" for item in
+                   hub.interaction_timeline("robot-01", now + 9, limit=4))
+
+
 def test_context_keeps_two_recent_spoken_clauses_without_evicting_tools():
     now = time.monotonic()
     hub = CameraFrameHub(["robot-01"])
