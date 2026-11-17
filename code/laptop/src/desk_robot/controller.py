@@ -6,8 +6,6 @@ import uuid
 from dataclasses import asdict, dataclass, field, replace
 from typing import Awaitable, Callable, TypeVar
 
-_T = TypeVar("_T")
-
 from .calibration import Calibration
 from .config import Settings
 from .dock_ir import validate_ir
@@ -16,6 +14,8 @@ from .dock_vision import assess_dock
 from .grasp_feedback import guarded_grasp
 from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
+
+_T = TypeVar("_T")
 
 
 async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
@@ -285,11 +285,6 @@ class Coordinator:
         self.permits.clear()
         for robot_id in self._permit_epoch:
             self._permit_epoch[robot_id] += 1
-        active = {
-            job.robot_id for jid, job in self.jobs.items()
-            if (job.state in {"queued", "running"}
-                and jid in self.tasks and not self.tasks[jid].done())
-        }
         running = [task for task in self.tasks.values() if not task.done()]
         for task in running:
             task.cancel()
@@ -302,7 +297,7 @@ class Coordinator:
                 *(_bounded_body_stop(self.heads[robot_id]) for robot_id in ids),
                 return_exceptions=True,
             )
-            for robot_id, result in zip(ids, receipts):
+            for robot_id, result in zip(ids, receipts, strict=True):
                 if isinstance(result, BaseException):
                     self.shutdown_stop_failures[robot_id] = type(result).__name__
                     for job in self.jobs.values():
@@ -753,7 +748,7 @@ class Coordinator:
                 current_ir = (beacon["left_seq"], beacon["right_seq"])
                 if previous_ir is not None and any(
                     (new - old) & 0xffffffff not in range(1, 0x80000000)
-                    for new, old in zip(current_ir, previous_ir)
+                    for new, old in zip(current_ir, previous_ir, strict=True)
                 ):
                     return {
                         "phase": "hold", "reason": "Assigned dock IR replay or stale conversion",
