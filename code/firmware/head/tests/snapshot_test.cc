@@ -33,6 +33,7 @@ class Esp32Camera {
 public:
     int capture_calls = 0;
     bool capture_ok = true;
+    bool native_jpeg_ok = true;
     uint8_t pixels[8] = {};
     Frame frame{pixels, 8, 2, 2, PIXFORMAT_RGB565};
     Frame* current_fb_ = &frame;
@@ -41,7 +42,18 @@ public:
     std::recursive_mutex& AccessMutex() { return mutex; }
     bool Capture() {
         std::lock_guard<std::recursive_mutex> lock(AccessMutex());
-        pixels[0] = static_cast<uint8_t>(++capture_calls);
+        ++capture_calls;
+        if (frame.format == PIXFORMAT_JPEG) {
+            // A native camera frame must actually begin with SOI and end
+            // with EOI. The prior synthetic JPEG was four arbitrary RGB
+            // bytes and rightly failed the new production validation.
+            pixels[0] = 0xff;
+            pixels[1] = 0xd8;
+            pixels[2] = 0xff;
+            pixels[3] = native_jpeg_ok ? 0xd9 : 0;
+        } else {
+            pixels[0] = static_cast<uint8_t>(capture_calls);
+        }
         return capture_ok;
     }
     std::expected<std::vector<uint8_t>, std::string> SnapshotJpeg();
@@ -70,6 +82,8 @@ int main() {
     assert(!camera.SnapshotJpeg());
     camera.frame.len = 4;
     assert(camera.SnapshotJpeg()->size() == 4);
+    camera.native_jpeg_ok = false;
+    assert(!camera.SnapshotJpeg());
     camera.current_fb_ = nullptr;
     assert(!camera.SnapshotJpeg());
 }
