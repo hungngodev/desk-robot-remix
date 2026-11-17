@@ -4879,11 +4879,31 @@ async def test_native_completed_audio_tool_result_reaches_same_model_audio_queue
         async def json(self):
             return {"choices": [{"message": {"audio": {"data": wav64}}}]}
 
+    class SceneResult:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return None
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "model_context": "",
+                "raw_media_included": False,
+                "persistent_memory_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False, "charging_authorized": False,
+                "voice_monitor_ready": True, "memory_tools_enabled": False,
+                "transcript_memory_enabled": False,
+            }
+
     class ChatHttp:
         async def __aenter__(self):
             return self
         async def __aexit__(self, *args):
             return None
+        def get(self, url, *, headers, timeout):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            return SceneResult()
         def post(self, url, *, json, timeout):
             seen.append((url, json))
             return ChatResult()
