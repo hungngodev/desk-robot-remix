@@ -25,15 +25,17 @@ bool PulsePad::select() {
 bool PulsePad::close() { return select_mux(kExtraMux, 0); }
 bool PulsePad::write_reg(std::uint8_t reg, std::uint8_t value) {
   wire_->beginTransmission(kMax30102);
-  const bool ok = wire_->write(reg) == 1 && wire_->write(value) == 1;
-  return ok && wire_->endTransmission(true) == 0;
+  const bool wrote = wire_->write(reg) == 1 && wire_->write(value) == 1;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return wrote && acknowledged;
 }
 bool PulsePad::read_bytes(std::uint8_t reg, std::uint8_t* dest,
                           std::uint8_t length) {
   if (!dest || length == 0 || length > 24) return false;
   wire_->beginTransmission(kMax30102);
-  if (wire_->write(reg) != 1 || wire_->endTransmission(false) != 0)
-    return false;
+  const bool wrote = wire_->write(reg) == 1;
+  const bool acknowledged = wire_->endTransmission(!wrote) == 0;
+  if (!wrote || !acknowledged) return false;
   if (wire_->requestFrom(kMax30102, static_cast<std::size_t>(length), true) != length)
     return false;
   for (std::uint8_t i = 0; i < length; ++i) {
