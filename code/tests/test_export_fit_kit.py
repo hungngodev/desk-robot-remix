@@ -226,8 +226,9 @@ def test_real_openscad_renders_provisional_source_parts(tmp_path):
     report = source.export_kit(ROOT, output_dir=output)
     assert len(report["parts"]) == (
         len(source.ADAPTERS) + len(source.GAUGES)
-        + len(source.SPEAKER_FITS) + len(source.DOCKS)
-    ) == 12
+        + len(source.SPEAKER_FITS) + len(source.RANGER_FITS)
+        + len(source.DOCKS)
+    ) == 13
     assert (output / "adapter_stls/speaker_grille.stl").is_file()
     assert (output / "dock_stls/dock_passive_fit.stl").is_file()
     for item in report["parts"]:
