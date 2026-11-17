@@ -1,4 +1,4 @@
-> **Authoritative buying quantities, November 16:** This page is retained for detailed wiring, I2C allocation and source verification. Its embedded static shopping tables are not maintained as a second purchasing ledger. Use [the generated two shopping lists](complete-shopping-checklist.md), [the generated 49-role CSV](fleet-components.csv) and [the sole hardware plan](full-feature-plan.json). In particular, full range is eight VL53L4CD per robot and two muxes per robot, independent of earlier prototype figures. **All irreversible purchases remain on HOLD.**
+> **Authoritative buying quantities, November 16:** This page is retained for detailed wiring, I2C allocation and source verification. Its embedded static shopping tables are not maintained as a second purchasing ledger. Use [the generated two shopping lists](complete-shopping-checklist.md), [the generated 49-role CSV](fleet-components.csv) and [the sole hardware plan](full-feature-plan.json). In particular, full range is eight VL53L0X per robot and two muxes per robot, independent of earlier prototype figures. **All irreversible purchases remain on HOLD.**
 
 # Final selected full five-pet hardware architecture
 
@@ -39,7 +39,7 @@
 | MG90S positional servo | 2 | 10 | Count stock before buying |
 | MPU6050 GY521 compatible six axis breakout | 1 | 5 | 1 reported owned |
 | AT42QT1010 momentary capacitive head touch | 1 | 5 | 1 reported owned |
-| VL53L4CD time of flight carrier | 8 | 40 | None verified owned |
+| VL53L0X time of flight carrier | 8 | 40 | None verified owned |
 | TCA9548A 8 channel 3.3V compatible I2C multiplexer | 2 | 10 | None verified owned |
 | MAX98357A I2S mono amplifier | 1 | 5 | None verified owned |
 | 8 ohm 1 watt approximately 20 mm speaker | 1 | 5 | None verified owned |
@@ -78,7 +78,7 @@
 
 **Full profile boot requirement:** The selected MCP23017 dock/status input module is now mandatory for `esp32_full` to allow arming. Allowing a completely absent or unresponsive dock board as an optional peripheral would defeat contact safety. Keep one module per robot in the existing parts list, plus the two independent normally closed seat switches and chip status pins; do not invent current sensing from PGOOD/CHG. The `esp32_stepper` staging profile can be used for unpowered bench checks before the dock electronics are assembled, but it does not qualify the full robot for free roaming or powered docking.
 
-The selected full `esp32_full` profile already contains source code to read **eight VL53L4CDs** from TCA9548A `0x70`: four independent downward cliff channels, one forward obstacle channel, and **three additional left, right, rear read-only channels**. The earlier `esp32_stepper` profile reads the five safety/facing channels only. The additional readings feed Mac event detection but **never grant motor permission or an automatic retreat**. All eight boards need actual carrier voltage, orientation, short-range performance, stale-data handling and stopping-envelope measurements before full movement approval. The source driver is not evidence that eight modules are already bought, wired or physically operational.
+The selected full `esp32_full` profile already contains source code to read **eight VL53L0Xs** from TCA9548A `0x70`: four independent downward cliff channels, one forward obstacle channel, and **three additional left, right, rear read-only channels**. The earlier `esp32_stepper` profile reads the five safety/facing channels only. The additional readings feed Mac event detection but **never grant motor permission or an automatic retreat**. All eight boards need actual carrier voltage, orientation, short-range performance, stale-data handling and stopping-envelope measurements before full movement approval. The source driver is not evidence that eight modules are already bought, wired or physically operational.
 
 ## Fixed pin wiring
 
@@ -124,14 +124,14 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 
 | Lane | Module | Direction | Driver |
 | --- | --- | --- | --- |
-| 0 | VL53L4CD, 0x29 | floor front left | Existing WROOM five-channel driver |
-| 1 | VL53L4CD, 0x29 | floor front right | Existing WROOM five-channel driver |
-| 2 | VL53L4CD, 0x29 | floor rear left | Existing WROOM five-channel driver |
-| 3 | VL53L4CD, 0x29 | floor rear right | Existing WROOM five-channel driver |
-| 4 | VL53L4CD, 0x29 | front obstacle | Existing WROOM five-channel driver |
-| 5 | VL53L4CD, 0x29 | left obstacle | Implemented read only in esp32_full; physical qualification pending |
-| 6 | VL53L4CD, 0x29 | right obstacle | Implemented read only in esp32_full; physical qualification pending |
-| 7 | VL53L4CD, 0x29 | rear obstacle | Implemented read only in esp32_full; physical qualification pending |
+| 0 | VL53L0X, 0x29 | floor front left | Existing WROOM five-channel driver |
+| 1 | VL53L0X, 0x29 | floor front right | Existing WROOM five-channel driver |
+| 2 | VL53L0X, 0x29 | floor rear left | Existing WROOM five-channel driver |
+| 3 | VL53L0X, 0x29 | floor rear right | Existing WROOM five-channel driver |
+| 4 | VL53L0X, 0x29 | front obstacle | Existing WROOM five-channel driver |
+| 5 | VL53L0X, 0x29 | left obstacle | Implemented read only in esp32_full; physical qualification pending |
+| 6 | VL53L0X, 0x29 | right obstacle | Implemented read only in esp32_full; physical qualification pending |
+| 7 | VL53L0X, 0x29 | rear obstacle | Implemented read only in esp32_full; physical qualification pending |
 
 ### Mux B, address 0x71: extra pet features, lower polling priority
 
@@ -187,7 +187,7 @@ The room accessory station may reuse the existing Feather nRF52840 over USB if i
 | Item | State |
 | --- | --- |
 | One Sense + WROOM, 2 ULN2003 motors, 2 MG90S, OLED, basic touch | Existing project firmware and documented wiring; real assembled verification pending |
-| MPU6050 at upstream 0x68/0x69, five VL53L4CD on mux A | Existing source support; physical mounting, voltage and safety tests pending |
+| MPU6050 at upstream 0x68/0x69, five VL53L0X on mux A | Existing source support; physical mounting, voltage and safety tests pending |
 | Additional 3 optical directions, second mux and 8 zone CAP1188 | Eight lanes and read-only side polling source implemented; eight physical sensor trials and measured safety margins still required |
 | APDS9960, FSR/ADS1115, two wheel encoders, AS5600 nose, PN532, battery gauges, humidity | Low-priority mux raw drivers, bounded PN532 toy tag protocol and selected Mac interactions in source; no actual carrier, mounting, optical, power, NFC or physical motion qualification |
 | Local safety stopping, battery charging, gripper lift, natural audio interrupt, autonomy, docking | No physical acceptance; must pass full published trials before declaring done |
@@ -218,9 +218,9 @@ The accompanying [machine-readable plan](full-feature-plan.json) is the source f
 A new bounded WROOM adapter reads Microchip CAP1188 ID 0xFD = 0x50 and manufacturer 0xFE = 0x5D on expansion mux 0x71 lane 0, address 0x28 after its address strap is verified. It reads actual 8-bit touch status at register 0x03 every 80ms, temporarily disconnecting the range mux and closing the optional mux before leaving. Missing and wrong-ID devices cannot forge touch reports. `BodyControl` tracks zone mask, source validity and observed rising-zone counters, without granting motor authority or replacing the independent AT42QT1010 stop pad. The existing authenticated Mac head-status poll now stores qualifying rising contacts as private firsthand petting memories, ignoring first samples, reconnect resets and malformed deltas. Both C++ and Python tests were added; these are software tests only. The physical electrode geometry and through-case capacitance still require trials.
 
 
-## Additional left, right and rear VL53L4CD source reuse
+## Additional left, right and rear VL53L0X source reuse
 
-The new `esp32_full` firmware profile initializes and samples all eight TCA9548A `0x70` lanes using the **same pinned Pololu VL53L4CD Arduino source** as the original critical five, without a new ranging library. Channels 0 to 4 continue to feed the local floor/front CliffGuard; channels 5 to 7 are left, right and rear diagnostic samples with validity and age. A failed full eight sensor boot does not authorize movement. The existing `esp32_stepper` five sensor profile remains available for testing owned hardware before the three additional carriers are installed. Hardware side/rear clearance thresholds, skid, chassis sweep and stopping trial evidence are still required before these lanes can authorize reversing or turning. [Pololu library](https://github.com/pololu/vl53l4cd-arduino).
+The new `esp32_full` firmware profile initializes and samples all eight TCA9548A `0x70` lanes using the **same pinned Pololu VL53L0X Arduino source** as the original critical five, without a new ranging library. Channels 0 to 4 continue to feed the local floor/front CliffGuard; channels 5 to 7 are left, right and rear diagnostic samples with validity and age. A failed full eight sensor boot does not authorize movement. The existing `esp32_stepper` five sensor profile remains available for testing owned hardware before the three additional carriers are installed. Hardware side/rear clearance thresholds, skid, chassis sweep and stopping trial evidence are still required before these lanes can authorize reversing or turning. [Pololu library](https://github.com/pololu/vl53l4cd-arduino).
 
 
 ## Real eight channel USB bench report
@@ -247,7 +247,7 @@ This table describes the **single canonical PR #17**. It separates real source c
 
 | Sensor or accessory | Actual source behavior | Next qualification or missing source |
 | --- | --- | --- |
-| VL53L4CD x8 through mux 0x70 | Four corner cliff plus front WROOM guard; left, right and rear raw readings plus calibrated Mac proximity events | Verify all eight carrier voltages, optical geometry, short-range performance and local stop margin |
+| VL53L0X x8 through mux 0x70 | Four corner cliff plus front WROOM guard; left, right and rear raw readings plus calibrated Mac proximity events | Verify all eight carrier voltages, optical geometry, short-range performance and local stop margin |
 | MPU6050, optional BerryIMU | Real I2C six-axis identity and bounded raw telemetry; opt-in handling and shake memories | Calibrate mounting, gravity vector, held state and physical motion |
 | AT42QT1010 and CAP1188 | Local direct head-touch stop, taps, doubles and hold-to-quiet; eight read-only petting electrodes | Shell thickness, false touches, debounce and physical stop times |
 | MAX30102 paw optical | SparkFun-derived bounded red/IR FIFO, fresh acquisition counter, two-sample optical touch events, per-robot memory | Verify actual module, current, finger contact threshold; **no BPM or medical output** |
