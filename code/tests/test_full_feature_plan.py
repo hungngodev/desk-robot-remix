@@ -220,6 +220,29 @@ def test_active_product_docs_and_workflow_cannot_resurrect_premium_ranger():
     assert "Historic VL6180X and VL53L0X suggestions are" not in wiring
 
 
+def test_usb_calibration_and_cliff_guard_match_real_tof_source_valid_range():
+    """Reject 1mm/15mm calibrations for a driver that discards <30mm."""
+    import re
+    root = Path(__file__).resolve().parents[1]
+    driver = (root / "firmware/body/lib/TofBus/TofBus.cpp").read_text()
+    controller = (root / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    guard = (root / "firmware/body/lib/CliffGuard/CliffGuard.cpp").read_text()
+    matched = re.search(r"distance\s*>=\s*(\d+)\s*&&\s*distance\s*<=\s*(\d+)",
+                        driver)
+    assert matched is not None
+    accepted_min, accepted_max = map(int, matched.groups())
+    assert accepted_min == 30 and accepted_max == 1300
+    # Three independently implemented source owners must agree, or CI fails.
+    assert f"floor.min_mm < {accepted_min}" in guard
+    assert f"floor.max_mm > {accepted_max}" in guard
+    assert f"config.front_obstacle_mm < {accepted_min}" in guard
+    assert f"config.front_max_mm > {accepted_max}" in guard
+    assert f"minimum < {accepted_min}" in controller
+    assert f"maximum > {accepted_max}" in controller
+    assert f"near_mm < {accepted_min}" in controller
+    assert f"far_mm > {accepted_max}" in controller
+
+
 def test_full_fleet_speaker_source_is_exact_2w_and_remains_physical_hold():
     """Replace the unsafe 1W cart entry, not the thermal/fit acceptance gate."""
     p = load()
