@@ -207,6 +207,30 @@ def render(plan: dict, body: str, head: str) -> str:
     row("XIAO GPIO2 TX", "WROOM GPIO16 RX", "UART 115200, 3.3V")
     row("WROOM GPIO17 TX", "XIAO GPIO1 RX", "UART 115200, 3.3V")
     row("XIAO GND", "WROOM GND", "Common logic reference; power path unverified")
+    row("Recessed keyed 5V dock contacts with independent current limit",
+        "BQ24075 IN pin 13 with local bypass",
+        "NO permanently live exposed pogo pads; no direct battery/boost connection",
+        "TI BQ24075 Rev N reference only; physical dock wiring HOLD")
+    row("BQ24075 OUT pins 10/11: battery-dependent 3V to 5.6V",
+        "Rated buck-boost VIN, 5V fixed regulated output",
+        "Pololu S13V30F5 2.8V to 22V is voltage-range reference ONLY",
+        "Actual 3V INPUT max safe current, 5V ripple and thermals HOLD")
+    row("BQ24075 BAT pins 2/3, through 5mOhm >=2W Kelvin shunt",
+        "Protected 1S battery PACK+ at removable rated connector",
+        "INA226 IN+ on CHARGER BAT side; IN- on PACK+ side",
+        "Positive current = PACK CHARGE; real thermal/PCM/wire fit UNQUALIFIED")
+    row("Protected PACK- and 10k NTC lead",
+        "Charger VSS and TS pin 1 respectively",
+        "NTC returns to PACK-; no 10k fixed TS bypass in active charge circuit",
+        "Exact NTC beta, pack pin order and thermal abort fault TEST REQUIRED")
+    row("INA226 0x40 on accessory TCA9548A 0x71 CH4",
+        "Kelvin sense across protected pack current shunt",
+        "Opt-in signed 5mOhm current, fresh I2C seq, 3.3V logic",
+        "Not physical calibration; NO software charge enable or approval")
+    row("BQ24075 open drain PGOOD and CHG",
+        "MCP23017 0x20 GPA2/GPA3 via 3.3V pullups",
+        "Read-only; PGOOD=LOW input good, CHG=LOW charge indicated",
+        "Indicator not battery current, status HIGH-Z when disconnected")
     row("Fused rated 5V system boost through head branch Schottky anode",
         "XIAO Sense 5V input at Schottky cathode",
         "External to head ONLY, reversed current blocked from XIAO USB",
