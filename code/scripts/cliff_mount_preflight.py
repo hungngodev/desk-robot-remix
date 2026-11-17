@@ -15,6 +15,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CAD = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
 TOF = ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp"
+# ST DS11555 Rev 6, section 6.1 specifies 25 degree SYSTEM field of view.
+# It is not a point ray. A sliver of floor visible at the rear of this cone
+# may remain a plausible echo after the central ray has crossed the edge.
+ST_SYSTEM_FOV_DEG = 25.0
 
 
 def verify_source_contract() -> dict:
@@ -35,6 +39,7 @@ def verify_source_contract() -> dict:
         "lens_center_above_adapter_mount_mm": (float(match[0]) + 7.0) / 2.0 + 1.0,
         "firmware_valid_min_mm": min_mm,
         "firmware_valid_max_mm": max_mm,
+        "manufacturer_system_fov_deg": ST_SYSTEM_FOV_DEG,
     }
 
 
@@ -52,7 +57,9 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
            or not math.isfinite(v) for v in vals):
         raise ValueError("Every geometry value must be a finite measured number")
     if (chassis_mount_above_desk_mm < 0
-            or not 0 <= optical_tilt_deg < 80
+            # The forward cone extremity must intersect the floor. A beam
+            # at or above the horizon has no finite horizontal footprint.
+            or not 0 <= optical_tilt_deg < 90 - ST_SYSTEM_FOV_DEG / 2
             or leading_wheel_behind_sensor_mm <= 0
             or measured_p95_stopping_distance_mm < 0
             or remaining_vision_or_sensor_latency_ms < 0
@@ -63,22 +70,50 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
     height = chassis_mount_above_desk_mm + baseline[
         "lens_center_above_adapter_mount_mm"]
     slant = height / math.cos(math.radians(optical_tilt_deg))
-    optical_feasible = (baseline["firmware_valid_min_mm"] <= slant <=
-                        baseline["firmware_valid_max_mm"])
+    half_fov = ST_SYSTEM_FOV_DEG / 2
+    rear_angle = optical_tilt_deg - half_fov
+    front_angle = optical_tilt_deg + half_fov
+    # Geometric full-cone envelope: ST's published ranging tables assume
+    # the WHOLE 25-degree field is covered. Near a desk edge this assumption
+    # is violated. Do not treat an unchanged range from a partial floor
+    # footprint as permission to keep moving.
+    near_angle = max(0.0, rear_angle)
+    nearest_slant = height / math.cos(math.radians(near_angle))
+    farthest_slant = height / math.cos(math.radians(front_angle))
+    center_range_ok = (baseline["firmware_valid_min_mm"] <= slant <=
+                       baseline["firmware_valid_max_mm"])
+    full_cone_range_ok = (
+        baseline["firmware_valid_min_mm"] <= nearest_slant
+        and farthest_slant <= baseline["firmware_valid_max_mm"]
+    )
+    # Worst case: floor remains at the rear rim of the optical cone even
+    # after the center ray has crossed the tabletop edge. For forward
+    # tilted sensors we conservatively credit NO additional forward lead.
+    rear_floor_setback = max(
+        0.0, -height * math.tan(math.radians(rear_angle))
+    )
     stopping = (measured_p95_stopping_distance_mm
                 + remaining_vision_or_sensor_latency_ms
                 * measured_travel_speed_mm_s / 1000.0
                 + engineering_margin_mm)
-    clearance_ok = leading_wheel_behind_sensor_mm > stopping
+    required_physical_lead = stopping + rear_floor_setback
+    effective_lead = leading_wheel_behind_sensor_mm - rear_floor_setback
+    clearance_ok = leading_wheel_behind_sensor_mm > required_physical_lead
     return {
         **baseline,
         "nominal_lens_above_desk_mm": height,
         "nominal_optical_floor_path_mm": slant,
-        "nominal_floor_in_firmware_valid_range": optical_feasible,
-        "required_wheel_behind_sensor_mm": stopping,
+        "nominal_floor_in_firmware_valid_range": center_range_ok,
+        "full_fov_nearest_floor_path_mm": nearest_slant,
+        "full_fov_farthest_floor_path_mm": farthest_slant,
+        "full_fov_floor_path_in_valid_range": full_cone_range_ok,
+        "rear_floor_return_setback_mm": rear_floor_setback,
+        "effective_wheel_edge_lead_mm": effective_lead,
+        "required_stopping_clearance_mm": stopping,
+        "required_wheel_behind_sensor_mm": required_physical_lead,
         "wheel_behind_sensor_mm": leading_wheel_behind_sensor_mm,
         "nominal_stopping_geometry_possible": clearance_ok,
-        "candidate_geometry_possible_on_paper": optical_feasible and clearance_ok,
+        "candidate_geometry_possible_on_paper": full_cone_range_ok and clearance_ok,
         "actual_dark_glossy_surface_and_edge_trials": False,
         "sensor_mount_and_optical_alignment_physically_verified": False,
         "40_sensor_fleet_purchase_approved": False,
