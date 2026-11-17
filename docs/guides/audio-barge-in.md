@@ -227,3 +227,34 @@ Official upstream [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) suppor
 
 For genuine open conversation, keep the pinned Xiaozhi firmware, device AFE reference code and server interruption hook. Then connect a supported realtime voice service using its documented provisioning/transport interface, preserving the existing authenticated WROOM motion guard and device identities. Do **not** rename `OllamaLLM` to an unverified realtime module or hardcode a cloud credential. Physical mic/speaker delay, double talk and audible cancel still need the measured 20 trial procedure. The control endpoint reports `natural_barge_in_certified=false` until those results are real. See also [Xiaozhi feature guide](https://xiaozhi.dev/en/docs/usage/feature-guide/) and the pinned server bridge config.
 
+
+## Bounded pinned Xiaozhi TX under urgent flush
+
+The exact pinned [Xiaozhi NoAudioCodec](https://github.com/78/xiaozhi-esp32/blob/c435f99a88066029ec2dbd2d758c8cc9d051565b/main/audio/codecs/no_audio_codec.cc)
+uses `i2s_channel_write(..., portMAX_DELAY)` **while holding the
+`data_if_mutex_`** in `NoAudioCodec::Write`. Therefore the old
+`AudioService::ResetDecoder` followed by `EnableOutput(false)` could
+wait indefinitely for a stalled speaker I2S DMA write even though an
+urgent speech stop had been received. Cancelling TTS at the Mac layer
+alone cannot bound this on-device lock.
+
+Our `code/firmware/head/install_overlay.py` now applies the smallest
+Sense-only edit to the exact upstream writer in a disposable pinned
+clone. It uses a **500 ms maximum speaker I2S TX wait** and returns the
+actual accepted 32-bit sample count even after timeout, with a warning
+rather than fatal `ESP_ERROR_CHECK`. The normal native Xiaozhi
+`SenseReferenceCodec` consumes that accepted count so the AEC
+reference contains only audio which the output driver reported writing.
+The original upstream checkout, CoreS3, and modular/waveshare board
+profiles remain unchanged. `firmware/head/tests/test_overlay.py`
+checks pinned patch anchor, callback semantics, the selected Sense
+profile and exact revert.
+
+This gives a **bounded codec wait**, not a 500ms end-to-end guaranteed
+spoken interruption. 500ms I2S timeout plus decoder scheduler, task
+wake, VAD/network latency, buffered amplifier output and real
+speaker/microphone acoustics can exceed the stated user acceptance
+limit. Playback frame length and output DMA queues need a live
+oscilloscope/audio recording at the real XIAO board. If they exceed the
+20 trial metric, tune bounded queueing and driver cancellation using
+the upstream Xiaozhi implementation, not a second fabricated codec.
