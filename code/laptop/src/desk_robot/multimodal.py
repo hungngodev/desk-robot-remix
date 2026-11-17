@@ -913,8 +913,6 @@ class MultimodalOrchestrator:
                             and not recent_sensor_edge):
                         metrics["stream_frames_skipped"] += 1
                         continue
-                    if recent_sensor_edge:
-                        metrics["stream_sensor_priority_frames"] += 1
                     self._last_stream_sample[robot_id] = received
                     source = "speech" if local_speech else "proactive"
                     turn = self._turn_epoch[robot_id]
@@ -947,6 +945,10 @@ class MultimodalOrchestrator:
                         metrics["stream_frames_skipped"] += 1
                     else:
                         metrics["stream_frames_selected"] += 1
+                        # An attempted urgent frame that failed JPEG decoding
+                        # must never masquerade as successful sensor context.
+                        if recent_sensor_edge:
+                            metrics["stream_sensor_priority_frames"] += 1
                         async with self._model_frame_conditions[robot_id]:
                             self._model_frame_versions[robot_id] += 1
                             self._model_frame_conditions[robot_id].notify_all()
