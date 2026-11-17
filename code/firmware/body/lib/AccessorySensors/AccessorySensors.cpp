@@ -1,4 +1,10 @@
 #include "AccessorySensors.h"
+#ifndef DESK_ROBOT_PACK_SHUNT_MOHM
+#define DESK_ROBOT_PACK_SHUNT_MOHM 0
+#endif
+#if DESK_ROBOT_PACK_SHUNT_MOHM != 0 && DESK_ROBOT_PACK_SHUNT_MOHM != 5
+#error Exact pack shunt must be source-qualified 5 mOhm or OFF
+#endif
 #if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
     (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 namespace desk_robot {
@@ -24,6 +30,7 @@ void AccessorySensors::invalidate_cached() {
   data_.climate.valid = data_.force.valid =
     data_.proximity.valid = data_.gauge.fuel_valid =
     data_.gauge.monitor_valid = data_.dock.valid = data_.nfc.valid = false;
+  data_.gauge.pack_current_valid = false;
   data_.optional_inputs.valid = false;
 #if DESK_ROBOT_ENABLE_HAPTIC
   haptic_.fault();
@@ -381,10 +388,21 @@ void AccessorySensors::power(std::uint32_t now_ms) {
     if (g.monitor_valid) {
       g.bus_mv = ina226_bus_mv(bus);
       g.shunt_uv = ina226_shunt_uv(static_cast<std::int16_t>(shunt));
+      // Only after both actual registers were successfully acquired.
+      g.monitor_sample_seq = next_nonzero_sensor_sequence(g.monitor_sample_seq);
+#if DESK_ROBOT_PACK_SHUNT_MOHM == 5
+      g.pack_current_valid = ina226_pack_current_ma(
+          g.shunt_uv, DESK_ROBOT_PACK_SHUNT_MOHM, g.pack_current_ma);
+#else
+      g.pack_current_valid = false;  // known physical shunt absent
+#endif
+    } else {
+      g.pack_current_valid = false;
     }
   }
   if (g.fuel_valid || g.monitor_valid) g.at_ms = now_ms;
-  // Never infer amps from shunt voltage without a measured, rated shunt.
+  // Even valid integer milliamps do NOT certify pack charging, because
+  // Kelvin tap routing, shunt tolerance and physical direction are unmeasured.
 }
 void AccessorySensors::dock_status(std::uint32_t now_ms) {
   auto& dock = data_.dock;
