@@ -354,6 +354,7 @@ async def test_existing_xiaozhi_speaker_keeps_human_barge_distinct_from_operator
         assert request.headers["authorization"] == "Bearer " + "s" * 40
         sent.append(json.loads(request.content))
         return httpx.Response(200, json={
+            "device_id": "mac-01",  # Exact authenticated head identity is required.
             "interrupted": True,
             "head_flush_requested": True,
             "head_flush_acknowledged": False,
