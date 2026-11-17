@@ -25,7 +25,7 @@ Source [one_robot_adapter_kit.scad](one_robot_adapter_kit.scad) is original CC0 
 | Part | One robot qty | Use |
 | --- | --- | --- |
 | head_bridge | 1 | Centered slotted head/body spacer |
-| tof_adjustable | 8 | One VL53L4CD bracket per direction |
+| tof_adjustable | 8 | One VL53L0X GY-530 candidate bracket per direction |
 | oled_bezel | 1 | SSD1306 aperture |
 | speaker_grille | 1 | 20mm speaker front |
 | fsr_jaw_pocket | 1 | Force pad jaw holder |
