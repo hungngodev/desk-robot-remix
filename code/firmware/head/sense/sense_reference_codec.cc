@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <esp_timer.h>
+#include <esp_log.h>
 
 SenseReferenceCodec::SenseReferenceCodec(
     int microphone_rate, int speaker_rate, gpio_num_t speaker_bclk,
@@ -116,18 +117,39 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         return 0;
     }
     const int volume = output_volume_;
-    // Reuse the already working Xiaozhi 32-bit I2S driver, including partial
-    // write accounting, not a second amplifier writer or competing driver.
+    uint64_t started_generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(reference_mutex_);
+        started_generation = reference_generation_;
+    }
+    // The inherited I2S write can block; never hold reference_mutex_ across it.
+    // Reset/urgent barge-in may clear the ring while this old write finishes.
     const int accepted = NoAudioCodec::Write(data, samples);
+    bool log_stale = false;
+    uint32_t stale_discards = 0;
     if (accepted > 0) {
         std::lock_guard<std::mutex> lock(reference_mutex_);
-        PublishAcceptedLocked(data, accepted, volume, esp_timer_get_time());
+        if (started_generation == reference_generation_) {
+            PublishAcceptedLocked(data, accepted, volume, esp_timer_get_time());
+        } else {
+            // The physical TX DMA may have accepted some old audio. It must
+            // NOT be relabeled as current-generation echo reference.
+            stale_discards = ++stale_publish_discards_;
+            log_stale = stale_discards == 1 || (stale_discards % 32U) == 0;
+        }
+    }
+    if (log_stale) {
+        ESP_LOGW("SenseAEC", "discarded stale playback reference after cancellation: %u writes; physical TX silence unverified",
+                 static_cast<unsigned>(stale_discards));
     }
     return accepted;
 }
 
 void SenseReferenceCodec::ClearReference() {
     std::lock_guard<std::mutex> lock(reference_mutex_);
+    // Invalidate writes that entered the inherited blocking I2S path before
+    // this reset. Never reset this generation with the ring write index.
+    ++reference_generation_;
     reference_.fill(0);
     write_index_ = 0;
     last_write_us_ = 0;
