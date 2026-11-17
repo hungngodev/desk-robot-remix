@@ -174,8 +174,12 @@ def screen_planar_cliff_coverage(
         raise ValueError("Need four floor sensors and every supporting contact")
     for point in [*support_points_mm, *floor_sensor_points_mm]:
         if (not isinstance(point, (list, tuple)) or len(point) != 2
-                or any(not _finite_real(c) for c in point)):
-            raise ValueError("Each measured body-frame point needs finite x,y")
+                or any(not _finite_real(c) for c in point)
+                # A desk robot cannot have a valid body coordinate a full
+                # kilometre from its origin. This is input sanitation, not
+                # an assumed enclosure size or an optical clearance.
+                or any(abs(c) > 1_000_000 for c in point)):
+            raise ValueError("Each measured chassis point needs plausible finite x,y")
 
     h = (chassis_mount_above_desk_mm
          + verify_source_contract()["lens_center_above_adapter_mount_mm"])
