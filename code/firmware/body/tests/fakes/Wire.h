@@ -35,6 +35,10 @@ class TwoWire {
   unsigned mcp_terminated_transmissions = 0;
   unsigned optional_gpio_reads = 0;
   std::uint8_t optional_gpioB = 0x01; // reed open, PIR low
+  std::uint8_t mcp_olatb = 0;  // BANK=0 OLATB 0x15
+  std::uint8_t mcp_iodirb = 0xFF; // BANK=0 IODIRB 0x01
+  unsigned haptic_rising_edges = 0;
+  bool fail_mcp_latch_readback = false;
   bool nfc_connected = false;
   bool nfc_tag_present = false;
   std::uint8_t nfc_command = 0, nfc_phase = 0;
@@ -156,6 +160,14 @@ class TwoWire {
       nfc_phase = 1; // deterministic ACK, then response on separate mux slots
     } else if (!outbound.empty()) {
       register_address = outbound[0];
+      if (current_address == 0x20 && outbound.size() == 2) {
+        if (register_address == 0x15) {
+          if ((mcp_olatb & 0x04U) == 0 && (outbound[1] & 0x04U) != 0)
+            ++haptic_rising_edges;
+          mcp_olatb = outbound[1];
+        }
+        if (register_address == 0x01) mcp_iodirb = outbound[1];
+      }
       if (current_address == 0x57 && outbound.size() == 2) {
         if (register_address == 0x06)
           pulse_fifo_read_pointer = outbound[1] & 31U;
@@ -233,6 +245,11 @@ class TwoWire {
       if (fail_optional_gpio) return 0;
       ++optional_gpio_reads;
       inbound = {optional_gpioB};
+    } else if (addr == 0x20 && register_address == 0x15) {
+      if (fail_mcp_latch_readback) return 0;
+      inbound = {mcp_olatb};
+    } else if (addr == 0x20 && register_address == 0x01) {
+      inbound = {mcp_iodirb};
     } else if (addr == 0x44 && pending_sht && count == 6) {
       const std::uint8_t temp[2] = {0x66, 0x66};
       const std::uint8_t humidity[2] = {0x80, 0x00};
