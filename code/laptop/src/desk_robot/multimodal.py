@@ -728,6 +728,7 @@ class MultimodalOrchestrator:
                 "native_speech_camera_reuses": 0,
                 "stream_frames_received": 0, "stream_frames_selected": 0,
                 "stream_frames_skipped": 0, "stream_reconnects": 0,
+                "stream_sensor_priority_frames": 0,
             } for robot in settings.robots
         }
         self._turn_epoch = {r.id: 0 for r in settings.robots}
@@ -893,9 +894,27 @@ class MultimodalOrchestrator:
                         1.0 if self._any_human_active(now) and not local_speech
                         else 0.5
                     )
-                    if received - self._last_stream_sample[robot_id] < sample_gap:
+                    # A fresh physical touch/cliff/handling edge deserves
+                    # the next ALREADY streamed frame, even within the
+                    # ordinary 500 ms idle sampling gap. Reuse the existing
+                    # video feed instead of opening /api/camera.jpg. Do not
+                    # accelerate inference or interfere with active human VAD.
+                    recent_sensor_edge = (
+                        self.hub.urgent[robot_id]
+                        and not self._any_human_active(now)
+                        and any(
+                            kind != "human_voice"
+                            and 0 <= received - event_at <= 0.8
+                            for kind, event_at in
+                            self.hub.event_history[robot_id]
+                        )
+                    )
+                    if (received - self._last_stream_sample[robot_id] < sample_gap
+                            and not recent_sensor_edge):
                         metrics["stream_frames_skipped"] += 1
                         continue
+                    if recent_sensor_edge:
+                        metrics["stream_sensor_priority_frames"] += 1
                     self._last_stream_sample[robot_id] = received
                     source = "speech" if local_speech else "proactive"
                     turn = self._turn_epoch[robot_id]
