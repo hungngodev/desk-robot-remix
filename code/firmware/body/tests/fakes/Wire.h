@@ -32,6 +32,7 @@ class TwoWire {
   bool optional_mux_stuck = false;
   bool fail_optional_mux_write = false;
   bool fail_cap_register_write = false;
+  bool cap_uses_0x29 = false; // common generic breakout address
   unsigned cap_register_end_calls = 0;
   unsigned cap_register_requests = 0;
   bool optional_mux_installed = true;
@@ -57,7 +58,8 @@ class TwoWire {
   }
   std::size_t write(std::uint8_t v) {
     if (fail_optional_mux_write && current_address == 0x71) return 0;
-    if (fail_cap_register_write && current_address == 0x28) return 0;
+    if (fail_cap_register_write && (current_address == 0x28 ||
+        (current_address == 0x29 && extras == 1 && cap_uses_0x29))) return 0;
     outbound.push_back(v);
     return 1;
   }
@@ -65,10 +67,11 @@ class TwoWire {
     if (addr == 0x70) return true;
     if (addr == 0x71) return optional_mux_installed;
     if (addr == 0x29)
-      return ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0;
+      return (ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0) ||
+             (ranges == 0 && extras == 1 && cap_uses_0x29);
     if (ranges != 0 || extras == 0) return false;
     switch (extras) {
-      case 1: return addr == 0x28 || addr == 0x57;
+      case 1: return (addr == 0x28 && !cap_uses_0x29) || addr == 0x57;
       case 2: return addr == 0x39 || addr == 0x36;
       case 4: return addr == 0x48;
       case 8: return addr == 0x44;
@@ -82,7 +85,9 @@ class TwoWire {
   std::uint8_t endTransmission(bool stop = true) {
     (void)stop;
     ++transactions;
-    if (current_address == 0x28) ++cap_register_end_calls;
+    if (current_address == 0x28 ||
+        (current_address == 0x29 && extras == 1 && cap_uses_0x29))
+      ++cap_register_end_calls;
     if (!connected(current_address)) return 4;
     if (current_address == 0x70) {
       if (outbound.empty()) return 0; // address-only I2C ACK probe
@@ -94,6 +99,9 @@ class TwoWire {
       if (outbound.size() != 1) return 4;
       if (!optional_mux_stuck) extras = outbound[0];
       if (extras && ranges) unsafe_parallel_mux = true;
+    } else if (current_address == 0x29 && extras == 1 &&
+               cap_uses_0x29 && !outbound.empty()) {
+      register_address = outbound[0];
     } else if (current_address == 0x29 && !outbound.empty()) {
       if (outbound.size() < 1 || outbound.size() > 2) return 4;
       tof_register = outbound[0];
@@ -116,7 +124,8 @@ class TwoWire {
     ++transactions;
     inbound.clear();
     pos = 0;
-    if (addr == 0x28) ++cap_register_requests;
+    if (addr == 0x28 || (addr == 0x29 && extras == 1 && cap_uses_0x29))
+      ++cap_register_requests;
     if (!connected(addr)) return 0;
     if (addr == 0x70) {
       if (range_mux_read_nack) return 0;
@@ -124,6 +133,10 @@ class TwoWire {
           ? static_cast<std::uint8_t>(0xff) : ranges};
     } else if (addr == 0x71) {
       inbound = {extras};
+    } else if (addr == 0x29 && extras == 1 && cap_uses_0x29) {
+      if (register_address == 0xFD) inbound = {0x50};
+      else if (register_address == 0xFE) inbound = {0x5D};
+      else if (register_address == 0x03) inbound = {0xA5};
     } else if (addr == 0x29) {
       if (tof_register == 0x13 && count == 1) {
         inbound = {static_cast<std::uint8_t>(tof_ready ? 0x07 : 0)};
