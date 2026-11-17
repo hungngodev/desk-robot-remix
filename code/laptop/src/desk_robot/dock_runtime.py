@@ -8,12 +8,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from .dock_vision import DockCameraCalibration, DockPose, assess_dock, detect_apriltag
+
 # Keep the native future itself as the worker lifetime owner. An asyncio wrapper
 # can be cancelled during shutdown while the C detector is still running.
 _DETECTOR_SLOT = threading.BoundedSemaphore(1)
 _DETECTOR_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desk-apriltag")
-
-from .dock_vision import DockCameraCalibration, DockPose, assess_dock, detect_apriltag
 
 
 def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
