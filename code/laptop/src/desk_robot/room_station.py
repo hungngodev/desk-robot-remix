@@ -134,8 +134,10 @@ def _valid_reading(sensor: str, data: dict, clock: int) -> bool:
         pixels = data.get("pixels_c")
         if not isinstance(pixels, list) or len(pixels) != 64:
             raise ValueError("AMG8833 needs exactly 64 thermal values")
+        # Match the AMG8833 high-gain 0..80 C object range confirmed by
+        # Panasonic. Do not accept another sensor variant's thermal range.
         for pixel in pixels:
-            _number(pixel, -40, 125)
+            _number(pixel, 0, 80)
     return True
 
 
