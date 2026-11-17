@@ -297,3 +297,16 @@ def test_fake_or_overcounted_reported_stock_cannot_erase_purchase_quantity(
         target[key] = 3
     with pytest.raises(ValueError, match="exceeds"):
         mod.generate(plan)
+
+
+def test_common_chip_reference_does_not_force_premium_breakout_purchase():
+    """Selected IC/source is distinct from an expensive branded carrier."""
+    for part_id, chip in (("i2c_mux", "TCA9548A"),
+                          ("mcp23017", "MCP23017"),
+                          ("amp", "MAX98357A")):
+        assert mod.SOURCE_REFERENCES[part_id][0:2] == ("Generic", chip)
+        register = (mod.PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text()
+        row = next(line for line in register.splitlines()
+                   if line.startswith("| " + chr(96) + part_id + chr(96) + " |"))
+        assert "Unquoted" in row
+        assert "HOLD EXACT GENERIC PCB" in row
