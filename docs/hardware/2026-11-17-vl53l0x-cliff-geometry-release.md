@@ -31,7 +31,7 @@ unmeasured.
 
 Execute `python code/scripts/cliff_mount_preflight.py
 --mount-above-desk-mm VALUE --tilt-deg VALUE
---sensor-ahead-of-wheel-mm VALUE --measured-stopping-mm VALUE
+--sensor-ahead-of-wheel-mm VALUE --measured-worst-stopping-mm VALUE
 --latency-ms VALUE --speed-mm-s VALUE` with actual numbers.
 The script independently checks the firmware distance acceptance,
 actual CAD lens position and ST's **25 degree system field of view**, then
@@ -50,7 +50,7 @@ response of a mixed/partial field or a measured false-negative probability.
 
 The revised source requires:
 
-`physical sensor ahead of leading wheel > p95 braking distance +
+`physical sensor ahead of leading wheel > highest observed loaded braking distance +
 remaining sensor/controller latency * speed +
 engineering clearance margin + rearward echo setback`.
 
@@ -62,11 +62,22 @@ extra braking credit for a forward tilted optical axis.
 **Specific prior false positive:** with mount 20 mm above desk and current
 13.5 mm adapter optical center, height is 33.5 mm. ST's 25 degree FoV
 leaves `33.5 * tan(12.5 degrees) = 7.43 mm` of potential rearward floor
-reflection. At speed 100 mm/s, assumed 80 ms sensor latency, 10 mm observed
-p95 stopping and 10 mm reserve, the required clearance is 28 mm **plus
+reflection. At speed 100 mm/s, assumed 80 ms sensor latency, 10 mm illustrative worst observed loaded stopping and 10 mm reserve, the required clearance is 28 mm **plus
 7.43 mm**. A 32 mm ahead-of-wheel sensor looks safe under the previous
 point-ray equation, but has just 24.57 mm effective lead and is now
 correctly rejected by both the geometry code and committed regressions.
+
+**November 17 fail-closed source corrections:** The planar four-floor-sensor
+swept-contact check now requires the complete nominal FoV floor return path
+to be inside the existing 30..1300 mm firmware range. In particular, a flush
+adapter at only 13.5 mm optical height may have ample geometric wheel lead
+while yielding NO acceptable floor data; it must fail both criteria. The
+forward `evaluate()` function no longer lets a p95-only stopping number
+authorize a desk-edge geometry: the separate worst observed loaded stop
+parameter is required, finite and at least the p95 diagnostic. The command
+line now explicitly requests `--measured-worst-stopping-mm`. All test
+examples that use 10 mm stopping are illustrative values, not physically
+recorded robot brakes. Neither source correction proves a real edge stop.
 
 A 25 degree FoV is not a proof of the exact location/strength of the last
 return. With mixed reflections, lens windows, black table surfaces, ambient
