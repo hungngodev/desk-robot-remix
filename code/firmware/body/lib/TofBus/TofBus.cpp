@@ -128,8 +128,9 @@ ImuIdentity TofBus::probe_imu() {
 
   auto identity = [this](std::uint8_t address, std::uint8_t& value) {
     wire_.beginTransmission(address);
-    if (wire_.write(static_cast<std::uint8_t>(0x0f)) != 1 ||
-        wire_.endTransmission(false) != 0) return false;
+    const bool wrote = wire_.write(static_cast<std::uint8_t>(0x0f)) == 1;
+    const bool acknowledged = wire_.endTransmission(!wrote) == 0;
+    if (!wrote || !acknowledged) return false;
     if (wire_.requestFrom(address, static_cast<size_t>(1), true) != 1 ||
         wire_.available() < 1) return false;
     const int byte = wire_.read();
@@ -144,8 +145,9 @@ ImuIdentity TofBus::probe_imu() {
   for (std::uint8_t addr : {static_cast<std::uint8_t>(0x68), static_cast<std::uint8_t>(0x69)}) {
     std::uint8_t id = 0;
     wire_.beginTransmission(addr);
-    if (wire_.write(static_cast<std::uint8_t>(0x75)) == 1 &&
-        wire_.endTransmission(false) == 0 &&
+    const bool wrote = wire_.write(static_cast<std::uint8_t>(0x75)) == 1;
+    const bool acknowledged = wire_.endTransmission(!wrote) == 0;
+    if (wrote && acknowledged &&
         wire_.requestFrom(addr, static_cast<size_t>(1), true) == 1 &&
         wire_.available() >= 1) {
       const int value = wire_.read();
