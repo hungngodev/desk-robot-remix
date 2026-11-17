@@ -13,6 +13,7 @@
 #include <ld2410.h>
 #include <math.h>
 #include "thermal_pixels.h"
+#include "soil_sample.h"
 
 #ifndef ROOM_SOIL_FITTED
 #define ROOM_SOIL_FITTED 0
@@ -119,10 +120,16 @@ void radar_observation(uint32_t now) {
 void soil_observation(uint32_t now) {
   Serial.print(F("\"soil\":{\"valid\":"));
 #if ROOM_SOIL_FITTED
-  // Raw ADC is NOT moisture percentage without probe and soil calibration.
-  jsbool(true);
-  Serial.print(F(",\"sample_ms\":")); Serial.print(now);
-  Serial.print(F(",\"raw_adc\":")); Serial.print(analogRead(A0));
+  // Each report uses three actual bounded Arduino ADC acquisitions. Rail,
+  // saturation and gross noise faults must never appear as fresh plant
+  // evidence. This remains raw ADC, not moisture % or proof of a live probe.
+  const auto sample = desk_robot_room::read_soil_sample(
+      []() { return analogRead(A0); });
+  jsbool(sample.valid);
+  if (sample.valid) {
+    Serial.print(F(",\"sample_ms\":")); Serial.print(now);
+    Serial.print(F(",\"raw_adc\":")); Serial.print(sample.raw_adc);
+  }
 #else
   (void)now;
   jsbool(false);
