@@ -483,3 +483,47 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
         report = mod.generate(plan, evidence_for(plan))
         assert not report["order_released"]
         assert any(expected in gate for gate in report["missing_system_evidence"])
+
+
+def test_all_fourteen_addon_quantities_match_one_fleet():
+    """No motor, battery, dock, or shared-station add-on can drift in prose.
+
+    These fourteen are candidate subparts or alternatives to the forty-nine
+    machine-counted parent roles, not fourteen automatically approved purchases.
+    The quantities are fixed here until the design is explicitly reviewed.
+    """
+    register = (mod.PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text(
+        encoding="utf-8")
+    sub = register.split(
+        "## Explicit drivetrain, 1S power path and one shared station add-ons", 1
+    )[1].split("## Price and source-first purchase overrides", 1)[0]
+    expected = {
+        "N20 100:1 MP 6V motors": (2, 10),
+        "DRV8833 dual H bridge": (1, 5),
+        "BQ24075 battery power path and BQ27441 gauge": (1, 5),
+        "5V switching regulator": (1, 5),
+        "Protected NTC 1S battery pack": (1, 5),
+        "Independent 5V dock adapter": (1, 5),
+        "Dock IR LED transistor/resistor driver channel": (2, 10),
+        "Shared room controller": (1, 1),
+        "True room CO2 sensor": (1, 1),
+        "Room gas/environment sensor": (1, 1),
+        "Room presence radar": (1, 1),
+        "Room thermal 8x8 array": (1, 1),
+        "Optional capacitive soil probe": (1, 1),
+        "Optional NFC toy stickers": (10, 10),
+    }
+    observed = {}
+    for line in sub.splitlines():
+        if not line.startswith("| ") or line.startswith(("| Item ", "|---")):
+            continue
+        cells = [x.strip() for x in line.strip().strip("|").split("|")]
+        assert len(cells) == 7, line
+        assert cells[0] not in observed, cells[0]
+        observed[cells[0]] = (int(cells[2]), int(cells[3]))
+        # A quoted source or candidate must never masquerade as approval.
+        assert cells[6], cells[0]
+    assert observed == expected, (
+        "A hidden or miscounted motor, protected cell, charger, dock driver, "
+        "or room station component would change the real shopping list"
+    )
