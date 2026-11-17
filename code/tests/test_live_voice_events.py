@@ -282,7 +282,7 @@ async def test_hardware_monitor_refuses_legacy_or_null_voice_snapshot():
     ):
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(
-                lambda request: httpx.Response(200, json=payload)
+                lambda request, payload=payload: httpx.Response(200, json=payload)
             )
         ) as client:
             async def deliver(robot_id, kind):
