@@ -146,7 +146,6 @@ ImuIdentity TofBus::probe_imu() {
   std::uint8_t mpu_matches = 0;
   std::uint8_t mpu_address = 0;
   for (std::uint8_t addr : {static_cast<std::uint8_t>(0x68), static_cast<std::uint8_t>(0x69)}) {
-    std::uint8_t id = 0;
     wire_.beginTransmission(addr);
     const bool wrote = wire_.write(static_cast<std::uint8_t>(0x75)) == 1;
     const bool acknowledged = wire_.endTransmission(!wrote) == 0;
