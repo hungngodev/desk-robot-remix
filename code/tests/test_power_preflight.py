@@ -828,3 +828,95 @@ def test_one_missing_harness_spec_and_cli_cannot_claim_compatible(monkeypatch, c
     runpy.run_path(str(script), run_name="__main__")
     unsafe = json.loads(capsys.readouterr().out)
     assert unsafe["protected_pack_screen"]["candidate_usable_on_paper"] is False
+
+
+one_stack = runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+))["screen_one_cell_power_stack"]
+
+
+def plausible_hypothetical_one_cell_stack():
+    """All invented values solely prove gate logic, NOT a real SKU selection."""
+    return dict(
+        active_peak_5v_a=.6, active_sustained_5v_a=.4,
+        dock_idle_5v_a=.2, charge_request_a=.4,
+        pack_mm=(50, 30, 10), tray_mm=(68, 35, 14),
+        pack_peak_a=10, pack_sustained_a=8, pcm_trip_a=12,
+        connector_a=8, wire_crimp_a=8,
+        boost_input_max_a=12, boost_input_continuous_a=10,
+        boost_output_at_3v_continuous_a=3,
+        boost_regulator_min_input_v=2.8, boost_regulator_max_input_v=22,
+        charger_input_limit_a=1.4, charger_thermal_input_a=1.4,
+        dock_adapter_continuous_a=2.0, pack_charge_max_a=1.0,
+        docked_sys_v=5.5,
+        charge_temperature_sensor_connected=True,
+        charger_ts_fixed_resistor_removed=True, dock_motors_disarmed=True,
+    )
+
+
+def test_complete_one_cell_stack_proves_only_math_not_battery_safety():
+    result = one_stack(**plausible_hypothetical_one_cell_stack())
+    assert result["charger_variant"] == "BQ24075"
+    assert result["all_power_stages_compatible_on_paper"] is True
+    assert all(result["checks"].values())
+    assert result["all_power_stages_physically_verified"] is False
+    assert result["qualified_1s_dock_safe_to_buy"] is False
+    assert result["battery_and_harness"]["candidate_physically_qualified"] is False
+    assert result["docked"]["charger_and_load_sharing_verified"] is False
+
+
+def test_stack_rejects_wrong_regulator_only_rated_at_five_volts():
+    cfg = plausible_hypothetical_one_cell_stack()
+    # Pololu #4082 is marketed 3A only for input close to 5V.
+    # With the genuine 3V graph missing this cannot pass full robot review.
+    cfg["boost_output_at_3v_continuous_a"] = None
+    assert not one_stack(**cfg)["all_power_stages_compatible_on_paper"]
+    cfg["boost_output_at_3v_continuous_a"] = 0.5
+    assert not one_stack(**cfg)["all_power_stages_compatible_on_paper"]
+
+
+def test_stack_rejects_5v_only_regulator_on_bq24075_dock():
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["boost_regulator_max_input_v"] = 5.0
+    result = one_stack(**cfg)
+    assert not result["checks"][
+        "charger_out_to_regulated_5v_covers_3v_cell_and_dock"]
+    assert not result["all_power_stages_compatible_on_paper"]
+
+
+def test_stack_does_not_ignore_actual_ntc_jumper_and_connector():
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["connector_a"] = 0.86
+    result = one_stack(**cfg)
+    assert not result["checks"]["whole_protected_cell_pcm_cable_and_tray"]
+    cfg["connector_a"] = 8
+    cfg["charger_ts_fixed_resistor_removed"] = False
+    result = one_stack(**cfg)
+    assert not result["checks"]["charger_ts_is_connected_to_actual_pack_ntc"]
+    cfg["charger_ts_fixed_resistor_removed"] = True
+    cfg["charge_temperature_sensor_connected"] = False
+    assert not one_stack(**cfg)["all_power_stages_compatible_on_paper"]
+
+
+def test_stack_will_not_count_1_5a_bq24075_twice():
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["charger_input_limit_a"] = 2.0
+    with pytest.raises(ValueError, match="not above 1.5"):
+        one_stack(**cfg)
+    cfg["charger_input_limit_a"] = 1.4
+    cfg["dock_idle_5v_a"] = 1.3
+    # 1.3 A system output plus 0.4 A charge cannot fit a 1.4A charger.
+    assert not one_stack(**cfg)["checks"][
+        "docked_idle_plus_cell_charge_in_same_1_5a_budget"]
+
+
+def test_stack_requires_disarmed_motors_and_actual_pack_volume():
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["dock_motors_disarmed"] = False
+    assert not one_stack(**cfg)["all_power_stages_compatible_on_paper"]
+    cfg["dock_motors_disarmed"] = True
+    cfg["pack_mm"] = (70, 50, 20)
+    assert not one_stack(**cfg)["checks"]["whole_protected_cell_pcm_cable_and_tray"]
+    cfg["pack_mm"] = (50, 30, 10)
+    cfg["pack_sustained_a"] = None
+    assert not one_stack(**cfg)["all_power_stages_compatible_on_paper"]
