@@ -229,11 +229,17 @@ class SenseSelectionTests(unittest.TestCase):
         self.assertIn("BerryModel::Mpu6050", imu)
         self.assertIn("0x75", tof)
         self.assertIn("mpu_matches != 1", tof)
-        self.assertIn("read_register(0x0031, &ready, 1)", tof)
-        self.assertIn("(ready & 1U) != 0U", tof)  # active-low data ready
-        self.assertIn("(result[0] & 0x1fU) == 9U", tof)  # Pololu ULD valid raw code
-        self.assertIn("result[3] > 0", tof)  # reject zero SPAD quality
-        self.assertIn("!write_byte(0x0086, 0x01)", tof)  # checked IRQ clear
+        # The selected inexpensive VL53L0X uses 8-bit registers. The
+        # earlier VL53L4CD ULD 16-bit addresses were superseded and must
+        # not be used by the actual safety scanner.
+        self.assertIn("read_register(0x13, &ready, 1)", tof)
+        self.assertIn("(ready & 0x07U) == 0", tof)
+        self.assertIn("read_register(0x14, result, kMaxSampleBytes)", tof)
+        self.assertIn("((result[0] & 0x78U) >> 3) == 11U", tof)
+        self.assertIn("distance >= 30 && distance <= 1300", tof)
+        self.assertIn("!write_byte(0x0B, 0x01)", tof)
+        self.assertNotIn("read_register(0x0031", tof)
+        self.assertNotIn("!write_byte(0x0086", tof)
 
     def test_sense_build_uses_separate_copy(self):
         with tempfile.TemporaryDirectory() as directory:
