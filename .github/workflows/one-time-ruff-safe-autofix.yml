@@ -14,11 +14,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - name: Install existing locked tooling
-        run: cd code && uv sync --locked
+        run: cd code && uv python install 3.11 && uv sync --extra dev --python 3.11 --locked
       - name: Apply only safe Ruff changes
         run: |
           cd code
-          uv run ruff check . --fix || true
+          uv run --no-sync ruff --version
+          uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py --fix || true
           echo "Safe Ruff changed:"
           git diff --stat
       - name: Commit safe fixes, no forced push
