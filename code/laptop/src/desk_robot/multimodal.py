@@ -1189,6 +1189,15 @@ class MultimodalOrchestrator:
         """One real device read until its task exits, even after a timeout."""
         previous = self._head_snapshot_tasks.get(robot_id)
         if previous is not None:
+            if not previous.done() and source in ("speech", "voice_question"):
+                # Human VAD cancels a lower-priority sensor snapshot without
+                # waiting for its underlying XIAO driver to unwind. Give that
+                # *existing physical owner* a bounded chance to exit before
+                # starting the new speech frame. This wait is in the JPEG
+                # worker only, never on the urgent audio STOP/VAD callback.
+                # An uncooperative old driver still fails closed: absolutely
+                # no overlapping physical camera requests are permitted.
+                await asyncio.wait({previous}, timeout=0.25)
             if not previous.done():
                 raise RuntimeError("Previous XIAO camera snapshot still in flight")
             self._head_snapshot_tasks.pop(robot_id, None)
