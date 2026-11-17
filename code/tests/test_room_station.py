@@ -1,7 +1,9 @@
 """One owned Feather room station, read-only source and five-pet sharing."""
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from dataclasses import replace
 
 import pytest
@@ -9,7 +11,7 @@ import pytest
 from desk_robot.brain_context import compose_brain_context
 from desk_robot.config import RobotConfig, Settings
 from desk_robot.multimodal import CameraFrameHub
-from desk_robot.room_station import RoomStationDecoder
+from desk_robot.room_station import RoomSerialFeed, RoomStationDecoder
 from desk_robot.soil_calibration import SoilCalibration
 
 
@@ -253,3 +255,34 @@ def test_unrepresentable_room_receive_clock_is_a_value_error(clock):
     with pytest.raises(ValueError, match="Finite Mac receive clock"):
         accept(frame(), decoder=decoder, now=clock)
     assert accept(frame(), decoder=decoder, now=1.0).seq == 1
+
+
+def test_cancelled_room_reader_joins_thread_before_task_exits_even_if_cancelled_twice():
+    """A new USB epoch must not overlap the old serial worker after cancellation."""
+    async def scenario():
+        entered = threading.Event()
+        release = threading.Event()
+        exited = threading.Event()
+        feed = RoomSerialFeed("/dev/cu.test", lambda observation: None)
+
+        def blocked_reader(running):
+            entered.set()
+            try:
+                release.wait(timeout=3)
+            finally:
+                exited.set()
+
+        feed._read_port = blocked_reader
+        task = asyncio.create_task(feed.run(asyncio.Event()))
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        task.cancel()  # repeated cancellation must not detach the thread
+        await asyncio.sleep(0.02)
+        assert not task.done()
+        assert not exited.is_set()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        assert exited.is_set()
+
+    asyncio.run(scenario())
