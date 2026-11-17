@@ -401,6 +401,10 @@ def test_novelty_checks_use_only_recent_words_this_pet_actually_sent():
         "Want to try guessing where the silver key is hiding?",
         source="robot-02", witnessed=False,
     )
+    # Episodes obtain their real clock AFTER the original 'now' sample.
+    # Use a clock at or after the created observation; otherwise the
+    # negative sub-millisecond "future" age correctly fails closed.
+    now = time.time()
     assert repeated_spontaneous_line(
         "Want to try guessing where the silver key is hiding!",
         [our_line], now_wall=now,
