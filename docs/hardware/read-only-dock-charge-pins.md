@@ -3,8 +3,8 @@
 The hardware plan allocates MCP23017 at WROOM accessory mux 0x71 lane 5, I2C address 0x20. The new firmware adapter uses *only inputs*, with on-chip 3.3V pullups:
 
 * GPA0 and GPA1 are independent normally closed mechanical dock contact confirmation switches. Both should open to HIGH when the robot is seated. A broken wire can look like a pressed switch, so these alone never prove docking or authorize charging.
-* GPA2 reads **BQ24074 PGOOD** as an open drain, LOW meaning the charger reports a valid input source. The charger status needs actual powered verification.
-* GPA3 reads **BQ24074 CHG** as an open drain, LOW meaning the IC reports an active charge cycle. This is not a current measurement or proof that the battery is accepting charge.
+* GPA2 reads **BQ24075 PGOOD** as an open drain, LOW meaning the charger reports a valid input source. The earlier BQ24074 reference is an alternative IC and not the active paper power path. The charger status needs actual powered verification.
+* GPA3 reads **BQ24075 CHG** as an open drain, LOW meaning the IC reports an active charge cycle. This is not a current measurement or proof that the battery is accepting charge.
 
 The WROOM reports these four bools through the existing read only `aux` path. The Sense bridge and Mac validator type-check them, reject fictional `charging_verified=true`, and never enable the charger or drive actuators.
 
@@ -24,3 +24,29 @@ The original three HTTP responses were **not proof of three independent physical
 * BQ24074 `CHG`/ `PGOOD` status outputs are open drain and indicate **chip state**, not bidirectional battery current. [TI BQ24074 datasheet](https://www.ti.com/lit/ds/symlink/bq24074.pdf) additionally notes timer faults and thermal suspension behavior. Three independently sampled LOW pins can still mean **no net charge flowing into the battery** under motor/head loads.
 
 **Electrical bench acceptance remains open.** Do not command terminal approach or energize contacts until actual protected power circuit, complete rated connector/contact assembly, fuse, thermal measurements, and independent battery current sensing are validated. `charging_verified` stays `false` in every current API result.
+
+## Actual INA226 current source and net-charge agreement, November 17
+
+The complete power [net specification](2026-11-17-one-pet-protected-power-circuit.md)
+now places a source-verified five milliohm two watt Kelvin shunt between
+BQ24075 BAT pins 2/3 and the **protected external PACK+**. INA226 IN+
+is at the charger side, IN- on protected pack side. Positive shunt
+voltage means current **towards** the battery and negative indicates
+battery supplement/discharge, in the wiring orientation described.
+
+This is **not** a drop-in shunt on arbitrary generic INA226 modules.
+Inspect the actual carrier shunt and Kelvin sense connections before
+building `esp32_dc_integrated_lab`. Standard firmware sets
+`DESK_ROBOT_PACK_SHUNT_MOHM=0`, so even a present INA226 never
+claims physically calibrated charge amps. The opt-in integrated build
+uses exactly 5 milliohm to derive `pack_ma`, `pack_valid` and
+`pack_seq` only after a successful raw register read. The independent
+Mac source in `dock_evidence.py` now requires three newly acquired
+INA226 readings, separately from three newly acquired MCP23017 dock
+status samples, before indicating **raw** charge direction. If the
+charger reports CHG active but all raw current indicates sustained
+battery discharge, `charger_indicator_net_discharge_conflict=true`
+is reported. `charging_verified`, `charging_authorized`, and
+`battery_current_measured` intentionally remain **false**; actual
+shunt calibration, connector ratings, charger TS NTC fault sweep and
+net battery charging must be verified with a separate instrument.
