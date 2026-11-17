@@ -1075,3 +1075,91 @@ def test_room_usb_thread_callback_does_not_schedule_after_mac_shutdown():
     runtime._closed = False
     with pytest.raises(RuntimeError, match="Event loop is closed"):
         runtime._queue_room_observation(ClosedLoop(), observation)
+
+
+async def test_human_voice_requests_roaming_stop_before_slow_audio_abort_finishes():
+    """One real VAD edge dispatches the existing local motor stop concurrently.
+
+    Slow Xiaozhi stop or another pet's audio cleanup must not defer WROOM
+    exploration cancellation until AFTER voice playback teardown.
+    """
+    audio_started = asyncio.Event()
+    release_audio = asyncio.Event()
+    motor_stopped = asyncio.Event()
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            audio_started.set()
+            await release_audio.wait()
+
+    class Conversation:
+        async def stop(self):
+            await release_audio.wait()
+
+    class Coordinator:
+        async def stop_active_exploration(self):
+            motor_stopped.set()
+            return ("robot-01",)
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[
+        SimpleNamespace(id="robot-01"), SimpleNamespace(id="robot-02"),
+    ])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.coordinator = Coordinator()
+    task = asyncio.create_task(
+        runtime._on_voice_interrupt("robot-02", "speech_start")
+    )
+    try:
+        await asyncio.wait_for(audio_started.wait(), timeout=0.3)
+        await asyncio.wait_for(motor_stopped.wait(), timeout=0.3)
+        assert not task.done()
+    finally:
+        release_audio.set()
+        await asyncio.wait_for(task, timeout=1)
+
+
+async def test_voice_monitor_unready_stops_autonomous_roaming_only():
+    motor_stopped = []
+    monitor = []
+
+    class Pet:
+        def set_voice_monitor_ready(self, ready):
+            monitor.append(ready)
+
+    class Coordinator:
+        async def stop_active_exploration(self):
+            motor_stopped.append(True)
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.pet = Pet()
+    runtime.coordinator = Coordinator()
+    await runtime._on_voice_monitor_ready(False)
+    assert monitor == [False]
+    assert motor_stopped == [True]
+    await runtime._on_voice_monitor_ready(True)
+    assert monitor == [False, True]
+    assert motor_stopped == [True]
+
+
+async def test_roaming_stop_transport_failure_is_not_silent():
+    class Pet:
+        async def interrupt(self, robot_id):
+            return None
+
+    class Conversation:
+        async def stop(self):
+            return None
+
+    class Coordinator:
+        async def stop_active_exploration(self):
+            raise RuntimeError("WROOM physical STOP unconfirmed")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id="robot-01")])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.coordinator = Coordinator()
+    with pytest.raises(RuntimeError, match="physical STOP unconfirmed"):
+        await runtime._on_voice_interrupt("robot-01", "normal")
