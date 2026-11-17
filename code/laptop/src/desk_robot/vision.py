@@ -276,7 +276,7 @@ class OllamaScene:
         confidence = data.get("confidence")
         answer = data.get("answer")
         if (type(supported) is not bool or type(confidence) not in (int, float)
-                or not math.isfinite(confidence) or not 0 <= confidence <= 1
+                or not 0 <= confidence <= 1 or not math.isfinite(confidence)
                 or not isinstance(answer, str) or not 1 <= len(answer.strip()) <= 400):
             raise ValueError("Unbounded or malformed local vision answer")
         if not supported or confidence < 0.65:
