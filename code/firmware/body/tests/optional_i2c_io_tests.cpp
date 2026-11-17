@@ -109,6 +109,25 @@ int main() {
     // No new conversion must not increment the source sequence.
     CHECK(!stale_pulse.poll(200));
     CHECK(stale_pulse.sample().sample_seq == 1U);
+    // A completely full MAX30102 FIFO can have matching write/read
+    // pointers. Its independent overflow counter must still block old
+    // optical evidence and recover only after a genuinely new conversion.
+    TwoWire overflow_pulse_wire;
+    desk_robot::PulsePad overflow_pulse;
+    CHECK(overflow_pulse.begin(overflow_pulse_wire));
+    overflow_pulse_wire.pulse_fifo_write_pointer = 0;
+    overflow_pulse_wire.pulse_fifo_overflow = 7;
+    CHECK(!overflow_pulse.poll(0));
+    CHECK(!overflow_pulse.sample().valid);
+    CHECK(overflow_pulse.sample().sample_seq == 0U);
+    CHECK(overflow_pulse_wire.pulse_fifo_read_pointer == 0);
+    CHECK(overflow_pulse_wire.pulse_fifo_overflow == 0);
+    overflow_pulse_wire.pulse_fifo_write_pointer = 2;
+    CHECK(overflow_pulse.poll(100));
+    CHECK(overflow_pulse.sample().valid);
+    CHECK(overflow_pulse.sample().sample_seq == 1U);
+    CHECK(overflow_pulse_wire.pulse_fifo_read_pointer == 2);
+    CHECK(overflow_pulse_wire.ranges == 0 && overflow_pulse_wire.extras == 0);
     // A rejected MAX30102 register write/read must still finish the Wire
     // transaction and must invalidate an old optical sample.
     TwoWire pulse_write_fault_wire;
