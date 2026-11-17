@@ -64,6 +64,15 @@ def verify(plan: dict, body: str, head: str) -> None:
                              ("kRightIn1", 27), ("kRightIn2", 32)):
         if _pin(rf"constexpr int {symbol} = (\d+);", body, symbol) != expected:
             raise ValueError(f"Guarded DC motor pin drift: {symbol}")
+    # The DC alternative frees GPIO23 but the STEPPER variant uses that
+    # same pin as its last right ULN2003 coil. Never infer that both wires
+    # can exist in the same purchased chassis harness.
+    watchdog = _pin(r"constexpr int kDcHeartbeatPin = (\d+);",
+                    body, "kDcHeartbeatPin")
+    if (watchdog != 23 or watchdog not in bus["body_gpio"]["right_stepper"]):
+        raise ValueError("DC motor watchdog must share only mutually exclusive STEP GPIO23")
+    if watchdog in (25, 26, 27, 32):
+        raise ValueError("DC watchdog collides with active H bridge PWM input")
     for label, symbol in HEAD_SINGLE.items():
         actual = _pin(rf"#define {symbol} GPIO_NUM_(\d+)\b", head, symbol)
         if actual != bus["sense_gpio"][label]:
@@ -188,6 +197,10 @@ def render(plan: dict, body: str, head: str) -> str:
     row("WROOM GPIO27 + GPIO32", "right DRV8833 BIN1/BIN2 (DC FULL only)",
         "3.3V motor PWM signals, alternative to right ULN2003",
         "Guarded DC profile; physical load unqualified")
+    row("WROOM GPIO23 (DC only; same as STEP right coil 4)",
+        "CD74HC123 channel 2 B rising-edge input",
+        "CPU-only 15ms toggles, 3.3V; no LEDC, pull LOW at boot",
+        "Source exists only in esp32_dc_watchdog_lab; nSLEEP gate unqualified")
     for signal, target in (("lift_servo", "MG90S lift signal"),
                            ("grip_servo", "MG90S jaw signal")):
         row(f"WROOM GPIO{bus['body_gpio'][signal]}", target, "3.3V PWM signal only")
@@ -274,6 +287,9 @@ def render(plan: dict, body: str, head: str) -> str:
         "* XIAO Sense camera/SD expansion J3 must be physically isolated",
         "  and continuity-checked before GPIO7/8 I2S and GPIO9 RGB use.",
         "  SD card slot disabled and empty; verify shipped PCB revision.",
+        "* DC-only GPIO23 heartbeat is NOT the DRV8833 motor driver nSLEEP.",
+        "  It needs the independent second HC123 channel, verified Q timeout",
+        "  and a fail-LOW interface against any onboard VM-to-nSLEEP pullup.",
         "* Haptic MCP23017 GPB2 drives only a generic HC123 one-shot trigger,",
         "  not the coin motor. Verify active-HIGH edge, 3.3V rail, timed Q and",
         "  low-side MOSFET/flyback current; production effect stays disabled.",
