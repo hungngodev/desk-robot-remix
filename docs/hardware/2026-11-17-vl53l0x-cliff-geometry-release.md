@@ -33,11 +33,50 @@ Execute `python code/scripts/cliff_mount_preflight.py
 --mount-above-desk-mm VALUE --tilt-deg VALUE
 --sensor-ahead-of-wheel-mm VALUE --measured-stopping-mm VALUE
 --latency-ms VALUE --speed-mm-s VALUE` with actual numbers.
-The script independently checks the existing firmware threshold and CAD
-lens center, then calculates a conservative required forward offset:
+The script independently checks the firmware distance acceptance,
+actual CAD lens position and ST's **25 degree system field of view**, then
+calculates the available stopping offset. Primary source: [ST VL53L0X
+DS11555 Rev 6, section 6.1, page 21](https://www.st.com/resource/en/datasheet/vl53l0x.pdf).
+The manufacturer's range tables assume the full FoV is covered. A desk edge
+violates that assumption, so its reported range may remain plausible while
+some of its optical cone still intersects the table.
 
-`required lead = p95 measured braking distance + actual unaccounted
-sensor/controller latency * speed + clearance margin`.
+For a downward optical center at height `H`, nominal tilt `t` degrees
+toward the front, and ST half FoV `b = 12.5 degrees`, the worst
+backward floor echo footprint is bounded geometrically by
+`rearward echo setback = max(0, -H * tan(t - b))`.
+This geometric bound is a conservative **model**, not a guaranteed signal
+response of a mixed/partial field or a measured false-negative probability.
+
+The revised source requires:
+
+`physical sensor ahead of leading wheel > p95 braking distance +
+remaining sensor/controller latency * speed +
+engineering clearance margin + rearward echo setback`.
+
+The source also checks the closest and farthest optical path across the
+full FoV against the **actual firmware** 30..1300 mm acceptance range, and
+rejects tilt where the cone reaches the horizon. It deliberately gives no
+extra braking credit for a forward tilted optical axis.
+
+**Specific prior false positive:** with mount 20 mm above desk and current
+13.5 mm adapter optical center, height is 33.5 mm. ST's 25 degree FoV
+leaves `33.5 * tan(12.5 degrees) = 7.43 mm` of potential rearward floor
+reflection. At speed 100 mm/s, assumed 80 ms sensor latency, 10 mm observed
+p95 stopping and 10 mm reserve, the required clearance is 28 mm **plus
+7.43 mm**. A 32 mm ahead-of-wheel sensor looks safe under the previous
+point-ray equation, but has just 24.57 mm effective lead and is now
+correctly rejected by both the geometry code and committed regressions.
+
+A 25 degree FoV is not a proof of the exact location/strength of the last
+return. With mixed reflections, lens windows, black table surfaces, ambient
+light, multi-sensor interference and motor vibration, the actual time to
+declare a cliff can be worse. The 25 degree footprint is a necessary
+geometric screen, not a sufficient safety guarantee. Furthermore, p95
+braking distance permits 5 percent exceedance; use measured worst-case
+stopping over worst supplied voltage, load, turn, floor and fault condition
+for the actual final safety margin. Neither p95 nor a CAD dimension alone
+qualifies a high-consequence desk edge stop.
 
 A sensor that reports a cliff only once the leading wheel reaches the edge
 cannot prevent falling, even if its range reading is perfect. The firmware
