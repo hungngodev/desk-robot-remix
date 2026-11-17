@@ -79,6 +79,8 @@ jobs:
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
       - name: Compile full eight low-cost VL53L0X robot firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full
+      - name: Compile optional bumper and PIR interaction lab
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full_interaction_lab
       - name: Compile opt-in haptic MCP23017 lab firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full_haptic_lab
       - name: Compile full guarded DRV8833 DC drivetrain firmware
