@@ -87,6 +87,39 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
+    async def test_cancelled_task_cannot_erase_failed_stop_receipt(self):
+        started = asyncio.Event()
+
+        async def cancellable_job():
+            started.set()
+            await asyncio.Event().wait()
+
+        task = asyncio.create_task(cancellable_job())
+        await started.wait()
+        coordinator = object.__new__(Coordinator)
+        coordinator.settings = SimpleNamespace(robot=lambda robot_id: object())
+        coordinator.heads = {"robot-01": object()}
+        coordinator.jobs = {"job-01": Job("job-01", "robot-01", "pickup", state="running")}
+        coordinator.tasks = {"job-01": task}
+        coordinator.permits = {"robot-01": 123.0}
+        coordinator._permit_epoch = {"robot-01": 0}
+
+        async def failed_receipt(head):
+            # Allow cooperative cancellation to finish before STOP fails.
+            await asyncio.sleep(0)
+            raise RuntimeError("USB STOP failed")
+
+        with patch("desk_robot.controller._bounded_body_stop", side_effect=failed_receipt):
+            with self.assertRaisesRegex(RuntimeError, "USB STOP failed"):
+                await coordinator.stop("robot-01")
+        self.assertTrue(task.cancelled())
+        self.assertEqual(coordinator.jobs["job-01"].state, "failed")
+        self.assertEqual(
+            coordinator.jobs["job-01"].error,
+            "WROOM physical STOP unconfirmed; rely on local watchdog",
+        )
+
+
 
 if __name__ == "__main__":
     unittest.main()
