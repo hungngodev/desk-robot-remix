@@ -551,6 +551,10 @@ def test_round2_xiaozhi_jpeg_and_bounded_uart_reuse_existing_owners():
     assert "config.fb_location = CAMERA_FB_IN_PSRAM" in sense
     assert "void Bridge::CameraStreamTask(" in bridge
     assert '"/api/camera.mjpg"' in bridge
+    assert '"/api/camera.identity"' in bridge
+    assert 'esp_camera_sensor_get()' in bridge
+    assert 'pid == OV3660_PID' in bridge and 'pid == OV5640_PID' in bridge
+    assert '"camera_pid_raw"' in bridge and '"boot"' in bridge
     assert "camera_busy_.exchange(true)" in bridge
     assert "SnapshotJpeg()" in bridge and "SnapshotJpeg()" in snapshot
     assert "std::lock_guard<std::recursive_mutex> camera_lock(AccessMutex())" in snapshot
