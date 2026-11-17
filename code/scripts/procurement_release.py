@@ -18,9 +18,9 @@ PLAN = ROOT / "docs/hardware/full-feature-plan.json"
 # A vendor-specific reference is not necessarily a final production carrier.
 SOURCE_REFERENCES = {
     "cliff_obstacle": ("Generic", "GY-530 VL53L0X", "https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html"),
-    "i2c_mux": ("SparkFun", "BOB-16784", "https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html"),
-    "mcp23017": ("Waveshare", "15391", "https://www.waveshare.com/mcp23017-io-expansion-board.htm"),
-    "amp": ("SparkFun", "DEV-14809", "https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html"),
+    "i2c_mux": ("Generic", "TCA9548A", "https://www.ti.com/product/TCA9548A"),
+    "mcp23017": ("Generic", "MCP23017", "https://www.microchip.com/en-us/product/MCP23017"),
+    "amp": ("Generic", "MAX98357A", "https://www.analog.com/en/products/max98357a.html"),
     "speaker": ("SparkFun", "COM-26553", "https://www.sparkfun.com/mini-speaker-1w-8-ohm.html"),
 }
 
