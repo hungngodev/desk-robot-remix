@@ -3,18 +3,17 @@
 #if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
     (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 
-// Five critical ST VL53L4CD measurements via TCA9548A channels 0..4.
-// Full-feature profile adds three extra diagnostic directions on channels 5..7.
-// Reuse the pinned Pololu implementation for sensor initialization/ranging,
-// but use bounded checked Wire reads on the safety path. The upstream helper
-// divides by the reported SPAD count without guarding against zero, so do NOT
-// call its read() method in an edge-critical loop.
-// Source: https://github.com/pololu/vl53l4cd-arduino
-// License: ST/Pololu BSD 3-Clause Clear. This adapter adds no motion authority.
+// Five critical ST VL53L0X measurements via TCA9548A channels 0..4.
+// Full-feature profile adds three side/rear read-only channels 5..7.
+// Reuse pinned Pololu VL53L0X initialization, but poll the ready/result
+// registers with bounded checked I2C operations rather than its blocking read.
+// Raw DEVICE status 11 is valid; reject 0, invalid/out-of-range results.
+// Cheap generic GY-530 carriers require actual 3.3V-level and desk-edge trials.
+// Source: https://github.com/pololu/vl53l0x-arduino (MIT).
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <VL53L4CD.h>
+#include <VL53L0X.h>
 #include "RangeScanOrder.h"
 
 #ifndef DESK_ROBOT_EXTRA_RANGERS
@@ -58,9 +57,9 @@ class TofBus {
   static constexpr std::uint8_t kSensorAddress = 0x29;
   static constexpr std::uint8_t kFloorAndFrontCount = 5;
   static constexpr std::uint8_t kRangeCount = 5 + (DESK_ROBOT_EXTRA_RANGERS ? 3 : 0);
-  static constexpr std::uint8_t kMaxSampleBytes = 15;
+  static constexpr std::uint8_t kMaxSampleBytes = 12;
   TwoWire& wire_ = Wire;
-  VL53L4CD device_{};
+  VL53L0X devices_[kRangeCount]{};
   RangeScanOrder scan_{DESK_ROBOT_EXTRA_RANGERS != 0};
   std::uint8_t next_channel_ = 0;
   std::uint8_t new_extra_channel_ = 255;
@@ -78,8 +77,8 @@ class TofBus {
   // Always quiesce any fitted interaction mux before a critical range read.
   bool quiesce_optional_mux();
   bool select(std::uint8_t channel);
-  bool read_register(std::uint16_t reg, std::uint8_t* dest, std::uint8_t bytes);
-  bool write_byte(std::uint16_t reg, std::uint8_t value);
+  bool read_register(std::uint8_t reg, std::uint8_t* dest, std::uint8_t bytes);
+  bool write_byte(std::uint8_t reg, std::uint8_t value);
   void failed(CliffGuard& guard);
 };
 
