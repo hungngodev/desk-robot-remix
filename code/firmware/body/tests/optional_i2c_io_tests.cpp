@@ -88,6 +88,23 @@ int main() {
     CHECK(cap_failed_write_wire.ranges == 0);
     CHECK(cap_failed_write_wire.extras == 0);
     CHECK(!cap_failed_write_wire.unsafe_parallel_mux);
+    // A rejected MAX30102 register write/read must still finish the Wire
+    // transaction and must invalidate an old optical sample.
+    TwoWire pulse_write_fault_wire;
+    desk_robot::PulsePad pulse_write_fault;
+    CHECK(pulse_write_fault.begin(pulse_write_fault_wire));
+    CHECK(pulse_write_fault.poll(0));
+    CHECK(pulse_write_fault.sample().valid);
+    const auto pulse_end_before =
+        pulse_write_fault_wire.pulse_terminated_transmissions;
+    pulse_write_fault_wire.fail_pulse_register_write = true;
+    CHECK(!pulse_write_fault.poll(100));
+    CHECK(!pulse_write_fault.sample().valid);
+    CHECK(pulse_write_fault_wire.failed_pulse_writes > 0);
+    CHECK(pulse_write_fault_wire.pulse_terminated_transmissions -
+          pulse_end_before >= pulse_write_fault_wire.failed_pulse_writes);
+    CHECK(pulse_write_fault_wire.ranges == 0 &&
+          pulse_write_fault_wire.extras == 0);
     // MAX30102 shares the same optional lane. It must enforce the same
     // verified 0x70 quiescence and 0x71 isolation as CAP1188.
     TwoWire stuck_range_pulse_wire;
