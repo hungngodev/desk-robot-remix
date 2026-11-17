@@ -41,8 +41,12 @@ bool AccessorySensors::read(std::uint8_t address, std::uint8_t reg,
                              std::uint8_t* dest, std::uint8_t count) {
   if (!dest || !count || count > 16) return false;
   wire_->beginTransmission(address);
-  if (wire_->write(reg) != 1 || wire_->endTransmission(false) != 0)
-    return false;
+  const bool wrote = wire_->write(reg) == 1;
+  // Always terminate a failed partial transmission with STOP. Otherwise a
+  // rejected write may leave Wire in a transaction while the dock GPIOA
+  // freshness gate thinks the optional controller simply vanished.
+  const bool acknowledged = wire_->endTransmission(!wrote) == 0;
+  if (!wrote || !acknowledged) return false;
   if (wire_->requestFrom(address, static_cast<std::size_t>(count), true) != count)
     return false;
   for (std::uint8_t i = 0; i < count; ++i) {
@@ -63,20 +67,24 @@ bool AccessorySensors::read16(std::uint8_t address, std::uint8_t reg,
 bool AccessorySensors::write8(std::uint8_t address, std::uint8_t reg,
                                std::uint8_t value) {
   wire_->beginTransmission(address);
-  const bool ok = wire_->write(reg) == 1 && wire_->write(value) == 1;
-  return ok && wire_->endTransmission(true) == 0;
+  const bool wrote = wire_->write(reg) == 1 && wire_->write(value) == 1;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return wrote && acknowledged;
 }
 bool AccessorySensors::write16(std::uint8_t address, std::uint8_t reg,
                                 std::uint16_t value) {
   wire_->beginTransmission(address);
-  const bool ok = wire_->write(reg) == 1 &&
-                  wire_->write(static_cast<std::uint8_t>(value >> 8)) == 1 &&
-                  wire_->write(static_cast<std::uint8_t>(value)) == 1;
-  return ok && wire_->endTransmission(true) == 0;
+  const bool wrote = wire_->write(reg) == 1 &&
+                     wire_->write(static_cast<std::uint8_t>(value >> 8)) == 1 &&
+                     wire_->write(static_cast<std::uint8_t>(value)) == 1;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return wrote && acknowledged;
 }
 bool AccessorySensors::write_command(std::uint8_t address, std::uint8_t cmd) {
   wire_->beginTransmission(address);
-  return wire_->write(cmd) == 1 && wire_->endTransmission(true) == 0;
+  const bool wrote = wire_->write(cmd) == 1;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return wrote && acknowledged;
 }
 bool AccessorySensors::begin(TwoWire& wire) {
   wire_ = &wire;
