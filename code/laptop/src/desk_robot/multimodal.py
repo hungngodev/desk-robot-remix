@@ -1139,6 +1139,19 @@ class MultimodalOrchestrator:
                         )
                         if turn != self._turn_epoch[robot_id]:
                             return  # Older cancelled sampler cannot own a new VAD turn.
+                    except RuntimeError as exc:
+                        # A cancelled lower-priority sensor snapshot can still
+                        # be the sole real device reader for one more event-loop
+                        # tick. The strict single-owner gate must not kill the
+                        # current human VAD camera sampler permanently. Retry
+                        # ONLY that bounded ownership contention, without
+                        # launching a second physical capture or reviving an
+                        # older conversation generation.
+                        if str(exc) == "Previous XIAO camera snapshot still in flight":
+                            await asyncio.sleep(0.05)
+                            continue
+                        self.hub.discard_video(robot_id)
+                        break
                     except Exception:
                         # Camera failure does NOT prove the human stopped
                         # speaking. Only discard stale frames, never VAD state.
