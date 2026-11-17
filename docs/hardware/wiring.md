@@ -150,7 +150,7 @@ Use rated conductors for actuator power. Owned DuPont ribbons are signal leads,
 not the main motor/servo supply. Never run motor/servo current through a board's
 3.3 V regulator or from a laptop USB port through the board. Check the actual
 MG90S voltage rating. MAX98357 speaker connects across SPK+ and SPK−, **neither
-to ground**; set volume for the 8 Ω / 1 W speaker. Insulate brass/cosmetic metal.
+to ground**; validate amplifier gain, long speech temperature and enclosure acoustics for the fixed 8 Ω / 2 W Challenge CS20-02P110-04-1X speaker; 5 V amplifier supply is not yet physically accepted. Insulate brass/cosmetic metal.
 
 The [Adafruit #4090](https://www.adafruit.com/product/4090) breakout is not a
 qualified whole-robot high-current distributor. **Do not directly join the
