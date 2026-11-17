@@ -171,6 +171,42 @@ int main() {
       CHECK(bus.probe_imu().family == 0); // this fake has no physical IMU
       CHECK(Wire.imu_probe_attempts > 0); // only after proven disconnect
     }
+    {
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      // A not-ready interrupt must not refresh any old floor observation.
+      Wire.tof_ready = false;
+      const auto prior = Wire.tof_samples;
+      for (std::uint32_t n = 60; n < 72; ++n) bus.poll(guard, n);
+      CHECK(Wire.tof_samples == prior);
+      CHECK(!guard.evaluate(260)); // previously valid samples have expired
+      CHECK(guard.fault() == desk_robot::CliffFault::StaleSample);
+    }
+    {
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      Wire.tof_raw_status = 1; // ST raw status 11 is the only accepted value
+      bus.poll(guard, 60); // optional lane 5, read-only
+      bus.poll(guard, 61); // critical floor 0
+      CHECK(guard.fault() == desk_robot::CliffFault::InvalidSample);
+      CHECK(!guard.evaluate(61));
+      CHECK(!guard.try_rearm(61));
+    }
+    {
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      Wire.tof_force_mm = 8190; // VL53L0X no-reflection/out-of-range code
+      bus.poll(guard, 60); // optional lane 5
+      bus.poll(guard, 61); // critical floor 0
+      CHECK(guard.fault() == desk_robot::CliffFault::InvalidSample);
+      CHECK(!guard.evaluate(61));
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {
