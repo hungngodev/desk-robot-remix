@@ -341,7 +341,8 @@ def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatc
     assert len(opened) == 1
     assert attempts == [1, 2]
     assert received == [2]
-    assert feed.rejected == 2  # one callback failure and one replayed frame
+    assert feed.rejected == 1  # replayed frame only
+    assert feed.callback_failures == 1  # independent consumer failure
     assert feed.received == 1  # only successfully delivered observations
     assert "callback failed" in feed.last_error
 
@@ -380,7 +381,8 @@ def test_room_callback_failure_is_not_erased_by_clean_reader_shutdown(monkeypatc
 
         feed = RoomSerialFeed("/dev/cu.test", broken_consumer)
         await asyncio.wait_for(feed.run(stop), timeout=2)
-        assert feed.rejected == 1
+        assert feed.rejected == 0
+        assert feed.callback_failures == 1
         assert feed.received == 0
         assert "Room observation callback failed: RuntimeError" in feed.last_error
 
