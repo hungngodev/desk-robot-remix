@@ -75,6 +75,9 @@ class Runtime:
             )
             self.pet.multimodal = self.multimodal
             self.conversation.multimodal = self.multimodal
+            # Qualified hardware exploration shares this SAME stream.
+            # Never start a second capture loop when the body is driving.
+            self.coordinator.multimodal = self.multimodal
             self.multimodal.preempt_background_vision = (
                 self.pet.preempt_background_vision
             )
