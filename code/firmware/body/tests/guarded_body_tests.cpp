@@ -179,6 +179,12 @@ static void measured_local_calibration_is_atomic_and_never_arms() {
   CHECK(send(body, "calcommit", 0, true) == "ERR calcommit incomplete_stage");
   CHECK(send(body, "calfloor 4 40 60", 0, true).find("ERR calfloor") == 0);
   CHECK(send(body, "calfloor 0 60 40", 0, true).find("ERR calfloor") == 0);
+  CHECK(send(body, "calfloor 0 1 15", 0, true).find("ERR calfloor") == 0);
+  CHECK(send(body, "calfloor 0 29 60", 0, true).find("ERR calfloor") == 0);
+  CHECK(send(body, "calfloor 0 30 1301", 0, true).find("ERR calfloor") == 0);
+  CHECK(send(body, "calfront 1 100", 0, true).find("ERR calfront") == 0);
+  CHECK(send(body, "calfront 29 100", 0, true).find("ERR calfront") == 0);
+  CHECK(send(body, "calfront 30 1301", 0, true).find("ERR calfront") == 0);
   for (int i = 0; i < 4; ++i)
     CHECK(send(body, "calfloor " + std::to_string(i) + " 40 60", 0, true) ==
           "OK calfloor channel=" + std::to_string(i));
