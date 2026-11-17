@@ -387,7 +387,12 @@ def test_malformed_retired_boot_packet_cannot_erase_new_boot_calibration():
     gate = HandlingGate()
     calibrated(gate, 100)
     assert qualified(gate, sample(boot_id=2), 102) == ()
-    calibrated(gate, 103)
+    # A new WROOM boot can only calibrate from its OWN seven additional
+    # physical acquisitions. The original helper defaults to retired boot 1
+    # and must never be allowed to restore boot 2's pose.
+    for i in range(7):
+        assert qualified(gate, sample(boot_id=2), 102.15 + .15 * i) == ()
+    assert gate.reference is not None
     assert gate.last_boot_id == 2
     assert gate.reference is not None
     # A delayed packet from boot 1 must not revoke the valid boot 2 pose.
