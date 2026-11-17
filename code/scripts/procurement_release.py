@@ -654,7 +654,7 @@ def render_first_robot_markdown(report: dict) -> str:
     projection = first_robot_projection(report)
 
     def cell(value: object) -> str:
-        return str(value).replace("|", r"\\|").replace("\\n", " ").strip()
+        return str(value).replace("|", r"\|").replace("\n", " ").strip()
 
     lines = [
         "# First complete desk robot, one dock and one room station",
@@ -707,7 +707,7 @@ def render_first_robot_markdown(report: dict) -> str:
         "authorized purchases.",
         "",
     ]
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def _purchase_rows(report: dict):
     for row in report["robots"]:
@@ -848,8 +848,9 @@ def main() -> int:
                         help="Operator-recorded measured qualification JSON, if any")
     parser.add_argument("--require-release", action="store_true",
                         help="Exit 2 unless every part and system receipt has passed")
-    parser.add_argument("--format", choices=("json", "csv", "markdown"),
-                        default="json", help="Render one verified quantity ledger")
+    parser.add_argument("--format", choices=(
+        "json", "csv", "markdown", "first-robot-json", "first-robot-markdown"
+    ), default="json", help="Project the canonical ledger without buying permits")
     args = parser.parse_args()
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
     evidence = (json.loads(args.evidence.read_text(encoding="utf-8"))
@@ -859,6 +860,10 @@ def main() -> int:
         print(render_csv(report), end="")
     elif args.format == "markdown":
         print(render_markdown(report), end="")
+    elif args.format == "first-robot-json":
+        print(json.dumps(first_robot_projection(report), indent=2))
+    elif args.format == "first-robot-markdown":
+        print(render_first_robot_markdown(report), end="")
     else:
         print(json.dumps(report, indent=2))
     return 2 if args.require_release and not report["order_released"] else 0
