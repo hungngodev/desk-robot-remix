@@ -2876,11 +2876,16 @@ async def test_proactive_source_prompt_does_not_claim_sensor_is_camera(fleet, tm
         await wait_for(lambda: state.spoken == 1)
         assert "Local physical sensor event" in chat.prompts[0][1]["content"]
         assert "New visual change" not in chat.prompts[0][1]["content"]
+        await wait_for(lambda: pet._speech_task is None)
         pet._consider_speech(
             "robot-01", SceneChange("key", "A possible key appeared", .96), 24
         )
-        await wait_for(lambda: state.spoken == 2)
+        await wait_for(lambda: pet._speech_task is None)
         assert "Camera model assessment (uncertain)" in chat.prompts[1][1]["content"]
+        # Different sensor and camera evidence keep independent provenance;
+        # identical canned model text is intentionally not spoken twice.
+        assert state.spoken == 1
+        assert state.last_initiative_suppression == "repetitive_spontaneous_reply"
     finally:
         state.enabled = False
         await pet.close()
