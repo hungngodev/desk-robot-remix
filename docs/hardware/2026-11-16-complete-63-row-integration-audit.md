@@ -1,6 +1,6 @@
 # Sixty three row source and purchase crosswalk
 
-Checked against live draft PR 17 on 2026-11-16. This is an **audit, not a second cart or purchase approval**. The only counted source is `full-feature-plan.json`; the human sourced quote/candidate ledger is `2026-11-16-five-pet-purchase-register.md`. The latter has 42 pet and dock items plus 14 supplementary rows, while the plan has 42 pet and dock roles plus 7 shared station roles. **There are 63 ledger rows, not 63 separately required SKUs.**
+Checked against live draft PR 17 on 2026-11-16. This is an **audit, not a second cart or purchase approval**. The only counted source is `full-feature-plan.json`; the human sourced quote/candidate ledger is `2026-11-16-five-pet-purchase-register.md`. The plan now has 42 pet and dock roles, 7 shared station roles, and 14 `linked_subassemblies` explicitly tied to those parent roles. `code/scripts/procurement_release.py` requires separate reviewed decisions for all 14 linked entries before it could release an order; an unresolved entry blocks release. **There are 63 ledger rows, not 63 separately required SKUs.**
 
 This report deliberately distinguishes a source path from real compatibility. A named file and a source level driver do not establish an exact PCB vendor, firmware build result, pin voltage, loaded power margin, optical cliff stopping, tested charging, or physical fit. Most parts remain HOLD. Full product purchase and the fivefold fleet copy require actual electrical and mechanical evidence.
 
