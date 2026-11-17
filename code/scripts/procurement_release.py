@@ -719,7 +719,9 @@ def first_robot_projection(report: dict) -> dict:
 
 # An exact low-energy sample can be ordered for bench characterization before
 # a complete robot exists. This does NOT lift lithium/motion/charging gates.
-# All SKUs and historical quotes come from the existing November 16 register.
+# Original choices derive from the November 16 register. Added inexpensive
+# ElectroPeak carrier samples are independently linked product candidates.
+# None of these listings verifies PCB revision, shipping, or US landed price.
 PILOT_SAMPLE_PRODUCTS = {
     "cliff_obstacle": ("VL53L0X GY-530 small carrier candidate ElectroPeak SEN-19-006",
                        "ElectroPeak", "SEN-19-006",
@@ -757,7 +759,7 @@ PILOT_SAMPLE_PRODUCTS = {
             "https://www.sparkfun.com/sparkfun-rgb-led-breakout-ws2812b.html", 1, 1.50),
     "dock_ir_receivers": (
         "Two 38 kHz demodulated IR receivers, Vishay TSOP38438 reference, mounted behind separate directional baffles",
-        "Vishay", "TSOP38438", "https://www.vishay.com/en/product/82491/", 2, 0.79),
+        "Vishay", "TSOP38438", "https://www.digikey.com/en/products/detail/vishay-semiconductor-opto-division/TSOP38438/4073478", 2, 0.79),
     "dock_ir_emitter_channels": (
         "Two independently aimed 940 nm 38 kHz infrared LED emitter channels with rated transistor driver and current limiting per dock",
         "Vishay", "TSAL6200",
@@ -834,7 +836,8 @@ def render_first_robot_pilot_samples(report: dict) -> str:
         "",
         "These exact samples are for low-energy bench experiments, not a "
         "physically qualified robot, motor drive, Li-ion battery or live dock. "
-        "Every quote is historical and excludes shipping and tax.",
+        "Every quote is historical and excludes shipping and tax. Bare dock IR
+        "emitters are NOT complete transistor and current-limited driver channels.",
         "",
         "## 1. Reported owned or incoming, not yet inspected",
         "",
