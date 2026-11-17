@@ -102,9 +102,11 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('body_fault_active_', source)
         self.assertIn('bool last_rendered_fault = false;', source)
         self.assertIn('board->body_fault_active_ = true;', source)
-        self.assertIn('board->body_fault_active_ ? "sad" : "neutral"', source)
+        self.assertIn('board->body_fault_active_ ? "sad" :', source)
+        self.assertIn('person_cue_active ? "surprised" : "neutral"', source)
         self.assertIn('last_was_idle = idle;', source)
-        self.assertIn('board->body_fault_active_ ? "sad" : "neutral"', source)
+        self.assertIn('board->body_fault_active_ ? "sad" :', source)
+        self.assertIn('person_cue_active ? "surprised" : "neutral"', source)
         bridge = (board / 'robot_bridge.cc').read_text()
         self.assertIn('BodyInteraction Bridge::PollInteraction()', bridge)
         self.assertIn('Transact("status", false)', bridge)
@@ -194,7 +196,7 @@ class SenseSelectionTests(unittest.TestCase):
         assert "httpd_resp_send_chunk(req" in bridge
         assert "X-Desk-Camera-Sequence: %u" in bridge
         assert "X-Desk-Camera-Complete-Us: %lld" in bridge
-        assert "config.max_uri_handlers = 6;" in bridge
+        assert "config.max_uri_handlers = 7;" in bridge
 
     def test_vendor_stackchan_behavior_compiles_without_motor_framework(self):
         compiler = shutil.which("c++")
