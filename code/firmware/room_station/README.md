@@ -8,7 +8,7 @@ Firmware: `src/main.cpp`. Mac decoding and opt-in shared context:
 
 ## Source-mapped signals
 
-The existing target is `feather_nrf52840_room_bench` on the **reported owned**
+The `feather_nrf52840_room_bench` and `feather_nrf52840_room_full` targets share the **reported owned**
 Adafruit Feather nRF52840. Reusing that board and open source Arduino libraries
 does **not** require buying any new Adafruit-branded hardware. Check the exact
 owned PCB revision and pinned PlatformIO core before wiring.
@@ -19,7 +19,7 @@ owned PCB revision and pinned PlatformIO core before wiring.
 | BME688 | Same 3.3 V compatible I2C bus; 0x77 or 0x76 | Upstream BME68x ambient and raw gas resistance, not VOC ppm |
 | AMG8833 | Same 3.3 V compatible I2C bus; address 0x69 | Checked 64-pixel thermal register reads; no identity recognition |
 | LD2410C | Serial1 RX D1/P0.24 from radar TX, TX D0/P0.25 to radar RX | Upstream LD2410 at 256000 baud, packet freshness bounded |
-| Capacitive soil | **Optional** analog A0/D14/P0.04, plus rated supply and common ground | Three 12-bit ADC acquisitions, median and noise/rail rejection; remains disabled in the default build |
+| Capacitive soil | Analog A0/D14/P0.04 from **3.3V powered** capacitive probe, common ground | Three 12-bit ADC acquisitions, median and noise/rail rejection in the dedicated `room_full` profile; `room_bench` leaves it off |
 | Mac | Feather's USB serial at 115200 | Versioned one-line JSON observations, read-only, opt-in |
 
 Source for the Feather numbers:
@@ -41,9 +41,7 @@ connecting any module. Do not confuse I2C with 5 V tolerant wiring.
 2. Check the actual I2C carrier rails/pullups and address scan, then validate
    SCD40, BME688 and AMG8833 one module at a time. Add LD2410C at the
    exact 256000 baud on UART1 after confirming board supply and logic levels.
-3. Soil remains **OFF** in `platformio.ini`: `-DROOM_SOIL_FITTED=0`.
-   Only when a specific 3.3 V analog output probe is connected to A0 and
-   validated may a bench firmware enable `ROOM_SOIL_FITTED=1`.
+3. Soil remains **OFF** in the safe default `feather_nrf52840_room_bench`, but the full required profile `feather_nrf52840_room_full` now compiles the actual A0 ADC code with `ROOM_SOIL_FITTED=1`. Select the full build ONLY when the installed probe is fed from the 3.3V rail, its AOUT maximum is under 3.3V across its operating conditions, its ground is common and no 5V output reaches A0.
    Reject saturated and unstable ADC readings; floating A0 can still look
    plausible, so software alone does not prove a connected probe.
 4. Measure the **same probe** in physically dry and wet reference media.
@@ -62,3 +60,5 @@ connecting any module. Do not confuse I2C with 5 V tolerant wiring.
 and test procedure. It is not a power schematic, a measured PCB revision,
 a verified dry/wet calibration, a completed physical station, or an approved
 five-pet purchasing order.
+
+The Feather nRF52840 Express [official analog pin reference](https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/pinouts) uses a nominal 0 to 3.6 V SAADC measurement span with gain one sixth. **The measurement span is not permission to apply 5V to an I/O pin.** Use a 3.3V powered capacitive probe with a verified 0 to 3.3V analog output and common ground, away from water ingress at the PCB head. Once it is connected, use `feather_nrf52840_room_full` and verify dry/wet calibration. No newly purchased Adafruit board is required.
