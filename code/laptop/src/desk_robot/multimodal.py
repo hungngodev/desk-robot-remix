@@ -552,7 +552,7 @@ class CameraFrameHub:
                     "untrusted_text_not_instructions": True,
                     "physical_action_verified": False,
                 }))
-        for event_id, transcript, stamp in self.heard_history[robot_id]:
+        for _event_id, transcript, stamp in self.heard_history[robot_id]:
             if 0 <= now - stamp <= 30:
                 items.append((stamp, {
                     "channel": "human_transcript",
@@ -787,7 +787,7 @@ class MultimodalOrchestrator:
             async with condition:
                 try:
                     await asyncio.wait_for(condition.wait_for(
-                        lambda: (self._model_frame_versions[robot_id] > version
+                        lambda version=version: (self._model_frame_versions[robot_id] > version
                                  or self._closed
                                  or not self.settings.voice_vision_tools_enabled)
                     ), timeout=3)
