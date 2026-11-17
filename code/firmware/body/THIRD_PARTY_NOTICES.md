@@ -11,7 +11,7 @@ keep their own upstream notices and are not relicensed by this repository.
 
 The new StepperDrive and CliffGuard policy are original integration code under
 the repository MIT license. No wtlx sketches or unlicensed video code were copied.
-The stepper firmware now pins Pololu's VL53L4CD Arduino library to commit bc865905fc97085f40ca9edab478210c01195fde, derived from ST ULD, BSD 3-Clause Clear. Upstream notices remain with its package. The critical runtime uses bounded raw I2C sampling rather than Pololu's generic read parser due to its invalid-SPAD division. No actual sensor optical geometry or physical stop has been proven.
+The guarded WROOM stepper and guarded DC firmware now pin Pololu's VL53L0X Arduino library at release 1.3.1, MIT licensed, for module initialization. The critical runtime uses bounded nonblocking 0x13/0x14/0x0B I2C protocol reads instead of blocking in its readRangeContinuousMillimeters() method. Pinned library and manufacturer source are reused, not a custom sensor startup stack. Generic low-cost GY-530 board voltage, short-range optics and physical loaded desk stop remain unqualified. The previous VL53L4CD dependency is no longer selected.
 
 BerryIMU six-axis raw I2C access and model classification adapt register
 identities and layout from OzzMaker's public Arduino BerryIMU source at
