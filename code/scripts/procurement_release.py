@@ -819,6 +819,16 @@ def first_robot_pilot_samples(report: dict) -> dict:
             "source_sku": source[2] if source else None,
             "source_url": source[3] if source else None,
             "historical_unit_quote_usd": source[5] if source else None,
+            # TSAL6200 is a bare LED, not a driven 38 kHz dock channel.
+            # Preserve this distinction in machine-readable pilot JSON too.
+            "sample_is_complete_functional_channel": (
+                False if ident == "dock_ir_emitter_channels" else None
+            ),
+            "missing_for_functional_channel": (
+                ["rated_transistor_driver", "current_limiting",
+                 "38khz_modulation_and_wiring_validation"]
+                if ident == "dock_ir_emitter_channels" else []
+            ),
         })
     return {
         "purpose": "First robot bench samples, not five robot release",
