@@ -154,3 +154,43 @@ def test_room_configuration_requires_explicit_local_port_and_context_consent():
                      room_station_port="/dev/cu.usbmodemTEST",
                      room_station_context_enabled=True)
     assert valid.room_station_enabled
+
+
+@pytest.mark.parametrize("sensor,field", [
+    ("scd40", "co2_ppm"),
+    ("scd40", "temp_c"),
+    ("bme688", "pressure_pa"),
+    ("bme688", "gas_ohms"),
+    ("ld2410c", "moving_cm"),
+    ("soil", "raw_adc"),
+    ("amg8833", "pixels_c"),
+])
+def test_extreme_room_numeric_values_fail_closed_and_preserve_counter_epoch(
+    sensor, field
+):
+    """A hostile USB JSON integer must not overflow and reconnect the reader."""
+    huge = 10 ** 1000
+    decoder = RoomStationDecoder()
+    assert accept(frame(10, 1000), decoder=decoder).seq == 10
+    corrupted = frame(11, 2000)
+    if sensor == "soil":
+        corrupted["readings"]["soil"] = {
+            "valid": True, "sample_ms": 2000, "raw_adc": huge,
+        }
+    elif sensor == "amg8833":
+        corrupted["readings"]["amg8833"]["pixels_c"][0] = huge
+    else:
+        corrupted["readings"][sensor][field] = huge
+    with pytest.raises(ValueError):
+        accept(corrupted, decoder=decoder)
+    # Invalid frames do not advance sequence/time fences. A subsequent
+    # legitimate sample with the same next sequence can recover in place.
+    assert accept(frame(11, 2000), decoder=decoder).seq == 11
+
+
+@pytest.mark.parametrize("clock", [10 ** 1000, -(10 ** 1000)])
+def test_unrepresentable_room_receive_clock_is_a_value_error(clock):
+    decoder = RoomStationDecoder()
+    with pytest.raises(ValueError, match="Finite Mac receive clock"):
+        accept(frame(), decoder=decoder, now=clock)
+    assert accept(frame(), decoder=decoder, now=1.0).seq == 1
