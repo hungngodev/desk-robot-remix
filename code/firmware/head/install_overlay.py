@@ -246,6 +246,46 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nendmenu\n',
             'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nconfig DESK_ROBOT_AEC_DELAY_MS\n    int "Sense playback reference delay in milliseconds (measure physically)"\n    range 0 250\n    default 90\nconfig DESK_ROBOT_RGB_HEART_ENABLED\n    bool "Enable GPIO9 RGB heart only after physical SD J3 isolation and logic/power approval"\n    default n\nconfig DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED\n    bool "Opt in: start continuous Xiaozhi realtime microphone listening on boot"\n    depends on USE_AUDIO_PROCESSOR && USE_DEVICE_AEC\n    default n\nendmenu\n',
         ).encode()
+        # The PINNED Xiaozhi NoAudioCodec::Write holds data_if_mutex_
+        # during i2s_channel_write(... portMAX_DELAY). An urgent flush then
+        # waits for that mutex indefinitely if the I2S driver wedges.
+        # Modify ONLY the disposable Sense build copy, preserving the
+        # upstream codec and its accepted-sample return contract. A failed
+        # or partial write returns the actual accepted frames, so the
+        # Sense MIC+REFERENCE bridge never invents unheard PCM samples.
+        path = "main/audio/codecs/no_audio_codec.cc"
+        codec_source = (target / path).read_text()
+        codec_source = replace_once(
+            codec_source,
+            '#include "no_audio_codec.h"',
+            '#include "no_audio_codec.h"\\n#include "sdkconfig.h"'.replace('\\n', '\n'),
+        )
+        codec_source = replace_once(
+            codec_source,
+            '    size_t bytes_written;\\n'
+            '    ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));\\n'
+            '    return bytes_written / sizeof(int32_t);'.replace('\\n', '\n'),
+            '''    size_t bytes_written = 0;
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Bound urgent-stop latency when the underlying TX channel does not
+    // drain. Ordinary Opus chunks are far smaller than this 500 ms ceiling.
+    // Do not ESP_ERROR_CHECK(timeout): a transient stalled TX must not
+    // reboot the face or erase evidence from the microphone task.
+    const esp_err_t err = i2s_channel_write(
+        tx_handle_, buffer.data(), samples * sizeof(int32_t),
+        &bytes_written, pdMS_TO_TICKS(500));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Sense speaker I2S write timeout/error (%d), %u bytes accepted",
+                 static_cast<int>(err), static_cast<unsigned>(bytes_written));
+    }
+#else
+    ESP_ERROR_CHECK(i2s_channel_write(
+        tx_handle_, buffer.data(), samples * sizeof(int32_t),
+        &bytes_written, portMAX_DELAY));
+#endif
+    return static_cast<int>(bytes_written / sizeof(int32_t));''',
+        )
+        files[path] = codec_source.encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
         # not a second decoder or audio transport. Normal TTS stops retain the
         # upstream behavior; flush=true explicitly discards queued decoder PCM
