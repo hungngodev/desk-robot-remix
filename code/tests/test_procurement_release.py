@@ -633,10 +633,32 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
         replacement_sku="already qualified STEP backend",
         alternative_or_parent_receipt=receipt,
     )
+    # A qualified STEP motor combined with a selected DRV8833 DC driver is
+    # still an impossible assembly. It must never release a mixed cart.
+    mixed = mod.generate(plan, altered)
+    assert not mixed["order_released"]
+    assert "motor_driver_variant_mismatch" in mixed["missing_system_evidence"]
+    altered["supplemental_decisions"]["drv8833_driver_candidate"].update(
+        disposition="rejected_in_favor_of_qualified_alternative",
+        replacement_sku="already qualified ULN2003 STEP driver",
+        alternative_or_parent_receipt=receipt,
+    )
     assert mod.generate(plan, altered)["order_released"]
     altered["supplemental_decisions"]["n20_motor_candidate"].pop(
         "alternative_or_parent_receipt")
     assert not mod.generate(plan, altered)["order_released"]
+
+    # In the opposite direction, a selected DC motor cannot be authorized
+    # with a legacy ULN2003 stepper driver merely because each has a receipt.
+    motor_dc_driver_step = copy.deepcopy(evidence)
+    motor_dc_driver_step["supplemental_decisions"]["drv8833_driver_candidate"].update(
+        disposition="rejected_in_favor_of_qualified_alternative",
+        replacement_sku="already qualified ULN2003 STEP driver",
+        alternative_or_parent_receipt=receipt,
+    )
+    opposite = mod.generate(plan, motor_dc_driver_step)
+    assert not opposite["order_released"]
+    assert "motor_driver_variant_mismatch" in opposite["missing_system_evidence"]
 
     invalid = copy.deepcopy(evidence)
     invalid["supplemental_decisions"]["ghost_charger"] = {}
