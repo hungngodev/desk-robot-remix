@@ -259,7 +259,13 @@ class RoomSerialFeed:
                 if not running():
                     break
                 self.received += 1
-                self.on_observation(evidence)
+                try:
+                    self.on_observation(evidence)
+                except Exception as exc:
+                    # Application callback failure is not a USB disconnect.
+                    # Keep the decoder replay fence and serial epoch intact.
+                    self.last_error = f"Room observation callback failed: {type(exc).__name__}: {exc}"
+                    self.rejected += 1
 
     async def run(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
