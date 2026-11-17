@@ -85,10 +85,10 @@
     },
     {
       "id": "cliff_obstacle",
-      "name": "VL53L0X time of flight carrier",
+      "name": "VL53L0X generic GY-530 I2C module",
       "per_robot": 8,
       "reported_owned_total": 0,
-      "notes": "Four downward, one front, one left, one right, one rear; esp32_full source implements all eight, with only five channels in local drive guard and three read-only. None physically qualified.",
+      "notes": "Four downward desk sensors, one front and three optional read-only directions. Cheap generic GY-530 module selected over premium Pololu. Exact board 3.3V I2C pullups and desk-stop tests remain mandatory.",
       "group": "pet"
     },
     {
