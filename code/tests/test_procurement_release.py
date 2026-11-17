@@ -154,6 +154,44 @@ def test_battery_babysitter_and_second_fuel_gauge_not_bought_together():
 
 
 
+def test_detailed_charger_selection_cannot_hide_duplicate_battery_gauge():
+    """A BQ27441 equipped charger is incompatible with a second MAX17048."""
+    p = fixture()
+    p["parts"].extend([
+        {"id": "cap_power", "name": "1S power assembly", "per_robot": 1,
+         "reported_owned_total": 0, "group": "pet"},
+        {"id": "max17048", "name": "MAX17048", "per_robot": 1,
+         "reported_owned_total": 0, "group": "pet"},
+    ])
+    e = {
+        "parts": {"cap_power": {"vendor": "generic", "sku": "custom",
+                                  "pcb_revision": "A",
+                                  "integrated_fuel_gauge_ic": "none"}},
+        "supplemental_decisions": {
+            "bq24075_charger_candidate": {
+                "parent_role": "cap_power", "fleet_quantity": 5,
+                "disposition": "selected", "vendor": "SparkFun",
+                "sku": "PRT-13777", "pcb_revision": "A",
+            },
+        },
+    }
+    assert "duplicate_bq27441_and_max17048_gauges" in (
+        mod.generate(p, e)["missing_system_evidence"])
+    # Removing a board from the actual purchasing selection is different
+    # from selecting it and simply changing the primary power assembly name.
+    e["supplemental_decisions"]["bq24075_charger_candidate"][
+        "disposition"
+    ] = "rejected_in_favor_of_qualified_alternative"
+    assert "duplicate_bq27441_and_max17048_gauges" not in (
+        mod.generate(p, e)["missing_system_evidence"])
+    e["supplemental_decisions"]["bq24075_charger_candidate"].update(
+        disposition="selected", sku="generic-1s-charger",
+        integrated_fuel_gauge_ic="BQ27441",
+    )
+    assert "duplicate_bq27441_and_max17048_gauges" in (
+        mod.generate(p, e)["missing_system_evidence"])
+
+
 def test_shared_station_and_controller_must_be_in_release_scope():
     """Every listed room module is needed for the requested complete build."""
     p = fixture()
