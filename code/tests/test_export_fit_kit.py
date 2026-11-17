@@ -68,7 +68,7 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     folder = tmp_path / "docs/cad/remixes"
     folder.mkdir(parents=True)
     for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
-                 "speaker_rect_fit_gauge.scad"):
+                 "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad"):
         (folder / name).write_text("cube([1,1,1]);\n")
     (folder / "dock").mkdir()
     (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
@@ -87,12 +87,13 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     rendered = tmp_path / "rendered"
     report = source.export_kit(tmp_path, output_dir=rendered)
     assert len(commands) == (
-        len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS) + len(source.DOCKS)
-    ) == 12
-    assert len(report["parts"]) == 12
+        len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS) + len(source.RANGER_FITS) + len(source.DOCKS)
+    ) == 13
+    assert len(report["parts"]) == 13
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
     assert (rendered / "fit_stls/speaker_rect_fit_gauge.stl").is_file()
+    assert (rendered / "fit_stls/vl53l0x_gy530_fit_gauge.stl").is_file()
     assert (rendered / "dock_stls/dock_passive_fit.stl").is_file()
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
@@ -109,7 +110,7 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     folder = tmp_path / "docs/cad/remixes"
     folder.mkdir(parents=True)
     for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
-                 "speaker_rect_fit_gauge.scad"):
+                 "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad"):
         (folder / name).write_text("cube([1,1,1]);\n")
     (folder / "dock").mkdir()
     (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
@@ -130,6 +131,29 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     assert not list(output.rglob("*.stl"))
     assert not (output / "fit_kit_manifest.json").exists()
 
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_low_cost_gy530_sensor_envelope_coupon_watertight(tmp_path):
+    """The fixed $1.76 SKU nominal XY is not verified for holes, lens, or PCB."""
+    from struct import unpack_from
+    scad = ROOT / "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad"
+    content = scad.read_text()
+    assert "SEN-19-006" in content
+    assert "board_x = 10.5;" in content
+    assert "board_y = 13.3;" in content
+    target = tmp_path / "gy530.stl"
+    subprocess.run(["openscad", "--export-format", "binstl", "-o",
+                    str(target), str(scad)], check=True, timeout=60)
+    assert module().closed_mesh_edges(target) > 0
+    data = target.read_bytes()
+    n = unpack_from("<I", data, 80)[0]
+    coords = [unpack_from("<3f", data, 84 + i*50 + 12 + j*12)
+              for i in range(n) for j in range(3)]
+    width = max(x[0] for x in coords) - min(x[0] for x in coords)
+    length = max(x[1] for x in coords) - min(x[1] for x in coords)
+    assert 15 < width < 16
+    assert 17 < length <= 18.1
 
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
