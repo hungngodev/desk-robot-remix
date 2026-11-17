@@ -1693,6 +1693,68 @@ def test_native_live_policy_respects_real_mac_pet_quiet_and_pause(
         assert fail_closed.json()["pet_quiet"] is True
 
 
+@pytest.mark.parametrize("missing", ["device_identity", "speaker_adapter"])
+@pytest.mark.parametrize("route", ["pause", "quiet"])
+def test_hardware_operator_revoke_reports_missing_xiao_stop_owner(
+    settings, tokens, missing, route,
+):
+    """A successful WROOM stop is not proof an unaddressed speaker is silent."""
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    robot = settings.robots[0]
+    robot.device_id = None if missing == "device_identity" else "test-head-01"
+    events = []
+
+    class Coordinator:
+        def robot(self, rid):
+            return settings.robot(rid)
+
+        async def stop(self, rid):
+            events.append("wroom_stop")
+            return {"stopped": True}
+
+    class Pet:
+        async def pause(self, rid):
+            events.append("pet_pause")
+            return {"enabled": False}
+
+        async def set_quiet(self, rid, value):
+            assert value is True
+            events.append("pet_quiet")
+            return {"quiet": True}
+
+    class Speaker:
+        async def interrupt(self, selected):
+            events.append("unexpected_speaker_stop")
+            raise AssertionError("Missing XIAO owner cannot confirm STOP")
+
+    class Runtime:
+        coordinator = Coordinator()
+        pet = Pet()
+        conversation = SimpleNamespace(
+            speaker=Speaker() if missing == "device_identity" else object()
+        )
+
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    target = f"/v1/pet/{robot.id}/{route}"
+    payload = {"quiet": True} if route == "quiet" else None
+    with TestClient(
+        create_app(settings, runtime=Runtime()), raise_server_exceptions=False
+    ) as client:
+        response = client.post(target, headers=headers, json=payload)
+    assert response.status_code == 503
+    assert "XIAO speech STOP unconfirmed" in response.json()["error"]
+    assert events == ["wroom_stop", "pet_quiet" if route == "quiet"
+                      else "pet_pause"]
+
+
 def test_pet_quiet_and_pause_stop_motors_before_unavailable_voice_bridge(
     settings, tokens,
 ):
