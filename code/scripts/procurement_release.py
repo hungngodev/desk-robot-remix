@@ -17,7 +17,7 @@ PLAN = ROOT / "docs/hardware/full-feature-plan.json"
 
 # A vendor-specific reference is not necessarily a final production carrier.
 SOURCE_REFERENCES = {
-    "cliff_obstacle": ("Pololu", "3692", "https://www.pololu.com/product/3692"),
+    "cliff_obstacle": ("Generic", "GY-530 VL53L0X", "https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html"),
     "i2c_mux": ("SparkFun", "BOB-16784", "https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html"),
     "mcp23017": ("Waveshare", "15391", "https://www.waveshare.com/mcp23017-io-expansion-board.htm"),
     "amp": ("SparkFun", "DEV-14809", "https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html"),
