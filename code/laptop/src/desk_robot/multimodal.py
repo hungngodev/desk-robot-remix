@@ -586,23 +586,30 @@ class CameraFrameHub:
         # status tool within one short human utterance. Reserving only the
         # latest generic "tool" would erase the other completed results
         # during a sensor burst before the brain can format them.
-        if limit > len(modalities):
-            seen_tools = {
-                items[i][1].get("kind") for i in required
-                if items[i][1]["channel"] == "tool"
-            }
+        if len(required) < limit:
+            # Preserve both clauses of a single recent human request before
+            # unrelated status/tool completions consume the last slots.
+            # Reserve exactly one earlier ASR here; the modality pass already
+            # selected the newest. This fixes a compound request losing its
+            # first clause after several tools and touch events arrive.
             heard = sum(
                 items[i][1]["channel"] == "human_transcript"
                 for i in required
             )
+            if heard == 1:
+                for index in range(len(items) - 1, -1, -1):
+                    if index not in required and items[index][1]["channel"] == "human_transcript":
+                        required.add(index)
+                        break
+            seen_tools = {
+                items[i][1].get("kind") for i in required
+                if items[i][1]["channel"] == "tool"
+            }
             for index in range(len(items) - 1, -1, -1):
                 if len(required) >= limit:
                     break
                 entry = items[index][1]
-                if entry["channel"] == "human_transcript" and heard < 2:
-                    required.add(index)
-                    heard += 1
-                elif entry["channel"] == "tool" and entry.get("kind") not in seen_tools:
+                if entry["channel"] == "tool" and entry.get("kind") not in seen_tools:
                     required.add(index)
                     seen_tools.add(entry.get("kind"))
         selected = set(required)
