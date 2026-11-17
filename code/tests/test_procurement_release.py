@@ -234,6 +234,10 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
         assert selected[ident][8] == "0", "Do not rebuy reported owned " + ident
     assert "VL53L0X" in selected["cliff_obstacle"][1]
     assert "VL53L4CD" not in register
+    # The first unknown $2-style GY-530 carrier is for optical/electrical
+    # qualification, NOT the complete 8-piece robot or 40-piece fleet.
+    assert selected["cliff_obstacle"][8] == "1"
+    assert "ONE SAMPLE OR BORROW ONLY" in selected["cliff_obstacle"][10]
     # An expensive comparison board is not an authorized pilot purchase.
     for ident in ("cap1188", "fsr", "ads1115", "as5600", "encoder_magnets",
                   "max17048", "ina226", "pn532", "sht41"):
