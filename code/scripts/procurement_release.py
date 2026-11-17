@@ -307,6 +307,29 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                      "missing_part_evidence": missing})
     if set(room_evidence) - room_ids:
         raise ValueError("Evidence refers to nonexistent shared station part IDs")
+    # A role ID and quantity are not proof that its actual controller remains
+    # the already integrated hardware. Older research proposals swap the
+    # XIAO Sense and WROOM for generic S3CAM/C3 boards, which have different
+    # camera buses, GPIO budgets, safety ownership and wiring. That would
+    # invalidate firmware/print acceptance even when all abstract role IDs
+    # and inventory totals still appear unchanged. An architecture change
+    # requires a separately reviewed plan and code revision, never a silent
+    # purchase approval from this frozen five-pet source.
+    named = {row["id"]: row.get("name") for row in rows}
+    architecture = plan.get("architecture")
+    canonical_owners = (
+        isinstance(architecture, str)
+        and "XIAO ESP32S3 Sense" in architecture
+        and "WROOM32" in architecture
+        and "Mac owner" in architecture
+        and "two isolated I2C multiplexers" in architecture
+        and isinstance(named.get("xiao_sense"), str)
+        and "XIAO ESP32S3 Sense" in named["xiao_sense"]
+        and isinstance(named.get("wroom"), str)
+        and "ESP32 WROOM32" in named["wroom"]
+    )
+    if not canonical_owners:
+        missing_system.append("unqualified_xiao_sense_wroom_architecture_substitution")
     selected_pet = {row["id"]: row["per_robot"] for row in rows}
     selected_room = {row["id"]: row["shared_total"] for row in room}
     reduced = [
