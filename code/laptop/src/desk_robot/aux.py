@@ -85,6 +85,21 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or not _bool(power.get("monitor_valid"))
             or power.get("current_calibrated") is not False):
         raise ValueError("Invalid uncalibrated battery or shunt source")
+    # Optional until an inspected 5mOhm Kelvin sensor and matching WROOM
+    # firmware actually exist. Raw calculated milliamp telemetry is not a
+    # calibrated battery ammeter or charging authorization.
+    current_fields = ("pack_ma", "pack_valid", "pack_seq")
+    if any(key in power for key in current_fields):
+        if (not all(key in power for key in current_fields)
+                or not _sint(power["pack_ma"], -16384, 16384)
+                or not _bool(power["pack_valid"])
+                or not _uint(power["pack_seq"], 0xffffffff)
+                or (power["pack_valid"] and (
+                    not power["monitor_valid"] or power["pack_seq"] == 0
+                    or not -81920 < power["shunt_uv"] < 81920
+                    or power["pack_ma"] != int(power["shunt_uv"] / 5)))
+                or (not power["pack_valid"] and power["pack_ma"] != 0)):
+            raise ValueError("Invalid INA226 pack-line current provenance")
 
     if (not _uint(proximity.get("raw"), 255)
             or not _bool(proximity.get("valid"))
