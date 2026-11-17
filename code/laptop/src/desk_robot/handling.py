@@ -119,10 +119,21 @@ class HandlingGate:
                 and self.last_sample_ms is not None
                 and raw_mpu6050(body) is not None):
             stamp = imu["sample_ms"]
-            if stamp == self.last_sample_ms or (
-                    stamp < self.last_sample_ms
+            if stamp == self.last_sample_ms:
+                if self.last_at is not None and now - self.last_at > 1.0:
+                    # The reader may have reconnected after a long gap while
+                    # still exposing the last cached conversion as fresh.
+                    # Invalidate the pose/baseline, but retain the exact
+                    # acquisition identity so that cached data cannot seed it.
+                    previous = (self.last_boot_id, self.last_sample_ms)
+                    self.reset()
+                    self.last_boot_id, self.last_sample_ms = previous
+                return ()
+            if (stamp < self.last_sample_ms
                     and not (self.last_sample_ms >= 0xffff0000
                              and stamp <= 0xffff)):
+                # A late older conversion is not evidence of a NEW polling
+                # outage; never erase the newer trusted pose on replay.
                 return ()
         if self.last_at is not None and now - self.last_at > 1.0:
             # Host reconnect invalidates calibration, not source identity.
