@@ -1229,3 +1229,27 @@ def test_pilot_sample_cannot_inherit_approved_sku_from_replaced_sensor():
     assert range_row["pilot_sample_quantity"] == 0
     assert range_row["source_url"] is None
     assert not pilot["whole_first_robot_purchase_approved"]
+
+
+
+def test_pilot_supplier_rows_never_mutate_canonical_fleet_source_references():
+    """Keep unit test samples distinct from production source references.
+
+    A mistaken insertion of a 6-field candidate into SOURCE_REFERENCES
+    rewrites every generated five-robot CSV source field. The first robot
+    pilot cart must not invalidate the original full fleet register.
+    """
+    assert set(mod.SOURCE_REFERENCES) == {
+        "cliff_obstacle", "i2c_mux", "mcp23017", "amp", "speaker"
+    }
+    assert all(len(candidate) == 3
+               for candidate in mod.SOURCE_REFERENCES.values())
+    assert all(len(candidate) == 6
+               for candidate in mod.PILOT_SAMPLE_PRODUCTS.values())
+    assert all(isinstance(candidate[4], int) and candidate[4] > 0
+               for candidate in mod.PILOT_SAMPLE_PRODUCTS.values())
+    assert all(candidate[5] is None or isinstance(candidate[5], float)
+               for candidate in mod.PILOT_SAMPLE_PRODUCTS.values())
+    assert mod.SOURCE_REFERENCES["i2c_mux"][0] == "Generic"
+    assert mod.SOURCE_REFERENCES["mcp23017"][0] == "Generic"
+    assert mod.PILOT_SAMPLE_PRODUCTS["i2c_mux"][2] == "COM-05-067"
