@@ -357,11 +357,18 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if not callable(interrupt):
             interrupt = getattr(speaker, "interrupt", None)
         robot = settings.robot(robot_id)
-        if callable(interrupt) and robot.device_id:
-            await bounded_cleanup(
-                interrupt(robot), seconds=2.5,
-                message="XIAO speech interruption unconfirmed",
-            )
+        if not robot.device_id:
+            # The WROOM has already been stopped and pet initiative revoked.
+            # But no authenticated XIAO target means we cannot certify the
+            # speaker STOP. A successful HTTP 200 would silently hide audio
+            # that could still be playing on an unknown or previous head.
+            raise HeadError("XIAO speech STOP unconfirmed: no device identity")
+        if not callable(interrupt):
+            raise HeadError("XIAO speech STOP unconfirmed: no speaker adapter")
+        await bounded_cleanup(
+            interrupt(robot), seconds=2.5,
+            message="XIAO speech interruption unconfirmed",
+        )
 
     async def stop_pet_and_audio(robot_id: str, *, quiet: bool):
         """Stop body first, then revoke pet initiative and native speaker.
