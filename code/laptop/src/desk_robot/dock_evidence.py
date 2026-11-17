@@ -27,6 +27,10 @@ def classify_dock(dock: dict) -> str:
     if left != right:
         return "asymmetric_seat_or_fault"
     if not left and not right:
+        # CHG asserted while both independent seat switches are open is a
+        # contact/status contradiction, not an ordinary unseated input.
+        if input_good and indicated:
+            return "charge_signal_without_seat_fault"
         return "charger_input_without_seat" if input_good else "not_seated"
     if not input_good:
         return "seated_but_unpowered"
