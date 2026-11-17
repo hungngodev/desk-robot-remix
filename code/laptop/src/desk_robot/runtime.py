@@ -359,10 +359,13 @@ class Runtime:
         await step("WROOM motion", self.coordinator.close(), 4.0)
         # Stop the one read-only USB producer after the urgent WROOM STOP and
         # before tearing down per-pet camera and context owners.
-        self._room_stop.set()
-        if self._room_task is not None:
+        room_stop = getattr(self, "_room_stop", None)
+        if room_stop is not None:
+            room_stop.set()
+        room_task = getattr(self, "_room_task", None)
+        if room_task is not None:
             async def wait_room_shutdown():
-                await self._room_task
+                await room_task
             await step("Shared room USB", wait_room_shutdown(), 1.0)
             self._room_task = None
         unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
@@ -416,8 +419,9 @@ class Runtime:
             # Otherwise retain the cancelled but still live task as owned.
 
         await step("Pet observer", self.pet.close(), 5.0)
-        if self.multimodal is not None:
-            await step("Camera orchestration", self.multimodal.close(), 3.0)
+        camera = getattr(self, "multimodal", None)
+        if camera is not None:
+            await step("Camera orchestration", camera.close(), 3.0)
         await step("Conversation", self.conversation.stop(), 3.0)
         await step("Mac HTTP client", self.client.aclose(), 3.0)
         if errors:
