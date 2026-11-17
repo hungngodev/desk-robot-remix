@@ -643,6 +643,10 @@ class Coordinator:
             raise OperationError(
                 "Dock motion requires measured camera to chassis mounting geometry"
             )
+        if camera.camera_sensor_pid not in ("OV3660", "OV5640"):
+            raise OperationError(
+                "Dock motion requires recorded actual camera sensor PID"
+            )
         if robot.dock_beacon_id is None:
             raise OperationError("Dock approach needs the assigned physical NEC beacon")
         return self._submit(
@@ -673,6 +677,23 @@ class Coordinator:
                 timeout_message="Camera snapshot timeout",
             )
             received_at = time.monotonic()
+            if camera.camera_sensor_pid is not None:
+                # This method checks Espressif's live sensor PID AND the
+                # accepted JPEG boot nonce; a JSON calibration alone cannot
+                # authorize steering an OV5640 with OV3660 intrinsics.
+                read_identity = getattr(head, "camera_identity", None)
+                if not callable(read_identity):
+                    raise OperationError(
+                        "Dock camera live sensor identity unavailable"
+                    )
+                observed_pid = await _bounded_head_reply(
+                    read_identity(), seconds=2.0,
+                    timeout_message="Dock camera live sensor identity timeout",
+                )
+                if observed_pid != camera.camera_sensor_pid:
+                    raise OperationError(
+                        "Dock camera sensor PID differs from measured calibration"
+                    )
             # The shared bounded native detector also owns all read-only
             # AprilTag observations. A cancelled/expired C detector cannot
             # escape the single-worker budget or overlap another robot.
