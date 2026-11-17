@@ -41,7 +41,8 @@ class SideRangeEvents:
         A reconnect or invalid response forgets history; the first fresh
         reading is a baseline, never a fabricated arrival.
         """
-        if (type(now) not in (int, float) or not math.isfinite(now)
+        if (type(now) not in (int, float) or not -1e15 <= now <= 1e15
+                or not math.isfinite(now)
                 or type(near_mm) is not int or not 35 <= near_mm <= 1000
                 or type(require_hardware_identity) is not bool):
             raise ValueError("Measured side range threshold and finite clock required")
