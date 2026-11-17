@@ -128,12 +128,39 @@ void soil_observation(uint32_t now) {
 #endif
   Serial.print('}');
 }
+// The pinned Adafruit AMG88xx readPixels() returns void and its underlying
+// I2C read discards transfer failure. Reject a partial/failed pixel frame
+// instead of reporting whatever happens to be in the old pixel array.
+// Reuse its normal init and Panasonic/Adafruit 0x80+2*n register layout.
+// Pixel temperature is a signed 12-bit two's complement value, 0.25 C/LSB.
+// This bounded one-second room-only read has no robot motion authority.
+bool checked_amg_pixel(uint8_t pixel, float& temperature) {
+  if (pixel >= AMG88xx_PIXEL_ARRAY_SIZE) return false;
+  const uint8_t reg = static_cast<uint8_t>(0x80U + 2U * pixel);
+  Wire.beginTransmission(kAmgAddress);
+  const bool wrote = Wire.write(reg) == 1;
+  const int ack = Wire.endTransmission(!wrote);
+  if (!wrote || ack != 0) return false;
+  if (Wire.requestFrom(kAmgAddress, static_cast<uint8_t>(2), true) != 2 ||
+      Wire.available() < 2) return false;
+  const int lo = Wire.read();
+  const int hi = Wire.read();
+  if (lo < 0 || hi < 0) return false;
+  const uint16_t bits = static_cast<uint16_t>(
+      (static_cast<uint16_t>(hi) << 8) | static_cast<uint16_t>(lo));
+  int16_t signed_quarter_c = static_cast<int16_t>(bits & 0x0fffU);
+  if ((signed_quarter_c & 0x0800U) != 0) signed_quarter_c -= 4096;
+  temperature = 0.25f * signed_quarter_c;
+  return finite_temperature(temperature);
+}
 void thermal_observation(uint32_t now) {
   bool valid = amg_started;
   if (valid) {
-    amg.readPixels(thermal);
-    for (float temp : thermal) {
-      if (!finite_temperature(temp)) { valid = false; break; }
+    for (uint8_t i = 0; i < AMG88xx_PIXEL_ARRAY_SIZE; ++i) {
+      if (!checked_amg_pixel(i, thermal[i])) {
+        valid = false;
+        break;
+      }
     }
   }
   Serial.print(F("\"amg8833\":{\"valid\":")); jsbool(valid);
