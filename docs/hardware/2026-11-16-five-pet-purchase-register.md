@@ -18,8 +18,8 @@ Fleet means **five fully featured robots and five independent docks** plus **one
 | `stepper` | 28BYJ48 5V stepper motor; NOT SELECTED Module/carrier selection required | 2 | 10 | 5 | 0 | 0 | 0 | 0 | Unquoted | LEGACY |
 | `uln2003` | ULN2003 driver for 28BYJ48; NOT SELECTED Module/carrier selection required | 2 | 10 | 5 | 0 | 0 | 0 | 0 | Unquoted | LEGACY |
 | `mg90s` | MG90S positional servo; NOT SELECTED Module/carrier selection required | 2 | 10 | 0 | 10 | 0 | 0 | 0 | Unquoted | SOURCE / FIT |
-| `imu` | MPU6050 GY521 compatible six axis breakout; Generic MPU6050 GY521 | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | MODULE CHECK |
-| `head_touch` | AT42QT1010 momentary capacitive head touch; Generic AT42QT1010 | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | MODULE CHECK |
+| `imu` | MPU6050 GY521 compatible six axis breakout; [Keyestudio KS0170 GY521 MPU6050](https://www.keyestudio.com/products/keyestudio-gy-521-mpu6050-3-axis-gyroscope-and-accelerometer-module-for-arduino) | 1 | 5 | 1 | 0 | 0 | 4 | 1 | $9.00 | PILOT I2C |
+| `head_touch` | AT42QT1010 momentary capacitive head touch; [SparkFun SEN 12041 AT42QT1010](https://www.sparkfun.com/sparkfun-capacitive-touch-breakout-at42qt1010.html) | 1 | 5 | 1 | 0 | 0 | 4 | 1 | $3.95 | SOURCE MATCH |
 | `max30102` | MAX30102 optical heartbeat paw pad breakout; NOT SELECTED Module/carrier selection required | 1 | 5 | 0 | 5 | 0 | 0 | 0 | Unquoted | SOURCE / FIT |
 | `cliff_obstacle` | VL53L4CD time of flight carrier; [Pololu #3692](https://www.pololu.com/product/3692/specs) | 8 | 40 | 0 | 0 | 0 | 40 | 8 | $11.81 | PILOT FIT |
 | `i2c_mux` | TCA9548A 8 channel 3.3V compatible I2C multiplexer; [SparkFun BOB 16784](https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html) | 2 | 10 | 0 | 0 | 0 | 10 | 2 | $6.60 | PILOT FIT |
@@ -40,16 +40,16 @@ Fleet means **five fully featured robots and five independent docks** plus **one
 | `sensor_3v3` | Dedicated regulated 3.3V expansion sensor supply; [Pololu #2873](https://www.pololu.com/product/2873) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $5.47 | POWER PILOT |
 | `switch_power` | Rated switch, fuse, power leads, JST style keyed connectors, decoupling; NOT SELECTED Module/carrier selection required | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | SOURCE / FIT |
 | `bumper` | Normally closed micro bumper switch; NOT SELECTED Module/carrier selection required | 2 | 10 | 0 | 0 | 0 | 10 | 2 | Unquoted | SOURCE / FIT |
-| `reed` | Magnetic reed switch; NOT SELECTED Module/carrier selection required | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | SOURCE / FIT |
-| `pir` | PIR thermal motion sensor; NOT SELECTED Module/carrier selection required | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | SOURCE / FIT |
-| `bmp280` | BMP280 pressure and temperature module; NOT SELECTED Module/carrier selection required | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | SOURCE / FIT |
+| `reed` | Magnetic reed switch; [Seeed Grove Magnetic Switch 101020038](https://www.seeedstudio.com/Grove-Magnetic-Switch.html) | 1 | 5 | 1 | 0 | 0 | 4 | 1 | $3.20 | PILOT GPIO |
+| `pir` | PIR thermal motion sensor; [Seeed Grove Adjustable PIR 101020617](https://www.seeedstudio.com/Grove-Adjustable-PIR-Motion-Sensor.html) | 1 | 5 | 1 | 0 | 0 | 4 | 1 | $7.00 | PILOT FIT |
+| `bmp280` | BMP280 pressure and temperature module; [Seeed Grove BMP280 101020192](https://www.seeedstudio.com/Grove-Barometer-Sensor-BMP280.html) | 1 | 5 | 1 | 0 | 0 | 4 | 1 | $9.80 | PILOT FIT |
 | `sht41` | SHT41 humidity and temperature module; [7Semi SHT41 ES 13515](https://7semi.com/7semi-sht41-temperature-humidity-sensor-breakout-i2c-qwiic-sht41-breakout/) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $7.40 | OUT OF STOCK |
 | `pn532` | PN532 I2C NFC reader module with IRQ/reset pins; [Seeed 113020006](https://www.seeedstudio.com/Grove-NFC.html) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $17.50 | I2C MODE |
 | `mcp23017` | MCP23017 16 channel I2C GPIO expander; [Waveshare 15391](https://www.waveshare.com/mcp23017-io-expansion-board.htm) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $5.99 | 38x23 FIT |
-| `haptic_motor` | 3V coin vibration motor; NOT SELECTED Module/carrier selection required | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | SOURCE / FIT |
+| `haptic_motor` | 3V coin vibration motor; [SparkFun ROB 08449 3V](https://www.sparkfun.com/vibration-motor.html) | 1 | 5 | 1 | 0 | 0 | 4 | 1 | $2.95 | PILOT POWER |
 | `haptic_driver` | AO3400 class logic MOSFET, flyback diode and pulldown; NOT SELECTED Module/carrier selection required | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | SOURCE / FIT |
 | `dock_ir_receivers` | Two 38 kHz demodulated IR receivers, Vishay TSOP38438 reference, mounted behind separate directional baffles; [Vishay TSOP38438](https://www.mouser.com/c/?q=TSOP38438) | 2 | 10 | 0 | 0 | 0 | 10 | 2 | $0.79 | PILOT OPTICS |
-| `dock_ir_beacon_controller` | Independent powered 38 kHz classic NEC dock beacon controller and programmable board; NOT SELECTED Module/carrier selection required | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | SOURCE / FIT |
+| `dock_ir_beacon_controller` | Independent powered 38 kHz classic NEC dock beacon controller and programmable board; [Seeed Seeeduino Nano 102010268](https://www.seeedstudio.com/Seeeduino-Nano-p-4111.html) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $8.99 | BENCH FIRMWARE |
 | `dock_ir_emitter_channels` | Two independently aimed 940 nm 38 kHz infrared LED emitter channels with rated transistor driver and current limiting per dock; [Vishay TSAL6200](https://www.digikey.com/en/products/detail/vishay-semiconductor-opto-division/TSAL6200/1681339) | 2 | 10 | 0 | 0 | 0 | 10 | 2 | $0.35 | PILOT OPTICS |
 | `dock_contacts` | Keyed charging contacts and alignment switch set; NOT SELECTED Module/carrier selection required | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | SOURCE / FIT |
 | `dock_fixture` | Printed docking cradle, printed camera marker and 5V charging input; NOT SELECTED Module/carrier selection required | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | SOURCE / FIT |
@@ -76,7 +76,7 @@ These extra purchase rows realize abstract BOM assemblies; do not count them as 
 | Optional capacitive soil probe | UNSELECTED 3.3V ADC variant | 1 | 1 | Unquoted | 0 | Shared station optional and disabled in firmware |
 | Optional NFC toy stickers | Generic NTAG213 | 10 | 10 | Unquoted | 0 | 10 game tokens optional, not access control |
 
-## Verified protected pack candidate and critical charging thermistor mismatch
+\nVendor gate notes: Seeeduino Nano is ATmega328P compatible but its dock image still needs actual PlatformIO compilation and flashing. The Seeed adjustable PIR reports active HIGH and thus matches the MCP23017 GPIOB1 firmware, unlike the SparkFun JST PIR active LOW. MPU6050 module I2C signal pullups must be checked against 3.3V before connecting WROOM.\n\n## Verified protected pack candidate and critical charging thermistor mismatch
 
 * [LiPol Battery Co. LPHD7430085](https://lipo-battery.com/high-rate-discharge-lipo-battery-lphd7430085-5a-3-7v-2000mah-7-4wh/) is a SPECIFIC candidate with 1S 3.7V 2000mAh, protection PCM, 10k NTC, listed 5A max discharge, 7.4 x 30 x 86 mm housing and **three-pin Molex 43645-0300**. This is NOT a purchasing approval because the printed chassis and battery cavity have no measured size, current or connector proof.
 * SparkFun [PRT-13777 Battery Babysitter](https://www.sparkfun.com/sparkfun-battery-babysitter-lipo-battery-manager.html) has a 2-pin LiPo connection and a published BQ24075 schematic which ties TS to a 10k bypass and gauge BIN. Its default design **must NOT be assumed to monitor the LPHD7430085 third-wire thermistor**. Source: [SparkFun schematic](https://github.com/sparkfun/Battery_Babysitter) and [TS discussion](https://community.sparkfun.com/t/battery-babysitter-unknow-connection-bq24075s-ts-pin-to-bq27441s-bin/40099). A qualified PCB level TS circuit, independent thermal protection and a properly keyed harness need design review before the battery and charger can become a full fleet order.
