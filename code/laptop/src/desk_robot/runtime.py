@@ -370,7 +370,11 @@ class Runtime:
             async def wait_room_shutdown():
                 await room_task
             await step("Shared room USB", wait_room_shutdown(), 1.0)
-            self._room_task = None
+            # A stalled callback or serial worker may outlive the deadline.
+            # Retain ownership until the actual reader task has terminated;
+            # never turn an unconfirmed USB shutdown into an absent reader.
+            if room_task.done():
+                self._room_task = None
         unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
         if unconfirmed:
             # An idle robot can still have an uncertain prior motor pulse.
