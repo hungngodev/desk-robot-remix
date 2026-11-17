@@ -132,7 +132,13 @@ def test_planar_lead_cannot_pass_if_floor_is_below_sensor_minimum_range():
 def test_planar_lead_cannot_pass_if_sensor_floor_exceeds_maximum_range():
     # Separate upper-range failure from low mounting height: both invalidate
     # the nominal optical prerequisite regardless of projected wheel lead.
-    result = planar(chassis_mount_above_desk_mm=1300.0)
+    result = planar(
+        chassis_mount_above_desk_mm=1300.0,
+        # Keep the purely mechanical lead feasible despite the large optical
+        # setback. This isolates the high-range failure instead of testing
+        # a second, unrelated insufficient-lead failure at the same time.
+        floor_sensor_points_mm=[[800, -10], [800, 10], [800, 0], [-800, 0]],
+    )
     assert all(c["covered"] for c in result["support_checks"])
     assert not result["nominal_full_fov_floor_in_valid_range"]
     assert not result["necessary_planar_coverage_on_paper"]
