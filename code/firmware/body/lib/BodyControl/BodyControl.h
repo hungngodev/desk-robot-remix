@@ -94,6 +94,10 @@ class BodyControl {
   // Full-feature build requires the dock input even if it failed at boot.
   // Cannot be activated or relaxed by UART, AI, or a peer message.
   void require_dock_monitor(bool required) { dock_monitor_required_ = required; }
+  // Only the full guarded DRV8833 DC build enables this input at startup.
+  // A missing, stale or LOW nFAULT sample latches wheel shutdown, requiring
+  // fresh HIGH hardware evidence and local USB rearm, never an AI command.
+  void require_dc_driver_fault_monitor(bool required) { dc_fault_required_ = required; }
   // Left/right/rear read-only ToF samples never grant motor permission.
   void sample_side_range(std::uint8_t index, std::uint16_t mm,
                          bool valid, std::uint32_t now_ms);
@@ -147,6 +151,9 @@ class BodyControl {
   std::uint8_t dock_last_pins_ = 0;
   bool dock_provenance_fault_ = false;  // requires a new GPIOA acquisition
   bool dock_monitor_required_ = false; // full robot build, set at boot only
+  bool dc_fault_required_ = false;  // fail closed for DRV8833 full DC profile
+  bool dc_fault_latched_ = false;   // only local USB may clear
+  bool dc_driver_fault_bad(std::uint32_t now_ms) const;
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};
   std::uint8_t extra_streaks_[3]{};
