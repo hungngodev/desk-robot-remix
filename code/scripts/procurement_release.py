@@ -80,6 +80,10 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         if not isinstance(part, dict) or not isinstance(part.get("id"), str):
             raise ValueError("Part without stable ID")
         ident = part["id"]
+        # The user explicitly selected inexpensive VL53L0X for desk ranging.
+        # Reject premium substitutions before an agent can generate a cart.
+        if ident == "cliff_obstacle" and "VL53L0X" not in str(part.get("name", "")):
+            raise ValueError("Cliff sensor must be the approved low-cost VL53L0X")
         if ident in seen:
             raise ValueError(f"Duplicate part ID: {ident}")
         seen.add(ident)
