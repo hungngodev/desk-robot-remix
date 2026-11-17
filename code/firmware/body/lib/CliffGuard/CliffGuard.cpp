@@ -3,10 +3,13 @@
 namespace desk_robot {
 
 bool CliffGuard::valid_config(const CliffConfig& config) {
-  // This ceiling only rejects implausible policies. Actual freshness must be
-  // much more restrictive if measured lead/latency/stopping margins require it.
-  if (!config.calibrated || config.freshness_ms == 0 ||
-      config.freshness_ms > 1000 || config.front_obstacle_mm < 30 ||
+  // Enforce the SAME 30..200 ms admissible range as the local USB
+  // "calfresh" command. This guard also validates calibration restored from
+  // NVS, so its former 1000 ms ceiling could silently accept a stored
+  // policy that the operator command rightly refuses. Actual certified
+  // freshness may need to be STRICTER given sensor cadence and wheel speed.
+  if (!config.calibrated || config.freshness_ms < 30 ||
+      config.freshness_ms > 200 || config.front_obstacle_mm < 30 ||
       config.front_max_mm > 1300 ||
       config.front_obstacle_mm >= config.front_max_mm) return false;
   for (const auto& floor : config.floor) {
