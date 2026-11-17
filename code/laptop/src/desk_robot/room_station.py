@@ -287,7 +287,7 @@ class RoomSerialFeed:
             reader_stop = threading.Event()
             worker = asyncio.create_task(asyncio.to_thread(
                 self._read_port,
-                lambda: not stop.is_set() and not reader_stop.is_set(),
+                lambda reader_stop=reader_stop: not stop.is_set() and not reader_stop.is_set(),
             ))
             cancelled = False
             try:
