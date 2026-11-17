@@ -113,7 +113,6 @@ def test_fitter_rejects_impossible_geometry_without_physical_permission():
         fitter().fit_corners(
             frames, (640, 480), columns=9, rows=6, square_mm=0,
             tag_side_mm=60, marker_id=2, target_distance_mm=200,
-            camera_sensor_pid="OV5640",
         )
 
 
@@ -128,6 +127,7 @@ def test_camera_calibration_rejects_mixed_jpeg_modes(tmp_path):
         fitter().calibrate_images(
             tmp_path, columns=9, rows=6, square_mm=10,
             tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid="OV5640",
         )
 
 
