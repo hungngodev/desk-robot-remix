@@ -409,6 +409,14 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                     and driver_choice.get("disposition") in dc_selected)
     if motor_is_dc != driver_is_dc:
         missing_system.append("motor_driver_variant_mismatch")
+    # Even a correctly paired N20+DRV8833 is not a license to buy the
+    # 28BYJ48+ULN2003 fallback at the same time. "Selected" N20 means the
+    # plan must separately set the unused legacy quantities to zero and
+    # preserve owned stock as off-plan inventory. Until then release HOLD.
+    if motor_is_dc and driver_is_dc and (
+            selected_pet.get("stepper", 0) > 0
+            or selected_pet.get("uln2003", 0) > 0):
+        missing_system.append("double_purchase_dc_and_stepper_drivetrains")
 
     # The SparkFun PRT-13777 Battery Babysitter integrates BQ27441.
     # A separate MAX17048 would duplicate the gauge. Inspect BOTH the
