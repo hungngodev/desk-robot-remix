@@ -1190,6 +1190,16 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert rows["cliff_obstacle"]["pilot_sample_quantity"] == 8
     assert rows["cliff_obstacle"]["source_sku"] == "SEN-19-006"
     assert rows["speaker"]["source_sku"] == "CS20-02P110-04-1X"
+    # A bare TSAL6200 LED is not a safe functional dock emitter channel.
+    ir = rows["dock_ir_emitter_channels"]
+    assert ir["pilot_sample_quantity"] == 2
+    assert ir["source_sku"] == "TSAL6200"
+    assert ir["sample_is_complete_functional_channel"] is False
+    assert ir["missing_for_functional_channel"] == [
+        "rated_transistor_driver", "current_limiting",
+        "38khz_modulation_and_wiring_validation",
+    ]
+    assert rows["cliff_obstacle"]["missing_for_functional_channel"] == []
     assert rows["i2c_mux"]["pilot_sample_quantity"] == 2
     assert rows["i2c_mux"]["source_sku"] == "COM-05-067"
     assert rows["i2c_mux"]["historical_unit_quote_usd"] is None
