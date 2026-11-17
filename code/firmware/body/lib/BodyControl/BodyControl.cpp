@@ -174,6 +174,16 @@ void BodyControl::set_imu_identity(std::uint8_t family, std::uint8_t gyro,
   // This merely records chip identification. It never arms or clears a guard.
 }
 
+bool BodyControl::dc_driver_fault_bad(std::uint32_t now_ms) const {
+  if (!dc_fault_required_) return false;
+  const auto& fault = state_.accessories.optional_inputs;
+  // A B3 HIGH reading is meaningful only from a fresh MCP23017 GPIOB
+  // transaction. No cached I2C value, boot default or malformed read
+  // can authorize a moving DC bridge.
+  return !fault.present || !fault.valid || fault.sample_seq == 0U ||
+         now_ms - fault.at_ms >= 250U || fault.driver_fault_active;
+}
+
 bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
   const auto& dock = state_.accessories.dock;
   // Once the optional physical MCP23017 was found at boot, its I2C
@@ -187,6 +197,14 @@ bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
 void BodyControl::set_accessories(const AccessoryReadings& readings,
                                   std::uint32_t now_ms) {
   state_.accessories = readings;
+  if (dc_driver_fault_bad(now_ms)) {
+    // Missing/stale or asserted nFAULT immediately cancels wheels. Never
+    // detach holding servo PWM merely because the driver reported a fault.
+    // The latch survives a later HIGH read until a fresh local USB rearm.
+    dc_fault_latched_ = true;
+    stop_motion();
+    state_.armed = false;
+  }
   const auto& dock = readings.dock;
   // CHG alone is not proof of net cell charging, but if it asserts while
   // both seat switches and PGOOD appear clear, treating the pins as a safe
@@ -291,6 +309,12 @@ void BodyControl::tick(std::uint32_t now_ms) {
   if (imu_motion_required_ && !imu_fresh(now_ms)) {
     // Missing, failed or stale compulsory motion sensor locally disarms.
     // This is not a tilt interlock: orientation calibration is still required.
+    stop_motion();
+    state_.armed = false;
+    return;
+  }
+  if (dc_fault_latched_ || dc_driver_fault_bad(now_ms)) {
+    dc_fault_latched_ = dc_fault_latched_ || dc_driver_fault_bad(now_ms);
     stop_motion();
     state_.armed = false;
     return;
@@ -698,8 +722,11 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(boot_epoch_),
         guarded_motion_profile() ? "true" : "false",
         guarded_motion_profile() && guard_ != nullptr &&
-            guard_->evaluate(now_ms) ? "true" : "false",
-        !guarded_motion_profile() ? "not_required" :
+            guard_->evaluate(now_ms) && !dc_fault_latched_ &&
+            !dc_driver_fault_bad(now_ms) ? "true" : "false",
+        dc_fault_latched_ ? "dc_driver_fault_latched" :
+            dc_driver_fault_bad(now_ms) ? "dc_driver_fault_unavailable" :
+            !guarded_motion_profile() ? "not_required" :
             guard_ == nullptr ? "missing_guard" : CliffGuard::fault_name(guard_->fault()),
         static_cast<unsigned>(guard_ == nullptr ? kNoFaultSensor : guard_->fault_sensor()),
         static_cast<unsigned>(ranges[0].distance_mm),
@@ -724,13 +751,22 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     stop_motion();
     state_.armed = false;
+    if (dc_driver_fault_bad(now_ms)) {
+      std::snprintf(reply, capacity, "ERR rearm dc_driver_fault_unhealthy");
+      return;
+    }
     if (!guarded_motion_profile() || guard_ == nullptr ||
         !guard_->try_rearm(now_ms)) {
       std::snprintf(reply, capacity, "ERR rearm safety_interlock");
       return;
     }
+    dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (dc_fault_latched_ || dc_driver_fault_bad(now_ms)) {
+      std::snprintf(reply, capacity, "ERR arm dc_driver_fault_interlock");
+      return;
+    }
     if (dock_power_lockout_) {
       std::snprintf(reply, capacity, "ERR arm dock_power_connected");
       return;
