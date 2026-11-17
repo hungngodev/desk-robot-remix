@@ -1364,7 +1364,15 @@ def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cros
     settings, tokens,
 ):
     from desk_robot.controller import Job
+    from desk_robot.config import RobotConfig
 
+    # The general simulation fixture has only two pets. Include a third
+    # VALID configured identity to test the important empty job response,
+    # rather than incorrectly treating unknown robot-03 as a valid pet.
+    settings.robots.append(RobotConfig(
+        id="robot-03", name="Empty job pet",
+        token_env="DESK_ROBOT_HEAD_01_TOKEN", motion_enabled=False,
+    ))
     tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     with TestClient(create_app(settings)) as client:
         jobs = client.app.state.runtime.coordinator.jobs
