@@ -237,14 +237,15 @@ of about five remains an unconfirmed inventory claim, not an approved BOM line.
 See [Seeed's Sense pin allocation](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/)
 and [the MAX30102 datasheet](https://www.analog.com/en/products/max30102.html).
 
-ST now labels the proposed VL6180X **obsolete and out of production**. The
-existing sensor channel plan is still a proposed baseline, not a fleet
-procurement authorization. Bench evaluate one supported short range
-[VL53L0X](https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html)
-against the intended surfaces and height before substituting: it requires a
-different driver and may exceed the existing budget at current breakout prices.
-No optical scan time, stopping margin or surface support is physically
-qualified. [Full evidence and blockers](../research/2026-11-09-html-verification.md).
+ST marks the earlier VL6180X obsolete and out of production. The currently
+selected low-cost range component is a genuine **VL53L0X chip on an inexpensive
+generic GY-530 compatible I2C carrier**. The critical body source and host
+fake already use the pinned MIT Pololu VL53L0X 1.3.1 startup library; there
+is no reason to buy expensive VL53L4CD boards. A real single-carrier trial
+on matte, black, reflective and transparent desktop surfaces at the actual
+mounting height is still needed before authorizing many units.
+No optical timing, stopping margin or material support is physically
+qualified. [Historical evidence](../research/2026-11-09-html-verification.md).
 
 ## Five-channel sensor integration and measured local USB calibration
 
