@@ -200,7 +200,7 @@ def render(plan: dict, body: str, head: str) -> str:
     row("WROOM GPIO23 (DC only; same as STEP right coil 4)",
         "CD74HC123 channel 2 B rising-edge input",
         "CPU-only 15ms toggles, 3.3V; no LEDC, pull LOW at boot",
-        "Source exists only in esp32_dc_watchdog_lab; nSLEEP gate unqualified")
+        "Source in esp32_dc_watchdog_lab and esp32_dc_integrated_lab; nSLEEP gate unqualified")
     for signal, target in (("lift_servo", "MG90S lift signal"),
                            ("grip_servo", "MG90S jaw signal")):
         row(f"WROOM GPIO{bus['body_gpio'][signal]}", target, "3.3V PWM signal only")
