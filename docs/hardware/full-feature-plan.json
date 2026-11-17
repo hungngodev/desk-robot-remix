@@ -216,7 +216,7 @@
       "name": "INA226 current voltage monitor with rated external shunt",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "Choose shunt from measured full load, not 0.1 ohm generic assumption",
+      "notes": "Existing INA226 0x40 firmware now has a dedicated signed pack-line current source in opt-in esp32_dc_integrated_lab for EXACT five milliohm Kelvin shunt. Candidate resistor Vishay WSL25125L000FEA18, 0.005 ohm 1 percent 2 watt 2512, LCSC C844694 around $0.52 each before shipping versus DigiKey around $1.78 each. Exact resistor pinout and rating source https://www.lcsc.com/product-detail/C844694.html. This selects the low-cost RESISTOR VALUE and reference SKU, not an electrically qualified generic INA226 breakout or charger board. Check actual installed shunt, proper Kelvin layout, high current 2W copper dissipation, connector, source calibration and polarity before installing battery.",
       "group": "pet"
     },
     {
