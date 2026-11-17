@@ -112,7 +112,7 @@
       "name": "8 ohm 1 watt approximately 20 mm speaker",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "Output across amp differential terminals; acoustic cavity pending fit",
+      "notes": "8 ohm 1W speaker is NOT power-safe at unrestricted MAX98357A 5V output (up to about 1.8W into 8 ohm). Need either verified max-volume/gain restriction and thermal/acoustic test or physically fitted 8 ohm >=2W speaker with verified impedance and enclosure. Speaker + and - go to differential amplifier outputs, neither to GND. No purchase/signoff from codec source alone.",
       "group": "pet"
     },
     {
