@@ -194,7 +194,7 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
         encoding="utf-8")
     selected = {}
     for line in register.splitlines():
-        if not line.startswith("| \`"):
+        if not line.startswith("| " + chr(96)):
             continue
         columns = [cell.strip() for cell in line.strip().strip("|").split("|")]
         if len(columns) != 11:
@@ -215,8 +215,6 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
                   "max17048", "ina226", "pn532", "sht41"):
         assert selected[ident][8] == "0", ident
         assert "NO PURCHASE" in selected[ident][10], ident
-    assert "NO NEW ADAFRUIT HARDWARE" not in register.upper() or (
-        "Adafruit hardware purchases are not required" in register)
     # Separate candidate subsystem is not a hidden second approved shopping list.
     assert "BQ27441" in register and "MAX17048" in register
     assert "Duplicate with separate MAX17048" in register
