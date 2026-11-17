@@ -206,6 +206,7 @@ def screen_protected_pack(
 def screen_bq2407x_output_path(
     charger_variant: str,
     *, regulator_min_input_v: float, regulator_max_input_v: float,
+    regulator_topology: str = "boost_only",
     bypasses_5v_regulator: bool = False,
 ) -> dict:
     """Require a converter input rating that covers both docked and 1S power.
@@ -225,13 +226,23 @@ def screen_bq2407x_output_path(
         raise ValueError("Regulator input voltage ratings must be real and ordered")
     if type(bypasses_5v_regulator) is not bool:
         raise ValueError("Direct 5V rail bypass must be explicit")
+    if regulator_topology not in ("boost_only", "buck_boost"):
+        raise ValueError("Regulator topology must be verified boost_only or buck_boost")
     docked_output_max_v = 4.5 if charger_variant == "BQ24074" else 5.6
+    # A step-up-only converter does not regulate downward from a possible
+    # 5.6 V BQ24075 SYS node to a 5.0 V rail. A claimed wide VIN rating
+    # alone is NOT proof that its output remains fixed at five volts.
+    topology_suitable = (charger_variant == "BQ24074" or
+                         regulator_topology == "buck_boost")
     return {
         "charger_ic": charger_variant,
         "docked_output_max_v": docked_output_max_v,
         "conservative_low_cell_design_v": 3.0,
+        "regulator_topology": regulator_topology,
+        "topology_supports_regulating_5v_both_modes": topology_suitable,
         "regulator_covers_charger_output_on_paper": (
-            not bypasses_5v_regulator and regulator_min_input_v <= 3.0
+            not bypasses_5v_regulator and topology_suitable
+            and regulator_min_input_v <= 3.0
             and regulator_max_input_v >= docked_output_max_v
         ),
         "fixed_5v_direct_output_prohibited": True,
@@ -351,6 +362,7 @@ def screen_one_cell_power_stack(
     boost_output_at_3v_continuous_a: float | None,
     boost_regulator_min_input_v: float,
     boost_regulator_max_input_v: float,
+    regulator_topology: str,
     charger_input_limit_a: float | None,
     charger_thermal_input_a: float | None,
     dock_adapter_continuous_a: float | None,
@@ -404,7 +416,8 @@ def screen_one_cell_power_stack(
     vpath = screen_bq2407x_output_path(
         charger_variant,
         regulator_min_input_v=boost_regulator_min_input_v,
-        regulator_max_input_v=boost_regulator_max_input_v)
+        regulator_max_input_v=boost_regulator_max_input_v,
+        regulator_topology=regulator_topology)
     docked = assess_docked_load(
         dock_idle_5v_a, charge_request_a,
         measured_sys_v=docked_sys_v,
