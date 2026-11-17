@@ -431,7 +431,10 @@ class Runtime:
         room_task = getattr(self, "_room_task", None)
         if room_task is not None:
             async def wait_room_shutdown():
-                await room_task
+                # The generic shutdown deadline cancels its OWN waiter.
+                # Shield the real USB reader so timeout does not cancel its
+                # still-running OS worker or disguise unfinished ownership.
+                await asyncio.shield(room_task)
             await step("Shared room USB", wait_room_shutdown(), 1.0)
             # A stalled callback or serial worker may outlive the deadline.
             # Retain ownership until the actual reader task has terminated;
