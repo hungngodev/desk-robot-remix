@@ -230,7 +230,6 @@ class Runtime:
         visual = getattr(self, "multimodal", None)
         if visual is None:
             return
-        now = time.monotonic()
         # A start may be missing from the replay ring after reconnect.
         # Active VAD from the authenticated server is enough to stop any
         # currently playing unsolicited or group speech before reconciliation.
@@ -477,7 +476,7 @@ class Runtime:
                         *(_bounded_monitor_stop(stop(robot)) for robot in robots),
                         return_exceptions=True,
                     )
-                    for robot, result in zip(robots, outcomes):
+                    for robot, result in zip(robots, outcomes, strict=True):
                         if isinstance(result, BaseException):
                             errors.append(RuntimeError(
                                 f"Native speaker shutdown STOP unconfirmed for {robot.id}"
