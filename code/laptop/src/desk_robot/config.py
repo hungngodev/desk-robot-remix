@@ -85,6 +85,9 @@ class Settings(BaseModel):
     room_station_enabled: bool = False  # One explicit USB source, never an extra robot
     room_station_port: str | None = None  # Actual local /dev/tty.* device
     room_station_context_enabled: bool = False  # Consent for all pets to read room facts
+    # Optional actual ADC endpoints for one physical probe, never fake defaults.
+    room_station_soil_dry_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
+    room_station_soil_wet_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     fleet_text_auto_fanout_enabled: bool = True  # Keep existing broadcast behavior unless selective-only chosen.
     max_job_seconds: float = Field(default=45, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
@@ -116,6 +119,15 @@ class Settings(BaseModel):
             raise ValueError("Room station requires a real explicit local USB serial port")
         if self.room_station_context_enabled and not self.room_station_enabled:
             raise ValueError("Room station context needs explicit source enable and consent")
+        soil_dry = self.room_station_soil_dry_adc
+        soil_wet = self.room_station_soil_wet_adc
+        if (soil_dry is None) != (soil_wet is None):
+            raise ValueError("Soil calibration needs both measured dry and wet ADC values")
+        if soil_dry is not None:
+            if not self.room_station_enabled:
+                raise ValueError("Soil calibration requires a real enabled room station")
+            from .soil_calibration import SoilCalibration
+            SoilCalibration(soil_dry, soil_wet)
         ids = [r.id for r in self.robots]
         if not ids or len(set(ids)) != len(ids):
             raise ValueError("At least one robot and unique robot IDs are required")
