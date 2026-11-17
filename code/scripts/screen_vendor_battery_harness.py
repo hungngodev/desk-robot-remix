@@ -118,6 +118,11 @@ def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
              b + 2 * clearance_mm <= wt) or
             (b + wire_relief_mm + 2 * clearance_mm <= lt and
              a + 2 * clearance_mm <= wt)))
+    # THOR publishes an incomplete bare-cell envelope and optional NTC/PCM
+    # configuration. A chassis CANNOT be declared compatible from that size:
+    # the final protector, wiring exit and keyed connector add real volume.
+    if model == "THOR-18650-1S2P-5200":
+        fit = None
     peak = demand["minimum_rated_cell_and_boost_input_a"]
     cont = demand["minimum_continuous_cell_input_a"]
     # "Maximum discharge current" is not a published continuous rating.
