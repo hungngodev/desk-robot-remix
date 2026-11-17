@@ -470,13 +470,35 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                     and driver_choice.get("disposition") in dc_selected)
     if motor_is_dc != driver_is_dc:
         missing_system.append("motor_driver_variant_mismatch")
-    # Even a correctly paired N20+DRV8833 is not a license to buy the
-    # 28BYJ48+ULN2003 fallback at the same time. "Selected" N20 means the
-    # plan must separately set the unused legacy quantities to zero and
-    # preserve owned stock as off-plan inventory. Until then release HOLD.
-    if motor_is_dc and driver_is_dc and (
-            selected_pet.get("stepper", 0) > 0
-            or selected_pet.get("uln2003", 0) > 0):
+    # Keep the 42 frozen conceptual feature IDs so agents cannot delete
+    # mobility to bypass requirements. They are NOT 42 additive purchase
+    # lines: the two legacy stepper rows are mutually exclusive alternatives
+    # to selected N20+DRV8833. Never require a purchased DC drivetrain AND
+    # a purchased stepper drivetrain in the same robot.
+    physical_motor_variant = "dc" if motor_is_dc and driver_is_dc else (
+        "stepper" if not motor_is_dc and not driver_is_dc else "unresolved")
+    if physical_motor_variant == "dc":
+        for row in rows:
+            if row["id"] in ("stepper", "uln2003"):
+                row["excluded_from_order_as_alternative"] = True
+                row["effective_selected_fleet_total"] = 0
+                row["remaining_if_reported_stock_works"] = 0
+                row["shopping_decision"] = "do_not_buy_legacy_stepper_when_dc_selected"
+                row["approved_for_fleet_purchase"] = True
+                row["missing_part_evidence"] = []
+            else:
+                row["effective_selected_fleet_total"] = row["fleet_total"]
+                row["excluded_from_order_as_alternative"] = False
+    else:
+        for row in rows:
+            row["effective_selected_fleet_total"] = row["fleet_total"]
+            row["excluded_from_order_as_alternative"] = False
+    if physical_motor_variant == "unresolved":
+        missing_system.append("motor_driver_variant_mismatch")
+    if physical_motor_variant == "dc" and any(
+            row["id"] in ("stepper", "uln2003") and
+            row["remaining_if_reported_stock_works"] != 0
+            for row in rows):
         missing_system.append("double_purchase_dc_and_stepper_drivetrains")
 
     # The SparkFun PRT-13777 Battery Babysitter integrates BQ27441.
@@ -510,6 +532,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 and all(row["approved_for_fleet_purchase"] for row in rows)
                 and all(row["approved_for_fleet_purchase"] for row in room))
     return {"fleet_robots": fleet, "docks": fleet, "room_stations": 1,
+            "physical_motor_variant_in_cart": physical_motor_variant,
             "order_released": approved, "order_release_is_not_an_electrical_guarantee": True,
             "supplemental_decisions": approved_decisions,
             "known_one_head_ordered_unreceived": 1,
