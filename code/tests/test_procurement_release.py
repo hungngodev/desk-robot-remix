@@ -350,7 +350,14 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
     for ident in ("fsr", "ads1115", "as5600", "encoder_magnets",
                   "max17048", "ina226", "pn532", "sht41"):
         assert selected[ident][8] == "0", ident
-        assert "NO PURCHASE" in selected[ident][10], ident
+        # Supplier comparison may say HOLD rather than NO PURCHASE, but
+        # neither may authorize units. Preserve the explicitly unresolved
+        # INA226 Kelvin shunt and exact-carrier fit decisions.
+        decision = selected[ident][10]
+        assert ("NO PURCHASE" in decision or decision.startswith(
+            ("HOLD CHEAP GENERIC EXACT CARRIER",
+             "SHUNT VALUE/SKU FIXED, BREAKOUT HOLD")
+        )), ident
     # Separate candidate subsystem is not a hidden second approved shopping list.
     assert "BQ27441" in register and "MAX17048" in register
     assert "Duplicate with separate MAX17048" in register
