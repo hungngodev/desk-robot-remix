@@ -370,3 +370,16 @@ def test_dock_uses_generic_nano_not_brand_premium():
     firmware = (mod.PLAN.parents[2] / "code/firmware/dock/platformio.ini").read_text()
     assert "board = nanoatmega328" in firmware
     assert "Arduino-IRremote.git#v4.7.1" in firmware
+
+
+def test_current_high_markup_sensor_rows_are_generic_and_unapproved():
+    """Brand premiums are not our default cart just because their IC works."""
+    data = (mod.PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text()
+    for part_id in ("cap1188", "fsr", "ads1115", "as5600"):
+        row = next(line for line in data.splitlines()
+                   if line.startswith("| " + chr(96) + part_id + chr(96) + " |"))
+        assert "generic" in row.lower(), part_id
+        assert "HOLD CHEAP GENERIC EXACT CARRIER" in row, part_id
+        assert "Unquoted" in row, part_id
+        fields = [x.strip() for x in row.strip().strip("|").split("|")]
+        assert fields[8] == "0", part_id
