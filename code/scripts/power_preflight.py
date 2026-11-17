@@ -226,11 +226,13 @@ def assess_docked_load(
     protected_pack_max_charge_a: float | None = None,
     reserve: float = 1.2,
     motors_confirmed_disarmed: bool = False,
+    charger_variant: str = "BQ24074",
 ) -> dict:
     """Conservatively bound simultaneous idle system and 1S charge currents.
 
-    TI BQ24074's OUT rail is roughly battery-domain 4.4V, not a 5V rail.
-    The charger 1.5A input rating is NOT a 1.5A boosted system plus an
+    TI BQ24074 OUT is 4.3..4.5V docked; BQ24075 can be 5.4..5.6V.
+    Neither is a fixed 5V motor rail. The charger 1.5A input rating is
+    NOT a 1.5A boosted system plus an
     independent 1.5A charge budget. A separate boost supplies 5V.
     This is a conservative input-current arithmetic gate, not a battery
     charge measurement, thermal/NTC proof or enable signal.
@@ -239,9 +241,12 @@ def assess_docked_load(
                 measured_boost_efficiency, reserve)
     if any(not _finite_number(x) for x in measured):
         raise ValueError("Actual docked loads and conversion measurements required")
+    if charger_variant not in ("BQ24074", "BQ24075"):
+        raise ValueError("Unknown charger variant; source-reviewed IC required")
+    max_out_v = 4.5 if charger_variant == "BQ24074" else 5.6
     if (not 0 < measured_idle_5v_a <= 20
             or not 0 < requested_cell_charge_a <= 5
-            or not 3.0 <= measured_sys_v <= 4.5
+            or not 3.0 <= measured_sys_v <= max_out_v
             or not 0.5 <= measured_boost_efficiency <= 0.99
             or not 1 <= reserve <= 2):
         raise ValueError("Invalid docked load, cell, SYS or reserve measurement")
@@ -282,6 +287,9 @@ def assess_docked_load(
             and decimal(protected_pack_max_charge_a) >= decimal(charge)
         )
     return {
+        "charger_variant": charger_variant,
+        "charger_variant_max_docked_out_v": max_out_v,
+        "fixed_5v_rail_requires_separate_converter": True,
         "measured_idle_5v_a": measured_idle_5v_a,
         "requested_cell_charge_a": requested_cell_charge_a,
         "required_sys_to_boost_input_a": ceiling(boost_input * decimal(reserve)),
@@ -314,6 +322,8 @@ def main() -> None:
     parser.add_argument("--dock-idle-5v-a", type=float)
     parser.add_argument("--dock-requested-charge-a", type=float)
     parser.add_argument("--dock-sys-v", type=float)
+    parser.add_argument("--dock-charger-variant", choices=("BQ24074", "BQ24075"),
+                        default="BQ24074")
     parser.add_argument("--dock-boost-efficiency", type=float)
     parser.add_argument("--dock-charger-input-limit-a", type=float)
     parser.add_argument("--dock-board-thermal-input-a", type=float)
@@ -368,6 +378,7 @@ def main() -> None:
             rated_5v_boost_continuous_a=args.dock_boost_5v_continuous_a,
             protected_pack_max_charge_a=args.dock_pack_charge_max_a,
             motors_confirmed_disarmed=args.dock_motors_disarmed,
+            charger_variant=args.dock_charger_variant,
         )
     else:
         if args.peak_5v_a is None or args.continuous_5v_a is None:
