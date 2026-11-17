@@ -94,7 +94,12 @@ class VisualChangeGate:
     """
 
     def __init__(self, *, min_changed_fraction: float = 0.008, confirmations: int = 2):
-        if not 0 < min_changed_fraction <= 1 or confirmations < 1:
+        # The gate must never silently become one-frame or never-triggered
+        # when config supplies bool, NaN, Infinity or a fractional count.
+        if (type(min_changed_fraction) not in (int, float)
+                or not 0 < min_changed_fraction <= 1
+                or type(confirmations) is not int
+                or not 1 <= confirmations <= 16):
             raise ValueError("Invalid frame gate parameters")
         self.min_changed_fraction = min_changed_fraction
         self.confirmations = confirmations

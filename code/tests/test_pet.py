@@ -92,6 +92,18 @@ def test_visual_change_gate_requires_persistent_difference():
         VisualChangeGate(min_changed_fraction=2)
 
 
+@pytest.mark.parametrize("confirmations", [0, -1, True, False, 1.5, float("nan"), float("inf"), "2", None, 17])
+def test_visual_change_gate_rejects_invalid_confirmation_budget(confirmations):
+    with pytest.raises(ValueError, match="Invalid frame gate parameters"):
+        VisualChangeGate(confirmations=confirmations)
+
+
+@pytest.mark.parametrize("fraction", [None, True, False, "0.01", float("nan"), float("inf"), -0.01, 1.01])
+def test_visual_change_gate_rejects_unbounded_or_nonnumeric_change_fraction(fraction):
+    with pytest.raises(ValueError, match="Invalid frame gate parameters"):
+        VisualChangeGate(min_changed_fraction=fraction)
+
+
 def test_predecoded_scene_gate_reuses_exact_original_motion_and_confirmation_semantics():
     """Native JPEG preprocessing must not change event thresholds or hysteresis."""
     original = VisualChangeGate()
