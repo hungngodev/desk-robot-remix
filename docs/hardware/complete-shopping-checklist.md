@@ -80,7 +80,6 @@ Other reported spares are not interchangeable with chosen modules: BerryIMU, MAX
 | shared station | NFC game tags and magnets | 10 | 10 | HOLD | shared interactive toys |
 | shared station | AMG8833 thermal array | 1 | 1 | HOLD | optional separate thermal station; not needed for core camera vision |
 | shared station | Station controller with timestamped USB serial protocol, reuse owned Feather nRF52840 if feasible | 1 | 0 | HOLD | ventilated stationary USB enclosure; no motor or charge authority; owned Feather nRF52840 is a candidate, not yet an approved controller |
-
 | linked detail (not additive) | N20 100:1 MP 6V motor alternative | 10 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent stepper; disposition unresolved; see the canonical 14-row source register before buying |
 | linked detail (not additive) | DRV8833 dual H bridge alternative | 5 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent uln2003; disposition unresolved; see the canonical 14-row source register before buying |
 | linked detail (not additive) | BQ24075 power path plus BQ27441 gauge alternative | 5 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent cap_power; disposition unresolved; see the canonical 14-row source register before buying |
