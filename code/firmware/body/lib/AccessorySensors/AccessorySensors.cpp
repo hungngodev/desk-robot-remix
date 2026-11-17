@@ -25,6 +25,10 @@ void AccessorySensors::invalidate_cached() {
     data_.proximity.valid = data_.gauge.fuel_valid =
     data_.gauge.monitor_valid = data_.dock.valid = data_.nfc.valid = false;
   data_.optional_inputs.valid = false;
+#if DESK_ROBOT_ENABLE_HAPTIC
+  haptic_.fault();
+  haptic_needs_low_ = true;  // retry deassertion after a bus/mux fault
+#endif
   for (auto& sample : data_.angle) sample.valid = false;
 }
 bool AccessorySensors::select(std::uint8_t lane) {
@@ -91,6 +95,10 @@ bool AccessorySensors::begin(TwoWire& wire) {
   wire_->beginTransmission(0x71);
   mux_present_ = wire_->endTransmission(true) == 0;
   data_ = AccessoryReadings{};
+#if DESK_ROBOT_ENABLE_HAPTIC
+  haptic_.configure(false);
+  haptic_needs_low_ = false;
+#endif
   next_lane_ = 1;
   started_ = false;
   sht_pending_ = ads_pending_ = false;
@@ -168,6 +176,22 @@ bool AccessorySensors::begin(TwoWire& wire) {
     data_.optional_inputs.present = data_.dock.present &&
         write8(0x20, 0x01, 0xFF) && // all GPIOB inputs, no output drivers
         write8(0x20, 0x0D, 0x01);   // B0 reed pullup; B1 PIR externally biased
+#if DESK_ROBOT_ENABLE_HAPTIC
+    // MCP23017 BANK=0: GPB2 is an edge into an EXTERNALLY CURRENT-LIMITED,
+    // hardware one-shot motor driver. The expander is not a watchdog.
+    // Initialize the OLATB latch LOW before making GPB2 an output.
+    // B0/B1 remain inputs for the reported reed and PIR sensors.
+    if (data_.optional_inputs.present) {
+      std::uint8_t latch = 0xff, direction = 0xff;
+      const bool configured =
+          write8(0x20, 0x15, 0x00) &&
+          write8(0x20, 0x01, 0xFB) &&
+          read(0x20, 0x15, &latch, 1) && latch == 0x00 &&
+          read(0x20, 0x01, &direction, 1) && direction == 0xFB;
+      haptic_.configure(configured);
+      haptic_needs_low_ = !configured;
+    }
+#endif
     // PN532 is truly optional and cannot replace MCP23017 dock interlock.
     // An address ACK only starts a nonblocking SAM protocol verification.
     if (probe(kPn532Address)) nfc_stage_ = NfcStage::StartSam;
@@ -377,6 +401,34 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
 }
 
 
+#if DESK_ROBOT_ENABLE_HAPTIC
+void AccessorySensors::haptic_step(std::uint32_t now_ms) {
+  // Run only on the normal lane 5 pass AFTER fresh dock GPIOA acquisition.
+  // No arbitrary I2C access while the critical 0x70 cliff mux is selected.
+  if (!haptic_.ready() && !haptic_needs_low_) return;
+  const auto& dock = data_.dock;
+  const bool undocked = dock.present && dock.valid &&
+      dock.sample_seq != 0U && now_ms - dock.at_ms < 250U &&
+      !dock.left_seated && !dock.right_seated &&
+      !dock.input_good && !dock.charge_indicated;
+  const auto action = haptic_needs_low_
+      ? HapticPulse::Action::TurnOff : haptic_.next(now_ms, undocked);
+  if (action == HapticPulse::Action::None) return;
+  const std::uint8_t expected =
+      action == HapticPulse::Action::TurnOn ? 0x04U : 0x00U;
+  std::uint8_t readback = 0xff;
+  // Reuse the existing verified mux and register helper, with OLATB readback.
+  const bool success = write8(0x20, 0x15, expected) &&
+      read(0x20, 0x15, &readback, 1) && readback == expected;
+  haptic_.completed(action, success, now_ms);
+  if (success && expected == 0) haptic_needs_low_ = false;
+  if (!success) {
+    haptic_needs_low_ = true;
+    invalidate_cached(); // do not preserve old dock evidence on bus failure
+  }
+}
+#endif
+
 void AccessorySensors::optional_gpio(std::uint32_t now_ms) {
   auto& extra = data_.optional_inputs;
   if (!extra.present) return;
@@ -544,6 +596,10 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
     case 4: power(now_ms); break;
     case 5:
       dock_status(now_ms);
+#if DESK_ROBOT_ENABLE_HAPTIC
+      // Short, one-shot, touch-driven feedback only; dock monitor stays first.
+      haptic_step(now_ms);
+#endif
       // Optional NFC work is subordinate to the required dock monitor.
       // Never spend a second bus transaction if mandatory GPIO failed.
       if (data_.dock.present && data_.dock.valid) {
