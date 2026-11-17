@@ -50,6 +50,10 @@ private:
     // Guarded by reference_mutex_, not a competing audio task/driver.
     uint64_t reference_generation_ = 0;
     uint32_t stale_publish_discards_ = 0;
+    // Silence-only reference on startup/reset is expected briefly. Count
+    // missing windows and warn only on prolonged consecutive underflow.
+    uint32_t missing_reference_reads_ = 0;
+    uint32_t consecutive_missing_reference_reads_ = 0;
     int64_t last_write_us_ = 0;
     int16_t filter_last1_ = 0;
     int16_t filter_last2_ = 0;
@@ -60,5 +64,5 @@ private:
     void PushLocked(int16_t sample);
     void PublishAcceptedLocked(const int16_t* source, int samples, int volume,
                                int64_t now_us);
-    void ReadReferenceLocked(int16_t* dest, int frames);
+    bool ReadReferenceLocked(int16_t* dest, int frames);
 };
