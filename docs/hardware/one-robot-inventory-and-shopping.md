@@ -34,7 +34,7 @@
 | Power bank | Have | 1, output rating unverified |
 | DuPont jumper ribbons | Have | 10 signal-wire ribbons |
 | 3D printer filament | Have | reported, amount to check |
-| VL53L4CD time of flight carrier | Buy | 8 units; the current full WROOM firmware contains eight VL53L4CD channels: four floor, one front and three side/rear read-only. No physical breakout, I2C timing or placement has been qualified. |
+| VL53L0X time of flight carrier | Buy | 8 units; the current full WROOM firmware contains eight VL53L0X channels: four floor, one front and three side/rear read-only. No physical breakout, I2C timing or placement has been qualified. |
 | TCA9548A 8 channel 3.3V compatible I2C multiplexer | Buy | 2 units; Two per pet. 0x70 for range, 0x71 for extra sensors. |
 | MAX98357A I2S mono amplifier | Buy | 1  |
 | 8 ohm 1 watt approximately 20 mm speaker | Buy | 1  |
