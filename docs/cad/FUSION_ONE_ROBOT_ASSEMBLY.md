@@ -27,7 +27,7 @@ the original README files, including noncommercial and share alike restrictions.
 1. Create new design **DeskPet01** in millimeters and Save. Under Modify > Change
    Parameters, record measured actual board width, board length, shaft locations,
    screw diameter, servo case length/width and horn center, battery enclosure
-   envelope, track outside width, speaker diameter/depth, camera assembly
+   envelope, track outside width, the active Challenge 20 × 16 × 4.7 mm rectangular speaker body, solder pads, gasket and cavity, camera assembly
    width/depth and each selected cheap generic VL53L0X GY-530 carrier PCB/lens offset. Set values from
    calipers/vendor STEP models of the **actual purchased breakout**, not guessed
    values from the rendered concept.
