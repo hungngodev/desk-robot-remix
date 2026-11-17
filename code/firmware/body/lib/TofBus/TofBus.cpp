@@ -39,7 +39,10 @@ bool TofBus::read_register(std::uint8_t reg, std::uint8_t* out, std::uint8_t len
   if (!out || length == 0 || length > kMaxSampleBytes) return false;
   wire_.beginTransmission(kSensorAddress);
   const bool written = wire_.write(reg) == 1;
-  const int result = wire_.endTransmission(false);
+  // Only an accepted register pointer may use the repeated START. An
+  // unsuccessful write must terminate with STOP so the next safety read
+  // does not inherit a half-open I2C transaction.
+  const int result = wire_.endTransmission(!written);
   if (!written || result != 0) return false;
   if (wire_.requestFrom(kSensorAddress, static_cast<size_t>(length), true) != length) return false;
   for (std::uint8_t n = 0; n < length; ++n) {
