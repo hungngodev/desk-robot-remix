@@ -562,8 +562,10 @@ def render_csv(report: dict) -> str:
     for scope, part in _purchase_rows(report):
         ref = part.get("reference_only") or {}
         writer.writerow((
-            scope, part["id"], part["name"], part["per_robot"],
-            part.get("fleet_total", part.get("shared_total", 0)),
+            scope, part["id"], part["name"],
+            0 if part.get("excluded_from_order_as_alternative") else part["per_robot"],
+            part.get("effective_selected_fleet_total",
+                     part.get("fleet_total", part.get("shared_total", 0))),
             part["reported_owned_not_verified"],
             part["estimated_owned_not_verified"],
             part["ordered_unreceived_not_verified"],
@@ -621,10 +623,13 @@ def render_markdown(report: dict) -> str:
         "| --- | --- | ---: | ---: | --- | --- |",
     ))
     for scope, part in _purchase_rows(report):
-        total = part.get("fleet_total", part.get("shared_total", 0))
+        total = part.get("effective_selected_fleet_total",
+                         part.get("fleet_total", part.get("shared_total", 0)))
         remaining = part["remaining_if_reported_stock_works"]
         status = "APPROVED" if part["approved_for_fleet_purchase"] else "HOLD"
-        if part["shopping_decision"].startswith("hold_until_drivetrain"):
+        if part.get("excluded_from_order_as_alternative"):
+            status = "EXCLUDED MOTOR ALTERNATIVE, DO NOT BUY"
+        elif part["shopping_decision"].startswith("hold_until_drivetrain"):
             status = "HOLD MOTOR CHOICE"
         reference = part.get("reference_only") or {}
         note = (f"{reference['vendor']} {reference['sku']}: {reference['url']}"
