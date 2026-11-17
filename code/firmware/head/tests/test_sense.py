@@ -156,7 +156,9 @@ class SenseOverlayTests(unittest.TestCase):
             writer.index("NoAudioCodec::Write(data, samples)"),
             writer.index("started_generation == reference_generation_"),
         )
-        self.assertIn("stale_discards = ++stale_publish_discards_;", writer)
+        self.assertIn("if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;", writer)
+        self.assertIn("stale_discards = stale_publish_discards_;", writer)
+        self.assertIn("reference_integrity_failed_ = true;", writer)
         self.assertIn("PublishAcceptedLocked(data, accepted, volume", writer)
         clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1]
         self.assertLess(
