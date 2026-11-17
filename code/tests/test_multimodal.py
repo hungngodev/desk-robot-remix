@@ -409,10 +409,20 @@ async def test_live_sensor_edge_reuses_stream_and_never_starts_competing_snapsho
             while not visual.hub.frames["robot-01"]:
                 await asyncio.sleep(.01)
         assert visual.hub.frames["robot-01"][-1].source == "proactive"
+        assert visual._metrics["robot-01"]["stream_sensor_priority_frames"] == 1
+        # Second independent sensor event arrives before the usual 500ms
+        # idle sample interval: select the NEXT existing 4 FPS stream frame
+        # immediately rather than an on-demand camera capture.
+        visual.sensor_event("robot-01", "nfc_tag")
+        await head.frames_to_send.put(image())
+        async with asyncio.timeout(2):
+            while visual._metrics["robot-01"]["stream_frames_selected"] < 2:
+                await asyncio.sleep(.01)
+        assert visual._metrics["robot-01"]["stream_sensor_priority_frames"] == 2
         assert head.captures == 0
         assert [event["kind"] for event in visual.hub.recent_events(
             "robot-01", time.monotonic()
-        )][-2:] == ["paw_contact", "petting_zone"]
+        )][-3:] == ["paw_contact", "petting_zone", "nfc_tag"]
         # No stream frame or reconnection is a license to fall back to
         # an incompatible single-shot capture path.
         visual.sensor_event("robot-01", "paw_contact")
