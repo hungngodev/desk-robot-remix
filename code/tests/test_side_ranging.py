@@ -1,4 +1,4 @@
-"""Three existing extra VL53L4CD read-only directions become qualified pet events."""
+"""Three low-cost VL53L0X side/rear directions emit read-only pet events."""
 import asyncio
 from pathlib import Path
 
