@@ -40,7 +40,7 @@ Other reported spares are not interchangeable with chosen modules: BerryIMU, MAX
 | pet or dock | MPU6050 GY521 compatible six axis breakout | 5 | 4 | HOLD | At least one reported; BerryIMU preserved as spare |
 | pet or dock | AT42QT1010 momentary capacitive head touch | 5 | 4 | HOLD | At least one photographed; retain as independent local stop |
 | pet or dock | MAX30102 optical heartbeat paw pad breakout | 5 | 0 | HOLD | Original user HTML says this is APPROVED as a robot-mounted paw pad and claims about five are already owned. Independent photo audit did not establish exact stock. No purchase before recount and module voltage check. Use WROOM I2C 0x57, not Sense GPIO41/42 PDM mic. |
-| pet or dock | VL53L4CD time of flight carrier | 40 | 40 | HOLD | Pololu 3692: https://www.pololu.com/product/3692 |
+| pet or dock | VL53L0X time of flight carrier | 40 | 40 | HOLD | Generic GY-530 VL53L0X: https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html |
 | pet or dock | TCA9548A 8 channel 3.3V compatible I2C multiplexer | 10 | 10 | HOLD | SparkFun BOB-16784: https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html |
 | pet or dock | MAX98357A I2S mono amplifier | 5 | 5 | HOLD | SparkFun DEV-14809: https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html |
 | pet or dock | 8 ohm 1 watt approximately 20 mm speaker | 5 | 5 | HOLD | SparkFun COM-26553: https://www.sparkfun.com/mini-speaker-1w-8-ohm.html |
