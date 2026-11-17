@@ -3,13 +3,13 @@ from itertools import count
 from pathlib import Path
 from types import SimpleNamespace
 
-_IMU_FRAMES = count(1)
-
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore
 from desk_robot.pet import PetController
 from desk_robot.simulator import SimulatedSpeaker
+
+_IMU_FRAMES = count(1)
 
 
 def status(acc=(0, 0, 16384), gyro=(0, 0, 0)):
