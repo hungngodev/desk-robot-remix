@@ -3260,9 +3260,12 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     assert "Perhaps a blue mug" in calls[0][1]["messages"][1]["content"]
     assert session.native_tool_audio_queued == 1
     chunks = [session.outgoing.get_nowait() for _ in range(6)]
-    assert len(chunks) == 6 and chunks[-1] is None
+    # Native queue always carries (response_id, PCM_or_None) tuples, so
+    # terminal None is the payload of the last item, not the whole item.
+    assert len(chunks) == 6 and chunks[-1][1] is None
     assert all(item[0].startswith("tool_") and len(item[1]) == 9600
                for item in chunks[:-1])
+    assert chunks[-1][0] == chunks[0][0]
     assert session._tool_audio_response_id == chunks[0][0]
     await session._speak_tool_results(Http(), "One more unrelated read", [
         {"source": "wroom_status", "safety_fault": "unknown"}], 0, 0)
