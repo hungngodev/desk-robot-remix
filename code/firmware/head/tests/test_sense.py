@@ -141,6 +141,30 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertEqual((self.root / 'main/boards/common/esp32_camera.cc').read_text()
                          .count('camera_lock(AccessMutex())'), 6)
 
+    def test_reference_generation_fence_prevents_stale_barge_audio(self):
+        """Source contract only; physical DMA silence still needs A2 trials."""
+        header = (HEAD / "sense/sense_reference_codec.h").read_text()
+        code = (HEAD / "sense/sense_reference_codec.cc").read_text()
+        self.assertIn("uint64_t reference_generation_ = 0;", header)
+        writer = code.split("int SenseReferenceCodec::Write(", 1)[1]
+        writer = writer.split("void SenseReferenceCodec::ClearReference()", 1)[0]
+        self.assertLess(
+            writer.index("started_generation = reference_generation_;"),
+            writer.index("NoAudioCodec::Write(data, samples)"),
+        )
+        self.assertLess(
+            writer.index("NoAudioCodec::Write(data, samples)"),
+            writer.index("started_generation == reference_generation_"),
+        )
+        self.assertIn("stale_discards = ++stale_publish_discards_;", writer)
+        self.assertIn("PublishAcceptedLocked(data, accepted, volume", writer)
+        clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1]
+        self.assertLess(
+            clear.index("++reference_generation_;"),
+            clear.index("reference_.fill(0);"),
+        )
+        self.assertIn('physical TX silence unverified', writer)
+
     def test_sense_reinstall_drift_and_exact_restore(self):
         overlay.apply(self.root, 'sense')
         overlay.apply(self.root, 'sense')
