@@ -328,5 +328,5 @@ def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatc
     assert attempts == [1, 2]
     assert received == [2]
     assert feed.rejected == 2  # one callback failure and one replayed frame
-    assert feed.received == 2
+    assert feed.received == 1  # only successfully delivered observations
     assert "callback failed" in feed.last_error
