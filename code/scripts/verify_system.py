@@ -20,7 +20,7 @@ CODE = ROOT / "code"
 
 
 def steps(suite: str, build: Path) -> list[tuple[str, list[str], Path, int]]:
-    if suite not in ("python", "body", "wroom", "sense", "all"):
+    if suite not in ("python", "body", "wroom", "sense", "room", "dock", "all"):
         raise ValueError("Unknown verification suite")
     jobs: list[tuple[str, list[str], Path, int]] = []
     if suite in ("python", "all"):
@@ -46,13 +46,32 @@ def steps(suite: str, build: Path) -> list[tuple[str, list[str], Path, int]]:
             (f"wroom-{env}", ["pio", "run", "-d",
                              str(CODE / "firmware/body"), "-e", env],
              ROOT, 900)
-            for env in ("esp32_full", "esp32_stepper", "esp32dev")
+            for env in (
+                "esp32_full", "esp32_full_haptic_lab",
+                "esp32_dc_full", "esp32_dc_watchdog_lab",
+                "esp32_stepper", "esp32dev", "esp32_vl53l0x_bench",
+            )
         ]
     if suite in ("sense", "all"):
         jobs.append(
             ("sense-build", ["bash", str(CODE / "scripts/build_head.sh"),
                              "--board", "sense"], CODE, 2100)
         )
+    if suite in ("room", "all"):
+        jobs += [
+            (f"room-{env}", ["pio", "run", "-d",
+                             str(CODE / "firmware/room_station"), "-e", env],
+             ROOT, 900)
+            for env in ("feather_nrf52840_room_bench",
+                        "feather_nrf52840_room_full")
+        ]
+    if suite in ("dock", "all"):
+        jobs += [
+            (f"dock-{num:02d}", ["pio", "run", "-d",
+                                str(CODE / "firmware/dock"), "-e",
+                                f"bench_nano_dock_{num:02d}"], ROOT, 600)
+            for num in range(1, 6)
+        ]
     return jobs
 
 
@@ -90,7 +109,7 @@ def run(name: str, argv: list[str], cwd: Path, timeout: int) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=["python", "body", "wroom", "sense", "all"],
+    parser.add_argument("--suite", choices=["python", "body", "wroom", "sense", "room", "dock", "all"],
                         default="body")
     parser.add_argument("--report", type=Path,
                         default=Path("verification-result.json"))
