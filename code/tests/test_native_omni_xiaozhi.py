@@ -4964,7 +4964,10 @@ async def test_native_completed_audio_tool_result_reaches_same_model_audio_queue
         assert seen and any("/v1/chat/completions" in str(x[0])
                             for x in seen)
         packets = list(session.outgoing._queue)
-        assert packets[-1] is None
+        # Audio and its terminal marker carry the SAME generation lease,
+        # so a late tool completion cannot terminate another pet's playback.
+        assert packets[-1][0].startswith("tool_")
+        assert packets[-1][1] is None
         assert packets[0][0].startswith("tool_")
         assert b"old PCM" not in [packet[1] for packet in packets[:-1]]
         assert session.wire.response_id != "stale_model"
