@@ -1222,7 +1222,7 @@ def test_pilot_sample_cannot_inherit_approved_sku_from_replaced_sensor():
     bad = copy.deepcopy(json.loads(mod.PLAN.read_text(encoding="utf-8")))
     next(x for x in bad["parts"] if x["id"] == "cliff_obstacle")[
         "name"
-    ] = "expensive replacement VL53L4CD"
+    ] = "VL53L0X unreviewed replacement PCB"
     pilot = mod.first_robot_pilot_samples(mod.generate(bad))
     range_row = next(x for x in pilot["roles"] if x["id"] == "cliff_obstacle")
     assert range_row["pilot_action"] == "HOLD_CHANGED_PART_IDENTITY"
