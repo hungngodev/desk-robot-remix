@@ -659,3 +659,22 @@ def test_pack_cli_requires_all_geometry_and_undocked_mode(monkeypatch):
         with pytest.raises(SystemExit) as exc:
             runpy.run_path(str(script), run_name="__main__")
         assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("peak,continuous,trip", [
+    (8, 9, 10),
+    (10, 6, 9),
+    (10, 11, 9),
+])
+def test_pack_pcm_rating_must_cover_its_own_advertised_peak(peak, continuous, trip):
+    """Reject contradictory seller ratings before treating a cell as compatible."""
+    demand = tool(1, 0.6)
+    with pytest.raises(ValueError, match="Contradictory protected pack"):
+        pack_screen(
+            demand,
+            pack_length_mm=55, pack_width_mm=30, pack_thickness_mm=10,
+            tray_length_mm=68, tray_width_mm=35, tray_height_mm=14,
+            rated_peak_discharge_a=peak,
+            rated_continuous_discharge_a=continuous,
+            pcm_overcurrent_trip_a=trip,
+        )
