@@ -62,7 +62,7 @@ These extra purchase rows realize abstract BOM assemblies; do not count them as 
 | Item | Candidate source | Count per pet or station | Five pets or single station | Quote each | Pilot | Qualification note |
 |---|---|---:|---:|---:|---:|---|
 | N20 100:1 MP 6V motors | [Pololu #2367](https://www.pololu.com/product/2367/specs) | 2 | 10 | $22.03 | 0 | Two per pet, 10 fleet; source motor driver option, tracks still to fit; Owned 28BYJ48 must be load tested first; $22.03 premium not selected for purchasing |
-| DRV8833 dual H bridge | [Pololu #2130](https://www.pololu.com/product/2130) | 1 | 5 | $10.07 | 1 | One per pet, 5 fleet; user reported spare uncounted |
+| DRV8833 dual H bridge | Generic exact TI DRV8833 two motor module; [TI datasheet](https://www.ti.com/product/DRV8833) | 1 | 5 | Unquoted | 0 | Reuse reportedly owned spare DRV8833 first and verify 3.3V logic, driver polarity, 5V/low-cell motor load and real current. Pololu premium carrier not an approved purchase |
 | BQ24075 battery power path and BQ27441 gauge | [SparkFun PRT 13777](https://www.sparkfun.com/sparkfun-battery-babysitter-lipo-battery-manager.html) | 1 | 5 | $23.95 | 0 | One per pet, bench verify net charge and thermistor; Duplicate with separate MAX17048; select one gauge and verify pack NTC |
 | 5V switching regulator | [Pololu #4082 S13V30F5](https://www.pololu.com/product/4082) | 1 | 5 | $16.51 | 0 | One per pet, low cell current/thermal test; Low cell power input and thermal qualification missing |
 | Protected NTC 1S battery pack | UNSELECTED pack SKU needed | 1 | 5 | Unquoted | 0 | Five eventual, order only once fit and load measured |
