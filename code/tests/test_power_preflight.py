@@ -539,3 +539,78 @@ def test_cli_rejects_mixed_and_incomplete_power_modes(monkeypatch):
         with pytest.raises(SystemExit) as result:
             runpy.run_path(str(script), run_name="__main__")
         assert result.value.code == 2
+
+
+pack_screen = runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+))["screen_protected_pack"]
+
+
+def test_protected_pack_envelope_and_current_screen_never_certifies_hardware():
+    """No generic 2A pack or 86mm candidate is silently approved for 68mm tray."""
+    requirements = tool(3, 1.8, cell_low_v=3.0, measured_boost_efficiency=.85)
+    base = dict(
+        tray_length_mm=68, tray_width_mm=35, tray_height_mm=14,
+        rated_peak_discharge_a=10, rated_continuous_discharge_a=6,
+        pcm_overcurrent_trip_a=11,
+    )
+    overlong = pack_screen(
+        requirements, pack_length_mm=86, pack_width_mm=30,
+        pack_thickness_mm=7.4, **base,
+    )
+    assert not overlong["assembled_pack_fits_tray_on_paper"]
+    assert not overlong["candidate_usable_on_paper"]
+
+    compact_but_underrated = pack_screen(
+        requirements, pack_length_mm=55, pack_width_mm=30,
+        pack_thickness_mm=10, **{
+            **base, "rated_peak_discharge_a": 2,
+            "rated_continuous_discharge_a": 2,
+            "pcm_overcurrent_trip_a": 3,
+        },
+    )
+    assert compact_but_underrated["assembled_pack_fits_tray_on_paper"]
+    assert compact_but_underrated["current_sufficient_on_paper"] is False
+    assert compact_but_underrated["candidate_usable_on_paper"] is False
+
+    sufficient_hypothetical = pack_screen(
+        requirements, pack_length_mm=55, pack_width_mm=30,
+        pack_thickness_mm=10, **base,
+    )
+    assert sufficient_hypothetical["candidate_usable_on_paper"] is True
+    assert not sufficient_hypothetical["candidate_physically_qualified"]
+    assert not sufficient_hypothetical["actual_pack_pcm_and_ntc_test_verified"]
+    assert not sufficient_hypothetical["printed_assembly_and_wire_relief_verified"]
+
+
+def test_protected_pack_incomplete_ratings_and_rotated_fit():
+    requirements = tool(1.0, 0.6)
+    base = dict(pack_length_mm=30, pack_width_mm=55,
+                pack_thickness_mm=10, tray_length_mm=68,
+                tray_width_mm=35, tray_height_mm=14)
+    unknown = pack_screen(requirements, **base)
+    assert unknown["assembled_pack_fits_tray_on_paper"]
+    assert unknown["current_sufficient_on_paper"] is None
+    assert unknown["candidate_usable_on_paper"] is None
+    assert not unknown["candidate_physically_qualified"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("pack_length_mm", True),
+    ("pack_length_mm", 10 ** 1000),
+    ("tray_width_mm", -1),
+    ("pack_thickness_mm", float("nan")),
+    ("rated_continuous_discharge_a", True),
+    ("pcm_overcurrent_trip_a", float("inf")),
+])
+def test_protected_pack_bad_specs_fail_closed(field, value):
+    requirements = tool(1.0, 0.6)
+    args = dict(pack_length_mm=55, pack_width_mm=30,
+                pack_thickness_mm=10, tray_length_mm=68,
+                tray_width_mm=35, tray_height_mm=14,
+                rated_peak_discharge_a=8,
+                rated_continuous_discharge_a=5,
+                pcm_overcurrent_trip_a=9)
+    args[field] = value
+    with pytest.raises(ValueError):
+        pack_screen(requirements, **args)
