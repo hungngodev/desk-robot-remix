@@ -62,3 +62,9 @@ a verified dry/wet calibration, a completed physical station, or an approved
 five-pet purchasing order.
 
 The Feather nRF52840 Express [official analog pin reference](https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/pinouts) uses a nominal 0 to 3.6 V SAADC measurement span with gain one sixth. **The measurement span is not permission to apply 5V to an I/O pin.** Use a 3.3V powered capacitive probe with a verified 0 to 3.3V analog output and common ground, away from water ingress at the PCB head. Once it is connected, use `feather_nrf52840_room_full` and verify dry/wet calibration. No newly purchased Adafruit board is required.
+
+## AMG8833 source bounds and failure behavior
+
+The selected **AMG8833 high gain** part has a Panasonic-specified **0 to 80 °C measured-object range**, distinct from the AMG8834 low gain -20 to 100 °C variant. The portable `thermal_pixels.h` checks signed two's-complement 0.25 °C pixel values against the selected part's limits. A malformed transfer or any out-of-range pixel rejects that frame; a rejected 16-byte chunk does not partially overwrite the previous chunk. These limits are a conservative validity screen, not a claim of ±0 °C accuracy, successful electrical integration, or physical body-temperature detection. Source: https://industry.panasonic.eu/products/components/sensors/ir-thermophile-array-sensor-grid-eye .
+
+The exact host files `thermal_pixels.h` (blob `b1c38da57be7db1956d4dafe21d7ed9860433fa8`) and `thermal_pixels_tests.cpp` (blob `ccd0f47ae6060ad03bb6e1406a75a7be8b29a5f1`) passed a local standalone `g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -O1` test on November 17, 2026. The complete Feather PlatformIO build and a real AMG8833 bus trial are **NOT EXECUTED**. Keep the room station and fleet procurement on HOLD pending physical validation.
