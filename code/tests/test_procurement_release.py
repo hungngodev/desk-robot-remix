@@ -203,11 +203,32 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
         assert part_id not in selected, "Duplicate candidate component"
         selected[part_id] = columns
     assert set(selected) == set(parts), "Missing or invented selected purchasing role"
+    machine = {row["id"]: row for row in mod.generate(plan)["robots"]}
+    # Audit the *entire* hand-curated 42-role purchase table, not only its
+    # headline totals. In particular HOLD or zero pilot does not erase a
+    # physical fleet shortage (previously wrong for steppers and 1S power).
     for ident, item in parts.items():
         cells = selected[ident]
-        assert int(cells[2]) == item["per_robot"], ident
-        assert int(cells[3]) == 5 * item["per_robot"], ident
+        report = machine[ident]
+        expected = (
+            report["per_robot"], report["fleet_total"],
+            report["reported_owned_not_verified"],
+            report["estimated_owned_not_verified"],
+            report["ordered_unreceived_not_verified"],
+            report["remaining_if_reported_stock_works"],
+        )
+        actual = tuple(int(value) for value in cells[2:8])
+        assert actual == expected, (
+            f"{ident}: register per/total/owned/estimate/ordered/gap "
+            f"{actual} disagrees with machine ledger {expected}"
+        )
         assert int(cells[8]) >= 0, ident
+        assert int(cells[8]) <= report["remaining_if_reported_stock_works"], (
+            f"{ident}: pilot count cannot exceed recorded shortage"
+        )
+    assert machine["stepper"]["remaining_if_reported_stock_works"] == 5
+    assert machine["uln2003"]["remaining_if_reported_stock_works"] == 5
+    assert machine["cap_power"]["remaining_if_reported_stock_works"] == 5
     for ident in ("oled", "imu", "head_touch", "reed", "pir", "bmp280",
                   "haptic_motor"):
         assert selected[ident][8] == "0", "Do not rebuy reported owned " + ident
