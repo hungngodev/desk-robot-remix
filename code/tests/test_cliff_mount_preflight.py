@@ -91,6 +91,90 @@ def test_late_braking_fails_even_with_feasible_lens_height():
     assert not r["candidate_geometry_possible_on_paper"]
 
 
+def planar(**overrides):
+    values = dict(
+        left_wheel_mm_s=100.0, right_wheel_mm_s=100.0,
+        track_width_mm=100.0,
+        # Two drive-wheel contacts and a rear supporting caster.
+        support_points_mm=[[0, -10], [0, 10], [-10, 0]],
+        # Four existing downward optical lanes, NOT the side diagnostics.
+        floor_sensor_points_mm=[[45, -10], [45, 10], [35, 0], [-45, 0]],
+        chassis_mount_above_desk_mm=20.0,
+        detection_latency_ms=80.0, measured_worst_braking_mm=10.0,
+        engineering_margin_mm=10.0,
+    )
+    values.update(overrides)
+    return tool.screen_planar_cliff_coverage(**values)
+
+
+def test_forward_2d_contact_coverage_uses_st_25_degree_optical_rear_setback():
+    result = planar()
+    assert result["body_translation_mm_s"] == 100.0
+    assert result["body_turn_rate_rad_s"] == 0.0
+    assert result["manufacturer_fov_deg"] == 25.0
+    assert result["nominal_fov_rear_footprint_mm"] == pytest.approx(7.42677, abs=.001)
+    assert all(s["covered"] for s in result["support_checks"])
+    assert result["necessary_planar_coverage_on_paper"]
+    assert not result["fully_safe_cliff_operation_proven"]
+
+
+def test_forward_safe_configuration_may_have_unsafe_reverse():
+    reverse = planar(left_wheel_mm_s=-100, right_wheel_mm_s=-100)
+    assert reverse["body_translation_mm_s"] == -100.0
+    assert not reverse["necessary_planar_coverage_on_paper"]
+    assert any(not s["covered"] for s in reverse["support_checks"])
+
+
+def test_differential_drive_spin_moves_front_and_rear_supports_sideways():
+    spin = planar(
+        left_wheel_mm_s=-100, right_wheel_mm_s=100,
+        support_points_mm=[[40, 0], [-40, 0], [0, 0]],
+        floor_sensor_points_mm=[[40, 60], [-40, -60],
+                                [40, -60], [-40, 60]],
+    )
+    assert spin["body_translation_mm_s"] == 0.0
+    assert spin["body_turn_rate_rad_s"] == 2.0
+    assert spin["support_checks"][0]["motion_mm_s"] == 80.0
+    assert spin["support_checks"][0]["covered"]
+    assert spin["support_checks"][1]["covered"]
+    assert not spin["support_checks"][2]["requires_cliff_coverage"]
+    assert spin["necessary_planar_coverage_on_paper"]
+
+    # Same motor command, only forward/backward-aligned sensors. A pure
+    # one-dimensional cliff check would miss the lateral edge sweep.
+    missed = planar(
+        left_wheel_mm_s=-100, right_wheel_mm_s=100,
+        support_points_mm=[[40, 0], [-40, 0], [0, 0]],
+    )
+    assert not missed["necessary_planar_coverage_on_paper"]
+
+
+def test_increasing_tilt_reduces_available_cliff_margin_on_a_turn_or_drive():
+    safe = planar()
+    tilted = planar(optical_tilt_deg=20)
+    assert safe["necessary_planar_coverage_on_paper"]
+    assert not tilted["necessary_planar_coverage_on_paper"]
+    assert tilted["nominal_fov_rear_footprint_mm"] > (
+        safe["nominal_fov_rear_footprint_mm"])
+
+
+@pytest.mark.parametrize("update", [
+    {"track_width_mm": 0},
+    {"track_width_mm": 10**1000},
+    {"left_wheel_mm_s": 10**1000},
+    {"left_wheel_mm_s": 0, "right_wheel_mm_s": 0},
+    {"optical_tilt_deg": 77.5},
+    {"floor_sensor_points_mm": [[0,0]]},
+    {"support_points_mm": [[0,0], [1,1]]},
+    {"support_points_mm": [[0,0], [1,1], ["bad",0]]},
+    {"qualified_lateral_sensor_coverage_mm": 1000},
+    {"detection_latency_ms": 1e308, "left_wheel_mm_s": 1e308},
+])
+def test_planar_motion_contract_rejects_missing_or_malformed_geometry(update):
+    with pytest.raises(ValueError):
+        planar(**update)
+
+
 @pytest.mark.parametrize("kwargs", [
     {"chassis_mount_above_desk_mm": float("nan")},
     {"chassis_mount_above_desk_mm": 10 ** 1000},
