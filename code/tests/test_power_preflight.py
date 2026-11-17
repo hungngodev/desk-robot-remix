@@ -614,3 +614,48 @@ def test_protected_pack_bad_specs_fail_closed(field, value):
     args[field] = value
     with pytest.raises(ValueError):
         pack_screen(requirements, **args)
+
+
+def test_pack_geometry_cli_rejects_an_overlong_cell_before_order(monkeypatch, capsys):
+    import json
+    import sys
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    base = [str(script), "--peak-5v-a", "3",
+            "--continuous-5v-a", "1.8", "--pack-length-mm", "86",
+            "--pack-width-mm", "30", "--pack-thickness-mm", "7.4",
+            "--tray-length-mm", "68", "--tray-width-mm", "35",
+            "--tray-height-mm", "14", "--pack-peak-discharge-a", "10",
+            "--pack-continuous-discharge-a", "6", "--pack-pcm-trip-a", "11"]
+    monkeypatch.setattr(sys, "argv", base)
+    runpy.run_path(str(script), run_name="__main__")
+    result = json.loads(capsys.readouterr().out)
+    assert result["protected_pack_screen"]["assembled_pack_fits_tray_on_paper"] is False
+    assert result["protected_pack_screen"]["candidate_usable_on_paper"] is False
+    assert result["protected_pack_screen"]["candidate_physically_qualified"] is False
+    # A shorter envelope may pass ONLY the math. The actual pack is never
+    # called qualified by the CLI even when every hypothetical rating fits.
+    changed = list(base)
+    changed[changed.index("--pack-length-mm") + 1] = "55"
+    monkeypatch.setattr(sys, "argv", changed)
+    runpy.run_path(str(script), run_name="__main__")
+    good = json.loads(capsys.readouterr().out)
+    assert good["protected_pack_screen"]["candidate_usable_on_paper"] is True
+    assert good["protected_pack_screen"]["candidate_physically_qualified"] is False
+
+
+def test_pack_cli_requires_all_geometry_and_undocked_mode(monkeypatch):
+    import sys
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    for params in (
+        ["--peak-5v-a", "1", "--continuous-5v-a", ".6",
+         "--pack-length-mm", "55"],
+        ["--dock-idle-5v-a", ".5", "--dock-requested-charge-a", ".25",
+         "--dock-sys-v", "4.4", "--dock-boost-efficiency", ".85",
+         "--pack-length-mm", "55", "--pack-width-mm", "30",
+         "--pack-thickness-mm", "10", "--tray-length-mm", "68",
+         "--tray-width-mm", "35", "--tray-height-mm", "14"],
+    ):
+        monkeypatch.setattr(sys, "argv", [str(script)] + params)
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_path(str(script), run_name="__main__")
+        assert exc.value.code == 2
