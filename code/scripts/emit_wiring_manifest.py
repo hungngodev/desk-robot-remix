@@ -214,7 +214,7 @@ def render(plan: dict, body: str, head: str) -> str:
     row("Fused rated 5V motor/servo branch with local >=470uF rated bulk",
         "MG90S lift/grip and motor driver VM power",
         "Direct rated 5V branch, NEVER via XIAO 3V3 or USB/diode",
-        "470uF proven on cgro00 XIAO servos, NOT sufficient-rating proof for this robot")
+        "470uF documented in cgro00 V2 servo wiring, NOT sufficient-rating proof for this robot")
     row("Fused rated 5V audio branch, independent of XIAO diode",
         "MAX98357A VIN with local 0.1uF + 10uF decoupling",
         "Common ground; amplifier outputs floating differential",
@@ -295,7 +295,7 @@ def render(plan: dict, body: str, head: str) -> str:
         "  WROOM, speaker and 3.3V sensors. Never power actuators through MCU GPIO.",
         "* Source-reused XIAO power isolation: Seeed 5V external input needs",
         "  Schottky anode on fused boost and cathode on XIAO 5V pin.",
-        "  cgro00/desk-robot uses 1N5817 + 470uF local 5V bulk for MG90S;",
+        "  cgro00/desk-robot V2 docs use 1N5817 + 470uF 5V servo bulk;",
         "  its two-servo supply rating is NOT sufficient evidence for our motors.",
         "* XIAO external 5V/VBUS requires manufacturer-compliant diode or",
         "  verified power-path isolation from USB before simultaneous USB use.",
