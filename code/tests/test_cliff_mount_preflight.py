@@ -118,6 +118,32 @@ def test_forward_2d_contact_coverage_uses_st_25_degree_optical_rear_setback():
     assert not result["fully_safe_cliff_operation_proven"]
 
 
+def test_planar_lead_cannot_pass_if_floor_is_below_sensor_minimum_range():
+    # With a flush adapter the 13.5 mm lens height is BELOW firmware's
+    # 30 mm VL53L0X acceptance minimum. Large forward sensor lead must not
+    # make a motion geometry report pass when no floor sample is accepted.
+    result = planar(chassis_mount_above_desk_mm=0.0)
+    assert all(c["covered"] for c in result["support_checks"])
+    assert not result["nominal_full_fov_floor_in_valid_range"]
+    assert not result["necessary_planar_coverage_on_paper"]
+    assert not result["fully_safe_cliff_operation_proven"]
+
+
+def test_planar_lead_cannot_pass_if_sensor_floor_exceeds_maximum_range():
+    # Separate upper-range failure from low mounting height: both invalidate
+    # the nominal optical prerequisite regardless of projected wheel lead.
+    result = planar(chassis_mount_above_desk_mm=1300.0)
+    assert all(c["covered"] for c in result["support_checks"])
+    assert not result["nominal_full_fov_floor_in_valid_range"]
+    assert not result["necessary_planar_coverage_on_paper"]
+
+
+def test_planar_feasible_mount_keeps_optical_prerequisite_explicit():
+    result = planar(chassis_mount_above_desk_mm=20.0)
+    assert result["nominal_full_fov_floor_in_valid_range"]
+    assert result["necessary_planar_coverage_on_paper"]
+
+
 def test_forward_safe_configuration_may_have_unsafe_reverse():
     reverse = planar(left_wheel_mm_s=-100, right_wheel_mm_s=-100)
     assert reverse["body_translation_mm_s"] == -100.0
