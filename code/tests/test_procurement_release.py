@@ -55,6 +55,13 @@ def test_outdated_s3cam_c3_architecture_cannot_be_buy_approved():
         ("architecture", "ESP32 S3CAM + ESP32 C3 two-sensor XSHUT"),
         ("xiao_sense", "Generic ESP32 S3CAM N16R8 OV2640"),
         ("wroom", "Generic ESP32 C3 SuperMini"),
+        # Prior substring matching silently accepted these mixed labels.
+        ("architecture", plan["architecture"] + " Also install ESP32 C3."),
+        ("xiao_sense", "XIAO ESP32S3 Sense camera + microphone / "
+                       "or generic ESP32 S3CAM"),
+        ("wroom", "ESP32 WROOM32 development board / "
+                  "or ESP32 C3 SuperMini"),
+        ("architecture", "ESP32 C3 plus " + plan["architecture"]),
     )
     for ident, replacement in cases:
         altered = copy.deepcopy(plan)
