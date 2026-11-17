@@ -66,6 +66,9 @@ def supplemental_rows():
     end = "## Price and source-first purchase overrides"
     assert text.count(header) == 1 and text.count(end) == 1
     section = text.split(header, 1)[1].split(end, 1)[0]
+    # An adjacent source ownership table is documentation, not another
+    # seven-column purchasing table. Parse only the first purchase section.
+    section = section.split("## Actual source owner for every linked assembly detail", 1)[0]
     rows = {}
     for line in section.splitlines():
         if not line.startswith("| "):
