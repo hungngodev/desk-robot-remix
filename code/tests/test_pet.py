@@ -307,6 +307,7 @@ async def test_explicit_look_preempts_background_vlm_waiting_for_shared_lock(
         await pet.close()
 
 
+@pytest.mark.parametrize("local_object", [False, True])
 async def test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner(
     fleet, tmp_path, local_object
 ):
