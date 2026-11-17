@@ -2711,7 +2711,11 @@ def test_native_completed_asr_rejects_older_committed_audio_item(
     if superseded_by == "new_human_turn":
         session._readonly_turn += 1
     elif superseded_by == "barge_generation":
-        session._generation += 1
+        # A real input barge invalidates _input_generation. The distinct
+        # output _generation also changes when the SAME user's tool answer
+        # reserves the speaker; that is not a new utterance and must not
+        # discard later completed ASR clauses from this question.
+        session._input_generation += 1
     else:
         session._user_was_talking = True
     session._bind_native_audio_commit({
@@ -2726,6 +2730,29 @@ def test_native_completed_asr_rejects_older_committed_audio_item(
     })
     assert session.native_readonly_tools_dropped == 1
     assert not session.closed
+
+
+def test_native_audio_output_preemption_does_not_erase_same_human_asr(native):
+    """Tool speech changes PCM generation, not the current user's identity."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._readonly_turn = 3
+    session._pending_audio_commits.append((session._input_generation, 3))
+    session._generation += 1  # legitimate same-turn audio tool reservation
+    session._bind_native_audio_commit({
+        "item_id": "same_user_next_clause", "event": {"turn_id": 22},
+    })
+    assert session._accept_current_audio_item({
+        "item_id": "same_user_next_clause",
+        "transcript": "And what about the battery?",
+    })
+    assert session.native_readonly_tools_dropped == 0
 
 
 def test_native_only_current_committed_audio_can_enter_tools_and_memory(native):
