@@ -514,3 +514,45 @@ def test_round2_safety_driver_preserves_all_eight_muxed_ready_checked_ranges():
     assert "GPIO_NUM_18" not in (
         ROOT / "code/firmware/head/sense/config.h"
     ).read_text().split("#define CAMERA_PIN_D2")[0]
+
+def test_round2_xiaozhi_jpeg_and_bounded_uart_reuse_existing_owners():
+    """Prove the audit's alternate S3CAM UART/Explain loop is not installed.
+
+    Static source ownership, not a physical camera FPS or playback latency test.
+    """
+    sense = (ROOT / "code/firmware/head/sense/desk_robot_sense.cc").read_text()
+    sense_pins = (ROOT / "code/firmware/head/sense/config.h").read_text()
+    bridge = (ROOT / "code/firmware/head/overlay/robot_bridge.cc").read_text()
+    overlay = (ROOT / "code/firmware/head/install_overlay.py").read_text()
+    snapshot = (ROOT / "code/firmware/head/modular_snapshot.inc").read_text()
+    body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    config = (ROOT / "code/config/xiaozhi.local.example.yaml").read_text()
+
+    # XIAO Sense streams native JPEG using upstream Xiaozhi's ONE camera.
+    assert "config.pixel_format = PIXFORMAT_JPEG" in sense
+    assert "config.fb_count = 1;" in sense
+    assert "config.fb_location = CAMERA_FB_IN_PSRAM" in sense
+    assert "void Bridge::CameraStreamTask(" in bridge
+    assert '"/api/camera.mjpg"' in bridge
+    assert "camera_busy_.exchange(true)" in bridge
+    assert "SnapshotJpeg()" in bridge and "SnapshotJpeg()" in snapshot
+    assert "std::lock_guard<std::recursive_mutex> camera_lock(AccessMutex())" in snapshot
+    assert 'if board == "sense":' in overlay
+    assert "CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3" in overlay
+    assert "LAMP_GPIO" not in sense_pins
+    # GPIO18 is genuinely used by OV camera D2, not a second LED or lamp.
+    assert "#define CAMERA_PIN_D2 GPIO_NUM_18" in sense_pins
+
+    # The WROOM retains a 64-byte per-iteration inbound UART budget. It
+    # replies only to bounded requests, never streams 100 Hz IMU or ToF logs
+    # into Xiaozhi's audio thread, and makes no unsolicited motor decisions.
+    assert "for (int bytes = 0; bytes < 64 && stream.available() > 0;" in body
+    assert "process_input(head_uart, head_receiver, false);" in body
+    assert "uart_driver_install(kUart, 2048," in bridge
+    assert 'Transact("status", false)' in bridge
+    assert "Serial2.printf" not in body
+    assert "EVT:CLIFF" not in body
+    # All live model tools remain on the existing XiaoZhi function_call
+    # route and Mac read-only bridge. No extra VLLM or cloud agent required.
+    assert "Intent: function_call" in config
+    assert "LLM: OllamaLLM" in config
