@@ -408,6 +408,66 @@ async def test_exploration_persists_under_one_permit_until_explicit_stop(setting
         await c.close()
 
 
+async def test_authenticated_human_preempts_running_exploration_without_rearming(settings):
+    c, head = make(settings)
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        async with asyncio.timeout(3):
+            while head.commands.count("drive 20 20 100") == 0:
+                await asyncio.sleep(0.01)
+        stopped = await c.stop_active_exploration()
+        assert stopped == ("robot-01",)
+        assert job.state in {"cancelled", "failed"}
+        assert c.permits.get("robot-01") is None
+        assert head.commands[-1] == "stop"
+        assert any("preempted by live human" in event for event in job.events)
+        before = head.commands.count("drive 20 20 100")
+        await asyncio.sleep(0.2)
+        assert head.commands.count("drive 20 20 100") == before
+        # A repeated VAD event must not send another motor command.
+        previous_count = len(head.commands)
+        assert await c.stop_active_exploration() == ()
+        assert len(head.commands) == previous_count
+    finally:
+        await c.close()
+
+
+async def test_human_voice_roaming_stop_does_not_cancel_manual_gripper(settings):
+    c, head = make(settings)
+    try:
+        await c.operator_arm("robot-01")
+        job = c.manual("robot-01", "grip 90")
+        async with asyncio.timeout(1):
+            while job.state == "queued":
+                await asyncio.sleep(0)
+        assert job.state == "running"
+        commands_before = list(head.commands)
+        assert await c.stop_active_exploration() == ()
+        assert head.commands == commands_before
+        assert job.state == "running"
+    finally:
+        await c.close()
+
+
+async def test_voice_roaming_stop_fault_remains_unconfirmed(settings):
+    c, head = make(settings)
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        async with asyncio.timeout(3):
+            while head.commands.count("drive 20 20 100") == 0:
+                await asyncio.sleep(0.01)
+        head.fail_command = "stop"
+        with pytest.raises(OperationError, match="STOP unconfirmed"):
+            await c.stop_active_exploration()
+        assert any("preempted by live human" in event for event in job.events)
+        # Never claim a successful physical stop when the transport ACK failed.
+    finally:
+        head.fail_command = None
+        await c.close()
+
+
 async def test_exploration_drops_on_body_disarm_and_never_rearms(settings):
     c, head = make(settings)
     await c.operator_arm("robot-01")
