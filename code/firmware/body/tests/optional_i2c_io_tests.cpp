@@ -33,9 +33,21 @@ int main() {
     CHECK(pulse.begin(Wire));
     CHECK(touch.begin(Wire));
     CHECK(Wire.ranges == 0 && Wire.extras == 0);
+    // Common generic CAP1188 address 0x29 works on isolated 0x71 lane 0,
+    // without requiring a special 0x28 resistor-strap carrier.
+    TwoWire generic_touch_wire;
+    generic_touch_wire.cap_uses_0x29 = true;
+    desk_robot::ExpansionTouch generic_touch;
+    CHECK(generic_touch.begin(generic_touch_wire));
+    CHECK(generic_touch.verified());
+    std::uint8_t generic_zones = 0;
+    CHECK(generic_touch.poll(100, generic_zones));
+    CHECK(generic_zones == 0xA5);
+    CHECK(generic_touch_wire.ranges == 0 && generic_touch_wire.extras == 0);
+    CHECK(!generic_touch_wire.unsafe_parallel_mux);
     // An ACK is not proof that the safety mux actually disabled its 0x29
-    // sensor. The optional CAP1188 path must refuse to open the 0x71
-    // branch, even when the CAP chip itself uses the safer 0x28 address.
+    // sensor. Even when the CAP chip is also at 0x29, the optional path
+    // must refuse to open its 0x71 branch until the 0x70 readback is zero.
     TwoWire stuck_range_touch_wire;
     stuck_range_touch_wire.ranges = 1;
     stuck_range_touch_wire.range_mux_stuck = true;
