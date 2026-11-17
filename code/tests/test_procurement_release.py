@@ -1304,3 +1304,17 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert "NOT complete driven dock channels" in rendered
 
 
+
+def test_receipt_url_requires_real_https_host():
+    """A URL scheme alone is not a real receipt address."""
+    receipt = {"result": "pass", "tested_on": "bench sample",
+               "reviewer": "operator", "evidence_url": ""}
+    for bad in ("https://", "https:///no-host",
+                "https://user@attacker.example/receipt",
+                "https://example.org:0/receipt",
+                "https://example.org:invalid/receipt",
+                "https://example.org/space here"):
+        receipt["evidence_url"] = bad
+        assert not mod._receipt(receipt), bad
+    receipt["evidence_url"] = "https://lab.example.org/receipt/42"
+    assert mod._receipt(receipt)

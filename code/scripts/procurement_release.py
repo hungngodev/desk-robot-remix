@@ -11,6 +11,7 @@ import csv
 import io
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs/hardware/full-feature-plan.json"
@@ -165,12 +166,24 @@ def _count(v: object, name: str) -> int:
     return v
 
 
+
+def _evidence_https_url(value: str) -> bool:
+    """Reject scheme-only, credential-bearing and malformed evidence URLs."""
+    try:
+        parsed = urlsplit(value)
+        return (parsed.scheme == "https" and bool(parsed.hostname)
+                and not parsed.username and not parsed.password
+                and not any(ch.isspace() for ch in value)
+                and parsed.port != 0)
+    except ValueError:
+        return False
+
 def _receipt(obj: object) -> bool:
     # Explicitly reject True, fake booleans, empty strings and unqualified labels.
     return (isinstance(obj, dict)
             and obj.get("result") == "pass"
             and isinstance(obj.get("evidence_url"), str)
-            and obj["evidence_url"].startswith("https://")
+            and _evidence_https_url(obj["evidence_url"])
             and isinstance(obj.get("tested_on"), str)
             and bool(obj["tested_on"].strip())
             and isinstance(obj.get("reviewer"), str)
