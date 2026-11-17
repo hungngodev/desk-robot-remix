@@ -113,6 +113,7 @@ def test_fitter_rejects_impossible_geometry_without_physical_permission():
         fitter().fit_corners(
             frames, (640, 480), columns=9, rows=6, square_mm=0,
             tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid="OV5640",
         )
 
 
@@ -127,4 +128,25 @@ def test_camera_calibration_rejects_mixed_jpeg_modes(tmp_path):
         fitter().calibrate_images(
             tmp_path, columns=9, rows=6, square_mm=10,
             tag_side_mm=60, marker_id=2, target_distance_mm=200,
+        )
+
+
+@pytest.mark.parametrize("pid", [None, "", "OV2640", "OV5640b", "ov3660", 0x5640])
+def test_calibration_rejects_unknown_or_unrecorded_camera_identity(tmp_path, pid):
+    # Identity validation must happen before any image or CV2 operation.
+    with pytest.raises(ValueError, match="actual XIAO camera sensor PID"):
+        fitter().calibrate_images(
+            tmp_path, columns=9, rows=6, square_mm=10,
+            tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid=pid,
+        )
+
+
+@pytest.mark.parametrize("pid", ["OV3660", "OV5640"])
+def test_known_camera_pid_passes_identity_check_but_not_image_gate(tmp_path, pid):
+    with pytest.raises(ValueError, match="12 original checkerboard"):
+        fitter().calibrate_images(
+            tmp_path, columns=9, rows=6, square_mm=10,
+            tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid=pid,
         )
