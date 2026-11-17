@@ -28,7 +28,7 @@ the original README files, including noncommercial and share alike restrictions.
    Parameters, record measured actual board width, board length, shaft locations,
    screw diameter, servo case length/width and horn center, battery enclosure
    envelope, track outside width, speaker diameter/depth, camera assembly
-   width/depth and each VL53L4CD carrier PCB/lens offset. Set values from
+   width/depth and each selected cheap generic VL53L0X GY-530 carrier PCB/lens offset. Set values from
    calipers/vendor STEP models of the **actual purchased breakout**, not guessed
    values from the rendered concept.
 2. In the Browser create eight Components: Chassis, Drivetrain, Lift, Gripper,
@@ -65,8 +65,8 @@ the original README files, including noncommercial and share alike restrictions.
    assembly, strain relief and fused main switch. Design cable passages
    and avoid routing motor current through Dupont signal ribbons. Do not
    put a guessed bare 18650 beside unprotected charging contacts.
-7. Add **four downward VL53L4CDs** facing the table, **front, left, right,
-   rear VL53L4CDs** facing outward. Model the actual carrier PCB, connector
+7. Add **four downward VL53L0X GY-530 modules** facing the table, **front, left, right,
+   rear VL53L0X GY-530 modules** facing outward. Model the actual carrier PCB, connector
    stack height and lens field of view. Make eight individually removable
    brackets so their elevations and optical sweeps can be calibrated.
    Keep the four downward sensors away from track shadow and lifted jaw.
