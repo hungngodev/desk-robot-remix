@@ -170,3 +170,16 @@ def test_complete_robot_is_default_without_losing_guarded_dc_variant():
     assert "control.require_imu_for_motion(true)" in main
     assert "guarded_motion_profile()" in body
     assert 'profile_ == BodyProfile::DcGuarded ? "dc_pwm_guarded"' in body
+
+
+def test_third_party_notice_and_hardware_source_map_dont_reintroduce_premium_sensor():
+    root = Path(__file__).resolve().parents[2]
+    notices = (root / "code/firmware/body/THIRD_PARTY_NOTICES.md").read_text()
+    source_map = (root / "docs/source-map.md").read_text()
+    pio = (root / "code/firmware/body/platformio.ini").read_text()
+    assert "Pololu's VL53L0X Arduino library" in notices
+    assert "release 1.3.1" in notices
+    assert "VL53L4CD dependency is no longer selected" in notices
+    assert "vl53l4cd-arduino" not in pio
+    assert "VL53L4CD short-range replacement | REJECT PREMIUM PURCHASE" in source_map
+    assert "OOMWOO is still in hardware development" in source_map
