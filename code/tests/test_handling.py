@@ -19,6 +19,47 @@ def sample(
     }
 
 
+def canonical_wroom_sample(**kwargs):
+    """Use the same nested motor keys as BodyControl::status JSON."""
+    frame = sample(**kwargs)
+    frame["motor"] = {"m0": frame.pop("left"), "m1": frame.pop("right")}
+    return frame
+
+
+def test_real_wroom_nested_motor_schema_recovers_handling_events():
+    frame = canonical_wroom_sample()
+    result = raw_mpu6050(frame)
+    assert result is not None and result[0] == (0, 0, 1)
+    gate = HandlingGate()
+    for i in range(8):
+        assert qualified(gate, canonical_wroom_sample(), 100 + i * .15) == ()
+    assert gate.reference == (0, 0, 1)
+    tilted = canonical_wroom_sample(acc=(12551, 0, 10531))
+    assert qualified(gate, tilted, 102.0) == ()
+    assert qualified(gate, tilted, 102.2) == ("handling_tilt",)
+
+
+def test_real_wroom_motion_and_conflicting_legacy_fields_fail_closed():
+    for frame in (
+        canonical_wroom_sample(left=25),
+        canonical_wroom_sample(right=-30),
+        canonical_wroom_sample(drive_ms=250),
+        dict(canonical_wroom_sample(), left=0, right=0,
+             motor={"m0": 20, "m1": 0}),
+        dict(canonical_wroom_sample(), motor={"m0": True, "m1": 0}),
+        dict(canonical_wroom_sample(), motor={"m0": "0", "m1": 0}),
+        dict(canonical_wroom_sample(), motor={"m0": 0}),
+    ):
+        assert raw_mpu6050(frame) is None
+    gate = HandlingGate()
+    for i in range(8):
+        qualified(gate, canonical_wroom_sample(), 100 + i * .15)
+    assert gate.reference is not None
+    # Even a late callback from the motor-active envelope revokes pose.
+    assert qualified(gate, canonical_wroom_sample(left=30), 100.1) == ()
+    assert gate.reference is None
+
+
 def qualified(gate, body, now, *, new_sample=True):
     if new_sample:
         body["imu"]["sample_ms"] = int(round(now * 1000)) & 0xffffffff
