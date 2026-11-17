@@ -1060,6 +1060,58 @@ static void full_dc_driver_nfault_is_fresh_sticky_and_usb_only() {
   CHECK(send(body, "arm", 402) == "ERR arm dc_driver_fault_interlock");
 }
 
+
+static void status_readiness_matches_local_arm_interlocks() {
+  // Read-only HTTP/voice clients see safety.ready. A clear five-range guard
+  // must not hide a missing dock GPIO, stale IMU, contact or touch trip.
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "status", 0).find("\\"ready\\":true") != std::string::npos);
+  body.sample_touch_input(true);
+  CHECK(send(body, "status", 1).find("\\"ready\\":false") != std::string::npos);
+  CHECK(send(body, "status", 1).find("\\"fault\\":\\"touch_active\\"") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 1) == "ERR arm touch_active");
+  body.sample_touch_input(false);
+
+  body.sample_optional_inputs(1U, true, false, false);
+  CHECK(send(body, "status", 2).find("\\"fault\\":\\"bumper_active\\"") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 2) == "ERR arm bumper_active");
+  body.sample_optional_inputs(0U, false, false, false);
+
+  body.require_imu_for_motion(true);
+  CHECK(send(body, "status", 3).find("\\"fault\\":\\"imu_missing_or_stale\\"") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 3) == "ERR arm imu_missing_or_stale");
+
+  desk_robot::CliffGuard dock_guard;
+  CHECK(dock_guard.configure(config()));
+  fresh(dock_guard, 0);
+  desk_robot::BodyControl dock_body(desk_robot::BodyProfile::StepperGuarded, &dock_guard);
+  CHECK(send(dock_body, "rearm", 0, true) == "OK rearm");
+  dock_body.require_dock_monitor(true);
+  CHECK(send(dock_body, "status", 1).find(
+      "\\"fault\\":\\"dock_gpio_missing_or_stale\\"") != std::string::npos);
+  CHECK(send(dock_body, "arm", 1) == "ERR arm dock_gpio_missing_or_stale");
+  desk_robot::AccessoryReadings readings{};
+  readings.dock.present = readings.dock.valid = true;
+  readings.dock.sample_seq = 1;
+  readings.dock.at_ms = 2;
+  dock_body.set_accessories(readings, 2);
+  CHECK(send(dock_body, "status", 2).find("\\"ready\\":true") != std::string::npos);
+  readings.dock.left_seated = true;
+  readings.dock.sample_seq = 2;
+  readings.dock.at_ms = 3;
+  dock_body.set_accessories(readings, 3);
+  CHECK(send(dock_body, "status", 3).find(
+      "\\"fault\\":\\"dock_power_connected\\"") != std::string::npos);
+  CHECK(send(dock_body, "arm", 3) == "ERR arm dock_power_connected");
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -1075,6 +1127,7 @@ int main() {
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract();
     full_dc_driver_nfault_is_fresh_sticky_and_usb_only();
+    status_readiness_matches_local_arm_interlocks();
     std::cout << "PASS guarded DC uses same real cliff and USB recovery policy\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
     dock_removal_needs_new_fresh_real_gpio_sample();
