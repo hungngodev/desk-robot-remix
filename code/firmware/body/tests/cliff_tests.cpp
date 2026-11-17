@@ -75,6 +75,14 @@ void invalid_configuration() {
   CHECK(!guard.configure(value));
   value = config(); value.floor[0].min_mm = 0;
   CHECK(!guard.configure(value));
+  value = config(); value.floor[0].min_mm = 29;
+  CHECK(!guard.configure(value)); // active VL53L0X never accepts <30mm
+  value = config(); value.floor[0].max_mm = 1301;
+  CHECK(!guard.configure(value)); // active VL53L0X rejects >1300mm
+  value = config(); value.front_obstacle_mm = 29;
+  CHECK(!guard.configure(value));
+  value = config(); value.front_max_mm = 1301;
+  CHECK(!guard.configure(value));
   value = config(); value.front_max_mm = value.front_obstacle_mm;
   CHECK(!guard.configure(value));
   value = config(); value.front_obstacle_mm = 0;
