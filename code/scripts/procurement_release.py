@@ -17,7 +17,7 @@ PLAN = ROOT / "docs/hardware/full-feature-plan.json"
 
 # A vendor-specific reference is not necessarily a final production carrier.
 SOURCE_REFERENCES = {
-    "cliff_obstacle": ("Generic", "GY-530 VL53L0X", "https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html"),
+    "cliff_obstacle": ("ElectroPeak", "SEN-19-006", "https://electropeak.com/gy-530-vl53l0x-laser-range-finder"),
     "i2c_mux": ("Generic", "TCA9548A", "https://www.ti.com/product/TCA9548A"),
     "mcp23017": ("Generic", "MCP23017", "https://www.microchip.com/en-us/product/MCP23017"),
     "amp": ("Generic", "MAX98357A", "https://www.analog.com/en/products/max98357a.html"),
