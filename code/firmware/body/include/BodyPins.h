@@ -62,6 +62,29 @@ constexpr int kServoPins[] = {kLiftServo, kGripServo};
 constexpr int kServoChannels[] = {4, 5};
 constexpr int kServoFrequency = 50;
 constexpr int kServoResolution = 16;
+// Arduino-ESP32 LEDC on the pinned ESP32-WROOM profile assigns one hardware
+// timer to each consecutive pair of channels: 0/1 -> timer 0, 2/3 -> timer 1,
+// 4/5 -> timer 2. The firmware uses direct ledcSetup(), not ESP32Servo.
+// Reject a future pin/channel or PWM frequency refactor that would put a
+// 50 Hz servo on a 20 kHz DRV8833 motor timer. This is a source/build
+// contract, NOT evidence the actual motor and servo PCB is electrically safe.
+static_assert(kServoChannels[0] == 4 && kServoChannels[1] == 5 &&
+              kServoFrequency == 50 && kServoResolution == 16,
+              "Servo outputs must own 50 Hz LEDC timer 2");
+#if !DESK_ROBOT_STEPPER
+static_assert(kMotorChannels[0] == 0 && kMotorChannels[1] == 1 &&
+              kMotorChannels[2] == 2 && kMotorChannels[3] == 3 &&
+              kMotorFrequency == 20000 && kMotorResolution == 8,
+              "DC motor outputs must use isolated LEDC timers 0/1");
+static_assert(kLeftIn1 != kLeftIn2 && kLeftIn1 != kRightIn1 &&
+              kLeftIn1 != kRightIn2 && kLeftIn2 != kRightIn1 &&
+              kLeftIn2 != kRightIn2 && kRightIn1 != kRightIn2 &&
+              kLiftServo != kLeftIn1 && kLiftServo != kLeftIn2 &&
+              kLiftServo != kRightIn1 && kLiftServo != kRightIn2 &&
+              kGripServo != kLeftIn1 && kGripServo != kLeftIn2 &&
+              kGripServo != kRightIn1 && kGripServo != kRightIn2,
+              "Motor and servo GPIO assignments must never overlap");
+#endif
 // Conservative generic 1..2 ms span; calibrate actual mechanism before loading.
 constexpr int kServoMinUs = 1000;
 constexpr int kServoMaxUs = 2000;
