@@ -87,7 +87,7 @@ def estimate_clock_drift(
     reference: np.ndarray, microphone: np.ndarray, *,
     sample_rate: int = 16000, max_delay_ms: float = 250,
 ) -> dict:
-    """Estimate relative clock slip from four disjoint audio time windows.
+    """Estimate relative clock slip from four spaced audio time windows.
 
     A single global cross-correlation lag cannot expose gradual speaker to
     microphone drift. Windows share the same original sample timeline; never
