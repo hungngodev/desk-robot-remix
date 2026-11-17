@@ -275,6 +275,29 @@ void diagnostics_read_only_and_bounded() {
   CHECK(another.diagnostic(0, 0x10U).age_ms == 32U);
 }
 
+void diagnostics_expire_validity_without_clearing_raw_or_latched_fault() {
+  CliffGuard guard;
+  CHECK(guard.configure(config()));
+  healthy_samples(guard, 10);
+  CHECK(guard.try_rearm(10));
+  auto fresh = guard.diagnostic(2, 89);  // 79 ms, valid under 80 ms TTL
+  CHECK(fresh.present && fresh.valid && fresh.distance_mm == 45);
+  CHECK(fresh.age_ms == 79);
+  const auto expired = guard.diagnostic(2, 90);  // exact TTL is stale
+  CHECK(expired.present && !expired.valid && expired.distance_mm == 45);
+  CHECK(expired.age_ms == 80);
+  CHECK(guard.fault() == CliffFault::None);  // read-only; no auto-stop/rearm
+  CHECK(!guard.evaluate(90));
+  CHECK(guard.fault() == CliffFault::StaleSample);
+  CHECK(!guard.diagnostic(2, 90).valid);
+  // 32-bit monotonic rollover must still expire at the same TTL.
+  CliffGuard wrapped;
+  CHECK(wrapped.configure(config()));
+  wrapped.sample(0, 45, true, 0xfffffff0U);
+  CHECK(wrapped.diagnostic(0, 0x3fU).valid);  // 79 ms elapsed
+  CHECK(!wrapped.diagnostic(0, 0x40U).valid); // 80 ms elapsed
+}
+
 void fault_names() {
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::None), "none") == 0);
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::Unconfigured), "unconfigured") == 0);
@@ -304,7 +327,9 @@ int main(int argc, char** argv) {
       {"first_fault_and_invalid_channel", first_fault_and_invalid_channel},
       {"unsigned_clock_rollover", unsigned_clock_rollover},
       {"fault_names", fault_names},
-      {"diagnostics_read_only_and_bounded", diagnostics_read_only_and_bounded}};
+      {"diagnostics_read_only_and_bounded", diagnostics_read_only_and_bounded},
+      {"diagnostics_expire_validity_without_clearing_raw_or_latched_fault",
+       diagnostics_expire_validity_without_clearing_raw_or_latched_fault}};
   int ran = 0;
   for (const auto& test : tests) {
     if (argc > 1 && std::strcmp(argv[1], test.first) != 0) continue;

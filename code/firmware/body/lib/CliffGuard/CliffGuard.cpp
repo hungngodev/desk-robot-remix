@@ -107,9 +107,13 @@ RangeDiagnostic CliffGuard::diagnostic(std::uint8_t channel,
   const auto& sample = samples_[channel];
   RangeDiagnostic result;
   result.present = sample.present;
-  result.valid = sample.valid;
   result.distance_mm = sample.mm;
   result.age_ms = sample.present ? now_ms - sample.at_ms : 0U;
+  // Status JSON must not advertise an expired measurement as live sensor
+  // evidence. Raw mm and age remain available to diagnose a stale lane.
+  // Motor permission still comes ONLY from the independent latched guard.
+  result.valid = sample.present && sample.valid && configured_ &&
+                 result.age_ms < config_.freshness_ms;
   return result;
 }
 

@@ -14,8 +14,9 @@ struct FloorInterval {
 };
 
 // Read-only measurement diagnostics, never a motor permission or calibration.
-// Missing readings have present=false. Invalid readings may retain the raw
-// distance to help an operator diagnose reflectance, alignment and wiring.
+// Missing readings have present=false. Invalid or stale readings retain raw
+// distance and age for diagnosis; valid means fresh under the active local
+// policy, never physical motor permission.
 struct RangeDiagnostic {
   bool present = false;
   bool valid = false;
