@@ -44,6 +44,7 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
         raise ValueError("Invalid dock evidence request")
     snapshots = []
     sample_sequences = []
+    raw_pack_samples = []
     for index in range(3):
         # Do not let a cancellation-ignoring alternate telemetry adapter
         # freeze the read-only dock evidence request indefinitely.
@@ -58,6 +59,12 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
         # Validity and freshness are checked in validate_aux. A new HTTP
         # response by itself does NOT mean a new physical GPIO conversion.
         sample_sequences.append(dock["seq"])
+        power = sample["power"]
+        raw_pack_samples.append((
+            power.get("pack_valid", False),
+            power.get("pack_seq", 0),
+            power.get("pack_ma", 0),
+        ))
         snapshots.append((
             dock["present"], dock["valid"], dock["left_seated"],
             dock["right_seated"], dock["input_good"], dock["charge_indicated"],
@@ -81,7 +88,26 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
         "right_seated": right, "input_good": input_good,
         "charge_indicated": charge_indicated,
     })
-    return _result(robot_id, state, bool(present and valid))
+    result = _result(robot_id, state, bool(present and valid))
+    # Unlike CHG's active-low indicator, these signs come from genuine
+    # INA226 shunt register conversions in the WROOM. Never trust three
+    # cached HTTPS replies as three new battery-current measurements.
+    # Raw mA is ALWAYS uncalibrated and cannot enable dock charging.
+    if all(item[0] and item[1] > 0 for item in raw_pack_samples):
+        ids = [item[1] for item in raw_pack_samples]
+        if newer(ids[1], ids[0]) and newer(ids[2], ids[1]):
+            amps = [item[2] for item in raw_pack_samples]
+            result["raw_pack_ma"] = amps
+            result["raw_pack_samples_fresh"] = True
+            if all(value > 20 for value in amps):
+                result["raw_pack_direction"] = "into_pack_unqualified"
+            elif all(value < -20 for value in amps):
+                result["raw_pack_direction"] = "out_of_pack_unqualified"
+            else:
+                result["raw_pack_direction"] = "indeterminate"
+        else:
+            result["raw_pack_direction"] = "acquisition_replay"
+    return result
 
 
 def _result(robot_id: str, state: str, stable: bool) -> dict:
@@ -92,6 +118,9 @@ def _result(robot_id: str, state: str, stable: bool) -> dict:
         "source": "wroom_mcp23017_bq24074_status_pins",
         "physical_contact_verified": False,
         "battery_current_measured": False,
+        "raw_pack_direction": "not_available",
+        "raw_pack_samples_fresh": False,
+        "raw_pack_ma": [],
         "charger_electrically_qualified": False,
         "charging_verified": False,
         "motor_authorized": False,
