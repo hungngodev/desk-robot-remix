@@ -107,7 +107,6 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
     """
     report = {}
     for line in ("sda", "scl"):
-        arms = []
         pullups = []
         total_pf = 0.0
         measured_rises = []
@@ -132,15 +131,26 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
             if "measured_low_v" in part:
                 # A real low may be 0V; only reject bool/NaN/negative.
                 v = part["measured_low_v"]
-                if type(v) not in (float, int) or not math.isfinite(v) or v < 0:
+                if type(v) not in (float, int):
+                    raise ValueError(f"{label}.{line}.measured_low_v invalid")
+                try:
+                    valid_low = math.isfinite(v) and v >= 0
+                except OverflowError:
+                    valid_low = False
+                if not valid_low:
                     raise ValueError(f"{label}.{line}.measured_low_v invalid")
                 measured_lows.append(float(v))
-            arms.append(label)
         if not pullups:
             raise ValueError(f"{line}: no verified pullup network")
-        effective = 1.0 / sum(1.0 / r for r in pullups)
+        reciprocal_sum = sum(1.0 / r for r in pullups)
+        if not math.isfinite(reciprocal_sum) or reciprocal_sum <= 0:
+            raise ValueError(f"{line}: pullup network cannot be evaluated safely")
+        effective = 1.0 / reciprocal_sum
         rise_ns = 0.8473 * effective * total_pf / 1000
-        sink_ma = (VCC - LOW_MAX_V) / effective * 1000
+        sink_ma = (VCC - LOW_MAX_V) * reciprocal_sum * 1000
+        if any(not math.isfinite(value) for value in
+               (total_pf, effective, rise_ns, sink_ma)):
+            raise ValueError(f"{line}: RC calculation overflowed")
         model_ok = (total_pf <= MAX_CAP_PF and rise_ns <= RISE_LIMIT_NS
                     and sink_ma <= SINK_MAX_MA
                     and all(v <= RISE_LIMIT_NS for v in measured_rises)
