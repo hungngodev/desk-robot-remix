@@ -863,11 +863,11 @@ static void dual_ir_evidence_never_authorizes_body_motion_or_charging() {
   sample.code = 0xcb34ed12U;
   body.set_terminal_ir(sample);
   const std::string data = send(body, "ir", 100);
-  CHECK(data.find("\\"match\\":true") != std::string::npos);
-  CHECK(data.find("\\"left_seq\\":9") != std::string::npos);
-  CHECK(data.find("\\"right_seq\\":12") != std::string::npos);
-  CHECK(data.find("\\"motor_authorized\\":false") != std::string::npos);
-  CHECK(data.find("\\"charging_authorized\\":false") != std::string::npos);
+  CHECK(data.find("\"match\":true") != std::string::npos);
+  CHECK(data.find("\"left_seq\":9") != std::string::npos);
+  CHECK(data.find("\"right_seq\":12") != std::string::npos);
+  CHECK(data.find("\"motor_authorized\":false") != std::string::npos);
+  CHECK(data.find("\"charging_authorized\":false") != std::string::npos);
   CHECK(!body.state().armed);
   CHECK(body.state().left == 0 && body.state().right == 0);
   CHECK(send(body, "ir 1", 101) == "ERR ir bad_arguments");
@@ -876,7 +876,7 @@ static void dual_ir_evidence_never_authorizes_body_motion_or_charging() {
   sample.left_fresh = sample.same_code = false;
   sample.code = 0;
   body.set_terminal_ir(sample);
-  CHECK(send(body, "ir", 103).find("\\"match\\":false") != std::string::npos);
+  CHECK(send(body, "ir", 103).find("\"match\":false") != std::string::npos);
 }
 
 static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
@@ -911,10 +911,10 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   const auto aux = send(body, "aux", 120);
   CHECK(!aux.empty() && aux.front() == '{' && aux.back() == '}');
   CHECK(aux.size() < desk_robot::kReplyCapacity - 1);
-  CHECK(aux.find("\\"seq\\":8,\\"bpm\\":null") != std::string::npos);
-  CHECK(aux.find("\\"valid\\":true,\\"seq\\":10,\\"age_ms\\":25")
+  CHECK(aux.find("\"seq\":8,\"bpm\":null") != std::string::npos);
+  CHECK(aux.find("\"valid\":true,\"seq\":10,\"age_ms\":25")
         != std::string::npos);
-  CHECK(aux.find("\\"nfc\\":{\\"v\\":true,\\"t\\":305419896,\\"e\\":3,\\"s\\":17}")
+  CHECK(aux.find("\"nfc\":{\"v\":true,\"t\":305419896,\"e\":3,\"s\":17}")
         != std::string::npos);
   CHECK(aux.find("\"pressure_pa\":100653,\"seq\":5,\"age_ms\":25") != std::string::npos);
   // Optional pressure is read-only; it cannot approve movement or charge. It cannot arm a physical guard.
@@ -922,7 +922,7 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   readings.nfc.valid = false;
   body.set_accessories(readings, 125);
   const auto stale = send(body, "aux", 125);
-  CHECK(stale.find("\\"nfc\\":{\\"v\\":false,\\"t\\":0,\\"e\\":3,\\"s\\":17}")
+  CHECK(stale.find("\"nfc\":{\"v\":false,\"t\":0,\"e\":3,\"s\":17}")
         != std::string::npos);
 }
 
