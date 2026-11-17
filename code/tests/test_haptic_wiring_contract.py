@@ -109,3 +109,41 @@ def test_amplifier_supply_matches_current_two_watt_speaker():
         corrupt["audio_output_power_contract"][field] = wrong
         with pytest.raises(ValueError, match="speaker amplifier power contract"):
             generator.verify(corrupt, body, head)
+
+
+def test_generic_gy530_vin_stays_three_volt_three_and_excludes_5v():
+    """Sensor chip and common GY530 level shifted VIN are not 5V host IO."""
+    import copy
+    import importlib.util
+    import pytest
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("wiring_tof_voltage", path)
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    plan = json.loads((ROOT / generator.PLAN).read_text())
+    body = (ROOT / generator.BODY_PINS).read_text()
+    head = (ROOT / generator.HEAD_PINS).read_text()
+    rendered = generator.render(plan, body, head)
+    assert "Rated regulated 3.3V expansion rail" in rendered
+    assert "eight GY-530 VL53L0X VIN pins" in rendered
+    assert "5V VIN can raise SDA/SCL to 5V" in rendered
+    assert rendered.rstrip() == (HARDWARE /
+        "one-robot-signal-harness.generated.md").read_text().rstrip()
+    voltage = plan["range_breakout_power_contract"]
+    assert voltage["exact_vendor_pcb_verified"] is False
+    for field, wrong in (
+        ("module_vin_v", 5),
+        ("module_vin_v", True),
+        ("tca9548a_vcc_v", 5),
+        ("downstream_pullup_target_v", 5),
+        ("upstream_pullup_target_v", 5),
+        ("modules_per_robot", 7),
+        ("mux_address_7bit", 0x71),
+        ("selected_chip", "VL53L4CD"),
+    ):
+        corrupt = copy.deepcopy(plan)
+        corrupt["range_breakout_power_contract"][field] = wrong
+        with pytest.raises(ValueError, match="ToF|GY-530"):
+            generator.verify(corrupt, body, head)
