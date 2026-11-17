@@ -51,14 +51,14 @@ def test_full_wroom_xiao_signal_harness_matches_real_firmware():
     assert "| MCP23017 GPB1 | optional PIR output |" in page
     assert "| WROOM GPIO36 reserved | left 38kHz IR demodulator |" in page
     assert "| WROOM GPIO39 reserved | right 38kHz IR demodulator |" in page
-    assert "VL53L4CD (0x29)" in page
+    assert "VL53L0X (0x29)" in page
     # All eight Pololu-style carrier lanes are UNPOWERED until actual
     # VIN and pullup levels are measured, not merely firmware allocated.
     assert page.count(
         "Unqualified carrier; DO NOT ENERGIZE before voltage checks"
     ) == 8
     assert page.count("SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden") == 8
-    assert "All eight VL53L4CD carriers: identify PCB revision" in page
+    assert "All eight VL53L0X carriers: identify PCB revision" in page
     assert "Do NOT energize any ToF lane until 5V WROOM exposure is excluded" in page
     assert "Assembly readiness: NO" in page
     assert "Do NOT wire yet" in page
