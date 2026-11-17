@@ -228,9 +228,10 @@ async def test_five_registered_heads_route_simultaneous_status_to_own_robot(
     # The installed plugin binds the original registry dict at import time.
     bridge.connections.clear()
     bridge.connections.update(heads)
-    resolve = lambda device: (
-        "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
-    )
+    def resolve(device):
+        return (
+            "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
+        )
     bridge.robot_for_device = resolve
     bridge_tools.robot_for_device = resolve
     bridge.voice_turn_generation = {device: 3 for device in heads}
@@ -273,9 +274,10 @@ async def test_five_registered_heads_get_only_their_own_raw_power_gauge(
     }
     bridge.connections.clear()
     bridge.connections.update(heads)
-    resolve = lambda device: (
-        "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
-    )
+    def resolve(device):
+        return (
+            "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
+        )
     bridge.robot_for_device = resolve
     bridge_tools.robot_for_device = resolve
     original = httpx.AsyncClient
@@ -321,9 +323,10 @@ async def test_one_human_cancels_only_own_visual_tool_not_four_other_pets(
     }
     bridge.connections.clear()
     bridge.connections.update(heads)
-    resolve = lambda device: (
-        "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
-    )
+    def resolve(device):
+        return (
+            "robot-" + device.rsplit("-", 1)[-1] if device in heads else None
+        )
     bridge.robot_for_device = resolve
     bridge_tools.robot_for_device = resolve
     bridge.voice_turn_generation = {device: 3 for device in heads}
