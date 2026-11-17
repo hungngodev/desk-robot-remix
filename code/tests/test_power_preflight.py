@@ -404,7 +404,9 @@ def test_cli_rejects_nonfinite_power_telemetry_and_ratings(monkeypatch, capsys, 
     import sys
     script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
     argv = [str(script), "--peak-5v-a", "3", "--continuous-5v-a", "1.8",
-            flag, value]
+            # argparse treats a standalone -inf token as another option.
+            # Explicit flag=value tests the numeric safety validator itself.
+            f"{flag}={value}"]
     monkeypatch.setattr(sys, "argv", argv)
     with pytest.raises(ValueError):
         runpy.run_path(str(script), run_name="__main__")
