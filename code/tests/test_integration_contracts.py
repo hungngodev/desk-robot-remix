@@ -23,6 +23,27 @@ ROOT = Path(__file__).resolve().parents[2]
 PLAN = json.loads((ROOT / "docs/hardware/full-feature-plan.json").read_text())
 
 
+def test_optional_reed_event_is_real_and_unwired_pir_bumper_are_lab_only():
+    """Compile the stable reed event path, never fake unqualified input wiring."""
+    ini = (ROOT / "code/firmware/body/platformio.ini").read_text()
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    sensors = (ROOT / "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp").read_text()
+    pet = (ROOT / "code/laptop/src/desk_robot/pet.py").read_text()
+    full = ini.split("[env:esp32_full]", 1)[1].split("[env:", 1)[0]
+    dc = ini.split("[env:esp32_dc_full]", 1)[1].split("[env:", 1)[0]
+    lab = ini.split("[env:esp32_full_interaction_lab]", 1)[1].split("[env:", 1)[0]
+    for profile in (full, dc):
+        assert "-DDESK_ROBOT_ENABLE_REED=1" in profile
+        assert "-DDESK_ROBOT_ENABLE_PIR=1" not in profile
+        assert "-DDESK_ROBOT_ENABLE_BUMPER=1" not in profile
+    assert "-DDESK_ROBOT_ENABLE_PIR=1" in lab
+    assert "-DDESK_ROBOT_ENABLE_BUMPER=1" in lab
+    assert "write8(0x20, 0x0D, 0x01)" in sensors  # GPIOB0 pullup
+    assert "extension_fresh" in main
+    assert "mask |= 2U;" in main
+    assert "(\"reed_count\", 2, \"magnet\"" in pet
+
+
 def test_all_firmware_sensor_reactions_have_a_real_camera_priority_label():
     # Every event produced by physical input and eligible to initiate speech
     # must be representable as a separate authenticated camera context hint.
