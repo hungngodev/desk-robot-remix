@@ -143,8 +143,24 @@ belong to the WROOM bus, not this head's display bus.
 
 SSD1306 pin order/voltage, address, orientation and the rounded Sparky bezel fit still need
 checking. MAX98357 speaker connects across SPK+ and SPK−, neither to ground;
-limit volume for the selected8Ω1W speaker. Use qualified supplies/grounds and
+use the selected Challenge Electronics CS20-02P110-04-1X 8 ohm 2 W rectangular speaker, not the retired 1 W candidate; actual MAX98357A 5V output and enclosure acoustic/thermal margins must still be qualified. Use qualified supplies/grounds and
 rated actuator wiring. Do not join independent USB5V sources blindly.
+
+## Bounded I2S write under urgent speech interruption
+
+The exact pinned Xiaozhi `NoAudioCodec::Write` normally calls the ESP-IDF
+`i2s_channel_write` with `portMAX_DELAY` while holding its codec mutex.
+An urgent decoder reset and `EnableOutput(false)` cannot reliably interrupt
+a stalled write until that lock is released. The **Sense-only disposable
+overlay** in `install_overlay.py` now reuses the same native I2S writer with
+a 500 ms TX wait ceiling, preserves its actual accepted sample count so the
+playback AEC reference is not fabricated, and returns a transient write fault
+instead of rebooting the head with `ESP_ERROR_CHECK`. Other Xiaozhi boards
+retain the original upstream writer. The overlay test checks the pinned
+upstream anchor and reversibility, but this software bound alone does not
+certify audible interruption: WiFi, AFE/VAD, output DMA, codec locking and
+speaker-to-PDM acoustic coupling must still be timed with real equipment.
+See [voice acceptance](../../../../docs/guides/audio-barge-in.md).
 
 ## Driver reuse and isolation
 
