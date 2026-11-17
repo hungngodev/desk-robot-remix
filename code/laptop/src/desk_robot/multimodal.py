@@ -434,6 +434,12 @@ class CameraFrameHub:
                 or re.fullmatch(r"omni_sent_[0-9a-f]{12}_[0-9a-f]{20}", event_id)
                     is None):
             raise ValueError("Invalid native sent audio receipt")
+        # A duplicate event ID must not bypass validation of the supplied
+        # text. Reject NUL, blank and overlong speech before the idempotent
+        # replay fence, just as we already validate receipt timestamps.
+        if (not isinstance(text, str) or not 1 <= len(text.strip()) <= 200
+                or "\x00" in text):
+            raise ValueError("Invalid native model sent speech text")
         # A replayed event ID is harmless only when its attached timestamp
         # remains valid. Validate source time BEFORE idempotent deduplication:
         # otherwise an attacker or misbehaving voice bridge could replay a
