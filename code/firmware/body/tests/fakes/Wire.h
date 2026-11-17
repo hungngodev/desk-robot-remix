@@ -21,6 +21,12 @@ class TwoWire {
   bool fail_dock_gpio = false;
   bool fail_optional_gpio = false;
   bool fail_mcp_register_write = false;
+  bool fail_pulse_register_write = false;
+  bool fail_imu_register_write = false;
+  unsigned failed_pulse_writes = 0;
+  unsigned pulse_terminated_transmissions = 0;
+  unsigned failed_imu_writes = 0;
+  unsigned imu_terminated_transmissions = 0;
   unsigned failed_mcp_writes = 0;
   unsigned mcp_terminated_transmissions = 0;
   unsigned optional_gpio_reads = 0;
@@ -61,6 +67,18 @@ class TwoWire {
   }
   std::size_t write(std::uint8_t v) {
     if (fail_optional_mux_write && current_address == 0x71) return 0;
+    if (fail_pulse_register_write && current_address == 0x57) {
+      ++failed_pulse_writes;
+      return 0;
+    }
+    if (fail_imu_register_write &&
+        (current_address == 0x68 || current_address == 0x69 ||
+         current_address == 0x6a || current_address == 0x6b ||
+         current_address == 0x1c || current_address == 0x1d ||
+         current_address == 0x1e)) {
+      ++failed_imu_writes;
+      return 0;
+    }
     if (fail_mcp_register_write && current_address == 0x20) {
       ++failed_mcp_writes;
       return 0;
@@ -96,6 +114,11 @@ class TwoWire {
         (current_address == 0x29 && extras == 1 && cap_uses_0x29))
       ++cap_register_end_calls;
     if (current_address == 0x20) ++mcp_terminated_transmissions;
+    if (current_address == 0x57) ++pulse_terminated_transmissions;
+    if (current_address == 0x68 || current_address == 0x69 ||
+        current_address == 0x6a || current_address == 0x6b ||
+        current_address == 0x1c || current_address == 0x1d ||
+        current_address == 0x1e) ++imu_terminated_transmissions;
     if (!connected(current_address)) return 4;
     if (current_address == 0x70) {
       if (outbound.empty()) return 0; // address-only I2C ACK probe
