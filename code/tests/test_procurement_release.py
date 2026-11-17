@@ -582,7 +582,18 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
             },
         }
 
-    assert mod.generate(selected, evidence_for(selected))["order_released"]
+    synthetic_released = mod.generate(selected, evidence_for(selected))
+    assert synthetic_released["order_released"]
+    # The single-unit projection was previously permanently HOLD even when
+    # all physical source receipts were synthetically present. Reuse the
+    # original full evidence contract rather than inventing a second one.
+    one = mod.first_robot_projection(synthetic_released)
+    assert one["purchase_approved"] is True
+    assert one["motor_variant"] == "stepper"
+    assert "APPROVED WITH VERIFIED RECEIPTS" in (
+        mod.render_first_robot_markdown(synthetic_released)
+    )
+    # WARNING: All the above receipts are TEST DATA, not an actual buy permit.
     attempts = []
     without_touch = copy.deepcopy(selected)
     without_touch["parts"] = [part for part in without_touch["parts"]
