@@ -16,6 +16,7 @@ def evaluate(**updates):
     args = dict(chassis_mount_above_desk_mm=0.0, optical_tilt_deg=0.0,
                 leading_wheel_behind_sensor_mm=45.0,
                 measured_p95_stopping_distance_mm=10.0,
+                measured_worst_stopping_distance_mm=10.0,
                 remaining_vision_or_sensor_latency_ms=80.0,
                 measured_travel_speed_mm_s=100.0)
     args.update(updates)
@@ -47,6 +48,7 @@ def test_properly_raised_sensor_can_be_feasible_but_not_qualified():
     assert r["required_wheel_behind_sensor_mm"] == pytest.approx(35.42677, abs=.001)
     assert r["full_fov_floor_path_in_valid_range"]
     assert r["nominal_stopping_geometry_possible"]
+    assert r["worst_observed_stop_supplied"]
     assert r["candidate_geometry_possible_on_paper"]
     assert not r["actual_dark_glossy_surface_and_edge_trials"]
     assert not r["sensor_mount_and_optical_alignment_physically_verified"]
@@ -85,10 +87,40 @@ def test_wider_rear_floor_footprint_does_not_gain_false_wheel_clearance():
 
 def test_late_braking_fails_even_with_feasible_lens_height():
     r = evaluate(chassis_mount_above_desk_mm=20.0,
-                 measured_p95_stopping_distance_mm=40)
+                 measured_p95_stopping_distance_mm=40,
+                 measured_worst_stopping_distance_mm=40)
     assert r["nominal_floor_in_firmware_valid_range"]
     assert not r["nominal_stopping_geometry_possible"]
     assert not r["candidate_geometry_possible_on_paper"]
+
+
+def test_p95_only_is_not_an_accepted_desk_edge_stopping_bound():
+    result = evaluate(
+        chassis_mount_above_desk_mm=20,
+        measured_worst_stopping_distance_mm=None,
+    )
+    assert result["full_fov_floor_path_in_valid_range"]
+    assert not result["worst_observed_stop_supplied"]
+    assert not result["nominal_stopping_geometry_possible"]
+    assert not result["candidate_geometry_possible_on_paper"]
+
+
+def test_worst_observed_stop_rejects_faster_than_reported_p95():
+    with pytest.raises(ValueError, match="Worst observed stop"):
+        evaluate(chassis_mount_above_desk_mm=20,
+                 measured_p95_stopping_distance_mm=20,
+                 measured_worst_stopping_distance_mm=10)
+
+
+def test_worst_observed_stop_controls_required_wheel_lead():
+    p95_only = evaluate(chassis_mount_above_desk_mm=20,
+                        measured_worst_stopping_distance_mm=None)
+    worst = evaluate(chassis_mount_above_desk_mm=20,
+                     measured_worst_stopping_distance_mm=20)
+    assert worst["required_wheel_behind_sensor_mm"] == pytest.approx(
+        p95_only["required_wheel_behind_sensor_mm"] + 10
+    )
+    assert not worst["candidate_geometry_possible_on_paper"]
 
 
 def planar(**overrides):
