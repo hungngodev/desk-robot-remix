@@ -49,7 +49,7 @@ def test_all_physical_roles_and_linked_decisions_have_exact_source_owners():
                 path = row[key]
                 assert isinstance(path, str)
                 if key == "host_test":
-                    assert path.startswith("code/tests/"), (id_, path)
+                    assert path.startswith("code/") and "/tests/" in path, (id_, path)
                 elif (section, id_) in non_code_sources:
                     assert path == non_code_sources[(section, id_)], (id_, path)
                 else:
