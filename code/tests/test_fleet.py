@@ -385,7 +385,8 @@ async def test_five_robot_conversation_persists_peer_hearsay_without_identity_le
     again = Conversation(fleet, SimulatedChat(), SimulatedSpeaker(), memory=memory)
     await again.run(IDS[:2], "A follow up", 1)
     assert "untrusted historical text" in again.histories["robot-01"][0]["content"]
-    assert "I heard robot-02 say" in again.histories["robot-01"][0]["content"]
+    # A peer transcript is a report, not independent acoustic evidence.
+    assert "robot-02 said (peer report, not my sighting)" in again.histories["robot-01"][0]["content"]
     assert "I said" in again.histories["robot-01"][0]["content"]
     assert memory.count("robot-03") == 5
 
