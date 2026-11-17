@@ -1318,3 +1318,23 @@ def test_receipt_url_requires_real_https_host():
         assert not mod._receipt(receipt), bad
     receipt["evidence_url"] = "https://lab.example.org/receipt/42"
     assert mod._receipt(receipt)
+
+
+def test_one_robot_power_register_excludes_duplicate_soc_board():
+    """Keep a single SoC gauge choice distinct from raw INA226 current."""
+    path = (Path(__file__).resolve().parents[2] /
+            "docs/hardware/2026-11-16-five-pet-purchase-register.md")
+    register = path.read_text(encoding="utf-8")
+    bq_rows = [
+        row for row in register.splitlines()
+        if row.startswith("| BQ24075 power-path source, NO second SoC gauge |")
+    ]
+    assert len(bq_rows) == 1
+    assert "SparkFun Battery Babysitter with BQ27441 is EXCLUDED" in bq_rows[0]
+    gauge_rows = [
+        row for row in register.splitlines()
+        if row.startswith("| `max17048` |")
+    ]
+    assert len(gauge_rows) == 1
+    assert "ONE SoC GAUGE ONLY" in gauge_rows[0]
+    assert "separate INA226 is a signed current monitor" in gauge_rows[0]
