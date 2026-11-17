@@ -16,7 +16,7 @@ def fixture():
         "target_robots": 5, "qualified_assumptions": False,
         "physical_trial_count": 0, "prices_complete": False,
         "parts": [
-            {"id": "cliff_obstacle", "name": "VL53L4CD", "per_robot": 8,
+            {"id": "cliff_obstacle", "name": "VL53L0X", "per_robot": 8,
              "reported_owned_total": 0, "group": "pet"},
             {"id": "stepper", "name": "28BYJ48", "per_robot": 2,
              "reported_owned_total": 5, "group": "pet"},
@@ -34,7 +34,7 @@ def test_full_fleet_quantities_never_grant_purchase():
     assert (r["fleet_robots"], r["docks"], r["room_stations"]) == (5, 5, 1)
     d = {p["id"]: p for p in r["robots"]}
     assert d["cliff_obstacle"]["fleet_total"] == 40
-    assert d["cliff_obstacle"]["reference_only"]["sku"] == "3692"
+    assert d["cliff_obstacle"]["reference_only"]["sku"] == "GY-530 VL53L0X"
     assert d["stepper"]["remaining_if_reported_stock_works"] == 5
     assert d["mg90s"]["remaining_if_reported_stock_works"] == 10
     assert not r["order_released"]
@@ -178,7 +178,7 @@ def test_entire_shopping_csv_and_two_lists_match_authoritative_source():
     assert {r["scope"] for r in rows} == {"pet or dock", "shared station"}
     assert all(row["purchase_approved"] == "NO" for row in rows)
     assert not any(
-        "VL53L0X" in row["component"] or "VL6180X" in row["component"]
+        "VL53L4CD" in row["component"] or "VL6180X" in row["component"]
         for row in rows
     )
     assert expected_md.count("## 1. Owned or ordered") == 1
