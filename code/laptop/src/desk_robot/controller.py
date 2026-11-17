@@ -222,6 +222,43 @@ class Coordinator:
                 self.jobs[jid].error = "Operator cancelled before job started"
         return acknowledgement
 
+    async def stop_active_exploration(self) -> tuple[str, ...]:
+        """A real human voice or lost VAD monitor preempts optional roaming.
+
+        Only autonomously exploring bodies are stopped. Do not cancel a
+        manually initiated pickup, dock or other operator-approved job merely
+        because another pet heard a voice. Reuse stop(), so outstanding WROOM
+        permits are revoked and physical STOP is sent BEFORE job cleanup.
+        Never automatically resume after speech_end or transport recovery.
+        """
+        active = tuple(sorted({
+            job.robot_id for jid, job in self.jobs.items()
+            if job.kind == "exploration"
+            and job.state in {"queued", "running"}
+            and jid in self.tasks
+            and not self.tasks[jid].done()
+        }))
+        if not active:
+            return ()
+        for job in self.jobs.values():
+            if job.robot_id in active and job.kind == "exploration":
+                job.events.append("Autonomous roaming preempted by live human or monitor loss")
+        results = await asyncio.gather(
+            *(self.stop(robot_id) for robot_id in active),
+            return_exceptions=True,
+        )
+        errors = [
+            result for result in results if isinstance(result, BaseException)
+        ]
+        if errors:
+            # A failed STOP is NOT proof the motors stopped. The WROOM local
+            # watchdog is still required, and the monitoring caller sees the
+            # unresolved physical abort rather than a fabricated success.
+            raise OperationError(
+                "Voice preemption of roaming: WROOM STOP unconfirmed"
+            ) from errors[0]
+        return active
+
     async def close(self):
         """Revoke permits and send bounded physical STOP before slow cleanup."""
         self.closed = True
