@@ -286,3 +286,47 @@ def test_cancelled_room_reader_joins_thread_before_task_exits_even_if_cancelled_
         assert exited.is_set()
 
     asyncio.run(scenario())
+
+
+def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatch):
+    """A failed consumer must not turn replayed USB frames into new evidence."""
+    import sys
+    from types import SimpleNamespace
+
+    opened = []
+    packets = [frame(1, 1000), frame(1, 1000), frame(2, 2000)]
+    received = []
+    feed = RoomSerialFeed("/dev/cu.test", lambda observation: received.append(observation.seq))
+
+    class FakePort:
+        def __init__(self, *args, **kwargs):
+            opened.append(self)
+            self.reads = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            self.reads += 1
+            return json.dumps(packets[self.reads - 1]).encode() if self.reads <= 3 else b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=FakePort))
+    attempts = []
+
+    def callback(observation):
+        attempts.append(observation.seq)
+        if len(attempts) == 1:
+            raise RuntimeError("application consumer failed")
+        received.append(observation.seq)
+
+    feed.on_observation = callback
+    feed._read_port(lambda: bool(opened) and opened[0].reads < 3 or not opened)
+    assert len(opened) == 1
+    assert attempts == [1, 2]
+    assert received == [2]
+    assert feed.rejected == 2  # one callback failure and one replayed frame
+    assert feed.received == 2
+    assert "callback failed" in feed.last_error
