@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze real labeled left/right/rear VL53L4CD raw WROOM measurements.
+"""Analyze real labeled left/right/rear VL53L0X raw WROOM measurements.
 
 Input is JSONL with robot_id, direction in left/right/rear, label in near/far,
 and unmodified side_ranges from real GET /v1/robots/{id}/status. A human
