@@ -74,3 +74,38 @@ def test_generated_robot_harness_matches_live_wiring_emitter():
     assert output.rstrip() == checked_in.rstrip()
     assert "MCP23017 GPB2" in output
     assert "CD74HC123 rising-edge haptic trigger" in output
+
+
+def test_amplifier_supply_is_fixed_to_three_point_three_for_retained_one_watt():
+    """Don't silently wire a 5V / 1.8W capable amplifier to a 1W speaker."""
+    import copy
+    import importlib.util
+    import pytest
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("wiring_audio", path)
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    plan = json.loads((ROOT / generator.PLAN).read_text())
+    body = (ROOT / generator.BODY_PINS).read_text()
+    head = (ROOT / generator.HEAD_PINS).read_text()
+    output = generator.render(plan, body, head)
+    assert "Rated, isolated 3.3V audio power rail" in output
+    assert "MAX98357A VDD/VIN" in output
+    assert "MAX98357A OUTP and OUTN" in output
+    assert "NEVER connect either output to GND" in output
+    assert "audio rail peak, brownout and heat HOLD" in output
+    assert output.rstrip() == (HARDWARE /
+        "one-robot-signal-harness.generated.md").read_text().rstrip()
+    for field, wrong in (
+        ("amplifier_vdd_v", 5), ("amplifier_vdd_v", True),
+        ("speaker_nominal_rating_w", 2),
+        ("speaker_nominal_impedance_ohm", 4),
+        ("amplifier_ic", "other"),
+        ("physical_release", "approved"),
+    ):
+        corrupt = copy.deepcopy(plan)
+        corrupt["audio_output_power_contract"][field] = wrong
+        with pytest.raises(ValueError, match="speaker amplifier power contract"):
+            generator.verify(corrupt, body, head)
