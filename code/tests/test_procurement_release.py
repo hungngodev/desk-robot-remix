@@ -183,6 +183,33 @@ def test_new_adafruit_hardware_is_never_approved_even_with_receipts():
     assert not mod.generate(p, e)["order_released"]
 
 
+@pytest.mark.parametrize("field, label", [
+    ("brand", "Adafruit"),
+    ("sku", "Adafruit 3317 VL53L0X breakout"),
+    ("product_name", "Adafruit STEMMA QT carrier"),
+    ("product_url", "https://www.adafruit.com/product/3317"),
+    ("resolved_item", "Adafruit branded module"),
+])
+def test_adafruit_brand_hidden_behind_generic_reseller_is_still_blocked(field, label):
+    candidate = {"vendor": "generic reseller", "sku": "GENERIC-SKU"}
+    candidate[field] = label
+    assert mod._ad_fruit_new_hardware(candidate, 1)
+    assert not mod._ad_fruit_new_hardware(candidate, 0)  # already owned
+    assert not mod._ad_fruit_new_hardware(
+        {"vendor": "Generic", "sku": "VL53L0X"}, 1
+    )
+    plan = fixture()
+    evidence = {"parts": {"stepper": dict(candidate)},
+                "room_pod": {"scd40": dict(candidate)}}
+    actual = mod.generate(plan, evidence)
+    assert "no_new_adafruit_hardware" in next(
+        item for item in actual["robots"] if item["id"] == "stepper"
+    )["missing_part_evidence"]
+    assert "no_new_adafruit_hardware" in next(
+        item for item in actual["room_pod"] if item["id"] == "scd40"
+    )["missing_part_evidence"]
+
+
 def test_battery_babysitter_and_second_fuel_gauge_not_bought_together():
     p = fixture()
     p["parts"].extend([

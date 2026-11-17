@@ -177,10 +177,20 @@ def _receipt(obj: object) -> bool:
             and bool(obj["reviewer"].strip()))
 
 
-def _ad_fruit_new_hardware(vendor: object, quantity: int) -> bool:
-    """Do not purchase Adafruit branded boards; already-owned Feather is exempt."""
-    return quantity > 0 and isinstance(vendor, str) and (
-        "adafruit" in vendor.casefold()
+def _ad_fruit_new_hardware(part_evidence: object, quantity: int) -> bool:
+    """Reject branded NEW boards, even when a reseller is named as vendor.
+
+    Brand, seller, product/SKU and reviewed physical item must agree. An
+    already-owned board is not a new purchase; open-source Adafruit drivers
+    remain allowed without purchasing Adafruit-branded carriers.
+    """
+    if quantity <= 0 or not isinstance(part_evidence, dict):
+        return False
+    return any(
+        isinstance(part_evidence.get(field), str)
+        and "adafruit" in part_evidence[field].casefold()
+        for field in ("vendor", "brand", "sku", "product_name",
+                      "product_url", "resolved_item", "pcb_revision")
     )
 
 
@@ -230,7 +240,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 and isinstance(ev.get("sku"), str) and ev["sku"].strip()
                 and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
-        if _ad_fruit_new_hardware(ev.get("vendor"), max(needed - owned, 0)):
+        if _ad_fruit_new_hardware(ev, max(needed - owned, 0)):
             missing.append("no_new_adafruit_hardware")
         chosen = FIXED_SOURCE_SKUS.get(ident)
         if chosen is not None and (
@@ -292,7 +302,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 and isinstance(ev.get("sku"), str) and ev["sku"].strip()
                 and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
-        if _ad_fruit_new_hardware(ev.get("vendor"), qty - estimated):
+        if _ad_fruit_new_hardware(ev, qty - estimated):
             missing.append("no_new_adafruit_hardware")
         room.append({"id": ident, "name": module.get("name"),
                      "shared_total": qty, "per_robot": 0,
@@ -475,7 +485,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                              and declared[k].strip()
                              for k in ("vendor", "sku", "pcb_revision"))
                      and not _ad_fruit_new_hardware(
-                         declared.get("vendor"),
+                         declared,
                          units if declared.get("disposition") == "selected" else 0))
         if valid and declared.get("disposition") in (
                 "included_in_parent", "rejected_in_favor_of_qualified_alternative"):
