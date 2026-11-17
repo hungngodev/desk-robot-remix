@@ -92,9 +92,8 @@ class TwoWire {
       if (!optional_mux_stuck) extras = outbound[0];
       if (extras && ranges) unsafe_parallel_mux = true;
     } else if (current_address == 0x29 && !outbound.empty()) {
-      if (outbound.size() < 2 || outbound.size() > 3) return 4;
-      tof_register = static_cast<std::uint16_t>(
-          (static_cast<unsigned>(outbound[0]) << 8) | outbound[1]);
+      if (outbound.size() < 1 || outbound.size() > 2) return 4;
+      tof_register = outbound[0];
     } else if (current_address == 0x24 && !outbound.empty()) {
       if (outbound.size() < 9 || outbound[0] != 0 || outbound[1] != 0 ||
           outbound[2] != 0xff) return 4;
@@ -123,15 +122,14 @@ class TwoWire {
     } else if (addr == 0x71) {
       inbound = {extras};
     } else if (addr == 0x29) {
-      if (tof_register == 0x0031 && count == 1) {
-        inbound = {0}; // fresh result ready
-      } else if (tof_register == 0x0089 && count == 15) {
-        inbound.assign(15, 0);
-        inbound[0] = 9; // ST status 9, valid
-        inbound[3] = 2; // nonzero SPAD count
+      if (tof_register == 0x13 && count == 1) {
+        inbound = {0x07}; // VL53L0X result interrupt ready
+      } else if (tof_register == 0x14 && count == 12) {
+        inbound.assign(12, 0);
+        inbound[0] = 0x58; // raw device status 11: range valid
         const unsigned mm = ranges == 16 ? 300 : 45;
-        inbound[13] = static_cast<std::uint8_t>(mm >> 8);
-        inbound[14] = static_cast<std::uint8_t>(mm);
+        inbound[10] = static_cast<std::uint8_t>(mm >> 8);
+        inbound[11] = static_cast<std::uint8_t>(mm);
         ++tof_samples;
       }
     } else if (addr == 0x24 && nfc_connected) {
