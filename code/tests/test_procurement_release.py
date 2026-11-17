@@ -342,8 +342,12 @@ def test_candidate_buy_register_matches_exact_selected_bom_without_premium_pilot
     # qualification, NOT the complete 8-piece robot or 40-piece fleet.
     assert selected["cliff_obstacle"][8] == "1"
     assert "ONE SAMPLE OR BORROW ONLY" in selected["cliff_obstacle"][10]
-    # An expensive comparison board is not an authorized pilot purchase.
-    for ident in ("cap1188", "fsr", "ads1115", "as5600", "encoder_magnets",
+    # The preferred low-cost CAP1188 is HOLD with zero pilot units, while
+    # other premium comparison boards explicitly say NO PURCHASE. Do not
+    # loosen either source quantity merely to satisfy an outdated phrase.
+    assert selected["cap1188"][8] == "0"
+    assert selected["cap1188"][10].startswith("HOLD CHEAP GENERIC")
+    for ident in ("fsr", "ads1115", "as5600", "encoder_magnets",
                   "max17048", "ina226", "pn532", "sht41"):
         assert selected[ident][8] == "0", ident
         assert "NO PURCHASE" in selected[ident][10], ident
