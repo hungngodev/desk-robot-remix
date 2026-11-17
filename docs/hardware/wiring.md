@@ -1,6 +1,6 @@
 > **Canonical full five pet wiring allocation:** [complete feature and electrical plan](full-feature-wiring-and-shopping.md). The current full `esp32_full` build also sets `DESK_ROBOT_REQUIRE_DOCK_MONITOR=1`: an installed, recently sampled MCP23017 at expansion bus `0x71`, channel 5, is compulsory even if that sensor failed to initialize at boot. A missing module, invalid GPIOA transfer, zero sample sequence, or 500 ms stale reading locally refuses motor arming and stops moving tracks; any single seat switch or charger PGOOD indication also locks out motors. The base `esp32_stepper` profile is for staged tests only. Do not apply 5 V to MCP23017 inputs, and do not energize dock contacts from firmware. This is source code, not measured electrical qualification.
 
-The five-channel profile remains the earlier core WROOM safety foundation. The complete `esp32_full` profile now additionally polls left, right and rear VL53L4CD channels 5 to 7, exports read-only freshness/validity, and lets the Mac react to their actual telemetry. This is implemented source but **not** qualified physical hardware. Most optional add-ons still require breakout-specific wiring, driver review, and measured bench acceptance. The 0x71 expansion mux is now quiesced before critical range reads if fitted.
+The five-channel profile remains the earlier core WROOM safety foundation. The complete `esp32_full` profile now additionally polls left, right and rear VL53L0X channels 5 to 7, exports read-only freshness/validity, and lets the Mac react to their actual telemetry. This is implemented source but **not** qualified physical hardware. Most optional add-ons still require breakout-specific wiring, driver review, and measured bench acceptance. The 0x71 expansion mux is now quiesced before critical range reads if fitted.
 
 > 2026-11-10 sensor correction: MPU6050 is the preferred six-axis module for the prototype, per the user's new hardware identification. Preserve the photographed BerryIMU as an optional alternative. Firmware probes MPU WHO_AM_I at register 0x75 expecting 0x68; never use BerryIMU register 0x0F for MPU. Both share WROOM GPIO21/22 I2C at 3.3V logic. Verify **this particular breakout**, its VCC regulator and pullups before power. No new GPIO is needed. A second installed IMU makes autodetection ambiguous and blocks motion. The original paragraphs below are historical build guidance and do not override this revision.
 
@@ -51,14 +51,14 @@ acceleration, loaded speed, stop/hold current and thermal limits need measuremen
 ```text
 WROOM GPIO21/22 -> selected MPU6050 0x68/0x69 on the UPSTREAM body I2C bus
   -> TCA9548A RANGE mux 0x70
-     CH0 front-left floor VL53L4CD 0x29
-     CH1 front-right floor VL53L4CD 0x29
-     CH2 rear-left floor VL53L4CD 0x29
-     CH3 rear-right floor VL53L4CD 0x29
-     CH4 front obstacle VL53L4CD 0x29
-     CH5 left-side VL53L4CD 0x29, read-only
-     CH6 right-side VL53L4CD 0x29, read-only
-     CH7 rear obstacle VL53L4CD 0x29, read-only
+     CH0 front-left floor VL53L0X 0x29
+     CH1 front-right floor VL53L0X 0x29
+     CH2 rear-left floor VL53L0X 0x29
+     CH3 rear-right floor VL53L0X 0x29
+     CH4 front obstacle VL53L0X 0x29
+     CH5 left-side VL53L0X 0x29, read-only
+     CH6 right-side VL53L0X 0x29, read-only
+     CH7 rear obstacle VL53L0X 0x29, read-only
   -> TCA9548A ACCESSORY mux 0x71
      CH0 CAP1188 0x28 + MAX30102 0x57
      CH1 APDS9960 0x39 + AS5600 nose 0x36
@@ -73,8 +73,8 @@ XIAO -> independent HEAD-owned OLED GPIO5/6 bus; NOT connected to WROOM SDA/SCL
 ```
 
 The earlier ST VL6180X proposal has been superseded by the selected
-**VL53L4CD**. The current `esp32_full` source scans **eight 0x29
-VL53L4CD channels** on TCA9548A 0x70: four floor, one forward and
+**VL53L0X**. The current `esp32_full` source scans **eight 0x29
+VL53L0X channels** on TCA9548A 0x70: four floor, one forward and
 three left/right/rear read-only directions. The first five channels
 form the local movement guard; the other three add separate read-only
 observations. The topology above lists the entire source allocation. Actual
@@ -240,7 +240,7 @@ and [the MAX30102 datasheet](https://www.analog.com/en/products/max30102.html).
 ST now labels the proposed VL6180X **obsolete and out of production**. The
 existing sensor channel plan is still a proposed baseline, not a fleet
 procurement authorization. Bench evaluate one supported short range
-[VL53L4CD](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html)
+[VL53L0X](https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html)
 against the intended surfaces and height before substituting: it requires a
 different driver and may exceed the existing budget at current breakout prices.
 No optical scan time, stopping margin or surface support is physically
@@ -248,9 +248,9 @@ qualified. [Full evidence and blockers](../research/2026-11-09-html-verification
 
 ## Five-channel sensor integration and measured local USB calibration
 
-The current esp32_stepper target selects the same **VL53L4CD driver for all five sensors**, reusing pinned Pololu ST-derived code for device setup and start, plus bounded checked Wire measurement reads. Neither actual breakout part, case optic fit, five-unit purchase or loaded stop margin is qualified. Historic VL6180X and VL53L0X suggestions are **not** the current firmware purchase list.
+The current esp32_stepper target selects the cheap **VL53L0X** driver for all five critical range sensors, using pinned MIT Pololu vl53l0x-arduino v1.3.1 for initialization and bounded nonblocking Wire register reads for the local guard. The full esp32_full target adds three read-only directions. The exact generic carrier and measured local stop/edge optical margin remain unqualified. Prior premium VL53L4CD and obsolete VL6180X recommendations are explicitly NOT current purchases.
 
-WROOM GPIO21 SDA and GPIO22 SCL go to TCA9548A at 0x70, with channels 0,1,2,3 allocated to individual downward corners and channel 4 to forward obstacle. Each VL53L4CD uses isolated 0x29 I2C. Shared 3.3V logic and ground, verified pullups. For each selected Pololu #3692 carrier, connect VIN only to the qualified 3.3 V sensor rail, not the 5 V motor/head rail: its external SDA/SCL pullups follow VIN even though the onboard sensor runs at 2.8 V. Check the exact board revision and all eight carrier VIN, SDA, SCL and mux supply domains before energizing; XSHUT and GPIO1 are not level shifted. This is a wiring constraint, not a measured electrical pass. See [carrier voltage research](../research/2026-11-13-vl53l4cd-carrier-logic-level-gate.md) and [Pololu #3692](https://www.pololu.com/product/3692). Connect mux active-low RESET to 3.3V pullup, never strapping GPIO4.
+WROOM GPIO21 SDA and GPIO22 SCL connect to TCA9548A range mux 0x70. Channels 0 through 3 are independent downward corners and channel 4 is forward obstacle; channels 5 through 7 are read-only side and rear measurements. Each inexpensive generic VL53L0X GY-530 compatible I2C module uses 0x29 behind its isolated mux lane. Power only from a verified 3.3V compatible module supply and a 3.3V I2C SDA/SCL bus; do NOT assume a generic board's VIN pin, on-board regulators, pullups or XSHUT logic have Pololu #3692 electrical behavior. Verify the ACTUAL purchased PCB schematic, pin labels, pullups, dimensions and 30 to 80 mm desk range before powering a full system. Keep TCA9548A RESET tied high appropriately at 3.3V, not to unsafe strapping GPIO4. Previous Pololu #3692 carrier voltage notes are historical, not instructions for generic GY-530 boards.
 
 Local measured calibration commands are accepted only on the WROOM programming USB Serial. They are rejected over the head UART or Mac network service. **The values below must come from a real measured rig**, actual black/glossy/transparent surfaces and loaded stopping/scan latency with a catch tray:
 
@@ -265,7 +265,7 @@ Local measured calibration commands are accepted only on the WROOM programming U
 
 Limits range 1..1300 mm; freshness is 30..200ms. All four floor, front and freshness settings must be staged before the atomic commit; calabort clears the stage. The body saves a versioned checksummed calibration in NVS, leaves motors disarmed, and requires five fresh measurements plus a NEW direct USB rearm before motion. Reboot and recovering I2C never resume old motion. Any stale/invalid/out-of-range sensor or bus fault latches stop, with no blind reversal. Measure real lead and stopping margin before putting tracks on a desk.
 
-The pinned Pololu generic read helper can divide by zero for zero SPAD returns; the runtime uses only its initialization and start functions, and a checked raw I2C results path. All of this is software integration, **not** a verified physical stop test or a solution to the current $50 delivered budget contradiction.
+Pinned Pololu VL53L0X v1.3.1 handles sensor startup. Its readRangeContinuousMillimeters() waits for data-ready, so local critical sampling instead checks VL53L0X register 0x13 readiness once, reads result at 0x14, validates status and distance, then clears 0x0B. Real timeout, surface reflectance and loaded desk-edge stop measurements are still mandatory; this software code is NOT physical safety signoff.
 
 ## Five read-only range diagnostics
 
@@ -344,7 +344,7 @@ The same status and USB inspection path reports raw acceleration, raw gyro and
 age with an explicit validity bit, not interpreted tilt or an optical cliff
 clearance. Keep actuators unloaded during board identification and measure the
 real axis orientation before considering tilt or held interlock thresholds.
-A valid raw IMU sample never substitutes for any missing VL53L4CD corner.
+A valid raw IMU sample never substitutes for any missing VL53L0X corner.
 
 
 The physical WROOM profile also refuses a motion `arm` without fresh
@@ -364,8 +364,8 @@ InvenSense MPU6050 RM-MPU-6000A and Adafruit AT42QT1010 breakout:
 | Input or bus | Purpose and current ownership | Real electrical gate |
 | --- | --- | --- |
 | GPIO21 SDA / GPIO22 SCL, TCA9548A upstream | Preferred MPU6050 at 0x68 or 0x69; one selected IMU | Real MPU WHO_AM_I register 0x75 gives 0x68; 3.3 V logic, not a second Wire instance |
-| RANGE mux 0x70 channels 0 through 4 | Four actual cliff footprints and front VL53L4CD | Distinct mux lanes, device 0x29, floor calibration and stopping distance |
-| RANGE mux 0x70 channels 5 through 7 | Three actual read-only left, right and rear VL53L4CD | Existing firmware source acquires these in esp32_full; no local reverse/turn movement permission |
+| RANGE mux 0x70 channels 0 through 4 | Four actual cliff footprints and front VL53L0X | Distinct mux lanes, device 0x29, floor calibration and stopping distance |
+| RANGE mux 0x70 channels 5 through 7 | Three actual read-only left, right and rear VL53L0X | Existing firmware source acquires these in esp32_full; no local reverse/turn movement permission |
 | ACCESSORY mux 0x71 channels 0 through 7 | CAP/paw, gesture/nose, force, SHT41/BMP280, power gauges, MCP dock/PN532, wheel angles | See complete channel list above and source checked generated harness; chip IDs, breakout VCC and I2C pullups remain unqualified |
 | GPIO34 | Required active HIGH AT42QT1010 head pad | 3.3 V power and output, through-case physical false-touch trials |
 | GPIO35, build flag DESK_ROBOT_ENABLE_BUMPER | Optional normally-closed mechanical bumper, raw local trip | External 3.3 V pullup, active LOW; must be physically fitted and tested before enable |
