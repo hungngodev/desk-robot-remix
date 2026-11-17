@@ -81,8 +81,10 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   polled_ = true;
   last_ms_ = now_ms;
   if (!select()) { close(); sample_.valid = false; return false; }
-  std::uint8_t write_pointer = 0, read_pointer = 0;
-  bool ok = read_reg(0x04, write_pointer) && read_reg(0x06, read_pointer);
+  std::uint8_t write_pointer = 0, read_pointer = 0, overflow = 0;
+  bool ok = read_reg(0x04, write_pointer) &&
+            read_reg(0x05, overflow) &&
+            read_reg(0x06, read_pointer);
   const std::uint8_t available =
       static_cast<std::uint8_t>((write_pointer - read_pointer) & 31U);
   // The MAX30102 FIFO_RD_PTR (0x06) is writable. If the body loop was
@@ -90,12 +92,17 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   // Drop that backlog in one bounded register write instead of assigning
   // now_ms to samples acquired before the pause. A new reading must arrive
   // on a later poll before an event may be emitted.
-  if (ok && available > 4U) {
+  if (ok && (available > 4U || (overflow & 31U) != 0U)) {
+    // A full FIFO can wrap both pointers to the same value. The hardware
+    // overflow counter is independent evidence that samples were lost.
+    // Clear both old data and the overflow flag before accepting new ones.
     const bool discarded =
         write_reg(0x06, static_cast<std::uint8_t>(write_pointer & 31U));
+    const bool cleared = write_reg(0x05, 0);
     const bool closed = close();
     sample_.valid = false;
     (void)discarded;
+    (void)cleared;
     (void)closed;
     return false;
   }
