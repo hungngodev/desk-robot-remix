@@ -207,6 +207,17 @@ int main() {
       CHECK(guard.fault() == desk_robot::CliffFault::InvalidSample);
       CHECK(!guard.evaluate(61));
     }
+    {
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      CHECK(bus.begin(21, 22, -1));
+      Wire.fail_imu_register_write = true;
+      const auto before = Wire.imu_terminated_transmissions;
+      CHECK(bus.probe_imu().family == 0);
+      CHECK(Wire.failed_imu_writes > 0);
+      CHECK(Wire.imu_terminated_transmissions - before >= Wire.failed_imu_writes);
+      CHECK(Wire.ranges == 0 && Wire.extras == 0);
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {
