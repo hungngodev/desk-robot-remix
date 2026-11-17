@@ -60,7 +60,7 @@ finished robots; quote and validate robot one before ordering the remaining sets
 | Part | One / five | Purpose / selection status |
 | --- | ---: | --- |
 |[MAX98357A I2S amplifier](https://electropeak.com/max98357-i2s-audio-amplifier-module)|1 /5 | Default speaker output; check the HiLetgo reuse option below before ordering |
-|[Mini speaker](https://electropeak.com/8-ohm-1w-20mm-diameter-speaker)|1 /5 |20mm8ohm1W is the existing candidate; cavity/acoustics unqualified |
+| [Challenge CS20-02P110-04-1X 8 Ω 2 W rectangular speaker](https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069) | 1 / 5 | Active fixed candidate, 20 × 16 × 4.7 mm; the old 20 mm round 1 W part is retired. Match the rectangular front grille and measure output temperature, enclosure and double talk before buying. |
 | Four VL53L0X compatible downward carriers, final exact breakout UNQUALIFIED | 4 / 20 | Software driver chosen and integrated, hardware not approved for purchase. Inspect 3.3V carrier and actual optical height on every surface before buying all five. ST lists previous VL6180X obsolete. |
 | Fifth VL53L0X compatible forward obstacle carrier, exact physical breakout UNQUALIFIED | 1 /5 | Software uses a fifth VL53L0X through TCA9548A channel 4. Buy cheap generic VL53L0X only after exact 3.3V logic and floor optical test. |
 |[TCA9548A mux](https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board)|1 /5 | Isolates the equal-address ToFs |
