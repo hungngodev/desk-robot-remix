@@ -32,12 +32,12 @@ int main() {
 
     // An actual contact disables new vibration even if touch arrived.
     wire.dock_gpioA = 0x0F;
-    CHECK(bus.request_haptic(1700));
+    CHECK(bus.request_haptic(1680));
     scan(bus, 1680, 1752);
     CHECK(wire.mcp_olatb == 0 && wire.haptic_rising_edges == 1);
     // Resume a later independent touch only after undocked fresh GPIOA.
     wire.dock_gpioA = 0x0C;
-    CHECK(bus.request_haptic(1800));
+    CHECK(bus.request_haptic(1764));
     scan(bus, 1764, 1836);
     CHECK(wire.haptic_rising_edges == 2 && wire.mcp_olatb == 0x04);
     // The stop must run even if a contact becomes seated during pulse.
