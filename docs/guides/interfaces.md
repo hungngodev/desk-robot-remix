@@ -1,4 +1,4 @@
-> Updated 2026-11-12. The esp32_full firmware targets eight VL53L4CD
+> Updated 2026-11-12. The esp32_full firmware targets eight VL53L0X
 > channels (five local safety plus three independent read-only directions) through TCA9548A 0x70, local fault latching, USB-only measured
 > calibration, touch interruption and read-only range diagnostics. This is
 > source files and target build profiles, not a verified compile at the current PR head, flashed, fitted or physically qualified assembly. GitHub Actions currently fails before job steps execute.
