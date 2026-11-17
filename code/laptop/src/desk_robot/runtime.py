@@ -94,6 +94,21 @@ class Runtime:
                 and self.multimodal is not None):
             self.multimodal.hub.remember_room(observation)
 
+    def _queue_room_observation(self, loop, observation: RoomObservation) -> None:
+        """Never schedule late USB observations onto an already-closed loop.
+
+        The serial reader is a real worker thread; call_soon_threadsafe can
+        race Mac shutdown after the reader sampled the last USB frame.
+        Only ignore the closing-loop exception after shutdown is committed.
+        """
+        if self._closed:
+            return
+        try:
+            loop.call_soon_threadsafe(self._on_room_observation, observation)
+        except RuntimeError:
+            if not self._closed:
+                raise
+
     async def start(self):
         """Bridge Xiaozhi's real voice interruption into Mac speech cancellation."""
         if getattr(self, "_closed", False):
@@ -115,8 +130,8 @@ class Runtime:
             loop = asyncio.get_running_loop()
             self.room_feed = RoomSerialFeed(
                 self.settings.room_station_port,
-                lambda observation: loop.call_soon_threadsafe(
-                    self._on_room_observation, observation
+                lambda observation: self._queue_room_observation(
+                    loop, observation
                 ),
             )
             self._room_task = asyncio.create_task(
