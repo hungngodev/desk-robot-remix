@@ -20,6 +20,9 @@ class TwoWire {
   bool pending_sht = false;
   bool fail_dock_gpio = false;
   bool fail_optional_gpio = false;
+  bool fail_mcp_register_write = false;
+  unsigned failed_mcp_writes = 0;
+  unsigned mcp_terminated_transmissions = 0;
   unsigned optional_gpio_reads = 0;
   std::uint8_t optional_gpioB = 0x01; // reed open, PIR low
   bool nfc_connected = false;
@@ -58,6 +61,10 @@ class TwoWire {
   }
   std::size_t write(std::uint8_t v) {
     if (fail_optional_mux_write && current_address == 0x71) return 0;
+    if (fail_mcp_register_write && current_address == 0x20) {
+      ++failed_mcp_writes;
+      return 0;
+    }
     if (fail_cap_register_write && (current_address == 0x28 ||
         (current_address == 0x29 && extras == 1 && cap_uses_0x29))) return 0;
     outbound.push_back(v);
@@ -88,6 +95,7 @@ class TwoWire {
     if (current_address == 0x28 ||
         (current_address == 0x29 && extras == 1 && cap_uses_0x29))
       ++cap_register_end_calls;
+    if (current_address == 0x20) ++mcp_terminated_transmissions;
     if (!connected(current_address)) return 4;
     if (current_address == 0x70) {
       if (outbound.empty()) return 0; // address-only I2C ACK probe
