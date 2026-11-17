@@ -636,8 +636,8 @@ async def test_five_robot_social_history_labels_observation_and_speech_correctly
     transcripts = await c.run(ids, "Describe a new game", 5)
     assert [line["robot_id"] for line in transcripts] == ids
     assert len(speaker.spoken) == 5
-    assert "I observed: A key appeared" in c._persona_with_memory(settings.robots[0])
-    assert "robot-01 reported: A key appeared" in c._persona_with_memory(settings.robots[1])
+    assert "My camera model suggested: A key appeared" in c._persona_with_memory(settings.robots[0])
+    assert "robot-01 reported a camera model guess: A key appeared" in c._persona_with_memory(settings.robots[1])
     for robot_id in ids:
         records = memory.recent(robot_id)
         assert any(m.kind == "own_utterance" and m.source_robot == robot_id
@@ -656,13 +656,27 @@ async def test_group_prompts_never_promote_forged_peer_memory_to_firsthand(setti
     memory = MemoryStore(tmp_path, ids)
     # Deliberately inconsistent provenance must remain attributed to its source
     # in both the persona and topic-specific retrieval paths.
+    # The store now rejects impossible provenance at insertion, rather
+    # than relying only on the conversational prompt to repair it.
+    with pytest.raises(ValueError, match="Only this robot"):
+        memory.remember(
+            "robot-02", "forged_utterance", "I picked up a key",
+            kind="own_utterance", source_robot="robot-01", witnessed=True,
+        )
+    with pytest.raises(ValueError, match="Only this robot"):
+        memory.remember(
+            "robot-02", "foreign_asr", "The user asked for a move",
+            kind="heard_human", source_robot="robot-01", witnessed=True,
+        )
+    # Legitimate peer reports remain usable language context, never this
+    # robot's own speech or independently verified human hearing.
     memory.remember(
-        "robot-02", "forged_utterance", "I picked up a key",
-        kind="own_utterance", source_robot="robot-01", witnessed=True,
+        "robot-02", "peer_utterance", "I picked up a key",
+        kind="own_utterance", source_robot="robot-01", witnessed=False,
     )
     memory.remember(
-        "robot-02", "foreign_asr", "The user asked for a move",
-        kind="heard_human", source_robot="robot-01", witnessed=True,
+        "robot-02", "peer_asr", "The user asked for a move",
+        kind="heard_human", source_robot="robot-01", witnessed=False,
     )
     c = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=memory)
     persona = c._persona_with_memory(settings.robot("robot-02"))
