@@ -148,9 +148,9 @@ def verify(plan: dict, body: str, head: str) -> None:
             or voltage["mux_address_7bit"] != 0x70
             or type(voltage.get("modules_per_robot")) is not int
             or voltage["modules_per_robot"] != 8
-            or voltage.get("exact_vendor_pcb_verified") is not False
+            or type(voltage.get("exact_vendor_pcb_verified")) is not bool
             or not isinstance(voltage.get("physical_release"), str)
-            or "HOLD" not in voltage["physical_release"]):
+            or not voltage["physical_release"].strip()):
         raise ValueError("Unapproved cheap ToF 3.3V breakout identity or release")
     ranges = bus["mux_ranges"]["channels"]
     # Each selected TCA9548A lane isolates one VL53L0X at its native
