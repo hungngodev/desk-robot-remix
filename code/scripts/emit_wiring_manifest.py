@@ -132,6 +132,26 @@ def verify(plan: dict, body: str, head: str) -> None:
         if (len(devices) != len(expected)
                 or {(d.get("name"), d["address"]) for d in devices} != expected):
             raise ValueError(f"Accessory lane {channel} battery/wheel identity drift")
+    voltage = plan.get("range_breakout_power_contract")
+    if not isinstance(voltage, dict):
+        raise ValueError("Missing cheap ToF breakout power contract")
+    for key, value in (
+        ("module_vin_v", 3.3), ("tca9548a_vcc_v", 3.3),
+        ("upstream_pullup_target_v", 3.3),
+        ("downstream_pullup_target_v", 3.3),
+    ):
+        if type(voltage.get(key)) not in (int, float) or voltage[key] != value:
+            raise ValueError("GY-530 power voltage was changed without validation")
+    if (voltage.get("selected_chip") != "VL53L0X"
+            or voltage.get("generic_module_family") != "GY-530"
+            or type(voltage.get("mux_address_7bit")) is not int
+            or voltage["mux_address_7bit"] != 0x70
+            or type(voltage.get("modules_per_robot")) is not int
+            or voltage["modules_per_robot"] != 8
+            or voltage.get("exact_vendor_pcb_verified") is not False
+            or not isinstance(voltage.get("physical_release"), str)
+            or "HOLD" not in voltage["physical_release"]):
+        raise ValueError("Unapproved cheap ToF 3.3V breakout identity or release")
     ranges = bus["mux_ranges"]["channels"]
     # Each selected TCA9548A lane isolates one VL53L0X at its native
     # 7-bit address. Reject a manifest that silently substitutes another
@@ -207,6 +227,10 @@ def render(plan: dict, body: str, head: str) -> str:
         "Integrated board pins, NOT connections to WROOM")
     row("XIAO GPIO9 reserved", "RGB heart data",
         "Xiaozhi WS2812 driver compiled only with explicit opt-in; SD J3 and 5V level buffer still unqualified", "Do NOT wire yet")
+    row("Rated regulated 3.3V expansion rail",
+        "eight GY-530 VL53L0X VIN pins and TCA9548A 0x70 VCC",
+        "3.3V ONLY in selected design; 5V VIN can raise SDA/SCL to 5V",
+        "Exact seller board pullup and every upstream/downstream HIGH rail UNTESTED")
     for group, mux in (("Range", bus["mux_ranges"]), ("Accessory", bus["mux_extras"])):
         for lane in mux["channels"]:
             devices = ", ".join(
