@@ -196,3 +196,34 @@ They intentionally always return `40_sensor_fleet_purchase_approved: false`.
 The central `code/scripts/procurement_release.py` now requires a separate
 `cliff_sensor_mount_height_and_stopping_geometry` evidence receipt
 independent of generic ranger and motor test claims.
+
+
+## VL53L0X temperature calibration, explicit RG4 decision
+
+ST's [VL53L0X datasheet](https://www.st.com/resource/en/datasheet/vl53l0x.pdf)
+states that the VHV and phase temperature reference calibration must be
+repeated if device temperature changes by more than 8 degrees Celsius from
+initial calibration. The pinned [Pololu initialization implementation](https://github.com/pololu/vl53l0x-arduino/blob/master/VL53L0X.cpp)
+performs this reference calibration inside `init()` and does not expose a
+supported temperature-only recalibration API. Do not manufacture an
+undocumented private-register sequence.
+
+**Selected safety policy for the present hardware:** do not perform
+periodic automatic reinitialization of an actively moving floor sensor.
+Doing so would remove safety observations while driving and could confuse
+the four-lane cliff guard. A deliberate temperature recalibration requires
+first disarming local WROOM motor authority, then a full reinitialization
+of every connected VL53L0X on its isolated 0x70 mux channel, followed by
+fresh five-channel critical readings, explicit operator calibration review
+and separate local rearm. A failed initialization or any stale/missing
+measurement remains latched and cannot be silently excused by warming up.
+
+The current XIAO/WROOM parts do NOT supply a calibrated VL53L0X die
+temperature measurement to enforce the manufacturer's 8 degree delta.
+Room SHT41/BMP280 ambient temperature is not a validated substitute for
+sensor die temperature, especially near the regulator, motors or sunlight.
+Therefore there is NO claimed automatic thermal recertification and no
+permission for unattended near-edge motion. Characterize warmup and
+temperature changes on the real installed board, then select a documented
+disarmed recalibration procedure before physical release. Do not add a
+new sensor or replace Pololu without a separately measured benefit.
