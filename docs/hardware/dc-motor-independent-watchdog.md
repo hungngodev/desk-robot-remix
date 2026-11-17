@@ -62,7 +62,7 @@ compiling `esp32_dc_watchdog_lab`.
 ## Production and prototype split
 
 `code/firmware/body/platformio.ini` contains
-`esp32_dc_watchdog_lab`, extending the full sensor guarded DC backend,
+`esp32_dc_watchdog_lab` or combined `esp32_dc_integrated_lab`, extending the full sensor guarded DC backend,
 with `DESK_ROBOT_ENABLE_DC_WATCHDOG=1`. It is **not the default**.
 The chosen standalone GPIO23 is also used as a stepper phase in
 `esp32_full`; therefore the **two motor architectures are electrically
