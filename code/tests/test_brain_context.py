@@ -894,3 +894,27 @@ def test_asr_whitespace_normalization_preserves_requested_tool_priority():
     assert "Battery 24 percent" in result
     assert "Please check your battery" in result
     assert len(result) <= 400
+
+def test_real_wroom_safety_fault_survives_chat_tool_result_flood():
+    """Urgent physical fault is context, never a model motor authorization."""
+    timeline = [
+        {"channel": "tool", "kind": "visual_look",
+         "content": "An uncertain camera object " + "v" * 90},
+        {"channel": "tool", "kind": "memory_recall",
+         "content": "Unrelated private history " + "m" * 90},
+        {"channel": "tool", "kind": "sensor_telemetry",
+         "content": "Raw room data " + "r" * 90},
+        {"channel": "robot_speech", "kind": "own_utterance",
+         "content": "I was speaking about a game."},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "What do you see, and what do you remember?"},
+        {"channel": "sensor", "kind": "safety_fault"},
+    ]
+    prompt = compose_brain_context([], [], timeline).interaction
+    assert prompt.startswith("WROOM reported latched safety fault")
+    assert "local disarm" in prompt
+    assert "do not drive, reverse, rearm" in prompt
+    assert len(prompt) <= 400
+    # No inferred fall, guaranteed physical stopping or auto recovery.
+    assert "saved me from falling" not in prompt
+    assert "ready to roam" not in prompt
