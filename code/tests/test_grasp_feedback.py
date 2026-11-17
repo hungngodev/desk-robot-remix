@@ -250,6 +250,7 @@ async def test_stalled_force_feedback_is_bounded_and_jaw_relaxes_only_if_safe(
 ):
     """A stalled WROOM auxiliary read cannot hold an active jaw indefinitely."""
     import asyncio
+
     import desk_robot.grasp_feedback as feedback
 
     monkeypatch.setattr(feedback, "_FORCE_READ_TIMEOUT_S", 0.04)
@@ -282,6 +283,7 @@ async def test_stalled_force_feedback_is_bounded_and_jaw_relaxes_only_if_safe(
 
 async def test_stalled_force_feedback_never_bypasses_local_wroom_disarm(monkeypatch):
     import asyncio
+
     import desk_robot.grasp_feedback as feedback
 
     monkeypatch.setattr(feedback, "_FORCE_READ_TIMEOUT_S", 0.04)
@@ -321,6 +323,7 @@ async def test_stalled_force_feedback_never_bypasses_local_wroom_disarm(monkeypa
 async def test_hung_gripper_command_still_attempts_bounded_safe_relief(monkeypatch):
     """An unacknowledged jaw command may already have moved the servo."""
     import asyncio
+
     import desk_robot.grasp_feedback as feedback
 
     monkeypatch.setattr(feedback, "_GRIP_COMMAND_TIMEOUT_S", 0.04)
@@ -351,6 +354,7 @@ async def test_hung_gripper_command_still_attempts_bounded_safe_relief(monkeypat
 async def test_hung_safety_recheck_blocks_extra_grip_and_relief(monkeypatch):
     """No cached WROOM armed state is permission for another jaw command."""
     import asyncio
+
     import desk_robot.grasp_feedback as feedback
 
     monkeypatch.setattr(feedback, "_HEALTH_READ_TIMEOUT_S", 0.04)
@@ -471,6 +475,7 @@ async def test_gripper_cannot_wait_forever_for_uncooperative_force_adapter(
 ):
     """A late ADC result after cancellation must never authorize jaw closure."""
     import asyncio
+
     import desk_robot.grasp_feedback as feedback
 
     monkeypatch.setattr(feedback, "_FORCE_READ_TIMEOUT_S", 0.04)

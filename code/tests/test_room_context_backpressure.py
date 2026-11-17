@@ -5,7 +5,6 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot.room_station import RoomObservation
 from desk_robot.runtime import Runtime
 

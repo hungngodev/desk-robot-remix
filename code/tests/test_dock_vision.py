@@ -161,9 +161,10 @@ def test_dock_calibration_refuses_incomplete_or_invalid_image_mode(width, height
 
 def test_dock_detector_rejects_camera_mode_change_before_apriltag_pose():
     """Matching distortion and focal lengths are invalid at another JPEG size."""
+    from dataclasses import replace
+
     import cv2
     import numpy as np
-    from dataclasses import replace
 
     measured = replace(
         calibration(), image_width_px=640, image_height_px=480,

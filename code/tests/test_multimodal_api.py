@@ -1,8 +1,7 @@
 """Native Mac vision endpoints can be called by Xiaozhi, not used to mint motion."""
 import pytest
-from fastapi.testclient import TestClient
-
 from desk_robot.api import create_app
+from fastapi.testclient import TestClient
 
 
 def test_mac_existing_ollama_selects_only_consented_readonly_tools(
@@ -62,7 +61,7 @@ def test_mac_existing_ollama_selects_only_consented_readonly_tools(
         assert request["transcript"] in model.calls[0][1]["content"]
         assert client.post(url, json=request).status_code == 401
         assert client.post(
-            f"/v1/pet/unknown-head/plan-readonly", headers=headers,
+            "/v1/pet/unknown-head/plan-readonly", headers=headers,
             json=request,
         ).status_code == 404
         settings.voice_vision_tools_enabled = False
@@ -77,6 +76,7 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
     import json
     import time
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.mode = "hardware"
@@ -372,6 +372,7 @@ async def test_existing_ollama_semantic_planner_uses_strict_json_schema(
     settings,
 ):
     import json
+
     import httpx
     from desk_robot.conversation import OllamaChat
 
@@ -484,6 +485,7 @@ def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
     settings, tokens,
 ):
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.mode = "hardware"
@@ -530,8 +532,9 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
 ):
     import time
     from types import SimpleNamespace
-    from desk_robot.multimodal import CameraFrameHub
+
     from desk_robot.brain_context import compose_brain_context
+    from desk_robot.multimodal import CameraFrameHub
 
     ids = [robot.id for robot in settings.robots]
     hub = CameraFrameHub(ids)
@@ -793,6 +796,7 @@ def test_native_visual_stream_cannot_emit_frame_after_consent_revoke_during_sock
 ):
     import time
     from types import SimpleNamespace
+
     from starlette.requests import Request
 
     class Video:
@@ -912,6 +916,7 @@ def test_native_asr_memory_requires_independent_consent_and_deduplicates(
     settings, tokens, tmp_path,
 ):
     from types import SimpleNamespace
+
     from desk_robot.memory import MemoryStore
 
     pet = settings.robots[0]
@@ -968,6 +973,7 @@ def test_completed_native_asr_blends_with_live_camera_context_without_disk_conse
 ):
     import time
     from types import SimpleNamespace
+
     from desk_robot.memory import MemoryStore
     from desk_robot.multimodal import CameraFrameHub
 
@@ -1045,6 +1051,7 @@ def test_native_asr_write_revoked_during_sqlite_commit_rolls_back_only_new_event
 ):
     """Revoked consent retracts new ASR but keeps older idempotent history."""
     from types import SimpleNamespace
+
     from desk_robot.memory import MemoryStore
 
     settings.mode = "hardware"
@@ -1179,8 +1186,8 @@ def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
     settings, tokens, tmp_path, monkeypatch,
 ):
     """Durable transcript consent does not grant continuing live ASR access."""
-    import time
     from types import SimpleNamespace
+
     from desk_robot.memory import MemoryStore
     from desk_robot.multimodal import CameraFrameHub
 
@@ -1239,6 +1246,7 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
     settings, tokens, tmp_path,
 ):
     from types import SimpleNamespace
+
     from desk_robot.memory import MemoryStore
     from desk_robot.multimodal import CameraFrameHub
 
@@ -1307,6 +1315,7 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
     settings, tokens, tmp_path,
 ):
     from types import SimpleNamespace
+
     from desk_robot.memory import MemoryStore
 
     ids = [robot.id for robot in settings.robots]
@@ -1363,8 +1372,8 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
 def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cross_pet_leak(
     settings, tokens,
 ):
-    from desk_robot.controller import Job
     from desk_robot.config import RobotConfig
+    from desk_robot.controller import Job
 
     # The general simulation fixture has only two pets. Include a third
     # VALID configured identity to test the important empty job response,
@@ -1432,9 +1441,10 @@ def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cros
 def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_tool(
     settings, tokens,
 ):
-    from types import SimpleNamespace
-    from desk_robot.multimodal import CameraFrameHub
     import time
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
 
     robot = settings.robots[0].id
     hub = CameraFrameHub([r.id for r in settings.robots])
@@ -1630,6 +1640,7 @@ def test_native_live_policy_respects_real_mac_pet_quiet_and_pause(
     settings, tokens,
 ):
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.mode = "hardware"
@@ -1895,6 +1906,7 @@ def test_native_model_speech_text_enters_shared_mac_context_without_disk_storage
     """Only scoped authenticated sent Opus text becomes ephemeral pet history."""
     import time
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.mode = "hardware"

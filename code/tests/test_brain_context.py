@@ -5,7 +5,6 @@ import time
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot.brain_context import compose_brain_context, repeated_spontaneous_line
 from desk_robot.conversation import Conversation
 from desk_robot.memory import CoreFact, Memory, MemoryStore

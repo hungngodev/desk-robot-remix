@@ -3,7 +3,6 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-
 from desk_robot.cli import inspect_live_media, request
 
 

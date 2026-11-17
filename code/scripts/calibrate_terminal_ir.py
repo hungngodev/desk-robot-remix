@@ -15,9 +15,7 @@ import time
 from pathlib import Path
 
 import httpx
-
 from desk_robot.dock_ir import validate_ir
-
 
 LABELS = ("left", "center", "right")
 

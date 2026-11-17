@@ -84,7 +84,6 @@ async def main() -> None:
     if not args.consent_to_save_private_jpegs:
         parser.error("Explicit local camera image recording consent required")
     import httpx
-
     from desk_robot.config import load_settings
     from desk_robot.transport import HttpHead
 

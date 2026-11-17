@@ -18,7 +18,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import aiohttp
-
 from desk_robot.realtime_omni_protocol import OmniDuplexWire, verify_native_server
 
 

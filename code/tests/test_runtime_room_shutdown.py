@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from desk_robot.runtime import Runtime
 
 

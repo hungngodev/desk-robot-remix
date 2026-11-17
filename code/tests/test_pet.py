@@ -312,8 +312,8 @@ async def test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner(
     fleet, tmp_path, local_object
 ):
     """A hardware sensor event must reach the scene gate, not just RAM JPEGs."""
-    from PIL import ImageDraw
     from desk_robot.multimodal import MultimodalOrchestrator
+    from PIL import ImageDraw
 
     before = jpeg("gray")
     if local_object:
@@ -2707,6 +2707,7 @@ async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
 ):
     """Touch reactions remain possible, but prior live ASR is not reusable."""
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     fleet.mode = "hardware"
@@ -2746,6 +2747,7 @@ async def test_proactive_physical_sensor_rechecks_live_consent_after_model_await
 ):
     """The same sensor event cannot narrate ASR after opt out mid thought."""
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     fleet.mode = "hardware"
@@ -2802,6 +2804,7 @@ async def test_proactive_sensor_private_live_context_revoked_during_tts(
 ):
     """Opted-out ASR context must not reach the head from a physical paw cue."""
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     fleet.mode = "hardware"
@@ -4253,6 +4256,7 @@ async def test_pet_hardware_body_monitor_does_not_survive_stalled_status(
 ):
     """An unreachable safety/touch bridge cannot leave the pet proactively active."""
     import asyncio
+
     import desk_robot.pet as pet_module
 
     fleet.mode = "hardware"
@@ -4300,6 +4304,7 @@ async def test_optional_aux_read_never_duplicates_cancel_resistant_adapter(
 ):
     """A hung auxiliary sensor read retains its owner through timeout and pause."""
     import asyncio
+
     import desk_robot.pet as pet_module
 
     fleet.mode = "hardware"

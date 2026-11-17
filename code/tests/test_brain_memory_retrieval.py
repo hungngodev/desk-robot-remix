@@ -4,10 +4,9 @@ from __future__ import annotations
 import time
 
 import pytest
-from fastapi.testclient import TestClient
-
 from desk_robot.api import create_app
 from desk_robot.memory import MemoryStore
+from fastapi.testclient import TestClient
 
 
 def test_relevant_episodic_recall_is_private_and_does_not_invent_matches(tmp_path):
@@ -111,6 +110,7 @@ async def test_proactive_reasoning_reuses_relevant_old_experience_not_only_last_
     settings, tmp_path
 ):
     import time
+
     from desk_robot.conversation import Conversation
     from desk_robot.pet import PetController
     from desk_robot.simulator import SimulatedSpeaker

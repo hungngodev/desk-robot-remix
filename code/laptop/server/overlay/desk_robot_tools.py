@@ -3,8 +3,8 @@
 import asyncio
 import os
 
-import httpx
 import desk_robot_bridge as bridge
+import httpx
 from desk_robot_bridge import connections, robot_for_device
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
 

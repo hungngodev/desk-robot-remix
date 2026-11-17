@@ -6,7 +6,6 @@ command or charger output.
 
 import httpx
 import pytest
-
 from desk_robot.config import RobotConfig, Settings
 from desk_robot.dock_ir import dock_beacon_code, validate_ir
 from desk_robot.transport import HeadError, HttpHead

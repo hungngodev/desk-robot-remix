@@ -4,7 +4,6 @@ These are simulated host contract tests. They do not certify beacon optics,
 local WROOM sensor geometry, battery charging, or loaded motor stopping.
 """
 import pytest
-
 from desk_robot.controller import Coordinator, Job, OperationError
 from desk_robot.dock_vision import DockCameraCalibration, DockPose
 from desk_robot.simulator import SimulationVision

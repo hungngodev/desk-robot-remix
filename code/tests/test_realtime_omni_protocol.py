@@ -2,7 +2,6 @@
 import base64
 
 import pytest
-
 from desk_robot.realtime_omni_protocol import OmniDuplexWire
 
 

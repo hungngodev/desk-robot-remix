@@ -8,8 +8,8 @@ from typing import Protocol
 import httpx
 
 from .aux import validate_aux
-from .dock_ir import validate_ir
 from .config import RobotConfig, secret
+from .dock_ir import validate_ir
 
 
 class HeadError(RuntimeError):

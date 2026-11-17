@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import json
 import math
-import time
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 # Keep the native future itself as the worker lifetime owner. An asyncio wrapper
 # can be cancelled during shutdown while the C detector is still running.

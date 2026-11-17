@@ -6,7 +6,6 @@ import uuid
 from dataclasses import asdict, dataclass, field, replace
 from typing import Awaitable, Callable, TypeVar
 
-
 _T = TypeVar("_T")
 
 from .calibration import Calibration

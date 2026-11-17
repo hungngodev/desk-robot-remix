@@ -48,6 +48,7 @@ async def test_one_human_interrupt_preempts_other_pet_audio_too():
 async def test_hardware_monitor_loss_cancels_pending_pet_or_group_speech():
     """One lost VAD stream must retire an in-flight optional speech task."""
     import asyncio
+
     from desk_robot.pet import PetController
 
     started, cleaned = asyncio.Event(), asyncio.Event()
@@ -157,9 +158,8 @@ async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
     import asyncio
     from io import BytesIO
 
-    from PIL import Image
-
     from desk_robot.multimodal import MultimodalOrchestrator
+    from PIL import Image
 
     ready, release = asyncio.Event(), asyncio.Event()
 
@@ -484,6 +484,7 @@ async def test_server_vad_snapshot_preempts_missing_start_and_releases_missing_e
 
 async def test_missing_vad_start_reuses_real_multimodal_camera_preemption():
     import asyncio
+
     from desk_robot.multimodal import MultimodalOrchestrator
 
     class SlowHead:
@@ -735,6 +736,7 @@ async def test_authenticated_vad_snapshot_upgrades_finite_aec_barge_hold():
 async def test_monitor_loss_stalled_xiao_stop_cannot_starve_other_heads(monkeypatch):
     """Every real head gets its STOP attempt even if one ignores cancellation."""
     import asyncio
+
     import pytest
 
     monkeypatch.setattr("desk_robot.runtime._MONITOR_STOP_TIMEOUT_S", 0.05)
@@ -822,8 +824,8 @@ async def test_human_vad_camera_still_starts_when_fleet_audio_stop_fails():
 
 
 async def test_recovered_vad_snapshot_reconciles_camera_despite_failed_audio_stop():
-    from desk_robot.multimodal import CameraFrameHub
     import pytest
+    from desk_robot.multimodal import CameraFrameHub
 
     events = []
     hub = CameraFrameHub(["robot-01"])

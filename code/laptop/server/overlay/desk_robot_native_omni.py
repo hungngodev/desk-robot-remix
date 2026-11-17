@@ -14,8 +14,6 @@ from __future__ import annotations
 import asyncio
 import audioop
 import base64
-from io import BytesIO
-import wave
 import hashlib
 import ipaddress
 import json
@@ -23,17 +21,18 @@ import os
 import re
 import time
 import uuid
+import wave
 from collections import deque
 from dataclasses import dataclass
+from io import BytesIO
 from urllib.parse import urlsplit
 
 import aiohttp
-
 from desk_robot_voice_intents import (
     _advice_only_request,
+    native_grounded_fact,
     native_readonly_request,
     native_readonly_requests,
-    native_grounded_fact,
     pack_grounded_facts,
 )
 

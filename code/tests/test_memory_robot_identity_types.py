@@ -1,7 +1,6 @@
 """Reject unhashable model supplied robot identities without writing memory."""
 
 import pytest
-
 from desk_robot.memory import MemoryStore
 
 

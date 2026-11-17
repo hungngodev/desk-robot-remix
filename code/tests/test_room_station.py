@@ -7,7 +7,6 @@ import threading
 from dataclasses import replace
 
 import pytest
-
 from desk_robot.brain_context import compose_brain_context
 from desk_robot.config import RobotConfig, Settings
 from desk_robot.multimodal import CameraFrameHub

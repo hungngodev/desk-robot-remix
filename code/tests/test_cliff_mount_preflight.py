@@ -1,6 +1,5 @@
 """Host source/geometry safety contract for the 8 inexpensive VL53L0X lanes."""
 import importlib.util
-import math
 from pathlib import Path
 
 import pytest

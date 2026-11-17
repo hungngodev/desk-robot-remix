@@ -9,14 +9,15 @@ import re
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
 from desk_robot.config import Settings, load_settings
 from desk_robot.multimodal import TRIGGERS
 from desk_robot.pet import (
-    _DIRECT_INTERACTION_KINDS, _PHYSICAL_INITIATIVE_KINDS,
-    _SOCIAL_EVENT_KINDS, _VISUAL_INITIATIVE_MIN_CONFIDENCE,
+    _DIRECT_INTERACTION_KINDS,
+    _PHYSICAL_INITIATIVE_KINDS,
+    _SOCIAL_EVENT_KINDS,
+    _VISUAL_INITIATIVE_MIN_CONFIDENCE,
 )
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = json.loads((ROOT / "docs/hardware/full-feature-plan.json").read_text())

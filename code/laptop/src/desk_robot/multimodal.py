@@ -8,12 +8,12 @@ are never persisted, never authorize motors and expire on disconnect/close.
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
-import threading
 import math
 import re
+import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from typing import TYPE_CHECKING

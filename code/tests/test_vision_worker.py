@@ -3,7 +3,6 @@ import asyncio
 import threading
 
 import pytest
-
 from desk_robot.vision import Detection, YoloWorldVision
 
 
@@ -66,6 +65,7 @@ async def test_model_exception_releases_worker_lease():
 async def test_native_visual_question_huge_confidence_fails_closed_without_crash():
     """Oversized Ollama confidence must not abort the camera question worker."""
     import json
+
     from desk_robot.vision import OllamaScene
 
     class Response:

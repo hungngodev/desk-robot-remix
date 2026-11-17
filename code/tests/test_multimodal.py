@@ -7,12 +7,14 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from PIL import Image, ImageDraw
-
 from desk_robot.multimodal import (
-    CameraFrameHub, MultimodalOrchestrator, _prepare, change_fraction,
+    CameraFrameHub,
+    MultimodalOrchestrator,
+    _prepare,
+    change_fraction,
 )
 from desk_robot.vision import OllamaScene
+from PIL import Image, ImageDraw
 
 
 def image(color="gray", square=False):
@@ -1010,6 +1012,7 @@ async def test_fresh_frame_from_current_spoken_turn_is_reused_without_duplicatio
 
 async def test_real_vad_during_jpeg_cpu_prepare_suppresses_late_idle_frame(monkeypatch):
     import threading
+
     import desk_robot.multimodal as media
 
     entered = threading.Event()
@@ -1048,6 +1051,7 @@ async def test_real_vad_during_jpeg_cpu_prepare_suppresses_late_idle_frame(monke
 
 async def test_prepare_from_external_pet_cannot_add_frame_during_human_voice(monkeypatch):
     import threading
+
     import desk_robot.multimodal as media
 
     entered = threading.Event()
@@ -1201,6 +1205,7 @@ async def test_camera_failure_does_not_release_authenticated_human_speech():
 
 async def test_jpeg_resize_worker_cannot_block_new_vad_on_event_loop(monkeypatch):
     import threading
+
     import desk_robot.multimodal as module
 
     entered = threading.Event()
@@ -1241,6 +1246,7 @@ async def test_jpeg_resize_worker_cannot_block_new_vad_on_event_loop(monkeypatch
 
 async def test_preprocessing_finishing_after_pause_cannot_republish_frame(monkeypatch):
     import threading
+
     import desk_robot.multimodal as module
 
     entered = threading.Event()
@@ -1300,6 +1306,7 @@ async def test_never_speak_delayed_live_scene_after_vlm_timeout():
 async def test_cancelled_preprocess_retains_native_worker_slot_until_it_exits(monkeypatch):
     """The Pillow thread must own admission until its actual completion."""
     import threading
+
     import desk_robot.multimodal as media
 
     started = threading.Event()
@@ -1359,6 +1366,7 @@ async def test_preprocess_submission_failure_releases_native_budget(monkeypatch)
 async def test_optional_jpeg_worker_cannot_starve_live_human_visual_preprocess(monkeypatch):
     """A blocked low priority decode cannot occupy both native worker slots."""
     import threading
+
     import desk_robot.multimodal as media
 
     started = threading.Event()
@@ -1681,6 +1689,7 @@ async def test_completed_brief_vad_cannot_publish_old_optional_jpeg(
 ):
     """VAD may BEGIN and END during CPU decode; current voice=False is not enough."""
     import threading
+
     import desk_robot.multimodal as media
 
     entered = threading.Event()
@@ -1731,6 +1740,7 @@ async def test_old_native_camera_cannot_repopulate_new_voice_turn(
 ):
     """An /omni-frame HTTP task is not owned by the cancellable VAD sampler."""
     import threading
+
     import desk_robot.multimodal as media
 
     entered, release = threading.Event(), threading.Event()

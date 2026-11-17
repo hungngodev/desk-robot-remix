@@ -1,7 +1,6 @@
 """Fleet memory identities must never silently alias the same SQLite file."""
 
 import pytest
-
 from desk_robot.memory import MemoryStore
 
 

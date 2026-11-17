@@ -4,7 +4,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot.pet import PetController
 from desk_robot.vision import SceneChange
 

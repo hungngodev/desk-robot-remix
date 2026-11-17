@@ -2,7 +2,6 @@
 import copy
 
 import pytest
-
 from desk_robot.dock_evidence import classify_dock, observe_dock_evidence
 
 
@@ -202,6 +201,7 @@ async def test_uncooperative_dock_evidence_read_times_out_without_charge_claim(
 ):
     """A stuck authenticated GPIO poller cannot invent stable charge evidence."""
     import asyncio
+
     import desk_robot.dock_evidence as evidence
 
     monkeypatch.setattr(evidence, "_DOCK_READ_TIMEOUT_S", 0.04)

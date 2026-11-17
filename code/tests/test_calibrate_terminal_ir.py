@@ -7,7 +7,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
     "terminal_ir_calibrator", ROOT / "code/scripts/calibrate_terminal_ir.py"

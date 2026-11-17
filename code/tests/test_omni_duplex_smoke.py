@@ -6,7 +6,6 @@ import wave
 from pathlib import Path
 
 import pytest
-
 from desk_robot.config import load_settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +88,7 @@ async def test_native_probe_sends_one_real_av_unit_with_distinct_jpeg_receipt(
     import asyncio
     import base64
     import json
+
     from aiohttp import web
     from aiohttp.test_utils import TestServer
 
@@ -288,6 +288,7 @@ async def test_native_av_smoke_propagates_backend_error_during_input_pacing():
     """A bad backend must not consume a minute of prerecorded microphone PCM."""
     import asyncio
     import json
+
     from aiohttp import web
     from aiohttp.test_utils import TestServer
 
@@ -350,6 +351,7 @@ async def test_real_five_concurrent_websocket_av_sessions_use_independent_receip
     import asyncio
     import base64
     import json
+
     from aiohttp import web
     from aiohttp.test_utils import TestServer
 
@@ -450,6 +452,7 @@ async def test_quiet_mic_video_unit_accepts_intentional_listen_or_real_speech(
     import asyncio
     import base64
     import json
+
     from aiohttp import web
     from aiohttp.test_utils import TestServer
 

@@ -324,6 +324,7 @@ async def test_conversation_six_total_alternating_independent_histories(settings
 async def test_group_chat_uses_each_pet_own_live_audio_sensor_and_tool_context(settings):
     import time
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.voice_vision_tools_enabled = True
@@ -504,6 +505,7 @@ async def test_hardware_group_memory_respects_fleet_sharing_consent(
 async def test_group_chat_never_exposes_live_asr_without_fleet_text_consent(settings):
     import time
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.voice_vision_tools_enabled = True
@@ -528,6 +530,7 @@ async def test_group_chat_does_not_expose_revoked_private_memory_tool_result(
 ):
     import time
     from types import SimpleNamespace
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.mode = "hardware"

@@ -500,6 +500,7 @@ async def test_dock_slow_marker_inference_never_drives_from_expired_image(
     import asyncio
     import threading
     import time
+
     from desk_robot.controller import Job
     from desk_robot.dock_vision import DockCameraCalibration, DockPose
 
@@ -564,6 +565,7 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
     settings, monkeypatch,
 ):
     import asyncio
+
     from desk_robot.controller import Job
     from desk_robot.dock_vision import DockCameraCalibration, DockPose
 

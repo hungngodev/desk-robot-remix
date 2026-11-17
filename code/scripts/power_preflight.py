@@ -6,9 +6,9 @@ Use measured simultaneous motor, servo, camera, WiFi and audio load readings.
 from __future__ import annotations
 
 import argparse
-from decimal import Decimal, ROUND_CEILING
 import json
 import math
+from decimal import ROUND_CEILING, Decimal
 
 
 def _finite_number(value: object) -> bool:

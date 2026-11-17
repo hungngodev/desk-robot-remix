@@ -3,7 +3,6 @@ import asyncio
 from pathlib import Path
 
 import pytest
-
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore

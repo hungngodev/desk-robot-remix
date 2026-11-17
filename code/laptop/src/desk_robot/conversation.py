@@ -15,7 +15,6 @@ from .config import RobotConfig, Settings, secret
 from .memory import MemoryStore
 from .streamed_ollama import ollama_speech_segments
 
-
 _SPEAKER_ABORT_TIMEOUT_S = 2.0
 _CONVERSATION_STOP_TIMEOUT_S = 2.5
 

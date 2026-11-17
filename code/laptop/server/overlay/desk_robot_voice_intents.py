@@ -6,8 +6,9 @@ read-only decisions. Keep the router conservative and unit-test directly.
 """
 from __future__ import annotations
 
-import re
 import json
+import re
+
 
 def _advice_only_request(text: str) -> bool:
     """Keep how-to advice in natural conversation, not sensor/tool routing."""

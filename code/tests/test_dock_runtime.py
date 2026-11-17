@@ -616,6 +616,7 @@ async def test_dock_diagnostic_uncooperative_camera_returns_hold(
     """Cancellation ignoring JPEG source must not hold dock diagnostics open."""
     import asyncio
     from types import SimpleNamespace
+
     import desk_robot.dock_runtime as runtime
     from desk_robot.controller import _bounded_head_reply as real_bounded
 

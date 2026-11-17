@@ -23,7 +23,6 @@ from .dock_runtime import observe_actual_dock
 from .runtime import Runtime
 from .transport import HeadError
 
-
 _PET_SHUTDOWN_TIMEOUT_S = 1.0
 
 

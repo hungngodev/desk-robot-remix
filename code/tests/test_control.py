@@ -1,9 +1,9 @@
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 from desk_robot.controller import Coordinator, Job, OperationError
-from types import SimpleNamespace
 from desk_robot.simulator import SimulatedHead, SimulationVision
 
 
@@ -719,6 +719,7 @@ async def test_hardware_running_health_rechecks_body_identity(settings, reported
 async def test_exploration_rejects_valid_jpeg_with_unusable_dimensions(settings):
     """Even a decodable one pixel image is not a meaningful live camera feed."""
     from io import BytesIO
+
     from PIL import Image
 
     image = BytesIO()

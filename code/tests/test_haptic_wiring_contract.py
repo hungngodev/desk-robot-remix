@@ -80,6 +80,7 @@ def test_amplifier_supply_matches_current_two_watt_speaker():
     """Do not approve a retired 1W speaker on the current 5V output."""
     import copy
     import importlib.util
+
     import pytest
 
     path = ROOT / "code/scripts/emit_wiring_manifest.py"
@@ -115,6 +116,7 @@ def test_generic_gy530_vin_stays_three_volt_three_and_excludes_5v():
     """Sensor chip and common GY530 level shifted VIN are not 5V host IO."""
     import copy
     import importlib.util
+
     import pytest
 
     path = ROOT / "code/scripts/emit_wiring_manifest.py"

@@ -14,7 +14,6 @@ from .memory import MemoryStore
 from .multimodal import MultimodalOrchestrator
 from .pet import PetController
 from .room_station import RoomObservation, RoomSerialFeed
-from .soil_calibration import SoilCalibration
 from .simulator import (
     SimulatedChat,
     SimulatedHead,
@@ -22,9 +21,9 @@ from .simulator import (
     SimulatedSpeaker,
     SimulationVision,
 )
+from .soil_calibration import SoilCalibration
 from .transport import HttpHead
 from .vision import OllamaScene, YoloWorldVision
-
 
 _MONITOR_STOP_TIMEOUT_S = 0.35
 _RUNTIME_VOICE_STOP_TIMEOUT_S = 2.5
@@ -406,7 +405,7 @@ class Runtime:
                 if not done:
                     raise TimeoutError(f"{label} shutdown unconfirmed")
                 await task
-            except asyncio.CancelledError as exc:
+            except asyncio.CancelledError:
                 # A child owner may cancel itself independently of shutdown.
                 # Never let that skip STOP attempts for the other four pets,
                 # camera, speech and HTTP. An externally cancelled shutdown

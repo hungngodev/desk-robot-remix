@@ -7,7 +7,6 @@ quantities blindly to the robot/room totals.
 """
 from pathlib import Path
 
-
 HARDWARE = Path(__file__).resolve().parents[2] / "docs" / "hardware"
 REGISTER = HARDWARE / "2026-11-16-five-pet-purchase-register.md"
 PLAN = HARDWARE / "full-feature-plan.json"

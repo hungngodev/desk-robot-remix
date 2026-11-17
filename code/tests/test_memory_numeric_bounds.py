@@ -1,7 +1,6 @@
 """Regression: hostile numeric confidence must fail closed without float overflow."""
 
 import pytest
-
 from desk_robot.memory import MemoryStore
 
 

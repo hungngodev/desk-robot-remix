@@ -4407,8 +4407,8 @@ async def test_native_asr_camera_and_battery_clauses_are_spoken_together(
 ):
     """A delayed camera lookup must not cause two disconnected replies."""
     import io
-    import wave
     import types
+    import wave
 
     module, bridge = native
     conn, _ = connection()
@@ -4847,8 +4847,8 @@ async def test_native_completed_audio_tool_result_reaches_same_model_audio_queue
 ):
     """Actual ASR receipt -> Mac look -> chat audio; old native PCM discarded."""
     import io
-    import wave
     import types
+    import wave
 
     module, bridge = native
     conn, _ = connection()

@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from desk_robot.api import create_app
 from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+from fastapi.testclient import TestClient
 
 
 def test_core_memory_is_private_persistent_small_and_separate_from_episodes(

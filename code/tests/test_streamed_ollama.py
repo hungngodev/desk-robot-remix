@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-
 from desk_robot.conversation import Conversation, KokoroHeadSpeaker, OllamaChat
 from desk_robot.streamed_ollama import ollama_speech_segments
 
