@@ -1,3 +1,27 @@
+# November 17 pilot purchasing clarification for parallel agents
+
+The user wants an actual first-robot shopping list, NOT repeated global
+purchase HOLD reports that make bench validation impossible. Canonical
+`code/scripts/procurement_release.py` now has a separate
+`--format pilot-samples-markdown` and `--format pilot-samples-json` mode,
+which lists known exact, inexpensive low-energy bench samples with historical
+quotes and links while displaying all unresolved roles. The existing
+`--format first-robot-markdown` and fleet release remain strict physical
+acceptance gates. **Never convert a pilot sample into final purchase, charging,
+loaded desk-edge motion, or five-robot approval** just because the supplier
+lists a chip. The module must have a verified exact PCB revision and
+electrical, optical, mechanical and budget fit. A battery pack, charging
+contact, watchdog PCB and moving motor have additional nonnegotiable gates.
+
+Pilot sourcing MUST preserve `SOURCE_REFERENCES` for the generated fleet CSV.
+The `PILOT_SAMPLE_PRODUCTS` table is independent. CI enforces the original
+fleet CSV and `test_pilot_supplier_rows_never_mutate_canonical_fleet_source_references`
+checks that source maps cannot be accidentally mixed. A quote of 40.27 USD
+is only the historical subtotal of those exact sample entries whose
+seller quotes were already denominated in USD. Two additional source candidates
+have no verified USD quote, and all shipping, tax and actual stock are unknown.
+This is a carefully scoped first build shopping action, not the final product.
+
 # 2026-11-17 uploaded multimodal audit: IMPLEMENTATION CONSTITUTION, not a replacement wiring plan
 
 The user supplied a 61 KB audit covering low-cost sensors, live Gemini models, proactive tools, memory, expressive face control, firmware and autonomous coding loops. Its roadmap is **research input**, not evidence of tested hardware. For every PR #17 iteration: inspect current source, exact commit, pinned upstream version and license; implement one bounded safe delta; add executable regression; run same-commit CI; preserve unresolved physical trials. Never mark code, hardware, pricing or a vendor feature verified on an unexecuted assertion. The canonical implementation is ONLY this draft PR #17 and branch `impl/mac-hardware-safety-preflight-2026-11-10`.
