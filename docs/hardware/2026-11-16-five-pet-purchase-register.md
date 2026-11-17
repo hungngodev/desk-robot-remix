@@ -16,6 +16,22 @@ The exact parent quantities are 42 pet/dock entries and 7 shared station entries
 
 **Critical compatibility stop conditions:** The proposed protected 1S pack length of 86 mm exceeds the default 68 mm battery tray envelope; the charger thermistor TS pin and third wire must be designed, measured and tested rather than bypassed. The SparkFun PRT-13777 Battery Babysitter already contains a BQ27441 fuel gauge, so pairing it with a separate MAX17048 is redundant unless the architecture explicitly replaces the gauge. The source release guard also rejects other declared integrated BQ27441/MAX17048 carriers with duplicate separate MAX17048. Verify the selected 2W rectangular Challenge speaker has an acoustically sound mounted enclosure, acceptable sustained temperature and amplifier gain at the fixed 5V rail, and validate safe recessed charging contacts. See [TI BQ24075](https://www.ti.com/product/BQ24075), [SparkFun Battery Babysitter source and schematic](https://github.com/sparkfun/Battery_Babysitter), and [ST VL53L0X](https://www.st.com/resource/datasheet/vl53l0x.pdf) as primary silicon and upstream references, **not** claims that a cheap uninspected clone is electrically compatible.
 
+
+**November 17 exact short-pack rejection:** LP103650 is **not** a fit-safe
+replacement for the rejected 86 mm LPHD7430085. Its own manufacturer lists
+assembled dimensions 10 × 36 × 51 mm, which exceed the provisional battery
+tray's 35 mm width **before** the 1 mm per-side clearance modeled by
+\`screen_protected_pack\`. The published **maximum discharge current is 2 A**;
+our deliberately conservative 3 A at 5 V active load scenario requires about
+7.65 A at the low 1S voltage (including margin). It fails BOTH width and
+current gates. Do NOT buy five, and do not mistake capacity 2000 mAh for
+current capability. Manufacturer source:
+https://www.lipobattery.us/3-7v-lipo-battery-lp103650-2000mah-7-4wh-with-pcm-and-wires-and-ntc-and-2510-3p/
+Compact alternatives such as the THOR-103048 may fit geometrically but their
+actual protected-pack peak, continuous, PCM trip, wire, connector and NTC
+ratings are not established by footprint alone. The existing first-robot
+bench cart intentionally contains NO lithium pack purchase.
+
 ## Five identical pet and dock core roles
 
 | Role | Part and current seller candidate | Per pet | Five needed | Reported owned | Estimated owned | Ordered | Fleet gap if estimate confirmed | Pilot | Quote each | Purchase gate |

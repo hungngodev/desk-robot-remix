@@ -922,3 +922,26 @@ def test_stack_requires_disarmed_motors_and_actual_pack_volume():
     cfg["pack_mm"] = (50, 30, 10)
     cfg["pack_sustained_a"] = None
     assert not one_stack(**cfg)["all_power_stages_compatible_on_paper"]
+
+
+
+def test_published_lp103650_short_pack_is_still_too_wide_and_underrated():
+    """A shorter 51 mm pack is not a substitute for validated geometry/current.
+
+    Published LP103650 protected 1S: 10 x 36 x 51 mm, 2 A maximum discharge.
+    Source: lipobattery.us LP103650 page. Model 68 x 35 x 14 mm tray from
+    docs/cad/remixes/remaining_fit_gauges.scad, 1 mm side clearances,
+    and original conservative 3 A @5V, 3 V low-cell, 85% boost.
+    """
+    requirement = tool(3.0, 1.8, cell_low_v=3.0,
+                       measured_boost_efficiency=0.85)
+    verdict = pack_screen(
+        requirement, pack_length_mm=51, pack_width_mm=36,
+        pack_thickness_mm=10, tray_length_mm=68, tray_width_mm=35,
+        tray_height_mm=14, rated_peak_discharge_a=2.0,
+        rated_continuous_discharge_a=2.0, pcm_overcurrent_trip_a=2.0)
+    assert requirement["minimum_rated_cell_and_boost_input_a"] > 7.6
+    assert verdict["assembled_pack_fits_tray_on_paper"] is False
+    assert verdict["current_sufficient_on_paper"] is False
+    assert verdict["candidate_usable_on_paper"] is False
+    assert verdict["candidate_physically_qualified"] is False
