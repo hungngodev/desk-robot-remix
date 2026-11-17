@@ -750,6 +750,16 @@ PILOT_SAMPLE_PRODUCTS = {
         "ElectroPeak", "COM-05-093",
         "https://electropeak.com/mcp23017-e-ss-16-channel-i-o-expansion-module-i2c-interface",
         1, 4.50),
+
+    "amp": (
+        "MAX98357A I2S mono amplifier", "DFRobot", "DFR0954",
+        "https://www.digikey.com/en/products/detail/dfrobot/DFR0954/18069273",
+        1, None),  # Documented MAX98357A board; current checkout unknown.
+    "bumper": (
+        "Normally closed micro bumper switch",
+        "Aratas / former Omron", "D2F-01L3",
+        "https://www.digikey.com/en/products/detail/aratas-formerly-omron-components/D2F-01L3/368448",
+        2, None),  # SPDT NC/COM must be wired; real on-chassis fit unknown.
     "speaker": ("Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker",
                 "Challenge Electronics", "CS20-02P110-04-1X",
                 "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069", 1, 3.24),
