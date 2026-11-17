@@ -45,6 +45,38 @@ _PACKS = {
         "connector": "JST SHR-03V-S 30AWG", "connector_continuous_a": 0.86,
         "lead_continuous_a": 0.86,
     },
+    "VARTA-VAR56653502013": {
+        "source": "https://my.avnet.com/wcm/connect/ccae6ad7-8e6a-4cc7-a362-0c6336823708/AvA-Standard-Batteries-EN-Brochure.pdf",
+        "size_mm": (70.0, 38.0, 21.0),
+        "continuous_a": 2.5, "max_discharge_a": 2.5,
+        "ntc": "10k", "pcm": True,
+        "connector": "Molex 5264-0300 with 5263-PBT terminals / 22AWG",
+        "connector_continuous_a": None, "lead_continuous_a": None,
+    },
+    "LITECH-LP1S2P2A2AL005": {
+        "source": "https://litechpower.com/product/litech-power-1s2p-3-7v-5-2ah-battery-pack-lp1s2p2a2al005/",
+        "size_mm": (66.0, 39.0, 20.0),
+        "continuous_a": 2.0, "max_discharge_a": 3.0,
+        "ntc": "10k", "pcm": True,
+        "connector": "20AWG open ends, terminal not chosen",
+        "connector_continuous_a": None, "lead_continuous_a": None,
+    },
+    "BATTERYSPACE-CU-JAS427": {
+        "source": "https://www.batteryspace.com/polymer-li-ion-battery-pack-3-7v-3000mah-11-1wh-5a-rate.aspx",
+        "size_mm": (66.5, 37.5, 14.5),  # +1.5mm maker dimensional tolerance
+        "continuous_a": None, "max_discharge_a": 5.0,
+        "ntc": "10k", "pcm": True,
+        "connector": "6in 22AWG open ends, terminal not chosen",
+        "connector_continuous_a": None, "lead_continuous_a": None,
+    },
+    "THOR-18650-1S2P-5200": {
+        "source": "https://thorbattery.com/product/thor-18650-1s2p-5200/",
+        "size_mm": (65.0, 37.0, 18.4),  # BARE PACK; unfinished PCM adds volume
+        "continuous_a": None, "max_discharge_a": 10.4,
+        "ntc": "optional", "pcm": True,
+        "connector": "Default PH2.0; optional NTC and PCM current are unspecified",
+        "connector_continuous_a": None, "lead_continuous_a": None,
+    },
     "PR-CU-R512-Molex-26AWG": {
         "source": "https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx",
         "size_mm": (68.0, 50.0, 7.0),
@@ -112,6 +144,11 @@ def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
         reasons.append("exact_connector_or_lead_ampacity_missing")
     elif not harness_ok:
         reasons.append("exact_connector_or_lead_ampacity_insufficient")
+    if src["ntc"] != "10k":
+        reasons.append("pack_ntc_10k_not_fitted_in_exact_variant")
+    if model == "THOR-18650-1S2P-5200":
+        reasons.append("bare_cell_envelope_not_complete_protected_pack")
+        reasons.append("pcm_current_limit_and_connector_configuration_unselected")
     reasons += ["charger_ntc_circuit_not_qualified",
                 "physical_power_and_fit_trials_not_executed"]
     return {
