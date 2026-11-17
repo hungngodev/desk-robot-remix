@@ -82,6 +82,7 @@ int main() {
     std::uint8_t failed_zones = 0x5A;
     CHECK(!cap_failed_write.poll(100, failed_zones));
     CHECK(cap_failed_write_wire.cap_register_end_calls == before_cap_ends + 1);
+    CHECK(cap_failed_write_wire.cap_failed_write_stops == 1);
     CHECK(cap_failed_write_wire.cap_register_requests == before_cap_requests);
     CHECK(failed_zones == 0x5A);
     CHECK(!cap_failed_write.verified());
