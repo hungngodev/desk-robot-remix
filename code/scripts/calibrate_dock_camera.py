@@ -107,8 +107,14 @@ def fit_corners(
 
 def calibrate_images(folder: Path, *, columns: int, rows: int,
                      square_mm: float, tag_side_mm: float,
-                     marker_id: int, target_distance_mm: float) -> dict:
+                     marker_id: int, target_distance_mm: float,
+                     camera_sensor_pid: str) -> dict:
     """Require original same-mode JPEGs with many real board placements."""
+    # Seeed has shipped both OV3660 and OV5640 Sense cameras. A candidate
+    # produced without a recorded physical sensor identity cannot be reused
+    # across the two modules even at identical JPEG dimensions.
+    if camera_sensor_pid not in ("OV3660", "OV5640"):
+        raise ValueError("Record actual XIAO camera sensor PID: OV3660 or OV5640")
     import cv2
     import numpy as np
 
@@ -146,6 +152,10 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
         tag_side_mm=tag_side_mm, marker_id=marker_id,
         target_distance_mm=target_distance_mm,
     )
+    candidate["camera_sensor_pid"] = camera_sensor_pid
+    # Caller supplied identity remains unverified until a live device PID
+    # receipt is compared against it. No authority is granted by this string.
+    candidate["camera_pid_runtime_verified"] = False
     candidate["input_jpegs"] = len(files)
     candidate["rejected_checkerboard_views"] = len(files) - len(views)
     return candidate
@@ -163,11 +173,16 @@ def main() -> None:
     parser.add_argument("--tag-side-mm", type=float, required=True)
     parser.add_argument("--marker-id", type=int, required=True)
     parser.add_argument("--target-distance-mm", type=float, required=True)
+    parser.add_argument(
+        "--camera-sensor-pid", required=True, choices=("OV3660", "OV5640"),
+        help="Record the actual XIAO camera PID from the physical module",
+    )
     args = parser.parse_args()
     candidate = calibrate_images(
         args.images, columns=args.columns, rows=args.rows,
         square_mm=args.square_mm, tag_side_mm=args.tag_side_mm,
         marker_id=args.marker_id, target_distance_mm=args.target_distance_mm,
+        camera_sensor_pid=args.camera_sensor_pid,
     )
     with args.output.open("x", encoding="utf-8") as file:
         json.dump(candidate, file, indent=2)
