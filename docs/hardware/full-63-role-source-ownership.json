@@ -1,0 +1,389 @@
+{
+  "schema_version": 1,
+  "description": "Exact source owners for the 42 robot/dock roles, 7 shared station roles and 14 overlapping linked decisions. Source code presence and host test existence do not prove executable, mechanical, electrical, or physical qualification.",
+  "generated_from": "docs/hardware/full-feature-plan.json",
+  "pet_roles": {
+    "xiao_sense": {
+      "source": "code/firmware/head/sense/desk_robot_sense.cc",
+      "host_test": "code/firmware/head/tests/test_sense.py",
+      "source_state": "head_camera_mic_firmware",
+      "remaining_qualification": "camera,microphone,pins,PSRAM/audio stress"
+    },
+    "wroom": {
+      "source": "code/firmware/body/src/main.cpp",
+      "host_test": "code/firmware/body/tests/body_tests.cpp",
+      "source_state": "local_motor_safety_source",
+      "remaining_qualification": "final board revision,pin and power"
+    },
+    "oled": {
+      "source": "code/firmware/head/sense/desk_robot_sense.cc",
+      "host_test": "code/firmware/head/tests/test_sense.py",
+      "source_state": "head_display_firmware",
+      "remaining_qualification": "display PCB,bezel,flex clearance"
+    },
+    "stepper": {
+      "source": "code/firmware/body/lib/StepperDrive/StepperDrive.cpp",
+      "host_test": "code/firmware/body/tests/stepper_tests.cpp",
+      "source_state": "exclusive_legacy_motor_source",
+      "remaining_qualification": "alternative DC or stepper torque and footprint"
+    },
+    "uln2003": {
+      "source": "code/firmware/body/src/main.cpp",
+      "host_test": "code/firmware/body/tests/guarded_body_tests.cpp",
+      "source_state": "exclusive_legacy_motor_source",
+      "remaining_qualification": "legacy coil current and independent fault state"
+    },
+    "mg90s": {
+      "source": "code/firmware/body/src/main.cpp",
+      "host_test": "code/firmware/body/tests/body_tests.cpp",
+      "source_state": "servo_output_source",
+      "remaining_qualification": "actual torque,horn sweep and stall current"
+    },
+    "imu": {
+      "source": "code/firmware/body/lib/BerryImu/BerryImu.cpp",
+      "host_test": "code/firmware/body/tests/berry_imu_tests.cpp",
+      "source_state": "identity_and_readonly_source",
+      "remaining_qualification": "exact IMU silicon and orientation calibration"
+    },
+    "head_touch": {
+      "source": "code/firmware/body/src/main.cpp",
+      "host_test": "code/firmware/body/tests/body_tests.cpp",
+      "source_state": "local_touch_stop_source",
+      "remaining_qualification": "3.3V OUT and pad mounting"
+    },
+    "max30102": {
+      "source": "code/firmware/body/lib/PulsePad/PulsePad.cpp",
+      "host_test": "code/firmware/body/tests/pulse_raw_tests.cpp",
+      "source_state": "optical_raw_source",
+      "remaining_qualification": "3.3V carrier, optical light baffle and calibration"
+    },
+    "cliff_obstacle": {
+      "source": "code/firmware/body/lib/TofBus/TofBus.cpp",
+      "host_test": "code/firmware/body/tests/tof_mux_tests.cpp",
+      "source_state": "local_guarded_ranger_source",
+      "remaining_qualification": "actual 3.3V level, dark floor and stopping margin"
+    },
+    "i2c_mux": {
+      "source": "code/firmware/body/lib/TofBus/TofBus.cpp",
+      "host_test": "code/firmware/body/tests/tof_mux_tests.cpp",
+      "source_state": "two_mux_source",
+      "remaining_qualification": "exact 0x70 and 0x71 breakout pullups"
+    },
+    "amp": {
+      "source": "code/firmware/head/sense/sense_reference_codec.cc",
+      "host_test": "code/firmware/head/tests/test_sense.py",
+      "source_state": "native_i2s_audio_source",
+      "remaining_qualification": "gain,rail and electrical bypass,voice cancellation"
+    },
+    "speaker": {
+      "source": "docs/cad/remixes/speaker_rect_fit_gauge.scad",
+      "host_test": "code/tests/test_export_fit_kit.py",
+      "source_state": "speaker_fit_reference_only",
+      "remaining_qualification": "sealed acoustic enclosure,2W heat and mic coupling"
+    },
+    "cap1188": {
+      "source": "code/firmware/body/lib/ExpansionTouch/ExpansionTouch.cpp",
+      "host_test": "code/firmware/body/tests/optional_i2c_io_tests.cpp",
+      "source_state": "touch_driver_source",
+      "remaining_qualification": "generic 0x29 carrier and electrode EMI"
+    },
+    "touch_electrodes": {
+      "source": "docs/cad/remixes/one_robot_adapter_kit.scad",
+      "host_test": "code/tests/test_assembly_harness.py",
+      "source_state": "passive_bom_geometry_only",
+      "remaining_qualification": "electrode pad size,insulation and noise"
+    },
+    "apds9960": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/accessory_math_tests.cpp",
+      "source_state": "optional_gesture_source",
+      "remaining_qualification": "electrical carrier,stream calibration"
+    },
+    "fsr": {
+      "source": "code/laptop/src/desk_robot/grasp_feedback.py",
+      "host_test": "code/tests/test_grasp_feedback.py",
+      "source_state": "closed_loop_host_source",
+      "remaining_qualification": "FSR transfer,grip mechanics and wiring"
+    },
+    "ads1115": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/optional_i2c_io_tests.cpp",
+      "source_state": "adc_driver_source",
+      "remaining_qualification": "exact gain,wiring and sensor impedance"
+    },
+    "rgb": {
+      "source": "code/firmware/head/sense/desk_robot_sense.cc",
+      "host_test": "code/firmware/head/tests/test_sense.py",
+      "source_state": "opt_in_rgb_source",
+      "remaining_qualification": "5V logic buffer and SD J3 physical separation"
+    },
+    "logic_level": {
+      "source": "code/firmware/head/sense/config.h",
+      "host_test": "code/tests/test_assembly_harness.py",
+      "source_state": "physical_electronics_only",
+      "remaining_qualification": "actual AHCT buffer carrier not connected yet"
+    },
+    "as5600": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/accessory_math_tests.cpp",
+      "source_state": "angle_driver_source",
+      "remaining_qualification": "three diametric magnet geometries"
+    },
+    "encoder_magnets": {
+      "source": "docs/cad/remixes/one_robot_adapter_kit.scad",
+      "host_test": "code/tests/test_assembly_harness.py",
+      "source_state": "passive_bom_geometry_only",
+      "remaining_qualification": "magnet diametric direction and shaft air gap"
+    },
+    "ina226": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/optional_i2c_io_tests.cpp",
+      "source_state": "readonly_power_telemetry_source",
+      "remaining_qualification": "external shunt ampacity and conversion"
+    },
+    "max17048": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/optional_i2c_io_tests.cpp",
+      "source_state": "readonly_fuel_source",
+      "remaining_qualification": "avoid double gauge with integrated BQ27441"
+    },
+    "cap_power": {
+      "source": "code/scripts/power_preflight.py",
+      "host_test": "code/tests/test_power_preflight.py",
+      "source_state": "power_calculator_not_schematic",
+      "remaining_qualification": "pack,PCM,connector,NTC,charge and boost circuit missing"
+    },
+    "sensor_3v3": {
+      "source": "code/scripts/emit_wiring_manifest.py",
+      "host_test": "code/tests/test_i2c_electrical_preflight.py",
+      "source_state": "power_harness_signal_only",
+      "remaining_qualification": "regulator current and thermal calculation"
+    },
+    "switch_power": {
+      "source": "code/scripts/emit_wiring_manifest.py",
+      "host_test": "code/tests/test_xiao_power_integrity.py",
+      "source_state": "power_harness_signal_only",
+      "remaining_qualification": "fuse,keyed 5V/3V3 wiring and USB backfeed"
+    },
+    "bumper": {
+      "source": "code/firmware/body/src/main.cpp",
+      "host_test": "code/firmware/body/tests/body_tests.cpp",
+      "source_state": "local_nc_bumper_source",
+      "remaining_qualification": "real NC contact and external pullup"
+    },
+    "reed": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/optional_i2c_io_tests.cpp",
+      "source_state": "optional_gpio_read_source",
+      "remaining_qualification": "exact 3.3V reed polarity"
+    },
+    "pir": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/optional_i2c_io_tests.cpp",
+      "source_state": "optional_gpio_read_source",
+      "remaining_qualification": "3.3V input,carrier supply and trigger"
+    },
+    "bmp280": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/accessory_math_tests.cpp",
+      "source_state": "environment_driver_source",
+      "remaining_qualification": "exact breakout and compensation trim"
+    },
+    "sht41": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/accessory_math_tests.cpp",
+      "source_state": "environment_driver_source",
+      "remaining_qualification": "I2C pullup,CRC,carrier availability"
+    },
+    "pn532": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/pn532_frames_tests.cpp",
+      "source_state": "read_only_nfc_source",
+      "remaining_qualification": "I2C mode,address,IRQ and 3.3V carrier"
+    },
+    "mcp23017": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/haptic_mcp_bus_tests.cpp",
+      "source_state": "dock_gpio_haptic_source",
+      "remaining_qualification": "reset-safe GPIO,IODIR and power"
+    },
+    "haptic_motor": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/firmware/body/tests/haptic_pulse_tests.cpp",
+      "source_state": "opt_in_haptic_source",
+      "remaining_qualification": "actual 3V coin stall and timer"
+    },
+    "haptic_driver": {
+      "source": "docs/hardware/haptic-one-shot-wiring.md",
+      "host_test": "code/tests/test_haptic_wiring_contract.py",
+      "source_state": "external_hardware_timing_unverified",
+      "remaining_qualification": "74HC123 timer,A03400,transient and motor heat"
+    },
+    "dock_ir_receivers": {
+      "source": "code/firmware/body/lib/TerminalIr/TerminalIr.cpp",
+      "host_test": "code/firmware/body/tests/terminal_ir_tests.cpp",
+      "source_state": "read_only_dual_nec_source",
+      "remaining_qualification": "directional baffles and latency"
+    },
+    "dock_ir_beacon_controller": {
+      "source": "code/firmware/dock/src/main.cpp",
+      "host_test": "code/tests/test_dock_beacon_reference.py",
+      "source_state": "dock_beacon_firmware_source",
+      "remaining_qualification": "exact Nano boot/timing and dock 5V supply"
+    },
+    "dock_ir_emitter_channels": {
+      "source": "code/firmware/dock/src/main.cpp",
+      "host_test": "code/tests/test_dock_beacon_reference.py",
+      "source_state": "dock_beacon_firmware_source",
+      "remaining_qualification": "2 transistor LED channels optical current"
+    },
+    "dock_contacts": {
+      "source": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "host_test": "code/tests/test_dock_charge_pins.py",
+      "source_state": "readonly_contact_detection_only",
+      "remaining_qualification": "recessed safe contacts,charge/NTC circuit not implemented"
+    },
+    "dock_fixture": {
+      "source": "docs/cad/remixes/dock/dock_passive_fit.scad",
+      "host_test": "code/tests/test_export_fit_kit.py",
+      "source_state": "passive_dock_adapter_only",
+      "remaining_qualification": "keyed printed cradle,charge contacts and baffle align"
+    },
+    "assembly": {
+      "source": "docs/cad/remixes/fusion_assembly_scaffold.py",
+      "host_test": "code/tests/test_fusion_scaffold.py",
+      "source_state": "cad_scaffold_not_assembly",
+      "remaining_qualification": "no fitted sealed chassis,gears,holes and connectors"
+    }
+  },
+  "room_roles": {
+    "scd40": {
+      "source": "code/firmware/room_station/src/main.cpp",
+      "host_test": "code/tests/test_room_station.py",
+      "source_state": "station_read_only_source",
+      "remaining_qualification": "board voltage and live CO2 refresh"
+    },
+    "bme688": {
+      "source": "code/firmware/room_station/src/main.cpp",
+      "host_test": "code/tests/test_room_station.py",
+      "source_state": "station_read_only_source",
+      "remaining_qualification": "gas warmup and ventilation not VOC ppm"
+    },
+    "ld2410c": {
+      "source": "code/firmware/room_station/src/main.cpp",
+      "host_test": "code/tests/test_room_station.py",
+      "source_state": "station_read_only_source",
+      "remaining_qualification": "UART 256k and radar carrier voltage"
+    },
+    "soil_probe": {
+      "source": "code/firmware/room_station/src/soil_sample.h",
+      "host_test": "code/tests/test_room_station_full_profile.py",
+      "source_state": "full_profile_soil_source",
+      "remaining_qualification": "A0 actual 3.3V analog,wet/dry per sensor"
+    },
+    "nfc_game_props": {
+      "source": "code/laptop/src/desk_robot/handling.py",
+      "host_test": "code/tests/test_handling_integration.py",
+      "source_state": "host_nfc_game_logic_source",
+      "remaining_qualification": "10 physical tags and readable antenna"
+    },
+    "amg8833": {
+      "source": "code/firmware/room_station/src/thermal_pixels.h",
+      "host_test": "code/firmware/room_station/tests/thermal_pixels_tests.cpp",
+      "source_state": "station_thermal_source",
+      "remaining_qualification": "real AMG8833 array and temperature"
+    },
+    "room_controller": {
+      "source": "code/firmware/room_station/src/main.cpp",
+      "host_test": "code/tests/test_room_station.py",
+      "source_state": "station_usb_source",
+      "remaining_qualification": "Feather hardware,cables and pin budgets"
+    }
+  },
+  "linked_roles": {
+    "n20_motor_candidate": {
+      "source": "code/firmware/body/platformio.ini",
+      "host_test": "code/firmware/body/tests/guarded_body_tests.cpp",
+      "source_state": "alternate_dc_firmware_only",
+      "remaining_qualification": "motor torque,stall and gear fit"
+    },
+    "drv8833_driver_candidate": {
+      "source": "docs/hardware/dc-motor-independent-watchdog.md",
+      "host_test": "code/tests/test_dc_motor_watchdog_contract.py",
+      "source_state": "alternate_dc_firmware_only",
+      "remaining_qualification": "nSLEEP external cutoff and GPIO23 exclusive wiring"
+    },
+    "bq24075_charger_candidate": {
+      "source": "code/scripts/power_preflight.py",
+      "host_test": "code/tests/test_power_preflight.py",
+      "source_state": "charger_paper_screen_only",
+      "remaining_qualification": "exact NTC TS and max docked OUT voltage"
+    },
+    "boost_5v_candidate": {
+      "source": "code/scripts/power_preflight.py",
+      "host_test": "code/tests/test_power_preflight.py",
+      "source_state": "boost_paper_screen_only",
+      "remaining_qualification": "regulator 3V low cell input plus 5.6V docked"
+    },
+    "protected_ntc_pack": {
+      "source": "code/scripts/screen_vendor_battery_harness.py",
+      "host_test": "code/tests/test_vendor_battery_harness.py",
+      "source_state": "pack_paper_screen_only",
+      "remaining_qualification": "protected fit and exact cable connector thermistor"
+    },
+    "dock_5v_adapter": {
+      "source": "code/scripts/power_preflight.py",
+      "host_test": "code/tests/test_power_preflight.py",
+      "source_state": "dock_adapter_paper_screen_only",
+      "remaining_qualification": "adapter current,input protection and output safety"
+    },
+    "dock_ir_transistor_channels": {
+      "source": "code/firmware/dock/src/main.cpp",
+      "host_test": "code/tests/test_dock_beacon_reference.py",
+      "source_state": "dock_driver_source_only",
+      "remaining_qualification": "transistor 940nm IR current and bias"
+    },
+    "shared_room_controller": {
+      "source": "code/firmware/room_station/platformio.ini",
+      "host_test": "code/tests/test_room_station_full_profile.py",
+      "source_state": "shared_feather_firmware_only",
+      "remaining_qualification": "existing Feather board still uninspected"
+    },
+    "room_scd40": {
+      "source": "code/firmware/room_station/src/main.cpp",
+      "host_test": "code/tests/test_room_station.py",
+      "source_state": "station_read_only_source",
+      "remaining_qualification": "exact SCD40 revision and address"
+    },
+    "room_bme688": {
+      "source": "code/firmware/room_station/src/main.cpp",
+      "host_test": "code/tests/test_room_station.py",
+      "source_state": "station_read_only_source",
+      "remaining_qualification": "exact breakout I2C and heater power"
+    },
+    "room_ld2410c": {
+      "source": "code/firmware/room_station/src/main.cpp",
+      "host_test": "code/tests/test_room_station.py",
+      "source_state": "station_read_only_source",
+      "remaining_qualification": "UART logic, 256k timing and supply"
+    },
+    "room_amg8833": {
+      "source": "code/firmware/room_station/src/thermal_pixels.h",
+      "host_test": "code/firmware/room_station/tests/thermal_pixels_tests.cpp",
+      "source_state": "station_thermal_source",
+      "remaining_qualification": "board pinout and supplier selection"
+    },
+    "room_soil_probe": {
+      "source": "code/firmware/room_station/src/soil_sample.h",
+      "host_test": "code/tests/test_soil_calibration.py",
+      "source_state": "station_soil_source",
+      "remaining_qualification": "3.3V probe and measured wet/dry"
+    },
+    "room_nfc_game_tokens": {
+      "source": "code/laptop/src/desk_robot/handling.py",
+      "host_test": "code/tests/test_handling_integration.py",
+      "source_state": "nfc_host_logic_source",
+      "remaining_qualification": "10 tags,PN532 working antenna"
+    }
+  }
+}
