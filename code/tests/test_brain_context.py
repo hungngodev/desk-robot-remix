@@ -178,8 +178,13 @@ def test_latched_safety_fault_survives_tiny_live_context_and_newer_touch():
     # deque. The original authenticated fault timestamp must still survive.
     for n in range(20):
         hub.notify("robot-01", "touch_tap", now - 0.2 + n * 0.005)
-    assert not any(kind == "safety_fault" for kind, _ in
+    assert not any(kind in {"safety_fault", "human_voice"} for kind, _ in
                    hub.event_history["robot-01"])
+    recent = hub.recent_events("robot-01", now)
+    assert len(recent) == 6
+    assert {"safety_fault", "human_voice"} <= {e["kind"] for e in recent}
+    assert next(e for e in recent if e["kind"] == "human_voice")["source"] == "xiaozhi_vad"
+    assert hub.recent_events("robot-02", now) == []
     # Four slots, but many useful inputs. The local safety fault takes
     # precedence over lower value routine touch and camera context.
     timeline = hub.interaction_timeline("robot-01", now, limit=4)
@@ -197,6 +202,8 @@ def test_latched_safety_fault_survives_tiny_live_context_and_newer_touch():
                    hub.interaction_timeline("robot-01", now + 9, limit=4))
     hub.clear("robot-01")
     assert hub.latest_safety_fault["robot-01"] == float("-inf")
+    assert hub.voice_started_at["robot-01"] == float("-inf")
+    assert hub.recent_events("robot-01", now) == []
 
 
 def test_context_keeps_two_recent_spoken_clauses_without_evicting_tools():
