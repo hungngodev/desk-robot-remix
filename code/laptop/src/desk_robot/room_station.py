@@ -244,6 +244,8 @@ class RoomSerialFeed:
     def _read_port(self, running: Callable[[], bool]) -> None:
         import serial  # optional hardware-only pyserial package, no simulation
         with serial.Serial(self.port, baudrate=115200, timeout=.25) as port:
+            # Reset at real connection opening, not after a callback failure.
+            self.last_error = None
             decoder = RoomStationDecoder(soil_calibration=self.soil_calibration)
             while running():
                 line = port.readline(MAX_FRAME_BYTES + 1)
@@ -294,7 +296,6 @@ class RoomSerialFeed:
                         pass
                     raise asyncio.CancelledError
                 worker.result()
-                self.last_error = None
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
