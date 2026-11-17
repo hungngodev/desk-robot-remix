@@ -126,16 +126,19 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     bool reference_ready = false;
     uint32_t consecutive_missing = 0;
     uint32_t overwrite_count = 0;
+    bool newly_overwritten = false;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
         FillSilenceLocked(esp_timer_get_time());
+        const uint32_t previous_overwrites = reference_overwrite_reads_;
         reference_ready = ReadReferenceLocked(reference.data(), frames);
         consecutive_missing = consecutive_missing_reference_reads_;
         overwrite_count = reference_overwrite_reads_;
+        newly_overwritten = overwrite_count != previous_overwrites;
     }
-    // Log outside the codec ring mutex. An actual overwrite must never be
-    // silently reclassified as clean aligned AEC simply by filling zeroes.
-    if (overwrite_count != 0 &&
+    // Log outside the codec ring mutex only when the counter ADVANCES.
+    // Persistent failure state must not flood the audio task's logs.
+    if (newly_overwritten &&
         (overwrite_count == 1 || (overwrite_count % 32U) == 0U)) {
         ESP_LOGW("SenseAEC", "reference ring overwritten; %u compromised microphone reads; A2 integrity FAILED",
                  static_cast<unsigned>(overwrite_count));
