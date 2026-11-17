@@ -741,8 +741,12 @@ async def test_memory_tool_result_dropped_after_new_human_turn(
     result = await bridge_tools.desk_robot_memories(
         bridge_tools.registered_head, "key"
     )
-    assert "superseded" in result.result["error"]
-    assert "memories" not in result.result
+    # An obsolete read-only result must be completely silent, not returned
+    # to the LLM as an error string the new human turn could hear. The pinned
+    # Xiaozhi Action.NONE contract has no result and no response payload.
+    assert result.action == 1
+    assert result.result is None
+    assert result.response is None
 
 
 async def test_live_human_vad_cancels_hung_visual_tool_without_speaking_old_result(
