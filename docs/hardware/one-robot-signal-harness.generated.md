@@ -27,7 +27,7 @@ Signal-only list. Never infer a power source from a logic voltage.
 | WROOM GPIO17 TX | XIAO GPIO1 RX | UART 115200, 3.3V | Source allocated |
 | XIAO GND | WROOM GND | Common logic reference; power path unverified | Source allocated |
 | Fused rated 5V system boost through head branch Schottky anode | XIAO Sense 5V input at Schottky cathode | External to head ONLY, reversed current blocked from XIAO USB | Seeed official XIAO external 5V diode rule; exact diode current/heat HOLD |
-| Fused rated 5V motor/servo branch with local >=470uF rated bulk | MG90S lift/grip and motor driver VM power | Direct rated 5V branch, NEVER via XIAO 3V3 or USB/diode | 470uF proven on cgro00 XIAO servos, NOT sufficient-rating proof for this robot |
+| Fused rated 5V motor/servo branch with local >=470uF rated bulk | MG90S lift/grip and motor driver VM power | Direct rated 5V branch, NEVER via XIAO 3V3 or USB/diode | 470uF documented in cgro00 V2 servo wiring, NOT sufficient-rating proof for this robot |
 | Fused rated 5V audio branch, independent of XIAO diode | MAX98357A VIN with local 0.1uF + 10uF decoupling | Common ground; amplifier outputs floating differential | MAX98357A manufacturer datasheet bypass; current/acoustic tests HOLD |
 | WROOM GPIO21 SDA + GPIO22 SCL | MPU6050 + 0x70 + 0x71 mux inputs | 3.3V I2C; actual breakout pullups need checking | Source allocated |
 | WROOM GPIO34 | AT42QT1010 OUT | 3.3V input; external bias required on GPIO34 through GPIO39 | Source allocated |
@@ -73,7 +73,7 @@ Signal-only list. Never infer a power source from a logic voltage.
   WROOM, speaker and 3.3V sensors. Never power actuators through MCU GPIO.
 * Source-reused XIAO power isolation: Seeed 5V external input needs
   Schottky anode on fused boost and cathode on XIAO 5V pin.
-  cgro00/desk-robot uses 1N5817 + 470uF local 5V bulk for MG90S;
+  cgro00/desk-robot V2 docs use 1N5817 + 470uF 5V servo bulk;
   its two-servo supply rating is NOT sufficient evidence for our motors.
 * XIAO external 5V/VBUS requires manufacturer-compliant diode or
   verified power-path isolation from USB before simultaneous USB use.
