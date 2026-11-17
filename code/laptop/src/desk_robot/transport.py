@@ -104,7 +104,7 @@ class _MjpegFrames:
                     headers[key] = value
                 if headers.get("content-type") != "image/jpeg":
                     raise ValueError("MJPEG part is not JPEG")
-                def decimal(name: str) -> int:
+                def decimal(name: str, headers=headers) -> int:
                     value = headers[name]
                     if not 1 <= len(value) <= 20 or not value.isascii() or not value.isdecimal():
                         raise ValueError("Invalid MJPEG numeric header")
