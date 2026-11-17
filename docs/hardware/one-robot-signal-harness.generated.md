@@ -47,7 +47,7 @@ Signal-only list. Never infer a power source from a logic voltage.
 | Range TCA9548A 0x70 CH5 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
 | Range TCA9548A 0x70 CH6 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
 | Range TCA9548A 0x70 CH7 SDA/SCL | VL53L0X (0x29) | WROOM 3.3V logic ONLY; carrier VIN and external SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden | Unqualified carrier; DO NOT ENERGIZE before voltage checks |
-| Accessory TCA9548A 0x71 CH0 SDA/SCL | CAP1188 (0x28), MAX30102 paw pad (0x57) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
+| Accessory TCA9548A 0x71 CH0 SDA/SCL | CAP1188 (0x29), MAX30102 paw pad (0x57) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
 | Accessory TCA9548A 0x71 CH1 SDA/SCL | APDS9960 (0x39), AS5600 nose (0x36) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
 | Accessory TCA9548A 0x71 CH2 SDA/SCL | ADS1115 (0x48) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
 | Accessory TCA9548A 0x71 CH3 SDA/SCL | SHT41 (0x44), BMP280 (0x76) | Isolated 3.3V I2C lane; separately qualify GND/VCC | Source driver; physical carrier unqualified |
