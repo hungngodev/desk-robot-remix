@@ -30,7 +30,7 @@ Fleet means **five fully featured robots and five independent docks** plus **one
 | `apds9960` | APDS9960 gesture proximity color light module; [Soldered APDS9960 module](https://www.mouser.com/c/?q=APDS9960) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | CARRIER |
 | `fsr` | FSR402 type force sensing resistor; [SparkFun SEN 09375](https://www.sparkfun.com/force-sensitive-resistor-0-5.html) | 2 | 10 | 0 | 0 | 0 | 10 | 2 | $10.95 | FIT |
 | `ads1115` | ADS1115 4 channel ADC breakout; [Whadda WPI453](https://www.jameco.com/z/WPI453-Velleman-Velleman-4-Channel-ADS1115-16-Bit-ADC-I2C-Module-by-Whadda_2354647.html) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $17.95 | FIT |
-| `rgb` | Single diffused WS2812B RGB pixel; NOT SELECTED Module/carrier selection required | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | SOURCE / FIT |
+| `rgb` | Single diffused WS2812B RGB pixel; [SparkFun BOB 13282](https://www.sparkfun.com/sparkfun-rgb-led-breakout-ws2812b.html) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $1.50 | PILOT FIT |
 | `logic_level` | 74AHCT1G125 3.3V to 5V RGB buffer; [TI SN74AHCT1G125](https://www.ti.com/product/SN74AHCT1G125) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | CARRIER |
 | `as5600` | AS5600 magnetic rotary angle breakout; [Seeed 101020692](https://www.seeedstudio.com/Grove-12-bit-Magnetic-Rotary-Position-Sensor-AS5600-p-4192.html) | 3 | 15 | 0 | 0 | 0 | 15 | 3 | $6.50 | SHAFT FIT |
 | `encoder_magnets` | Diametric AS5600 compatible magnets; NOT SELECTED Module/carrier selection required | 3 | 15 | 0 | 0 | 0 | 15 | 3 | Unquoted | SOURCE / FIT |
@@ -43,7 +43,7 @@ Fleet means **five fully featured robots and five independent docks** plus **one
 | `reed` | Magnetic reed switch; NOT SELECTED Module/carrier selection required | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | SOURCE / FIT |
 | `pir` | PIR thermal motion sensor; NOT SELECTED Module/carrier selection required | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | SOURCE / FIT |
 | `bmp280` | BMP280 pressure and temperature module; NOT SELECTED Module/carrier selection required | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | SOURCE / FIT |
-| `sht41` | SHT41 humidity and temperature module; [Sensirion SHT41 populated carrier pending](https://sensirion.com/products/catalog/SHT41) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | Unquoted | CARRIER |
+| `sht41` | SHT41 humidity and temperature module; [7Semi SHT41 ES 13515](https://7semi.com/7semi-sht41-temperature-humidity-sensor-breakout-i2c-qwiic-sht41-breakout/) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $7.40 | OUT OF STOCK |
 | `pn532` | PN532 I2C NFC reader module with IRQ/reset pins; [Seeed 113020006](https://www.seeedstudio.com/Grove-NFC.html) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $17.50 | I2C MODE |
 | `mcp23017` | MCP23017 16 channel I2C GPIO expander; [Waveshare 15391](https://www.waveshare.com/mcp23017-io-expansion-board.htm) | 1 | 5 | 0 | 0 | 0 | 5 | 1 | $5.99 | 38x23 FIT |
 | `haptic_motor` | 3V coin vibration motor; NOT SELECTED Module/carrier selection required | 1 | 5 | 1 | 0 | 0 | 4 | 1 | Unquoted | SOURCE / FIT |
@@ -75,6 +75,12 @@ These extra purchase rows realize abstract BOM assemblies; do not count them as 
 | Room thermal 8x8 array | [SparkFun SEN 14607](https://www.sparkfun.com/sparkfun-grid-eye-infrared-array-breakout-amg8833-qwiic.html) | 1 | 1 | $49.95 | 1 | Exactly one station, no identity classification |
 | Optional capacitive soil probe | UNSELECTED 3.3V ADC variant | 1 | 1 | Unquoted | 0 | Shared station optional and disabled in firmware |
 | Optional NFC toy stickers | Generic NTAG213 | 10 | 10 | Unquoted | 0 | 10 game tokens optional, not access control |
+
+## Verified protected pack candidate and critical charging thermistor mismatch
+
+* [LiPol Battery Co. LPHD7430085](https://lipo-battery.com/high-rate-discharge-lipo-battery-lphd7430085-5a-3-7v-2000mah-7-4wh/) is a SPECIFIC candidate with 1S 3.7V 2000mAh, protection PCM, 10k NTC, listed 5A max discharge, 7.4 x 30 x 86 mm housing and **three-pin Molex 43645-0300**. This is NOT a purchasing approval because the printed chassis and battery cavity have no measured size, current or connector proof.
+* SparkFun [PRT-13777 Battery Babysitter](https://www.sparkfun.com/sparkfun-battery-babysitter-lipo-battery-manager.html) has a 2-pin LiPo connection and a published BQ24075 schematic which ties TS to a 10k bypass and gauge BIN. Its default design **must NOT be assumed to monitor the LPHD7430085 third-wire thermistor**. Source: [SparkFun schematic](https://github.com/sparkfun/Battery_Babysitter) and [TS discussion](https://community.sparkfun.com/t/battery-babysitter-unknow-connection-bq24075s-ts-pin-to-bq27441s-bin/40099). A qualified PCB level TS circuit, independent thermal protection and a properly keyed harness need design review before the battery and charger can become a full fleet order.
+* TI BQ24075 OUT is battery-domain system load, NOT a fixed 5V motor rail. Pololu #4082 maximum continuous 5V output depends on low-cell input voltage and actual thermal load. A printed mock-up and bench adapter can precede safely connected battery trials.
 
 ## Stop conditions before bulk purchase
 
