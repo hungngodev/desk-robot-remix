@@ -34,6 +34,9 @@ def test_full_wroom_xiao_signal_harness_matches_real_firmware():
     assert page.startswith("# One robot: firmware checked SIGNAL harness")
     assert "| WROOM GPIO13 | left ULN2003 IN1 |" in page
     assert "| WROOM GPIO23 | right ULN2003 IN4 |" in page
+    assert "| WROOM GPIO25 + GPIO26 | left DRV8833 AIN1/AIN2 (DC FULL only) |" in page
+    assert "| WROOM GPIO27 + GPIO32 | right DRV8833 BIN1/BIN2 (DC FULL only) |" in page
+    assert "Motor variants are mutually exclusive" in page
     assert "| XIAO GPIO2 TX | WROOM GPIO16 RX |" in page
     assert "| WROOM GPIO17 TX | XIAO GPIO1 RX |" in page
     assert "| WROOM GPIO18 | MG90S lift signal |" in page
@@ -75,6 +78,9 @@ def test_actual_pin_reassignment_fails_before_releasing_harness():
     wrong["bus"]["body_gpio"]["left_stepper"][0] = 4
     with pytest.raises(ValueError, match="Stepper phase pin drift"):
         harness.verify(wrong, body, sense)
+    with pytest.raises(ValueError, match="Guarded DC motor pin drift"):
+        harness.verify(plan, body.replace("constexpr int kLeftIn1 = 25;",
+                                          "constexpr int kLeftIn1 = 4;"), sense)
     with pytest.raises(ValueError, match="Missing or duplicate"):
         harness.verify(plan, body, sense.replace(
             "#define ROBOT_UART_RX GPIO_NUM_1", ""
