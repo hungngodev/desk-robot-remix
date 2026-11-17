@@ -32,6 +32,11 @@ SYSTEM_GATES = (
     "real_dual_ir_terminal_docking", "lift_and_grip_calibration",
     "sense_speaker_mic_double_talk", "five_robot_integration",
     "room_pod_usb_serial_and_five_pet_observers",
+    # Both are requested physical features, not merely reserved BOM slots.
+    # Existing optional RGB/haptic source and disabled room soil firmware
+    # must not quietly count as a finished five-pet purchase.
+    "rgb_and_haptic_real_device_effects_and_power",
+    "room_soil_probe_enabled_and_calibrated",
     "source_builds_and_tests",
     "user_approved_costed_exact_carrier_bill_of_materials",
     "source_first_upstream_reuse_and_license_audit",
