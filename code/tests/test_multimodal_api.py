@@ -1534,7 +1534,7 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
         entered, release = threading.Event(), threading.Event()
 
         class Head:
-            async def aux_status(self):
+            async def aux_status(self, route=route, entered=entered, release=release):
                 if route == "aux":
                     entered.set()
                     if not await asyncio.to_thread(release.wait, 3):
@@ -1547,7 +1547,9 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
 
         original_search = MemoryStore.search
 
-        def delayed_search(self, *args, **kwargs):
+        def delayed_search(self, *args, route=route, entered=entered,
+                           release=release, original_search=original_search,
+                           **kwargs):
             if route == "voice-context":
                 entered.set()
                 if not release.wait(3):
