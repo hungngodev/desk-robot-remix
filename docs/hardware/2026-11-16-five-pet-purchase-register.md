@@ -84,7 +84,28 @@ These extra purchase rows realize abstract BOM assemblies; do not count them as 
 | Optional capacitive soil probe | UNSELECTED 3.3V ADC variant | 1 | 1 | Unquoted | 0 | Shared station optional and disabled in firmware |
 | Optional NFC toy stickers | Generic NTAG213 | 10 | 10 | Unquoted | 0 | 10 game tokens optional, not access control |
 
-\nVendor gate notes: Select an inexpensive generic 5V 16MHz Nano ATmega328P-compatible board for the dock IR transmitter, not a Seeeduino priced by brand. Firmware platformio.ini already selects nanoatmega328 and upstream Arduino-IRremote; exact generic board still needs compiler, flash and 38kHz timing validation. It is NOT a battery charger or energized dock controller. The Seeed adjustable PIR reports active HIGH and thus matches the MCP23017 GPIOB1 firmware, unlike the SparkFun JST PIR active LOW. MPU6050 module I2C signal pullups must be checked against 3.3V before connecting WROOM.\n\n## Price and source-first purchase overrides
+\nVendor gate notes: Select an inexpensive generic 5V 16MHz Nano ATmega328P-compatible board for the dock IR transmitter, not a Seeeduino priced by brand. Firmware platformio.ini already selects nanoatmega328 and upstream Arduino-IRremote; exact generic board still needs compiler, flash and 38kHz timing validation. It is NOT a battery charger or energized dock controller. The Seeed adjustable PIR reports active HIGH and thus matches the MCP23017 GPIOB1 firmware, unlike the SparkFun JST PIR active LOW. MPU6050 module I2C signal pullups must be checked against 3.3V before connecting WROOM.\n\n## Actual source owner for every linked assembly detail
+
+This is a **source coverage and physical blocker map**, not a second purchasing table. A library import, a simulation, or an exact pin declaration does not mean the final manufactured part is calibrated or safe. Every line still requires the linked subassembly decision and source/part receipts in the purchasing gate.
+
+| Linked detail | Existing owner reused rather than a second implementation | Still required to release one physical design |
+| --- | --- | --- |
+| N20 two motor alternative | `code/firmware/body/lib/BodyControl/` guarded DC source and `esp32_dc_full` profile | Measure exact motor/current, track sprocket fit, loaded reversal, braking and edge margin before choosing over owned 28BYJ48 |
+| DRV8833 driver alternative | Existing guarded DC pin/actuator path, `BodyPins.h`, `emit_wiring_manifest.py` | Match generic PCB pin order, current, thermal and real undervoltage fault cutoff with chosen motors |
+| BQ24075 and BQ27441 charger alternative | TI/SparkFun [open schematic](https://github.com/sparkfun/Battery_Babysitter) and `code/scripts/power_preflight.py`; no charger PCB production implementation | Select single 1S charge gauge topology, connect actual pack NTC to charger TS, verify protected circuit and charge cutoff |
+| 5V switching regulator | `code/scripts/power_preflight.py` DC and docked input budget | Choose exact regulator, measured 1S minimum cell voltage, motor/head peaks, continuous boost efficiency and heat |
+| Protected NTC 1S pack | `docs/cad/remixes/remaining_fit_gauges.scad` printable nonpower fit gauge only | Existing 68 mm tray does NOT fit previously suggested 86 mm pack; choose true cell and keyed connector after fit, pack thermal and load proof |
+| Dock 5V adapter | Docked power budget in `power_preflight.py`; no production protected contact controller | Exact rated supply, cable voltage drop, contact isolation, fuse, reverse polarity, load and temperature measurement |
+| Two dock IR transistor channels | `code/firmware/dock/src/main.cpp` Arduino IRremote NEC bench beacon | Actual two 38 kHz emitter channels each need transistor/current limit, optical baffles, timing and simultaneous receive proof |
+| Shared room controller | `code/firmware/room_station/src/main.cpp` existing Feather nRF52840 source | Inspect allegedly owned exact Feather and USB/ADC/UART pin mapping, compile firmware and qualify one physical station |
+| SCD40 | Existing room station Sensirion driver integration | Verify exact 0x62 I2C carrier, rail, warmup, USB timestamp freshness, observed room CO2 |
+| BME688 | Existing room station BME680 compatible upstream library | Confirm exact 0x76 or 0x77 breakout, source variant, gas heater/thermal limits and values without fabricated VOC ppm |
+| LD2410C | Existing room station `ld2410` upstream UART driver | Verify 256000 baud, exact 3.3V logic and pin orientation, human presence trigger and false events |
+| AMG8833 | Existing room station AMG88xx upstream driver, shared only | Verify 0x69 bus and real thermal array values, avoid person identity claims; expensive optional station hardware remains HOLD |
+| Soil probe | `code/firmware/room_station/src/main.cpp` optional `ROOM_SOIL_FITTED=0` profile | Select inexpensive 3.3V capacitive ADC probe and verify humidity calibration, corrosion, routing and physical trigger |
+| NFC toy stickers | Existing WROOM PN532 bounded UID toy read and Mac private event flow | Verify actual sticker tag standard, reader distance, accessory 0x71 CH5 and consented play interactions; stickers do not grant robot identity or charge access |
+
+## Price and source-first purchase overrides
 
 No premium vendor breakout is approved merely because its chip driver exists. The marked high-cost CAP1188, FSR, ADS1115, AS5600, INA226, fuel-gauge, NFC and humidity carriers have **pilot quantity zero** while a cheap generic exact-chip alternative is compared on documented PCB schematic, 3.3V bus, physical fit, public upstream driver and landed total cost. They remain features in the design and code; zero pilot does not delete the feature.
 
