@@ -94,6 +94,84 @@ def size_5v_supply(
 
 
 
+def screen_protected_pack(
+    supply: dict,
+    *,
+    pack_length_mm: float,
+    pack_width_mm: float,
+    pack_thickness_mm: float,
+    tray_length_mm: float,
+    tray_width_mm: float,
+    tray_height_mm: float,
+    wire_relief_mm: float = 8.0,
+    side_clearance_mm: float = 1.0,
+    rated_peak_discharge_a: float | None = None,
+    rated_continuous_discharge_a: float | None = None,
+    pcm_overcurrent_trip_a: float | None = None,
+) -> dict:
+    """Screen a REAL assembled protected pack against the selected tray.
+
+    Reuse the pre-existing size_5v_supply electrical demand: do not confuse
+    nominal mAh, advertised '3C' pulse, or a charger current with continuous
+    cell discharge and its protection circuit trip point. The dimensions are
+    the entire protected, wired pack, not an unwrapped bare cell. Actual
+    bending, restraint, insulation, connector and NTC tests remain required.
+    """
+    if not isinstance(supply, dict) or not all(
+        _finite_number(supply.get(name)) and supply[name] > 0
+        for name in ("minimum_rated_cell_and_boost_input_a",
+                     "minimum_continuous_cell_input_a")
+    ):
+        raise ValueError("Provide measured-load 1S sizing report first")
+    dimensions = (pack_length_mm, pack_width_mm, pack_thickness_mm,
+                  tray_length_mm, tray_width_mm, tray_height_mm,
+                  wire_relief_mm, side_clearance_mm)
+    if (any(not _finite_number(x) for x in dimensions)
+            or any(x <= 0 for x in dimensions[:6])
+            or wire_relief_mm < 0 or side_clearance_mm < 0):
+        raise ValueError("Actual positive pack/tray dimensions and clearance required")
+    if any(x > 1000 for x in dimensions[:6]):
+        raise ValueError("Unrepresentable physical pack/tray envelope")
+    ratings = (rated_peak_discharge_a, rated_continuous_discharge_a,
+               pcm_overcurrent_trip_a)
+    if any(r is not None and (not _finite_number(r) or r <= 0) for r in ratings):
+        raise ValueError("Pack discharge and PCM ratings must be positive real amperes")
+    fits_flat = (
+        pack_thickness_mm + 2 * side_clearance_mm <= tray_height_mm
+        and any(
+            length + wire_relief_mm + 2 * side_clearance_mm <= tray_length_mm
+            and width + 2 * side_clearance_mm <= tray_width_mm
+            for length, width in (
+                (pack_length_mm, pack_width_mm),
+                (pack_width_mm, pack_length_mm),
+            )
+        )
+    )
+    ratings_complete = all(v is not None for v in ratings)
+    current_ok = None
+    if ratings_complete:
+        current_ok = (
+            Decimal(str(rated_peak_discharge_a)) >= Decimal(str(
+                supply["minimum_rated_cell_and_boost_input_a"]))
+            and Decimal(str(rated_continuous_discharge_a)) >= Decimal(str(
+                supply["minimum_continuous_cell_input_a"]))
+            and Decimal(str(pcm_overcurrent_trip_a)) >= Decimal(str(
+                supply["minimum_rated_cell_and_boost_input_a"]))
+        )
+    return {
+        "assembled_pack_fits_tray_on_paper": fits_flat,
+        "current_ratings_complete": ratings_complete,
+        "current_sufficient_on_paper": current_ok,
+        "candidate_usable_on_paper": fits_flat and current_ok if ratings_complete else None,
+        "minimum_cell_peak_a": supply["minimum_rated_cell_and_boost_input_a"],
+        "minimum_cell_continuous_a": supply["minimum_continuous_cell_input_a"],
+        "actual_pack_pcm_and_ntc_test_verified": False,
+        "charger_load_sharing_and_thermal_verified": False,
+        "printed_assembly_and_wire_relief_verified": False,
+        "candidate_physically_qualified": False,
+    }
+
+
 def assess_docked_load(
     measured_idle_5v_a: float,
     requested_cell_charge_a: float,
