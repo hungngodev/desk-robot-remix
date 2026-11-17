@@ -372,6 +372,57 @@ async def test_direct_visual_request_reserves_fleet_vlm_and_camera_until_finishe
         await visual.close()
 
 
+async def test_live_sensor_edge_reuses_stream_and_never_starts_competing_snapshot():
+    """A pet touch may wake the observer but must not fight live MJPEG ownership.
+
+    Pipecat/LiveKit-inspired source sampling: only the existing continuous
+    XIAO stream delivers frames. The real WROOM event remains a distinct
+    provenance cue, not an instruction to start another physical capture.
+    """
+    class LiveHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.frames_to_send = asyncio.Queue()
+
+        async def stream_frames(self):
+            while True:
+                frame = await self.frames_to_send.get()
+                yield frame, time.monotonic()
+
+    head = LiveHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        assert visual.stream_owns_camera("robot-01")
+        visual.sensor_event("robot-01", "paw_contact")
+        visual.sensor_event("robot-01", "petting_zone")
+        assert not visual.sensor_burst_pending("robot-01")
+        assert "robot-01" not in visual._sensor_tasks
+        assert visual._metrics["robot-01"]["sensor_stream_reuses"] == 2
+        # A selected video frame arrives AFTER the actual touch, without
+        # querying /api/camera.jpg or relabelling stream vision as a cliff.
+        await head.frames_to_send.put(image(square=True))
+        async with asyncio.timeout(2):
+            while not visual.hub.frames["robot-01"]:
+                await asyncio.sleep(.01)
+        assert visual.hub.frames["robot-01"][-1].source == "proactive"
+        assert head.captures == 0
+        assert [kind for kind, _ in visual.hub.recent_events(
+            "robot-01", time.monotonic()
+        )][-2:] == ["paw_contact", "petting_zone"]
+        # No stream frame or reconnection is a license to fall back to
+        # an incompatible single-shot capture path.
+        visual.sensor_event("robot-01", "paw_contact")
+        await asyncio.sleep(.04)
+        assert head.captures == 0
+        assert not visual.sensor_burst_pending("robot-01")
+    finally:
+        await visual.close()
+
+
 async def test_sensor_burst_uses_existing_camera_owner_and_coalesces_requests():
     heads = {"robot-01": Head(), "robot-02": Head()}
     visual = MultimodalOrchestrator(config(), heads, Vision(), asyncio.Lock())
