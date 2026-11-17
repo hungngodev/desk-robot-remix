@@ -114,7 +114,7 @@ def test_new_verified_large_pack_continuous_ratings_reject_false_10a_claims():
                             tray_mm=(115, 55, 30))
     litech = screen.evaluate("LITECH-LP1S2P2A2AL005", supply,
                              tray_mm=(115, 55, 30))
-    for report, sustained in ((varta, 2.5), (litech, 2.0)):
+    for report, _sustained in ((varta, 2.5), (litech, 2.0)):
         assert report["pack_fits_current_tray_on_paper"]
         assert report["pack_peak_within_published_max_on_paper"] is False
         assert report["pack_current_enough_on_paper"] is False
