@@ -530,9 +530,9 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
             "parts": {
                 part["id"]: {
                     **dict(passed),
-                    **dict(zip(("vendor", "sku"),
-                               mod.FIXED_SOURCE_SKUS[part["id"]]))
-                    if part["id"] in mod.FIXED_SOURCE_SKUS else {},
+                    **(dict(zip(("vendor", "sku"),
+                                mod.FIXED_SOURCE_SKUS[part["id"]]))
+                       if part["id"] in mod.FIXED_SOURCE_SKUS else {}),
                 }
                 for part in plan["parts"]
             },
@@ -647,8 +647,8 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
         "parts": {
             p["id"]: {
                 **dict(approved_part),
-                **dict(zip(("vendor", "sku"), mod.FIXED_SOURCE_SKUS[p["id"]]))
-                if p["id"] in mod.FIXED_SOURCE_SKUS else {},
+                **(dict(zip(("vendor", "sku"), mod.FIXED_SOURCE_SKUS[p["id"]]))
+                   if p["id"] in mod.FIXED_SOURCE_SKUS else {}),
             }
             for p in plan["parts"]
         },
