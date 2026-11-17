@@ -280,7 +280,32 @@ def main() -> None:
     parser.add_argument("--dock-boost-5v-continuous-a", type=float)
     parser.add_argument("--dock-pack-charge-max-a", type=float)
     parser.add_argument("--dock-motors-disarmed", action="store_true")
+    # Optional assembled protected-pack screening, tied to the existing 1S
+    # measured-load supply report. A seller photograph or nominal mAh is
+    # never proof of wire clearance, NTC wiring or PCM trip behavior.
+    parser.add_argument("--pack-length-mm", type=float)
+    parser.add_argument("--pack-width-mm", type=float)
+    parser.add_argument("--pack-thickness-mm", type=float)
+    parser.add_argument("--tray-length-mm", type=float)
+    parser.add_argument("--tray-width-mm", type=float)
+    parser.add_argument("--tray-height-mm", type=float)
+    parser.add_argument("--pack-wire-relief-mm", type=float, default=8.0)
+    parser.add_argument("--pack-side-clearance-mm", type=float, default=1.0)
+    parser.add_argument("--pack-peak-discharge-a", type=float)
+    parser.add_argument("--pack-continuous-discharge-a", type=float)
+    parser.add_argument("--pack-pcm-trip-a", type=float)
     args = parser.parse_args()
+    pack_dimensions = (
+        args.pack_length_mm, args.pack_width_mm, args.pack_thickness_mm,
+        args.tray_length_mm, args.tray_width_mm, args.tray_height_mm,
+    )
+    pack_ratings = (
+        args.pack_peak_discharge_a, args.pack_continuous_discharge_a,
+        args.pack_pcm_trip_a,
+    )
+    pack_requested = any(x is not None for x in pack_dimensions + pack_ratings)
+    if pack_requested and any(x is None for x in pack_dimensions):
+        parser.error("Pack mode requires all three assembled pack and tray dimensions")
     dock_inputs = (
         args.dock_idle_5v_a, args.dock_requested_charge_a, args.dock_sys_v,
         args.dock_boost_efficiency,
@@ -290,6 +315,8 @@ def main() -> None:
             parser.error("Dock mode requires idle current, charge current, SYS voltage and efficiency")
         if args.peak_5v_a is not None or args.continuous_5v_a is not None:
             parser.error("Use one mode: undocked peak load OR docked idle load")
+        if pack_requested:
+            parser.error("Pack geometry screening is for undocked load mode only")
         result = assess_docked_load(
             args.dock_idle_5v_a, args.dock_requested_charge_a,
             measured_sys_v=args.dock_sys_v,
@@ -314,6 +341,21 @@ def main() -> None:
             boost_continuous_output_a=args.boost_continuous_output_a,
             protected_cell_continuous_a=args.protected_cell_continuous_a,
         )
+        if pack_requested:
+            result["protected_pack_screen"] = screen_protected_pack(
+                result,
+                pack_length_mm=args.pack_length_mm,
+                pack_width_mm=args.pack_width_mm,
+                pack_thickness_mm=args.pack_thickness_mm,
+                tray_length_mm=args.tray_length_mm,
+                tray_width_mm=args.tray_width_mm,
+                tray_height_mm=args.tray_height_mm,
+                wire_relief_mm=args.pack_wire_relief_mm,
+                side_clearance_mm=args.pack_side_clearance_mm,
+                rated_peak_discharge_a=args.pack_peak_discharge_a,
+                rated_continuous_discharge_a=args.pack_continuous_discharge_a,
+                pcm_overcurrent_trip_a=args.pack_pcm_trip_a,
+            )
     print(json.dumps(result, indent=2))
 
 
