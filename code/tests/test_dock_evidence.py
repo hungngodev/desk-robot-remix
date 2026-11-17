@@ -210,3 +210,52 @@ async def test_uncooperative_dock_evidence_read_times_out_without_charge_claim(
         release.set()
         await asyncio.sleep(0)
     assert head.commands == []
+
+
+@pytest.mark.parametrize(("raw_ma", "expected"), [
+    (30, "into_pack_unqualified"),
+    (-30, "out_of_pack_unqualified"),
+    (0, "indeterminate"),
+])
+async def test_new_ina226_current_receipts_report_direction_without_charger_authority(
+    monkeypatch, raw_ma, expected,
+):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, data in enumerate(samples):
+        data["power"].update(
+            shunt_uv=raw_ma * 5,
+            pack_ma=raw_ma,
+            pack_valid=True,
+            pack_seq=index + 19,
+            monitor_valid=True,
+        )
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["state"] == "charger_reports_active"
+    assert result["stable_three_samples"]
+    assert result["raw_pack_direction"] == expected
+    assert result["raw_pack_samples_fresh"] is True
+    assert result["raw_pack_ma"] == [raw_ma] * 3
+    assert result["battery_current_measured"] is False
+    assert result["charging_verified"] is False
+    assert result["charging_authorized"] is False
+
+
+async def test_raw_pack_replay_cannot_forge_three_current_conversions(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for data in samples:
+        data["power"].update(
+            shunt_uv=150, pack_ma=30, pack_valid=True,
+            pack_seq=9, monitor_valid=True,
+        )
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["stable_three_samples"]  # independent dock pin samples pass
+    assert result["raw_pack_direction"] == "acquisition_replay"
+    assert result["raw_pack_samples_fresh"] is False
+    assert result["raw_pack_ma"] == []
+    assert result["charging_verified"] is False
