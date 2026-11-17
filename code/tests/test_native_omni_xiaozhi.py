@@ -539,15 +539,17 @@ async def test_opus_packet_timeout_includes_waiting_for_device_send_lock(
     if producer == "mac":
         module._external_speaker_owner = conn.device_id
         module._external_speaker_connection = conn
-        send = lambda: module.send_external_opus(conn, b"old-packet", 0)
+        def send():
+            return module.send_external_opus(conn, b"old-packet", 0)
     else:
         session = module.NativeOmniSession(
             conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
             model="openbmb/MiniCPM-o-4_5", token="p" * 32,
         )
-        send = lambda: session._send_device_opus(
-            b"old-packet", session._generation,
-        )
+        def send():
+            return session._send_device_opus(
+                b"old-packet", session._generation,
+            )
     async with module._external_device_send_lock(conn):
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(send(), timeout=0.85)
