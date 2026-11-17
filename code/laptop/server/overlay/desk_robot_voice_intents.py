@@ -281,7 +281,9 @@ def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
                 if (key in {"interpretation_not_proof", "untrusted_summary",
                             "summary"} and isinstance(item, str)
                         and len(item) > maximum):
-                    node[key] = item[:maximum]
+                    # An excerpt is not a full recollection or visual
+                    # description. Make truncation explicit to the model.
+                    node[key] = item[:maximum - 3].rstrip() + "..."
                 else:
                     shrink(item, maximum)
 
