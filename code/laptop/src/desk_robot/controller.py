@@ -390,8 +390,12 @@ class Coordinator:
                     job.result = await operation
                 job.state = "succeeded"
             except asyncio.CancelledError:
-                job.state = "cancelled"
-                job.error = "Operator cancelled"
+                # An operator STOP can already have failed at the transport.
+                # Cancellation of this Python task must never erase that
+                # stronger physical failure or claim the WROOM stopped.
+                if job.state != "failed":
+                    job.state = "cancelled"
+                    job.error = "Operator cancelled"
             except Exception as exc:
                 job.state = "failed"
                 job.error = str(exc) or type(exc).__name__
