@@ -1,10 +1,18 @@
 """A human speaking to one Sense preempts the shared fleet speech floor."""
 import asyncio
+import threading
 import time
 from types import SimpleNamespace
 
 import pytest
 from desk_robot.runtime import Runtime
+
+
+def configure_room_dispatch(runtime):
+    """A partial Runtime fixture still owns its bounded USB handoff state."""
+    runtime._room_dispatch_lock = threading.Lock()
+    runtime._room_dispatch_pending = None
+    runtime._room_dispatch_enqueued = False
 
 
 async def test_one_human_interrupt_preempts_other_pet_audio_too():
@@ -883,6 +891,7 @@ async def test_runtime_shutdown_attempts_other_owners_after_pet_cleanup_failure(
             events.append("client")
 
     runtime = Runtime.__new__(Runtime)
+    configure_room_dispatch(runtime)
     runtime.settings = SimpleNamespace(mode="simulation")
     runtime._voice_task = None
     runtime.coordinator = Coordinator()
@@ -922,6 +931,7 @@ async def test_runtime_shutdown_bounds_uncooperative_voice_monitor_and_continues
             events.append("client")
 
     runtime = Runtime.__new__(Runtime)
+    configure_room_dispatch(runtime)
     runtime.settings = SimpleNamespace(mode="simulation")
     runtime.coordinator = CloseOwner()
     runtime.pet = CloseOwner()
@@ -1020,6 +1030,7 @@ async def test_hardware_runtime_close_stops_all_native_speakers(failed_peer):
                 raise RuntimeError("decoder STOP failed")
 
     runtime = Runtime.__new__(Runtime)
+    configure_room_dispatch(runtime)
     runtime.settings = SimpleNamespace(mode="hardware", robots=[
         SimpleNamespace(id="robot-01", device_id="head01"),
         SimpleNamespace(id="robot-02", device_id="head02"),
@@ -1048,22 +1059,23 @@ async def test_hardware_runtime_close_stops_all_native_speakers(failed_peer):
 def test_room_usb_thread_callback_does_not_schedule_after_mac_shutdown():
     """A late read-only USB frame cannot reopen a closed Mac event loop."""
     runtime = Runtime.__new__(Runtime)
+    configure_room_dispatch(runtime)
     events = []
     observation = object()
     runtime._closed = False
     runtime._on_room_observation = lambda value: events.append(value)
 
     class Loop:
-        def call_soon_threadsafe(self, callback, value):
+        def call_soon_threadsafe(self, callback):
             events.append("scheduled")
-            callback(value)
+            callback()
 
     runtime._queue_room_observation(Loop(), observation)
     assert events == ["scheduled", observation]
     events.clear()
 
     class ClosedLoop:
-        def call_soon_threadsafe(self, callback, value):
+        def call_soon_threadsafe(self, callback):
             events.append("called_after_close")
             raise RuntimeError("Event loop is closed")
 
@@ -1074,7 +1086,7 @@ def test_room_usb_thread_callback_does_not_schedule_after_mac_shutdown():
     # A loop can close between checking the flag and scheduling. Ignore only
     # that genuine committed-shutdown race, not arbitrary active failures.
     class RacingLoop:
-        def call_soon_threadsafe(self, callback, value):
+        def call_soon_threadsafe(self, callback):
             runtime._closed = True
             raise RuntimeError("Event loop is closed")
 
