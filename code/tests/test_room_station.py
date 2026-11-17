@@ -330,3 +330,48 @@ def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatc
     assert feed.rejected == 2  # one callback failure and one replayed frame
     assert feed.received == 1  # only successfully delivered observations
     assert "callback failed" in feed.last_error
+
+
+def test_room_callback_failure_is_not_erased_by_clean_reader_shutdown(monkeypatch):
+    """A finished worker must not clear a real consumer failure diagnostic."""
+    import sys
+    from types import SimpleNamespace
+
+    class Port:
+        def __init__(self, *args, **kwargs):
+            self.reads = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            self.reads += 1
+            if self.reads == 1:
+                return json.dumps(frame()).encode()
+            threading.Event().wait(0.001)
+            return b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+
+    async def scenario():
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def broken_consumer(observation):
+            loop.call_soon_threadsafe(stop.set)
+            raise RuntimeError("consumer rejected evidence")
+
+        feed = RoomSerialFeed("/dev/cu.test", broken_consumer)
+        await asyncio.wait_for(feed.run(stop), timeout=2)
+        assert feed.rejected == 1
+        assert feed.received == 0
+        assert "Room observation callback failed: RuntimeError" in feed.last_error
+
+        # Only a genuinely reopened port may reset the previous error.
+        feed._read_port(lambda: False)
+        assert feed.last_error is None
+
+    asyncio.run(scenario())
