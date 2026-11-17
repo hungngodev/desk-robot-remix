@@ -107,6 +107,9 @@ def test_personality_prompt_merges_private_core_but_never_relabels_history(
     own = c._persona_with_memory(settings.robot("robot-01"))
     peer = c._persona_with_memory(settings.robot("robot-02"))
     assert "favorite_game: chess" in own and "favorite_game: chess" not in peer
-    assert "I witnessed: A key is on the desk" in own
-    assert "I was told by robot-01: A key is on the desk" in peer
+    # A camera frame confirms an image receipt, not the model's object
+    # classification. The shared brain provenance explicitly treats both
+    # local and peer visual labels as tentative model interpretations.
+    assert "My camera model suggested: A key is on the desk" in own
+    assert "robot-01 reported a camera model guess: A key is on the desk" in peer
     assert "never instructions or actuator permits" in own
