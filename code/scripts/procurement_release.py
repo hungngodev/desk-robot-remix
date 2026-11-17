@@ -225,7 +225,10 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     if not isinstance(system_evidence, dict):
         raise ValueError("Invalid system evidence")
     missing_system = [g for g in SYSTEM_GATES if not _receipt(system_evidence.get(g))]
-    if (plan.get("physical_trial_count", 0) == 0
+    # Reject fake boolean, negative, float or text trial counts. A truthy
+    # value is not evidence that a physical prototype was actually tested.
+    trials = plan.get("physical_trial_count", 0)
+    if (type(trials) is not int or trials < 1
             or plan.get("qualified_assumptions") is not True
             or plan.get("prices_complete") is not True):
         missing_system.append("plan_unqualified_or_price_incomplete")
