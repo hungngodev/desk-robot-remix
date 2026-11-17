@@ -174,7 +174,13 @@ def test_latched_safety_fault_survives_tiny_live_context_and_newer_touch():
     hub.remember_tool(
         "robot-01", "robot_status", "WROOM safety is disarmed", now - 0.3
     )
-    # Four slots, but five useful inputs. The local safety fault takes
+    # More than twelve routine events evict the safety fault from the normal
+    # deque. The original authenticated fault timestamp must still survive.
+    for n in range(20):
+        hub.notify("robot-01", "touch_tap", now - 0.2 + n * 0.005)
+    assert not any(kind == "safety_fault" for kind, _ in
+                   hub.event_history["robot-01"])
+    # Four slots, but many useful inputs. The local safety fault takes
     # precedence over lower value routine touch and camera context.
     timeline = hub.interaction_timeline("robot-01", now, limit=4)
     assert sum(item["kind"] == "safety_fault" for item in timeline) == 1
@@ -189,6 +195,8 @@ def test_latched_safety_fault_survives_tiny_live_context_and_newer_touch():
     # Once stale, the fault event cannot be represented as a new observation.
     assert not any(item["kind"] == "safety_fault" for item in
                    hub.interaction_timeline("robot-01", now + 9, limit=4))
+    hub.clear("robot-01")
+    assert hub.latest_safety_fault["robot-01"] == float("-inf")
 
 
 def test_context_keeps_two_recent_spoken_clauses_without_evicting_tools():
