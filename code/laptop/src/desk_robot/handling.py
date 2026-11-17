@@ -18,6 +18,32 @@ ACC_COUNTS_PER_G = 16384.0  # MPU6050: ACCEL_CONFIG 0x00, +/-2g.
 GYRO_COUNTS_PER_DPS = 131.0  # MPU6050: GYRO_CONFIG 0x00, +/-250dps.
 
 
+def _stationary_body(body: object) -> bool:
+    """Consume canonical WROOM motor.m0/m1, never assume legacy flat fields.
+
+    Reject contradictory dual representations rather than trusting the
+    quieter pair during a real motor command or an out-of-order callback.
+    """
+    if (not isinstance(body, dict) or type(body.get("drive_ms")) is not int
+            or body["drive_ms"] != 0):
+        return False
+    motors = body.get("motor")
+    if motors is not None:
+        if (not isinstance(motors, dict)
+                or type(motors.get("m0")) is not int
+                or type(motors.get("m1")) is not int):
+            return False
+        if (("left" in body and
+             (type(body["left"]) is not int or body["left"] != motors["m0"]))
+                or ("right" in body and
+                    (type(body["right"]) is not int or
+                     body["right"] != motors["m1"]))):
+            return False
+        return motors["m0"] == 0 and motors["m1"] == 0
+    return (type(body.get("left")) is int and body["left"] == 0 and
+            type(body.get("right")) is int and body["right"] == 0)
+
+
 def raw_mpu6050(body: dict) -> tuple[tuple[float, ...], float] | None:
     """Validate the WROOM 6-axis and source metadata before deriving context."""
     if not isinstance(body, dict):
@@ -34,11 +60,7 @@ def raw_mpu6050(body: dict) -> tuple[tuple[float, ...], float] | None:
             or not 0 <= imu["sample_ms"] <= 0xffffffff
             or type(imu.get("boot_id")) is not int
             or not 1 <= imu["boot_id"] <= 0xffffffff
-            or type(body.get("left")) is not int
-            or type(body.get("right")) is not int
-            or body["left"] != 0 or body["right"] != 0
-            or type(body.get("drive_ms")) is not int
-            or body["drive_ms"] != 0):
+            or not _stationary_body(body)):
         return None
     accel, gyro = imu.get("acc"), imu.get("gyro")
     if any(
@@ -118,20 +140,12 @@ class HandlingGate:
                 # A new WROOM boot revokes the old pose even when its host
                 # callback timestamp precedes the last delivered callback.
                 pass
-            elif (isinstance(body, dict)
-                    and type(body.get("left")) is int and body["left"] == 0
-                    and type(body.get("right")) is int and body["right"] == 0
-                    and type(body.get("drive_ms")) is int
-                    and body["drive_ms"] == 0):
+            elif _stationary_body(body):
                 return ()
         # An older acquisition with an intact stationary safety envelope
         # cannot revoke a newer pose merely because its IMU payload was
         # corrupted in transit. Invalid CURRENT acquisitions still fail closed.
-        stationary = (isinstance(body, dict)
-                      and type(body.get("left")) is int and body["left"] == 0
-                      and type(body.get("right")) is int and body["right"] == 0
-                      and type(body.get("drive_ms")) is int
-                      and body["drive_ms"] == 0)
+        stationary = _stationary_body(body)
         if (stationary and self.last_boot_id is not None
                 and isinstance(imu, dict)
                 and type(imu.get("boot_id")) is int
