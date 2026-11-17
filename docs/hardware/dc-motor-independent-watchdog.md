@@ -59,6 +59,55 @@ startup, disabled, active, stall, supply-loss, and nSLEEP pullup states using
 the exact generic driver PCB revision. This gate is not solved just by
 compiling `esp32_dc_watchdog_lab`.
 
+## DRV8833 driver fault is a second, independent local stop input
+
+The guarded DC firmware now also reads the DRV8833 active LOW `nFAULT`
+output. This is **not** the same function as the independent CD74HC123
+heartbeat timeout and must not be confused with it. TI documents that
+`nFAULT` asserts under driver protection conditions including thermal,
+overcurrent and undervoltage. The bridge protects itself electrically, but
+the application's old PWM commands must not automatically restart after the
+protection condition clears.
+
+For the proposed 3.3 V physical harness, locate the exact generic DRV8833
+carrier's **actual** `nFAULT` pin, not a similarly labeled sleep or enable
+pin. Connect it to MCP23017 `GPIOB3` at I2C address 0x20 through the
+existing TCA9548A `0x71` channel 5. An external approximately 4.7 kΩ
+pullup located at the **driver end** to the verified 3.3 V logic rail,
+and a weak 100 kΩ pulldown at the **expander end** to ground, form the
+proposed disconnected wire fail LOW scheme. `GPIOB3` internal pullup
+is intentionally disabled; MCP23017 configuration already enables only
+`GPIOB0` internal pullup, with `GPIOB2` optionally a haptic output.
+**Do not connect this net to 5 V and do not assume an unknown carrier's
+built in pullups, pins or regulator are compatible.** Measure the intact
+HIGH level, asserted LOW level and disconnected LOW level before this
+electrical design can be accepted. A pulled low line can never
+authenticate why it is low, and a short to 3.3 V defeats the disconnected
+lead heuristic: periodic wiring inspection and independent nSLEEP timing
+remain required.
+
+The guarded `esp32_dc_full` build enables
+`DESK_ROBOT_REQUIRE_DC_NFAULT=1`. The existing 0x71 accessory poll
+samples GPIOB after the mandatory GPIOA dock status read and labels the
+signal `driver_fault_active` only from an actual successful transfer.
+`BodyControl` stops motors and latches an error if the sample is LOW,
+missing, invalid or 250 ms stale. The latch requires fresh verified HIGH
+evidence and an explicit **local USB rearm**, so an AI or network command
+cannot clear the previous fault. On startup the monitor begins latched;
+no remote arm can precede the first physical sample and local rearm.
+Safety shutdown retains existing servo holding PWM to avoid intentionally
+dropping a held object. The current MCP GPIOB sampling cadence is slower
+than the DRV8833 hardware protection. It cannot replace either driver
+overcurrent protection or the CD74HC123 independent stall cutoff.
+
+Source regression cases cover boot, missing bus, active LOW, recovery,
+stale samples, failed GPIOB I2C, and disallowed remote rearm in
+`code/firmware/body/tests/guarded_body_tests.cpp` and
+`optional_i2c_io_tests.cpp`. The 3.3 V pullup and disconnected lead
+scheme, exact carrier pin label, physical thermal response, bridge PWM
+output behavior, and independent nSLEEP CPU stall cutoff remain
+**unqualified**, even when software CI passes.
+
 ## Production and prototype split
 
 `code/firmware/body/platformio.ini` contains
