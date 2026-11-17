@@ -6,10 +6,14 @@ bool CliffGuard::valid_config(const CliffConfig& config) {
   // This ceiling only rejects implausible policies. Actual freshness must be
   // much more restrictive if measured lead/latency/stopping margins require it.
   if (!config.calibrated || config.freshness_ms == 0 ||
-      config.freshness_ms > 1000 || config.front_obstacle_mm == 0 ||
+      config.freshness_ms > 1000 || config.front_obstacle_mm < 30 ||
+      config.front_max_mm > 1300 ||
       config.front_obstacle_mm >= config.front_max_mm) return false;
   for (const auto& floor : config.floor) {
-    if (floor.min_mm == 0 || floor.min_mm > floor.max_mm) return false;
+    // Match the active VL53L0X TofBus 30..1300mm valid range; never
+    // accept a staged calibration no actual sensor sample can satisfy.
+    if (floor.min_mm < 30 || floor.min_mm > floor.max_mm ||
+        floor.max_mm > 1300) return false;
   }
   return true;
 }
