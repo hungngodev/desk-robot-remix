@@ -103,6 +103,12 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
                 result["raw_pack_direction"] = "into_pack_unqualified"
             elif all(value < -20 for value in amps):
                 result["raw_pack_direction"] = "out_of_pack_unqualified"
+                # TI BQ24075 CHG reports charge *state*, not net pack
+                # current. DPPM may reduce charge or let pack supplement the
+                # live system. Never label a sustained negative pack current
+                # as successful battery charging.
+                if state == "charger_reports_active":
+                    result["charger_indicator_net_discharge_conflict"] = True
             else:
                 result["raw_pack_direction"] = "indeterminate"
         else:
@@ -120,6 +126,7 @@ def _result(robot_id: str, state: str, stable: bool) -> dict:
         "battery_current_measured": False,
         "raw_pack_direction": "not_available",
         "raw_pack_samples_fresh": False,
+        "charger_indicator_net_discharge_conflict": False,
         "raw_pack_ma": [],
         "charger_electrically_qualified": False,
         "charging_verified": False,
