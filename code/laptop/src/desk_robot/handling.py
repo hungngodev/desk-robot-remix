@@ -108,9 +108,15 @@ class HandlingGate:
                 and imu["boot_id"] in self.retired_boot_ids):
             return ()
         if self.last_at is not None and now <= self.last_at:
-            # An out-of-order host callback cannot invalidate a newer pose.
-            # Only a forward host polling gap can indicate a reconnect.
-            return ()
+            # Old stationary observations cannot replace newer calibration.
+            # An explicit motor-active status must still revoke the pose:
+            # host callback ordering is not a motor safety interlock.
+            if (isinstance(body, dict)
+                    and type(body.get("left")) is int and body["left"] == 0
+                    and type(body.get("right")) is int and body["right"] == 0
+                    and type(body.get("drive_ms")) is int
+                    and body["drive_ms"] == 0):
+                return ()
         # An older acquisition with an intact stationary safety envelope
         # cannot revoke a newer pose merely because its IMU payload was
         # corrupted in transit. Invalid CURRENT acquisitions still fail closed.
