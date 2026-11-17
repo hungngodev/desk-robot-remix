@@ -961,7 +961,6 @@ async def test_normal_barge_in_does_not_cut_off_auto_or_peer_speech(bridge):
 
 
 
-@pytest.mark.parametrize("failure", ["socket", "stall"])
 @pytest.mark.parametrize("fail_send", [False, True])
 async def test_normal_voice_barge_uses_native_shared_device_stop(
     bridge, monkeypatch, fail_send,
@@ -1020,6 +1019,7 @@ async def test_normal_voice_barge_uses_native_shared_device_stop(
     assert bridge.interrupt_generation[current.device_id] == 1
 
 
+@pytest.mark.parametrize("failure", ["socket", "stall"])
 async def test_direct_human_barge_failed_head_stop_preserves_authenticated_vad(
     bridge, failure,
 ):
