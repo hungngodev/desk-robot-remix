@@ -527,7 +527,15 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
 
     def evidence_for(plan):
         return {
-            "parts": {part["id"]: dict(passed) for part in plan["parts"]},
+            "parts": {
+                part["id"]: {
+                    **dict(passed),
+                    **dict(zip(("vendor", "sku"),
+                               mod.FIXED_SOURCE_SKUS[part["id"]]))
+                    if part["id"] in mod.FIXED_SOURCE_SKUS else {},
+                }
+                for part in plan["parts"]
+            },
             "room_pod": {item["id"]: dict(passed)
                          for item in plan["room_pod"]["modules"]},
             "system": {gate: receipt for gate in mod.SYSTEM_GATES},
@@ -632,7 +640,14 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
                      "pcb_revision": "1",
                      **{gate: receipt for gate in mod.PART_GATES}}
     evidence = {
-        "parts": {p["id"]: dict(approved_part) for p in plan["parts"]},
+        "parts": {
+            p["id"]: {
+                **dict(approved_part),
+                **dict(zip(("vendor", "sku"), mod.FIXED_SOURCE_SKUS[p["id"]]))
+                if p["id"] in mod.FIXED_SOURCE_SKUS else {},
+            }
+            for p in plan["parts"]
+        },
         "room_pod": {p["id"]: dict(approved_part)
                      for p in plan["room_pod"]["modules"]},
         "system": {gate: receipt for gate in mod.SYSTEM_GATES},
@@ -647,6 +662,21 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
     }
     assert len(evidence["supplemental_decisions"]) == 14
     assert mod.generate(plan, evidence)["order_released"]  # test fixture only
+    # Even a synthetic otherwise fully approved fleet MUST NOT contain a
+    # renamed cheap sensor carrier or revert to the unsafe 1W speaker.
+    for name, replacement in (
+        ("cliff_obstacle", "OTHER_GY530_REVISION"),
+        ("speaker", "COM-26553"),
+    ):
+        mismatch = copy.deepcopy(evidence)
+        mismatch["parts"][name]["sku"] = replacement
+        result = mod.generate(plan, mismatch)
+        assert not result["order_released"]
+        row = next(x for x in result["robots"] if x["id"] == name)
+        assert "exact_frozen_vendor_and_sku_mismatch" in row["missing_part_evidence"]
+    changed_vendor = copy.deepcopy(evidence)
+    changed_vendor["parts"]["cliff_obstacle"]["vendor"] = "PremiumBoardCo"
+    assert not mod.generate(plan, changed_vendor)["order_released"]
 
     for changed_name, mutator in (
         ("protected_ntc_pack", lambda e: e["supplemental_decisions"].pop(
