@@ -44,7 +44,7 @@ an assembled battery or regulator.
     -> measured charger IN (TI BQ24074 class power-path)
              | -> protected matched 1S battery via BAT and NTC
              | -> system/load node OUT (~battery voltage, not 5V)
-                    -> selected peak-qualified 5V boost
+                    -> selected peak-qualified 5V buck-boost converter
                            -> separately fused 5V motors/servos/speaker/head
                     -> measured quiet 3.3V regulator for accessory sensors
     -> PGOOD + CHG open-drain status via 3.3V MCP23017 inputs
@@ -52,6 +52,23 @@ an assembled battery or regulator.
 ```
 
 **Engineering conflict to resolve:** The BQ24074 maximum *programmed input current* and *charging current* are 1.5 A, while TI separately lists up to 4.5 A recommended OUT current under the specified operating conditions. These are different limits: 4.5 A at OUT is **not** a guarantee of 4.5 A of sustained dock-adapter power or successful net battery charging. Dynamic power-path management can reduce charging current, and the battery can supplement the system load. Board copper, temperature, cell discharge rating and charger thermal regulation must also be qualified. A CHG-active indication does **not** prove net battery charging. Qualified dock behavior must keep motors disarmed and measure *all remaining WiFi, camera, display and audio peaks*, boost input current and signed battery current. If the real load cannot remain within the source, device, board, battery and thermal limits simultaneously, choose a qualified higher-capacity power-path design or a validated dock power mode; do not parallel unqualified modules or trust the BQ status pin. Reference: TI BQ24074 electrical specifications, https://www.ti.com/lit/ds/symlink/bq24074.pdf .
+
+## Five volt converter topology is a hard purchasing gate
+
+TI BQ24075 SYS/OUT can rise to approximately 5.6 V when docked while a
+protected 1S cell can approach 3.0 V at the low-voltage design limit.
+A plain step-up-only converter cannot regulate downward to 5.0 V from a
+possible 5.6 V dock output. The existing source-first candidate
+[Pololu S13V30F5 #4082](https://www.pololu.com/product/4082)
+explicitly uses a buck-boost topology (2.8 to 22 V input), but its
+continuous output current at a depleted cell and enclosure thermal curve
+still require manufacturer-derated screening plus real loaded trials.
+A generic board with the same chip name is not automatically equivalent.
+The selected charger source and converter topology must match before
+any actual regulator PCB or battery order. The existing
+`screen_bq2407x_output_path` and `screen_one_cell_power_stack`
+reject a boost-only path for BQ24075. An on-paper pass does not close
+the protected-cell, NTC, connector, charge-current or heat gates.
 
 ## Required physical acceptance before purchasing five sets or energizing contacts
 
