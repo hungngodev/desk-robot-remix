@@ -875,3 +875,30 @@ def test_premium_or_malformed_eight_range_mux_cannot_be_approved():
         assert "invalid_selected_cheap_range_mux_layout" in (
             actual["missing_system_evidence"])
         assert not actual["order_released"]
+
+
+def test_inexpensive_gy530_power_and_mux_levels_are_fleet_purchase_invariant():
+    """Never authorize 5V I2C/cheap sensor VIN on an ESP32 3.3V bus."""
+    import copy
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    good = mod.generate(plan)
+    assert "unsafe_gy530_voltage_or_pin_contract" not in (
+        good["missing_system_evidence"])
+    mutations = (
+        ("module_vin_v", 5),
+        ("module_vin_v", True),
+        ("upstream_pullup_target_v", 5),
+        ("downstream_pullup_target_v", 5),
+        ("tca9548a_vcc_v", 5),
+        ("modules_per_robot", 7),
+        ("selected_chip", "VL53L4CD"),
+    )
+    for field, value in mutations:
+        candidate = copy.deepcopy(plan)
+        candidate["range_breakout_power_contract"][field] = value
+        report = mod.generate(candidate)
+        assert "unsafe_gy530_voltage_or_pin_contract" in (
+            report["missing_system_evidence"]), field
+        assert not report["order_released"]
