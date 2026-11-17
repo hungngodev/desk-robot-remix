@@ -79,6 +79,20 @@ def verify(plan: dict, body: str, head: str) -> None:
         raise ValueError("Stock XIAO PDM pins changed")
     if bus["sense_gpio"]["rgb_data"] != 9:
         raise ValueError("RGB reservation changed; check SD J3")
+    # Audio power may not drift back to 5V while the selected physical
+    # speaker remains rated only 1W. The MAX98357A supports a 3.3V supply;
+    # this is an allocation, NOT measured rail capacity or thermal acceptance.
+    audio = plan.get("audio_output_power_contract")
+    if (not isinstance(audio, dict)
+            or audio.get("amplifier_ic") != "MAX98357A"
+            or type(audio.get("amplifier_vdd_v")) not in (int, float)
+            or audio["amplifier_vdd_v"] != 3.3
+            or type(audio.get("speaker_nominal_impedance_ohm")) is not int
+            or audio["speaker_nominal_impedance_ohm"] != 8
+            or type(audio.get("speaker_nominal_rating_w")) not in (int, float)
+            or audio["speaker_nominal_rating_w"] != 1
+            or "HOLD" not in audio.get("physical_release", "")):
+        raise ValueError("Unqualified or changed 1W speaker amplifier power contract")
     # Do not accept bool/float addresses that compare equal to an integer.
     # They would later break hex formatting or misstate the physical harness.
     for group, expected in (("mux_ranges", 0x70), ("mux_extras", 0x71)):
@@ -183,6 +197,12 @@ def render(plan: dict, body: str, head: str) -> str:
                            ("amp_bclk", "MAX98357A BCLK"), ("amp_lrclk", "MAX98357A LRC"),
                            ("amp_din", "MAX98357A DIN")):
         row(f"XIAO GPIO{bus['sense_gpio'][signal]}", target, "3.3V head signal")
+    row("Rated, isolated 3.3V audio power rail", "MAX98357A VDD/VIN",
+        "3.3V selected; no direct XIAO 3V3 pin load until capacity measured",
+        "Design allocation only; audio rail peak, brownout and heat HOLD")
+    row("MAX98357A OUTP and OUTN", "8 ohm 1 W speaker + and -",
+        "Bridge tied differential outputs; NEVER connect either output to GND",
+        "Manufacturer 3.3V typical output reference; real speaker heat HOLD")
     row("XIAO onboard GPIO41 DIN + GPIO42 CLK", "Sense PDM microphone",
         "Integrated board pins, NOT connections to WROOM")
     row("XIAO GPIO9 reserved", "RGB heart data",
