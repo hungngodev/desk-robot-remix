@@ -7053,9 +7053,13 @@ async def test_native_operator_stop_revokes_model_and_flushes_real_head(native):
     conn.client_is_speaking = True
     session._last_human_speech_at = module.time.monotonic()
     commands = []
-    session._schedule_remote_cancel = lambda events: commands.extend(
-        event["type"] for event in events
-    )
+    class ModelSocket:
+        async def send_json(self, event):
+            commands.append(event["type"])
+
+    # Operator STOP uses awaited _cancel_remote after physical head STOP.
+    # A stub _schedule_remote_cancel is never invoked by that code path.
+    session._socket = ModelSocket()
     try:
         assert await module.suspend_proactive_for_operator(conn) is True
         assert session._pet_quiet is True
