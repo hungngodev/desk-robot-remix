@@ -12,6 +12,7 @@
 #include <Adafruit_AMG88xx.h>
 #include <ld2410.h>
 #include <math.h>
+#include "thermal_pixels.h"
 
 #ifndef ROOM_SOIL_FITTED
 #define ROOM_SOIL_FITTED 0
@@ -146,12 +147,8 @@ bool checked_amg_pixel(uint8_t pixel, float& temperature) {
   const int lo = Wire.read();
   const int hi = Wire.read();
   if (lo < 0 || hi < 0) return false;
-  const uint16_t bits = static_cast<uint16_t>(
-      (static_cast<uint16_t>(hi) << 8) | static_cast<uint16_t>(lo));
-  int16_t signed_quarter_c = static_cast<int16_t>(bits & 0x0fffU);
-  if ((signed_quarter_c & 0x0800U) != 0) signed_quarter_c -= 4096;
-  temperature = 0.25f * signed_quarter_c;
-  return finite_temperature(temperature);
+  return desk_robot_room::decode_thermal_pixel(
+      static_cast<uint8_t>(lo), static_cast<uint8_t>(hi), temperature);
 }
 void thermal_observation(uint32_t now) {
   bool valid = amg_started;
