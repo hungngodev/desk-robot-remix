@@ -938,3 +938,52 @@ Owner: live PR #17 repair. Previously zero-step CI failures were superseded by a
 
 ### November 17 C++11 room soil source and fake ADC test portability
 GitHub Actions run `44128421430` compiled the guarded stepper, full eight cheap VL53L0X profile, haptic lab, full DRV8833 DC, standalone watchdog lab, combined DC haptic watchdog, and the room bench profile successfully, but the room `feather_nrf52840_room_full` source compilation failed at `src/soil_sample.h:31`: `SoilSample{true, median}` is not valid in the pinned nRF52 Arduino toolchain's older C++ mode when `SoilSample` contains default member initializers. Commit `b9d4a22d1bed17513d81976833b6cf227e85e71a` retains the three ADC validity bounds and constructs the valid result by explicit assignment. The existing portable fake ADC test also used C++14 aggregate initialization; commit `d9f61621701cff8bb2593110b4e8f11be74de35a` gives it an explicit three-value constructor. Both exact GitHub blobs were reproduced and independently checked using local `git hash-object`: header `04b1c32b7391523a765190fdac0dfe1d3520f107`; test `9ddc1a33016ce01cb76d68f9b070225baf9fbc8b`. The exact pair compiled and ran successfully with `g++ -std=c++11`, `-std=c++14`, and `-std=c++17`, each using `-Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -O1`. This is **executed local portable source verification**, not a completed real Feather PlatformIO build or physically measured probe accuracy. No board or full shopping approval implied.
+
+
+### November 17 exact CI read and live input fairness repairs
+
+GitHub Actions run [44135807561](https://github.com/hungngodev/desk-robot-remix/actions/runs/44135807561)
+is a completed historical run for commit `99a41a7a14513760ab90fe6951a55759c97cf90a`.
+The job metadata reports **SUCCESS** for body C++ sanitizer tests, XIAO
+Sense ESP-IDF firmware compile and WROOM/room firmware compile. The Python
+and head host job reports **FAILURE**: its log ended with **90 failed,
+2131 passed, one error and four passing subtests**. These outcomes are
+specific to that run, not to the subsequent moving integration head.
+
+Source repairs committed afterward on the same draft PR:
+
+* `29e1c9f` and `0ba9cbf`: incomplete speaker carrier names now fail
+  closed as an unresolved purchase contract rather than raising a TypeError;
+  an explicit malformed-carrier regression was added.
+* `85a8ca6` and `6e3843e`: shared room USB context now coalesces into
+  one pending event-loop callback, replacing stale environmental snapshots
+  instead of letting the lower-priority producer fill the audio event loop.
+  Four deterministic source regressions cover a thousand-frame burst,
+  latest-only delivery and closed-loop races.
+* `f01c60e` and `538b11e`: physical sensor initiative is scoped to the
+  originating pet, while duplicate shared visual descriptions remain
+  fleet-deduplicated. Two regressions distinguish independent touches
+  from repeated camera guesses.
+* `b74d36f` and `0a025f1`: Runtime's bounded room-shutdown waiter
+  shields the original serial task, so a deadline cannot cancel the tracked
+  worker and falsely mark ownership finished. The prior test fixture now
+  includes the runtime's new bounded queue state and checks zero reader
+  cancellation requests.
+* `b3ba0ce` updates the existing multimodal orchestration guide.
+
+**Verification for these new patches:** GitHub source changes and regression
+files were accepted by the GitHub connector. Their full pytest execution,
+Python lint, original PR merge-head tests and physical hardware behavior
+have **NOT** been independently executed in this pass. Local repository
+clone failed DNS resolution, and a pending workflow is not a passed test.
+Next focused command from a full checkout is
+`cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_room_context_backpressure.py tests/test_runtime_room_shutdown.py tests/test_proactive_fleet_event_identity.py tests/test_procurement_release.py`.
+Then run complete host verification and all firmware jobs on the SAME
+fixed commit. New claims must be based on the specific resulting run.
+
+The 42 robot and dock parent roles, 7 shared station parent roles and 14
+nonadditive linked parts are still a sourcing register, not a purchase
+approval. Exact carrier schematics, prices, battery current and pack fit,
+loaded ToF cliff stopping, dock and charging trials, real audio interruption
+and mechanical clearance remain unqualified. `physical_trial_count=0`,
+`prices_complete=false`, full first robot purchase HOLD, PR stays draft.
