@@ -131,6 +131,25 @@ SUPPLEMENTAL_DECISIONS = {
 
 
 
+# Human-readable linked details, not extra counted robot slots.
+SUPPLEMENTAL_DISPLAY = {
+    "n20_motor_candidate": "N20 100:1 MP 6V motor alternative",
+    "drv8833_driver_candidate": "DRV8833 dual H bridge alternative",
+    "bq24075_charger_candidate": "BQ24075 power path plus BQ27441 gauge alternative",
+    "boost_5v_candidate": "5V switching regulator",
+    "protected_ntc_pack": "Protected 1S pack with connected NTC",
+    "dock_5v_adapter": "Independent rated 5V dock adapter",
+    "dock_ir_transistor_channels": "Dock IR transmitter transistor and resistor channels",
+    "shared_room_controller": "Shared room controller actual board",
+    "room_scd40": "Shared station SCD40",
+    "room_bme688": "Shared station BME688",
+    "room_ld2410c": "Shared station LD2410C",
+    "room_amg8833": "Shared station AMG8833",
+    "room_soil_probe": "Shared station soil probe",
+    "room_nfc_game_tokens": "Shared NFC toy tokens",
+}
+
+
 def _count(v: object, name: str) -> int:
     if type(v) is not int or v < 0:
         raise ValueError(f"{name} must be a nonnegative integer")
@@ -443,6 +462,20 @@ def render_markdown(report: dict) -> str:
         output.append(
             f"| {cell(scope)} | {cell(part['name'])} | {total} | "
             f"{remaining} | {status} | {cell(note)} |"
+        )
+    # These fourteen are alternatives or parts already covered by a parent
+    # role. Expose all of them in the SAME remaining-components list without
+    # double counting either physical quantities or automatic purchases.
+    for detail in report["supplemental_decisions"]:
+        name = SUPPLEMENTAL_DISPLAY[detail["id"]]
+        status = ("REVIEWED DECISION, CHECK DISPOSITION" if detail["reviewed"]
+                  else "HOLD SUBASSEMBLY DECISION")
+        output.append(
+            f"| linked detail (not additive) | {cell(name)} | "
+            f"{detail['fleet_quantity']} if selected | not independently counted | "
+            f"{status} | Linked parent {detail['parent_role']}; "
+            f"disposition {detail['disposition'] or 'unresolved'}; "
+            "see the canonical 14-row source register before buying |"
         )
     output.extend((
         "",
