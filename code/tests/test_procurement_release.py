@@ -436,6 +436,9 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
     register = (mod.PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text()
     sub = register.split("## Explicit drivetrain, 1S power path and one shared station add-ons", 1)[1]
     sub = sub.split("## Price and source-first purchase overrides", 1)[0]
+    # The same section also documents source owners in a different table.
+    # Those are not additional order lines or duplicate components.
+    sub = sub.split("## Actual source owner for every linked assembly detail", 1)[0]
     rows = {}
     for line in sub.splitlines():
         if not line.startswith("| ") or line.startswith("| Item ") or line.startswith("|---"):
