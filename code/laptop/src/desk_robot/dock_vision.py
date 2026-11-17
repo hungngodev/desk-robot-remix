@@ -37,6 +37,8 @@ class DockCameraCalibration:
     distortion_coeffs: tuple[float, ...] | None = None
     image_width_px: int | None = None
     image_height_px: int | None = None
+    # Camera PID is calibration provenance, not a self-attested motor permit.
+    camera_sensor_pid: str | None = None
     # Measured camera lens offset relative to the chassis centerline, right
     # positive, and horizontal yaw pointing right relative to chassis forward.
     # Image intrinsics alone cannot establish either mounting dimension.
@@ -68,6 +70,10 @@ class DockCameraCalibration:
             self.cx >= self.image_width_px or self.cy >= self.image_height_px
         ):
             raise ValueError("Dock optical center lies outside measured image")
+        if self.camera_sensor_pid is not None and self.camera_sensor_pid not in (
+            "OV3660", "OV5640"
+        ):
+            raise ValueError("Dock camera calibration names unsupported camera PID")
         if self.distortion_coeffs is not None:
             if (not isinstance(self.distortion_coeffs, tuple)
                     or len(self.distortion_coeffs) not in (4, 5, 8, 12, 14)
