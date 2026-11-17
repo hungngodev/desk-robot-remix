@@ -21,7 +21,7 @@ SOURCE_REFERENCES = {
     "i2c_mux": ("Generic", "TCA9548A", "https://www.ti.com/product/TCA9548A"),
     "mcp23017": ("Generic", "MCP23017", "https://www.microchip.com/en-us/product/MCP23017"),
     "amp": ("Generic", "MAX98357A", "https://www.analog.com/en/products/max98357a.html"),
-    "speaker": ("SparkFun", "COM-26553", "https://www.sparkfun.com/mini-speaker-1w-8-ohm.html"),
+    "speaker": ("Challenge Electronics", "CS20-02P110-04-1X", "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069"),
 }
 
 # Each gate must carry a real, operator-reviewed evidence receipt, not a bool.
