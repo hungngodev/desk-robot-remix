@@ -51,6 +51,7 @@ class TwoWire {
   bool fail_cap_register_write = false;
   bool cap_uses_0x29 = false; // common generic breakout address
   unsigned cap_register_end_calls = 0;
+  unsigned cap_failed_write_stops = 0;
   unsigned cap_register_requests = 0;
   bool optional_mux_installed = true;
   bool range_mux_write_nack = false;
@@ -129,7 +130,8 @@ class TwoWire {
       ++tof_register_stop_transmissions;
     if (current_address == 0x28 ||
         (current_address == 0x29 && extras == 1 && cap_uses_0x29))
-      ++cap_register_end_calls;
+      { ++cap_register_end_calls;
+        if (fail_cap_register_write && stop) ++cap_failed_write_stops; }
     if (current_address == 0x20) ++mcp_terminated_transmissions;
     if (current_address == 0x57) ++pulse_terminated_transmissions;
     if (current_address == 0x68 || current_address == 0x69 ||
