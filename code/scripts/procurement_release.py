@@ -33,12 +33,15 @@ SYSTEM_GATES = (
     "sense_speaker_mic_double_talk", "five_robot_integration",
     "room_pod_usb_serial_and_five_pet_observers",
     "source_builds_and_tests",
+    "user_approved_costed_exact_carrier_bill_of_materials",
+    "source_first_upstream_reuse_and_license_audit",
 )
 PART_GATES = (
     "exact_carrier_schematic", "measured_3v3_bus_and_pullups",
     "power_load_record", "firmware_and_source_reference",
     "mechanical_fit_receipt", "functional_or_fault_trial",
     "alternative_comparison",
+    "verified_landed_unit_price",
 )
 
 
@@ -58,6 +61,13 @@ def _receipt(obj: object) -> bool:
             and bool(obj["tested_on"].strip())
             and isinstance(obj.get("reviewer"), str)
             and bool(obj["reviewer"].strip()))
+
+
+def _ad_fruit_new_hardware(vendor: object, quantity: int) -> bool:
+    """Do not purchase Adafruit branded boards; already-owned Feather is exempt."""
+    return quantity > 0 and isinstance(vendor, str) and (
+        "adafruit" in vendor.casefold()
+    )
 
 
 def generate(plan: dict, evidence: dict | None = None) -> dict:
@@ -106,6 +116,8 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 and isinstance(ev.get("sku"), str) and ev["sku"].strip()
                 and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
+        if _ad_fruit_new_hardware(ev.get("vendor"), max(needed - owned, 0)):
+            missing.append("no_new_adafruit_hardware")
         vendor = SOURCE_REFERENCES.get(ident)
         rows.append({
             "id": ident, "name": part.get("name"), "per_robot": per,
@@ -159,6 +171,8 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 and isinstance(ev.get("sku"), str) and ev["sku"].strip()
                 and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
+        if _ad_fruit_new_hardware(ev.get("vendor"), qty - estimated):
+            missing.append("no_new_adafruit_hardware")
         room.append({"id": ident, "name": module.get("name"),
                      "shared_total": qty, "per_robot": 0,
                      "reported_owned_not_verified": 0,
@@ -172,6 +186,14 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                      "missing_part_evidence": missing})
     if set(room_evidence) - room_ids:
         raise ValueError("Evidence refers to nonexistent shared station part IDs")
+    # The SparkFun PRT-13777 Battery Babysitter already carries a BQ27441
+    # fuel gauge. Refuse a second separate MAX17048 design by default;
+    # both gauge ICs are legitimate but their telemetry paths are different.
+    power = approvals.get("cap_power", {})
+    if (isinstance(power, dict)
+            and str(power.get("sku", "")).replace("-", "").upper() == "PRT13777"
+            and any(x["id"] == "max17048" and x["per_robot"] for x in rows)):
+        missing_system.append("duplicate_bq27441_and_max17048_gauges")
     approved = (not missing_system
                 and all(row["approved_for_fleet_purchase"] for row in rows)
                 and all(row["approved_for_fleet_purchase"] for row in room))
