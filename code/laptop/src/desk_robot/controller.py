@@ -209,8 +209,10 @@ class Coordinator:
         # Stop physical wheels FIRST. A canceled job can be stuck in camera,
         # network or model cleanup; waiting for it would delay the real WROOM
         # stop command despite an urgent operator or human request.
+        stop_acknowledged = False
         try:
             acknowledgement = await _bounded_body_stop(self.heads[robot_id])
+            stop_acknowledged = True
         except BaseException:
             # A transport failure is not physical evidence of stopped wheels,
             # regardless of whether the cancelled job's Python task exited.
@@ -234,7 +236,8 @@ class Coordinator:
                         if (self.jobs[jid].robot_id == robot_id
                                 and task in pending):
                             self.jobs[jid].state = "failed"
-                            self.jobs[jid].error = "Cancelled job ignored timeout; WROOM stop dispatched"
+                            if stop_acknowledged:
+                                self.jobs[jid].error = "Cancelled job ignored timeout; WROOM stop dispatched"
         for jid, task in self.tasks.items():
             if self.jobs[jid].robot_id == robot_id and task.cancelled():
                 self.jobs[jid].state = "cancelled"

@@ -987,3 +987,7 @@ approval. Exact carrier schematics, prices, battery current and pack fit,
 loaded ToF cliff stopping, dock and charging trials, real audio interruption
 and mechanical clearance remain unqualified. `physical_trial_count=0`,
 `prices_complete=false`, full first robot purchase HOLD, PR stays draft.
+
+
+### November 17 14:19 EST pending defect R3, STOP receipt diagnostic
+Owner: Robot Pending Fixes. PR #17 observed head f5a846314373bb3d1a2102a3cbca2d5155774d0a. New review R3 reported that Coordinator.stop() overwrites a failed WROOM physical STOP receipt with an inaccurate "WROOM stop dispatched" message when a cancelled job ignores its timeout. The source fix gates the timeout diagnostic on actual acknowledged stop receipt, preserving the failure text and existing failed state on transport errors. Regression: code/tests/test_stop_transport_failure.py blocks a cancelled job, injects a failed body STOP receipt, and asserts failed state, retained unconfirmed STOP error and revoked permit. STATUS: SOURCE AND REGRESSION COMMITTED IF THIS ENTRY IS PRESENT; regression NOT EXECUTED in this connector environment; no physical motor cutoff evidence. Next: execute PYTHONPATH=laptop/src python -m pytest -q tests/test_stop_transport_failure.py on exact commit, then full host tests, independently prove CD74HC123 Q2 forces DRV8833 nSLEEP low during CPU halt. No GitHub Actions retry requested, no purchase authorization.
