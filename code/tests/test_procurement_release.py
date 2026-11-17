@@ -1182,7 +1182,7 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     pilot = mod.first_robot_pilot_samples(report)
     rows = {item["id"]: item for item in pilot["roles"]}
     assert len(rows) == 49
-    assert pilot["pilot_sample_count"] == 21
+    assert pilot["pilot_sample_count"] == 24
     assert pilot["pilot_historical_quoted_subtotal_usd"] == 40.27
     assert not pilot["whole_first_robot_purchase_approved"]
     assert not pilot["lithium_charging_or_motor_motion_authorized"]
@@ -1197,6 +1197,13 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert rows["apds9960"]["source_sku"] == "SEN-24-027"
     assert rows["ads1115"]["historical_unit_quote_usd"] is None
     assert rows["mcp23017"]["source_sku"] == "COM-05-093"
+    assert rows["amp"]["pilot_sample_quantity"] == 1
+    assert rows["amp"]["source_sku"] == "DFR0954"
+    assert rows["amp"]["historical_unit_quote_usd"] is None
+    assert rows["bumper"]["pilot_sample_quantity"] == 2
+    assert rows["bumper"]["source_sku"] == "D2F-01L3"
+    assert rows["bumper"]["historical_unit_quote_usd"] is None
+
 
     assert rows["xiao_sense"]["pilot_sample_quantity"] == 0
     assert rows["xiao_sense"]["pilot_action"] == "VERIFY_OWNED_OR_INCOMING_STOCK"
