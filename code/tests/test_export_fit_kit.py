@@ -200,8 +200,43 @@ def test_real_openscad_renders_provisional_source_parts(tmp_path):
     source = module()
     output = tmp_path / "rendered"
     report = source.export_kit(ROOT, output_dir=output)
-    assert len(report["parts"]) == 11
+    assert len(report["parts"]) == (
+        len(source.ADAPTERS) + len(source.GAUGES)
+        + len(source.SPEAKER_FITS) + len(source.DOCKS)
+    ) == 12
+    assert (output / "adapter_stls/speaker_grille.stl").is_file()
     assert (output / "dock_stls/dock_passive_fit.stl").is_file()
     for item in report["parts"]:
         assert source.binary_stl_triangles(output / item["location"]) > 0
     assert report["full_printable_assembly_verified"] is False
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_current_2w_rectangular_front_grille_renders(tmp_path):
+    """Active speaker front plate must not silently revert to a 20mm circle."""
+    from struct import unpack_from
+
+    source = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
+    text = source.read_text(encoding="utf-8")
+    assert "CS20-02P110-04-1X" in text
+    assert "speaker_l=20;" in text and "speaker_w=16;" in text
+    assert "speaker_h=4.7;" in text
+    assert "speaker_od=20;" not in text
+    output = tmp_path / "rect_front.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(output),
+        "-D", 'part="speaker_grille"', str(source),
+    ], check=True, timeout=60)
+    assert module().closed_mesh_edges(output) > 0
+    blob = output.read_bytes()
+    triangles = unpack_from("<I", blob, 80)[0]
+    points = [
+        unpack_from("<3f", blob, 84 + i * 50 + 12 + j * 12)
+        for i in range(triangles) for j in range(3)
+    ]
+    dimensions = tuple(round(max(v[k] for v in points)
+                             - min(v[k] for v in points), 2)
+                       for k in range(3))
+    assert dimensions == (32.0, 28.0, 3.0)
+    # A watertight frontal plate is still not the tested speaker baffle,
+    # mounting gasket, sealed 1cc box, or electrical/thermal certification.
