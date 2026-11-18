@@ -199,3 +199,62 @@ def test_source_snapshot_rejects_unverified_or_dirty_git(monkeypatch):
     assert result["sha"] == "a" * 40
     assert result["tracked_clean"] is False
     assert result["root_tree_intact"] is False
+
+
+def test_source_snapshot_rejects_sparse_checkout_with_missing_real_files(
+    tmp_path, monkeypatch,
+):
+    """A clean Git index cannot hide an absent non-sentinel subtree."""
+    import subprocess
+
+    checkout = tmp_path / "sparse-reproduction"
+    checkout.mkdir()
+    tracked = (
+        ".agent3d/agent.txt",
+        ".github/workflows/host-verification.yml",
+        ".gitignore",
+        "AGENTS.md",
+        "LICENSE",
+        "README.md",
+        "code/firmware/body/include/BodyPins.h",
+        "code/firmware/head/sense/config.h",
+        "code/laptop/src/desk_robot/handling.py",
+        "docs/hardware/full-feature-plan.json",
+        "docs/records/verification.md",
+        "nested/only-non-sentinel-file.txt",
+    )
+    for name in tracked:
+        file = checkout / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("tracked fixture\n", encoding="utf-8")
+    # The old ls-files count passed with these still in the index even when
+    # sparse checkout removed a whole unrelated subtree from the worktree.
+    for index in range(410):
+        file = checkout / "filler" / f"file-{index:03d}.txt"
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("present\n", encoding="utf-8")
+
+    def git(*args):
+        subprocess.run(
+            ["git", "-C", str(checkout), *args],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+
+    git("init", "-q")
+    git("config", "user.email", "robot-test@example.org")
+    git("config", "user.name", "Robot Verification Fixture")
+    git("add", "-A")
+    git("commit", "-qm", "fixture with complete nested tree")
+    monkeypatch.setattr(verify, "ROOT", checkout)
+    complete = verify.source_snapshot()
+    assert complete["tracked_clean"] is True
+    assert complete["root_tree_intact"] is True
+
+    git("sparse-checkout", "init", "--cone")
+    git("sparse-checkout", "set", ".agent3d", ".github",
+        "code", "docs", "filler")
+    assert not (checkout / "nested" / "only-non-sentinel-file.txt").exists()
+    sparse = verify.source_snapshot()
+    assert sparse["sha"] == complete["sha"]
+    assert sparse["tracked_clean"] is True  # Git legitimately skips that path.
+    assert sparse["root_tree_intact"] is False
