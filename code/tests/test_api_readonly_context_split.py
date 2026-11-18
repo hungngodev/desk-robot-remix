@@ -49,3 +49,37 @@ def test_robot_status_routes_keep_same_paths_and_shared_auth():
             getattr(dependency.call, "__name__", None) == "authorize"
             for dependency in route.dependant.dependencies
         )
+
+
+def test_readonly_voice_planner_stays_one_protected_route():
+    config = Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    app = create_app(load_settings(config), runtime=SimpleNamespace())
+    matches = [
+        route for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/v1/pet/{robot_id}/plan-readonly"
+    ]
+    assert len(matches) == 1
+    route = matches[0]
+    assert route.methods == {"POST"}
+    assert route.endpoint.__module__ == "desk_robot.api_readonly_planner"
+    assert any(
+        getattr(dependency.call, "__name__", None) == "authorize"
+        for dependency in route.dependant.dependencies
+    )
+
+
+def test_voice_planner_request_schema_preserves_original_input_bounds():
+    import pytest
+    from pydantic import ValidationError
+
+    from desk_robot.api import ReadonlyPlanRequest
+
+    assert ReadonlyPlanRequest(transcript="What can you see?").transcript == (
+        "What can you see?"
+    )
+    for invalid in ("", "ab", "x" * 281):
+        with pytest.raises(ValidationError):
+            ReadonlyPlanRequest(transcript=invalid)
+    with pytest.raises(ValidationError):
+        ReadonlyPlanRequest(transcript="Look here", command="move")
