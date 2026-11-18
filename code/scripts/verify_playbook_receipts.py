@@ -27,6 +27,7 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 
 def github_json(url: str, token: str | None = None) -> dict:
     """Read metadata; do not mutate the repository or download arbitrary URLs."""
+    token = token or os.environ.get("GITHUB_TOKEN")
     if not url.startswith("https://api.github.com/repos/" + REPO + "/"):
         raise ValueError("Unexpected GitHub API target")
     headers = {"Accept": "application/vnd.github+json",
@@ -41,6 +42,8 @@ def github_json(url: str, token: str | None = None) -> dict:
 
 
 def verified_actions_run(url: str, sha: str, lookup=github_json) -> bool:
+    if not isinstance(url, str):
+        return False
     parsed = urlsplit(url)
     match = RUN_PATH.fullmatch(parsed.path)
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
@@ -53,6 +56,8 @@ def verified_actions_run(url: str, sha: str, lookup=github_json) -> bool:
 
 
 def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
+    if not isinstance(url, str):
+        return False
     parsed = urlsplit(url)
     base = f"/{REPO}/blob/{sha}/docs/records/"
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
