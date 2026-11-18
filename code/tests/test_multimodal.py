@@ -67,6 +67,37 @@ def config(enabled=True):
 
 
 
+async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream():
+    """One malformed JPEG should not destroy a healthy continuous feed."""
+    class CorruptThenHealthy(Head):
+        async def stream_frames(self):
+            yield b"not a JPEG", time.monotonic()
+            await asyncio.sleep(0.56)  # Preserve the normal 500ms sample gate.
+            yield image(square=True), time.monotonic()
+            await asyncio.Event().wait()
+
+    head = CorruptThenHealthy()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        async with asyncio.timeout(2):
+            while visual.status("robot-01")["software_timings"][
+                "stream_frames_selected"
+            ] < 1:
+                await asyncio.sleep(0.02)
+        metrics = visual.status("robot-01")["software_timings"]
+        assert metrics["stream_frames_received"] >= 2
+        assert metrics["stream_frames_skipped"] >= 1
+        assert metrics["stream_frames_selected"] == 1
+        assert metrics["stream_reconnects"] == 0
+        assert head.captures == 0
+    finally:
+        await visual.close()
+
+
 async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_polls():
     """Streaming perception runs independently of VAD and single-shot pulls."""
     class LiveHead(Head):
