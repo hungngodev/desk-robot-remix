@@ -447,6 +447,12 @@ void setup() {
   Serial.println("INFO max30102_fifo_red_first_compiled_unqualified");
 #endif
   const bool accessory_mux = accessories.begin(Wire);
+  // These drivers probe the SAME 0x71 multiplexer after TofBus's own
+  // initial check. A transient 0x71 startup NACK must not let a later
+  // discovered CAP1188 at 0x29 coexist with an active VL53L0X lane.
+  // This only strengthens isolation; a failed quiescence forces local STOP.
+  if (petting_present || paw_present || accessory_mux)
+    tof.note_optional_mux_present();
   Serial.println(accessory_mux ? "INFO optional_accessory_bus_probed" :
                                  "INFO optional_accessory_bus_unavailable");
 #if DESK_ROBOT_ENABLE_HAPTIC
