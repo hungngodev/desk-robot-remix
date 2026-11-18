@@ -9,7 +9,18 @@ claim that any physical gate has passed. Each fix below uses existing owners.
   and a missing file only when the marker says the overlay created it. All
   other content is rejected before any restore. `72d6251`, `29200f9`
   and `4ea4ed8` add interrupted-install, user-edit refusal and import
-  corrections. Existing strict `apply()` drift remains fail closed.
+  corrections. `def8478`, `b8ea829`, `7ab2f9c`, `567f11e`,
+  `eb00fc8` now journal the original files before atomic source replacement,
+  survive a partial install and remove unpublished staging files. `e625631`
+  adds a genuine child process forced-exit regression. `cea8420` and
+  `5446561` reject traversal, malformed base64 and symlinked journal targets.
+  Current CI and a real power-loss/disk failure trial remain separate gates.
+* **Calibrated jaw force capture:** `70cda48` adopts the same nonzero
+  uint32 conversion sequence wraparound rule as the live gripper;
+  `584cd0c` exercises replay, wrap and duplicate acquisition.
+  `7e6bb24` and `0b0d03e` require correct per-robot telemetry identity
+  before including a raw FSR conversion in manual calibration evidence.
+  No measured force in newtons or physically qualified grip is claimed.
 * **Continuous camera frame transport:** `b665d9b`, `daaf61e`, and
   `957cb7d` drop corrupted JPEGs rather than triggering needless stream
   reconnect, with malformed and oversized-header regressions.
@@ -29,8 +40,9 @@ claim that any physical gate has passed. Each fix below uses existing owners.
 four-job CI success was run 44358527104 at a different SHA. Each new head
 requires its own Python/head tests, body native sanitizers, WROOM compile,
 and Sense ESP-IDF compile before any TESTED claim. Do not infer that
-pending or cancelled checks passed. The recoverable installer still needs a
-real kill-and-resume test; camera changes still need real XIAO stream trials.
+pending or cancelled checks passed. The forced process-exit regression is
+now CODED but has not yet executed on the current SHA; camera changes still
+need real XIAO stream trials.
 
 **Still OPEN:** actual loaded motor cutoff and desk-edge stopping,
 battery/1S charging and 3.3V/5V rails, I2C/ToF optical bench measurements,
