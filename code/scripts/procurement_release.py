@@ -772,9 +772,9 @@ PILOT_SAMPLE_PRODUCTS = {
         1, 4.90),  # Manufacturer USD quote checked 2026-11-18; bench sample only.
     "bumper": (
         "Normally closed micro bumper switch",
-        "Aratas / former Omron", "D2F-01L3",
-        "https://www.digikey.com/en/products/detail/aratas-formerly-omron-components/D2F-01L3/368448",
-        2, None),  # SPDT NC/COM must be wired; real on-chassis fit unknown.
+        "Newark", "D2F-01L3",
+        "https://www.newark.com/aratas/d2f-01l3/microswitch-d2f-01l3/dp/45Y5018",
+        2, 2.48),  # USD exact-SKU quote 2026-11-18; NC/COM and fit untested.
     "speaker": ("Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker",
                 "Challenge Electronics", "CS20-02P110-04-1X",
                 "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069", 1, 3.24),
