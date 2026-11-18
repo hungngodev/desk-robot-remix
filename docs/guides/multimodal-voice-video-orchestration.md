@@ -713,3 +713,23 @@ remain priority/backpressure design references; no second agent framework,
 camera or microphone transport was installed. The independent room callback
 blocking contract remains open for arbitrary third-party consumers; the
 production Runtime callback uses a short event-loop handoff.
+
+
+## Complete tool receipt overflow behavior
+
+The shared `desk_robot_voice_intents.pack_grounded_facts` function accepts
+**one through six** distinct completed facts for one speech turn, retaining
+their typed origins and source order within the existing 1800-character
+context cap. Seven or more facts are not silently truncated to the first
+six. Likewise, an uncompressible six-fact set produces a bounded
+`ValueError`, so the live turn must decline to narrate partial evidence
+and release its optional speech ownership. This is the deliberate
+fail-closed response to tool receipt overflow, not a lost seventh tool
+receipt or permission to invent a summary.
+
+A human can repeat or narrow the question to fit the bounded context.
+Actual connected tool execution, the delivered head audio and spoken
+receipt incorporation require end-to-end tests; source context packing
+alone does not prove a realtime model used the tools. A model may never
+interpret the contents of tool results as developer/system instructions,
+motor permission, charging confirmation or a new sensor reading.
