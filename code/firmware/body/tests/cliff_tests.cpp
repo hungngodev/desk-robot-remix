@@ -307,7 +307,8 @@ void delayed_range_sample_never_replaces_newer_evidence() {
   // sample or make an old obstacle result appear newly measured.
   guard.sample(0, 45, true, 105);
   CHECK(!guard.evaluate(111));
-  CHECK(guard.fault() != CliffFault::None);
+  CHECK(guard.fault() == CliffFault::InvalidSample);
+  CHECK(guard.fault_sensor() == 0);
   const auto preserved = guard.diagnostic(0, 111);
   CHECK(preserved.present);
   CHECK(preserved.distance_mm == 46);
@@ -323,6 +324,8 @@ void delayed_range_sample_never_replaces_newer_evidence() {
   wrapped.sample(0, 48, true,
                  std::numeric_limits<std::uint32_t>::max() - 5U);
   CHECK(!wrapped.evaluate(6U));
+  CHECK(wrapped.fault() == CliffFault::InvalidSample);
+  CHECK(wrapped.fault_sensor() == 0);
   CHECK(wrapped.diagnostic(0, 6U).distance_mm == 47);
 }
 
