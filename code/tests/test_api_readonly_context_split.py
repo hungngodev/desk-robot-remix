@@ -2,10 +2,11 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi.routing import APIRoute
-
-from desk_robot.api import create_app
+import pytest
+from desk_robot.api import ReadonlyPlanRequest, create_app
 from desk_robot.config import load_settings
+from fastapi.routing import APIRoute
+from pydantic import ValidationError
 
 
 def test_power_and_live_context_routes_keep_existing_auth_and_paths():
@@ -70,11 +71,6 @@ def test_readonly_voice_planner_stays_one_protected_route():
 
 
 def test_voice_planner_request_schema_preserves_original_input_bounds():
-    import pytest
-    from pydantic import ValidationError
-
-    from desk_robot.api import ReadonlyPlanRequest
-
     assert ReadonlyPlanRequest(transcript="What can you see?").transcript == (
         "What can you see?"
     )
