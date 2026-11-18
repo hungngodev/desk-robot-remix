@@ -232,7 +232,9 @@ class HandlingGate:
                     self.last_boot_id, self.last_sample_ms = previous
                     return ()
                 old_boot = self.last_boot_id
+                cooldown = self.last_shake
                 self.reset()  # new WROOM boot identity requires fresh calibration
+                self.last_shake = cooldown  # reboot cannot bypass host gesture cooldown
                 self.retired_boot_ids.append(old_boot)
             elif sample_ms < self.last_sample_ms:
                 # Only a near-uint32 wrap can legitimately restart the clock.

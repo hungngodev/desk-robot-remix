@@ -805,3 +805,23 @@ def test_mpu_clock_rollover_preserves_shake_cooldown():
     assert qualified(gate, dict(shaking, imu=dict(shaking["imu"], sample_ms=11)),
                      101.8, new_sample=False) == ()
     assert gate.last_shake == 100.7
+
+
+def test_new_boot_recalibration_preserves_recent_shake_cooldown():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    shaking = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, shaking, 102.0) == ()
+    assert qualified(gate, shaking, 102.15) == ("handling_shake",)
+    assert qualified(gate, sample(boot_id=2, sample_ms=1), 102.3, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_shake == 102.15
+    for i in range(2, 9):
+        assert qualified(gate, sample(boot_id=2, sample_ms=i),
+                         102.3 + (i - 1) * .15, new_sample=False) == ()
+    assert gate.reference is not None
+    for i, when in enumerate((103.5, 103.65), start=9):
+        frame = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0),
+                       boot_id=2, sample_ms=i)
+        assert qualified(gate, frame, when, new_sample=False) == ()
+    assert gate.last_shake == 102.15
