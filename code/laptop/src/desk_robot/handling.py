@@ -201,23 +201,19 @@ class HandlingGate:
         if self.last_at is not None and now - self.last_at > 1.0:
             # Host reconnect invalidates calibration, not source identity.
             previous = (self.last_boot_id, self.last_sample_ms)
-
             self.reset(preserve_shake_cooldown=True)
             self.last_boot_id, self.last_sample_ms = previous
             # A transport gap invalidates pose, not the gesture cooldown.
-
         sample = raw_mpu6050(body)
         if sample is None:
             # Bad telemetry invalidates pose, not the last trusted acquisition.
             # Otherwise replaying that conversion after a malformed status
             # could seed a fresh calibration with stale sensor data.
             previous = (self.last_boot_id, self.last_sample_ms)
-
             self.reset(preserve_shake_cooldown=True)
             self.last_boot_id, self.last_sample_ms = previous
             # Bad telemetry revokes pose, not the recent gesture cooldown.
             # Otherwise a quick recalibration can repeat a shake announcement.
-
             return ()
         boot_id = body["imu"]["boot_id"]
         sample_ms = body["imu"]["sample_ms"]
@@ -238,9 +234,7 @@ class HandlingGate:
                     self.last_boot_id, self.last_sample_ms = previous
                     return ()
                 old_boot = self.last_boot_id
-
                 self.reset(preserve_shake_cooldown=True)  # new WROOM boot identity requires fresh calibration
-
                 self.retired_boot_ids.append(old_boot)
             elif sample_ms < self.last_sample_ms:
                 # Only a near-uint32 wrap can legitimately restart the clock.
@@ -252,9 +246,7 @@ class HandlingGate:
                     return ()
                 # A 32-bit sensor clock rollover invalidates pose but must
                 # not reset the human gesture cooldown on the host clock.
-
                 self.reset(preserve_shake_cooldown=True)
-
             elif sample_ms - self.last_sample_ms > 0x7fffffff:
                 # A pre-wrap conversion arriving after wrap looks numerically
                 # newer. Reject implausibly large forward jumps as replay.
@@ -279,11 +271,9 @@ class HandlingGate:
             # Reject implausible acceleration without forgetting the source
             # conversion. A replay after the fault must not seed calibration.
             previous = (self.last_boot_id, self.last_sample_ms)
-
             self.reset(preserve_shake_cooldown=True)
             self.last_boot_id, self.last_sample_ms = previous
             # Implausible acceleration revokes pose, not the host cooldown.
-
             return ()
         if self.reference is None:
             # Startup is an intentional physical calibration step. Accel
