@@ -1286,8 +1286,11 @@ def main() -> int:
     parser.add_argument("--plan", type=Path, default=PLAN)
     parser.add_argument("--evidence", type=Path,
                         help="Operator-recorded measured qualification JSON, if any")
-    parser.add_argument("--require-release", action="store_true",
-                        help="Exit 2 unless every part and system receipt has passed")
+    releases = parser.add_mutually_exclusive_group()
+    releases.add_argument("--require-release", action="store_true",
+                          help="Fail closed unless full fleet physical evidence verifies")
+    releases.add_argument("--require-first-robot", action="store_true",
+                          help="Fail closed unless one complete robot and dock verify")
     parser.add_argument("--format", choices=(
         "json", "csv", "markdown", "first-robot-json", "first-robot-markdown",
         "pilot-samples-json", "pilot-samples-markdown",
@@ -1298,18 +1301,26 @@ def main() -> int:
     evidence = (json.loads(args.evidence.read_text(encoding="utf-8"))
                 if args.evidence else {})
     report = generate(plan, evidence)
-    if args.require_release:
+    if args.require_first_robot and args.format not in (
+        "first-robot-json", "first-robot-markdown"
+    ):
+        parser.error("First robot release may only print a first robot view")
+    if args.require_release or args.require_first_robot:
         # The pure projection intentionally accepts synthetic unit-test
         # receipts. A REAL purchase command must verify immutable, scoped
         # physical evidence against this exact clean source revision before
         # printing a potentially misleading APPROVED shopping view.
-        if not report["order_released"]:
+        purchase_ready = (first_robot_projection(report)["purchase_approved"]
+                          if args.require_first_robot else report["order_released"])
+        if not purchase_ready:
             print("HOLD: prerequisite component and system gates not qualified",
                   file=sys.stderr)
             return 2
         try:
             from verify_procurement_receipts import audit_release, checkout_sha
-            failures = audit_release(evidence, checkout_sha())
+            failures = audit_release(
+                evidence, checkout_sha(), first_robot=args.require_first_robot
+            )
         except (OSError, ValueError, TypeError, KeyError) as exc:
             print("HOLD: cannot verify real purchasing evidence: " + str(exc),
                   file=sys.stderr)
