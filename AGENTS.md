@@ -25,10 +25,14 @@ contact, watchdog PCB and moving motor have additional nonnegotiable gates.
 Pilot sourcing MUST preserve `SOURCE_REFERENCES` for the generated fleet CSV.
 The `PILOT_SAMPLE_PRODUCTS` table is independent. CI enforces the original
 fleet CSV and `test_pilot_supplier_rows_never_mutate_canonical_fleet_source_references`
-checks that source maps cannot be accidentally mixed. A quote of 40.27 USD
-is only the historical subtotal of those exact sample entries whose
-seller quotes were already denominated in USD. Two additional source candidates
-have no verified USD quote, and all shipping, tax and actual stock are unknown.
+checks that source maps cannot be accidentally mixed. At 2026-11-18 source review, the first robot evaluation cart has 13
+exact SKUs and 17 individual items with 39.93 USD in item-only quoted
+prices. Every pilot SKU now has a USD price source, but shipping, sales tax,
+seller checkout stock, delivered variants and physical suitability are NOT
+verified. The VL53L0X pilot purchase is ONE SEN-19-006 sample; seven more
+must remain unresolved until 3.3V bus and cliff detection tests pass. The
+full single robot and five robot cart remain blocked by the independent
+electrical, battery, drivetrain, dock, acoustic and mechanical release gates.
 This is a carefully scoped first build shopping action, not the final product.
 
 # 2026-11-17 uploaded multimodal audit: IMPLEMENTATION CONSTITUTION, not a replacement wiring plan
