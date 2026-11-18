@@ -18,7 +18,8 @@ RAW = ("https://github.com/hungngodev/desk-robot-remix/blob/"
 
 def lookup(url):
     if url.endswith("/actions/runs/42"):
-        return {"head_sha": SHA, "status": "completed", "conclusion": "success"}
+        return {"head_sha": SHA, "name": "Host verification",
+                "status": "completed", "conclusion": "success"}
     if "/contents/docs/records/bench.csv?ref=" in url:
         return {"type": "file", "size": 52}
     raise AssertionError("Unexpected URL " + url)
@@ -81,3 +82,10 @@ def test_wrong_run_host_is_rejected_without_network():
     fake["procedures"][0]["executed_test_receipt"]["url"] = (
         "https://example.com/hungngodev/desk-robot-remix/actions/runs/42")
     assert "CI run not verified" in verify.audit(fake, lookup)[0]
+
+
+def test_matching_sha_from_unrelated_workflow_does_not_qualify():
+    def unrelated(_):
+        return {"head_sha": SHA, "name": "Unrelated workflow",
+                "status": "completed", "conclusion": "success"}
+    assert "CI run not verified" in verify.audit(promoted(), unrelated)[0]
