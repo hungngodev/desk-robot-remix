@@ -162,6 +162,26 @@ class SenseOverlayTests(unittest.TestCase):
         )
 
 
+    def test_stream_camera_configuration_and_single_client_ownership(self):
+        """Source budget, not measured frame rate or audio contention."""
+        board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+        bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+        for expected in (
+            "config.pixel_format = PIXFORMAT_JPEG;",
+            "config.frame_size = FRAMESIZE_VGA;",
+            "config.jpeg_quality = 12;",
+            "config.fb_count = 2;",
+            "config.fb_location = CAMERA_FB_IN_PSRAM;",
+            "config.grab_mode = CAMERA_GRAB_LATEST;",
+        ):
+            self.assertIn(expected, board)
+        self.assertIn("camera_busy_.exchange(true)", bridge)
+        self.assertIn('Envelope(false, "camera busy")', bridge)
+        self.assertIn("vTaskDelay(pdMS_TO_TICKS(250));", bridge)
+        self.assertIn("bridge->camera_busy_.store(false);", bridge)
+        self.assertIn('"camera_sensor_pid"', bridge)
+
+
     def test_reference_generation_fence_prevents_stale_barge_audio(self):
         """Source contract only; physical DMA silence still needs A2 trials."""
         header = (HEAD / "sense/sense_reference_codec.h").read_text()
