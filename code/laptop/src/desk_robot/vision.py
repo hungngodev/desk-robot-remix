@@ -59,6 +59,10 @@ class YoloWorldVision:
         return await asyncio.wrap_future(work)
 
     def _detect(self, jpeg: bytes, label: str) -> list[Detection]:
+        # Live YOLO input is also a network camera frame. Validate its JPEG
+        # size and declared raster dimensions before loading model weights,
+        # mutating detector classes or decoding an unbounded RGB image.
+        _check_camera_jpeg(jpeg, max_bytes=4_000_000)
         if self.weights is None or not self.weights.is_file():
             raise RuntimeError(
                 "Install vision extra and explicitly download/set local YOLO-World weights"
@@ -78,6 +82,8 @@ class YoloWorldVision:
 
 
 def image_size(jpeg: bytes) -> tuple[int, int]:
+    # A camera geometry check must not trust decompression-bomb dimensions.
+    _check_camera_jpeg(jpeg, max_bytes=4_000_000)
     with Image.open(BytesIO(jpeg)) as im:
         im.verify()
     with Image.open(BytesIO(jpeg)) as im:
@@ -145,6 +151,13 @@ class VisualChangeGate:
         """
         if not isinstance(current, bytes) or len(current) != 64 * 48:
             raise ValueError("Expected bounded 64x48 grayscale image")
+        # This fast owner-thread path receives already decoded pixels. Check
+        # compressed evidence framing without repeating expensive Pillow work.
+        # A corrupt early packet cannot poison the next comparison baseline.
+        if (not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000
+                or not jpeg.startswith(b"\xff\xd8")
+                or not jpeg.endswith(b"\xff\xd9")):
+            raise ValueError("Invalid camera JPEG baseline")
         if self._pixel_baseline is None:
             self._pixel_baseline, self._baseline = current, jpeg
             return None
@@ -164,9 +177,9 @@ class VisualChangeGate:
         return baseline
 
 
-def _check_camera_jpeg(frame: bytes) -> None:
-    """Cheap trusted-source image header gate before any VLM network upload."""
-    if (not isinstance(frame, bytes) or not 12 <= len(frame) <= 1_000_000
+def _check_camera_jpeg(frame: bytes, *, max_bytes: int = 1_000_000) -> None:
+    """Reject unbounded camera images before any native decode or model work."""
+    if (not isinstance(frame, bytes) or not 12 <= len(frame) <= max_bytes
             or not frame.startswith(b"\xff\xd8")):
         raise ValueError("Bounded JPEG scene evidence required")
     with Image.open(BytesIO(frame)) as candidate:
