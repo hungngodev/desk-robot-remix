@@ -269,7 +269,9 @@ static void optional_max30102_raw_never_authorizes_motion_or_diagnosis() {
   body.execute("aux", 3, 150, response, sizeof(response));
   CHECK(std::string(response).find("\"part_id\":21") != std::string::npos);
   CHECK(std::string(response).find("\"ir\":55000") != std::string::npos);
-  CHECK(std::string(response).find("\"seq\":18,\"bpm\":null") != std::string::npos);
+  CHECK(std::string(response).find("\"seq\":18,\"fifo_ir_first\":false,"
+                                   "\"fifo_layout_physically_verified\":false,"
+                                   "\"bpm\":null") != std::string::npos);
   CHECK(std::string(response).find("\"age_ms\":50") != std::string::npos);
   body.execute("aux", 3, 500, response, sizeof(response));
   CHECK(std::string(response).find("\"valid\":false") != std::string::npos);
