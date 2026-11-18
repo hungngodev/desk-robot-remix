@@ -740,6 +740,11 @@ def first_robot_projection(report: dict) -> dict:
         # possible only after the unchanged complete physical system gates
         # have ALREADY passed through generate(), including installed parts.
         "purchase_approved": qualified_one,
+        # Machine-readable first-unit blockers remain visible to shopping
+        # clients without pretending five-robot integration is a prerequisite.
+        "missing_first_robot_system_evidence": report.get(
+            "missing_first_robot_system_evidence", ["missing"]
+        ),
         "reason": (
             "First complete unit has qualified shared and first-unit system "
             "receipts, supplier evidence and physical trials; the remaining "
@@ -1133,6 +1138,12 @@ def render_first_robot_markdown(report: dict) -> str:
         "Linked parts are already owned by parent roles and must not be "
         "summed into a cart; unresolved motors and charger parts are not "
         "authorized purchases.",
+        "",
+        "First-unit physical and source evidence still required (not extra "
+        "shopping lines): " + (
+            ", ".join(projection["missing_first_robot_system_evidence"])
+            if projection["missing_first_robot_system_evidence"] else "none"
+        ),
         "",
     ]
     return "\n".join(lines)
