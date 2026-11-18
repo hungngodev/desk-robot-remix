@@ -125,10 +125,14 @@ These are requirements, **not a list of finished features**.
 | Mac/Wi-Fi/sensor failure | Cancel activity, stop drive, preserve the current gripper target where powered, show fault/offline state. No automatic motor restart after reconnect or fault recovery. |
 
 Proposed tuning defaults: blink every 3–7seconds, occasional gaze shifts every 6–15
-seconds, activity reconsideration every 30–90seconds, and at most one spontaneous
-spoken initiation per group every 120seconds. These are configurable personality
-timings, not real-time deadlines. Explicit conversation turns use their own
-bounded session. Quiet mode and a stop always override timers.
+seconds, activity reconsideration every 30–90seconds, and at most one
+passive camera/ambient spontaneous spoken initiation per group every
+120 seconds. Deliberate physical contact (such as a real touch) has a
+separate default 12-second interaction cooldown and does not wait for
+the passive 120-second budget; it still shares the single global speaker
+lease and must yield to human speech, quiet, STOP and consent revocation.
+These are configurable personality timings, not real-time deadlines.
+Explicit conversation turns use their own bounded session.
 
 ## Control and compute boundary
 
