@@ -27,3 +27,25 @@ def test_power_and_live_context_routes_keep_existing_auth_and_paths():
             getattr(dependency.call, "__name__", None) == "authorize"
             for dependency in route.dependant.dependencies
         )
+
+
+def test_robot_status_routes_keep_same_paths_and_shared_auth():
+    config = Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    app = create_app(load_settings(config), runtime=SimpleNamespace())
+    for path in (
+        "/v1/robots",
+        "/v1/robots/{robot_id}/status",
+        "/v1/robots/{robot_id}/aux",
+    ):
+        matches = [
+            route for route in app.routes
+            if isinstance(route, APIRoute) and route.path == path
+        ]
+        assert len(matches) == 1
+        route = matches[0]
+        assert route.methods == {"GET"}
+        assert route.endpoint.__module__ == "desk_robot.api_robot_status"
+        assert any(
+            getattr(dependency.call, "__name__", None) == "authorize"
+            for dependency in route.dependant.dependencies
+        )
