@@ -35,6 +35,49 @@ Place the assembled pet upright on a stable flat desk with its tracks stopped. S
 
 The example thresholds above are **not factory safety settings**; they are software bounds that still require tuning against measured data from the actual hardware. A failed/offline IMU, commands in motion, invalid types, a long sample gap or unknown BerryIMU family must yield **no handling event**. No motor stop, servo permit, automatic roaming or charging result is based on these gestures.
 
+## Reproducible threshold candidate from real WROOM frames
+
+After collecting actual read-only WROOM status JSON from **one** stationary
+mounted robot, prepare a JSON Lines file with at least 8 independent upright
+conversions, 4 deliberate held tilts and 4 actual gentle shakes, plus the
+separate repeat trials below. Each line has a physical label, monotonic
+acquisition time, flashed firmware revision, mechanical IMU mount revision
+and the **unchanged real body status object**, including motor and IMU fields:
+
+```json
+{"label":"upright","time_monotonic_s":100.0,"firmware_commit":"actual-flashed-sha","mount_id":"actual-imu-mount","body":{"drive_ms":0,"motor":{"m0":0,"m1":0},"imu":{"family":4,"gyro_id":104,"valid":true,"age_ms":20,"boot_id":123,"sample_ms":100000,"acc":[0,0,16384],"gyro":[0,0,0]}}}
+```
+
+That row is an **illustrative format only**, not proof of a captured MPU6050
+conversion. Do not submit copied or synthetic rows as physical evidence.
+Capture genuine GPIO/I2C body status from the currently flashed WROOM, maintain
+monotonically increasing sample_ms, and retain the raw log, unit identity,
+mounting orientation and physical rig notes. During all these observations,
+wheel command and drive permit must be zero; use controlled benchtop handling
+without loaded wheel movement.
+
+Run from `code/`:
+
+```bash
+uv run --no-sync python scripts/calibrate_handling.py path/to/actual-trials.jsonl
+```
+
+The checker shares the existing MPU6050 raw decoder and manufacturer scales.
+It rejects mixed mounts or firmware, boot resets, repeated/stale samples,
+unstable stationary gyro offsets, implausible acceleration and overlapping
+positive versus negative angle or shake distributions. It reports separate
+candidate tilt degrees and shake delta milligravity within runtime bounds,
+together with observed class separation, **not** a physical certificate.
+Only after independently confirming the ten-repeat acceptance trials, hot/cold
+gyro offset behavior, mounting axes, false reactions, sensor timing and lack
+of motor authority may the operator copy those candidate knobs into the
+private local configuration and set `handling_interactions_qualified=true`.
+
+The automated tests of this checker use synthetic frames exclusively to prove
+its failure conditions. Its JSON always reports
+`thresholds_physically_qualified=false` and
+`motor_authorization=false` even if supplied samples separate perfectly.
+
 ## Acceptance checklist
 
 * Use an actual serial trace from the real WROOM with at least 8 stationary frames from the physically upright mounted MPU6050, verified axes, counts, temperature, freshness and startup gyro zero-rate bias. Repeat startup after cold and warm operation and record drift; the source does not yet perform temperature compensation. A different six-axis breakout requires its own scaling and version check.
