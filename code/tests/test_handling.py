@@ -700,3 +700,23 @@ def test_new_acquisition_with_older_host_time_does_not_rewind_gate_clock():
     assert qualified(gate, sample(sample_ms=previous_sample + 2),
                      previous_at + 1.1, new_sample=False) == ()
     assert gate.reference is None
+
+
+def test_missing_gyro_bias_revokes_pose_without_replaying_same_conversion():
+    gate = HandlingGate()
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=3000 + i),
+                         100 + i * .1, new_sample=False) == ()
+    assert gate.reference is not None
+    gate.gyro_bias_dps = None  # Corrupted/incomplete host calibration state.
+    current = sample(sample_ms=3008)
+    assert qualified(gate, current, 101.0, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_boot_id == 1 and gate.last_sample_ms == 3008
+    for i in range(8):
+        assert qualified(gate, current, 101.1 + i * .1,
+                         new_sample=False) == ()
+    assert gate.startup_samples == []
+    assert qualified(gate, sample(sample_ms=3009),
+                     102.0, new_sample=False) == ()
+    assert len(gate.startup_samples) == 1

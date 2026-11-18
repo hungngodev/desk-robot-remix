@@ -306,8 +306,11 @@ class HandlingGate:
             return ()
 
         if self.gyro_bias_dps is None:
-            # A pose without stationary gyro evidence cannot emit handling.
+            # Missing stationary gyro evidence revokes the pose, but the
+            # consumed conversion must remain fenced against replay.
+            previous = (self.last_boot_id, self.last_sample_ms)
             self.reset()
+            self.last_boot_id, self.last_sample_ms = previous
             return ()
         rotation_dps = math.hypot(*(
             raw - bias for raw, bias in
