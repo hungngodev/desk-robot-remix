@@ -67,11 +67,20 @@ def config(enabled=True):
 
 
 
-async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream():
-    """One malformed JPEG should not destroy a healthy continuous feed."""
+@pytest.mark.parametrize("malformed", [True, False])
+async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream(malformed):
+    """Malformed bytes and deceptive JPEG dimensions must not break video."""
+    bad_frame = b"not a JPEG"
+    if not malformed:
+        oversized = bytearray(image())
+        sof = oversized.find(b"\xff\xc0")
+        assert sof > 0
+        oversized[sof + 5:sof + 9] = (5000).to_bytes(2, "big") * 2
+        bad_frame = bytes(oversized)
+
     class CorruptThenHealthy(Head):
         async def stream_frames(self):
-            yield b"not a JPEG", time.monotonic()
+            yield bad_frame, time.monotonic()
             await asyncio.sleep(0.56)  # Preserve the normal 500ms sample gate.
             yield image(square=True), time.monotonic()
             await asyncio.Event().wait()
