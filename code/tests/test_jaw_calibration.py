@@ -44,7 +44,7 @@ def test_flat_contact_and_duplicate_or_reordered_hardware_frames_rejected():
         propose(samples)
     samples = measured_samples()
     samples["contact"][1] = samples["contact"][0]
-    with pytest.raises(ValueError, match="strictly increasing"):
+    with pytest.raises(ValueError, match="forward hardware conversions"):
         propose(samples)
     samples = measured_samples()
     samples["upper"] = [(730, i + 17) for i in range(8)]
@@ -60,6 +60,7 @@ async def test_capture_requires_independent_jaw_seq_and_reuses_existing_aux():
         assert request.headers["Authorization"] == "Bearer " + "s" * 32
         next_seq += 1
         return httpx.Response(200, json={
+            "robot_id": "robot-01",
             "force": {"valid": True, "calibrated": False,
                       "adc": [0, 100], "jaw_seq": next_seq},
         })
