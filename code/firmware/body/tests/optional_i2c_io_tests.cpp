@@ -320,6 +320,9 @@ int main() {
     CHECK(read.gauge.bus_mv == 5120);
     CHECK(read.gauge.shunt_uv == 40);
     CHECK(read.gauge.monitor_sample_seq > 0U);
+    CHECK(read.gauge.fuel_sample_seq > 0U);
+    CHECK(read.gauge.fuel_at_ms <= read.gauge.at_ms);
+    CHECK(read.gauge.monitor_at_ms <= read.gauge.at_ms);
 #if defined(DESK_ROBOT_PACK_SHUNT_MOHM) && DESK_ROBOT_PACK_SHUNT_MOHM == 5
     CHECK(read.gauge.pack_current_valid);
     CHECK(read.gauge.pack_current_ma == 8); // 40uV / 5mOhm = +8mA
@@ -471,16 +474,19 @@ int main() {
     const auto& fuel = fuel_accessories.readings().gauge;
     CHECK(fuel.fuel_valid && fuel.fuel_sample_seq > 0U);
     const auto last_good_fuel_seq = fuel.fuel_sample_seq;
+    const auto last_good_fuel_at = fuel.fuel_at_ms;
     fuel_wire.fail_fuel_register_read = true;
     for (std::uint32_t ms = 2808; ms < 3700; ms += 12)
       fuel_accessories.poll(ms);
     CHECK(!fuel.fuel_valid);
     CHECK(fuel.fuel_sample_seq == last_good_fuel_seq);
+    CHECK(fuel.fuel_at_ms == last_good_fuel_at);
     fuel_wire.fail_fuel_register_read = false;
     for (std::uint32_t ms = 3708; ms < 4650; ms += 12)
       fuel_accessories.poll(ms);
     CHECK(fuel.fuel_valid);
     CHECK(fuel.fuel_sample_seq > last_good_fuel_seq);
+    CHECK(fuel.fuel_at_ms > last_good_fuel_at);
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
