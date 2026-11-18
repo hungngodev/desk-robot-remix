@@ -23,6 +23,16 @@ constexpr int kServoMinDegrees = 60;
 constexpr int kServoMaxDegrees = 120;
 constexpr std::uint32_t kServoStepMs = 20;  // at most 50 commanded degrees/sec
 
+// Raw 9.7 fixed-point VL53L0X Mcps words, read-only. This does not
+// extend cliff safety permission or imply optical calibration.
+struct RangeOpticalRaw {
+  bool present = false;
+  bool valid = false;
+  std::uint16_t ambient_97 = 0;
+  std::uint16_t signal_97 = 0;
+  std::uint32_t at_ms = 0;
+};
+
 struct State {
   bool armed = false;
   bool servos_attached = false;
@@ -35,6 +45,7 @@ struct State {
   bool cap_valid = false; // read-only CAP1188 zones, never a motor permit
   std::uint8_t cap_mask = 0;
   std::uint32_t cap_events = 0;
+  RangeOpticalRaw optical[8]{};
   std::uint16_t side_mm[3]{};
   std::uint32_t side_at_ms[3]{};
   bool side_present[3]{};
@@ -105,6 +116,14 @@ class BodyControl {
     // time. Never treat a late healthy read as automatic recovery.
     if (required) dc_fault_latched_ = true;
   }
+  // Raw data from the SAME verified VL53L0X conversion as cliff ranges.
+  // A stale/broken shared mux immediately revokes valid flags but preserves
+  // last raw words for the read-only optical diagnostic endpoint.
+  void sample_range_optics(std::uint8_t channel, std::uint16_t ambient_97,
+                           std::uint16_t signal_97, bool valid,
+                           std::uint32_t now_ms);
+  void invalidate_range_optics();
+
   // Left/right/rear read-only ToF samples never grant motor permission.
   void sample_side_range(std::uint8_t index, std::uint16_t mm,
                          bool valid, std::uint32_t now_ms);
