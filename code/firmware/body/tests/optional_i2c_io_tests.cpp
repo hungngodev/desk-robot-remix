@@ -272,6 +272,31 @@ int main() {
     CHECK(read.force.present && read.force.valid && read.force.valid_mask == 3);
     CHECK(read.force.adc[0] == 1024);
     CHECK(read.force.adc[1] == -292);
+    // A shared mux failure invalidates BOTH ADS1115 channels, not only
+    // the aggregate flag. One recovered conversion cannot reuse the old pair.
+    TwoWire force_fault_wire;
+    desk_robot::AccessorySensors force_fault;
+    CHECK(force_fault.begin(force_fault_wire));
+    for (std::uint32_t ms = 0; ms < 2400; ms += 12)
+      force_fault.poll(ms);
+    CHECK(force_fault.readings().force.valid_mask == 3U);
+    force_fault_wire.optional_mux_stuck = true;
+    force_fault_wire.extras = 0;
+    force_fault.poll(2400);
+    CHECK(!force_fault.readings().force.valid);
+    CHECK(force_fault.readings().force.valid_mask == 0U);
+    force_fault_wire.optional_mux_stuck = false;
+    bool saw_partial = false;
+    for (std::uint32_t ms = 2412; ms < 4000; ms += 12) {
+      force_fault.poll(ms);
+      const auto& recovered = force_fault.readings().force;
+      if (recovered.valid_mask == 1U || recovered.valid_mask == 2U) {
+        CHECK(!recovered.valid);
+        saw_partial = true;
+        break;
+      }
+    }
+    CHECK(saw_partial);
     CHECK(read.gauge.fuel_present && read.gauge.fuel_valid);
     CHECK(read.gauge.cell_mv == 3600);
     CHECK(read.gauge.soc_centi == 5000);

@@ -31,6 +31,10 @@ void AccessorySensors::invalidate_cached() {
     data_.proximity.valid = data_.gauge.fuel_valid =
     data_.gauge.monitor_valid = data_.dock.valid = data_.nfc.valid = false;
   data_.gauge.pack_current_valid = false;
+  // Invalidate the complete ADS1115 acquisition pair. Otherwise a single
+  // post-fault conversion can combine with the other channel's stale bit.
+  data_.force.valid_mask = 0;
+  ads_pending_ = false;
   data_.optional_inputs.valid = false;
 #if DESK_ROBOT_ENABLE_HAPTIC
   haptic_.fault();
