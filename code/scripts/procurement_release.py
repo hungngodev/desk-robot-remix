@@ -738,7 +738,9 @@ def first_robot_projection(report: dict) -> dict:
 PILOT_SAMPLE_PRODUCTS = {
     "cliff_obstacle": ("VL53L0X GY-530 small carrier candidate ElectroPeak SEN-19-006",
                        "ElectroPeak", "SEN-19-006",
-                       "https://electropeak.com/gy-530-vl53l0x-laser-range-finder", 8, 1.76),
+                       "https://electropeak.com/gy-530-vl53l0x-laser-range-finder", 1, 1.44),
+    # Source checked 2026-11-18: one PCB sample first, then approve seven
+    # matching units only after 3.3V/I2C and short-range desk-edge trials.
     "i2c_mux": (
         "TCA9548A 8 channel 3.3V compatible I2C multiplexer",
         "ElectroPeak", "COM-05-067",
