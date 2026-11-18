@@ -480,8 +480,11 @@ def main() -> None:
     parser.add_argument("--dock-idle-5v-a", type=float)
     parser.add_argument("--dock-requested-charge-a", type=float)
     parser.add_argument("--dock-sys-v", type=float)
-    parser.add_argument("--dock-charger-variant", choices=("BQ24074", "BQ24075"),
-                        default="BQ24074")
+    # The source register considers BQ24075 while older comparison docs use
+    # BQ24074. These have different docked OUT voltages. A silent default
+    # could screen the wrong regulator topology, so require an explicit
+    # physically inspected variant for every dock analysis.
+    parser.add_argument("--dock-charger-variant", choices=("BQ24074", "BQ24075"))
     parser.add_argument("--dock-boost-efficiency", type=float)
     parser.add_argument("--dock-charger-input-limit-a", type=float)
     parser.add_argument("--dock-board-thermal-input-a", type=float)
@@ -526,6 +529,8 @@ def main() -> None:
         args.dock_boost_efficiency,
     )
     if any(v is not None for v in dock_inputs):
+        if args.dock_charger_variant is None:
+            parser.error("Dock mode requires the actual BQ24074 or BQ24075 charger variant")
         if any(v is None for v in dock_inputs):
             parser.error("Dock mode requires idle current, charge current, SYS voltage and efficiency")
         if args.peak_5v_a is not None or args.continuous_5v_a is not None:
