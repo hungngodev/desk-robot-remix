@@ -76,6 +76,23 @@ def raw_mpu6050(body: dict) -> tuple[tuple[float, ...], float] | None:
     return scaled, rate
 
 
+def mpu6050_temperature_raw(body: dict) -> int | None:
+    """Expose the current signed MPU register for later measured bias trials.
+
+    The raw number is not degrees Celsius, a compensated gyro rate, or
+    evidence of physical orientation. Only accept a fresh stationary WROOM
+    conversion with its explicit MPU-specific temperature validity flag.
+    """
+    if raw_mpu6050(body) is None:
+        return None
+    imu = body["imu"]
+    value = imu.get("temp_raw")
+    if (imu.get("temp_valid") is not True or type(value) is not int
+            or not -32768 <= value <= 32767):
+        return None
+    return value
+
+
 @dataclass
 class HandlingGate:
     """Relative upright baseline and bounded event edges, not motion authority."""
