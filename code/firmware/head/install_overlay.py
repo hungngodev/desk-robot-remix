@@ -329,6 +329,29 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
                 } else {
                     ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
         )
+        # Reject a backend's unsupported Opus rate BEFORE closing the live
+        # decoder. 32 kHz is a valid MAX98357A DAC clock but not an Opus
+        # decoder rate; a malformed TTS event must not permanently silence
+        # subsequent conforming 24 kHz replies. The decoder can also be
+        # reopened after a genuine failed open even when the last rate matches.
+        service = replace_once(
+            service,
+            """void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
+    if (decoder_sample_rate_ == sample_rate && decoder_duration_ms_ == frame_duration) {""",
+            """void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Valid Opus PCM decode rates: 8, 12, 16, 24 or 48 kHz. Reject a bad
+    // remote format without closing the functioning device decoder.
+    if (sample_rate != 8000 && sample_rate != 12000 &&
+        sample_rate != 16000 && sample_rate != 24000 &&
+        sample_rate != 48000) {
+        ESP_LOGE(TAG, "Rejecting unsupported Sense Opus rate %d", sample_rate);
+        return;
+    }
+#endif
+    if (decoder_sample_rate_ == sample_rate &&
+        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {""",
+        )
         files[path] = service.encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
         # not a second decoder or audio transport. Normal TTS stops retain the
