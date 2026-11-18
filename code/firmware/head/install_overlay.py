@@ -360,6 +360,42 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     if (decoder_sample_rate_ == sample_rate &&
         decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {""",
         )
+        # Replace the pinned upstream's close-then-open decoder transition
+        # only in the selected disposable Sense overlay. A malformed packet
+        # or failed replacement allocation must not destroy a working decoder.
+        # The decode thread and ResetDecoder use decoder_mutex_ for this swap.
+        service = replace_once(
+            service,
+            """    std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
+    if (opus_decoder_ != nullptr) {
+        esp_opus_dec_close(opus_decoder_);
+        opus_decoder_ = nullptr;
+    }
+    decoder_lock.unlock();
+    esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
+    auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &opus_decoder_);
+    if (opus_decoder_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to create audio decoder, error code: %d", ret);
+        return;
+    }
+    decoder_sample_rate_ = sample_rate;""",
+            """    esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
+    void* proposed_decoder = nullptr;
+    auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &proposed_decoder);
+    if (proposed_decoder == nullptr) {
+        ESP_LOGE(TAG, "Failed to create replacement decoder, keeping prior decoder: %d", ret);
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> decoder_lock(decoder_mutex_);
+        void* previous_decoder = opus_decoder_;
+        opus_decoder_ = proposed_decoder;
+        if (previous_decoder != nullptr) {
+            esp_opus_dec_close(previous_decoder);
+        }
+    }
+    decoder_sample_rate_ = sample_rate;""",
+        )
         files[path] = service.encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
         # not a second decoder or audio transport. Normal TTS stops retain the
