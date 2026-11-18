@@ -121,7 +121,16 @@ class VisualChangeGate:
     def _reduced(jpeg: bytes) -> bytes:
         from PIL import ImageOps
 
+        # Match the shared camera hub's cheap header checks before Pillow
+        # allocates the full raster. Direct pet observations can reach this
+        # gate without passing through multimodal._prepare first.
+        if not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000:
+            raise ValueError("Camera JPEG size invalid")
         with Image.open(BytesIO(jpeg)) as image:
+            if image.format != "JPEG":
+                raise ValueError("Authenticated camera source must return JPEG")
+            if not 1 <= image.width <= 4096 or not 1 <= image.height <= 4096:
+                raise ValueError("Camera dimensions invalid")
             return ImageOps.grayscale(image).resize((64, 48)).tobytes()
 
     def observe(self, jpeg: bytes) -> bytes | None:
