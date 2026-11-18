@@ -252,7 +252,9 @@ def compose_brain_context(
         if re.match(
             r"^(?:hey [a-z]+[, ]+|please )*"
             r"(?:what do you remember|do you (?:remember|recall)|"
-            r"what did i (?:tell|say)|remind me|what did we (?:discuss|talk))",
+            r"what did i (?:tell|say)|(?:can you )?remind me|" 
+            r"tell me what you remember|did we (?:talk|discuss)|"
+            r"what did we (?:discuss|talk))",
             heard,
         ):
             requested_tools.add("memory_recall")
@@ -264,6 +266,8 @@ def compose_brain_context(
             r"does (?:the|this|that|my) (?:screen|display|label)\b|"
             r"(?:how many|count) .{1,65} (?:on (?:my|the) "
             r"(?:desk|table)|in (?:the|this|your) (?:image|photo|frame))\b|"
+            r"(?:what(?:'s| is) on (?:my|the) (?:desk|table)|" 
+            r"tell me what you see|" 
             r"(?:is|are) (?:there|this|that|the|my) .{1,65} "
             r"(?:next to|beside|behind|on (?:my|the) "
             r"(?:desk|table))\b)",
@@ -273,20 +277,27 @@ def compose_brain_context(
         if re.match(
             r"^(?:hey [a-z]+[, ]+|please )*"
             r"(?:is the pickup|did you pick up|have you picked up|"
-            r"what is the pickup|check (?:the )?pickup)",
+            r"what is the pickup|check (?:the )?pickup|" 
+            r"has the pickup (?:finished|succeeded)|"
+            r"did the gripper (?:grab|lift)|are you holding|" 
+            r"is (?:the|my) .{1,40} in your gripper)",
             heard,
         ):
             requested_tools.add("pickup_status")
         if re.match(
             r"^(?:hey [a-z]+[, ]+|please )*"
             r"(?:check your battery|what(?: is|\x27s) your (?:battery|status)|"
-            r"how much battery|how are your sensors)",
+            r"how much battery|how are your sensors|" 
+            r"can you check your battery|how much charge (?:remains|is left)|"
+            r"what is the battery percentage|are you armed|" 
+            r"is your motor faulted)",
             heard,
         ):
             requested_tools.add("robot_status")
         if re.search(
             r"\b(?:temperature|humidity|pressure|climate|proximity|"
-            r"nfc|sht41|bmp280|sensor readings|dock contacts)\b", heard
+            r"nfc|sht41|bmp280|sensor readings|dock contacts|"
+            r"soil moisture|air quality|light level|imu reading)\b", heard
         ):
             requested_tools.add("sensor_telemetry")
     for latest in heard_requests:
