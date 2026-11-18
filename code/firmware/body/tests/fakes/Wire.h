@@ -69,6 +69,9 @@ class TwoWire {
   unsigned tof_register_stop_transmissions = 0;
   std::uint8_t tof_raw_status = 11;
   std::uint16_t tof_force_mm = 0; // zero keeps per-lane nominal 45/300 mm
+  // On-wire raw 9.7 fixed-point optical quality fields for regression.
+  std::uint16_t tof_ambient_97 = 0x0123;
+  std::uint16_t tof_signal_97 = 0x4567;
   unsigned imu_probe_attempts = 0;
 
   void begin(int, int, int) {}
@@ -225,6 +228,10 @@ class TwoWire {
       } else if (tof_register == 0x14 && count == 12) {
         inbound.assign(12, 0);
         inbound[0] = static_cast<std::uint8_t>(tof_raw_status << 3);
+        inbound[6] = static_cast<std::uint8_t>(tof_ambient_97 >> 8);
+        inbound[7] = static_cast<std::uint8_t>(tof_ambient_97);
+        inbound[8] = static_cast<std::uint8_t>(tof_signal_97 >> 8);
+        inbound[9] = static_cast<std::uint8_t>(tof_signal_97);
         const unsigned mm = tof_force_mm != 0 ? tof_force_mm :
                             (ranges == 16 ? 300 : 45);
         inbound[10] = static_cast<std::uint8_t>(mm >> 8);
