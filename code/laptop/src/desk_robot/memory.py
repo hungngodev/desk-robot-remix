@@ -248,7 +248,7 @@ class MemoryStore:
         if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
         if (not isinstance(query, str) or not 1 <= len(query.strip()) <= 240
-                or "\\x00" in query or type(limit) is not int
+                or "\x00" in query or type(limit) is not int
                 or not 1 <= limit <= 12):
             raise ValueError("Bounded memory question and limit required")
         expression = _fts_query(query)
