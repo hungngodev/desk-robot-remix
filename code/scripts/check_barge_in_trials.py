@@ -59,7 +59,7 @@ def evaluate(records: list[dict]) -> dict:
             "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
         )
         stages = [_number(r.get(name), name) for name in stage_names]
-        if any(later < earlier for earlier, later in zip(stages, stages[1:])):
+        if any(later < earlier for earlier, later in zip(stages, stages[1:], strict=False)):
             raise ValueError("Audio stop stage timestamps are not monotonic")
         distance = _number(r.get("speaker_distance_cm"), "speaker distance")
         noise = _number(r.get("room_noise_db_a"), "room background noise")
