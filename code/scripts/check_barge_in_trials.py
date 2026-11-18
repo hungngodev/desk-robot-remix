@@ -28,6 +28,7 @@ def evaluate(records: list[dict]) -> dict:
     on_time = 0
     understood = 0
     volumes, positions, loads, speakers, turns = set(), set(), set(), set(), set()
+    firmware_revisions, audio_configs, placements = set(), set(), set()
     for r in human:
         volume = r.get("volume")
         if volume not in ("low", "medium", "high"):
@@ -69,6 +70,9 @@ def evaluate(records: list[dict]) -> dict:
             value = r.get(label)
             if type(value) is not str or not value.strip() or len(value) > 128:
                 raise ValueError(f"Missing physical trial provenance: {label}")
+        firmware_revisions.add(r["firmware_commit"])
+        audio_configs.add(r["audio_config_id"])
+        placements.add(r["mic_speaker_placement_id"])
         captured = r.get("new_utterance_captured")
         correct = r.get("new_intent_correct")
         beginning = r.get("utterance_beginning_intelligible")
@@ -91,6 +95,13 @@ def evaluate(records: list[dict]) -> dict:
         raise ValueError("Need trials with a second human speaker")
     if not any(turn + 1 in turns for turn in turns):
         raise ValueError("Need adjacent conversation turns")
+
+    # A single acceptance result must not mix different firmware builds,
+    # AEC settings or microphone/speaker geometry across its twenty trials.
+    # Those require separate complete acoustic trial sets.
+    if any(len(values) != 1 for values in (
+            firmware_revisions, audio_configs, placements)):
+        raise ValueError("Do not mix firmware, audio config or physical mounting trials")
 
     control = alone[0]
     duration = _number(control.get("duration_seconds"), "robot-only duration")
