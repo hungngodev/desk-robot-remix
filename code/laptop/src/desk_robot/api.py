@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
-import re
 import secrets
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -29,7 +26,6 @@ from .api_readonly_planner import (
     register_readonly_planner_routes,
 )
 from .api_robot_status import register_robot_status_routes
-from .brain_context import compose_brain_context
 from .config import Settings, secret
 from .controller import OperationError
 from .conversation import conversation_turns
