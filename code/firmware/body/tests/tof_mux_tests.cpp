@@ -43,6 +43,48 @@ static void faulted(desk_robot::CliffGuard& guard) {
 int main() {
   try {
     {
+      // Optical quality is decoded from the SAME accepted 12-byte result,
+      // not a new blocking I2C read or a separate motion authorization.
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      const auto floor = bus.optical_diagnostic(0, 50);
+      CHECK(floor.present && floor.valid && floor.age_ms == 50);
+      CHECK(floor.ambient_97 == 0x0123 && floor.signal_97 == 0x4567);
+      CHECK(!bus.optical_diagnostic(0, 200).valid);
+      CHECK(bus.optical_diagnostic(0, 200).signal_97 == 0x4567);
+      CHECK(bus.new_optical_channel() == 4);
+
+      Wire.tof_ready = false;
+      bus.poll(guard, 60);  // no completed side conversion
+      CHECK(bus.new_optical_channel() == 255);
+      CHECK(!bus.optical_diagnostic(5, 60).present);
+      Wire.tof_ready = true;
+      bus.poll(guard, 61);  // a distinct completed critical conversion
+      CHECK(bus.new_optical_channel() == 0);
+      const auto renewed = bus.optical_diagnostic(0, 61);
+      CHECK(renewed.present && renewed.valid && renewed.age_ms == 0);
+      CHECK(!bus.optical_diagnostic(8, 61).present);
+    }
+    {
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      bus.poll(guard, 60);  // optional range lane 5
+      const auto side = bus.optical_diagnostic(5, 410);
+      CHECK(side.present && side.valid && side.age_ms == 350);
+      CHECK(side.ambient_97 == 0x0123 && side.signal_97 == 0x4567);
+      CHECK(!bus.optical_diagnostic(5, 411).valid);
+      Wire.range_mux_bad_readback = true;
+      bus.poll(guard, 61);  // fault invalidates old optical evidence
+      CHECK(!bus.optical_diagnostic(5, 62).valid);
+      CHECK(bus.optical_diagnostic(5, 62).signal_97 == 0x4567);
+      CHECK(!bus.optical_diagnostic(0, 62).valid);
+      faulted(guard); // optical metadata did not weaken the local latch
+    }
+    {
       desk_robot::TofBus bus;
       desk_robot::CliffGuard guard;
       ready(bus, guard);
