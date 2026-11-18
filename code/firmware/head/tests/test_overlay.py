@@ -139,7 +139,7 @@ class OverlayTests(unittest.TestCase):
         paths = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc", "main/boards/common/camera.h", "main/boards/common/esp_video.h", "main/boards/common/esp_video.cc"]
         # Sense overlays urgent-stop and the pinned Xiaozhi I2S writer; no
         # shortcut synthetic codec is installed in the firmware clone.
-        paths += ["main/application.cc", "main/audio/codecs/no_audio_codec.cc"]
+        paths += ["main/application.cc", "main/audio/audio_service.cc", "main/audio/codecs/no_audio_codec.cc"]
         paths += ["main/boards/common/esp32_camera.h", "main/boards/common/esp32_camera.cc"]
         paths += [p.relative_to(UPSTREAM).as_posix() for p in (UPSTREAM / "main/boards/m5stack/core-s3").iterdir() if p.is_file()]
         self.original = {}
@@ -223,6 +223,11 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("#else", source)
         self.assertIn("portMAX_DELAY", source)
         self.assertNotIn("pdMS_TO_TICKS(500)", original)
+        service = (self.root / "main/audio/audio_service.cc").read_text()
+        self.assertIn("constexpr int initial_decoder_rate = 24000;", service)
+        self.assertIn("esp_ae_rate_cvt_open(&cfg, &output_resampler_)", service)
+        self.assertIn("Sense speaker resampler unavailable: discarding mismatched PCM", service)
+        self.assertIn("decoded = !task.pcm.empty();", service)
         app = (self.root / "main/application.cc").read_text()
         self.assertIn("urgent_flush", app)
         self.assertIn("audio_service_.ResetDecoder()", app)
