@@ -1186,7 +1186,7 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     rows = {item["id"]: item for item in pilot["roles"]}
     assert len(rows) == 49
     assert pilot["pilot_sample_count"] == 17
-    assert pilot["pilot_historical_quoted_subtotal_usd"] == 27.63
+    assert pilot["pilot_historical_quoted_subtotal_usd"] == 30.07
     assert not pilot["whole_first_robot_purchase_approved"]
     assert not pilot["lithium_charging_or_motor_motion_authorized"]
     assert not pilot["actual_current_landed_cost_verified"]
@@ -1206,10 +1206,10 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert rows["cliff_obstacle"]["missing_for_functional_channel"] == []
     assert rows["i2c_mux"]["pilot_sample_quantity"] == 2
     assert rows["i2c_mux"]["source_sku"] == "COM-05-067"
-    assert rows["i2c_mux"]["historical_unit_quote_usd"] is None
+    assert rows["i2c_mux"]["historical_unit_quote_usd"] == 0.47
     assert rows["cap1188"]["source_sku"] == "SEN-25-020"
     assert rows["apds9960"]["source_sku"] == "SEN-24-027"
-    assert rows["ads1115"]["historical_unit_quote_usd"] is None
+    assert rows["ads1115"]["historical_unit_quote_usd"] == 1.50
     assert rows["mcp23017"]["source_sku"] == "COM-05-093"
     assert rows["amp"]["pilot_sample_quantity"] == 1
     assert rows["amp"]["source_sku"] == "DFR0954"
@@ -1232,7 +1232,7 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert text.count("## 1.") == 1
     assert text.count("## 2.") == 1
     assert "SEN-19-006" in text
-    assert "27.63" in text
+    assert "30.07" in text
     assert "not a physically qualified robot" in text
 
 
@@ -1284,11 +1284,13 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     cart = mod.pilot_supplier_cart(mod.generate(plan))
     assert cart["exact_sku_count"] == 13
     assert cart["component_quantity"] == 17
-    assert cart["historical_priced_partial_subtotal_usd"] == 27.63
+    assert cart["historical_priced_partial_subtotal_usd"] == 30.07
     assert not cart["landed_total_verified"]
     assert not cart["complete_robot_purchase_approved"]
     assert not cart["lithium_charging_or_motor_motion_authorized"]
-    assert {"COM-05-067", "DFR0954"} <= set(cart["unpriced_skus"])
+    assert {"D2F-01L3", "DFR0954"} <= set(cart["unpriced_skus"])
+    assert "COM-05-067" not in cart["unpriced_skus"]
+    assert "COM-05-045" not in cart["unpriced_skus"]
     assert len(set((x["vendor"], x["sku"]) for x in cart["items"])) == 13
     assert Counter(x["vendor"] for x in cart["items"])["ElectroPeak"] == 6
     rows = {x["id"]: x for x in cart["items"]}
