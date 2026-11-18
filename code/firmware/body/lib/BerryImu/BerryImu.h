@@ -53,9 +53,10 @@ class BerryImu {
  private:
   BerryReading reading_{};
   bool configured_ = false;
+#if defined(ARDUINO)
+  // Poll cadence is firmware-only; host builds must not carry unused fields.
   std::uint32_t last_poll_ms_ = 0;
   bool ever_polled_ = false;
-#if defined(ARDUINO)
   TwoWire* wire_ = nullptr;
   std::uint8_t gyro_address_ = 0;
   std::uint8_t extra_address_ = 0;
