@@ -15,7 +15,10 @@ import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
-from procurement_release import PART_GATES, SUPPLEMENTAL_DECISIONS, SYSTEM_GATES
+from procurement_release import (
+    FIRST_ROBOT_ROOM_GATE, FLEET_ONLY_SYSTEM_GATES, PART_GATES,
+    SUPPLEMENTAL_DECISIONS, SYSTEM_GATES,
+)
 from verify_playbook_receipts import verified_raw_record
 from verify_system import source_snapshot
 
@@ -38,7 +41,7 @@ def checkout_sha() -> str:
         raise ValueError("A clean exact commit and full repository tree are required for ordering")
     return sha
 
-def required_receipts(evidence: dict):
+def required_receipts(evidence: dict, *, first_robot: bool = False):
     """Scope each receipt to its specific purchased part, station or gate."""
     for ident, record in evidence.get("parts", {}).items():
         for gate in PART_GATES:
@@ -47,7 +50,12 @@ def required_receipts(evidence: dict):
         for gate in PART_GATES:
             yield "room:" + ident, gate, record.get(gate)
     for gate in SYSTEM_GATES:
+        if first_robot and gate in FLEET_ONLY_SYSTEM_GATES:
+            continue
         yield "system", gate, evidence.get("system", {}).get(gate)
+    if first_robot:
+        yield ("system", FIRST_ROBOT_ROOM_GATE,
+               evidence.get("system", {}).get(FIRST_ROBOT_ROOM_GATE))
     for ident in SUPPLEMENTAL_DECISIONS:
         selection = evidence.get("supplemental_decisions", {}).get(ident, {})
         scope = "supplemental:" + ident
@@ -61,7 +69,8 @@ def required_receipts(evidence: dict):
             )
 
 
-def audit_release(evidence: dict, sha: str, lookup=None) -> list[str]:
+def audit_release(evidence: dict, sha: str, lookup=None, *,
+                  first_robot: bool = False) -> list[str]:
     """Fail closed if a receipt is missing, mis-scoped or not actually present."""
     if not isinstance(evidence, dict) or not SHA.fullmatch(sha):
         return ["missing exact checkout SHA or release evidence"]
@@ -69,7 +78,9 @@ def audit_release(evidence: dict, sha: str, lookup=None) -> list[str]:
     lookup = github_json if lookup is None else lookup
     errors = []
     seen = 0
-    for scope, gate, receipt in required_receipts(evidence):
+    for scope, gate, receipt in required_receipts(
+        evidence, first_robot=first_robot
+    ):
         seen += 1
         if not isinstance(receipt, dict):
             errors.append(f"{scope}.{gate}: missing receipt")
