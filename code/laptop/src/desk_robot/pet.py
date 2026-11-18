@@ -23,6 +23,9 @@ from .conversation import Conversation
 from .handling import HandlingGate
 from .memory import MemoryStore
 from .side_ranging import SideRangeEvents
+from .sensor_event_contract import (
+    DIRECT_INTERACTION_KINDS, PHYSICAL_INITIATIVE_KINDS,
+)
 from .transport import Head, HeadError
 from .vision import SceneChange, VisualChangeGate
 
@@ -52,19 +55,10 @@ _SOCIAL_EVENT_KINDS = frozenset({
     "key", "candy", "object", "hand_wave", "petting_zone", "nfc_tag",
 })
 
-_DIRECT_INTERACTION_KINDS = frozenset({
-    "touch", "touch_tap", "touch_double", "petting_zone",
-    "squeeze", "hand_wave", "nose_twist", "paw_contact",
-    "nfc_tag", "magnet",
-})
-
-_PHYSICAL_INITIATIVE_KINDS = frozenset({
-    "touch", "touch_tap", "touch_double", "touch_hold", "petting_zone",
-    "squeeze", "hand_wave", "nose_twist", "nearby_object",
-    "battery_low", "magnet", "pir", "bumper",
-    "handling_tilt", "handling_shake", "side_object", "paw_contact",
-    "ambient_shift", "nfc_tag",
-})
+# Preserve existing internal aliases while sharing exact event names with
+# the camera hub. No independent duplicate registry can silently drift.
+_DIRECT_INTERACTION_KINDS = DIRECT_INTERACTION_KINDS
+_PHYSICAL_INITIATIVE_KINDS = PHYSICAL_INITIATIVE_KINDS
 
 
 def _initiative_evidence(change: SceneChange) -> bool:
