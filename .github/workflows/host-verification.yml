@@ -29,8 +29,21 @@ jobs:
           enable-cache: true
       - name: Prevent partial repository trees
         run: |
-          test -f AGENTS.md
-          test -f README.md
+          # Include hidden root entries: a truncated Git Database tree may
+          # retain a few visible source files but drop shared agent assets,
+          # workflow configuration, or repository license metadata.
+          for directory in .agent3d .github code docs; do
+            if [ ! -d "$directory" ]; then
+              echo "::error::Missing expected repository root directory: $directory"
+              exit 1
+            fi
+          done
+          for file in .gitignore AGENTS.md LICENSE README.md; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing expected repository root file: $file"
+              exit 1
+            fi
+          done
           test -f code/firmware/body/include/BodyPins.h
           test -f code/firmware/head/sense/config.h
           test -f docs/hardware/full-feature-plan.json
