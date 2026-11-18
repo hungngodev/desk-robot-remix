@@ -603,36 +603,37 @@ def apply(target: Path, board: str = "cores3") -> None:
             "sha256": digest(data),
             "original": base64.b64encode(path.read_bytes()).decode() if path.exists() else None,
         }
-    # Apply to the disposable build clone as a rollback transaction.
-    # Record an attempted write BEFORE starting it, since write_bytes can
-    # truncate a file and then fail. A partial install never publishes a
-    # success marker, even if the process is interrupted during marker I/O.
+    # Journal FIRST, then atomically replace each file. If SIGKILL stops
+    # this transaction, every published path is either its original bytes
+    # or its complete overlay bytes, and --remove can recover using the
+    # still-present marker. A marker written only after file replacements
+    # would strand a force-killed build with no rollback information.
+    atomic_replace_bytes(marker, (json.dumps(state, indent=2) + "\n").encode())
     attempted = []
-    marker_temp = target / (MARKER + ".tmp")
     try:
         for name, data in files.items():
-            path = target / name
-            path.parent.mkdir(parents=True, exist_ok=True)
             attempted.append(name)
-            path.write_bytes(data)
-        marker_temp.write_text(json.dumps(state, indent=2) + "\n")
-        marker_temp.replace(marker)  # Atomic publication of completed state.
+            atomic_replace_bytes(target / name, data)
     except BaseException:
-        # Restore each attempted file to its exact original byte content.
-        # In a failed rollback, do not pretend a clean install occurred.
-        marker.unlink(missing_ok=True)
-        marker_temp.unlink(missing_ok=True)
+        # Ordinary Python exceptions also roll back immediately. If disk
+        # failure prevents one restore, KEEP the journal for a later --remove.
+        rollback_failed = False
         for name in reversed(attempted):
             original = state[name]["original"]
             path = target / name
-            if original is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.write_bytes(base64.b64decode(original))
-        for board_name in BOARDS.values():
-            directory = target / board_name
-            if directory.is_dir() and not any(directory.iterdir()):
-                directory.rmdir()
+            try:
+                if original is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    atomic_replace_bytes(path, base64.b64decode(original))
+            except BaseException:
+                rollback_failed = True
+        if not rollback_failed:
+            marker.unlink(missing_ok=True)
+            for board_name in BOARDS.values():
+                directory = target / board_name
+                if directory.is_dir() and not any(directory.iterdir()):
+                    directory.rmdir()
         raise
     print(f"Installed {len(files)} overlay files into {target}")
 
