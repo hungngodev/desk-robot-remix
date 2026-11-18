@@ -32,3 +32,27 @@ def test_unverified_pilot_projection_remains_available_without_release_flag():
     assert pilot["whole_first_robot_purchase_approved"] is False
     assert pilot["lithium_charging_or_motor_motion_authorized"] is False
     assert pilot["actual_current_landed_cost_verified"] is False
+
+
+def test_one_robot_release_requires_real_first_unit_receipts_before_printing_cart():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--require-first-robot",
+         "--format", "first-robot-markdown"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "HOLD" in result.stderr
+
+
+def test_first_robot_release_refuses_fleet_or_pilot_output():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--require-first-robot",
+         "--format", "markdown"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "First robot release may only print a first robot view" in result.stderr
