@@ -36,7 +36,9 @@ def analyze(records: list[dict]) -> dict:
     boot_id = firmware = mount = None
     last_sample = last_time = None
     for record in records:
-        if not isinstance(record, dict) or record.get("label") not in groups:
+        if (not isinstance(record, dict)
+                or type(record.get("label")) is not str
+                or record["label"] not in groups):
             raise ValueError("Use upright, tilted or shaking measured labels")
         observed = record.get("time_monotonic_s")
         if not _finite(observed) or observed < 0:
