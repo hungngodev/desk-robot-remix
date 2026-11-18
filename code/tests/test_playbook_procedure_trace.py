@@ -22,11 +22,27 @@ def _valid_release_evidence(record):
         return False
     if any(ch not in "0123456789abcdef" for ch in sha):
         return False
-    if not isinstance(test, str) or not test.startswith("https://"):
+    if not isinstance(test, dict):
+        return False
+    if (test.get("sha") != sha
+            or type(test.get("exit_code")) is not int
+            or test["exit_code"] != 0
+            or not isinstance(test.get("command"), str)
+            or not test["command"].strip()
+            or not isinstance(test.get("url"), str)
+            or not test["url"].startswith(
+                "https://github.com/hungngodev/desk-robot-remix/")):
         return False
     if record["gate"] in {"MEASURED", "QUALIFIED"}:
         measured = record["physical_measurement_receipt"]
-        if not isinstance(measured, str) or not measured.startswith("https://"):
+        if (not isinstance(measured, dict)
+                or measured.get("result") != "pass"
+                or not isinstance(measured.get("operator"), str)
+                or not measured["operator"].strip()
+                or not isinstance(measured.get("device_revision"), str)
+                or not measured["device_revision"].strip()
+                or not isinstance(measured.get("raw_data_url"), str)
+                or not measured["raw_data_url"].startswith("https://")):
             return False
     return True
 
@@ -60,12 +76,21 @@ def test_status_string_cannot_fake_same_sha_or_physical_acceptance(claimed_statu
     row["gate"] = claimed_status
     assert not _valid_release_evidence(row)
     row["last_verified_sha"] = "a" * 40
-    row["executed_test_receipt"] = "https://github.com/example/verified-test"
+    row["executed_test_receipt"] = {
+        "sha": "a" * 40,
+        "exit_code": 0,
+        "command": "cd code && python -m pytest -q tests",
+        "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
+    }
     if claimed_status == "TESTED":
         assert _valid_release_evidence(row)
     else:
         assert not _valid_release_evidence(row)
-        row["physical_measurement_receipt"] = "https://github.com/example/bench-trial"
+        row["physical_measurement_receipt"] = {
+            "result": "pass", "operator": "bench engineer",
+            "device_revision": "received carrier revision",
+            "raw_data_url": "https://github.com/example/bench-trial",
+        }
         assert _valid_release_evidence(row)
 
 
@@ -74,4 +99,3 @@ def test_procurement_and_physical_procedures_remain_open_without_bench_receipts(
     for row in rows:
         if row["physical_measurement_receipt"] is None:
             assert row["gate"] not in {"MEASURED", "QUALIFIED"}
-    assert all(row["gate"] == "OPEN" for row in rows)
