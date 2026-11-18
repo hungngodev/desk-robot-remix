@@ -134,10 +134,10 @@ void invalid_then_good_is_sticky() {
   ready(guard, 0);
   guard.sample(2, 45, false, 10);
   CHECK(guard.fault() == CliffFault::InvalidSample);
-  guard.sample(2, 45, true, 10);
-  CHECK(!guard.evaluate(10));
+  guard.sample(2, 45, true, 11); // distinct conversion, not a replay
+  CHECK(!guard.evaluate(11));
   CHECK(guard.fault_sensor() == 2);
-  CHECK(guard.try_rearm(10));
+  CHECK(guard.try_rearm(11));
   guard.sample(1, 0, true, 11);
   CHECK(guard.fault() == CliffFault::InvalidSample);
   CHECK(!guard.evaluate(11));
@@ -232,6 +232,23 @@ void first_fault_and_invalid_channel() {
   guard.sample(5, 45, true, 2);
   CHECK(guard.fault() == CliffFault::InvalidChannel);
   CHECK(!guard.evaluate(2));
+}
+
+void duplicate_conversion_timestamp_requires_new_sensor_evidence() {
+  CliffGuard guard;
+  ready(guard, 100);
+  guard.sample(2, 46, true, 110);
+  CHECK(guard.evaluate(110));
+  guard.sample(2, 44, true, 110); // replayed same conversion timestamp
+  CHECK(guard.fault() == CliffFault::InvalidSample);
+  CHECK(guard.fault_sensor() == 2);
+  const auto preserved = guard.diagnostic(2, 111);
+  CHECK(preserved.distance_mm == 46); // stale replay did not overwrite raw
+  CHECK(preserved.present && !preserved.valid);
+  CHECK(!guard.try_rearm(111));
+  guard.sample(2, 45, true, 112); // genuine later conversion restores freshness
+  CHECK(guard.try_rearm(112));
+  CHECK(guard.evaluate(112));
 }
 
 void invalid_channel_requires_five_new_measurements() {
@@ -385,6 +402,8 @@ int main(int argc, char** argv) {
       {"bus_fault_requires_new_samples", bus_fault_requires_new_samples},
       {"configuration_replacement_invalidates_samples", configuration_replacement_invalidates_samples},
       {"first_fault_and_invalid_channel", first_fault_and_invalid_channel},
+      {"duplicate_conversion_timestamp_requires_new_sensor_evidence",
+       duplicate_conversion_timestamp_requires_new_sensor_evidence},
       {"invalid_channel_requires_five_new_measurements",
        invalid_channel_requires_five_new_measurements},
       {"unsigned_clock_rollover", unsigned_clock_rollover},
