@@ -138,6 +138,21 @@ The user's original 23-section `ESP32 Deskpet Ideas` research (active project se
 
 The source IR pin budget and read-only decoder are now implemented, but the complete robot remains **NOT DOCKING OR CHARGING VERIFIED** until the actual 38kHz beacon/transmitter, dual receiver physical measurements, terminal steering calibration, independently isolated contact/charger circuit, printed fit and repeated hardware approach/charge bench record all exist. This note is intentionally a gap and source reconciliation, not a completed software feature or an unapproved new purchase.
 
+### Dual-receiver NEC beacon compatibility
+
+The current `DualIrEvidence` implementation requires the **same complete
+classic NEC address/command frame** to be received freshly by both physically
+separate 38 kHz receivers. The two optical emitters therefore transmit the
+same encoded frame on independently current-limited and optically baffled
+channels. The emitter protocol and both receivers must be evaluated together.
+OOMWOO reference variants with distinct left/right codes are NOT source
+compatible with this matcher without a deliberate firmware redesign and
+requalification. Equal codes establish correlated beacon identity only, not
+measured signed steering bearing, safe final motion or charging permission.
+This duplicates the exact rule in
+`docs/hardware/complete-shopping-checklist.md` to prevent incompatible
+beacon purchases or flashing.
+
 ## Last centimeter of autonomous docking
 
 Actual AprilTag camera geometry and body safety can approach a visible guide, but the current `Coordinator._dock_approach` intentionally holds before powered contacts. **No control loop may infer charging contact from an image.** To finish autonomous physical seating, measure actual camera intrinsics, marker location, wheel steering scale, 8 sensor geometry, switch travel and stop distances, and add a physically qualified low-speed contact approach using multiple independent contact checks. Keep local cliff guard, one-use operator permit, 500ms watchdog and dock power motion lockout intact. No uncontrolled charging or movement.
