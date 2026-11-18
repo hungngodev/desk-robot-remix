@@ -533,6 +533,8 @@ def test_wroom_mux_reset_must_remain_hardware_pullup_not_boot_gpio():
     main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
     plan = (ROOT / "docs/product-definition.md").read_text()
     assert "constexpr int kMuxReset = -1;" in pins
+    assert "static_assert(kMuxReset == -1" in pins
+    assert "NO independent CPU-halt" in pins
     assert "if (mux_reset_pin >= 0)" in bus
     assert "body_pins::kMuxReset" in main
     assert "| TCA9548A reset | No GPIO, tied HIGH to 3.3 V" in plan
