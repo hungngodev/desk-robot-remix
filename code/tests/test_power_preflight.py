@@ -577,6 +577,9 @@ def test_docked_cli_uses_exact_same_fail_closed_preflight(monkeypatch, capsys):
         "--dock-idle-5v-a", "0.5", "--dock-requested-charge-a", "0.25",
         "--dock-sys-v", "4.4", "--dock-boost-efficiency", "0.85",
         "--dock-charger-variant", "BQ24074",
+        "--dock-regulator-topology", "boost_only",
+        "--dock-regulator-min-input-v", "2.8",
+        "--dock-regulator-max-input-v", "5.0",
         "--dock-charger-input-limit-a", "1.5",
         "--dock-board-thermal-input-a", "1.5",
         "--dock-adapter-continuous-a", "3",
@@ -610,16 +613,52 @@ def test_docked_cli_refuses_to_guess_which_charger_is_fitted(
     with pytest.raises(SystemExit) as error:
         runpy.run_path(str(script), run_name="__main__")
     assert error.value.code == 2
-    for variant, max_v in (("BQ24074", 4.5), ("BQ24075", 5.6)):
+    for variant, max_v, topology, maximum in (
+        ("BQ24074", 4.5, "boost_only", "5.0"),
+        ("BQ24075", 5.6, "buck_boost", "22.0"),
+    ):
         monkeypatch.setattr(
-            sys, "argv", [str(script)] + base +
-            ["--dock-charger-variant", variant],
+            sys, "argv", [str(script)] + base + [
+                "--dock-charger-variant", variant,
+                "--dock-regulator-topology", topology,
+                "--dock-regulator-min-input-v", "2.8",
+                "--dock-regulator-max-input-v", maximum,
+            ],
         )
         runpy.run_path(str(script), run_name="__main__")
         report = json.loads(capsys.readouterr().out)
         assert report["charger_variant"] == variant
         assert report["charger_variant_max_docked_out_v"] == max_v
+        assert report["voltage_path"]["regulator_covers_charger_output_on_paper"]
         assert report["candidate_physically_qualified"] is False
+
+
+def test_docked_cli_never_approves_bq24075_with_boost_only_regulator(
+    monkeypatch, capsys,
+):
+    import json
+    import sys
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    args = [
+        "--dock-idle-5v-a", "0.5", "--dock-requested-charge-a", "0.25",
+        "--dock-sys-v", "4.4", "--dock-boost-efficiency", "0.85",
+        "--dock-charger-variant", "BQ24075",
+        "--dock-regulator-topology", "boost_only",
+        "--dock-regulator-min-input-v", "2.8",
+        "--dock-regulator-max-input-v", "22.0",
+        "--dock-charger-input-limit-a", "1.5",
+        "--dock-board-thermal-input-a", "1.5",
+        "--dock-adapter-continuous-a", "3",
+        "--dock-boost-5v-continuous-a", "2",
+        "--dock-pack-charge-max-a", "1", "--dock-motors-disarmed",
+    ]
+    monkeypatch.setattr(sys, "argv", [str(script)] + args)
+    runpy.run_path(str(script), run_name="__main__")
+    report = json.loads(capsys.readouterr().out)
+    assert report["voltage_path"]["docked_output_max_v"] == 5.6
+    assert not report["voltage_path"]["regulator_covers_charger_output_on_paper"]
+    assert report["candidate_docked_load_on_paper"] is False
+    assert report["candidate_physically_qualified"] is False
 
 
 def test_cli_rejects_mixed_and_incomplete_power_modes(monkeypatch):
