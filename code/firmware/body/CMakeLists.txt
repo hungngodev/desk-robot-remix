@@ -45,6 +45,21 @@ target_compile_features(optional_i2c_pack_shunt_tests PRIVATE cxx_std_11)
 target_compile_options(optional_i2c_pack_shunt_tests PRIVATE
   -Wall -Wextra -Wpedantic -Werror)
 
+# Exercise the identical bounded FIFO and mux driver with the alternative
+# channel interpretation, without choosing it for an unverified physical PCB.
+add_executable(optional_i2c_reversed_fifo_tests
+  tests/optional_i2c_io_tests.cpp
+  lib/AccessorySensors/AccessorySensors.cpp
+  lib/PulsePad/PulsePad.cpp
+  lib/ExpansionTouch/ExpansionTouch.cpp)
+target_include_directories(optional_i2c_reversed_fifo_tests PRIVATE
+  tests/fakes lib/AccessorySensors lib/PulsePad lib/ExpansionTouch)
+target_compile_definitions(optional_i2c_reversed_fifo_tests PRIVATE
+  DESK_ROBOT_STEPPER=1 DESK_ROBOT_MAX30102_FIFO_IR_FIRST=1)
+target_compile_features(optional_i2c_reversed_fifo_tests PRIVATE cxx_std_11)
+target_compile_options(optional_i2c_reversed_fifo_tests PRIVATE
+  -Wall -Wextra -Wpedantic -Werror)
+
 add_executable(pack_current_tests tests/pack_current_tests.cpp)
 target_include_directories(pack_current_tests PRIVATE lib/AccessorySensors)
 target_compile_features(pack_current_tests PRIVATE cxx_std_11)
