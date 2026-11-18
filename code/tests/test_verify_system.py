@@ -1,5 +1,6 @@
 """Verification runner must never turn failed CI into a fake accepted robot."""
 import importlib.util
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +20,7 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
     assert names == [
         "python-tests", "python-lint", "body-cmake", "body-compile",
         "body-ctest", "wroom-esp32_full", "wroom-esp32_full_pulse_reversed_lab",
-        "wroom-esp32_full_haptic_lab",
+        "wroom-esp32_full_interaction_lab", "wroom-esp32_full_haptic_lab",
         "wroom-esp32_dc_full", "wroom-esp32_dc_watchdog_lab",
         "wroom-esp32_dc_integrated_lab",
         "wroom-esp32_stepper", "wroom-esp32dev",
@@ -35,9 +36,27 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
     assert [job[0] for job in verify.steps("dock", tmp_path)] == [
         "dock-01", "dock-02", "dock-03", "dock-04", "dock-05"
     ]
-    assert len(verify.steps("all", tmp_path)) == 22
+    assert len(verify.steps("all", tmp_path)) == 23
     with pytest.raises(ValueError):
         verify.steps("physical-accepted-by-a-badge", tmp_path)
+
+
+def test_every_declared_platformio_environment_is_exercised(tmp_path):
+    """New lab builds may not silently disappear from the release matrix."""
+    stages = {name for name, *_ in verify.steps("all", tmp_path)}
+    for directory, prefix in (
+        ("body", "wroom-"),
+        ("room_station", "room-"),
+        ("dock", "dock-"),
+    ):
+        config = (ROOT / "code/firmware" / directory / "platformio.ini").read_text()
+        environments = set(re.findall(r"^\\[env:([^\\]]+)\\]$", config,
+                                      flags=re.MULTILINE))
+        assert environments, directory
+        expected = {prefix + name for name in environments}
+        if directory == "dock":
+            expected = {"dock-" + name[-2:] for name in environments}
+        assert {stage for stage in stages if stage.startswith(prefix)} == expected
 
 
 def test_runner_returns_real_failures_and_does_not_retry_motion(monkeypatch, tmp_path):
