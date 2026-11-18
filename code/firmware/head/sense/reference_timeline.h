@@ -22,21 +22,48 @@ class PlaybackReferenceClock {
     }
     if (now_us <= end_us_) return 0;
     const auto elapsed_us = static_cast<std::uint64_t>(now_us - end_us_);
-    const auto frames = elapsed_us * kReferenceRate / 1000000U;
+    // Keep the fractional sample phase between irregular PDM reads. Rounding
+    // each 10.007 ms read independently would lose seven reference samples
+    // every ten reads, accumulating false AEC time drift over a conversation.
+    // Huge unattended gaps are bounded: do not multiply unbounded uptime.
+    const auto available_us = (max_frames / kReferenceRate + 1U) * 1000000U;
+    if (elapsed_us > available_us) {
+      end_us_ = now_us;
+      silence_remainder_ = 0;
+      return max_frames;
+    }
+    const auto numerator = elapsed_us * kReferenceRate + silence_remainder_;
+    const auto frames = numerator / 1000000U;
     end_us_ = now_us;
-    return std::min<std::uint64_t>(frames, max_frames);
+    silence_remainder_ = numerator % 1000000U;
+    if (frames > max_frames) {
+      silence_remainder_ = 0;
+      return max_frames;
+    }
+    return frames;
   }
 
   void accepted_output_frames(int samples) {
     if (samples > 0) {
-      end_us_ += static_cast<std::int64_t>(samples) * 1000000 / kOutputRate;
+      // Accepted I2S chunks may be partial. Carry sub-microsecond residue,
+      // rather than truncating every 32 kHz frame to 31 microseconds.
+      const auto numerator = static_cast<std::uint64_t>(samples) * 1000000U
+          + output_remainder_;
+      end_us_ += static_cast<std::int64_t>(numerator / kOutputRate);
+      output_remainder_ = numerator % kOutputRate;
     }
   }
 
-  void reset() { end_us_ = 0; }
+  void reset() {
+    end_us_ = 0;
+    silence_remainder_ = 0;
+    output_remainder_ = 0;
+  }
   std::int64_t represented_end_us() const { return end_us_; }
 
  private:
   std::int64_t end_us_ = 0;
+  std::uint64_t silence_remainder_ = 0;
+  std::uint64_t output_remainder_ = 0;
 };
 }  // namespace desk_robot
