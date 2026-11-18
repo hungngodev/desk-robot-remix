@@ -520,11 +520,14 @@ def apply(target: Path, board: str = "cores3") -> None:
             "sha256": digest(data),
             "original": base64.b64encode(path.read_bytes()).decode() if path.exists() else None,
         }
-    marker.write_text(json.dumps(state, indent=2) + "\n")
     for name, data in files.items():
         path = target / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
+    # A marker advertises a COMPLETE install. A failed write must not leave
+    # a marker that makes a subsequent run report "already applied" even
+    # though only part of the patch set reached the target.
+    marker.write_text(json.dumps(state, indent=2) + "\n")
     print(f"Installed {len(files)} overlay files into {target}")
 
 
