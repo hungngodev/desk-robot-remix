@@ -149,6 +149,7 @@ class BodyControl {
     // Unknown, absent or swapped identity fails closed for motor readiness.
     return state_.imu_family >= 1 && state_.imu_family <= 4 &&
            imu_.model == static_cast<BerryModel>(state_.imu_family) &&
+           BerryImu::identify(state_.imu_gyro_id, state_.imu_aux_id) == imu_.model &&
            imu_.valid && now_ms - imu_.at_ms <= 200U;
   }
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
