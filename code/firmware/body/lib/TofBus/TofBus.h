@@ -26,6 +26,17 @@ namespace desk_robot {
 // Only reads WHO_AM_I: no sensor fusion, driver selection or motion authority.
 // The photographed owned BerryIMU is likely V1 but its chip is unverified.
 // 1 = V1 LSM9DS0, 2 = V2 LSM9DS1, 3 = V3 LSM6DSL, 0 = unknown.
+// Exactly the optical quality words ALREADY present in VL53L0X 0x14 result.
+// On wire these are unsigned 9.7 fixed-point Mcps, NOT calibrated SNR.
+// They never relax the immediate local raw range/status CliffGuard gate.
+struct TofOpticalDiagnostic {
+  bool present = false;
+  bool valid = false;
+  std::uint16_t ambient_97 = 0;
+  std::uint16_t signal_97 = 0;
+  std::uint32_t age_ms = 0;
+};
+
 struct ImuIdentity {
   std::uint8_t family = 0;
   std::uint8_t gyro_id = 0;
@@ -47,6 +58,12 @@ class TofBus {
   // 0 left, 1 right, 2 rear. Read-only; no new motion permission.
   RangeDiagnostic extra_diagnostic(std::uint8_t index, std::uint32_t now_ms) const;
   std::uint8_t new_extra_channel() const { return new_extra_channel_; }
+  // Read-only, eight-channel quality diagnostics from the SAME 12-byte
+  // sample as the raw cliff input. A successful I2C read does not mean that
+  // an optical result is motion-safe or physically calibrated.
+  TofOpticalDiagnostic optical_diagnostic(std::uint8_t channel,
+                                           std::uint32_t now_ms) const;
+  std::uint8_t new_optical_channel() const { return new_optical_channel_; }
   // One-time read-only probe on the existing upstream 3.3V I2C bus,
   // after Wire has initialized. Do not call from the motor polling loop.
   ImuIdentity probe_imu();
@@ -63,6 +80,15 @@ class TofBus {
   RangeScanOrder scan_{DESK_ROBOT_EXTRA_RANGERS != 0};
   std::uint8_t next_channel_ = 0;
   std::uint8_t new_extra_channel_ = 255;
+  std::uint8_t new_optical_channel_ = 255;
+  struct OpticalSample {
+    bool present = false;
+    bool valid = false;
+    std::uint16_t ambient_97 = 0;
+    std::uint16_t signal_97 = 0;
+    std::uint32_t at_ms = 0;
+  };
+  OpticalSample optical_[kRangeCount]{};
   struct ExtraSample {
     bool present = false;
     bool valid = false;
