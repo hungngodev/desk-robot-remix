@@ -50,8 +50,13 @@ def verified_actions_run(url: str, sha: str, lookup=github_json) -> bool:
             or parsed.query or parsed.fragment or match is None):
         return False
     run = lookup(f"https://api.github.com/repos/{REPO}/actions/runs/{match[1]}")
+    head_repo = run.get("head_repository")
     return (run.get("head_sha") == sha
             and run.get("name") == "Host verification"
+            and run.get("event") == "pull_request"
+            and run.get("head_branch") == "impl/mac-hardware-safety-preflight-2026-11-10"
+            and isinstance(head_repo, dict)
+            and head_repo.get("full_name") == REPO
             and run.get("status") == "completed"
             and run.get("conclusion") == "success")
 
