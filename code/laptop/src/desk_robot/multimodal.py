@@ -967,6 +967,16 @@ class MultimodalOrchestrator:
                     # at most 2 FPS. No frame means no model work; no queue
                     # grows while Mac inference is busy.
                     now = time.monotonic()
+                    # The head supplies MAC receipt times, not device clocks.
+                    # Validate before storing the sampler cursor: a future
+                    # timestamp would otherwise suppress every later real
+                    # frame, while NaN would disable cadence filtering.
+                    if (not _finite(received)
+                            or received > now + 0.5
+                            or now - received > 6.0
+                            or received <= self._last_stream_sample[robot_id]):
+                        metrics["stream_frames_skipped"] += 1
+                        continue
                     local_speech = self.hub.user_active(robot_id, now)
                     # Another robot's human voice has priority for inference
                     # and the speaker, NOT a license to blind this robot.
