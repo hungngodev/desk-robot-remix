@@ -6,6 +6,13 @@
 
 namespace desk_robot {
 namespace {
+// This is a compile choice for the selected MAX30102 FIFO carrier, not
+// an optical proof that the received PCB routes its red and IR LEDs that way.
+#if defined(DESK_ROBOT_MAX30102_FIFO_IR_FIRST) && DESK_ROBOT_MAX30102_FIFO_IR_FIRST
+constexpr const char* kPulseIrFirstJson = "true";
+#else
+constexpr const char* kPulseIrFirstJson = "false";
+#endif
 
 bool parse_integer(const char* value, int& result) {
   bool negative = false;
@@ -637,7 +644,9 @@ void BodyControl::execute(const char* line, std::size_t length,
     const int written = std::snprintf(
         reply, capacity,
         "{\"pulse\":{\"present\":%s,\"valid\":%s,\"part_id\":%u,"
-        "\"red\":%lu,\"ir\":%lu,\"age_ms\":%lu,\"seq\":%lu,\"bpm\":null,\"medical\":false},"
+        "\"red\":%lu,\"ir\":%lu,\"age_ms\":%lu,\"seq\":%lu,"
+        "\"fifo_ir_first\":%s,\"fifo_layout_physically_verified\":false,"
+        "\"bpm\":null,\"medical\":false},"
         "\"angles\":{\"raw\":[%u,%u,%u],\"present_mask\":%u,"
         "\"valid_mask\":%u,\"magnet\":[%u,%u,%u]},"
         "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"valid\":%s,\"calibrated\":false},"
@@ -660,6 +669,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(raw.ir),
         static_cast<unsigned long>(age),
         static_cast<unsigned long>(raw.sample_seq),
+        kPulseIrFirstJson,
         static_cast<unsigned>(a.angle[0].angle),
         static_cast<unsigned>(a.angle[1].angle),
         static_cast<unsigned>(a.angle[2].angle),
