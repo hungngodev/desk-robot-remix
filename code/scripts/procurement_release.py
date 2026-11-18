@@ -10,6 +10,7 @@ import argparse
 import csv
 import io
 import json
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -1297,6 +1298,29 @@ def main() -> int:
     evidence = (json.loads(args.evidence.read_text(encoding="utf-8"))
                 if args.evidence else {})
     report = generate(plan, evidence)
+    if args.require_release:
+        # The pure projection intentionally accepts synthetic unit-test
+        # receipts. A REAL purchase command must verify immutable, scoped
+        # physical evidence against this exact clean source revision before
+        # printing a potentially misleading APPROVED shopping view.
+        if not report["order_released"]:
+            print("HOLD: prerequisite component and system gates not qualified",
+                  file=sys.stderr)
+            return 2
+        try:
+            from verify_procurement_receipts import audit_release, checkout_sha
+            failures = audit_release(evidence, checkout_sha())
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            print("HOLD: cannot verify real purchasing evidence: " + str(exc),
+                  file=sys.stderr)
+            return 2
+        if failures:
+            for problem in failures[:20]:
+                print("HOLD: " + problem, file=sys.stderr)
+            if len(failures) > 20:
+                print(f"HOLD: {len(failures) - 20} further evidence failures",
+                      file=sys.stderr)
+            return 2
     if args.format == "csv":
         print(render_csv(report), end="")
     elif args.format == "markdown":
