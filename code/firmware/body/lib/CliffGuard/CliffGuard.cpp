@@ -99,6 +99,10 @@ void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
       !current_health(now_ms, previous_reason, previous_sensor))
     latch(previous_reason, previous_sensor);
   if (channel >= kCliffSensorCount) {
+    // The caller's sensor routing is untrustworthy. Do not rearm using the
+    // five old good readings from before the wrong-channel event. Keep raw
+    // distances for diagnosis but require a complete fresh safety sweep.
+    for (auto& sample : samples_) sample.valid = false;
     latch(CliffFault::InvalidChannel);
     return;
   }
