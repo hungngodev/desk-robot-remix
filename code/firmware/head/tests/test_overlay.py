@@ -202,6 +202,24 @@ class OverlayTests(unittest.TestCase):
         self.assertFalse((self.root / overlay.BOARD).exists())
         self.assertFalse((self.root / overlay.MARKER).exists())
 
+    def test_interrupted_overlay_write_has_no_success_marker(self):
+        """An interrupted source patch must not be mistaken for an install."""
+        write_original = Path.write_bytes
+        attempts = 0
+
+        def interrupted_write(path, data):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                raise OSError("simulated interrupted overlay write")
+            return write_original(path, data)
+
+        with patch.object(Path, "write_bytes", interrupted_write):
+            with self.assertRaisesRegex(OSError, "simulated interrupted"):
+                overlay.apply(self.root)
+        self.assertGreaterEqual(attempts, 2)
+        self.assertFalse((self.root / overlay.MARKER).exists())
+
     def test_wrong_commit_refused(self):
         self.git.stop()
         with patch.object(overlay.subprocess, "check_output", return_value="wrong-commit"):
