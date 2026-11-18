@@ -33,8 +33,8 @@ def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
         if any(
             not isinstance(row, tuple) or len(row) != 2
             or type(row[0]) is not int or type(row[1]) is not int
-            or not 1 <= row[0] <= 0xffffffff
-            or not -32768 <= row[1] <= 32767 for row in rows
+            or not -32768 <= row[0] <= 32767
+            or not 1 <= row[1] <= 0xffffffff for row in rows
         ):
             raise ValueError(f"Untrusted {name} ADC records")
         history.extend(seq for _adc, seq in rows)
