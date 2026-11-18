@@ -874,3 +874,29 @@ def test_qualification_revoke_keeps_shake_cooldown():
 
     gate.reset()
     assert gate.last_shake == -float("inf")
+
+@pytest.mark.parametrize("fault,when", [
+    ("invalid_imu", 102.3),
+    ("sensor_gap", 104.0),
+    ("new_boot", 102.3),
+    ("implausible_gravity", 102.3),
+])
+def test_fault_reboots_and_gaps_preserve_prior_shake_cooldown(fault, when):
+    """Fault invalidation cannot unlock the same physical shake repeatedly."""
+    gate = HandlingGate()
+    calibrated(gate)
+    moving = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, moving, 102.0) == ()
+    assert qualified(gate, moving, 102.15) == ("handling_shake",)
+    observed = gate.last_shake
+    if fault == "invalid_imu":
+        changed = sample(valid=False)
+    elif fault == "sensor_gap":
+        changed = sample()
+    elif fault == "new_boot":
+        changed = sample(boot_id=2)
+    else:
+        changed = sample(acc=(0, 0, 0))
+    assert qualified(gate, changed, when) == ()
+    assert gate.last_shake == pytest.approx(observed)
+    assert gate.reference is None
