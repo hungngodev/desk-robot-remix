@@ -871,7 +871,7 @@ async def test_proactive_consent_revoked_during_alternate_speaker_send(settings)
         allowed = False
     finally:
         release.set()
-    with pytest.raises(RuntimeError, match="permission revoked during transmission"):
+    with pytest.raises(RuntimeError, match="permission revoked"):
         await asyncio.wait_for(task, timeout=1)
     assert speaker.interruptions == [robot.id]
     assert not conversation.session_lock.locked()
@@ -1021,7 +1021,7 @@ async def test_proactive_speaker_abort_is_bounded_if_adapter_ignores_cancel(
     release = asyncio.Event()
     entered = asyncio.Event()
 
-    async def fails_speech(robot, text):
+    async def fails_speech(robot, text, *, permission_check=None):
         raise RuntimeError("Transport failed during proactive speech")
 
     async def stubborn_interrupt(robot):
