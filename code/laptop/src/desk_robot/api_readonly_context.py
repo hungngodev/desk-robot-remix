@@ -41,7 +41,11 @@ def register_readonly_context_routes(
                 or not isinstance(data.get("power"), dict)):
             raise HeadError("WROOM fuel-gauge robot identity mismatch")
         power = data["power"]
-        valid = power.get("fuel_valid") is True
+        # A valid flag with no independent completed MAX17048 acquisition
+        # identity can be a stale/replayed optional telemetry payload.
+        fuel_seq = power.get("fuel_seq")
+        valid = (power.get("fuel_valid") is True
+                 and type(fuel_seq) is int and 0 < fuel_seq <= 0xffffffff)
         cell = power.get("cell_mv")
         soc = power.get("soc_centi")
         if (valid and (type(cell) is not int or not 0 <= cell <= 4500
@@ -52,6 +56,7 @@ def register_readonly_context_routes(
             "gauge_available": valid,
             "reported_cell_mv": cell if valid else None,
             "reported_soc_centi": soc if valid else None,
+            "raw_fuel_acquisition_seq": fuel_seq if valid else None,
             "sample_freshness_verified": False,
             "charging_verified": False,
             "battery_capacity_verified": False,
