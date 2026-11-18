@@ -220,6 +220,19 @@ def test_active_product_docs_and_workflow_cannot_resurrect_premium_ranger():
     assert "Historic VL6180X and VL53L0X suggestions are" not in wiring
 
 
+
+def test_superseded_procurement_banner_cannot_recommend_premium_rangers():
+    """An obsolete report may retain history, but its current banner must be correct."""
+    root = Path(__file__).resolve().parents[2]
+    body = (root / "docs/hardware/procurement-pass-2026-11-10.md").read_text()
+    banner = body.splitlines()[0]
+    assert "SUPERSEDED" in banner
+    assert "40 generic VL53L0X GY-530" in banner
+    assert "10 TCA9548A" in banner
+    assert "NOT authorized purchases" in banner
+    assert "40 VL53L4CD" not in banner
+    assert "subject to verifying" in banner
+
 def test_usb_calibration_and_cliff_guard_match_real_tof_source_valid_range():
     """Reject 1mm/15mm calibrations for a driver that discards <30mm."""
     import re
