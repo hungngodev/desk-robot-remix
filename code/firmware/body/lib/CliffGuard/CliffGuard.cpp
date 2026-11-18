@@ -88,6 +88,16 @@ void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
     return;
   }
   auto& sample = samples_[channel];
+  // Reject a delayed I2C completion for this channel instead of letting an
+  // older reading overwrite newer evidence. Half-range unsigned comparison
+  // admits normal millis() rollover without trusting timestamps from a
+  // different clock epoch. A rejected observation latches a local fault;
+  // only a fresh, explicitly authorized rearm can restore movement.
+  if (sample.present &&
+      static_cast<std::uint32_t>(now_ms - sample.at_ms) >= 0x80000000U) {
+    latch(CliffFault::InvalidSample, channel);
+    return;
+  }
   sample.present = true;
   sample.valid = valid;
   sample.mm = distance_mm;
