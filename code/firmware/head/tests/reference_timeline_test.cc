@@ -66,6 +66,21 @@ static void decoder_ahead_of_playback_preserves_queued_reference() {
   CHECK(clock.silence_frames(1130000, 16384) == 0);
 }
 
+static void late_opus_chunk_accounts_for_real_gap_once() {
+  PlaybackReferenceClock clock;
+  CHECK(clock.silence_frames(1000000, 16384) == 0);
+  clock.accepted_output_frames(1920);  // PCM represents 1.00..1.06 s.
+  CHECK(clock.silence_frames(1070000, 16384) == 160);
+  // The next chunk arrives at 1.10 s, so 30 ms more silence is needed
+  // after the previous 10 ms gap. Neither portion may be doubled.
+  CHECK(clock.silence_frames(1100000, 16384) == 480);
+  clock.accepted_output_frames(1920);
+  CHECK(clock.represented_end_us() == 1160000);
+  CHECK(clock.silence_frames(1130000, 16384) == 0);
+  CHECK(clock.silence_frames(1160000, 16384) == 0);
+  CHECK(clock.silence_frames(1170000, 16384) == 160);
+}
+
 static void huge_idle_gaps_are_bounded() {
   PlaybackReferenceClock clock;
   CHECK(clock.silence_frames(1000000, 16384) == 0);
@@ -80,6 +95,7 @@ int main() {
     }
     idle_gap_and_interrupt_are_never_double_counted();
     decoder_ahead_of_playback_preserves_queued_reference();
+    late_opus_chunk_accounts_for_real_gap_once();
     huge_idle_gaps_are_bounded();
     std::cout << "PASS actual Sense playback reference time accounting\n";
   } catch (const std::exception& exc) {
