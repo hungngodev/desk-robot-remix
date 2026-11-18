@@ -163,7 +163,7 @@ is a separate historical objective, not a robot dependency.
 | `F020` | Audio RIO AEC and actual user barge-in | REQUIRED | Software reference calibration, double-talk; 19/20 audible stop ≤500ms and 18/20 new request; echo only 10min zero false |
 | `F021` | Erle/latency report targets | MEASURE | HTML's 15–25dB ERLE and 18/20 700ms rates are not accepted proof; record measured metrics without weakening canonical A2 |
 | `F022` | Flushing network, Mac queue, ESP DMA | REQUIRED | Epoch/generation IDs, FLUSH through transport and DMA, no obsolete sentence resumed after reconnect |
-| `F023` | RoboEyes face choice and 0.96in fit | SOURCE GATE | HTML calls selected; repo still uses stock Xiaozhi UI; compare GPL3 vs MIT alternative before final face integration |
+| `F023` | RoboEyes face choice and 0.96in fit | SOURCE GATE | MIT StackChan HSM is already vendored and drives bounded idle mood events, but the display still uses stock Xiaozhi OledDisplay.SetEmotion. GPL3 RoboEyes versus a compatible MIT face renderer remains a separate unresolved renderer/license/0.96in-fit decision; HSM adoption alone does not close it |
 | `F024` | Cozmars/Sparky/Fetch style and packaging | REQUIRED DESIGN | Round retro TV + Cozmo/Vector, owned OLED, removable cosmetics, no extra head servo silently |
 | `F025` | Three Mac processes, Motion Gateway separation | ARCHITECTURE CANDIDATE | Structural model privilege boundary required; exact number of processes measured, not dogma |
 | `F026` | Shared MLX Whisper turbo and circuit breaker | EVALUATE | Proposed Apple Silicon shared model, priority class, fallback to whisper.cpp; never assume measured fleet performance |
@@ -281,7 +281,7 @@ is a separate historical objective, not a robot dependency.
 | `S059` | IR reflective obstacle | OWNED SPARE | Not a replacement for physically qualified cliff ToFs |
 | `S060` | VS1838B IR receiver | EXPANSION | Remote game/commands, no bypass of operator motion permissions |
 | `S061` | Spill/wet feet detection | RESEARCH | Safe nonmains contact circuit and corrosion, battery water safety |
-| `S062` | Capacitive soil moisture | RESEARCH | Plant-buddy external pod, weather protection |
+| `S062` | Capacitive soil moisture | ACTIVE REQUIRED SHARED STATION ROLE, PHYSICAL HOLD | One separate shared room station soil probe is in room_pod.modules and the complete shopping ledger; ROOM_SOIL_FITTED=0 leaves optional source sampling disabled until actual soil probe carrier, isolation, weather sealing, current and calibration are qualified. It is not a sensor installed on every pet |
 | `S063` | AS3935 lightning | RESEARCH | Ambient environmental demo; no safety guarantee |
 | `S064` | 433MHz RXB6 receiver | SENSITIVE OPT-IN | Legal and privacy concerns, no covert device interception |
 | `S065` | Loose mains ghost sense antenna | REJECTED FOR SAFETY | Do not add unprotected mains-coupled antenna or expose accidental voltage |
