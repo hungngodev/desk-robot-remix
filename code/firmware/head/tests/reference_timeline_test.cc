@@ -48,6 +48,24 @@ static void idle_gap_and_interrupt_are_never_double_counted() {
   CHECK(clock.silence_frames(2020000, 16384) == 0);
 }
 
+static void decoder_ahead_of_playback_preserves_queued_reference() {
+  PlaybackReferenceClock clock;
+  // Two 60 ms Opus chunks may decode only 10 ms apart. PCM accepted by
+  // I2S is already represented through 120 ms of future playback. Resetting
+  // the reference clock to the second callback time would lose the 50 ms
+  // queued interval and inject silence into speech that was already queued.
+  CHECK(clock.silence_frames(1000000, 16384) == 0);
+  clock.accepted_output_frames(1920);
+  CHECK(clock.represented_end_us() == 1060000);
+  CHECK(clock.silence_frames(1010000, 16384) == 0);
+  clock.accepted_output_frames(1920);
+  CHECK(clock.represented_end_us() == 1120000);
+  CHECK(clock.silence_frames(1080000, 16384) == 0);
+  CHECK(clock.silence_frames(1120000, 16384) == 0);
+  CHECK(clock.silence_frames(1130000, 16384) == 160);
+  CHECK(clock.silence_frames(1130000, 16384) == 0);
+}
+
 static void huge_idle_gaps_are_bounded() {
   PlaybackReferenceClock clock;
   CHECK(clock.silence_frames(1000000, 16384) == 0);
@@ -61,6 +79,7 @@ int main() {
       continuous_speech_keeps_one_to_one_time(cadence_ms);
     }
     idle_gap_and_interrupt_are_never_double_counted();
+    decoder_ahead_of_playback_preserves_queued_reference();
     huge_idle_gaps_are_bounded();
     std::cout << "PASS actual Sense playback reference time accounting\n";
   } catch (const std::exception& exc) {
