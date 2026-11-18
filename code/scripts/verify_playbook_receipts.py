@@ -51,6 +51,7 @@ def verified_actions_run(url: str, sha: str, lookup=github_json) -> bool:
         return False
     run = lookup(f"https://api.github.com/repos/{REPO}/actions/runs/{match[1]}")
     return (run.get("head_sha") == sha
+            and run.get("name") == "Host verification"
             and run.get("status") == "completed"
             and run.get("conclusion") == "success")
 
