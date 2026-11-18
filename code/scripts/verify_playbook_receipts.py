@@ -129,8 +129,14 @@ def main() -> int:
         print("REJECTED: " + error, file=sys.stderr)
     if errors:
         return 1
-    print("Live evidence checks passed for all promoted procedures. "
-          "Physical authenticity and acceptance still require bench review.")
+    promoted = sum(row.get("gate") != "OPEN"
+                   for row in ledger.get("procedures", []))
+    if promoted == 0:
+        print("No procedures promoted. No live evidence receipts checked; "
+              "all acceptance gates remain unclaimed.")
+    else:
+        print(f"Verified GitHub metadata for {promoted} promoted procedure(s). "
+              "Physical authenticity and acceptance still require bench review.")
     return 0
 
 
