@@ -53,7 +53,7 @@ def test_all_four_ci_jobs_check_the_reviewed_pr_head_not_synthetic_merge():
     assert workflow.count("      - uses: actions/checkout@v4") == 4
     assert workflow.count(requested) == 4
     assert workflow.count(expected) == 4
-    assert workflow.count('actual="$(git rev-parse HEAD)"') == 4
+    assert workflow.count('actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"') == 4
     assert workflow.count("Verify exact source commit under test") == 4
     assert "pull_request_target:" not in workflow
 
