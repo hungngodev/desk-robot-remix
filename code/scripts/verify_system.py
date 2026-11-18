@@ -81,6 +81,40 @@ def steps(suite: str, build: Path) -> list[tuple[str, list[str], Path, int]]:
     return jobs
 
 
+def required_upstream_fixture_errors() -> list[str]:
+    """Validate pinned test fixtures without cloning or modifying a checkout.
+
+    A fresh local clone must never turn missing test prerequisites into an
+    ambiguous source regression. The user may restore the exact pinned
+    sources with the existing scripts/restore_upstreams.py command.
+    """
+    lock = json.loads((CODE / "upstream-lock.json").read_text(encoding="utf-8"))
+    sources = {
+        source["name"]: source for source in lock["repositories"]
+    }
+    missing = []
+    for name in ("xiaozhi-esp32", "xiaozhi-esp32-server"):
+        source = sources.get(name)
+        if not isinstance(source, dict):
+            missing.append(f"{name}: absent from upstream lock")
+            continue
+        directory = CODE / source["path"]
+        if not directory.is_dir():
+            missing.append(f"{name}: pinned source directory absent")
+            continue
+        try:
+            actual = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=directory, text=True,
+                stderr=subprocess.DEVNULL, timeout=10,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError,
+                subprocess.TimeoutExpired):
+            actual = ""
+        if actual != source["commit"]:
+            missing.append(f"{name}: expected locked SHA {source['commit']}")
+    return missing
+
+
 def run(name: str, argv: list[str], cwd: Path, timeout: int) -> dict:
     started = time.monotonic()
     result = {
@@ -88,6 +122,19 @@ def run(name: str, argv: list[str], cwd: Path, timeout: int) -> dict:
         "pass": False, "exit_code": None, "error": None,
         "elapsed_s": None, "output_tail": "",
     }
+    if name == "python-tests":
+        try:
+            fixture_errors = required_upstream_fixture_errors()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            fixture_errors = ["upstream lock unreadable: " + str(exc)[:160]]
+        if fixture_errors:
+            result["error"] = (
+                "INCOMPLETE: " + "; ".join(fixture_errors) +
+                ". Restore exact pinned test fixtures with "
+                "python scripts/restore_upstreams.py, then retry."
+            )
+            result["elapsed_s"] = round(time.monotonic() - started, 2)
+            return result
     try:
         response = subprocess.run(
             argv, cwd=cwd, capture_output=True, text=True,
