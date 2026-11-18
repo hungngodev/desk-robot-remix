@@ -373,7 +373,10 @@ async def test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner(
         visual.sensor_event("robot-01", "petting_zone")
         await wait_for(lambda: device.calls >= 3, timeout=4)
         if local_object:
-            await wait_for(lambda: scene.calls == 1, timeout=4)
+            # compare() counts its call before the asynchronous memory write.
+            # Wait for the persisted result, not the earlier callback entry.
+            await wait_for(lambda: memory.count("robot-01") == 1, timeout=4)
+            assert scene.calls == 1
             assert sum(m.kind == "object" for m in memory.recent("robot-01")) == 1
         else:
             await asyncio.sleep(.1)
