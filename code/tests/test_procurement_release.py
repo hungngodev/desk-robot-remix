@@ -1158,6 +1158,9 @@ def test_one_robot_cart_projects_all_linked_quantities_without_order_approval():
     assert one["linked_decision_count"] == 14
     assert one["motor_variant"] == "unresolved"
     assert one["purchase_approved"] is False
+    assert mod.FIRST_ROBOT_ROOM_GATE in one["missing_first_robot_system_evidence"]
+    assert "five_robot_integration" not in one[
+        "missing_first_robot_system_evidence"]
     pet = {r["id"]: r for r in one["roles"] if r["scope"] == "pet or dock"}
     room = {r["id"]: r for r in one["roles"] if r["scope"] == "shared station"}
     assert pet["cliff_obstacle"]["prototype_target"] == 8
@@ -1190,6 +1193,9 @@ def test_one_robot_cart_projects_all_linked_quantities_without_order_approval():
     assert text.count("## 2.") == 1
     assert "PROTOTYPE BUYING STATUS: HOLD" in text
     assert "VL53L0X" in text
+    assert "First-unit physical and source evidence still required" in text
+    assert mod.FIRST_ROBOT_ROOM_GATE in text
+    assert "five_robot_integration" not in text
 
 
 def test_first_robot_projection_rejects_wrong_scope_and_variant():
