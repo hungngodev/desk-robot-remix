@@ -83,6 +83,10 @@ def test_empty_evidence_fails_closed_even_with_valid_sha():
 def test_clean_exact_sha_required(monkeypatch):
     good = {"sha": SHA, "tracked_clean": True, "root_tree_intact": True}
     monkeypatch.setattr(release, "source_snapshot", lambda: good)
+    monkeypatch.setattr(
+        release.subprocess, "check_output",
+        lambda *args, **kwargs: "impl/mac-hardware-safety-preflight-2026-11-10",
+    )
     assert release.checkout_sha() == SHA
     for bad in (
         {**good, "tracked_clean": False},
@@ -139,3 +143,15 @@ def test_first_robot_uses_first_observer_not_completed_five_robot_fleet():
     assert any("protected_1s_charger_and_dock_contacts" in msg
                for msg in release.audit_release(
                    evidence, SHA, lookup, first_robot=True))
+
+
+def test_purchase_approval_refuses_foreign_or_detached_branch(monkeypatch):
+    good = {"sha": SHA, "tracked_clean": True, "root_tree_intact": True}
+    monkeypatch.setattr(release, "source_snapshot", lambda: good)
+    for branch in ("main", "other/experiment", ""):
+        monkeypatch.setattr(
+            release.subprocess, "check_output",
+            lambda *args, label=branch, **kwargs: label,
+        )
+        with pytest.raises(ValueError, match="canonical PR #17 branch"):
+            release.checkout_sha()
