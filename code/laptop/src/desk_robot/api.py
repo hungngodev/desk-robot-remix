@@ -15,7 +15,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .api_readonly_context import register_readonly_context_routes
-from .api_readonly_planner import ReadonlyPlanRequest, register_readonly_planner_routes
+from .api_readonly_planner import (
+    ReadonlyPlanRequest as ReadonlyPlanRequest,
+    register_readonly_planner_routes,
+)
 from .api_robot_status import register_robot_status_routes
 from .brain_context import compose_brain_context
 from .config import Settings, secret
