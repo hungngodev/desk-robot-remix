@@ -383,8 +383,10 @@ void AccessorySensors::power(std::uint32_t now_ms) {
       g.soc_centi = max17048_soc_centi(state_of_charge);
       g.fuel_valid = g.cell_mv >= 2500 && g.cell_mv <= 4500 &&
                      g.soc_centi <= 10000;
-      if (g.fuel_valid)
+      if (g.fuel_valid) {
         g.fuel_sample_seq = next_nonzero_sensor_sequence(g.fuel_sample_seq);
+        g.fuel_at_ms = now_ms;
+      }
     }
   }
   if (g.monitor_present) {
@@ -396,6 +398,7 @@ void AccessorySensors::power(std::uint32_t now_ms) {
       g.shunt_uv = ina226_shunt_uv(static_cast<std::int16_t>(shunt));
       // Only after both actual registers were successfully acquired.
       g.monitor_sample_seq = next_nonzero_sensor_sequence(g.monitor_sample_seq);
+      g.monitor_at_ms = now_ms;
 #if DESK_ROBOT_PACK_SHUNT_MOHM == 5
       g.pack_current_valid = ina226_pack_current_ma(
           g.shunt_uv, DESK_ROBOT_PACK_SHUNT_MOHM, g.pack_current_ma);
