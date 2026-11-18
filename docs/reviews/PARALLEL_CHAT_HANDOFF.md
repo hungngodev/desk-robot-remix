@@ -21,6 +21,12 @@ claim that any physical gate has passed. Each fix below uses existing owners.
   `7e6bb24` and `0b0d03e` require correct per-robot telemetry identity
   before including a raw FSR conversion in manual calibration evidence.
   No measured force in newtons or physically qualified grip is claimed.
+* **Gripper explicit local health verdict:** `3de9906` now checks the
+  health callback's actual `armed is True` result and any supplied robot
+  identity before each grasp action and attempted jaw relief. `6105ef7`
+  regresses disarmed, foreign, absent and mid-grasp revoked health states,
+  preserving the original Coordinator and WROOM local veto. Software
+  evidence only; raw ADC is not force in newtons or measured torque.
 * **Continuous camera frame transport:** `b665d9b`, `daaf61e`, and
   `957cb7d` drop corrupted JPEGs rather than triggering needless stream
   reconnect, with malformed and oversized-header regressions.
