@@ -38,6 +38,43 @@ Proposed robot-one gate, not an achieved measurement:
 
 These thresholds make the requirement reviewable; no physical trial exists yet.
 
+### Executable audio trial record contract
+
+`code/scripts/check_barge_in_trials.py` now rejects incomplete trial
+coverage instead of treating an arbitrary set of twenty identical
+interruptions as acceptance evidence. The input is JSON Lines containing
+exactly twenty `kind: human` records and one `kind: robot_only` record.
+
+Each human row records a unique `id`, `volume` (`low`, `medium`,
+`high`), `interruption_position` (`early` or `late`),
+`load_profile` (`voice_only`, `camera_wifi`, or
+`motors_servos_stand`), `speaker_id`, a positive
+`conversation_turn`, `speaker_distance_cm` within 45 to 55,
+`room_noise_db_a`, `firmware_commit`, `audio_config_id`, and
+`mic_speaker_placement_id`. The twenty rows must actually cover both
+positions, all three load profiles and intended speaker volumes, two
+human speakers and adjacent conversation turn numbers.
+
+Each human row also supplies measured monotonic timestamps, in order:
+`human_onset_ms`, `vad_arrival_ms`, `abort_dispatch_ms`,
+`head_queue_clear_ms`, `i2s_stop_ms`, `audible_stop_ms`. Record
+`new_utterance_captured`, `new_intent_correct`,
+`utterance_beginning_intelligible`, and
+`obsolete_audio_never_resumed` as booleans. A claim of correct new intent
+requires actual retained speech at its start. The robot-only row records
+`duration_seconds` of at least 600 and nonnegative integer
+`self_interruptions`. The proposed acoustic gate needs 19/20 audible
+stops within 500 ms, 18/20 correctly retained and understood intents,
+zero self-interruptions and no obsolete audio ever resuming.
+
+The checker validates a *declared measurement record*; it does not
+independently measure acoustic waveforms, authenticate a second speaker,
+or prove the speaker, camera and motor were physically active. Its report
+always states that operator evidence is not independently attested.
+The final acceptance record must preserve waveform captures, device
+logs and real bench evidence outside the repository. A synthetic unit
+test passing this checker is never a physical A2 pass.
+
 ## Active hardware and software reuse
 
 Use the purchased **XIAO ESP32S3 Sense**, its onboard PDM microphone and included
