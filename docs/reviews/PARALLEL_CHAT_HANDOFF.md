@@ -1,3 +1,45 @@
+## 18 November 2026: executed playbook continuation, source fixes, open verification
+
+Canonical PR #17 and unchanged Mac + XIAO Sense + WROOM + 8 VL53L0X hardware.
+The 96-procedure user playbook is a requirement/evidence checklist, not a
+claim that any physical gate has passed. Each fix below uses existing owners.
+
+* **Interrupted pinned Xiaozhi overlay transaction:** `dc2ba9e` makes
+  removal/recovery accept either original or patched bytes per tracked file,
+  and a missing file only when the marker says the overlay created it. All
+  other content is rejected before any restore. `72d6251`, `29200f9`
+  and `4ea4ed8` add interrupted-install, user-edit refusal and import
+  corrections. Existing strict `apply()` drift remains fail closed.
+* **Continuous camera frame transport:** `b665d9b`, `daaf61e`, and
+  `957cb7d` drop corrupted JPEGs rather than triggering needless stream
+  reconnect, with malformed and oversized-header regressions.
+* **Camera receipt cursor isolation:** `f1722a0` and `4cc238c` validate
+  receipt times before updating adaptive-sampler state; reject nonfinite,
+  distant future, stale, and duplicate receipts without starving later live
+  frames. Mac receipt time remains distinct from device exposure time.
+* **Shared visual evidence bounds:** `4ea153c` and `89fe83b` reuse
+  JPEG-header validation for both direct spoken visual questions and two-frame
+  scene comparisons, rejecting invalid/oversized evidence before Ollama
+  network transport.
+* The preceding playbook pass also committed direct pet JPEG decode/header
+  bounds `33e21f8`, `2dd20c8`, `fe24cd7` and the VLM upload
+  guard `8bc1eba`, `c5d760b`.
+
+**Evidence status:** CODED with regression source committed. A known earlier
+four-job CI success was run 44358527104 at a different SHA. Each new head
+requires its own Python/head tests, body native sanitizers, WROOM compile,
+and Sense ESP-IDF compile before any TESTED claim. Do not infer that
+pending or cancelled checks passed. The recoverable installer still needs a
+real kill-and-resume test; camera changes still need real XIAO stream trials.
+
+**Still OPEN:** actual loaded motor cutoff and desk-edge stopping,
+battery/1S charging and 3.3V/5V rails, I2C/ToF optical bench measurements,
+physical two-receiver dock and safe contact charging, fitted full assembly,
+grip force, audible device playback ACK and acoustic barge-in, completed
+tool-result feedback on live native MiniCPM, five real active pet trials,
+and first-unit signed exact-SKU purchase approval. Keep purchase
+`first-robot` and fleet releases on HOLD until evidence exists.
+
 ## 2026-11-18 100-page playbook, 96 procedures, checked source and execution gates
 
 Canonical input: user supplied 100-page engineering playbook, procedures 01 to 96, 12 phases. This checkpoint records **actual** changes made on the existing PR #17, not completion of 96 physical or integration procedures. Every later agent must read the live head SHA and rerun checks on that exact head before changing a state to TESTED. A pending or cancelled GitHub workflow is not green.
