@@ -9,6 +9,7 @@
 // This is a real PCM reference path, NOT an assertion that the physical
 // loudspeaker/microphone acoustic delay has been calibrated or A2 passed.
 #include "codecs/no_audio_codec.h"
+#include "config.h"  // Selected Sense board AUDIO_*_SAMPLE_RATE contract.
 #include "sdkconfig.h"
 
 #include <array>
@@ -46,6 +47,12 @@ private:
     static constexpr uint32_t kRingSize = 16384;   // 1024 ms at 16 kHz
     static constexpr uint32_t kMicRate = 16000;
     static constexpr uint32_t kSpeakerRate = 32000;  // MAX98357A supported clock
+    // Fail the actual Sense firmware build if a board pin/audio change drifts
+    // away from the reference path. Otherwise Write() silently returns zero.
+    static_assert(AUDIO_INPUT_SAMPLE_RATE == kMicRate,
+                  "Sense AEC microphone rate differs from the active board");
+    static_assert(AUDIO_OUTPUT_SAMPLE_RATE == kSpeakerRate,
+                  "Sense AEC speaker rate differs from the active board");
     static_assert(kSpeakerRate % kMicRate == 0, "AEC decimation ratio must be integral");
     // Per-unit ESP-IDF private build setting, default 90 ms only as a bench
     // starting point. It is not a physical acoustic calibration.
