@@ -112,6 +112,19 @@ def required_upstream_fixture_errors() -> list[str]:
             actual = ""
         if actual != source["commit"]:
             missing.append(f"{name}: expected locked SHA {source['commit']}")
+            continue
+        try:
+            modifications = subprocess.check_output(
+                ["git", "status", "--porcelain", "--untracked-files=no"],
+                cwd=directory, text=True, stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except (OSError, subprocess.CalledProcessError,
+                subprocess.TimeoutExpired):
+            missing.append(f"{name}: cannot inspect tracked fixture changes")
+            continue
+        if modifications.strip():
+            missing.append(f"{name}: tracked fixture files differ from pinned commit")
     return missing
 
 
