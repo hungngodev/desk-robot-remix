@@ -69,6 +69,15 @@ SYSTEM_GATES = (
     "user_approved_costed_exact_carrier_bill_of_materials",
     "source_first_upstream_reuse_and_license_audit",
 )
+# Qualify one complete first robot BEFORE the other four exist. Only these
+# two gates specifically need the later five-robot acoustic/observer fleet.
+# Every electrical, physical, source, cost and part gate still applies to
+# the first robot, and the full fleet retains the unchanged SYSTEM_GATES.
+FLEET_ONLY_SYSTEM_GATES = frozenset({
+    "five_robot_integration",
+    "room_pod_usb_serial_and_five_pet_observers",
+})
+FIRST_ROBOT_ROOM_GATE = "room_pod_usb_serial_and_first_pet_observer"
 PART_GATES = (
     "exact_carrier_schematic", "measured_3v3_bus_and_pullups",
     "power_load_record", "firmware_and_source_reference",
@@ -597,6 +606,20 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     if duplicate_gauge and any(x["id"] == "max17048" and x["per_robot"]
                                for x in rows):
         missing_system.append("duplicate_bq27441_and_max17048_gauges")
+    # One fully assembled first unit must not require proof that five robots
+    # already operate together. Do not skip ANY of the shared safety or
+    # purchasing evidence: only explicitly fleet-scale trials are deferred.
+    first_robot_missing_system = [
+        gate for gate in missing_system
+        if gate not in FLEET_ONLY_SYSTEM_GATES
+    ]
+    # A qualified five-robot observer trial is stronger evidence for the
+    # single observer, but an independently tested first observer suffices
+    # before the remaining four robots have been built.
+    if not (_receipt(system_evidence.get(FIRST_ROBOT_ROOM_GATE)) or
+            _receipt(system_evidence.get(
+                "room_pod_usb_serial_and_five_pet_observers"))):
+        first_robot_missing_system.append(FIRST_ROBOT_ROOM_GATE)
     approved = (not missing_system
                 and all(row["approved_for_fleet_purchase"] for row in rows)
                 and all(row["approved_for_fleet_purchase"] for row in room))
@@ -606,13 +629,15 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             "supplemental_decisions": approved_decisions,
             "known_one_head_ordered_unreceived": 1,
             "reported_mg90s_approximately_ten_not_counted_as_verified": True,
-            "missing_system_evidence": missing_system, "robots": rows, "room_pod": room}
+            "missing_system_evidence": missing_system,
+            "missing_first_robot_system_evidence": first_robot_missing_system,
+            "robots": rows, "room_pod": room}
 
 
 
 
 def first_robot_projection(report: dict) -> dict:
-    """One COMPLETE robot, its dock and the one shared station, no order permit.
+    """One COMPLETE robot, its dock and shared station, with independent gates.
 
     The five-pet ledger remains authoritative. All 49 parent roles plus the
     fourteen linked decisions remain visible, but five-pet spare stock must
@@ -626,15 +651,13 @@ def first_robot_projection(report: dict) -> dict:
         raise ValueError("Unknown physical drivetrain selection")
     pet_rows = report["robots"]
     station_rows = report["room_pod"]
-    # A previously completed fleet source release already proves the first
-    # complete unit's BOM contract. The former hard-coded False meant even
-    # complete, reviewed receipts could NEVER release one unit. Preserve
-    # the default hold and the original evidence gates; this is not a
-    # shortcut around first-device electrical or physical qualification.
+    # First-unit source and physical qualification must be possible before
+    # the other four units exist. The fleet still has additional cross-robot
+    # trials, while all shared electrical, power, print, supplier and system
+    # gates remain mandatory here. No real receipts means HOLD as before.
     qualified_one = (
-        report.get("order_released") is True
-        and motor in {"stepper", "dc"}
-        and not report.get("missing_system_evidence", ["missing"])
+        motor in {"stepper", "dc"}
+        and not report.get("missing_first_robot_system_evidence", ["missing"])
         and all(not item.get("missing_part_evidence", ["missing"])
                 for item in [*pet_rows, *station_rows])
         and all(item.get("reviewed") is True
@@ -718,8 +741,9 @@ def first_robot_projection(report: dict) -> dict:
         # have ALREADY passed through generate(), including installed parts.
         "purchase_approved": qualified_one,
         "reason": (
-            "First complete unit inherits already qualified whole-system "
-            "receipt and supplier evidence; no further four-unit order implied."
+            "First complete unit has qualified shared and first-unit system "
+            "receipts, supplier evidence and physical trials; the remaining "
+            "four units require separate fleet integration evidence."
             if qualified_one else
             "Quantity projection, not a validated first-unit bill of "
             "materials. Verify exact sellers, safety, fit and actual "
