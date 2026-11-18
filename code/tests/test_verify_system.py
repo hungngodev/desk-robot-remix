@@ -50,7 +50,7 @@ def test_every_declared_platformio_environment_is_exercised(tmp_path):
         ("dock", "dock-"),
     ):
         config = (ROOT / "code/firmware" / directory / "platformio.ini").read_text()
-        environments = set(re.findall(r"^\\[env:([^\\]]+)\\]$", config,
+        environments = set(re.findall(r"^\[env:([^\]]+)\]$", config,
                                       flags=re.MULTILINE))
         assert environments, directory
         expected = {prefix + name for name in environments}
