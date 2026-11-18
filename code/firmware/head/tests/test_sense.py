@@ -524,6 +524,22 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'Transact(event' not in bridge  # never send cue to WROOM
 
 
+def test_playback_reference_clock_native_cpp_regression():
+    """Compile the same pure C++ clock the Sense firmware uses, not a Python model."""
+    compiler = shutil.which("c++")
+    assert compiler is not None, "A native C++17 compiler is required"
+    with tempfile.TemporaryDirectory() as temp:
+        exe = Path(temp) / "reference_timeline_test"
+        subprocess.run(
+            [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+             "-I", str(HEAD / "sense"),
+             str(HEAD / "tests/reference_timeline_test.cc"),
+             "-o", str(exe)],
+            check=True,
+        )
+        subprocess.run([str(exe)], check=True)
+
+
 def test_max98357a_output_rate_and_aec_reference_contract():
     """The selected generic MAX98357A excludes 24 kHz LRCLK; preserve AEC timing."""
     config = (HEAD / "sense/config.h").read_text()
@@ -548,9 +564,11 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     assert "samples > static_cast<int>(kSpeakerRate)" in codec
     # Audio chunks have a virtual playback END, so the 10 ms Read cadence
     # cannot count the 60 ms reference data a second time.
-    assert "last_write_us_ + 20000" not in codec
-    assert "now_us - last_write_us_" in codec
-    assert "last_write_us_ += static_cast<int64_t>(samples) * 1000000 / kSpeakerRate" in codec
+    assert "last_write_us_" not in codec
+    assert "reference_clock_.silence_frames(now_us, kMaxGapSamples)" in codec
+    assert "reference_clock_.accepted_output_frames(samples)" in codec
+    assert "reference_clock_.reset()" in codec
+    assert '#include "reference_timeline.h"' in header
 
     def accepted_reference_samples(read_period_ms):
         end_us = 0
