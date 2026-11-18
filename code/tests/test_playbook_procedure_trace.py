@@ -62,8 +62,14 @@ def _valid_release_evidence(record):
                 or measured.get("result") != "pass"
                 or not isinstance(measured.get("operator"), str)
                 or not measured["operator"].strip()
+                or measured["operator"].strip().casefold() in {
+                    "bench engineer", "operator", "tester", "unknown", "tbd",
+                }
                 or not isinstance(measured.get("device_revision"), str)
                 or not measured["device_revision"].strip()
+                or measured["device_revision"].strip().casefold() in {
+                    "received carrier revision", "unknown", "tbd", "generic",
+                }
                 or not _physical_record_url_is_traceable(
                     measured.get("raw_data_url"), sha)):
             return False
@@ -111,8 +117,8 @@ def test_status_string_cannot_fake_same_sha_or_physical_acceptance(claimed_statu
     else:
         assert not _valid_release_evidence(row)
         row["physical_measurement_receipt"] = {
-            "result": "pass", "operator": "bench engineer",
-            "device_revision": "received carrier revision",
+            "result": "pass", "operator": "fixture_operator_001",
+            "device_revision": "fixture_pcb_rev_A",
             "raw_data_url": ("https://github.com/hungngodev/desk-robot-remix/"
                              "blob/" + "a" * 40 + "/docs/records/bench.csv"),
         }
@@ -154,8 +160,8 @@ def test_physical_receipts_reject_placeholder_or_wrong_sha_urls():
         "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
     }
     row["physical_measurement_receipt"] = {
-        "result": "pass", "operator": "bench engineer",
-        "device_revision": "received carrier revision",
+        "result": "pass", "operator": "fixture_operator_001",
+        "device_revision": "fixture_pcb_rev_A",
         "raw_data_url": "https://github.com/example/bench-trial",
     }
     assert not _valid_release_evidence(row)
@@ -166,3 +172,23 @@ def test_physical_receipts_reject_placeholder_or_wrong_sha_urls():
         "https://github.com/hungngodev/desk-robot-remix/blob/"
         + "b" * 40 + "/docs/records/bench.csv")
     assert not _valid_release_evidence(row)
+
+
+def test_physical_receipts_reject_obvious_placeholder_people_and_devices():
+    row = json.loads(LEDGER.read_text())["procedures"][88].copy()
+    sha = "a" * 40
+    row.update(gate="MEASURED", last_verified_sha=sha)
+    row["executed_test_receipt"] = {
+        "sha": sha, "exit_code": 0, "command": "cd code && true",
+        "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
+    }
+    row["physical_measurement_receipt"] = {
+        "result": "pass", "operator": "bench engineer",
+        "device_revision": "received carrier revision",
+        "raw_data_url": ("https://github.com/hungngodev/desk-robot-remix/"
+                         "blob/" + sha + "/docs/records/bench.csv"),
+    }
+    assert not _valid_release_evidence(row)
+    row["physical_measurement_receipt"]["operator"] = "fixture_operator_001"
+    assert not _valid_release_evidence(row)
+
