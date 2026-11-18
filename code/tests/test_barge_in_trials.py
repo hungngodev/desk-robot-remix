@@ -100,6 +100,16 @@ def test_incomplete_acoustic_trial_coverage_fails(field, value):
         evaluate(rows)
 
 
+@pytest.mark.parametrize("field", [
+    "firmware_commit", "audio_config_id", "mic_speaker_placement_id",
+])
+def test_mixed_hardware_or_software_setup_cannot_be_certified(field):
+    rows = fake_rows()
+    rows[10][field] = "different-configuration"
+    with pytest.raises(ValueError, match="Do not mix firmware"):
+        evaluate(rows)
+
+
 def test_old_playback_replay_prevents_gate():
     rows = fake_rows()
     rows[0]["obsolete_audio_never_resumed"] = False
