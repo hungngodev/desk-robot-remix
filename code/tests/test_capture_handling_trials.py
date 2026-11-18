@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
-capture_phase = runpy.run_path(str(
+_capture_module = runpy.run_path(str(
     Path(__file__).resolve().parents[1] / "scripts/capture_handling_trials.py"
-))["capture_phase"]
+))
+capture_phase = _capture_module["capture_phase"]
+_safe_endpoint = _capture_module["_safe_endpoint"]
 
 
 class FakeResponse:
@@ -93,3 +95,26 @@ async def test_reboot_can_never_be_mixed_into_one_mount_trial():
 async def test_duplicate_cached_frame_never_becomes_another_measurement():
     with pytest.raises(RuntimeError, match="fresh independent"):
         await read(FakeClient(repeated=True), count=2)
+
+
+@pytest.mark.parametrize("url,robot", [
+    ("http://example.com:8008", "robot-01"),
+    ("http://192.168.0.2:8008", "robot-01"),
+    ("http://localhost:8008/api", "robot-01"),
+    ("http://user:pass@localhost:8008", "robot-01"),
+    ("http://localhost:8008/?secret=yes", "robot-01"),
+    ("http://localhost:8008", "../robot-02"),
+    ("http://localhost:8008", "robot-01/stop"),
+])
+def test_operator_token_never_sent_to_untrusted_http_or_ambiguous_robot(url, robot):
+    with pytest.raises(ValueError):
+        _safe_endpoint(url, robot)
+
+
+def test_authenticated_local_capture_path_rejects_no_valid_pets():
+    assert _safe_endpoint("http://127.0.0.1:8008", "robot-01").endswith(
+        "/v1/robots/robot-01/status",
+    )
+    assert _safe_endpoint("https://my-robot-mac.example:8008", "robot-01").endswith(
+        "/v1/robots/robot-01/status",
+    )
