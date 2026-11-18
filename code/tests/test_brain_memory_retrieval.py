@@ -1,6 +1,7 @@
 """One small agent memory building block: local relevant recall with provenance."""
 from __future__ import annotations
 
+import sqlite3
 import time
 
 import pytest
@@ -64,6 +65,82 @@ def test_recall_uses_bounded_250_episodic_records_without_extra_services(tmp_pat
     assert matches[-1].event_id == "event266"
     with pytest.raises(ValueError):
         store.search("robot-01", "key", limit=50)
+
+
+def test_fts5_rebuilds_legacy_memory_without_changing_provenance(tmp_path):
+    """Existing local pet databases migrate without deleting an episode."""
+    path = tmp_path / "robot-01.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            """CREATE TABLE memories (
+                 event_id TEXT PRIMARY KEY, source_robot TEXT NOT NULL,
+                 witnessed INTEGER NOT NULL, kind TEXT NOT NULL,
+                 summary TEXT NOT NULL, observed_at REAL NOT NULL,
+                 confidence REAL NOT NULL)"""
+        )
+        db.execute(
+            """INSERT INTO memories VALUES (
+               'legacy', 'robot-02', 0, 'key',
+               'A brass key was described yesterday', 1000, 0.7)"""
+        )
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    result = store.search("robot-01", "brass keys")
+    assert [m.event_id for m in result] == ["legacy"]
+    assert not result[0].witnessed
+    assert result[0].source_robot == "robot-02"
+    # A reopened store must neither duplicate nor forget the FTS index.
+    second = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    assert [m.event_id for m in second.search("robot-01", "brass keys")] == ["legacy"]
+
+
+def test_fts5_deletions_retention_and_quoted_queries_cannot_revive_memories(tmp_path):
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    store.remember(
+        "robot-01", "first", "A copper key beside the notebook",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    store.remember(
+        "robot-02", "same", "A copper key beside the notebook",
+        kind="key", source_robot="robot-01", witnessed=False,
+    )
+    assert [m.event_id for m in store.search(
+        "robot-01", 'key- " OR NOT'
+    )] == ["first"]
+    assert store.forget_episode("robot-01", "first")
+    assert store.search("robot-01", "copper key") == []
+    assert [m.event_id for m in store.search(
+        "robot-02", "copper keys"
+    )] == ["same"]
+    for index in range(260):
+        store.remember(
+            "robot-01", f"rolling{index:03}",
+            f"violetmemory{index:03} pencil",
+            kind="pencil", source_robot="robot-01", witnessed=True,
+            observed_at=1000 + index,
+        )
+    assert store.count("robot-01") == 250
+    assert store.search("robot-01", "violetmemory000") == []
+    assert [m.event_id for m in store.search(
+        "robot-01", "violetmemory259"
+    )] == ["rolling259"]
+
+
+def test_fts5_porter_and_unicode_recall_without_custom_stemming(tmp_path):
+    store = MemoryStore(tmp_path, ["robot-01"])
+    store.remember(
+        "robot-01", "candies", "The candies were on a shelf",
+        kind="candy", source_robot="robot-01", witnessed=True,
+    )
+    store.remember(
+        "robot-01", "coffee", "Có cà phê ở trên bàn",
+        kind="cup", source_robot="robot-01", witnessed=True,
+    )
+    assert [m.event_id for m in store.search("robot-01", "candy")] == [
+        "candies",
+    ]
+    assert [m.event_id for m in store.search("robot-01", "cafe")] == [
+        "coffee",
+    ]
 
 
 def test_voice_memory_tool_opt_in_and_same_pet_topical_recall(
