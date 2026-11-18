@@ -85,6 +85,9 @@ int main() {
       faulted(guard); // optical metadata did not weaken the local latch
     }
     {
+      // The previous case deliberately left mux readback corrupted. New
+      // bench scenarios must reset the fake bus before expecting startup.
+      Wire = TwoWire{};
       desk_robot::TofBus bus;
       desk_robot::CliffGuard guard;
       ready(bus, guard);
