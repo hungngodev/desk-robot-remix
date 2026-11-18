@@ -81,18 +81,19 @@ def test_empty_evidence_fails_closed_even_with_valid_sha():
 
 
 def test_clean_exact_sha_required(monkeypatch):
-    import subprocess
-
-    def git(args, **kwargs):
-        return SHA if "rev-parse" in args else ""
-    monkeypatch.setattr(release.subprocess, "check_output", git)
+    good = {"sha": SHA, "tracked_clean": True, "root_tree_intact": True}
+    monkeypatch.setattr(release, "source_snapshot", lambda: good)
     assert release.checkout_sha() == SHA
-
-    def dirty(args, **kwargs):
-        return SHA if "rev-parse" in args else " M firmware"
-    monkeypatch.setattr(release.subprocess, "check_output", dirty)
-    with pytest.raises(ValueError, match="clean exact commit"):
-        release.checkout_sha()
+    for bad in (
+        {**good, "tracked_clean": False},
+        {**good, "root_tree_intact": False},
+        {**good, "sha": "bad"},
+        {**good, "sha": None},
+    ):
+        monkeypatch.setattr(release, "source_snapshot",
+                            lambda bad=bad: bad)
+        with pytest.raises(ValueError, match="clean exact commit"):
+            release.checkout_sha()
 
 
 def test_live_network_failure_cannot_qualify_fake_record():
