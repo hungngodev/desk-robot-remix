@@ -495,3 +495,26 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'person_cue_active ? "surprised" : "neutral"' in board
     assert 'board->body_fault_active_ ? "sad" :' in board
     assert 'Transact(event' not in bridge  # never send cue to WROOM
+
+
+def test_max98357a_output_rate_and_aec_reference_contract():
+    """The selected generic MAX98357A excludes 24 kHz LRCLK; preserve AEC timing."""
+    config = (HEAD / "sense/config.h").read_text()
+    header = (HEAD / "sense/sense_reference_codec.h").read_text()
+    codec = (HEAD / "sense/sense_reference_codec.cc").read_text()
+    rates = dict(re.findall(r"#define (AUDIO_(?:INPUT|OUTPUT)_SAMPLE_RATE) (\d+)", config))
+    output = int(rates["AUDIO_OUTPUT_SAMPLE_RATE"])
+    microphone = int(rates["AUDIO_INPUT_SAMPLE_RATE"])
+    # Analog Devices MAX98357A/MAX98357B data sheet, Rev 16, page 16.
+    assert output in {8000, 16000, 32000, 44100, 48000, 88200, 96000}
+    assert output == 32000 and microphone == 16000
+    assert "static constexpr uint32_t kSpeakerRate = 32000;" in header
+    assert "static constexpr uint32_t kMicRate = 16000;" in header
+    assert "kSpeakerRate % kMicRate == 0" in header
+    assert "phase_ += static_cast<float>(kSpeakerRate) / kMicRate;" in codec
+    assert "samples > static_cast<int>(kSpeakerRate)" in codec
+    # Runtime resampling uses the pinned Xiaozhi decoder, not another audio stack.
+    if UPSTREAM.is_dir():
+        upstream = (UPSTREAM / "main/audio/audio_service.cc").read_text()
+        assert "SetDecodeSampleRate(packet->sample_rate, packet->frame_duration)" in upstream
+        assert "RATE_CVT_CFG(decoder_sample_rate_, codec->output_sample_rate()" in upstream

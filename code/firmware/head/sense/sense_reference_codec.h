@@ -45,7 +45,8 @@ protected:
 private:
     static constexpr uint32_t kRingSize = 16384;   // 1024 ms at 16 kHz
     static constexpr uint32_t kMicRate = 16000;
-    static constexpr uint32_t kSpeakerRate = 24000;
+    static constexpr uint32_t kSpeakerRate = 32000;  // MAX98357A supported clock
+    static_assert(kSpeakerRate % kMicRate == 0, "AEC decimation ratio must be integral");
     // Per-unit ESP-IDF private build setting, default 90 ms only as a bench
     // starting point. It is not a physical acoustic calibration.
     static constexpr uint32_t kDelaySamples =

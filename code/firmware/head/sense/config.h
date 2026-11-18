@@ -12,7 +12,8 @@
 // Pin source: https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/
 // These connections are compile-checked, not physically qualified.
 #define AUDIO_INPUT_SAMPLE_RATE 16000
-#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+// MAX98357A does not support 24 kHz LRCLK; 32 kHz retains voice bandwidth.
+#define AUDIO_OUTPUT_SAMPLE_RATE 32000
 #define AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42
 #define AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41
 #define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_4

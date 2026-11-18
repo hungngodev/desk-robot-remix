@@ -55,7 +55,8 @@ void SenseReferenceCodec::PublishAcceptedLocked(
         const int32_t scaled = static_cast<int32_t>(
             std::clamp(std::lround(static_cast<double>(source[i]) * factor),
                        -32768L, 32767L));
-        // RIO's streaming three tap low pass then 3:2 decimation. Preserve
+        // RIO-inspired three tap low pass followed by 2:1 decimation from the
+        // MAX98357A-supported 32 kHz output to the 16 kHz PDM AEC reference. Preserve
         // filter and fractional phase across decoder chunk boundaries.
         const int32_t filtered = (static_cast<int32_t>(filter_last2_) +
                                   2 * static_cast<int32_t>(filter_last1_) +
@@ -66,7 +67,7 @@ void SenseReferenceCodec::PublishAcceptedLocked(
             const int32_t result = static_cast<int32_t>(
                 last_filtered_ + (filtered - last_filtered_) * phase_);
             PushLocked(static_cast<int16_t>(std::clamp(result, static_cast<int32_t>(-32768), static_cast<int32_t>(32767))));
-            phase_ += 1.5f;
+            phase_ += static_cast<float>(kSpeakerRate) / kMicRate;
         }
         phase_ -= 1.0f;
         last_filtered_ = static_cast<int16_t>(filtered);
@@ -160,7 +161,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
 }
 
 int SenseReferenceCodec::Write(const int16_t* data, int samples) {
-    if (data == nullptr || samples <= 0 || samples > 24000 ||
+    if (data == nullptr || samples <= 0 || samples > static_cast<int>(kSpeakerRate) ||
         output_sample_rate_ != static_cast<int>(kSpeakerRate)) {
         return 0;
     }
