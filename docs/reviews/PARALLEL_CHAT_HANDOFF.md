@@ -19,6 +19,8 @@ Canonical input: user supplied 100-page engineering playbook, procedures 01 to 9
 | 11, procedures 81–88: adversarial tests | More build profile coverage CODED, current exact SHA CI pending | 23 local verifier stages; monitor GitHub CI status and run physical bench/audio/video scenarios, no inferred passes |
 | 12, procedures 89–96: first build, fleet and governance | NOT QUALIFIED | One complete robot must pass real electrical, optical, acoustic, drivetrain, docking and mechanic acceptance before buying/assembling four copies |
 
+**Later bounded source fixes in this same pass:** `7315e52c6e384ddf65e9bd84239d5cc074128775` adds `fifo_ir_first` to actual WROOM `aux` sensor telemetry next to `fifo_layout_physically_verified:false`, disclosing the compiled MAX30102 red/IR channel interpretation without claiming an optical measurement; `3bee1f904aa27216d780e642a29c08f3a8fc9595` updates native guarded body output expectations; `c817a1c03c47b36c103a8ac600f7bae768b97b53` checks firmware mapping provenance. `ecb563bbaf441bd8254698c917b7a49dcdcc843e` extends local exact-SHA verification to reject missing root files and tracked subtree loss, and `224cf3499061eac5b911f90eb79f10dbd4b27b59` adds missing/dirty/partial-tree negative cases. All still require the current SHA's actual CI result.
+
 **Release rule:** No automation, GitHub comment, passing Python test or sample invoice may mark charging, motion, print fit, one-robot acceptance, five-robot release, or full shopping list safe while required physical evidence is missing. Keep existing conditional first-robot and fleet procurement gates. A newly changed part, firmware version or CAD footprint reopens affected gates.
 
 ---
