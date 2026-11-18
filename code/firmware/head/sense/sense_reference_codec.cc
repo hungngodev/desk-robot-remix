@@ -63,7 +63,10 @@ void SenseReferenceCodec::PublishAcceptedLocked(
                                   scaled) / 4;
         filter_last2_ = filter_last1_;
         filter_last1_ = static_cast<int16_t>(scaled);
-        while (phase_ < 1.0f) {
+        // The board contract fixes a 32 kHz output and 16 kHz microphone.
+        // Each output sample can publish at most one reference sample.
+        // A loop would misleadingly suggest unsupported fractional ratios.
+        if (phase_ < 1.0f) {
             const int32_t result = static_cast<int32_t>(
                 last_filtered_ + (filtered - last_filtered_) * phase_);
             PushLocked(static_cast<int16_t>(std::clamp(result, static_cast<int32_t>(-32768), static_cast<int32_t>(32767))));
