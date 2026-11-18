@@ -81,6 +81,44 @@ static void late_opus_chunk_accounts_for_real_gap_once() {
   CHECK(clock.silence_frames(1170000, 16384) == 160);
 }
 
+static void irregular_idle_cadence_retains_fractional_reference_samples() {
+  PlaybackReferenceClock clock;
+  constexpr std::int64_t kStartUs = 1000000;
+  constexpr std::int64_t kReadUs = 10007;
+  constexpr int kReads = 6000;
+  CHECK(clock.silence_frames(kStartUs, 16384) == 0);
+  std::uint64_t total = 0;
+  for (int n = 1; n <= kReads; ++n) {
+    total += clock.silence_frames(kStartUs + n * kReadUs, 16384);
+  }
+  const auto expected = static_cast<std::uint64_t>(
+      kReads * kReadUs * PlaybackReferenceClock::kReferenceRate / 1000000U);
+  CHECK(total == expected);
+  CHECK(total == 960672ULL);  // Prior per-callback truncation returned 960000.
+  CHECK(clock.represented_end_us() == kStartUs + kReads * kReadUs);
+}
+
+static void short_i2s_writes_preserve_submicrosecond_playback_time() {
+  PlaybackReferenceClock clock;
+  CHECK(clock.silence_frames(1000000, 16384) == 0);
+  for (int n = 0; n < 32000; ++n) clock.accepted_output_frames(1);
+  CHECK(clock.represented_end_us() == 2000000);
+  CHECK(clock.silence_frames(2000000, 16384) == 0);
+  CHECK(clock.silence_frames(2010000, 16384) == 160);
+}
+
+static void reset_retires_fractional_timing_residue() {
+  PlaybackReferenceClock clock;
+  CHECK(clock.silence_frames(1000000, 16384) == 0);
+  CHECK(clock.silence_frames(1010007, 16384) == 160);
+  clock.accepted_output_frames(1);
+  clock.reset();
+  CHECK(clock.silence_frames(2000000, 16384) == 0);
+  CHECK(clock.silence_frames(2010007, 16384) == 160);
+  clock.accepted_output_frames(32000);
+  CHECK(clock.represented_end_us() == 3010007);
+}
+
 static void huge_idle_gaps_are_bounded() {
   PlaybackReferenceClock clock;
   CHECK(clock.silence_frames(1000000, 16384) == 0);
@@ -97,6 +135,9 @@ int main() {
     decoder_ahead_of_playback_preserves_queued_reference();
     late_opus_chunk_accounts_for_real_gap_once();
     huge_idle_gaps_are_bounded();
+    irregular_idle_cadence_retains_fractional_reference_samples();
+    short_i2s_writes_preserve_submicrosecond_playback_time();
+    reset_retires_fractional_timing_residue();
     std::cout << "PASS actual Sense playback reference time accounting\n";
   } catch (const std::exception& exc) {
     std::cerr << "FAIL " << exc.what() << "\n";
