@@ -337,6 +337,29 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertNotIn("reference_overwrite_reads_ = 0;", clear)
         self.assertNotIn("reference_integrity_failed_ = false;", clear)
 
+    def test_overlay_journal_precedes_atomic_file_update_and_rolls_back(self):
+        """A failed patch must leave neither altered upstream nor an orphan marker."""
+        marker = self.root / overlay.MARKER
+        writer = overlay.atomic_replace_bytes
+        observed = []
+
+        def fail_after_one_replace(path, data):
+            writer(path, data)
+            if path != marker and not observed:
+                self.assertTrue(marker.is_file())
+                observed.append(path)
+                raise OSError('synthetic write failure after atomic replacement')
+
+        with patch.object(overlay, 'atomic_replace_bytes',
+                          side_effect=fail_after_one_replace):
+            with self.assertRaisesRegex(OSError, 'synthetic write failure'):
+                overlay.apply(self.root, 'sense')
+        self.assertEqual(len(observed), 1)
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.root / overlay.BOARDS['sense']).exists())
+        for name, original in self.original.items():
+            self.assertEqual((self.root / name).read_bytes(), original)
+
     def test_partial_overlay_install_removes_original_and_missing_new_files(self):
         """A crash after marker creation must not strand the pinned clone."""
         overlay.apply(self.root, 'sense')
