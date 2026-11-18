@@ -528,6 +528,11 @@ def test_playback_reference_clock_native_cpp_regression():
     """Compile the same pure C++ clock the Sense firmware uses, not a Python model."""
     compiler = shutil.which("c++")
     assert compiler is not None, "A native C++17 compiler is required"
+    # Reuse the head protocol test's existing tested macOS SDK resolution.
+    # Apple clang may find c++ but lack libc++ includes without xcrun.
+    native_cpp_env = load_module(
+        "sense_native_cpp_env", HEAD / "tests/test_overlay.py"
+    ).native_cpp_env
     with tempfile.TemporaryDirectory() as temp:
         exe = Path(temp) / "reference_timeline_test"
         subprocess.run(
@@ -536,6 +541,7 @@ def test_playback_reference_clock_native_cpp_regression():
              str(HEAD / "tests/reference_timeline_test.cc"),
              "-o", str(exe)],
             check=True,
+            env=native_cpp_env(),
         )
         subprocess.run([str(exe)], check=True)
 
