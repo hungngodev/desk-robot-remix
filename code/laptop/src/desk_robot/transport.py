@@ -8,9 +8,9 @@ from typing import Protocol
 import httpx
 
 from .aux import validate_aux
-from .tof_optics import validate_optics
 from .config import RobotConfig, secret
 from .dock_ir import validate_ir
+from .tof_optics import validate_optics
 
 
 class HeadError(RuntimeError):
