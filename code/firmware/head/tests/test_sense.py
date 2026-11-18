@@ -170,6 +170,25 @@ class SenseOverlayTests(unittest.TestCase):
         )
 
 
+    def test_invalid_32khz_opus_offer_does_not_destroy_decoder(self):
+        """The 32 kHz DAC clock is not an Opus decode rate (source gate)."""
+        overlay.apply(self.root, 'sense')
+        audio = (self.root / 'main/audio/audio_service.cc').read_text()
+        setter = audio.split('void AudioService::SetDecodeSampleRate(', 1)[1]
+        setter = setter.split('void AudioService::PushTaskToEncodeQueue(', 1)[0]
+        self.assertIn('sample_rate != 24000', setter)
+        self.assertIn('sample_rate != 48000', setter)
+        self.assertIn('Rejecting unsupported Sense Opus rate', setter)
+        self.assertLess(setter.index('sample_rate != 24000'),
+                        setter.index('esp_opus_dec_close(opus_decoder_)'))
+        self.assertIn('decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr',
+                      setter)
+        self.assertIn('#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3', setter)
+        # 32 kHz remains the DAC rate; Opus decoder should stay at 24 kHz.
+        config = (self.root / overlay.BOARDS['sense'] / 'config.h').read_text()
+        self.assertIn('#define AUDIO_OUTPUT_SAMPLE_RATE 32000', config)
+        self.assertIn('constexpr int initial_decoder_rate = 24000;', audio)
+
     def test_stream_camera_configuration_and_single_client_ownership(self):
         """Source budget, not measured frame rate or audio contention."""
         board = (HEAD / "sense/desk_robot_sense.cc").read_text()
