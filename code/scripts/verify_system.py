@@ -133,7 +133,7 @@ def source_snapshot() -> dict:
         tracked = subprocess.check_output(
             ["git", "ls-files", "-z"], cwd=ROOT, text=True, timeout=10,
             stderr=subprocess.DEVNULL,
-        ).split("\\0")
+        ).split("\0")
         if tracked and tracked[-1] == "":
             tracked.pop()
         # Git's index includes skip-worktree paths in sparse checkouts.
