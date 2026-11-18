@@ -24,6 +24,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR CI must verify the reviewed branch source, not GitHub's
+          # synthetic merge SHA. For push/manual jobs use the event SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected" || {
+            echo "::error::Wrong checkout: expected $expected, got $actual"
+            exit 1
+          }
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -114,6 +127,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR CI must verify the reviewed branch source, not GitHub's
+          # synthetic merge SHA. For push/manual jobs use the event SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected" || {
+            echo "::error::Wrong checkout: expected $expected, got $actual"
+            exit 1
+          }
       - uses: astral-sh/setup-uv@v6
       - name: Compile guarded stepper firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
@@ -150,6 +176,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR CI must verify the reviewed branch source, not GitHub's
+          # synthetic merge SHA. For push/manual jobs use the event SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected" || {
+            echo "::error::Wrong checkout: expected $expected, got $actual"
+            exit 1
+          }
       - name: Configure portable C++ tests
         run: cmake -S code/firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
       - name: Build
@@ -173,6 +212,19 @@ jobs:
       image: espressif/idf:v6.1
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR CI must verify the reviewed branch source, not GitHub's
+          # synthetic merge SHA. For push/manual jobs use the event SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected" || {
+            echo "::error::Wrong checkout: expected $expected, got $actual"
+            exit 1
+          }
       - name: Restore pinned device source and generate isolated Sense overlay
         working-directory: code
         shell: bash
