@@ -87,7 +87,7 @@ def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
     if not isinstance(reviewer, str) or not isinstance(url, str):
         return False
     match = re.fullmatch(
-        r"https://github\\.com/hungngodev/desk-robot-remix/pull/17"
+        r"https://github\.com/hungngodev/desk-robot-remix/pull/17"
         r"#issuecomment-([0-9]+)", url,
     )
     if match is None:
@@ -103,7 +103,7 @@ def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
         and actor.get("login") == reviewer
         and isinstance(body, str)
         and isinstance(identifier, int)
-        and bool(re.search(rf"\\bprocedure\\s*#?{identifier}\\b", body, re.IGNORECASE))
+        and bool(re.search(rf"\bprocedure\s*#?{identifier}\b", body, re.IGNORECASE))
         and sha in body
     )
 
@@ -126,7 +126,7 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         receipt = row.get("executed_test_receipt")
         if (not isinstance(command, str)
                 or not command.startswith("cd code && ")
-                or re.search(r"--(?:help|version|collect-only)\\b|&& true\\b", command)
+                or re.search(r"--(?:help|version|collect-only)\b|&& true\b", command)
                 or not isinstance(receipt, dict)
                 or receipt.get("command") != command):
             errors.append(f"procedure {identifier}: executable command receipt mismatch")
