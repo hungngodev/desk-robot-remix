@@ -1,4 +1,4 @@
-> **Canonical full five pet wiring allocation:** [complete feature and electrical plan](full-feature-wiring-and-shopping.md). The current full `esp32_full` build also sets `DESK_ROBOT_REQUIRE_DOCK_MONITOR=1`: an installed, recently sampled MCP23017 at expansion bus `0x71`, channel 5, is compulsory even if that sensor failed to initialize at boot. A missing module, invalid GPIOA transfer, zero sample sequence, or 500 ms stale reading locally refuses motor arming and stops moving tracks; any single seat switch or charger PGOOD indication also locks out motors. The base `esp32_stepper` profile is for staged tests only. Do not apply 5 V to MCP23017 inputs, and do not energize dock contacts from firmware. This is source code, not measured electrical qualification.
+> **Canonical full five pet wiring allocation:** [complete feature and electrical plan](full-feature-wiring-and-shopping.md). The current full `esp32_full` build also sets `DESK_ROBOT_REQUIRE_DOCK_MONITOR=1`: a present, responsive, freshly sampled MCP23017 at expansion bus `0x71`, channel 5, is mandatory. A missing, unresponsive or failed module at boot refuses motor arming; this requirement cannot be waived. A missing module, invalid GPIOA transfer, zero sample sequence, or 500 ms stale reading locally refuses motor arming and stops moving tracks; any single seat switch or charger PGOOD indication also locks out motors. The base `esp32_stepper` profile is for staged tests only. Do not apply 5 V to MCP23017 inputs, and do not energize dock contacts from firmware. This is source code, not measured electrical qualification.
 
 The five-channel profile remains the earlier core WROOM safety foundation. The complete `esp32_full` profile now additionally polls left, right and rear VL53L0X channels 5 to 7, exports read-only freshness/validity, and lets the Mac react to their actual telemetry. This is implemented source but **not** qualified physical hardware. Most optional add-ons still require breakout-specific wiring, driver review, and measured bench acceptance. The 0x71 expansion mux is now quiesced before critical range reads if fitted.
 
@@ -60,7 +60,7 @@ WROOM GPIO21/22 -> selected MPU6050 0x68/0x69 on the UPSTREAM body I2C bus
      CH6 right-side VL53L0X 0x29, read-only
      CH7 rear obstacle VL53L0X 0x29, read-only
   -> TCA9548A ACCESSORY mux 0x71
-     CH0 CAP1188 0x28 + MAX30102 0x57
+     CH0 CAP1188 0x29 default / 0x28 strapped + MAX30102 0x57
      CH1 APDS9960 0x39 + AS5600 nose 0x36
      CH2 ADS1115 force 0x48
      CH3 SHT41 0x44 + BMP280 0x76 (verify breakout)
@@ -150,7 +150,7 @@ Use rated conductors for actuator power. Owned DuPont ribbons are signal leads,
 not the main motor/servo supply. Never run motor/servo current through a board's
 3.3 V regulator or from a laptop USB port through the board. Check the actual
 MG90S voltage rating. MAX98357 speaker connects across SPK+ and SPK−, **neither
-to ground**; validate amplifier gain, long speech temperature and enclosure acoustics for the fixed 8 Ω / 2 W Challenge CS20-02P110-04-1X speaker; 5 V amplifier supply is not yet physically accepted. Insulate brass/cosmetic metal.
+to ground**; use a documented initial MAX98357A GAIN pin left floating (nominal 9 dB) for bench AEC trials, then record the exact delivered carrier strap and measured gain before acceptance. A changed gain or speaker enclosure invalidates prior echo reduction measurements and requires a new calibration and ERLE/double talk test. Validate clipping, long speech temperature and enclosure acoustics for the fixed 8 Ω / 2 W Challenge CS20-02P110-04-1X speaker; 5 V amplifier supply is not yet physically accepted. Insulate brass/cosmetic metal.
 
 The [Adafruit #4090](https://www.adafruit.com/product/4090) breakout is not a
 qualified whole-robot high-current distributor. **Do not directly join the
