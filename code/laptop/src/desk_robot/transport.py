@@ -8,6 +8,7 @@ from typing import Protocol
 import httpx
 
 from .aux import validate_aux
+from .tof_optics import validate_optics
 from .config import RobotConfig, secret
 from .dock_ir import validate_ir
 
@@ -20,6 +21,7 @@ class Head(Protocol):
     async def command(self, command: str) -> dict: ...
     async def status(self) -> dict: ...
     async def aux_status(self) -> dict: ...
+    async def optics_status(self) -> dict: ...
     async def ir_status(self) -> dict: ...
     async def snapshot(self) -> bytes: ...
 
@@ -223,6 +225,15 @@ class HttpHead:
             data = _response_object(await self._request("GET", "/api/aux"))
             try:
                 return validate_aux(data, self.config.id)
+            except ValueError as exc:
+                raise HeadError(str(exc)) from exc
+
+    async def optics_status(self) -> dict:
+        """Same conversion VL53L0X ambient/signal diagnostics, read only."""
+        async with self.lock:
+            data = _response_object(await self._request("GET", "/api/optics"))
+            try:
+                return validate_optics(data, self.config.id)
             except ValueError as exc:
                 raise HeadError(str(exc)) from exc
 
