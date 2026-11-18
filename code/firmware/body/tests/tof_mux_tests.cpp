@@ -181,6 +181,35 @@ int main() {
       CHECK(bus.extra_diagnostic(0, 86).valid);
     }
     {
+      // The 0x71 touch mux NACKed at the very start of ToF init. Later
+      // CAP1188 or other 0x71 discovery must UPGRADE the sensor isolation
+      // contract, not leave the 0x29 cliff read exposed to a stuck CAP lane.
+      Wire = TwoWire{};
+      Wire.optional_mux_installed = false;
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      CHECK(Wire.ranges == 16);  // initialized critical lane four
+      Wire.optional_mux_installed = true;
+      Wire.extras = 1;  // 0x29 CAP1188 remains selected
+      Wire.optional_mux_stuck = true;
+      bus.note_optional_mux_present();
+      const auto before = Wire.tof_samples;
+      bus.poll(guard, 60);
+      CHECK(Wire.tof_samples == before);
+      CHECK(Wire.ranges == 16); // reject BEFORE changing critical lane
+      faulted(guard);
+      // After a correct verified disconnect, only a fresh critical sweep
+      // plus local rearm can restore permission.
+      Wire.optional_mux_stuck = false;
+      for (std::uint32_t at = 61; at < 66; ++at) bus.poll(guard, at);
+      CHECK(guard.try_rearm(70));
+      CHECK(guard.evaluate(70));
+      Wire.optional_mux_installed = false; // later I2C NACK is NOT absence
+      bus.poll(guard, 71);
+      faulted(guard);
+    }
+    {
       Wire = TwoWire{};
       Wire.optional_mux_installed = false; // five sensor bench profile
       desk_robot::TofBus bus;
