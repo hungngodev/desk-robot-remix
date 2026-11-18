@@ -420,6 +420,26 @@ int main() {
     // Even if Wire::write rejects a control byte, finish BOTH attempted
     // 0x71 transmissions with STOP; stale GPIOA evidence cannot survive.
     CHECK(stuck_wire.transactions >= before_failed_write + 4);
+    // The WROOM must increment MAX17048 identity on successful I2C register
+    // acquisition only. Failure and retry never advance stale fuel data.
+    TwoWire fuel_wire;
+    desk_robot::AccessorySensors fuel_accessories;
+    CHECK(fuel_accessories.begin(fuel_wire));
+    for (std::uint32_t ms = 0; ms < 2800; ms += 12)
+      fuel_accessories.poll(ms);
+    const auto& fuel = fuel_accessories.readings().gauge;
+    CHECK(fuel.fuel_valid && fuel.fuel_sample_seq > 0U);
+    const auto last_good_fuel_seq = fuel.fuel_sample_seq;
+    fuel_wire.fail_fuel_register_read = true;
+    for (std::uint32_t ms = 2808; ms < 3700; ms += 12)
+      fuel_accessories.poll(ms);
+    CHECK(!fuel.fuel_valid);
+    CHECK(fuel.fuel_sample_seq == last_good_fuel_seq);
+    fuel_wire.fail_fuel_register_read = false;
+    for (std::uint32_t ms = 3708; ms < 4650; ms += 12)
+      fuel_accessories.poll(ms);
+    CHECK(fuel.fuel_valid);
+    CHECK(fuel.fuel_sample_seq > last_good_fuel_seq);
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';

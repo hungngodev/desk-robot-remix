@@ -19,6 +19,7 @@ class TwoWire {
   std::size_t pos = 0;
   bool pending_sht = false;
   bool fail_dock_gpio = false;
+  bool fail_fuel_register_read = false;
   bool fail_optional_gpio = false;
   bool fail_mcp_register_write = false;
   bool fail_pulse_register_write = false;
@@ -210,6 +211,8 @@ class TwoWire {
     if (addr == 0x28 || (addr == 0x29 && extras == 1 && cap_uses_0x29))
       ++cap_register_requests;
     if (!connected(addr)) return 0;
+    if (fail_fuel_register_read && addr == 0x36 && extras == 16 &&
+        (register_address == 0x02 || register_address == 0x04)) return 0;
     if (addr == 0x70) {
       if (range_mux_read_nack) return 0;
       inbound = {range_mux_bad_readback
