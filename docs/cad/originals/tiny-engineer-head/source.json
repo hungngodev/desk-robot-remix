@@ -1,0 +1,82 @@
+{
+  "date": "2026-11-03",
+  "author": "Krzysztof Jamroz",
+  "commit": "aefc852a894174604a1e350bf9bc04c04f28ec80",
+  "source_url": "https://github.com/jamro/tiny-engineer/tree/aefc852a894174604a1e350bf9bc04c04f28ec80/3d_models",
+  "license": "CERN-OHL-S-2.0",
+  "role": "candidate only; intended 0.91-inch Waveshare display, not verified for owned 0.96 or Sense/camera",
+  "changed": false,
+  "physical_fit_verified": false,
+  "files": [
+    {
+      "file": "Head.stl",
+      "source_url": "https://raw.githubusercontent.com/jamro/tiny-engineer/aefc852a894174604a1e350bf9bc04c04f28ec80/3d_models/parts/sg90/stl/Head.stl",
+      "bytes": 93084,
+      "sha256": "4570b4ae2d2dd04d851d68e21dd68d6697222d00a11048f940e2a464ef0fcbe2",
+      "triangles": 1860,
+      "bounds": [
+        [
+          -25.950000762939453,
+          21.950000762939453
+        ],
+        [
+          -26.549999237060547,
+          26.549999237060547
+        ],
+        [
+          -2.842170943040401e-14,
+          14.600000381469727
+        ]
+      ],
+      "size": [
+        47.900001525878906,
+        53.099998474121094,
+        14.600000381469755
+      ]
+    },
+    {
+      "file": "Hat.stl",
+      "source_url": "https://raw.githubusercontent.com/jamro/tiny-engineer/aefc852a894174604a1e350bf9bc04c04f28ec80/3d_models/parts/sg90/stl/Hat.stl",
+      "bytes": 57784,
+      "sha256": "820e46424300205b46c5e28a519d934443fb1212c21627e0aa80e135f90cb27f",
+      "triangles": 1154,
+      "bounds": [
+        [
+          -34.150001525878906,
+          13.75
+        ],
+        [
+          -26.549999237060547,
+          26.549999237060547
+        ],
+        [
+          -1.2434497875801753e-14,
+          5.0
+        ]
+      ],
+      "size": [
+        47.900001525878906,
+        53.099998474121094,
+        5.000000000000012
+      ]
+    },
+    {
+      "file": "LICENSE",
+      "source_url": "https://raw.githubusercontent.com/jamro/tiny-engineer/aefc852a894174604a1e350bf9bc04c04f28ec80/3d_models/LICENSE",
+      "bytes": 13436,
+      "sha256": "8805fe7d397dfca4c8299840e913daa410f171e4c1643f0fa4e32f9a56ecb035"
+    },
+    {
+      "file": "NOTICE",
+      "source_url": "https://raw.githubusercontent.com/jamro/tiny-engineer/aefc852a894174604a1e350bf9bc04c04f28ec80/3d_models/NOTICE",
+      "bytes": 1245,
+      "sha256": "0561c8dcb202f2c0effd93f5c791dc4475fbc157d8676ee35f224248c929c0ef"
+    },
+    {
+      "file": "LICENSING.md",
+      "source_url": "https://raw.githubusercontent.com/jamro/tiny-engineer/aefc852a894174604a1e350bf9bc04c04f28ec80/LICENSING.md",
+      "bytes": 2628,
+      "sha256": "df8a99170f69d3052993b021b35b92e0dfa36a614a5f4afa00d90bd08952a12b"
+    }
+  ]
+}

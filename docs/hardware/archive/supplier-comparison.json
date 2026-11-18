@@ -1,0 +1,131 @@
+{
+  "checked_at": "2026-11-03",
+  "currency": "USD",
+  "items": [
+    {
+      "component": "Sense camera/microphone board",
+      "needed_for_first_robot": 1,
+      "amazon": {
+        "url": "https://www.amazon.com/dp/B0C69FFVHH",
+        "pack_quantity": 1,
+        "pack_price_usd": 25.99,
+        "packs_for_first_robot": 1,
+        "packs_for_five": 5
+      },
+      "outside": {
+        "supplier": "Seeed",
+        "url": "https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html",
+        "unit_usd": 13.9,
+        "first_robot_spend_usd": 13.9,
+        "five_robot_units": 5
+      },
+      "fit_qualified": false
+    },
+    {
+      "component": "VL53L0X floor/front sensors",
+      "needed_for_first_robot": 5,
+      "amazon": {
+        "url": "https://www.amazon.com/dp/B0F28MFW6X",
+        "pack_quantity": 5,
+        "pack_price_usd": 13.99,
+        "packs_for_first_robot": 1,
+        "packs_for_five": 5
+      },
+      "outside": {
+        "supplier": "ElectroPeak",
+        "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
+        "unit_usd": 1.75,
+        "first_robot_spend_usd": 8.75,
+        "five_robot_units": 25
+      },
+      "fit_qualified": false
+    },
+    {
+      "component": "MAX98357A-compatible I2S amplifier",
+      "needed_for_first_robot": 1,
+      "amazon": {
+        "url": "https://www.amazon.com/dp/B0DPJRLMDJ",
+        "pack_quantity": 2,
+        "pack_price_usd": 6.88,
+        "packs_for_first_robot": 1,
+        "packs_for_five": 3
+      },
+      "outside": {
+        "supplier": "ElectroPeak",
+        "url": "https://electropeak.com/max98357-i2s-audio-amplifier-module",
+        "unit_usd": 1.95,
+        "first_robot_spend_usd": 1.95,
+        "five_robot_units": 5
+      },
+      "fit_qualified": false
+    },
+    {
+      "component": "TCA9548A multiplexer",
+      "needed_for_first_robot": 1,
+      "amazon": {
+        "url": "https://www.amazon.com/dp/B0F8ZB8DNM",
+        "pack_quantity": 3,
+        "pack_price_usd": 6.98,
+        "packs_for_first_robot": 1,
+        "packs_for_five": 2
+      },
+      "outside": {
+        "supplier": "ElectroPeak",
+        "url": "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
+        "unit_usd": 0.47,
+        "first_robot_spend_usd": 0.47,
+        "five_robot_units": 5
+      },
+      "fit_qualified": false
+    },
+    {
+      "component": "20mm 8 ohm 1W speaker",
+      "needed_for_first_robot": 1,
+      "amazon": {
+        "url": "https://www.amazon.com/dp/B0GR48Q949",
+        "pack_quantity": 2,
+        "pack_price_usd": 5.99,
+        "packs_for_first_robot": 1,
+        "packs_for_five": 3
+      },
+      "outside": {
+        "supplier": "ElectroPeak",
+        "url": "https://electropeak.com/8-ohm-1w-20mm-diameter-speaker",
+        "unit_usd": 0.29,
+        "first_robot_spend_usd": 0.29,
+        "five_robot_units": 5
+      },
+      "fit_qualified": false
+    }
+  ],
+  "first_robot_electronics": {
+    "amazon_package_spend_usd": 59.83,
+    "outside_required_quantity_spend_usd": 25.36,
+    "difference_before_charges_usd": 34.47
+  },
+  "shared_unquoted_allowance_usd": 10,
+  "first_robot_planning_totals": {
+    "amazon_before_charges_usd": 69.83,
+    "outside_before_charges_usd": 35.36,
+    "outside_shipping_tax_other_fees_room_under_50_usd": 14.64
+  },
+  "five_robot_electronics_only": {
+    "amazon_package_spend_usd": 252.47,
+    "outside_unit_price_arithmetic_usd": 126.8,
+    "difference_before_charges_usd": 125.67,
+    "full_fleet_quote": false
+  },
+  "outside_supplier_orders": 2,
+  "shipping_usd": null,
+  "tax_usd": null,
+  "other_order_fees_usd": null,
+  "purchase_ready": false,
+  "price_evidence": "Amazon live product-page DOM; ElectroPeak live HTML product-price metadata via direct HTTP after MCP fetch client failure; Seeed official product page.",
+  "notes": [
+    "Amazon first order includes spare amp/mux/speaker; outside prices purchase required quantities only.",
+    "Same component types, generic board revisions/dimensions/pullups/connector differences not qualified.",
+    "Ten dollars for power leads/switch/fasteners/decoupling is an allowance, not a quote from either source.",
+    "Five-robot electronics arithmetic excludes missing steppers/drivers, WROOMs, OLEDs, banks, mechanical/power parts and all charges. No bulk discounts assumed.",
+    "All quantities scale only after first prototype physical acceptance; no purchases/cart changes made."
+  ]
+}

@@ -1,0 +1,156 @@
+{
+  "currency": "USD",
+  "checked_at": "2026-11-03",
+  "cap_usd": 50,
+  "fit_confirmed": false,
+  "readiness_checks": {
+    "two_usable_owned_mg90s_confirmed": false,
+    "case_mechanism_sensor_envelope_preflight_confirmed": false,
+    "bank_label_cable_and_mount_preflight_confirmed": false,
+    "sufficient_filament_and_printer_access_confirmed": false,
+    "waveshare_cam_reference_and_board_definition_reviewed": true,
+    "waveshare_display_uart_connectors_and_pinout_confirmed": false,
+    "waveshare_cam_16mb_build_confirmed": false
+  },
+  "items": [
+    {
+      "item": "Waveshare ESP32-S3-CAM-OV5640 camera/audio board bundle, SKU 33699",
+      "quantity": 1,
+      "unit_usd": 19.99,
+      "price_status": "verified",
+      "url": "https://www.waveshare.com/esp32-s3-cam-ov5640.htm?sku=33699",
+      "fit": "New purchase candidate for required first-build voice interruption. 16 MB flash / 8 MB PSRAM; ES8311/ES7210 physical playback reference; includes OV5640 and 1217 8 ohm 2 W speaker, no separate MAX98357/INMP441 needed. PCB 37 x 37 mm, 32.6 mm hole pitch. Separate OLED I2C bus and exact FPC/SH1.0 adapters required; case, power and barge-in unqualified."
+    },
+    {
+      "item": "GY-530 VL53L0X double-hole ToF module, SEN-19-018",
+      "quantity": 5,
+      "unit_usd": 1.75,
+      "price_status": "verified",
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
+      "fit": "Four downward corners plus one separate front obstacle sensor. Standoff/FOV/surface/voltage and stopping qualification required; not a falling-prevention guarantee."
+    },
+    {
+      "item": "TCA9548A eight-channel I2C multiplexer breakout",
+      "quantity": 1,
+      "unit_usd": 0.47,
+      "price_status": "verified",
+      "url": "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
+      "fit": "Five sensors on isolated channels, default 7-bit address 0x29; one selected at a time. Check reset access and 3.3 V pullups. Body bus only."
+    },
+    {
+      "item": "Owned ESP32-WROOM-32 dev board",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "At least one owned; exact fleet count unknown. Stepper profile and portable cliff policy compile; no sensor I/O/calibration, so cannot arm. Legacy DC profile preserved."
+    },
+    {
+      "item": "Owned 0.96 inch four-pin SSD1306 OLED, GME12864-11",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "At least one reported; verify controller, pin order, voltage and dimensions. Rounded Sparky v0.1.0 candidate has a larger OLED opening and needs a measured insert/mount. Case is unprinted/unqualified. Fleet count unknown."
+    },
+    {
+      "item": "Owned 5 V 28BYJ-48 stepper motor",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Five reported owned; ten needed for fleet. Use existing stepper-specific SMARS remix, not saved N20 mounts. Loaded speed/torque/temperature unknown."
+    },
+    {
+      "item": "Owned ULN2003 stepper driver board",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Five reported owned. Verify supplied motor/driver wiring, 3.3 V signal compatibility and current. No DRV8833 for this drivetrain."
+    },
+    {
+      "item": "Reported MG90S positional micro servo, about 10 owned (user estimate)",
+      "quantity": 2,
+      "unit_usd": 0,
+      "price_status": "inventory_check",
+      "url": "",
+      "fit": "User estimates about ten owned, potentially enough for five robots. Count/type/condition still to confirm; no additional servos planned yet. Two needed for prototype. Check pocket, spline, horn, travel and actual loaded lifting."
+    },
+    {
+      "item": "Owned regulated 5 V USB power bank",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "At least one owned, model unidentified. User reports no readable rating label. No current rating inferred from popularity or capacity; cable, auto-off, loaded voltage stability, weight and mount unverified. Reuse remains conditional."
+    },
+    {
+      "item": "Owned filament",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Reuse stock; printer access, sliced mass and sufficient quantity must be confirmed. Service printing/replenishment excluded."
+    },
+    {
+      "item": "Owned DuPont signal wire ribbons",
+      "quantity": 1,
+      "unit_usd": 0,
+      "price_status": "owned",
+      "url": "",
+      "fit": "Ten ribbons reported. Signal wiring only; do not assume actuator-current rating."
+    },
+    {
+      "item": "UART SH1.0 four-pin to 2.54 mm cable, Adafruit 4209",
+      "quantity": 1,
+      "unit_usd": 0.95,
+      "price_status": "verified",
+      "url": "https://www.digikey.com/en/products/detail/adafruit-industries-llc/4209/10230003",
+      "fit": "150 mm cable; continuity-check Waveshare UART connector pin1 RX44 / pin2 TX43 / pin3 3V3 / pin4 GND. Connect RX/TX/GND only; insulate 3V3. Qwiic colors do not define this UART pinout."
+    },
+    {
+      "item": "18-pin 0.5 mm FFC, 76 mm same-side contacts, GCT 05-18-A-0076-A-4-06-4-T",
+      "quantity": 1,
+      "unit_usd": 1.24,
+      "price_status": "verified",
+      "url": "https://www.digikey.com/en/products/detail/gct/05-18-A-0076-A-4-06-4-T/21266729",
+      "fit": "Candidate for LCD connector to OLED breakout. Verify mating contacts, cable orientation, numbered-pin continuity and clearance before power."
+    },
+    {
+      "item": "Assembled 18-pin 0.5 mm FPC/FFC to 2.54 mm breakout, MKTechnic AdB-FPC-DM-18P",
+      "quantity": 1,
+      "unit_usd": 0.44,
+      "price_status": "verified",
+      "url": "https://mktechnic.com/product/fpc-pcb-breakout-board-0-5-18p-ffc-test-adapter/",
+      "fit": "26 x 24 mm extra PCB, not fitted. Map actual board-side LCD pins1=3V3,3=GND,5=GPIO1(SDA),6=GPIO2(SCL), verify adapter numbering/continuity. No absent SPI display initialized."
+    },
+    {
+      "item": "Rated actuator power lead, switch, power connectors, fasteners and wiring",
+      "quantity": 1,
+      "unit_usd": 8,
+      "price_status": "allowance",
+      "url": "",
+      "fit": "Separate motor/servo branches and rated conductors; excludes the explicitly listed head UART/FFC/display interconnects. Exact power parts/current sizing/shipping pending; no custom PCB."
+    },
+    {
+      "item": "Bulk and local decoupling components",
+      "quantity": 1,
+      "unit_usd": 2,
+      "price_status": "allowance",
+      "url": "",
+      "fit": "Choose values/voltage rating after power measurements. Capacitors do not fix an undersized bank."
+    }
+  ],
+  "head_configuration": "Preferred candidate after user requires first-build voice interruption: Waveshare ESP32-S3-CAM-OV5640 physical-reference audio + camera + owned SSD1306; new board profile/build pending, no acoustic qualification. Sense target retained as earlier reference.",
+  "note": "Conditional FIRST prototype target 41.84 USD before shipping, tax and missing inventory. Selected Waveshare SKU 33699 observed 19.99 including camera and speaker; replaces earlier Sense/amp/speaker. Power/fastener allowances are not exact quotes. Fleet requires five additional stepper/driver pairs plus unknown reused quantities. No purchase, flashing or physical acceptance.",
+  "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
+  "qualification_checks": {
+    "stepper_chassis_lift_and_head_physical_fit_confirmed": false,
+    "stepper_backend_and_cliff_interlock_verified": false,
+    "sensor_mount_surface_latency_and_stops_qualified": false,
+    "integrated_power_load_temperature_and_stability_qualified": false,
+    "waveshare_head_physical_case_and_audio_paths_confirmed": false,
+    "ordinary_speech_barge_in_passed": false
+  }
+}

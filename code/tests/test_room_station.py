@@ -1,0 +1,394 @@
+"""One owned Feather room station, read-only source and five-pet sharing."""
+from __future__ import annotations
+
+import asyncio
+import json
+import threading
+from dataclasses import replace
+
+import pytest
+from desk_robot.brain_context import compose_brain_context
+from desk_robot.config import RobotConfig, Settings
+from desk_robot.multimodal import CameraFrameHub
+from desk_robot.room_station import RoomSerialFeed, RoomStationDecoder
+from desk_robot.soil_calibration import SoilCalibration
+
+
+def frame(seq=1, clock=1000):
+    return {
+        "v": 1, "station": "room-pod-01", "seq": seq, "at_ms": clock,
+        "readings": {
+            "scd40": {
+                "valid": True, "sample_ms": clock, "co2_ppm": 630,
+                "temp_c": 23.4, "humidity_pct": 46.1,
+            },
+            "bme688": {
+                "valid": True, "sample_ms": clock, "temp_c": 24.0,
+                "humidity_pct": 44.5, "pressure_pa": 100830,
+                "gas_ohms": 35201,
+            },
+            "ld2410c": {
+                "valid": True, "sample_ms": clock, "presence": True,
+                "stationary": True, "moving": False,
+                "stationary_cm": 107, "moving_cm": 0,
+            },
+            "soil": {"valid": False},
+            "amg8833": {"valid": True, "sample_ms": clock, "pixels_c": [23.0] * 64},
+        },
+    }
+
+
+def accept(payload, *, decoder=None, now=1.0):
+    return (decoder or RoomStationDecoder()).accept(
+        json.dumps(payload).encode(), now=now,
+    )
+
+
+@pytest.mark.parametrize("raw", [0, 4095, -1, 5000, True, 2250.0, "2250"])
+def test_soil_adc_contract_rejects_saturation_and_noninteger_without_calibration(raw):
+    payload = frame(seq=4, clock=5000)
+    payload["readings"]["soil"] = {
+        "valid": True, "sample_ms": 5000, "raw_adc": raw,
+    }
+    with pytest.raises(ValueError, match="Invalid or saturated raw soil ADC"):
+        RoomStationDecoder().accept(json.dumps(payload), now=10.0)
+
+
+def test_measured_soil_calibration_flows_into_shared_room_observation():
+    payload = frame(seq=2, clock=5000)
+    payload["readings"]["soil"] = {
+        "valid": True, "sample_ms": 5000, "raw_adc": 2250,
+    }
+    raw = RoomStationDecoder().accept(json.dumps(payload), now=10.0)
+    assert "Station soil probe raw ADC 2250" in raw.summary
+    assert "relative soil moisture" not in raw.summary
+
+    decoder = RoomStationDecoder(soil_calibration=SoilCalibration(3200, 1300))
+    observation = decoder.accept(json.dumps(payload), now=10.0)
+    assert "Station soil probe raw ADC 2250" in observation.summary
+    assert "relative soil moisture 50% from measured calibration" in observation.summary
+    assert not observation.motion_authorized
+    assert not observation.charging_authorized
+    assert not observation.person_identified
+
+    payload["readings"]["soil"] = {"valid": False}
+    payload["seq"], payload["at_ms"] = 3, 6000
+    no_soil = decoder.accept(json.dumps(payload), now=11.0)
+    assert "relative soil moisture" not in no_soil.summary
+
+
+def test_room_station_soil_calibration_requires_a_real_pair_and_live_source():
+    robots = [RobotConfig(id="robot-01", name="Pip", token_env="A")]
+    port = "/dev/cu.usbmodemTEST"
+    setting = Settings(robots=robots, room_station_enabled=True,
+                       room_station_port=port,
+                       room_station_soil_dry_adc=3200,
+                       room_station_soil_wet_adc=1300)
+    assert (setting.room_station_soil_dry_adc,
+            setting.room_station_soil_wet_adc) == (3200, 1300)
+    with pytest.raises(ValueError, match="both measured"):
+        Settings(robots=robots, room_station_enabled=True,
+                 room_station_port=port, room_station_soil_dry_adc=3200)
+    with pytest.raises(ValueError, match="requires a real enabled"):
+        Settings(robots=robots, room_station_soil_dry_adc=3200,
+                 room_station_soil_wet_adc=1300)
+    with pytest.raises(ValueError, match="too close"):
+        Settings(robots=robots, room_station_enabled=True,
+                 room_station_port=port, room_station_soil_dry_adc=2000,
+                 room_station_soil_wet_adc=2050)
+    with pytest.raises(ValueError):
+        Settings(robots=robots, room_station_enabled=True,
+                 room_station_port=port, room_station_soil_dry_adc=True,
+                 room_station_soil_wet_adc=1300)
+
+
+@pytest.mark.parametrize("pixel,valid", [
+    (0.0, True), (80.0, True), (-0.25, False), (80.25, False),
+    (-40.0, False), (125.0, False),
+])
+def test_amg8833_high_gain_pixel_range_matches_panasonic(pixel, valid):
+    payload = frame()
+    payload["readings"]["amg8833"]["pixels_c"][0] = pixel
+    if valid:
+        assert accept(payload).readings["amg8833"]["pixels_c"][0] == pixel
+    else:
+        with pytest.raises(ValueError, match="out of range"):
+            accept(payload)
+
+
+def test_full_read_only_room_frame_has_provenance_not_actuator_authority():
+    evidence = accept(frame())
+    assert evidence.seq == 1
+    assert evidence.source == "local_usb_shared_station_observation_not_identity"
+    assert not evidence.motion_authorized
+    assert not evidence.charging_authorized
+    assert not evidence.person_identified
+    assert "Station CO2 630 ppm" in evidence.summary
+    assert "raw gas resistance" in evidence.summary
+    assert "radar detected an echo" in evidence.summary
+    assert "person" not in evidence.summary.lower()
+    assert "VOC ppm" not in evidence.summary
+    assert "soil" not in evidence.summary
+
+
+@pytest.mark.parametrize("change", [
+    lambda p: p.update(station="room-pod-02"),
+    lambda p: p.update(v=True),
+    lambda p: p.update(motor_authorized=True),
+    lambda p: p["readings"].update(unknown={"valid": True}),
+    lambda p: p["readings"]["scd40"].update(co2_ppm=True),
+    lambda p: p["readings"]["scd40"].update(co2_ppm=999999),
+    lambda p: p["readings"]["bme688"].update(gas_ohms=float("inf")),
+    lambda p: p["readings"]["amg8833"].update(pixels_c=[23.0] * 63),
+    lambda p: p["readings"]["ld2410c"].update(
+        presence=False, stationary=True
+    ),
+    lambda p: p["readings"]["soil"].update(raw_adc=777),
+    lambda p: p["readings"]["scd40"].update(sample_ms=1000 - 8501),
+])
+def test_forged_nonfinite_stale_or_unqualified_room_measurements_rejected(change):
+    p = frame(clock=10000)
+    change(p)
+    with pytest.raises(ValueError):
+        accept(p)
+
+
+def test_serial_protocol_rejects_duplicate_fields_and_nonfinite_json():
+    decoder = RoomStationDecoder()
+    with pytest.raises(ValueError, match="Duplicate"):
+        decoder.accept('{"v":1,"v":2}', now=1.0)
+    with pytest.raises(ValueError):
+        decoder.accept('{"v":NaN}', now=1.0)
+    with pytest.raises(ValueError, match="Oversized"):
+        decoder.accept(b"x" * 4097, now=1.0)
+    with pytest.raises(ValueError):
+        decoder.accept(b"\xff\xfe", now=1.0)
+
+
+def test_earlier_boot_packets_and_duplicate_clock_never_replay_on_same_port():
+    decoder = RoomStationDecoder()
+    assert accept(frame(41, 5000), decoder=decoder).seq == 41
+    with pytest.raises(ValueError, match="Replayed"):
+        accept(frame(41, 5000), decoder=decoder)
+    with pytest.raises(ValueError, match="Replayed"):
+        accept(frame(40, 5100), decoder=decoder)
+    with pytest.raises(ValueError, match="Replayed"):
+        accept(frame(42, 5000), decoder=decoder)
+    assert accept(frame(42, 6000), decoder=decoder).seq == 42
+    with pytest.raises(ValueError, match="Replayed"):
+        accept(frame(1, 1000), decoder=decoder)
+    # Only a real USB close plus reopen creates a new decoder epoch.
+    assert accept(frame(1, 1000), decoder=RoomStationDecoder()).seq == 1
+
+
+def test_uint32_clock_and_sequence_wrap_uses_real_forward_progress():
+    decoder = RoomStationDecoder()
+    accept(frame(0xffffffff, 0xffffff00), decoder=decoder)
+    assert accept(frame(0, 744), decoder=decoder).seq == 0
+    with pytest.raises(ValueError, match="Replayed"):
+        accept(frame(0xffffffff, 0xffffff00), decoder=decoder)
+
+
+def test_shared_room_is_one_short_lived_context_not_robot_memory_or_vision():
+    ids = [f"robot-0{i}" for i in range(1, 6)]
+    hub = CameraFrameHub(ids)
+    evidence = accept(frame(), now=12.0)
+    hub.remember_room(evidence)
+    for ident in ids:
+        timeline = hub.interaction_timeline(ident, now=13.0)
+        room = [item for item in timeline if item["channel"] == "room_station"]
+        assert len(room) == 1
+        assert room[0]["shared_not_robot_eyewitness"] is True
+        assert room[0]["identity_verified"] is False
+        assert room[0]["physical_action_verified"] is False
+        bundle = compose_brain_context([], [], timeline)
+        assert "shared room usb station" in bundle.interaction.lower()
+        assert "not my own sight" in bundle.interaction.lower()
+        assert "630 ppm" in bundle.interaction
+    assert all(not hub.tool_history[ident] for ident in ids)
+    assert all(not hub.event_history[ident] for ident in ids)
+    assert hub.interaction_timeline("robot-01", now=25.0) == []
+    # Older completion never overwrites a current room measurement.
+    hub.remember_room(replace(evidence, received_at=11.0, summary="stale"))
+    assert hub.shared_room == evidence
+    hub.close()
+    assert hub.shared_room is None
+
+
+def test_room_configuration_requires_explicit_local_port_and_context_consent():
+    robots = [RobotConfig(id="robot-01", name="Pip", token_env="A")]
+    with pytest.raises(ValueError, match="real explicit local USB"):
+        Settings(robots=robots, room_station_enabled=True)
+    with pytest.raises(ValueError, match="real explicit local USB"):
+        Settings(robots=robots, room_station_enabled=True,
+                 room_station_port="http://camera.invalid")
+    with pytest.raises(ValueError, match="needs explicit source"):
+        Settings(robots=robots, room_station_context_enabled=True)
+    valid = Settings(robots=robots, room_station_enabled=True,
+                     room_station_port="/dev/cu.usbmodemTEST",
+                     room_station_context_enabled=True)
+    assert valid.room_station_enabled
+
+
+@pytest.mark.parametrize("sensor,field", [
+    ("scd40", "co2_ppm"),
+    ("scd40", "temp_c"),
+    ("bme688", "pressure_pa"),
+    ("bme688", "gas_ohms"),
+    ("ld2410c", "moving_cm"),
+    ("soil", "raw_adc"),
+    ("amg8833", "pixels_c"),
+])
+def test_extreme_room_numeric_values_fail_closed_and_preserve_counter_epoch(
+    sensor, field
+):
+    """A hostile USB JSON integer must not overflow and reconnect the reader."""
+    huge = 10 ** 1000
+    decoder = RoomStationDecoder()
+    assert accept(frame(10, 1000), decoder=decoder).seq == 10
+    corrupted = frame(11, 2000)
+    if sensor == "soil":
+        corrupted["readings"]["soil"] = {
+            "valid": True, "sample_ms": 2000, "raw_adc": huge,
+        }
+    elif sensor == "amg8833":
+        corrupted["readings"]["amg8833"]["pixels_c"][0] = huge
+    else:
+        corrupted["readings"][sensor][field] = huge
+    with pytest.raises(ValueError):
+        accept(corrupted, decoder=decoder)
+    # Invalid frames do not advance sequence/time fences. A subsequent
+    # legitimate sample with the same next sequence can recover in place.
+    assert accept(frame(11, 2000), decoder=decoder).seq == 11
+
+
+@pytest.mark.parametrize("clock", [10 ** 1000, -(10 ** 1000)])
+def test_unrepresentable_room_receive_clock_is_a_value_error(clock):
+    decoder = RoomStationDecoder()
+    with pytest.raises(ValueError, match="Finite Mac receive clock"):
+        accept(frame(), decoder=decoder, now=clock)
+    assert accept(frame(), decoder=decoder, now=1.0).seq == 1
+
+
+def test_cancelled_room_reader_joins_thread_before_task_exits_even_if_cancelled_twice():
+    """A new USB epoch must not overlap the old serial worker after cancellation."""
+    async def scenario():
+        entered = threading.Event()
+        release = threading.Event()
+        exited = threading.Event()
+        feed = RoomSerialFeed("/dev/cu.test", lambda observation: None)
+
+        def blocked_reader(running):
+            entered.set()
+            try:
+                release.wait(timeout=3)
+            finally:
+                exited.set()
+
+        feed._read_port = blocked_reader
+        task = asyncio.create_task(feed.run(asyncio.Event()))
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        task.cancel()  # repeated cancellation must not detach the thread
+        await asyncio.sleep(0.02)
+        assert not task.done()
+        assert not exited.is_set()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        assert exited.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatch):
+    """A failed consumer must not turn replayed USB frames into new evidence."""
+    import sys
+    from types import SimpleNamespace
+
+    opened = []
+    packets = [frame(1, 1000), frame(1, 1000), frame(2, 2000)]
+    received = []
+    feed = RoomSerialFeed("/dev/cu.test", lambda observation: received.append(observation.seq))
+
+    class FakePort:
+        def __init__(self, *args, **kwargs):
+            opened.append(self)
+            self.reads = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            self.reads += 1
+            return json.dumps(packets[self.reads - 1]).encode() if self.reads <= 3 else b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=FakePort))
+    attempts = []
+
+    def callback(observation):
+        attempts.append(observation.seq)
+        if len(attempts) == 1:
+            raise RuntimeError("application consumer failed")
+        received.append(observation.seq)
+
+    feed.on_observation = callback
+    # The consumer remains live while the final packet is delivered; a real
+    # cancellation between readline and callback must still suppress delivery.
+    feed._read_port(lambda: not opened or opened[0].reads < 4)
+    assert len(opened) == 1
+    assert attempts == [1, 2]
+    assert received == [2]
+    assert feed.rejected == 1  # replayed frame only
+    assert feed.callback_failures == 1  # independent consumer failure
+    assert feed.received == 1  # only successfully delivered observations
+    assert "callback failed" in feed.last_error
+
+
+def test_room_callback_failure_is_not_erased_by_clean_reader_shutdown(monkeypatch):
+    """A finished worker must not clear a real consumer failure diagnostic."""
+    import sys
+    from types import SimpleNamespace
+
+    class Port:
+        def __init__(self, *args, **kwargs):
+            self.reads = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            self.reads += 1
+            if self.reads == 1:
+                return json.dumps(frame()).encode()
+            threading.Event().wait(0.001)
+            return b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+
+    async def scenario():
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def broken_consumer(observation):
+            loop.call_soon_threadsafe(stop.set)
+            raise RuntimeError("consumer rejected evidence")
+
+        feed = RoomSerialFeed("/dev/cu.test", broken_consumer)
+        await asyncio.wait_for(feed.run(stop), timeout=2)
+        assert feed.rejected == 0
+        assert feed.callback_failures == 1
+        assert feed.received == 0
+        assert "Room observation callback failed: RuntimeError" in feed.last_error
+
+        # Only a genuinely reopened port may reset the previous error.
+        feed._read_port(lambda: False)
+        assert feed.last_error is None
+
+    asyncio.run(scenario())

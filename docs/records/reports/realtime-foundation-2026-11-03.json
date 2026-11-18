@@ -1,0 +1,70 @@
+{
+  "checked_at": "2026-11-03",
+  "scope": "Keep purchased Sense, source reuse audit, offline turn/frame/proactivity state and optional head adapter host checks",
+  "active_head": "XIAO ESP32S3 Sense; user-reported order, receipt/quantity/arrival/revision unconfirmed",
+  "checks": [
+    {
+      "command": "uv run pytest -q",
+      "exit_code": 0,
+      "passed": 95,
+      "new_live_turn_tests_included": 34,
+      "warning": "Existing FastAPI/Starlette httpx deprecation; no test failures"
+    },
+    {
+      "command": "env CPLUS_INCLUDE_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1 uv run pytest firmware/head/tests -q",
+      "exit_code": 0,
+      "passed": 20,
+      "subtests_passed": 4
+    },
+    {
+      "command": "uv run ruff check laptop/src/desk_robot/live_turns.py tests/test_live_turns.py firmware/head/install_overlay.py firmware/head/private_config.py firmware/head/tests/test_waveshare.py",
+      "exit_code": 0
+    },
+    {
+      "command": "uv run ruff format --check laptop/src/desk_robot/live_turns.py tests/test_live_turns.py firmware/head/tests/test_waveshare.py",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n scripts/build_head.sh",
+      "exit_code": 0
+    },
+    {
+      "check": "RIO pinned revision plus eight inspected-file SHA256 hashes match hardware/reuse-sources.json; unchanged checkout",
+      "passed": true
+    },
+    {
+      "check": "changed Markdown relative links",
+      "links_checked": 139,
+      "missing": []
+    },
+    {
+      "command": "python3 scripts/check_budget.py",
+      "exit_code": 0,
+      "planning_total_usd": 40.33,
+      "purchase_ready": false
+    },
+    {
+      "command": "python3 scripts/check_budget.py --shipping 0 --tax 0 --require-ready",
+      "exit_code": 1,
+      "expected": true,
+      "meaning": "Unresolved quotes/inventory/preflight still reject readiness; zero charges are a test input, not a delivery quote"
+    }
+  ],
+  "implemented": [
+    "Bounded local PCM queue with explicit flush directives and stale-turn rejection",
+    "Latest JPEG slot with connection identity, pacing, timestamp/freshness checks",
+    "Opt-in idle observations with quiet/busy/cooldown/reconnect cancellation",
+    "Reviewed RIO source pin/license/hash manifest; no RIO firmware incorporated"
+  ],
+  "not_implemented_or_qualified": [
+    "Sense software playback-reference/AEC port and final acoustic calibration",
+    "Connected Live audio/video provider or device media transport/flush acknowledgements",
+    "Pet scheduler, fleet speech arbitration integration and physical camera throughput",
+    "Real ToF/mux acquisition, calibration and sensor mounts; stepper target cannot arm",
+    "Physical case/mechanism fit, loaded power, edge stopping or pickup trials",
+    "Optional Waveshare complete firmware build and all physical acceptance"
+  ],
+  "no_cloud_api_calls_or_charges": true,
+  "no_hardware_flashed": true,
+  "physical_acceptance": false
+}

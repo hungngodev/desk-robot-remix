@@ -1,0 +1,15 @@
+{
+  "checked_at": "2026-10-28",
+  "esp_idf": {
+    "url": "https://github.com/espressif/esp-idf.git",
+    "branch": "release/v6.1",
+    "commit": "9a97f6c54ec638111ce55cd36581b3c192f15207"
+  },
+  "body": {
+    "platformio": "6.1.18",
+    "espressif32": "6.9.0",
+    "arduino_esp32": "2.0.17"
+  },
+  "python": "3.12.2",
+  "head_verification_wake_word": "disabled"
+}

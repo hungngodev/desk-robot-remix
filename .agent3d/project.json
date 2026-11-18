@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "handoff_requested": false,
+  "process": "fdm_robot_remix_concept",
+  "theme": "Five identical active desk pets: rounded source head, tracks, one lifting claw, removable costumes",
+  "envelope_mm": null,
+  "switch": null,
+  "printer": null,
+  "resin": null,
+  "slicer": null,
+  "layer_height_mm": null,
+  "functional_objects": ["SOURCE_Stepper_SMARS_Chassis", "SOURCE_Sparky_v010_shell"],
+  "print_objects": [],
+  "stage": "primary_form_concept",
+  "source_protection": "docs/cad/originals is unchanged; no manufacturing modifications or print exports",
+  "brief": "docs/product-definition.md",
+  "checkpoint": "docs/cad/concepts/2026-11-03-rounded/layout-study.blend",
+  "evidence": "docs/cad/concepts/2026-11-03-rounded/evidence.json",
+  "known_dimensions_mm": {"sparky_v010_shell": [55.9658, 51.9658, 53.9829]},
+  "unknowns": ["Bank dimensions, mass and output", "MG90S/linkage interface", "Final sensor/camera view and stopping envelope", "Printer and measured fit tolerances"],
+  "physical_fit_status": "not_verified"
+}

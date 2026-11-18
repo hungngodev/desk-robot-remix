@@ -1,0 +1,53 @@
+{
+  "mode": "simulation",
+  "physical_acceptance_pass": false,
+  "pickup": {
+    "id": "4ded5afe838d4af5a068ae5bfde47260",
+    "robot_id": "robot-01",
+    "kind": "pickup",
+    "state": "succeeded",
+    "result": {
+      "visually_verified": true,
+      "criterion": "two fresh raised-jaw frames, upward displacement, outside floor region",
+      "physical_acceptance_pass": false,
+      "target": "key",
+      "note": "Visual evidence is experimental, not force sensing or a physical acceptance trial"
+    },
+    "error": null,
+    "events": [
+      "observe 0: error_mm=(30.5,20.5)",
+      "observe 1: error_mm=(20.5,20.5)",
+      "observe 2: error_mm=(10.5,20.5)",
+      "observe 3: error_mm=(0.5,20.5)",
+      "observe 4: error_mm=(0.5,10.5)",
+      "observe 5: error_mm=(0.5,0.5)",
+      "stop acknowledged; servo positions are commanded, not measured"
+    ]
+  },
+  "conversation": [
+    {
+      "robot_id": "robot-01",
+      "text": "I see a candy on the desk."
+    },
+    {
+      "robot_id": "robot-02",
+      "text": "Let us take turns exploring."
+    },
+    {
+      "robot_id": "robot-01",
+      "text": "Let us take turns exploring."
+    },
+    {
+      "robot_id": "robot-02",
+      "text": "Let us take turns exploring."
+    },
+    {
+      "robot_id": "robot-01",
+      "text": "Let us take turns exploring."
+    },
+    {
+      "robot_id": "robot-02",
+      "text": "Let us take turns exploring."
+    }
+  ]
+}

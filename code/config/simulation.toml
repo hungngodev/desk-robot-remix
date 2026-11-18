@@ -1,0 +1,16 @@
+mode = "simulation"
+max_job_seconds = 20
+
+[[robots]]
+id = "robot-01"
+name = "Pip"
+token_env = "DESK_ROBOT_HEAD_01_TOKEN"
+motion_enabled = true
+calibration = "calibration.simulation.json"
+
+[[robots]]
+id = "robot-02"
+name = "Dot"
+token_env = "DESK_ROBOT_HEAD_02_TOKEN"
+motion_enabled = true
+calibration = "calibration.simulation.json"

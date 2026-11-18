@@ -1,0 +1,20 @@
+{
+  "mode": "hardware",
+  "python_env": true,
+  "ollama_installed": true,
+  "ffmpeg_installed": false,
+  "physical_test_status": "not run",
+  "credentials_present": true,
+  "robots": [
+    {
+      "id": "robot-01",
+      "motion_enabled": false,
+      "calibration_file_present": true
+    },
+    {
+      "id": "robot-02",
+      "motion_enabled": false,
+      "calibration_file_present": true
+    }
+  ]
+}

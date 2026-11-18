@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-04",
+  "scope": "Source traceability, touch/IMU interaction specification, revised unpriced BOM and budget handling",
+  "python_suite": {
+    "command": ".venv/bin/pytest -q",
+    "passed": 96,
+    "failed": 0,
+    "warnings": "One existing Starlette TestClient deprecation warning"
+  },
+  "focused_budget_tests": {
+    "command": ".venv/bin/pytest -q tests/test_records_budget.py",
+    "passed": 4,
+    "failed": 0,
+    "red_green": "Missing-price regression failed before the fix and passed afterward"
+  },
+  "lint": {
+    "command": ".venv/bin/ruff check scripts/check_budget.py tests/test_records_budget.py",
+    "passed": true
+  },
+  "documentation": {
+    "files_checked": 10,
+    "local_links_checked": 100,
+    "missing_links": [],
+    "quantity_rows_checked": 20,
+    "remote_links": "Existing primary evidence and explicitly labeled leads; not every link revalidated online"
+  },
+  "budget_gate": {
+    "command": "python3 scripts/check_budget.py --shipping 0 --tax 0 --require-ready",
+    "expected_exit": 1,
+    "actual_exit": 1,
+    "purchase_ready": false,
+    "whole_robot_total": null,
+    "shipping_tax_zero": "Gate demonstration only, not a quote"
+  },
+  "project_memory": {
+    "dataset": "desk-robot-remix",
+    "permanent_store_reported": "completed",
+    "dataset_item_count_verified": 1,
+    "expected_decision_record_returned_by_recall": true,
+    "unrelated_recall_hit": "Ignored; not used as project evidence"
+  },
+  "runtime_sensor_firmware_changed": false,
+  "geometry_changed": false,
+  "hardware_flashed": false,
+  "physical_acceptance": false,
+  "remaining": [
+    "Identify newly mentioned owned parts",
+    "Exact affordable IMU/touch/power modules and delivered quote",
+    "Adapter/behavior implementation and builds",
+    "Measured mechanical fit, acoustic interruption, loaded power and physical safety/pickup trials"
+  ]
+}

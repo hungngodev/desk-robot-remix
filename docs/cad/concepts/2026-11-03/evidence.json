@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-03",
+  "delivery": "concept_layout_only",
+  "engine": "Blender Workbench studio light; material colors; cavity/shadows",
+  "unit_system": "metres internally; source 3MF mm; STL assumed mm, not yet physically checked",
+  "source_meshes": [
+    {
+      "path": "docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl",
+      "sha256": "5f79f4a3f67ba21f0d23e96487369799421d7879d9b8569315a5eb4fded2ed78"
+    },
+    {
+      "path": "docs/cad/originals/eva-head/EVA-Robot.3mf",
+      "sha256": "80af1ce2c64e283563d104c378ccc31987f48df6387f24066e4bbc2c5137594c"
+    }
+  ],
+  "chassis_source_size": [
+    58.001522064208984,
+    86.19418334960938,
+    41.58845329284668
+  ],
+  "head_oriented_size_mm": {
+    "width": 48,
+    "depth": 74,
+    "height": 48.8
+  },
+  "head_front_source_plane": "x=-9, rectangle y=-17.5..17.5 z=33..52.6; camera near z=22",
+  "illustrative_objects": "all tracks, lift/claw, mounts, lenses, OLED insert, sensors and target",
+  "power_bank": "not modeled: dimensions, mass, capacity/current unknown",
+  "physical_fit_verified": false,
+  "print_exports": [],
+  "remaining": [
+    "mechanical assembly registration",
+    "MG90S fit and flat-key reach",
+    "sensor visibility and stopping envelope",
+    "bank dimensions/mass/load",
+    "slicer/fit coupon",
+    "actual assembly and physical tests"
+  ],
+  "previews": [
+    {
+      "path": "docs/cad/concepts/2026-11-03/proposed-robot.png",
+      "sha256": "24fe2a6f6d2de297160a30bec1fd606c2f2f29412409931fd442a2088ea9697c"
+    },
+    {
+      "path": "docs/cad/concepts/2026-11-03/side-layout.png",
+      "sha256": "7a2251e2a5cf1bf3c51be5adaf4431f3a3e7b1148a97158fa6a5ec228cea62bb"
+    },
+    {
+      "path": "docs/cad/concepts/2026-11-03/front-layout.png",
+      "sha256": "03dbd05be75f4e4c74b4854adbf4e617c7c87d3b4806954e7fa272067c4ec510"
+    },
+    {
+      "path": "docs/cad/concepts/2026-11-03/top-layout.png",
+      "sha256": "f266dc67141147ca70a0107c194545ba61f23e0f914de215d4fef7603df89c96"
+    }
+  ]
+}

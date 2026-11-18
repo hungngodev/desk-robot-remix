@@ -1,0 +1,146 @@
+"""Read actual jaw FSR via the Mac API and propose conservative raw ADC limits.
+
+This never drives the jaw or asserts a measured force in newtons. Operator
+performs a small safe manual three-phase measurement with no power motion.
+The generated calibration candidate is always marked measured=false until
+camera, safe servo linkage and force limits are independently accepted.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import math
+import os
+import statistics
+from pathlib import Path
+
+import httpx
+from desk_robot.grasp_feedback import force_observation
+
+
+def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
+    """Use real independent ADS1115 sample sequence numbers, never duplicate HTTP frames."""
+    if set(phases) != {"free", "contact", "upper"}:
+        raise ValueError("Expected free, light-contact and operator-approved upper samples")
+    history = []
+    medians = {}
+    spans = {}
+    for name in ("free", "contact", "upper"):
+        rows = phases[name]
+        if not isinstance(rows, list) or len(rows) < 5:
+            raise ValueError(f"Need at least five distinct {name} samples")
+        if any(
+            not isinstance(row, tuple) or len(row) != 2
+            or type(row[0]) is not int or type(row[1]) is not int
+            or not 1 <= row[0] <= 0xffffffff
+            or not -32768 <= row[1] <= 32767 for row in rows
+        ):
+            raise ValueError(f"Untrusted {name} ADC records")
+        history.extend(seq for _adc, seq in rows)
+        values = [value for value, _seq in rows]
+        medians[name] = statistics.median(values)
+        spans[name] = max(values) - min(values)
+    if history != sorted(set(history)):
+        raise ValueError("FSR readings must come from strictly increasing actual conversions")
+    base, touch, upper = (medians[name] for name in ("free", "contact", "upper"))
+    sign = 1 if touch > base else -1
+    light = (touch - base) * sign
+    heavy = (upper - base) * sign
+    noise = max(spans.values())
+    if (not all(math.isfinite(x) for x in (light, heavy, noise))
+            or light < max(100, 4 * noise)
+            or heavy < light + max(100, 2 * noise)):
+        raise ValueError("Unstable FSR or insufficient separation from unloaded baseline")
+    threshold = int(max(50, min(light * 0.55, 20000)))
+    # Place the recommended stop below the observed upper hand-applied sample,
+    # but never call it a calibrated mechanical force safety ceiling.
+    ceiling = int(min(30000, heavy * 0.80))
+    if ceiling <= threshold + max(50, noise):
+        raise ValueError("Contact threshold and operator upper level overlap")
+    return {
+        "grip_force_sign": sign,
+        "grip_force_delta_raw": threshold,
+        "grip_force_limit_raw": ceiling,
+        "grip_step_deg": 4,
+        "unloaded_median_raw": base,
+        "light_contact_delta_raw": light,
+        "upper_applied_delta_raw": heavy,
+        "adc_noise_span_raw": noise,
+        "newtons_measured": False,
+        "physical_force_safety_qualified": False,
+        "manual_review_required": True,
+    }
+
+
+async def capture(
+    client: httpx.AsyncClient, *, base_url: str, robot: str,
+    token: str, count: int = 8, interval: float = 0.18,
+) -> list[tuple[int, int]]:
+    if not 5 <= count <= 40 or not 0.12 <= interval <= 2:
+        raise ValueError("Invalid real ADC sampling cadence")
+    samples = []
+    seen = None
+    for _ in range(count * 5):
+        response = await client.get(
+            f"{base_url.rstrip('/')}/v1/robots/{robot}/aux",
+            headers={"Authorization": f"Bearer {token}"}, timeout=3.0,
+        )
+        response.raise_for_status()
+        adc, seq = force_observation(response.json())
+        if seen is None or seq > seen:
+            samples.append((adc, seq))
+            seen = seq
+        if len(samples) == count:
+            return samples
+        await asyncio.sleep(interval)
+    raise RuntimeError("Not enough independent fresh ADS1115 jaw conversions")
+
+
+async def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--url", default="http://127.0.0.1:8008")
+    parser.add_argument("--robot", default="robot-01")
+    parser.add_argument("--token-env", default="DESK_ROBOT_OPERATOR_TOKEN")
+    parser.add_argument("--calibration", type=Path, required=True)
+    parser.add_argument("--samples", type=int, default=8)
+    args = parser.parse_args()
+    token = os.getenv(args.token_env, "")
+    if len(token) < 24:
+        raise ValueError("Private operator token required")
+    if not args.calibration.is_file():
+        raise ValueError("Existing measured camera calibration JSON required")
+    source = json.loads(args.calibration.read_text(encoding="utf-8"))
+    if not isinstance(source, dict):
+        raise ValueError("Calibration must be JSON object")
+    readings = {}
+    async with httpx.AsyncClient() as client:
+        for key, step in (
+            ("free", "Release the jaw sensor: no object and no applied pressure"),
+            ("contact", "Apply a gentle representative object contact by hand"),
+            ("upper", "Apply a stronger but non-damaging pressure by hand"),
+        ):
+            input(step + ". Press Enter to record samples. ")
+            readings[key] = await capture(
+                client, base_url=args.url, robot=args.robot,
+                token=token, count=args.samples,
+            )
+    proposed = propose_force_limits(readings)
+    # Never silently enable autonomous grasping based on raw ADC alone.
+    source.update({
+        key: proposed[key] for key in (
+            "grip_force_sign", "grip_force_delta_raw",
+            "grip_force_limit_raw", "grip_step_deg",
+        )
+    })
+    source["measured"] = False
+    target = args.calibration.with_name(args.calibration.stem + ".jaw_candidate.json")
+    with target.open("x", encoding="utf-8") as output:
+        json.dump(source, output, indent=2)
+        output.write("\n")
+    print(json.dumps(proposed, indent=2))
+    print(f"Candidate written to {target}; physical approval still required")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

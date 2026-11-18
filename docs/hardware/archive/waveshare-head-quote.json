@@ -1,0 +1,56 @@
+{
+  "checked_local_date": "2026-11-03",
+  "checked_utc": "2026-11-04T00:03:34Z",
+  "product_url": "https://www.waveshare.com/esp32-s3-cam-ov5640.htm?sku=33699",
+  "selected_sku": "33699",
+  "selected_variant": "With OV5640 camera",
+  "price_usd_quantity_one": 19.99,
+  "package_contents": [
+    "ESP32-S3-CAM baseboard x1",
+    "OV5640 camera x1",
+    "1217 8Ω 2W speaker x1"
+  ],
+  "pcb_mm": [
+    37,
+    37
+  ],
+  "hole_pitch_mm": 32.6,
+  "dimension_source": "https://www.waveshare.com/img/devkit/ESP32-S3-CAM-OVxxxx/ESP32-S3-CAM-OVxxxx-details-size.jpg",
+  "schematic": "https://files.waveshare.com/wiki/ESP32-S3-CAM-OVxxxx/ESP32-S3-CAM-OVxxxx_Rev1.1.pdf",
+  "specification_source": "https://docs.waveshare.com/ESP32-S3-CAM-OVxxxx",
+  "verification": "Configured browser selected variant; visible product price/package read; official dimension image visually opened. No cart or checkout action.",
+  "amazon_candidate": "https://www.amazon.com/dp/B0GS1HT4LH",
+  "amazon_price_usd": null,
+  "amazon_note": "Same model link identified, no usable current price/seller quote verified",
+  "delivered_quote_complete": false,
+  "connectors": "Explicit line items added; verify actual orientation/continuity and fit. Not a delivered cart.",
+  "sense_previous_bom_sha256": "76a8e953b5da4337e0006247964aabed6b1242da58e33ed8f6ed9247b73cea54",
+  "interconnect_items": [
+    {
+      "item": "UART SH1.0 four-pin to 2.54 mm cable, Adafruit 4209",
+      "quantity": 1,
+      "unit_usd": 0.95,
+      "price_status": "verified",
+      "url": "https://www.digikey.com/en/products/detail/adafruit-industries-llc/4209/10230003",
+      "fit": "150 mm cable; continuity-check Waveshare UART connector pin1 RX44 / pin2 TX43 / pin3 3V3 / pin4 GND. Connect RX/TX/GND only; insulate 3V3. Qwiic colors do not define this UART pinout."
+    },
+    {
+      "item": "18-pin 0.5 mm FFC, 76 mm same-side contacts, GCT 05-18-A-0076-A-4-06-4-T",
+      "quantity": 1,
+      "unit_usd": 1.24,
+      "price_status": "verified",
+      "url": "https://www.digikey.com/en/products/detail/gct/05-18-A-0076-A-4-06-4-T/21266729",
+      "fit": "Candidate for LCD connector to OLED breakout. Verify mating contacts, cable orientation, numbered-pin continuity and clearance before power."
+    },
+    {
+      "item": "Assembled 18-pin 0.5 mm FPC/FFC to 2.54 mm breakout, MKTechnic AdB-FPC-DM-18P",
+      "quantity": 1,
+      "unit_usd": 0.44,
+      "price_status": "verified",
+      "url": "https://mktechnic.com/product/fpc-pcb-breakout-board-0-5-18p-ffc-test-adapter/",
+      "fit": "26 x 24 mm extra PCB, not fitted. Map actual board-side LCD pins1=3V3,3=GND,5=GPIO1(SDA),6=GPIO2(SCL), verify adapter numbering/continuity. No absent SPI display initialized."
+    }
+  ],
+  "interconnect_total_usd": 2.63,
+  "planning_total_before_charges_usd": 41.84
+}

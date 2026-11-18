@@ -1,0 +1,9 @@
+{
+  "verified_at": "2026-10-28",
+  "repositories": [
+    {"name":"VerdureBuddyRover","url":"https://github.com/maker-community/VerdureBuddyRover.git","ref":"main","commit":"cf1c772dcc854ae5c19699eebb3970e1c3f64f34","path":"upstream/VerdureBuddyRover","license":"MIT"},
+    {"name":"xiaozhi-esp32","url":"https://github.com/78/xiaozhi-esp32.git","ref":"main","commit":"c435f99a88066029ec2dbd2d758c8cc9d051565b","path":"upstream/xiaozhi-esp32","license":"MIT"},
+    {"name":"xiaozhi-esp32-server","url":"https://github.com/xinnan-tech/xiaozhi-esp32-server.git","ref":"main","commit":"d9c2e8c5d92627b670dec57d72a07a4226a410a3","path":"upstream/xiaozhi-esp32-server","license":"MIT"},
+    {"name":"verdure-xiaozhi","url":"https://github.com/maker-community/xiaozhi-esp32.git","ref":"verdure-buddy-rover","commit":"caf40bbba4200d9605886fbef4a20ee7ab05b7ca","path":"upstream/verdure-xiaozhi","license":"MIT"}
+  ]
+}

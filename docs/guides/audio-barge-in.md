@@ -1,0 +1,297 @@
+# Required first-build voice interruption
+
+Updated 2026-11-03: **voice interruption must work in the first build**. The user
+has now bought at least one **XIAO ESP32S3 Sense**, with **$18.87 displayed** in the
+listing. Exact order quantity, delivered revision and arrival remain unconfirmed.
+Keep that purchased board as the active head; no replacement purchase is required
+at this stage. A button remains useful for setup/manual stop, but cannot satisfy
+this gate.
+
+## Required experience and proposed acceptance
+
+After a conversation starts, a person can speak naturally while the robot is
+playing its own answer. It cancels the obsolete answer, captures the new utterance
+and responds to that request. It must not merely mute the microphone, wait for a
+button, wait for the whole TTS answer or require a special stop/wake phrase for
+each interruption. Model-generated voice must not continually interrupt itself.
+
+Proposed robot-one gate, not an achieved measurement:
+
+1. Record firmware/config, mic/speaker placement, operating volume, room/background
+   noise and a 50 cm speaking distance. Use low/middle/maximum **intended** volume,
+   not arbitrary amplifier maximum. Include interruptions near the beginning and
+   later in an answer, and during more than one consecutive conversation turn.
+2. At least 19 of 20 ordinary-speech trials stop audible obsolete TTS within 500 ms
+   of human-speech onset. At least 18 of 20 yield the correct new intent, with an
+   intelligible transcript that includes the start of the person's utterance.
+   A stop without capturing the request fails the conversational part.
+3. Ten minutes of robot-only speech has no false self-interruption. Test a second
+   person, normal pauses and nearby speech/noise; document the allowed conditions.
+4. Repeat with camera capture and Wi-Fi activity, then motors/servos on a stand.
+   Log capture/reference alignment, clipping, buffer losses, memory and timings.
+5. Aborted audio cannot resume from old queues after a reconnect or new turn.
+   Stop/quiet/fault cancel pending spontaneous speech as well as future TTS chunks.
+6. Repeat the acoustic gate on every duplicated robot. Hats/costumes must preserve
+   mic/speaker paths. For five-peer sessions, grant one conversational floor at a
+   time; the current speaker accepts human interruption and the Mac cancels the
+   obsolete group turn. Other robots receive peer events digitally.
+
+These thresholds make the requirement reviewable; no physical trial exists yet.
+
+### Executable audio trial record contract
+
+`code/scripts/check_barge_in_trials.py` now rejects incomplete trial
+coverage instead of treating an arbitrary set of twenty identical
+interruptions as acceptance evidence. The input is JSON Lines containing
+exactly twenty `kind: human` records and one `kind: robot_only` record.
+
+Each human row records a unique `id`, `volume` (`low`, `medium`,
+`high`), `interruption_position` (`early` or `late`),
+`load_profile` (`voice_only`, `camera_wifi`, or
+`motors_servos_stand`), `speaker_id`, a positive
+`conversation_turn`, `speaker_distance_cm` within 45 to 55,
+`room_noise_db_a`, `firmware_commit`, `audio_config_id`, and
+`mic_speaker_placement_id`. The twenty rows must actually cover both
+positions, all three load profiles and intended speaker volumes, two
+human speakers and adjacent conversation turn numbers.
+
+Each human row also supplies measured monotonic timestamps, in order:
+`human_onset_ms`, `vad_arrival_ms`, `abort_dispatch_ms`,
+`head_queue_clear_ms`, `i2s_stop_ms`, `audible_stop_ms`. Record
+`new_utterance_captured`, `new_intent_correct`,
+`utterance_beginning_intelligible`, and
+`obsolete_audio_never_resumed` as booleans. A claim of correct new intent
+requires actual retained speech at its start. The robot-only row records
+`duration_seconds` of at least 600 and nonnegative integer
+`self_interruptions`. The proposed acoustic gate needs 19/20 audible
+stops within 500 ms, 18/20 correctly retained and understood intents,
+zero self-interruptions and no obsolete audio ever resuming.
+
+The checker validates a *declared measurement record*; it does not
+independently measure acoustic waveforms, authenticate a second speaker,
+or prove the speaker, camera and motor were physically active. Its report
+always states that operator evidence is not independently attested.
+The final acceptance record must preserve waveform captures, device
+logs and real bench evidence outside the repository. A synthetic unit
+test passing this checker is never a physical A2 pass.
+
+## Active hardware and software reuse
+
+Use the purchased **XIAO ESP32S3 Sense**, its onboard PDM microphone and included
+camera, and a suitable speaker. The baseline drives a **MAX98357A** over I²S.
+The photographed HiLetgo PAM8403 offers an analog path if a suitable DAC is
+available. See the [parts list](../hardware/parts.md). Check the delivered
+board and sensor before assigning a firmware binary. The rechargeable 1S power
+kit and regulated 5 V supply are pending selection. Run the acoustic test with
+the selected amplifier, speaker and enclosure.
+
+The closest verified source is
+[RIO at revision `b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a`](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant/tree/b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a).
+It uses this Sense/PDM + MAX98357A + SSD1306 combination and has an explicit
+[MIT license](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant/blob/b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a/LICENSE).
+Reuse its implementation as a porting reference, preserving attribution; the
+repository is not evidence that our acoustics or complete robot have passed.
+
+- Its [AEC implementation](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant/blob/b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a/aec.cpp)
+  calls Espressif `aec_process` with mic and delayed playback-reference samples.
+  It includes stateful 24 kHz-to-16 kHz reference conversion, noise suppression,
+  VAD and a residual-echo gate. This is actual software AEC, not only a config flag.
+- Its [configuration](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant/blob/b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a/config.h)
+  enables full duplex, but the 90 ms reference delay is an initial value to
+  calibrate. Use its AEC bring-up/delay-sweep approach on the assembled head.
+- **Echo-gate fallback is a failure for our requirement.** When cancellation is
+  poor, closing the mic gate during playback may prevent self-triggering while
+  also removing the person's interruption. It cannot count as ordinary-speech
+  barge-in, even if a quiet half-duplex demonstration sounds good.
+- Review shared reference-ring ownership and synchronization before transplanting:
+  cross-task plain state and clearing a ring while another task reads it need
+  explicit handling. Verify alignment, drift, reference reset and double-talk;
+  do not copy timing assumptions unchanged.
+- RIO's [Live handler](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant/blob/b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a/gemini_live.cpp)
+  handles `serverContent.interrupted` by requesting a playback flush. Test audible
+  cancellation and retention of the new utterance through the complete chain.
+- Check GPIO ownership against our head/body UART and debug console. In
+  particular, RIO uses GPIO44 for amplifier shutdown; its pin map is not a drop-in
+  replacement for our wiring. Never ground a bridge-tied speaker output.
+
+RIO connects directly to Gemini Live and needs a cloud API credential. It does
+not provide our WROOM motion guard, cliff sensing, gripper or five-robot scheduler.
+Those remain separate local responsibilities. No API request, flash or acoustic
+test was performed during this source review.
+
+## Why the current Xiaozhi Sense profile is not already sufficient
+
+The [Sense port design](sense-aec-port.md) identifies an existing ESP-IDF AFE
+input for real mic/reference pairs, preserving the purchased board and pin map.
+RIO's reference/calibration ideas can be reused without importing a second full
+processing chain. The actual paired-sample adapter remains to implement.
+
+Pinned Xiaozhi revision`c435f99a88066029ec2dbd2d758c8cc9d051565b`:
+
+- `AudioCodec` defaults`input_reference_=false`; current Sense uses
+  `NoAudioCodecSimplexPdm` with16k capture/24k playback and no reference.
+- PDM RX and standard-I²S TX can coexist. `duplex_=false` describes the driver's
+  independent-channel arrangement; it is **not** proof that simultaneous input
+  and output are impossible. The missing piece is qualified reference/AEC/control.
+- [AFE architecture](https://github.com/78/xiaozhi-esp32/blob/c435f99a88066029ec2dbd2d758c8cc9d051565b/main/audio/README.md)
+  derives`MR` from mic/reference counts and warns that software reference timing
+  and concurrency need validation. Merely setting the reference flag invents
+  data; the samples must actually exist and match playback.
+
+A Sense software-reference port is technically possible and adds no replacement
+board cost. RIO is the closest hardware-matched reference found. Existing Box Lite
+code is another unqualified pattern, with shared buffer state, equal-rate
+assumptions and DMA timing concerns. A robust port needs bounded thread-safe
+queues, actual post-resampling/post-volume playback samples, alignment/drift
+handling, epoch/reset behavior and double-talk tests. Neither source is a
+demonstrated drop-in for our firmware and assembled head.
+
+Mac-side SpeexDSP/WebRTC adaptive AEC is another integration route, not currently
+installed or implemented. It requires timestamped real PCM references, delay and
+clock-drift handling. It is not achieved by changing a VAD threshold.
+
+## The complete interruption chain still needs testing
+
+AEC cleans capture; it does not by itself cancel the old answer. Required path:
+
+```text
+mic + actual speaker reference -> AFE/AEC -> real-time uplink -> VAD
+ -> cancel obsolete turn/TTS -> stop/flush local playback
+ -> retain new human utterance -> ASR/LLM -> fresh response
+```
+
+The pinned Python server`d9c2e8c5d92627b670dec57d72a07a4226a410a3` has VAD/TTS
+abort handling in`core/handle/receiveAudioHandle.py`. Its experimental spectral
+echo suppression in`core/connection.py` is only invoked for timestamped MQTT-gateway
+audio, **not the current ordinary direct-WebSocket path**. `features.aec` sets a
+flag; it does not create a clean reference or enable that suppression for every
+transport. The initial just-woken suppression window also needs early-interruption
+tests. The endpoint/UI/config and output queue behavior must work together.
+
+Selecting the pinned server's `GeminiLLM` provider does not enable Gemini Live:
+its `core/providers/llm/gemini/gemini.py` uses the traditional text-generation API.
+A Live transport is a separate integration choice, not a YAML-only audio upgrade.
+
+## Camera frames and proactive conversation
+
+RIO's camera is **tool-requested still capture, not video streaming**. It powers
+the sensor down between captures, so its existence does not prove continuous
+vision or simultaneous camera/audio performance.
+
+For the Mac pipeline, reuse Pipecat's
+[Gemini Live video example at `c87446099f88560b861ac0e1c13cce331e3a5770`](https://github.com/pipecat-ai/pipecat/blob/c87446099f88560b861ac0e1c13cce331e3a5770/examples/realtime/realtime-gemini-live-video.py)
+([BSD-2-Clause license](https://github.com/pipecat-ai/pipecat/blob/c87446099f88560b861ac0e1c13cce331e3a5770/LICENSE))
+as a **1 frame/s** camera/screen-input and initial-greeting reference. The example
+does not supply Sense capture/transport firmware or solve its acoustic echo.
+Google's [robotics streaming guidance](https://ai.google.dev/gemini-api/docs/robotics-streaming)
+explains that frames alone do not trigger new reasoning turns: periodic latest
+frames plus short text prompts can drive idle observations. New prompts can
+interrupt active generation, so the Mac must own cooldowns, speaking turns and
+cancellation; do not continuously prompt over human or peer speech. Proactive
+audio response settings alone are not an autonomous pet behavior controller.
+
+Start with sampled frames and bounded idle prompts, then measure audio/camera
+contention. Higher-rate video is a later measured
+capability. Cloud usage charges are separate from hardware and remain unquoted;
+no Gemini or other paid API was used for this review.
+
+## Optional fallback, not a purchase requirement
+
+The initial audit proposed **Waveshare ESP32-S3-CAM-OV5640, SKU33699** before the
+Sense purchase was incorporated. That recommendation is superseded by keeping
+the purchased Sense active. Waveshare remains an **unqualified alternative** if
+the Sense integration fails the acoustic gate and a later purchase is chosen.
+It has not passed our interruption tests either.
+
+Historical source check: the selected official option was $19.99, including
+OV5640 and a 1217 8Ω/2W speaker; PCB 37×37 mm, hole pitch 32.6 mm.
+[Product](https://www.waveshare.com/esp32-s3-cam-ov5640.htm?sku=33699),
+[docs](https://docs.waveshare.com/ESP32-S3-CAM-OVxxxx),
+[schematic](https://files.waveshare.com/wiki/ESP32-S3-CAM-OVxxxx/ESP32-S3-CAM-OVxxxx_Rev1.1.pdf).
+ES8311 DAC OUTP/OUTN feeds ES7210 ADC MIC3 as a physical playback reference;
+upstream `BoxAudioCodec` consumes one mic plus that reference, not automatically
+dual-mic beamforming. This route would replace the separate MAX98357A/speaker.
+
+Before using it, verify generated device-AEC configuration, exact driver/power
+initialization and a separate OLED I²C bus: its OV5640 at 0x3C conflicts with a
+default SSD1306. UART43/44 also requires the console on native USB. Its SH1.0/FPC
+connectors need matching adapters, and the rounded case has not been fitted.
+The earlier conditional Waveshare budget is not the active Sense build total or
+a delivered quote; do not order an additional board based on that old comparison.
+
+Source/API references: [Espressif AEC](https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/acoustic_echo_cancellation/README.html),
+[audio hardware guidance](https://docs.espressif.com/projects/esp-faq/en/latest/application-solution/audio-development-framework.html),
+[server audio handler](https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/d9c2e8c5d92627b670dec57d72a07a4226a410a3/main/xiaozhi-server/core/handle/receiveAudioHandle.py).
+
+Existing Sense build success remains historical software evidence. The RIO port,
+streamed-frame path and complete interruption chain remain to be implemented and
+tested. A compiled head profile establishes software integration only. No hardware
+has been flashed by this project and no interruption test has passed.
+
+
+## Per-robot playback reference alignment in the pinned Sense build
+
+The ESP-SR AFE input remains two-channel interleaved `MR` at 16 kHz;
+`SenseReferenceCodec` still resamples only the accepted 24 kHz speaker
+output and uses the existing Xiaozhi I2S writer. The earlier fixed 90 ms
+reference alignment is now a Kconfig setting named
+`CONFIG_DESK_ROBOT_AEC_DELAY_MS` (0 to 250 ms). That **does not** make the
+robot acoustically calibrated. Each actual assembled robot must measure the
+reference-to-microphone lag and run the 20 interruption trials at different
+speaker volumes, distances and motor load.
+
+For a private physical Sense build, pass `--board sense --aec-delay-ms 115`
+to the existing `firmware/head/private_config.py` command after measuring a
+115 ms reference lag. Use its other required robot ID, config, secrets and LAN
+server options as before. The field is written only to the private firmware
+configuration, without changing the upstream ESP-SR implementation. A 90 ms
+default is retained for a first bench measurement, never as proof of AEC
+performance or as an acceptable substitute for retained human utterances.
+
+
+## Xiaozhi natural realtime VAD and actual acoustic acceptance
+
+The pinned server overlay now uses real realtime listener VAD to preempt ordinary one to one assistant TTS, not only coordinated fleet speech. It requires two consecutive VAD positive frames within 300ms and sends an urgent true decoder/I2S speaker flush while preserving incoming ASR frames. The compiled SenseReferenceCodec already sends real PDM microphone and playback reference channels into ESP SR AEC. These statements concern code integration and tests, not an acoustic calibration on the user's actual head. The companion code/scripts/check_barge_in_trials.py checks real operator measured speaker stop and understanding records. Physical speaker/mic delay is estimated separately by code/scripts/estimate_aec_delay.py. Keep live spoken acceptance false until actual acoustic trials pass.
+
+
+## Live Xiaozhi voice mode check added to the bridge
+
+The authenticated Mac speech bridge now exposes `GET http://127.0.0.1:8766/voice-readiness?device_id=<xiaozhi-device-id>` using the same private `DESK_ROBOT_SPEECH_TOKEN` Bearer header as speech commands. It reads the **connected** device's current `client_listen_mode`, not a remembered or assumed configuration. Only `realtime` reports the realtime audio path available; `auto`, `manual` or an offline head report false. It also explicitly returns `device_aec_measured=false`, `microphone_double_talk_measured=false`, `audible_flush_measured=false` and `natural_barge_in_certified=false` until real equipment trials. The new host test covers authentication, transitions and disconnects. This is a diagnostic, not a firmware wake word change or a certificate. The previously integrated ESP-SR AFE/Xiaozhi abort path remains the correct approach for natural speech interruption.
+
+## Realtime backend is different from the local three stage pipeline
+
+Official upstream [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) supports **both** a streaming ASR + LLM + TTS server and a realtime end-to-end speech model. Its full-duplex capability also requires AEC-capable actual hardware. The project's current `code/config/xiaozhi.local.example.yaml` selects **SileroVAD, FunASR, OllamaLLM and CustomTTS/Kokoro**, which is the separate three-stage local pipeline, not automatically a Gemini Live / ChatGPT Live equivalent. The `CONFIG_USE_DEVICE_AEC=y` Sense flag and the new `/voice-readiness` endpoint establish a software path; neither proves an end-to-end realtime provider is in use or acoustic echo cancellation on the assembled head.
+
+For genuine open conversation, keep the pinned Xiaozhi firmware, device AFE reference code and server interruption hook. Then connect a supported realtime voice service using its documented provisioning/transport interface, preserving the existing authenticated WROOM motion guard and device identities. Do **not** rename `OllamaLLM` to an unverified realtime module or hardcode a cloud credential. Physical mic/speaker delay, double talk and audible cancel still need the measured 20 trial procedure. The control endpoint reports `natural_barge_in_certified=false` until those results are real. See also [Xiaozhi feature guide](https://xiaozhi.dev/en/docs/usage/feature-guide/) and the pinned server bridge config.
+
+
+## Bounded pinned Xiaozhi TX under urgent flush
+
+The exact pinned [Xiaozhi NoAudioCodec](https://github.com/78/xiaozhi-esp32/blob/c435f99a88066029ec2dbd2d758c8cc9d051565b/main/audio/codecs/no_audio_codec.cc)
+uses `i2s_channel_write(..., portMAX_DELAY)` **while holding the
+`data_if_mutex_`** in `NoAudioCodec::Write`. Therefore the old
+`AudioService::ResetDecoder` followed by `EnableOutput(false)` could
+wait indefinitely for a stalled speaker I2S DMA write even though an
+urgent speech stop had been received. Cancelling TTS at the Mac layer
+alone cannot bound this on-device lock.
+
+Our `code/firmware/head/install_overlay.py` now applies the smallest
+Sense-only edit to the exact upstream writer in a disposable pinned
+clone. It uses a **500 ms maximum speaker I2S TX wait** and returns the
+actual accepted 32-bit sample count even after timeout, with a warning
+rather than fatal `ESP_ERROR_CHECK`. The normal native Xiaozhi
+`SenseReferenceCodec` consumes that accepted count so the AEC
+reference contains only audio which the output driver reported writing.
+The original upstream checkout, CoreS3, and modular/waveshare board
+profiles remain unchanged. `firmware/head/tests/test_overlay.py`
+checks pinned patch anchor, callback semantics, the selected Sense
+profile and exact revert.
+
+This gives a **bounded codec wait**, not a 500ms end-to-end guaranteed
+spoken interruption. 500ms I2S timeout plus decoder scheduler, task
+wake, VAD/network latency, buffered amplifier output and real
+speaker/microphone acoustics can exceed the stated user acceptance
+limit. Playback frame length and output DMA queues need a live
+oscilloscope/audio recording at the real XIAO board. If they exceed the
+20 trial metric, tune bounded queueing and driver cancellation using
+the upstream Xiaozhi implementation, not a second fabricated codec.

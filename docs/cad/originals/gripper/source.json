@@ -1,0 +1,102 @@
+{
+  "verified_at": "2026-10-28",
+  "title": "SMARS Gripper Arm",
+  "author": "bluino",
+  "source_url": "https://www.thingiverse.com/thing:4253681/files",
+  "license": "CC-BY-4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "license_evidence": "Author files-page UI explicitly linked CC BY to version4.0; browser accessibility capture inspected.",
+  "files": [
+    {
+      "file": "servo_case_arm.stl",
+      "source_url": "https://www.thingiverse.com/download:7911087",
+      "bytes": 403184,
+      "sha256": "967180304dc4a7de40526a07d593237bb6fd750bd714deb512c3466072335163",
+      "format": "binary STL",
+      "triangles": 8062,
+      "source_coordinate_bounds": [
+        [
+          1.4437050819396973,
+          37.44370651245117
+        ],
+        [
+          -9.860003471374512,
+          19.639999389648438
+        ],
+        [
+          -239.05740356445312,
+          -174.2930450439453
+        ]
+      ],
+      "source_coordinate_size": [
+        36.0,
+        29.5,
+        64.7644
+      ],
+      "unit_note": "STL has no unit metadata. Confirm millimeter interpretation against original assembly/servo dimensions before printing.",
+      "changes": "None; downloaded filename normalized to original underscore spelling."
+    },
+    {
+      "file": "arm_rack.stl",
+      "source_url": "https://www.thingiverse.com/download:7911088",
+      "bytes": 17284,
+      "sha256": "aca898edb877ccff70208c1365b9489ab678bc0b21739d73bfcbb2405569a0fb",
+      "format": "binary STL",
+      "triangles": 344,
+      "source_coordinate_bounds": [
+        [
+          -5.099445343017578,
+          31.23356819152832
+        ],
+        [
+          -9.460001945495605,
+          -0.8600001931190491
+        ],
+        [
+          -238.78147888183594,
+          -211.2844696044922
+        ]
+      ],
+      "source_coordinate_size": [
+        36.333,
+        8.6,
+        27.497
+      ],
+      "unit_note": "STL has no unit metadata. Confirm millimeter interpretation against original assembly/servo dimensions before printing.",
+      "changes": "None; downloaded filename normalized to original underscore spelling."
+    },
+    {
+      "file": "pinion_gear.stl",
+      "source_url": "https://www.thingiverse.com/download:7911089",
+      "bytes": 68284,
+      "sha256": "3a1ab8d022be25b2e0e70b4d8b43f1d7bc68f4034b9a27c08f6e88cacd832bcb",
+      "format": "binary STL",
+      "triangles": 1364,
+      "source_coordinate_bounds": [
+        [
+          -12.079999923706055,
+          2.0799999237060547
+        ],
+        [
+          -17.58099937438965,
+          -12.781000137329102
+        ],
+        [
+          4.0,
+          17.225000381469727
+        ]
+      ],
+      "source_coordinate_size": [
+        14.16,
+        4.8,
+        13.225
+      ],
+      "unit_note": "STL has no unit metadata. Confirm millimeter interpretation against original assembly/servo dimensions before printing.",
+      "changes": "None; downloaded filename normalized to original underscore spelling."
+    }
+  ],
+  "linked_lift_parts": "Original fork_lift_e.stl and fork_lift_f.stl plus assembly PDF saved separately in ../forklift/ with original author CC-BY-NC-SA-4.0 provenance.",
+  "modified": false,
+  "physical_fit_verified": false,
+  "mesh_manufacturing_qa": "File structure and bounds inspected only; no manifold, wall thickness, slicer, tolerance or physical fit validation."
+}

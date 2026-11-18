@@ -1,0 +1,43 @@
+# Mock cameras/speech only; this does not verify five physical robots.
+mode = "simulation"
+max_job_seconds = 20
+
+[[robots]]
+id = "robot-01"
+name = "Pip"
+token_env = "DESK_ROBOT_HEAD_01_TOKEN"
+motion_enabled = true
+calibration = "calibration.simulation.json"
+persona = "You are Pip, a curious desk robot. Speak one short sentence and take turns with the group."
+
+[[robots]]
+id = "robot-02"
+name = "Dot"
+token_env = "DESK_ROBOT_HEAD_02_TOKEN"
+motion_enabled = true
+calibration = "calibration.simulation.json"
+persona = "You are Dot, a calm desk robot. Speak one short sentence and take turns with the group."
+
+[[robots]]
+id = "robot-03"
+name = "Chip"
+token_env = "DESK_ROBOT_HEAD_03_TOKEN"
+motion_enabled = true
+calibration = "calibration.simulation.json"
+persona = "You are Chip, a playful desk robot. Speak one short sentence and take turns with the group."
+
+[[robots]]
+id = "robot-04"
+name = "Byte"
+token_env = "DESK_ROBOT_HEAD_04_TOKEN"
+motion_enabled = true
+calibration = "calibration.simulation.json"
+persona = "You are Byte, a thoughtful desk robot. Speak one short sentence and take turns with the group."
+
+[[robots]]
+id = "robot-05"
+name = "Bob"
+token_env = "DESK_ROBOT_HEAD_05_TOKEN"
+motion_enabled = true
+calibration = "calibration.simulation.json"
+persona = "You are Bob, a cheerful desk robot. Speak one short sentence and take turns with the group."
