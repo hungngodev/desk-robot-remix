@@ -337,6 +337,50 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertNotIn("reference_overwrite_reads_ = 0;", clear)
         self.assertNotIn("reference_integrity_failed_ = false;", clear)
 
+    def test_forced_process_exit_leaves_recoverable_overlay_journal(self):
+        """A real child process termination must not strand half-patched XiaoZhi."""
+        script = """
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location('killed_overlay', sys.argv[1])
+overlay = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(overlay)
+root = Path(sys.argv[2])
+overlay.subprocess.check_output = (
+    lambda args, **kwargs: overlay.PIN if 'rev-parse' in args else ''
+)
+real_write = overlay.atomic_replace_bytes
+def killed_write(path, data):
+    real_write(path, data)
+    if path != root / overlay.MARKER:
+        os._exit(73)
+overlay.atomic_replace_bytes = killed_write
+overlay.apply(root, 'sense')
+"""
+        killed = subprocess.run(
+            [sys.executable, "-c", script, str(HEAD / "install_overlay.py"),
+             str(self.root)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(killed.returncode, 73, killed.stderr)
+        marker = self.root / overlay.MARKER
+        self.assertTrue(marker.is_file())
+        state = json.loads(marker.read_text())
+        self.assertTrue(any(
+            (self.root / name).is_file()
+            and overlay.digest((self.root / name).read_bytes()) == info['sha256']
+            for name, info in state.items()
+        ))
+        overlay.remove(self.root)
+        self.assertFalse(marker.exists())
+        for name, original in self.original.items():
+            self.assertEqual((self.root / name).read_bytes(), original)
+        overlay.apply(self.root, 'sense')
+        overlay.remove(self.root)
+
     def test_overlay_journal_precedes_atomic_file_update_and_rolls_back(self):
         """A failed patch must leave neither altered upstream nor an orphan marker."""
         marker = self.root / overlay.MARKER
