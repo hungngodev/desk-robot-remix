@@ -85,6 +85,13 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         if row.get("gate") == "OPEN":
             continue
         identifier = row.get("id", "unknown")
+        evidence_class = row.get("evidence_class")
+        if evidence_class not in {"source", "mixed", "physical"}:
+            errors.append(f"procedure {identifier}: missing evidence class")
+            continue
+        if evidence_class == "physical" and row.get("gate") == "TESTED":
+            errors.append(f"procedure {identifier}: physical task cannot be source-only TESTED")
+            continue
         sha = row.get("last_verified_sha")
         receipt = row.get("executed_test_receipt")
         if (not isinstance(sha, str) or not SHA.fullmatch(sha)
