@@ -40,8 +40,15 @@ class Chat(Protocol):
 
 
 class Speaker(Protocol):
+    # Explicit capability. An arbitrary hardware speaker cannot silently
+    # ignore consent revocation while synthesizing or queuing PCM.
+    supports_permission_checks: bool
+
     def session(self, robots: list[RobotConfig]): ...
-    async def say(self, robot: RobotConfig, text: str): ...
+    async def say(
+        self, robot: RobotConfig, text: str, *,
+        permission_check: Callable[[], bool] | None = None,
+    ): ...
 
 
 def conversation_turns(robot_ids: list[str], utterances: int | None = None) -> int:
@@ -219,6 +226,8 @@ class OllamaChat:
 
 class KokoroHeadSpeaker:
     """Native Kokoro HTTP -> upstream Xiaozhi audio conversion -> the chosen physical head."""
+    supports_permission_checks = True
+
 
     def __init__(self, settings: Settings, client: httpx.AsyncClient):
         self.settings, self.client = settings, client
@@ -328,6 +337,29 @@ class Conversation:
         self.histories: dict[str, list[dict]] = {}
         self.multimodal = None  # Existing Mac live context, attached in hardware mode.
 
+    async def _say_with_permission(
+        self, robot: RobotConfig, text: str,
+        permission_check: Callable[[], bool] | None,
+    ) -> None:
+        """One consent-aware entry for every hardware speaker implementation.
+
+        Simulation may use legacy mocks. Physical speech refuses a speaker
+        without an explicit permission-aware capability before any PCM send.
+        """
+        if permission_check is not None and not permission_check():
+            raise RuntimeError("Speech permission revoked before transmission")
+        aware = getattr(self.speaker, "supports_permission_checks", False) is True
+        if self.settings.mode == "hardware" and not aware:
+            raise RuntimeError("Hardware speaker lacks permission-aware speech contract")
+        if aware:
+            await self.speaker.say(
+                robot, text, permission_check=permission_check,
+            )
+        else:
+            await self.speaker.say(robot, text)
+        if permission_check is not None and not permission_check():
+            raise RuntimeError("Speech permission revoked during transmission")
+
     def _persona_with_memory(self, robot: RobotConfig) -> str:
         if (self.memory is None or (
             self.settings.mode == "hardware"
@@ -427,12 +459,7 @@ class Conversation:
             )
 
         async def say_group(robot: RobotConfig, text: str) -> None:
-            if isinstance(self.speaker, KokoroHeadSpeaker):
-                await self.speaker.say(
-                    robot, text, permission_check=consent_still_valid,
-                )
-            else:
-                await self.speaker.say(robot, text)
+            await self._say_with_permission(robot, text, consent_still_valid)
 
         self.active = asyncio.current_task()
         transcript = []
@@ -633,12 +660,9 @@ class Conversation:
                     ):
                         return False
                     try:
-                        if isinstance(self.speaker, KokoroHeadSpeaker):
-                            await self.speaker.say(
-                                robot, text, permission_check=permission_check,
-                            )
-                        else:
-                            await self.speaker.say(robot, text)
+                        await self._say_with_permission(
+                            robot, text, permission_check,
+                        )
                         # Simulated and alternate speakers may yield during say.
                         # Never report a completed proactive remark after opt-out.
                         if permission_check is not None and not permission_check():
