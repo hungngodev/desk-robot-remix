@@ -4728,3 +4728,37 @@ async def test_scene_comparison_rejects_unbounded_frames_before_network():
         with pytest.raises(ValueError, match="Bounded JPEG scene evidence required"):
             await scene.compare(b"not-a-jpeg", jpeg("red"))
     assert calls == []
+
+
+async def test_proactive_context_stage_never_reads_private_memory_without_optin(
+    fleet, tmp_path,
+):
+    """Separating context from speech must retain the hardware consent fence."""
+    fleet.mode = "hardware"
+    fleet.voice_memory_tools_enabled = False
+    fleet.voice_vision_tools_enabled = False
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    memory.remember(
+        "robot-01", "private_context_canary", "PRIVATE_CONTEXT_CANARY",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+        ), memory, KeyScene(),
+    )
+    try:
+        gathered = await pet._load_proactive_context(
+            "robot-01", SceneChange("key", "A key appeared", .96),
+        )
+        assert gathered is not None
+        recent, context, private_allowed, live_used = gathered
+        assert recent == []
+        assert private_allowed is False
+        assert live_used is False
+        assert "PRIVATE_CONTEXT_CANARY" not in (
+            context.recent + context.core + context.interaction
+        )
+        assert memory.count("robot-01") == 1
+    finally:
+        await pet.close()
