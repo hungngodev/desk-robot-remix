@@ -504,3 +504,52 @@ async def test_gripper_cannot_wait_forever_for_uncooperative_force_adapter(
         release.set()
         await asyncio.sleep(0)
     assert head.commands == []
+
+
+@pytest.mark.parametrize("status", [
+    {"armed": False},
+    {"armed": True, "robot_id": "robot-02"},
+    None,
+])
+async def test_gripper_rejects_disarmed_foreign_or_missing_health_verdict(
+    monkeypatch, status,
+):
+    """A completed status callback is not permission to move the jaw."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101, 240])
+
+    async def unqualified_health():
+        return status
+
+    with pytest.raises(OperationError, match="WROOM health"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=unqualified_health,
+        )
+    assert head.commands == []
+
+
+async def test_gripper_disarm_response_after_jaw_close_never_reopens_unsafely(
+    monkeypatch,
+):
+    """A false explicit WROOM verdict blocks both further pulses and relief."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101, 240])
+    calls = 0
+
+    async def health_response():
+        nonlocal calls
+        calls += 1
+        return {"armed": calls == 1, "robot_id": "robot-01"}
+
+    with pytest.raises(OperationError, match="WROOM health"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=health_response,
+        )
+    assert calls >= 3
+    assert head.commands == ["grip 65"]
