@@ -41,6 +41,20 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
         verify.steps("physical-accepted-by-a-badge", tmp_path)
 
 
+def test_local_lint_covers_same_head_python_sources_as_ci(tmp_path):
+    """Source receipt must include every Python Sense overlay file CI lints."""
+    jobs = dict((name, argv) for name, argv, _, _ in
+                verify.steps("python", tmp_path))
+    local_paths = set(jobs["python-lint"][4:])
+    workflow = (ROOT / ".github/workflows/host-verification.yml").read_text()
+    assert "ruff check laptop/src laptop/server/overlay " in workflow
+    for name in ("install_overlay.py", "private_config.py"):
+        target = "firmware/head/" + name
+        assert target in local_paths
+        assert (ROOT / "code" / target).is_file()
+    assert "firmware/head/*.py" in workflow
+
+
 def test_every_declared_platformio_environment_is_exercised(tmp_path):
     """New lab builds may not silently disappear from the release matrix."""
     stages = {name for name, *_ in verify.steps("all", tmp_path)}
