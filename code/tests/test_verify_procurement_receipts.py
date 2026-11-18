@@ -106,3 +106,36 @@ def test_live_network_failure_cannot_qualify_fake_record():
         raise URLError("offline")
     errors = release.audit_release(evidence, SHA, offline)
     assert any("record lookup unavailable" in error for error in errors)
+
+
+def test_first_robot_uses_first_observer_not_completed_five_robot_fleet():
+    station = {
+        gate: receipt("system", gate)
+        for gate in release.SYSTEM_GATES
+        if gate not in release.FLEET_ONLY_SYSTEM_GATES
+    }
+    station[release.FIRST_ROBOT_ROOM_GATE] = receipt(
+        "system", release.FIRST_ROBOT_ROOM_GATE
+    )
+    decisions = {
+        ident: {
+            "disposition": "rejected_in_favor_of_qualified_alternative",
+            "decision_receipt": receipt("supplemental:" + ident,
+                                        "decision_receipt"),
+            "alternative_or_parent_receipt": receipt(
+                "supplemental:" + ident, "alternative_or_parent_receipt"),
+        }
+        for ident in release.SUPPLEMENTAL_DECISIONS
+    }
+    evidence = {
+        "system": station, "supplemental_decisions": decisions,
+        "parts": {"imu": {gate: receipt("part:imu", gate)
+                           for gate in release.PART_GATES}},
+    }
+    assert release.audit_release(evidence, SHA, lookup, first_robot=True) == []
+    assert any("missing receipt" in msg
+               for msg in release.audit_release(evidence, SHA, lookup))
+    del station["protected_1s_charger_and_dock_contacts"]
+    assert any("protected_1s_charger_and_dock_contacts" in msg
+               for msg in release.audit_release(
+                   evidence, SHA, lookup, first_robot=True))
