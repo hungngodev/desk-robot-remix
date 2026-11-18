@@ -46,7 +46,7 @@ def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
     # Reuse the same half-range ordering as the live safety-critical grasp;
     # duplicate, backward and reset/replayed samples remain unacceptable.
     if any(not _fresh_jaw_sequence(new, old)
-           for old, new in zip(history, history[1:])):
+           for old, new in zip(history, history[1:], strict=False)):
         raise ValueError("FSR readings must come from distinct forward hardware conversions")
     base, touch, upper = (medians[name] for name in ("free", "contact", "upper"))
     sign = 1 if touch > base else -1
