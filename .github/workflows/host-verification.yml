@@ -118,6 +118,11 @@ jobs:
       - name: Host tests
         working-directory: code
         run: uv run --no-sync pytest -q -ra tests firmware/head/tests
+      - name: Verify any promoted playbook evidence against GitHub
+        working-directory: code
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run --no-sync python scripts/verify_playbook_receipts.py
       - name: Python lint
         working-directory: code
         run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
