@@ -138,6 +138,7 @@ int main() {
     CHECK(stale_pulse_wire.ranges == 0 && stale_pulse_wire.extras == 0);
     // No new conversion must not increment the source sequence.
     CHECK(!stale_pulse.poll(200));
+    CHECK(!stale_pulse.sample().valid); // FIFO empty: no fresh paw event
     CHECK(stale_pulse.sample().sample_seq == 1U);
     // A completely full MAX30102 FIFO can have matching write/read
     // pointers. Its independent overflow counter must still block old
