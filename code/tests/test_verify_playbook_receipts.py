@@ -27,10 +27,12 @@ def lookup(url):
 
 def promoted(gate="TESTED"):
     return {"procedures": [{
-        "id": 5, "evidence_class": "mixed",
+        "id": 9, "evidence_class": "mixed",
         "gate": gate, "last_verified_sha": SHA,
+        "verification_command": "cd code && python -m pytest -q tests/test_complete_component_ownership.py",
         "executed_test_receipt": {
             "sha": SHA, "exit_code": 0, "url": RUN,
+            "command": "cd code && python -m pytest -q tests/test_complete_component_ownership.py",
         },
         "physical_measurement_receipt": {
             "result": "pass", "raw_data_url": RAW,
@@ -105,3 +107,64 @@ def test_standalone_audit_rejects_unclassified_promotion():
     row.pop("evidence_class")
     assert any("missing evidence class" in item
                for item in verify.audit({"procedures": [row]}, lookup))
+
+
+def test_online_audit_refuses_nonexecuting_or_mismatched_playbook_commands():
+    for invalid in [
+        "cd code && python scripts/verify_system.py --help",
+        "cd code && python -m pytest --collect-only",
+        "cd code && true",
+        "cd code && python -m pytest -q tests/not-the-receipt.py",
+    ]:
+        bad = promoted("TESTED")
+        bad["procedures"][0]["verification_command"] = invalid
+        assert any(
+            "executable command receipt mismatch" in msg
+            for msg in verify.audit(bad, lookup)
+        )
+
+
+def test_online_manual_review_requires_real_matching_pr_comment():
+    manually_reviewed = promoted("TESTED")
+    row = manually_reviewed["procedures"][0]
+    row.update(id=4, evidence_class="source", verification_method="manual_review")
+    sha = row["last_verified_sha"]
+    comment_url = (
+        "https://github.com/hungngodev/desk-robot-remix/pull/17"
+        "#issuecomment-5678"
+    )
+    row["manual_review_receipt"] = {
+        "sha": sha, "reviewer": "physical_owner", "review_url": comment_url,
+    }
+
+    def reviewed(url):
+        if url.endswith("/issues/comments/5678"):
+            return {
+                "html_url": comment_url, "body": f"Procedure 4 reviewed at {sha}",
+                "user": {"login": "physical_owner", "type": "User"},
+            }
+        return lookup(url)
+
+    assert verify.audit(manually_reviewed, reviewed) == []
+    bad = row["manual_review_receipt"]
+    bad["reviewer"] = "unknown"
+    assert any(
+        "manual review not verified" in msg
+        for msg in verify.audit(manually_reviewed, reviewed)
+    )
+    bad["reviewer"] = "physical_owner"
+    bad["sha"] = "b" * 40
+    assert any(
+        "manual review not verified" in msg
+        for msg in verify.audit(manually_reviewed, reviewed)
+    )
+    bad["sha"] = sha
+    def fabricated(url):
+        if url.endswith("/issues/comments/5678"):
+            return {"html_url": comment_url, "body": "No matching procedure or SHA",
+                    "user": {"login": "physical_owner", "type": "User"}}
+        return lookup(url)
+    assert any(
+        "manual review not verified" in msg
+        for msg in verify.audit(manually_reviewed, fabricated)
+    )
