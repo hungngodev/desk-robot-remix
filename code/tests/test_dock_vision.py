@@ -163,7 +163,7 @@ def test_dock_detector_rejects_camera_mode_change_before_apriltag_pose():
     """Matching distortion and focal lengths are invalid at another JPEG size."""
     from dataclasses import replace
 
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     measured = replace(
@@ -181,7 +181,7 @@ def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
 
     This is synthetic geometry, not a calibrated XIAO camera or dock trial.
     """
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     distortion = (0.18, -0.07, 0.003, -0.002, 0.01)
@@ -232,7 +232,7 @@ def test_measured_distortion_recovers_synthetic_apriltag_pose(monkeypatch):
 
 def test_real_printed_apriltag_faces_camera_before_dock_approach():
     """Use real OpenCV tag generation/detection, not a mocked marker ID."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     dictionary = cv2.aruco.getPredefinedDictionary(
@@ -263,7 +263,7 @@ def test_real_printed_apriltag_faces_camera_before_dock_approach():
 
 def test_inverted_apriltag_plane_rejected_even_with_perfect_reprojection(monkeypatch):
     """A mirrored/back-facing tag cannot become a physical approach target."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     half = 30.0
@@ -366,7 +366,7 @@ def test_measured_dock_optical_center_must_be_inside_capture(cx, cy, error):
 ])
 def test_corrupt_or_off_frame_tag_corners_cannot_reach_pnp(monkeypatch, bad_corner):
     """Reject a detector's invalid geometry before native pose estimation."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     class BadDetector:
@@ -402,7 +402,7 @@ def test_corrupt_or_off_frame_tag_corners_cannot_reach_pnp(monkeypatch, bad_corn
 ])
 def test_malformed_detector_corner_shape_never_reaches_pnp(monkeypatch, bad_points):
     """A damaged native detector result must not crash or authorize docking."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     class MalformedDetector:
@@ -432,7 +432,7 @@ def test_malformed_detector_corner_shape_never_reaches_pnp(monkeypatch, bad_poin
 ])
 def test_malformed_detector_ids_cannot_select_dock_pose(monkeypatch, bad_ids):
     """Corrupt native marker IDs must not reach pose estimation or authority."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     class BadIdsDetector:
@@ -463,7 +463,7 @@ def test_malformed_detector_ids_cannot_select_dock_pose(monkeypatch, bad_ids):
 @pytest.mark.parametrize("failure_stage", ["detect", "solve", "project"])
 def test_native_opencv_failure_fails_closed_without_pose_authority(monkeypatch, failure_stage):
     """A native detector or PnP error cannot become an approach observation."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     class Detector:
@@ -503,7 +503,7 @@ def test_native_opencv_failure_fails_closed_without_pose_authority(monkeypatch, 
 ])
 def test_corrupt_detector_corner_container_fails_closed(monkeypatch, bad_corners):
     """Native detector output cannot crash the observation safety boundary."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     class CorruptDetector:
@@ -531,7 +531,7 @@ def test_corrupt_detector_corner_container_fails_closed(monkeypatch, bad_corners
 @pytest.mark.parametrize("decode_failure", ["native_error", "empty_frame"])
 def test_dock_jpeg_decode_failure_cannot_authorize_motion(monkeypatch, decode_failure):
     """A failed native JPEG decode never reaches marker detection or motor authority."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
 
     def corrupt_decode(*args, **kwargs):
         if decode_failure == "native_error":
@@ -559,7 +559,7 @@ def test_dock_jpeg_decode_failure_cannot_authorize_motion(monkeypatch, decode_fa
 @pytest.mark.parametrize("failure_stage", ["dictionary", "constructor"])
 def test_native_apriltag_setup_failure_cannot_reach_pose_or_motion(monkeypatch, failure_stage):
     """A failed OpenCV detector initialization is not a trusted dock sighting."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     def broken_dictionary(*args, **kwargs):
@@ -597,7 +597,7 @@ def test_native_apriltag_setup_failure_cannot_reach_pose_or_motion(monkeypatch, 
 ])
 def test_degenerate_dock_quad_rejected_before_native_pnp(monkeypatch, points):
     """Collapsed, crossed, concave and subpixel tags cannot provide a pose."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     class Detector:
@@ -631,7 +631,7 @@ def test_degenerate_dock_quad_rejected_before_native_pnp(monkeypatch, points):
 ])
 def test_native_decoder_malformed_frame_shape_fails_closed(monkeypatch, bad_frame):
     """A decoder result without a 2D grayscale image cannot reach ArUco."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     if bad_frame == "one_dimensional":
@@ -656,7 +656,7 @@ def test_native_decoder_malformed_frame_shape_fails_closed(monkeypatch, bad_fram
 @pytest.mark.parametrize("bad_dtype", ["float32", "float64", "int16", "bool"])
 def test_native_jpeg_decoder_non_uint8_frame_cannot_reach_detector(monkeypatch, bad_dtype):
     """A corrupt native decoder must not feed unexpected pixel types to ArUco."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     def corrupt_decode(*args, **kwargs):
@@ -684,7 +684,7 @@ def test_native_jpeg_decoder_non_uint8_frame_cannot_reach_detector(monkeypatch, 
 ])
 def test_malformed_native_detector_result_fails_closed(monkeypatch, malformed_result):
     """Unexpected native return arity must never reach PnP or docking authority."""
-    import cv2
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
     class CorruptDetector:
