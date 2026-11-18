@@ -670,6 +670,37 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
     assert "APPROVED WITH VERIFIED RECEIPTS" in (
         mod.render_first_robot_markdown(synthetic_released)
     )
+    # A first complete unit MUST be qualifiable before the other four
+    # exist. Synthetic receipts verify logic only and are never buy proof.
+    single_evidence = evidence_for(selected)
+    single_evidence["system"].pop("five_robot_integration")
+    single_evidence["system"].pop(
+        "room_pod_usb_serial_and_five_pet_observers"
+    )
+    single_evidence["system"][mod.FIRST_ROBOT_ROOM_GATE] = receipt
+    first_only = mod.generate(selected, single_evidence)
+    assert not first_only["order_released"]  # Fleet still unqualified.
+    assert "five_robot_integration" in first_only["missing_system_evidence"]
+    assert first_only["missing_first_robot_system_evidence"] == []
+    assert mod.first_robot_projection(first_only)["purchase_approved"] is True
+
+    # Neither a missing first-unit room station trial nor a missing shared
+    # loaded stopping trial may slip through the independent release path.
+    missing_observer = copy.deepcopy(single_evidence)
+    missing_observer["system"].pop(mod.FIRST_ROBOT_ROOM_GATE)
+    first_missing_observer = mod.generate(selected, missing_observer)
+    assert mod.FIRST_ROBOT_ROOM_GATE in first_missing_observer[
+        "missing_first_robot_system_evidence"]
+    assert not mod.first_robot_projection(first_missing_observer)[
+        "purchase_approved"]
+    missing_stopping = copy.deepcopy(single_evidence)
+    missing_stopping["system"].pop("loaded_drive_and_stopping")
+    first_missing_stopping = mod.generate(selected, missing_stopping)
+    assert "loaded_drive_and_stopping" in first_missing_stopping[
+        "missing_first_robot_system_evidence"]
+    assert not mod.first_robot_projection(first_missing_stopping)[
+        "purchase_approved"]
+
     # WARNING: All the above receipts are TEST DATA, not an actual buy permit.
     attempts = []
     without_touch = copy.deepcopy(selected)
