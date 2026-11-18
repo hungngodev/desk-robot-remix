@@ -1973,6 +1973,90 @@ class PetController:
             "data": selected,
         }
 
+    async def _load_proactive_context(
+        self, robot_id: str, change: SceneChange,
+    ) -> tuple | None:
+        """Gather one per-pet evidence context under existing consent fences.
+
+        Return None when private consent is revoked during the bounded SQLite
+        read. The speaking owner still applies current speech and camera
+        permission checks after model work and before every audio segment.
+        """
+        state = self.states[robot_id]
+        # LangGraph-style short-term + relevant long-term selection
+        # using this robot's *existing* local SQLite store. An old key
+        # event may be useful even when four newer touch events occurred.
+        # Both reads run off the audio/VAD event loop, with a deadline.
+        private_memory_allowed = (
+            self.settings.mode == "hardware"
+            and self.settings.voice_memory_tools_enabled
+        )
+        if (self.settings.mode == "hardware"
+                and not private_memory_allowed):
+            # Live camera/sensor consent is NOT consent to retrieve
+            # past SQLite episodes or curated private preferences for
+            # unsolicited TTS. Keep the same contract as Conversation.
+            recent_memory, relevant_memory, core_memory = [], [], []
+        else:
+            recent_memory, relevant_memory, core_memory = await asyncio.wait_for(
+                asyncio.gather(
+                    asyncio.to_thread(self.memory.recent, robot_id, limit=12),
+                    asyncio.to_thread(
+                        self.memory.search, robot_id, change.description, limit=3
+                    ),
+                    asyncio.to_thread(
+                        self.memory.core_facts, robot_id, limit=6
+                    ),
+                ),
+                timeout=2.0,
+            )
+        if (private_memory_allowed
+                and not self.settings.voice_memory_tools_enabled):
+            # Permission can change during the off-thread SQLite read.
+            # Do not submit stale private text to the model after revoke.
+            state.suppressed += 1
+            state.last_initiative_suppression = "memory_consent_revoked"
+            return
+        selected_memory = {
+            item.event_id: item
+            # Keep the last three events and up to three topical
+            # recalls, even when many newer unrelated events exist.
+            # The additional recent entries only support novelty checks.
+            for item in [*recent_memory[:3], *relevant_memory]
+        }
+        memory = sorted(
+            selected_memory.values(), key=lambda item: item.observed_at
+        )[-6:]
+        # Pure context formatter owns provenance labels and length caps.
+        # The existing camera hub owns all transient sensor/tool events.
+        # No second model, audio stack or memory database is introduced.
+        timeline = []
+        # A physical touch can still trigger curiosity after visual opt
+        # out; it must not reuse the old opt-in ASR/camera/tool timeline.
+        if (self.multimodal is not None
+                and (self.settings.mode != "hardware"
+                     or self.settings.voice_vision_tools_enabled)):
+            hub = self.multimodal.hub
+            now = time.monotonic()
+            ordered = getattr(hub, "interaction_timeline", None)
+            if callable(ordered):
+                timeline = ordered(robot_id, now, limit=10)
+                if not self.settings.voice_memory_tools_enabled:
+                    timeline = [
+                        item for item in timeline
+                        if not (item.get("channel") == "tool"
+                                and item.get("kind") == "memory_recall")
+                    ]
+            else:
+                hints = hub.recent_events(robot_id, now)
+                timeline = [
+                    {"channel": "sensor", "kind": item["kind"]}
+                    for item in hints
+                ]
+        live_context_used = self.settings.mode == "hardware" and bool(timeline)
+        context = compose_brain_context(memory, core_memory, timeline)
+        return recent_memory, context, private_memory_allowed, live_context_used
+
     async def _speak(
         self, robot_id: str, change: SceneChange, generation: int,
         *, offered_at: float, social_peer_id: str | None = None,
@@ -1990,78 +2074,12 @@ class PetController:
             return callable(latest) and latest() > offered_at
 
         try:
-            # LangGraph-style short-term + relevant long-term selection
-            # using this robot's *existing* local SQLite store. An old key
-            # event may be useful even when four newer touch events occurred.
-            # Both reads run off the audio/VAD event loop, with a deadline.
-            private_memory_allowed = (
-                self.settings.mode == "hardware"
-                and self.settings.voice_memory_tools_enabled
-            )
-            if (self.settings.mode == "hardware"
-                    and not private_memory_allowed):
-                # Live camera/sensor consent is NOT consent to retrieve
-                # past SQLite episodes or curated private preferences for
-                # unsolicited TTS. Keep the same contract as Conversation.
-                recent_memory, relevant_memory, core_memory = [], [], []
-            else:
-                recent_memory, relevant_memory, core_memory = await asyncio.wait_for(
-                    asyncio.gather(
-                        asyncio.to_thread(self.memory.recent, robot_id, limit=12),
-                        asyncio.to_thread(
-                            self.memory.search, robot_id, change.description, limit=3
-                        ),
-                        asyncio.to_thread(
-                            self.memory.core_facts, robot_id, limit=6
-                        ),
-                    ),
-                    timeout=2.0,
-                )
-            if (private_memory_allowed
-                    and not self.settings.voice_memory_tools_enabled):
-                # Permission can change during the off-thread SQLite read.
-                # Do not submit stale private text to the model after revoke.
-                state.suppressed += 1
-                state.last_initiative_suppression = "memory_consent_revoked"
+            gathered = await self._load_proactive_context(robot_id, change)
+            if gathered is None:
                 return
-            selected_memory = {
-                item.event_id: item
-                # Keep the last three events and up to three topical
-                # recalls, even when many newer unrelated events exist.
-                # The additional recent entries only support novelty checks.
-                for item in [*recent_memory[:3], *relevant_memory]
-            }
-            memory = sorted(
-                selected_memory.values(), key=lambda item: item.observed_at
-            )[-6:]
-            # Pure context formatter owns provenance labels and length caps.
-            # The existing camera hub owns all transient sensor/tool events.
-            # No second model, audio stack or memory database is introduced.
-            timeline = []
-            # A physical touch can still trigger curiosity after visual opt
-            # out; it must not reuse the old opt-in ASR/camera/tool timeline.
-            if (self.multimodal is not None
-                    and (self.settings.mode != "hardware"
-                         or self.settings.voice_vision_tools_enabled)):
-                hub = self.multimodal.hub
-                now = time.monotonic()
-                ordered = getattr(hub, "interaction_timeline", None)
-                if callable(ordered):
-                    timeline = ordered(robot_id, now, limit=10)
-                    if not self.settings.voice_memory_tools_enabled:
-                        timeline = [
-                            item for item in timeline
-                            if not (item.get("channel") == "tool"
-                                    and item.get("kind") == "memory_recall")
-                        ]
-                else:
-                    hints = hub.recent_events(robot_id, now)
-                    timeline = [
-                        {"channel": "sensor", "kind": item["kind"]}
-                        for item in hints
-                    ]
-            live_context_used = self.settings.mode == "hardware" and bool(timeline)
-            context = compose_brain_context(memory, core_memory, timeline)
+            recent_memory, context, private_memory_allowed, live_context_used = (
+                gathered
+            )
             # A social turn is NOT five independent agents speaking at once.
             # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
             # each pet's own persona, two bounded turns and per-pet memory.
