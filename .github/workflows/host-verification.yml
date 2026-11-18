@@ -49,6 +49,15 @@ jobs:
           test -f docs/hardware/full-feature-plan.json
           test -f docs/records/verification.md
           test -f code/laptop/src/desk_robot/handling.py
+          # A partial Git tree can retain root sentinels while deleting an
+          # entire test, firmware or documentation subtree. 457 tracked files
+          # were present at the reviewed November 18 baseline; the deliberately
+          # conservative floor blocks a large accidental deletion.
+          tracked_count=$(git ls-files | wc -l)
+          if [ "$tracked_count" -lt 400 ]; then
+            echo "::error::Partial repository tree: only $tracked_count tracked files"
+            exit 1
+          fi
       - name: Install Python and locked dependencies
         working-directory: code
         run: |
