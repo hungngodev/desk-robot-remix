@@ -104,3 +104,21 @@ def test_procurement_still_gates_every_physical_feature():
                  "five_robot_integration",
                  "user_approved_costed_exact_carrier_bill_of_materials"):
         assert f'"{gate}"' in release
+
+
+def test_max30102_compiled_fifo_layout_is_disclosed_not_qualified():
+    """A lab firmware variant must disclose orientation without claiming proof."""
+    body = (ROOT / "code/firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    platformio = (ROOT / "code/firmware/body/platformio.ini").read_text()
+    native = (ROOT / "code/firmware/body/tests/guarded_body_tests.cpp").read_text()
+    assert "DESK_ROBOT_MAX30102_FIFO_IR_FIRST" in body
+    assert "kPulseIrFirstJson" in body
+    assert r'"fifo_ir_first":%s' not in body  # C++ source uses escaped JSON keys
+    assert r'\"fifo_ir_first\":%s' in body
+    assert r'\"fifo_layout_physically_verified\":false' in body
+    assert "DESK_ROBOT_MAX30102_FIFO_IR_FIRST=1" in platformio
+    assert r'\"fifo_ir_first\":false' in native
+    assert r'\"fifo_layout_physically_verified\":false' in native
+    assert "esp32_full_pulse_reversed_lab" in (
+        ROOT / ".github/workflows/host-verification.yml"
+    ).read_text()
