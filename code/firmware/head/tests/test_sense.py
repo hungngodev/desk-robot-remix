@@ -179,8 +179,24 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('sample_rate != 24000', setter)
         self.assertIn('sample_rate != 48000', setter)
         self.assertIn('Rejecting unsupported Sense Opus rate', setter)
+        # Invalid rates are rejected before any replacement is attempted.
+        # A successful replacement is opened first, then atomically
+        # published under decoder_mutex_ and only then the old decoder
+        # is closed. The previous close(opus_decoder_) expectation was
+        # stale after switching to the safer previous_decoder swap.
         self.assertLess(setter.index('sample_rate != 24000'),
-                        setter.index('esp_opus_dec_close(opus_decoder_)'))
+                        setter.index('esp_opus_dec_open('))
+        self.assertLess(setter.index('esp_opus_dec_open('),
+                        setter.index('if (proposed_decoder == nullptr)'))
+        self.assertLess(setter.index('if (proposed_decoder == nullptr)'),
+                        setter.index('opus_decoder_ = proposed_decoder;'))
+        self.assertLess(setter.index('opus_decoder_ = proposed_decoder;'),
+                        setter.index('esp_opus_dec_close(previous_decoder);'))
+        self.assertIn('Failed to create replacement decoder, keeping prior decoder',
+                      setter)
+        self.assertIn('std::lock_guard<std::mutex> decoder_lock(decoder_mutex_);',
+                      setter)
+        self.assertIn('void* previous_decoder = opus_decoder_;', setter)
         self.assertIn('decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr',
                       setter)
         self.assertIn('#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3', setter)
