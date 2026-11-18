@@ -29,7 +29,11 @@ def steps(suite: str, build: Path) -> list[tuple[str, list[str], Path, int]]:
                               "tests", "firmware/head/tests"], CODE, 900),
             ("python-lint", [sys.executable, "-m", "ruff", "check",
                              "laptop/src", "laptop/server/overlay",
-                             "laptop/server", "tests", "scripts"], CODE, 180),
+                             "laptop/server", "tests", "scripts",
+                             # Match CI's explicitly pinned head overlay Python
+                             # targets, without recursively linting vendor C++.
+                             "firmware/head/install_overlay.py",
+                             "firmware/head/private_config.py"], CODE, 180),
         ]
     if suite in ("body", "all"):
         jobs += [
