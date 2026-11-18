@@ -4,6 +4,7 @@ The canonical PR owns execution. A source, URL or proposed command never
 becomes a physical or same-commit test receipt by changing a status string.
 """
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -32,10 +33,34 @@ def _physical_record_url_is_traceable(url, sha):
             and ".." not in parsed.path.split("/"))
 
 
+def _valid_manual_review(record, sha):
+    """A manual process gate cannot be promoted by a green build alone."""
+    receipt = record.get("manual_review_receipt")
+    if not isinstance(receipt, dict):
+        return False
+    reviewer = receipt.get("reviewer")
+    url = receipt.get("review_url")
+    return (
+        receipt.get("sha") == sha
+        and isinstance(reviewer, str)
+        and reviewer.strip().casefold() not in {
+            "", "unknown", "tbd", "reviewer", "tester",
+        }
+        and isinstance(url, str)
+        and url.startswith(
+            "https://github.com/hungngodev/desk-robot-remix/pull/17"
+            "#issuecomment-"
+        )
+        and url.partition("#issuecomment-")[2].isdecimal()
+    )
+
+
 def _valid_release_evidence(record):
     if record.get("evidence_class") not in EVIDENCE_CLASSES:
         return False
     if record["gate"] == "TESTED" and record["evidence_class"] == "physical":
+        return False
+    if record.get("verification_method") not in (None, "manual_review"):
         return False
     if record["gate"] == "OPEN":
         return True
@@ -45,13 +70,16 @@ def _valid_release_evidence(record):
         return False
     if any(ch not in "0123456789abcdef" for ch in sha):
         return False
+    if (record.get("verification_method") == "manual_review"
+            and not _valid_manual_review(record, sha)):
+        return False
     if not isinstance(test, dict):
         return False
     if (test.get("sha") != sha
             or type(test.get("exit_code")) is not int
             or test["exit_code"] != 0
             or not isinstance(test.get("command"), str)
-            or not test["command"].strip()
+            or test["command"] != record["verification_command"]
             or not isinstance(test.get("url"), str)
             or not test["url"].startswith(
                 "https://github.com/hungngodev/desk-robot-remix/")):
@@ -94,7 +122,17 @@ def test_all_96_playbook_procedures_have_distinct_source_and_verification_owners
         assert row["title"].strip()
         assert row["phase"].strip()
         assert row["source_owner"].strip()
-        assert row["verification_command"].startswith("cd code && ")
+        command = row["verification_command"]
+        assert command.startswith("cd code && ")
+        # A command that merely prints usage or collects tests can never
+        # qualify any of these 96 required engineering procedures.
+        assert not re.search(r"--(?:help|version|collect-only)\\b|&& true\\b", command)
+        # Every referenced pytest target must exist in this exact checkout.
+        for relative in re.findall(r"tests/[A-Za-z0-9_./-]+\\.py", command):
+            assert (ROOT / "code" / relative).is_file(), (row["id"], relative)
+        assert row.get("verification_method") in (None, "manual_review")
+        if row["id"] <= 8:
+            assert row["verification_method"] == "manual_review"
         assert row["gate"] in STATES
         assert row["evidence_class"] in EVIDENCE_CLASSES
         assert _valid_release_evidence(row), row["id"]
@@ -102,14 +140,16 @@ def test_all_96_playbook_procedures_have_distinct_source_and_verification_owners
 
 @pytest.mark.parametrize("claimed_status", ["TESTED", "MEASURED", "QUALIFIED"])
 def test_status_string_cannot_fake_same_sha_or_physical_acceptance(claimed_status):
-    row = json.loads(LEDGER.read_text())["procedures"][0].copy()
+    # An executable source task can be promoted with an actual test receipt.
+    # The first eight process/review tasks require separate human evidence.
+    row = json.loads(LEDGER.read_text())["procedures"][8].copy()
     row["gate"] = claimed_status
     assert not _valid_release_evidence(row)
     row["last_verified_sha"] = "a" * 40
     row["executed_test_receipt"] = {
         "sha": "a" * 40,
         "exit_code": 0,
-        "command": "cd code && python -m pytest -q tests",
+        "command": row["verification_command"],
         "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
     }
     if claimed_status == "TESTED":
@@ -192,3 +232,46 @@ def test_physical_receipts_reject_obvious_placeholder_people_and_devices():
     row["physical_measurement_receipt"]["operator"] = "fixture_operator_001"
     assert not _valid_release_evidence(row)
 
+
+
+def test_manual_process_procedures_need_review_receipts_beyond_green_ci():
+    row = json.loads(LEDGER.read_text())["procedures"][0].copy()
+    sha = "a" * 40
+    row["gate"] = "TESTED"
+    row["last_verified_sha"] = sha
+    row["executed_test_receipt"] = {
+        "sha": sha, "exit_code": 0, "command": row["verification_command"],
+        "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
+    }
+    assert not _valid_release_evidence(row)
+    row["manual_review_receipt"] = {
+        "reviewer": "unknown",
+        "sha": sha,
+        "review_url": "https://github.com/hungngodev/desk-robot-remix/pull/17",
+    }
+    assert not _valid_release_evidence(row)
+    row["manual_review_receipt"] = {
+        "reviewer": "fixture_operator_001",
+        "sha": sha,
+        "review_url": (
+            "https://github.com/hungngodev/desk-robot-remix/pull/17"
+            "#issuecomment-12345"
+        ),
+    }
+    assert _valid_release_evidence(row)
+    row["executed_test_receipt"]["command"] = (
+        "cd code && python scripts/verify_system.py --help"
+    )
+    assert not _valid_release_evidence(row)
+
+
+def test_all_tof_and_handling_procedures_use_existing_distinct_targets():
+    rows = json.loads(LEDGER.read_text())["procedures"]
+    known = {x["id"]: x["verification_command"] for x in rows}
+    for index in range(25, 33):
+        assert "test_tof_mux.py" not in known[index]
+        assert "--help" not in known[index]
+    assert "test_handling.py" in known[31]
+    assert "test_pet.py" in known[32]
+    assert "test_i2c_electrical_preflight.py" in known[27]
+    assert len(set(known[i] for i in range(25, 33))) >= 6
