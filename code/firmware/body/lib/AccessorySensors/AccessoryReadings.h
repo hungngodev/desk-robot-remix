@@ -96,7 +96,11 @@ struct GaugeRaw {
   int pack_current_ma = 0;
   bool pack_current_valid = false;
   std::uint32_t monitor_sample_seq = 0;
-  std::uint32_t at_ms = 0;
+  // Fuel and shunt are independent chip conversions. Their individual last
+  // successful read times must not refresh each other across partial faults.
+  std::uint32_t fuel_at_ms = 0;
+  std::uint32_t monitor_at_ms = 0;
+  std::uint32_t at_ms = 0;  // aggregate diagnostic only, never freshness authority
 };
 struct ProximityRaw {
   bool present = false, valid = false;
