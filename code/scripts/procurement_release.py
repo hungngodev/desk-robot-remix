@@ -745,7 +745,7 @@ PILOT_SAMPLE_PRODUCTS = {
         "TCA9548A 8 channel 3.3V compatible I2C multiplexer",
         "ElectroPeak", "COM-05-067",
         "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
-        2, None),  # Seller displays GBP; do not fabricate USD conversion.
+        2, 0.47),  # USD product quote checked 2026-11-18; not landed.
     "cap1188": (
         "CAP1188 8 zone capacitive touch breakout",
         "ElectroPeak", "SEN-25-020",
@@ -759,7 +759,7 @@ PILOT_SAMPLE_PRODUCTS = {
         "ADS1115 4 channel ADC breakout",
         "ElectroPeak", "COM-05-045",
         "https://electropeak.com/ads1115-16-bit-adc-4-channel-programmable-gain-amplifier-b00soy52cu",
-        1, None),  # Seller displays GBP.
+        1, 1.50),  # USD product quote checked 2026-11-18; not landed.
     "mcp23017": (
         "MCP23017 16 channel I2C GPIO expander",
         "ElectroPeak", "COM-05-093",
