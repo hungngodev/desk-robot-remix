@@ -11,15 +11,16 @@ from pathlib import Path
 import pytest
 from desk_robot.config import Settings, load_settings
 from desk_robot.multimodal import TRIGGERS
-from desk_robot.sensor_event_contract import (
-    DIRECT_INTERACTION_KINDS, PHYSICAL_INITIATIVE_KINDS,
-    TRIGGERS as SHARED_TRIGGERS,
-)
 from desk_robot.pet import (
     _DIRECT_INTERACTION_KINDS,
     _PHYSICAL_INITIATIVE_KINDS,
     _SOCIAL_EVENT_KINDS,
     _VISUAL_INITIATIVE_MIN_CONFIDENCE,
+)
+from desk_robot.sensor_event_contract import (
+    DIRECT_INTERACTION_KINDS,
+    PHYSICAL_INITIATIVE_KINDS,
+    TRIGGERS as SHARED_TRIGGERS,
 )
 from pydantic import ValidationError
 
