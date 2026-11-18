@@ -27,7 +27,8 @@ def lookup(url):
 
 def promoted(gate="TESTED"):
     return {"procedures": [{
-        "id": 89, "gate": gate, "last_verified_sha": SHA,
+        "id": 5, "evidence_class": "mixed",
+        "gate": gate, "last_verified_sha": SHA,
         "executed_test_receipt": {
             "sha": SHA, "exit_code": 0, "url": RUN,
         },
@@ -89,3 +90,18 @@ def test_matching_sha_from_unrelated_workflow_does_not_qualify():
         return {"head_sha": SHA, "name": "Unrelated workflow",
                 "status": "completed", "conclusion": "success"}
     assert "CI run not verified" in verify.audit(promoted(), unrelated)[0]
+
+
+def test_standalone_audit_rejects_source_only_physical_assembly_claim():
+    row = promoted()["procedures"][0]
+    row["id"] = 89
+    row["evidence_class"] = "physical"
+    assert any("physical task cannot be source-only TESTED" in item
+               for item in verify.audit({"procedures": [row]}, lookup))
+
+
+def test_standalone_audit_rejects_unclassified_promotion():
+    row = promoted()["procedures"][0]
+    row.pop("evidence_class")
+    assert any("missing evidence class" in item
+               for item in verify.audit({"procedures": [row]}, lookup))
