@@ -17,7 +17,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
-
 from desk_robot.handling import raw_mpu6050
 
 LABELS = (("upright", 8), ("tilted", 4), ("shaking", 4))
