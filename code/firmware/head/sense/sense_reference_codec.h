@@ -10,6 +10,7 @@
 // loudspeaker/microphone acoustic delay has been calibrated or A2 passed.
 #include "codecs/no_audio_codec.h"
 #include "config.h"  // Selected Sense board AUDIO_*_SAMPLE_RATE contract.
+#include "reference_timeline.h"
 #include "sdkconfig.h"
 
 #include <array>
@@ -54,6 +55,10 @@ private:
     static_assert(AUDIO_OUTPUT_SAMPLE_RATE == kSpeakerRate,
                   "Sense AEC speaker rate differs from the active board");
     static_assert(kSpeakerRate % kMicRate == 0, "AEC decimation ratio must be integral");
+    static_assert(kMicRate == desk_robot::PlaybackReferenceClock::kReferenceRate,
+                  "AEC ring clock must match microphone rate");
+    static_assert(kSpeakerRate == desk_robot::PlaybackReferenceClock::kOutputRate,
+                  "AEC output clock must match speaker rate");
     // Per-unit ESP-IDF private build setting, default 90 ms only as a bench
     // starting point. It is not a physical acoustic calibration.
     static constexpr uint32_t kDelaySamples =
@@ -83,7 +88,7 @@ private:
     bool reference_integrity_failed_ = false;
     bool reference_read_seen_ = false;
     uint64_t last_reference_read_write_index_ = 0;
-    int64_t last_write_us_ = 0;
+    desk_robot::PlaybackReferenceClock reference_clock_{};
     int16_t filter_last1_ = 0;
     int16_t filter_last2_ = 0;
     int16_t last_filtered_ = 0;
