@@ -12,9 +12,11 @@ import base64
 import json
 import os
 import secrets
+import threading
 import time
 import wave
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 from aiohttp import web
@@ -25,6 +27,35 @@ lease_until = 0.0
 lease_stopping = False
 lease_cleanup_task: asyncio.Task | None = None
 speaker_lock = asyncio.Lock()
+# The upstream WAV to Opus conversion is synchronous CPU work. Cancellation
+# of asyncio.to_thread does not stop it. Keep the one native encoder owned
+# until the underlying worker really exits; reject extra queued speech while
+# an old interrupted encoding remains active.
+_opus_encode_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desk-opus")
+_opus_encode_slot = threading.BoundedSemaphore(1)
+
+
+async def encode_opus_owned(audio: bytes) -> list[bytes]:
+    """Never stack another native Opus encoder onto a cancelled old turn."""
+    if not _opus_encode_slot.acquire(blocking=False):
+        raise RuntimeError("Previous Opus encoding still in flight")
+    try:
+        future = _opus_encode_pool.submit(encode_opus, audio)
+    except BaseException:
+        _opus_encode_slot.release()
+        raise
+
+    def worker_finished(completed) -> None:
+        try:
+            if not completed.cancelled():
+                completed.exception()  # Consume late native encoder failures.
+        finally:
+            _opus_encode_slot.release()
+
+    future.add_done_callback(worker_finished)
+    return await asyncio.wrap_future(future)
+
+
 # Retain the PR #7 device-specific generation fence for queued or encoding TTS.
 interrupt_generation: dict[str, int] = {}
 # Each real current-head human speech start supersedes tool results from
@@ -722,7 +753,7 @@ def create_app():
                     or generation != interrupt_generation.get(device, 0)):
                 raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
             async with asyncio.timeout(40):
-                frames = await asyncio.to_thread(encode_opus, audio)
+                frames = await encode_opus_owned(audio)
                 if (lease_stopping or not muted(device) or connections.get(device) is not connection
                         or generation != interrupt_generation.get(device, 0)):
                     raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
