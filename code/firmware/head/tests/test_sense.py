@@ -167,6 +167,23 @@ class SenseOverlayTests(unittest.TestCase):
         )
         self.assertIn('physical TX silence unverified', writer)
 
+    def test_reference_capture_reuses_bounded_scratch_without_heap_churn(self):
+        """Static ownership contract; firmware compile verifies C++ integration."""
+        header = (HEAD / "sense/sense_reference_codec.h").read_text()
+        code = (HEAD / "sense/sense_reference_codec.cc").read_text()
+        read = code.split("int SenseReferenceCodec::Read(", 1)[1].split(
+            "int SenseReferenceCodec::Write(", 1
+        )[0]
+        self.assertIn("static constexpr int kMaxReadFrames = 2048;", header)
+        self.assertIn("std::array<int16_t, kMaxReadFrames> microphone_frame_{};", header)
+        self.assertIn("std::array<int16_t, kMaxReadFrames> reference_frame_{};", header)
+        self.assertIn("std::lock_guard<std::mutex> input_lock(input_read_mutex_);", read)
+        self.assertIn("if (frames > kMaxReadFrames) return 0;", read)
+        self.assertIn("NoAudioCodecSimplexPdm::Read(microphone_frame_.data(), frames)", read)
+        self.assertIn("ReadReferenceLocked(reference_frame_.data(), frames)", read)
+        self.assertNotIn("std::vector<int16_t>", read)
+
+
     def test_reference_underflow_diagnostics_are_rate_limited(self):
         """Source-level diagnostic coverage, not acoustic qualification."""
         header = (HEAD / "sense/sense_reference_codec.h").read_text()
