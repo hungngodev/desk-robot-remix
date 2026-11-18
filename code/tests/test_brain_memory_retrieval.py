@@ -93,6 +93,39 @@ def test_fts5_rebuilds_legacy_memory_without_changing_provenance(tmp_path):
     assert [m.event_id for m in second.search("robot-01", "brass keys")] == ["legacy"]
 
 
+def test_fts5_rebuild_recovers_interrupted_legacy_index_creation(tmp_path):
+    path = tmp_path / "robot-01.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            """CREATE TABLE memories (
+                 event_id TEXT PRIMARY KEY, source_robot TEXT NOT NULL,
+                 witnessed INTEGER NOT NULL, kind TEXT NOT NULL,
+                 summary TEXT NOT NULL, observed_at REAL NOT NULL,
+                 confidence REAL NOT NULL)"""
+        )
+        db.execute(
+            """CREATE VIRTUAL TABLE memories_fts
+               USING fts5(summary,kind,content='memories',
+                          content_rowid='rowid',tokenize='porter unicode61')"""
+        )
+        db.execute(
+            """INSERT INTO memories VALUES (
+               'before_rebuild','robot-01',1,'key',
+               'Old silver key on the desk',1000,1.0)"""
+        )
+    store = MemoryStore(tmp_path, ["robot-01"])
+    assert [m.event_id for m in store.search("robot-01", "silver key")] == [
+        "before_rebuild",
+    ]
+    store.remember(
+        "robot-01", "after_rebuild", "An orange marble appeared",
+        kind="marble", source_robot="robot-01", witnessed=True,
+    )
+    assert [m.event_id for m in store.search("robot-01", "orange")] == [
+        "after_rebuild",
+    ]
+
+
 def test_fts5_deletions_retention_and_quoted_queries_cannot_revive_memories(tmp_path):
     store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
     store.remember(
