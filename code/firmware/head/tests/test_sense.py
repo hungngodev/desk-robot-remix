@@ -336,6 +336,53 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertNotIn("reference_overwrite_reads_ = 0;", clear)
         self.assertNotIn("reference_integrity_failed_ = false;", clear)
 
+    def test_partial_overlay_install_removes_original_and_missing_new_files(self):
+        """A crash after marker creation must not strand the pinned clone."""
+        overlay.apply(self.root, 'sense')
+        marker = self.root / overlay.MARKER
+        state = json.loads(marker.read_text())
+        # A half-applied transaction left a patched upstream file untouched
+        # and a brand-new board file uncreated.
+        restored = 'main/audio/audio_service.cc'
+        self.assertIn(restored, state)
+        self.assertIsNotNone(state[restored]['original'])
+        (self.root / restored).write_bytes(
+            base64.b64decode(state[restored]['original'])
+        )
+        new_file = next(
+            name for name, info in state.items()
+            if info['original'] is None and name.endswith('/config.h')
+        )
+        (self.root / new_file).unlink()
+        with self.assertRaisesRegex(ValueError, 'drift'):
+            overlay.apply(self.root, 'sense')
+        overlay.remove(self.root)
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.root / overlay.BOARDS['sense']).exists())
+        for name, original in self.original.items():
+            self.assertEqual((self.root / name).read_bytes(), original)
+        # Recovery permits the exact same pinned overlay to be applied again.
+        overlay.apply(self.root, 'sense')
+        self.assertTrue((self.root / new_file).is_file())
+        overlay.remove(self.root)
+
+    def test_partial_overlay_recovery_rejects_foreign_modification_atomically(self):
+        """Recovery may not overwrite a true local edit in any overlay file."""
+        overlay.apply(self.root, 'sense')
+        marker = self.root / overlay.MARKER
+        state = json.loads(marker.read_text())
+        restored = 'main/audio/audio_service.cc'
+        (self.root / restored).write_bytes(
+            base64.b64decode(state[restored]['original'])
+        )
+        changed = self.root / 'main/application.cc'
+        changed.write_bytes(changed.read_bytes() + b'// changed locally\\n')
+        old_bytes = (self.root / restored).read_bytes()
+        with self.assertRaisesRegex(ValueError, 'changed'):
+            overlay.remove(self.root)
+        self.assertTrue(marker.exists())
+        self.assertEqual((self.root / restored).read_bytes(), old_bytes)
+
     def test_sense_reinstall_drift_and_exact_restore(self):
         overlay.apply(self.root, 'sense')
         overlay.apply(self.root, 'sense')
