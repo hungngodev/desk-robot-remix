@@ -378,7 +378,11 @@ class OmniDuplexWire:
         This function intentionally cannot guess progress or mark generated
         audio as heard without a caller-provided physical playback measurement.
         """
-        if (type(actually_played_ms) is not int
+        if (not isinstance(response_id, str) or not response_id
+                or self.response_id is None
+                or not self.accept_output
+                or self.generated_bytes <= 0
+                or type(actually_played_ms) is not int
                 or type(truncate) is not bool
                 or self.response_id != response_id
                 or actually_played_ms < self.played_ms
