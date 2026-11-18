@@ -182,6 +182,28 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('"camera_sensor_pid"', bridge)
 
 
+    def test_tof_optics_read_only_bridge_validation_and_one_uart_owner(self):
+        """Eight optical raw words never become a second motion sensor owner."""
+        protocol = (HEAD / "overlay/robot_protocol.h").read_text()
+        bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+        body = (ROOT / "code/firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+        assert '"optics"' in protocol
+        assert 'bool OpticsValid(cJSON* json)' in bridge
+        assert 'cJSON_IsFalse(get("motor_authorized"))' in bridge
+        assert 'cJSON_IsFalse(get("physical_qualified"))' in bridge
+        assert 'cJSON_GetArraySize(amb) != 8' in bridge
+        assert 'cJSON_GetArraySize(signal) != 8' in bridge
+        assert 'cJSON_GetArraySize(ages) != 8' in bridge
+        assert 'command.verb == "optics"' in bridge
+        assert '"/api/optics"' in bridge
+        assert 'Transact(' in bridge
+        assert 'std::strcmp(command, "optics")' in body
+        assert '"motor_authorized":false' not in body  # JSON is C++ escaped
+        assert 'control.sample_range_optics(' in (
+            ROOT / "code/firmware/body/src/main.cpp"
+        ).read_text()
+
+
     def test_reference_generation_fence_prevents_stale_barge_audio(self):
         """Source contract only; physical DMA silence still needs A2 trials."""
         header = (HEAD / "sense/sense_reference_codec.h").read_text()
