@@ -472,8 +472,19 @@ void loop() {
     const auto scan_ms = millis();
     const auto errors_before = tof.errors();
     tof.poll(cliff_guard, scan_ms);
-    if (tof.errors() != errors_before)
+    if (tof.errors() != errors_before) {
       control.invalidate_side_ranges();
+      control.invalidate_range_optics();
+    }
+    const auto optical_channel = tof.new_optical_channel();
+    if (optical_channel < 8) {
+      const auto raw = tof.optical_diagnostic(optical_channel, scan_ms);
+      if (raw.present) {
+        control.sample_range_optics(
+            optical_channel, raw.ambient_97, raw.signal_97,
+            raw.valid, scan_ms);
+      }
+    }
     const auto extra = tof.new_extra_channel();
     if (extra < 3) {
       const auto sample = tof.extra_diagnostic(extra, scan_ms);
