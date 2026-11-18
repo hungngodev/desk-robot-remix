@@ -51,7 +51,22 @@ an assembled battery or regulator.
     -> independent left/right normally closed seat-switch inputs
 ```
 
-**Engineering conflict to resolve:** The BQ24074 maximum *programmed input current* and *charging current* are 1.5 A, while TI separately lists up to 4.5 A recommended OUT current under the specified operating conditions. These are different limits: 4.5 A at OUT is **not** a guarantee of 4.5 A of sustained dock-adapter power or successful net battery charging. Dynamic power-path management can reduce charging current, and the battery can supplement the system load. Board copper, temperature, cell discharge rating and charger thermal regulation must also be qualified. A CHG-active indication does **not** prove net battery charging. Qualified dock behavior must keep motors disarmed and measure *all remaining WiFi, camera, display and audio peaks*, boost input current and signed battery current. If the real load cannot remain within the source, device, board, battery and thermal limits simultaneously, choose a qualified higher-capacity power-path design or a validated dock power mode; do not parallel unqualified modules or trust the BQ status pin. Reference: TI BQ24074 electrical specifications, https://www.ti.com/lit/ds/symlink/bq24074.pdf .
+**Electrical limit resolved on paper, actual pack and dock still unqualified:** TI's programmable charger *input current* and *battery charge current* are limited to 1.5 A; the separate up-to-4.5 A OUT figure applies only under the datasheet's specified electrical conditions, including possible **battery supplement**. It is not an additional 4.5 A dock input or a guaranteed continuous output from the 5 V adapter. These are different limits: 4.5 A at OUT is **not** a guarantee of 4.5 A of sustained dock-adapter power or successful net battery charging. Dynamic power-path management can reduce charging current, and the battery can supplement the system load. Board copper, temperature, cell discharge rating and charger thermal regulation must also be qualified. A CHG-active indication does **not** prove net battery charging. Qualified dock behavior must keep motors disarmed and measure *all remaining WiFi, camera, display and audio peaks*, boost input current and signed battery current. If the real load cannot remain within the source, device, board, battery and thermal limits simultaneously, choose a qualified higher-capacity power-path design or a validated dock power mode; do not parallel unqualified modules or trust the BQ status pin. Reference: TI BQ24074 electrical specifications, https://www.ti.com/lit/ds/symlink/bq24074.pdf .
+
+## Frozen source architecture for the first robot
+
+The current `cap_power` entry in the canonical purchase register explicitly
+targets a **protected 1S pack with real NTC, BQ24075 power-path candidate,
+and a separately qualified 5 V buck-boost converter**. This is ONE
+source architecture for selection, not a selected purchasable charger PCB,
+battery or motor rail. The BQ24074 circuit above is a datasheet comparison
+and must not silently replace the BQ24075 variant in the register.
+Do not add more charger chip candidates until an actual carrier revision,
+protection circuit, NTC connection, battery discharge/PCM trip,
+connector/wire current ratings, output peaks and printed fit can be screened
+together. BQ24075's possible 5.6 V OUT makes a step-up-only 5 V board
+unsuitable. Dock contacts remain physically disconnected/unenergized;
+neither `PGOOD` nor `CHG` is a pack-current sensor.
 
 ## Five volt converter topology is a hard purchasing gate
 
