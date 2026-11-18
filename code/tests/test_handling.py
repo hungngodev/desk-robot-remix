@@ -686,3 +686,17 @@ def test_older_host_timestamp_cannot_hide_malformed_new_acquisition():
     assert qualified(gate, sample(sample_ms=previous_sample), previous_at - .1,
                      new_sample=False) == ()
     assert gate.reference is None
+
+
+def test_new_acquisition_with_older_host_time_does_not_rewind_gate_clock():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    previous_at, previous_sample = gate.last_at, gate.last_sample_ms
+    assert qualified(gate, sample(sample_ms=previous_sample + 1),
+                     previous_at - .05, new_sample=False) == ()
+    assert gate.last_sample_ms == previous_sample + 1
+    assert gate.last_at == previous_at
+    # A truly later host polling gap must still revoke the pose.
+    assert qualified(gate, sample(sample_ms=previous_sample + 2),
+                     previous_at + 1.1, new_sample=False) == ()
+    assert gate.reference is None

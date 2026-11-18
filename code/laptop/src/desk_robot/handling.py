@@ -244,7 +244,9 @@ class HandlingGate:
                 return ()  # same physical conversion; do not update last_at
         self.last_boot_id = boot_id
         self.last_sample_ms = sample_ms
-        self.last_at = now
+        # Accepted sensor acquisitions may arrive with an older host callback
+        # time. Never rewind the gate's cooldown and polling clock.
+        self.last_at = max(now, self.last_at) if self.last_at is not None else now
         acceleration, rotation_dps = sample
         # Decode the same validated MPU6050 axes, not a new I2C reader.
         # Estimating stationary bias follows the standard mean-zero-rate
