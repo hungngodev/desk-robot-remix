@@ -120,6 +120,41 @@ def test_imu_requires_eight_still_upright_baseline_reads():
     assert gate.reference == (0, 0, 1)
 
 
+def test_stationary_gyro_bias_is_estimated_and_used_for_qualified_tilt():
+    """A stable 3 dps offset is not 3 dps of deliberate human rotation."""
+    gate = HandlingGate()
+    for i in range(8):
+        assert qualified(
+            gate, sample(gyro=(393, -262, 131)),
+            100.0 + 0.15 * i,
+        ) == ()
+    assert gate.reference == (0, 0, 1)
+    assert gate.gyro_bias_dps == pytest.approx((3.0, -2.0, 1.0))
+    assert gate.startup_gyro_samples == []
+    tilt = sample(acc=(12551, 0, 10531), gyro=(393, -262, 131))
+    assert qualified(gate, tilt, 102.0) == ()
+    assert qualified(gate, tilt, 102.2) == ("handling_tilt",)
+    # Revoking physical qualification invalidates the bias as well as pose.
+    assert gate.observe(sample(), 102.4, qualified=False) == ()
+    assert gate.reference is None
+    assert gate.gyro_bias_dps is None
+
+
+def test_gyro_bias_calibration_rejects_inconsistent_stationary_claims():
+    gate = HandlingGate()
+    for i in range(7):
+        assert qualified(gate, sample(), 100.0 + 0.15 * i) == ()
+    # A last sample at 6 dps still passes the instantaneous 7 dps guard,
+    # but the window is not steady enough to estimate a trustworthy bias.
+    assert qualified(gate, sample(gyro=(786, 0, 0)), 101.15) == ()
+    assert gate.reference is None
+    assert gate.gyro_bias_dps is None
+    assert gate.startup_gyro_samples == []
+    calibrated(gate, 102)
+    assert gate.reference == (0, 0, 1)
+    assert gate.gyro_bias_dps == pytest.approx((0, 0, 0))
+
+
 def test_mpu_tilt_is_relative_to_actual_stationary_mount_not_body_axis():
     gate = HandlingGate()
     calibrated(gate)
