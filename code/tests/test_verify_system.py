@@ -89,6 +89,78 @@ def test_github_actions_also_compiles_all_body_and_room_envs():
     assert 'pio run -d code/firmware/dock -e "bench_nano_dock_$id"' in workflow
 
 
+def test_python_suite_reports_missing_pinned_upstreams_before_pytest(
+    monkeypatch, tmp_path,
+):
+    import json
+
+    sources = [
+        {
+            "name": name, "path": f"upstream/{name}",
+            "commit": letter * 40,
+        }
+        for name, letter in (
+            ("xiaozhi-esp32", "a"),
+            ("xiaozhi-esp32-server", "b"),
+        )
+    ]
+    (tmp_path / "upstream-lock.json").write_text(json.dumps({
+        "repositories": sources,
+    }))
+    monkeypatch.setattr(verify, "CODE", tmp_path)
+    executed = []
+
+    def should_not_run(*args, **kwargs):
+        executed.append(args)
+        raise AssertionError("Never launch pytest without its pinned sources")
+
+    monkeypatch.setattr(verify.subprocess, "run", should_not_run)
+    result = verify.run("python-tests", ["python", "-m", "pytest"],
+                        tmp_path, 2)
+    assert result["pass"] is False
+    assert result["exit_code"] is None
+    assert "INCOMPLETE" in result["error"]
+    assert "scripts/restore_upstreams.py" in result["error"]
+    assert "xiaozhi-esp32-server" in result["error"]
+    assert executed == []
+
+
+def test_python_suite_accepts_exact_pinned_upstream_commits(
+    monkeypatch, tmp_path,
+):
+    import json
+
+    commits = {"xiaozhi-esp32": "a" * 40,
+               "xiaozhi-esp32-server": "b" * 40}
+    (tmp_path / "upstream-lock.json").write_text(json.dumps({
+        "repositories": [
+            {"name": name, "path": "upstream/" + name, "commit": sha}
+            for name, sha in commits.items()
+        ],
+    }))
+    for name in commits:
+        (tmp_path / "upstream" / name).mkdir(parents=True)
+    monkeypatch.setattr(verify, "CODE", tmp_path)
+    calls = []
+
+    def pinned_git(args, **kwargs):
+        assert args == ["git", "rev-parse", "HEAD"]
+        return commits[kwargs["cwd"].name] + "\n"
+
+    def successful_pytest(*args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="1 passed",
+                               stderr="")
+
+    monkeypatch.setattr(verify.subprocess, "check_output", pinned_git)
+    monkeypatch.setattr(verify.subprocess, "run", successful_pytest)
+    result = verify.run("python-tests", ["python", "-m", "pytest"],
+                        tmp_path, 2)
+    assert result["pass"] is True
+    assert result["exit_code"] == 0
+    assert len(calls) == 1
+
+
 def test_runner_returns_real_failures_and_does_not_retry_motion(monkeypatch, tmp_path):
     calls = []
 
