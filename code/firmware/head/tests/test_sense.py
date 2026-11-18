@@ -337,6 +337,53 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertNotIn("reference_overwrite_reads_ = 0;", clear)
         self.assertNotIn("reference_integrity_failed_ = false;", clear)
 
+    def test_overlay_journal_rejects_parent_escape_before_any_restore(self):
+        """Untrusted recovery path cannot edit files outside the build clone."""
+        overlay.apply(self.root, 'sense')
+        marker = self.root / overlay.MARKER
+        state = json.loads(marker.read_text())
+        known_path = 'main/audio/audio_service.cc'
+        valid_bytes = (self.root / known_path).read_bytes()
+        state['main/../../outside-overwrite.txt'] = state[known_path]
+        marker.write_text(json.dumps(state))
+        with self.assertRaisesRegex(ValueError, 'Invalid head overlay journal'):
+            overlay.remove(self.root)
+        with self.assertRaisesRegex(ValueError, 'Invalid head overlay journal'):
+            overlay.apply(self.root, 'sense')
+        self.assertTrue(marker.is_file())
+        self.assertEqual((self.root / known_path).read_bytes(), valid_bytes)
+        del state['main/../../outside-overwrite.txt']
+        marker.write_text(json.dumps(state))
+        overlay.remove(self.root)
+
+    def test_overlay_journal_rejects_invalid_original_or_external_symlink(self):
+        """A forged original or symlinked source cannot become a restore target."""
+        overlay.apply(self.root, 'sense')
+        marker = self.root / overlay.MARKER
+        state = json.loads(marker.read_text())
+        known_path = 'main/audio/audio_service.cc'
+        old_original = state[known_path]['original']
+        state[known_path]['original'] = 'not base64 *'
+        marker.write_text(json.dumps(state))
+        with self.assertRaisesRegex(ValueError, 'Invalid original bytes'):
+            overlay.remove(self.root)
+        state[known_path]['original'] = old_original
+        marker.write_text(json.dumps(state))
+        with tempfile.TemporaryDirectory() as outside:
+            victim = Path(outside) / 'unrelated.cc'
+            victim.write_bytes(b'private unrelated source')
+            location = self.root / known_path
+            location.unlink()
+            location.symlink_to(victim)
+            with self.assertRaisesRegex(ValueError, 'path escapes pinned checkout'):
+                overlay.remove(self.root)
+            self.assertEqual(victim.read_bytes(), b'private unrelated source')
+            location.unlink()
+            location.write_bytes(
+                base64.b64decode(old_original)
+            )
+        overlay.remove(self.root)
+
     def test_forced_process_exit_leaves_recoverable_overlay_journal(self):
         """A real child process termination must not strand half-patched XiaoZhi."""
         script = """
