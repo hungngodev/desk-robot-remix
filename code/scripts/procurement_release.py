@@ -768,8 +768,8 @@ PILOT_SAMPLE_PRODUCTS = {
 
     "amp": (
         "MAX98357A I2S mono amplifier", "DFRobot", "DFR0954",
-        "https://www.digikey.com/en/products/detail/dfrobot/DFR0954/18069273",
-        1, None),  # Documented MAX98357A board; current checkout unknown.
+        "https://www.dfrobot.com/product-2614.html",
+        1, 4.90),  # Manufacturer USD quote checked 2026-11-18; bench sample only.
     "bumper": (
         "Normally closed micro bumper switch",
         "Aratas / former Omron", "D2F-01L3",
