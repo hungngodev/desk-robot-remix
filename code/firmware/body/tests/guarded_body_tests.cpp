@@ -233,6 +233,8 @@ static void accessory_sensors_never_infer_grip_or_current_or_grant_arm() {
   readings.gauge.fuel_valid = true;
   readings.gauge.cell_mv = 3690;
   readings.gauge.soc_centi = 6400;
+  readings.gauge.fuel_sample_seq = 1;
+  readings.gauge.fuel_at_ms = 5;
   readings.gauge.at_ms = 5;
   readings.proximity.present = true;
   readings.proximity.valid = true;
@@ -251,6 +253,42 @@ static void accessory_sensors_never_infer_grip_or_current_or_grant_arm() {
   CHECK(!body.state().armed);
   const std::string stale = send(body, "aux", 400);
   CHECK(stale.find("\"valid_mask\":0") != std::string::npos);
+}
+
+static void independent_pack_sensor_freshness_never_crosses_devices() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
+  desk_robot::AccessoryReadings readings{};
+  auto& gauge = readings.gauge;
+  gauge.fuel_present = gauge.fuel_valid = true;
+  gauge.monitor_present = gauge.monitor_valid = true;
+  gauge.cell_mv = 3720;
+  gauge.soc_centi = 5700;
+  gauge.fuel_sample_seq = 7;
+  gauge.monitor_sample_seq = 8;
+  gauge.fuel_at_ms = 10;
+  gauge.monitor_at_ms = 700;
+  gauge.at_ms = 700;  // Old shared timestamp incorrectly refreshed fuel.
+  body.set_accessories(readings, 700);
+  const auto only_monitor = send(body, "aux", 700);
+  CHECK(only_monitor.find("\"fuel_valid\":false") != std::string::npos);
+  CHECK(only_monitor.find("\"monitor_valid\":true") != std::string::npos);
+  CHECK(only_monitor.find("\"current_calibrated\":false")
+        != std::string::npos);
+
+  gauge.fuel_at_ms = 701;
+  gauge.fuel_sample_seq = 9;
+  gauge.monitor_at_ms = 10;
+  gauge.at_ms = 701;  // New fuel read must not refresh old shunt telemetry.
+  body.set_accessories(readings, 701);
+  const auto only_fuel = send(body, "aux", 701);
+  CHECK(only_fuel.find("\"fuel_valid\":true") != std::string::npos);
+  CHECK(only_fuel.find("\"monitor_valid\":false") != std::string::npos);
+
+  gauge.fuel_sample_seq = 0;
+  gauge.fuel_at_ms = 702;
+  body.set_accessories(readings, 702);
+  CHECK(send(body, "aux", 702).find("\"fuel_valid\":false")
+        != std::string::npos);  // A timestamp with no completed read is not fresh.
 }
 
 static void optional_max30102_raw_never_authorizes_motion_or_diagnosis() {
@@ -1187,6 +1225,7 @@ int main() {
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
+    independent_pack_sensor_freshness_never_crosses_devices();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
     extra_three_ranging_channels_are_diagnostics_only();
     eight_lane_optical_words_are_read_only_and_expire();
