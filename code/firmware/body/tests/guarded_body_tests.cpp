@@ -915,7 +915,9 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   const auto aux = send(body, "aux", 120);
   CHECK(!aux.empty() && aux.front() == '{' && aux.back() == '}');
   CHECK(aux.size() < desk_robot::kReplyCapacity - 1);
-  CHECK(aux.find("\"seq\":8,\"bpm\":null") != std::string::npos);
+  CHECK(aux.find("\"seq\":8,\"fifo_ir_first\":false,"
+                 "\"fifo_layout_physically_verified\":false,"
+                 "\"bpm\":null") != std::string::npos);
   CHECK(aux.find("\"valid\":true,\"seq\":10,\"age_ms\":25")
         != std::string::npos);
   CHECK(aux.find("\"nfc\":{\"v\":true,\"t\":305419896,\"e\":3,\"s\":17}")
