@@ -1299,6 +1299,8 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
         "sample_is_complete_functional_channel"] is False
     assert "rated_transistor_driver" in rows[
         "dock_ir_emitter_channels"]["missing_for_functional_channel"]
+    assert "cliff_obstacle" in cart["unresolved_roles"]
+    assert "i2c_mux" not in cart["unresolved_roles"]
     assert "cap_power" in cart["unresolved_roles"]
     assert "dock_contacts" in cart["unresolved_roles"]
     rendered = mod.render_pilot_supplier_cart(mod.generate(plan))
