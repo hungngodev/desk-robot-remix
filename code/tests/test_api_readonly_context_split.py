@@ -3,7 +3,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from desk_robot.api import CoreMemoryRequest, ReadonlyPlanRequest, create_app
+from desk_robot.api import (
+    CoreMemoryRequest,
+    NativeHeardRequest,
+    NativeSpokenRequest,
+    ReadonlyPlanRequest,
+    create_app,
+)
 from desk_robot.config import load_settings
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
@@ -126,3 +132,47 @@ def test_operator_memory_request_limits_survive_route_extraction():
             CoreMemoryRequest(value=invalid)
     with pytest.raises(ValidationError):
         CoreMemoryRequest(value="private", motor_authorized=True)
+
+
+def test_native_omni_routes_still_have_the_same_audio_video_auth():
+    config = Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    app = create_app(load_settings(config), runtime=SimpleNamespace())
+    endpoints = {
+        "/v1/pet/{robot_id}/omni-context": "GET",
+        "/v1/pet/{robot_id}/omni-heard": "POST",
+        "/v1/pet/{robot_id}/omni-spoken": "POST",
+        "/v1/pet/{robot_id}/omni-stream": "GET",
+        "/v1/pet/{robot_id}/omni-frame": "GET",
+    }
+    for path, method in endpoints.items():
+        matches = [
+            route for route in app.routes
+            if isinstance(route, APIRoute)
+            and route.path == path and method in route.methods
+        ]
+        assert len(matches) == 1
+        route = matches[0]
+        assert route.endpoint.__module__ == "desk_robot.api_native_omni_routes"
+        assert any(
+            getattr(dep.call, "__name__", None) == "authorize"
+            for dep in route.dependant.dependencies
+        )
+
+
+def test_native_heard_and_sent_schemas_remain_bounded_after_split():
+    heard = NativeHeardRequest(
+        event_id="omni_" + "a" * 12 + "_" + "b" * 20,
+        transcript="What is on my desk?",
+    )
+    assert heard.transcript == "What is on my desk?"
+    sent = NativeSpokenRequest(
+        event_id="omni_sent_" + "a" * 12 + "_" + "b" * 20,
+        model_text="I see a mug.", sent_at_us=123456,
+    )
+    assert sent.sent_at_us == 123456
+    with pytest.raises(ValidationError):
+        NativeHeardRequest(event_id="not_a_real_audio_event", transcript="Hi")
+    with pytest.raises(ValidationError):
+        NativeSpokenRequest(
+            event_id=sent.event_id, model_text="sent", sent_at_us=0,
+        )
