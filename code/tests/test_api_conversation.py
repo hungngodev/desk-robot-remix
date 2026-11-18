@@ -1210,7 +1210,6 @@ async def test_kokoro_all_stop_routes_require_device_bound_receipts(
 async def test_speaker_doubles_advertising_permission_support_accept_keyword():
     """A hardware speaker mock must not advertise a keyword it rejects."""
     import ast
-    import inspect
     from pathlib import Path
 
     for path in (Path(__file__), Path(__file__).with_name("test_fleet.py")):
