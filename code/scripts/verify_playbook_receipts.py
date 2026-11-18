@@ -78,6 +78,36 @@ def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
         and data["size"] > 0
 
 
+def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
+    """Resolve exact PR review evidence, not a self-declared URL string."""
+    receipt = row.get("manual_review_receipt")
+    if not isinstance(receipt, dict) or receipt.get("sha") != sha:
+        return False
+    reviewer, url = receipt.get("reviewer"), receipt.get("review_url")
+    if not isinstance(reviewer, str) or not isinstance(url, str):
+        return False
+    match = re.fullmatch(
+        r"https://github\\.com/hungngodev/desk-robot-remix/pull/17"
+        r"#issuecomment-([0-9]+)", url,
+    )
+    if match is None:
+        return False
+    comment = lookup(f"https://api.github.com/repos/{REPO}/issues/comments/{match[1]}")
+    actor = comment.get("user")
+    body = comment.get("body")
+    identifier = row.get("id")
+    return (
+        comment.get("html_url") == url
+        and isinstance(actor, dict)
+        and actor.get("type") == "User"
+        and actor.get("login") == reviewer
+        and isinstance(body, str)
+        and isinstance(identifier, int)
+        and bool(re.search(rf"\\bprocedure\\s*#?{identifier}\\b", body, re.IGNORECASE))
+        and sha in body
+    )
+
+
 def audit(ledger: dict, lookup=github_json) -> list[str]:
     """Return failures, never turn network errors into a success receipt."""
     errors: list[str] = []
@@ -92,14 +122,35 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         if evidence_class == "physical" and row.get("gate") == "TESTED":
             errors.append(f"procedure {identifier}: physical task cannot be source-only TESTED")
             continue
-        sha = row.get("last_verified_sha")
+        command = row.get("verification_command")
         receipt = row.get("executed_test_receipt")
+        if (not isinstance(command, str)
+                or not command.startswith("cd code && ")
+                or re.search(r"--(?:help|version|collect-only)\\b|&& true\\b", command)
+                or not isinstance(receipt, dict)
+                or receipt.get("command") != command):
+            errors.append(f"procedure {identifier}: executable command receipt mismatch")
+            continue
+        sha = row.get("last_verified_sha")
         if (not isinstance(sha, str) or not SHA.fullmatch(sha)
                 or not isinstance(receipt, dict)
                 or receipt.get("sha") != sha
                 or receipt.get("exit_code") != 0):
             errors.append(f"procedure {identifier}: invalid source receipt")
             continue
+        method = row.get("verification_method")
+        if method not in (None, "manual_review"):
+            errors.append(f"procedure {identifier}: unsupported verification method")
+            continue
+        if method == "manual_review":
+            try:
+                if not verified_manual_review(row, sha, lookup):
+                    errors.append(f"procedure {identifier}: manual review not verified")
+            except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
+                errors.append(
+                    f"procedure {identifier}: manual review lookup failed: "
+                    f"{type(exc).__name__}"
+                )
         try:
             if not verified_actions_run(receipt.get("url", ""), sha, lookup):
                 errors.append(f"procedure {identifier}: CI run not verified")
