@@ -56,7 +56,24 @@ mounting orientation and physical rig notes. During all these observations,
 wheel command and drive permit must be zero; use controlled benchtop handling
 without loaded wheel movement.
 
-Run from `code/`:
+The repository also provides an optional **read-only** capture helper which
+polls the existing authenticated Mac WROOM status route and refuses moving
+wheels, wrong robot identity, stale acquisitions and rebooted WROOM epochs.
+The operator must physically establish each labeled condition when prompted;
+the helper never moves or arms the robot. From `code/`, after configuring the
+private API token:
+
+```bash
+uv run --no-sync python scripts/capture_handling_trials.py --robot robot-01 --firmware-commit ACTUAL_FLASHED_SHA --mount-id ACTUAL_MOUNT --output actual-trials.jsonl
+uv run --no-sync python scripts/calibrate_handling.py actual-trials.jsonl
+```
+
+The JSONL records a host monotonic **receipt time**, not a synchronized IMU
+conversion clock. Only actual `imu.sample_ms` and `imu.boot_id` establish
+conversion sequence and physical boot provenance. Preserve the separate
+hardware stopwatch/thermal notes rather than inventing timestamps.
+
+You can also collect real status evidence independently and run from `code/`:
 
 ```bash
 uv run --no-sync python scripts/calibrate_handling.py path/to/actual-trials.jsonl
