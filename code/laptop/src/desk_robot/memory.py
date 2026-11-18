@@ -112,9 +112,6 @@ class MemoryStore:
                 # SQLite FTS5 is built in and zero-dependency. An external
                 # content index avoids storing a second copy of text and
                 # preserves the existing per-pet provenance source of truth.
-                exists = db.execute(
-                    "SELECT 1 FROM sqlite_master WHERE name='memories_fts'"
-                ).fetchone()
                 db.execute(
                     """CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
                        USING fts5(summary, kind, content='memories',
@@ -140,10 +137,10 @@ class MemoryStore:
                          VALUES (new.rowid,new.summary,new.kind);
                        END;"""
                 )
-                if exists is None:
-                    # Migrate old per-robot databases without changing stored
-                    # episodes, timestamps, core facts or ownership.
-                    db.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
+                # At most 250 rows per robot. Rebuild once per store start
+                # so an interrupted migration cannot leave a present but
+                # incomplete index, without touching original episode rows.
+                db.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
 
     @contextmanager
     def _connect(self, robot_id: str):
