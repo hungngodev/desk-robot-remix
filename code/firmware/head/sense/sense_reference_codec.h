@@ -14,7 +14,6 @@
 #include <array>
 #include <cstdint>
 #include <mutex>
-#include <vector>
 
 class SenseReferenceCodec final : public NoAudioCodecSimplexPdm {
 public:
@@ -53,6 +52,13 @@ private:
         CONFIG_DESK_ROBOT_AEC_DELAY_MS * (kMicRate / 1000);
     static constexpr uint32_t kMaxGapSamples = kRingSize;
     static_assert((kRingSize & (kRingSize - 1)) == 0);
+    // Reuse fixed bounded mic/reference frame scratch buffers instead of
+    // allocating twice on every realtime 16 kHz microphone callback.
+    // One capture reader owns the scratch buffers at a time.
+    static constexpr int kMaxReadFrames = 2048;
+    std::mutex input_read_mutex_;
+    std::array<int16_t, kMaxReadFrames> microphone_frame_{};
+    std::array<int16_t, kMaxReadFrames> reference_frame_{};
     std::mutex reference_mutex_;
     std::array<int16_t, kRingSize> reference_{};
     uint64_t write_index_ = 0;
