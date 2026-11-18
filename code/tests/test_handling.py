@@ -1,6 +1,6 @@
 """Source-grounded MPU6050 handling behavior, not physical calibration proof."""
 import pytest
-from desk_robot.handling import HandlingGate, raw_mpu6050
+from desk_robot.handling import HandlingGate, raw_mpu6050, mpu6050_temperature_raw
 
 
 def sample(
@@ -995,3 +995,26 @@ def test_internal_handling_reset_keeps_retired_boot_replay_fence():
     ) == ()
     assert gate.reference is None
     assert gate.startup_samples == []
+
+
+def test_read_only_mpu_temperature_requires_fresh_attested_stationary_sample():
+    frame = canonical_wroom_sample()
+    frame["imu"].update(temp_raw=-1286, temp_valid=True)
+    assert mpu6050_temperature_raw(frame) == -1286
+    frame["imu"]["temp_raw"] = 344
+    assert mpu6050_temperature_raw(frame) == 344
+    for malformed in (None, True, 1.2, "344", 32768, -32769):
+        frame["imu"]["temp_raw"] = malformed
+        assert mpu6050_temperature_raw(frame) is None
+    frame["imu"]["temp_raw"] = 344
+    frame["imu"]["temp_valid"] = False
+    assert mpu6050_temperature_raw(frame) is None
+    frame["imu"]["temp_valid"] = True
+    frame["imu"]["age_ms"] = 201
+    assert mpu6050_temperature_raw(frame) is None
+    frame["imu"]["age_ms"] = 20
+    frame["motor"]["m0"] = 10
+    assert mpu6050_temperature_raw(frame) is None
+    frame["motor"]["m0"] = 0
+    frame["imu"]["family"] = 1
+    assert mpu6050_temperature_raw(frame) is None
