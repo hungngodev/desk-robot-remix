@@ -1,3 +1,27 @@
+# Exact head verification summary
+
+This section is the first checkpoint for parallel engineering agents. Never
+treat the historical pass in this table as proof for the live PR head. Check
+[PR #17 checks](https://github.com/hungngodev/desk-robot-remix/pull/17/checks)
+and the exact commit SHA **before** changing any acceptance flag. This document
+is not automatically refreshed by GitHub Actions.
+
+| Verification gate | Exact evidence | Status at November 17 review |
+| --- | --- | --- |
+| Current PR #17 head | [Latest commits](https://github.com/hungngodev/desk-robot-remix/pull/17/commits) | Must fetch live SHA; no pinned current green claim |
+| Python and head host tests | [Historical run 44203205736](https://github.com/hungngodev/desk-robot-remix/actions/runs/44203205736), SHA `91c248a034d0f3ee4b8d8b93608cacc6dadc8fe3` | PASS on older SHA only |
+| C++ sanitizer tests | Same historical run and exact SHA | PASS on older SHA only |
+| ESP32 WROOM PlatformIO | Same historical run and exact SHA | PASS on older SHA only |
+| XIAO Sense ESP IDF 6.1 | Same historical run and exact SHA | PASS on older SHA only |
+| All four jobs on the current head | [Live checks](https://github.com/hungngodev/desk-robot-remix/pull/17/checks) | UNVERIFIED until current SHA has completed successfully |
+| Live speech and camera | Device evidence and A2 acoustic trial logs | NO physical qualification |
+| Loaded motor stop and hardware cutoff | Independent motor rail and CPU halt measurements | NO physical qualification |
+| Protected pack, charger and dock | Manufacturer matched PCB/pack and current/thermal/contact trials | NO physical qualification |
+| Print fit and gripper | Full measured mechanical assembly and calibration | NO physical qualification |
+
+Never close a physical safety or buying gate from synthetic tests,
+documentation improvements or a historical all green CI run.
+
 ## November 17 source edge-case burn-down: vision, cliff telemetry, procurement
 
 This checkpoint implements three missing acceptance details identified after rereading
