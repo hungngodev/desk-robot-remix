@@ -529,6 +529,54 @@ async def test_queued_speech_rejects_disconnected_or_replaced_head(
     await handlers["/session"](body_request({"device_ids": ids, "enabled": False}))
 
 
+async def test_cancelled_native_opus_worker_stays_owned_until_it_really_finishes(
+    bridge, monkeypatch,
+):
+    """Cancellation must not launch two real Opus encoders simultaneously."""
+    entered = threading.Event()
+    release = threading.Event()
+    exiting = threading.Event()
+    encoded = []
+
+    def blocking_encoder(audio):
+        encoded.append(audio)
+        entered.set()
+        try:
+            assert release.wait(3), "test failed to release native encoder"
+            return [b"opus"]
+        finally:
+            exiting.set()
+
+    monkeypatch.setattr(bridge, "encode_opus", blocking_encoder)
+    first = asyncio.create_task(bridge.encode_opus_owned(b"old-turn"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        with pytest.raises(RuntimeError, match="Previous Opus encoding"):
+            await bridge.encode_opus_owned(b"new-turn")
+        assert encoded == [b"old-turn"]
+    finally:
+        release.set()
+        assert await asyncio.to_thread(exiting.wait, 2)
+
+    # The native future owns the semaphore until it completes, not merely
+    # until the asyncio wrapper was cancelled.
+    for _ in range(60):
+        try:
+            result = await bridge.encode_opus_owned(b"fresh-turn")
+        except RuntimeError as exc:
+            assert "Previous Opus encoding" in str(exc)
+            await asyncio.sleep(0.01)
+        else:
+            assert result == [b"opus"]
+            break
+    else:
+        pytest.fail("Native Opus capacity was not released after actual exit")
+    assert encoded == [b"old-turn", b"fresh-turn"]
+
+
 async def test_stop_during_encoding_does_not_start_transmission(bridge, monkeypatch):
     ids, handlers = fleet_handlers(bridge, monkeypatch)
     await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
