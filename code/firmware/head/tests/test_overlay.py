@@ -248,6 +248,8 @@ class OverlayTests(unittest.TestCase):
         service = (self.root / "main/audio/audio_service.cc").read_text()
         self.assertIn("constexpr int initial_decoder_rate = 24000;", service)
         self.assertIn("esp_ae_rate_cvt_open(&cfg, &output_resampler_)", service)
+        self.assertIn("esp_ae_rate_cvt_close(output_resampler_)", service)
+        self.assertIn("output_resampler_ = nullptr;", service)
         self.assertIn("Sense speaker resampler unavailable: discarding mismatched PCM", service)
         self.assertIn("decoded = !task.pcm.empty();", service)
         app = (self.root / "main/application.cc").read_text()
