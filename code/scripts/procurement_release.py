@@ -915,7 +915,7 @@ def pilot_supplier_cart(report: dict) -> dict:
         "lithium_charging_or_motor_motion_authorized": False,
         "unresolved_roles": [
             x["id"] for x in pilot["roles"]
-            if x["conditional_remaining"] and not x["pilot_sample_quantity"]
+            if x["conditional_remaining"] > x["pilot_sample_quantity"]
         ],
         "items": items,
     }
