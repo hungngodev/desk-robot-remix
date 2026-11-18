@@ -24,7 +24,7 @@ _EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
 
 
 _CORE_SLOT = re.compile(r"[a-z][a-z0-9_]{1,39}\Z")
-_WORDS = re.compile(r"(?u)[^\\W_]{2,}")
+_WORDS = re.compile(r"(?u)[^\W_]{2,}")
 _QUERY_FILLER = frozenset({
     "a", "an", "and", "are", "at", "be", "can", "did", "do", "for", "from",
     "have", "i", "in", "is", "it", "me", "my", "of", "on", "our", "that",
