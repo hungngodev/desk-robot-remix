@@ -432,7 +432,8 @@ void setup() {
                 static_cast<unsigned>(imu.gyro_id),
                 static_cast<unsigned>(imu.aux_id));
   Serial.println();
-  // Optional 8-zone CAP1188 via mux 0x71, channel 0 at 0x28.
+  // Optional CAP1188 on mux 0x71 channel 0: prefer 0x29, accept 0x28
+  // only after manufacturer and product ID checks on the isolated bus.
   // The dedicated AT42QT1010 GPIO34 remains the actual touch stop.
   const bool petting_present = cap1188.begin(Wire);
   Serial.println(petting_present ? "INFO cap1188_read_only_available" :
