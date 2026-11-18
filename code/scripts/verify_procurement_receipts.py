@@ -42,10 +42,14 @@ def checkout_sha() -> str:
         raise ValueError("A clean exact commit and full repository tree are required for ordering")
     # Source authority is the existing PR branch. A clean main checkout,
     # stale fork or detached synthetic merge is not the purchase baseline.
-    current_branch = subprocess.check_output(
-        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
-        cwd=ROOT, text=True, timeout=10,
-    ).strip()
+    try:
+        current_branch = subprocess.check_output(
+            ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+            cwd=ROOT, text=True, timeout=10,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        current_branch = ""
     if current_branch != "impl/mac-hardware-safety-preflight-2026-11-10":
         raise ValueError("Purchasing requires the canonical PR #17 branch")
     return sha
