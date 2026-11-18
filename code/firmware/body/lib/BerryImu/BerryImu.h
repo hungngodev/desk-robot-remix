@@ -26,6 +26,9 @@ struct BerryReading {
   bool valid = false;
   std::int16_t accel[3]{};
   std::int16_t gyro[3]{};
+  // Read-only MPU6050 TEMP_OUT raw register, not a calibrated temperature.
+  // Other IMU families do not supply this value through this adapter.
+  std::int16_t temperature_raw = 0;
   std::uint32_t at_ms = 0;
 };
 
