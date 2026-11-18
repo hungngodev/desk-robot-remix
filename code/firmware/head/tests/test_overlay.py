@@ -17,13 +17,67 @@ overlay = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(overlay)
 UPSTREAM = Path(os.environ.get("DESK_ROBOT_UPSTREAM", HEAD.parents[1] / "upstream/xiaozhi-esp32"))
 
+
+def native_cpp_env() -> dict[str, str]:
+    """Use Apple's actual SDK libc++ includes for the C++ harness on macOS.
+
+    Never override a developer's explicit include path or mutate the shell.
+    On non-Apple runners use the compiler's normal header discovery.
+    """
+    env = dict(os.environ)
+    if sys.platform != "darwin" or env.get("CPLUS_INCLUDE_PATH"):
+        return env
+    xcrun = shutil.which("xcrun")
+    if not xcrun:
+        return env
+    try:
+        sdk = subprocess.run(
+            [xcrun, "--show-sdk-path"], capture_output=True, text=True,
+            check=False,
+        )
+    except OSError:
+        return env
+    if sdk.returncode == 0 and sdk.stdout.strip():
+        headers = Path(sdk.stdout.strip()) / "usr/include/c++/v1"
+        if headers.is_dir():
+            env["CPLUS_INCLUDE_PATH"] = str(headers)
+    return env
+
+
 class ProtocolTests(unittest.TestCase):
+    def test_native_cpp_env_preserves_user_configuration(self):
+        with patch.object(sys, "platform", "darwin"), patch.dict(
+            os.environ, {"CPLUS_INCLUDE_PATH": "/already/configured"}
+        ):
+            with patch.object(shutil, "which") as lookup:
+                self.assertEqual(
+                    native_cpp_env()["CPLUS_INCLUDE_PATH"],
+                    "/already/configured",
+                )
+                lookup.assert_not_called()
+
+    def test_native_cpp_env_resolves_macos_sdk_only_when_needed(self):
+        with patch.object(sys, "platform", "darwin"), patch.dict(
+            os.environ, {"CPLUS_INCLUDE_PATH": ""}
+        ), patch.object(shutil, "which", return_value="/usr/bin/xcrun"), patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="/fake/MacOSX.sdk\n",
+            ),
+        ) as probe, patch.object(Path, "is_dir", return_value=True):
+            env = native_cpp_env()
+            self.assertEqual(
+                env["CPLUS_INCLUDE_PATH"],
+                "/fake/MacOSX.sdk/usr/include/c++/v1",
+            )
+            probe.assert_called_once()
+
     def test_native_protocol_and_ack_regressions(self):
         compiler = shutil.which("c++")
         self.assertIsNotNone(compiler, "A native C++20 compiler is required")
         with tempfile.TemporaryDirectory() as d:
             exe = Path(d) / "protocol-test"
-            subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD / "overlay"), str(HEAD / "tests/protocol_test.cc"), "-o", str(exe)], check=True)
+            subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD / "overlay"), str(HEAD / "tests/protocol_test.cc"), "-o", str(exe)], check=True, env=native_cpp_env())
             subprocess.run([str(exe)], check=True)
 
 
@@ -74,7 +128,7 @@ class BuildSelectionTests(unittest.TestCase):
         self.assertIsNotNone(compiler, "A native C++23 compiler is required")
         with tempfile.TemporaryDirectory() as d:
             exe = Path(d) / "snapshot-test"
-            subprocess.run([compiler, "-std=c++23", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD), str(HEAD / "tests/snapshot_test.cc"), "-o", str(exe)], check=True)
+            subprocess.run([compiler, "-std=c++23", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD), str(HEAD / "tests/snapshot_test.cc"), "-o", str(exe)], check=True, env=native_cpp_env())
             subprocess.run([str(exe)], check=True)
 
 @unittest.skipUnless((UPSTREAM / "main/boards/common/esp_video.cc").is_file(), "Pinned upstream fixture unavailable")

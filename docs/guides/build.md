@@ -69,7 +69,7 @@ ctest --test-dir ../.tools/body-host --output-on-failure
 ```
 
 On this Mac, the installed compiler needed its existing SDK C++ include path:
-`export CPLUS_INCLUDE_PATH="$(xcrun --show-sdk-path)/usr/include/c++/v1"`.
+`export CPLUS_INCLUDE_PATH="$(xcrun --show-sdk-path)/usr/include/c++/v1"`. The head native test harness now probes this SDK include path automatically on macOS when no explicit `CPLUS_INCLUDE_PATH` was supplied; the manual setting remains useful for other direct compiler commands.
 This is a per-terminal workaround, not a global configuration change.
 
 ## Shared head build environment
