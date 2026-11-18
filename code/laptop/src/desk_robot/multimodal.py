@@ -25,20 +25,13 @@ if TYPE_CHECKING:
     from .transport import Head
     from .vision import OllamaScene
 from .room_station import RoomObservation
+from .sensor_event_contract import TRIGGERS  # retained public import name
 
 TEMPORAL_WORDS = re.compile(
     r"\b(chang(?:e|ed|ing)|mov(?:e|ed|ing)|happen(?:ed|ing)?|"
     r"before|after|just|appear(?:ed)?|disappear(?:ed)?|"
     r"pick(?:ed)?|put|drop(?:ped)?)\b", re.I
 )
-
-TRIGGERS = frozenset({
-    "human_voice", "touch", "touch_tap", "touch_double", "touch_hold",
-    "petting_zone", "hand_wave", "nearby_object", "nose_twist",
-    "squeeze", "bumper", "magnet", "pir", "battery_low", "safety_fault",
-    "handling_tilt", "handling_shake",
-    "side_object", "paw_contact", "ambient_shift", "nfc_tag",
-})
 
 
 def _finite(value: float) -> bool:
