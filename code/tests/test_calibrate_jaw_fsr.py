@@ -52,6 +52,7 @@ async def test_jaw_capture_skips_duplicate_and_accepts_wrapped_hardware_sample()
         calls.append(str(request.url))
         seq = next(observations)
         return httpx.Response(200, json={
+            "robot_id": "robot-01",
             "force": {
                 "valid": True, "calibrated": False,
                 "jaw_seq": seq, "adc": [0, 350],
@@ -69,3 +70,23 @@ async def test_jaw_capture_skips_duplicate_and_accepts_wrapped_hardware_sample()
     ]
     assert len(calls) == 6
     assert all("/v1/robots/robot-01/aux" in call for call in calls)
+
+
+async def test_jaw_capture_rejects_cross_robot_auxiliary_telemetry():
+    """A valid ADC conversion from another pet cannot calibrate this jaw."""
+    def wrong_robot(_request):
+        return httpx.Response(200, json={
+            "robot_id": "robot-02",
+            "force": {
+                "valid": True, "calibrated": False,
+                "jaw_seq": 1, "adc": [0, 350],
+            },
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wrong_robot)) as client:
+        with pytest.raises(ValueError, match="robot identity mismatch"):
+            await jaw.capture(
+                client, base_url="http://127.0.0.1:8008",
+                robot="robot-01", token="t" * 24,
+                count=5, interval=0.12,
+            )
