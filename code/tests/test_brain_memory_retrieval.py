@@ -138,7 +138,7 @@ def test_fts5_porter_and_unicode_recall_without_custom_stemming(tmp_path):
     assert [m.event_id for m in store.search("robot-01", "candy")] == [
         "candies",
     ]
-    assert [m.event_id for m in store.search("robot-01", "cafe")] == [
+    assert [m.event_id for m in store.search("robot-01", "phe")] == [
         "coffee",
     ]
 
