@@ -1035,6 +1035,31 @@ async def test_local_vlm_speaks_from_visual_evidence_and_not_confidence_guess(an
         assert await model.answer("What is there?", [image()]) == expected
 
 
+@pytest.mark.parametrize("kind", ["oversized", "fake_header"])
+async def test_direct_visual_question_rejects_corrupt_source_before_network(kind):
+    """A visual question must not forward malformed JPEG bytes to the VLM."""
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"message": {"content": "{}"}})
+
+    if kind == "oversized":
+        frame = bytearray(image())
+        sof = frame.find(bytes([255, 192]))
+        assert sof > 0
+        frame[sof + 5:sof + 9] = (5000).to_bytes(2, "big") * 2
+        bad = bytes(frame)
+    else:
+        bad = bytes([255, 216]) + b"fake camera image contents"
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        model = OllamaScene(client, url="http://local:11434", model="local-vlm")
+        with pytest.raises((ValueError, OSError)):
+            await model.answer("What is in front of me?", [bad])
+    assert requests == []
+
+
 async def test_vlm_two_frames_for_human_temporal_question():
     observed = []
     def handler(req):
