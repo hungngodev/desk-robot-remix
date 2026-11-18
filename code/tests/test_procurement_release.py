@@ -1314,6 +1314,54 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
 
 
 
+
+def test_pilot_cart_exposes_actual_source_and_test_not_hardware_approval():
+    import json
+    from pathlib import Path
+
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    cart = mod.pilot_supplier_cart(report)
+    assert cart["exact_sku_count"] == 13
+    for item in cart["items"]:
+        assert (mod.ROOT / item["implementation_source"]).is_file()
+        assert (mod.ROOT / item["implementation_test"]).is_file()
+        assert item["implementation_test"].startswith("code/")
+        assert "/tests/" in item["implementation_test"]
+        assert item["implementation_state"]
+        assert item["tests_executed_on_this_checkout"] is False
+    rows = {item["id"]: item for item in cart["items"]}
+    assert rows["cliff_obstacle"]["implementation_source"].endswith(
+        "TofBus/TofBus.cpp")
+    assert rows["amp"]["implementation_source"].endswith(
+        "sense_reference_codec.cc")
+    # The speaker has a CAD coupon, not a compiled speaker driver. Do not
+    # mislabel a physical fit reference as verified firmware.
+    assert rows["speaker"]["implementation_source_is_code"] is False
+    assert rows["speaker"]["implementation_state"] == "speaker_fit_reference_only"
+    assert rows["dock_ir_emitter_channels"][
+        "sample_is_complete_functional_channel"] is False
+    rendered = mod.render_pilot_supplier_cart(report)
+    assert "Engineering source" in rendered
+    assert "NOT executed tests" in rendered
+
+
+def test_pilot_cart_fails_closed_on_invented_implementation_owner(
+        tmp_path, monkeypatch):
+    import json
+
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    owners = json.loads((mod.ROOT / "docs/hardware/full-63-role-source-ownership.json")
+                        .read_text(encoding="utf-8"))
+    owners["pet_roles"]["cliff_obstacle"]["source"] = \
+        "../../nonexistent/tof.cpp"
+    target = tmp_path / "docs/hardware/full-63-role-source-ownership.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps(owners), encoding="utf-8")
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    with pytest.raises(ValueError, match="Missing sample implementation file"):
+        mod.pilot_supplier_cart(report)
+
+
 def test_receipt_url_requires_real_https_host():
     """A URL scheme alone is not a real receipt address."""
     receipt = {"result": "pass", "tested_on": "bench sample",
