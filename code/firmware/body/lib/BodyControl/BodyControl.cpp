@@ -68,6 +68,22 @@ void BodyControl::sample_touch_input(bool active) {
   if (active) touch_trip();  // before debounce and before motor output
 }
 
+void BodyControl::sample_range_optics(
+    std::uint8_t channel, std::uint16_t ambient_97,
+    std::uint16_t signal_97, bool valid, std::uint32_t now_ms) {
+  if (channel >= 8) return;
+  auto& sample = state_.optical[channel];
+  sample.present = true;
+  sample.valid = valid;
+  sample.ambient_97 = ambient_97;
+  sample.signal_97 = signal_97;
+  sample.at_ms = now_ms;
+}
+
+void BodyControl::invalidate_range_optics() {
+  for (auto& sample : state_.optical) sample.valid = false;
+}
+
 void BodyControl::sample_side_range(std::uint8_t index, std::uint16_t mm,
                                     bool valid, std::uint32_t now_ms) {
   if (index >= 3) return;
@@ -398,13 +414,14 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool status = std::strcmp(command, "status") == 0;
   const bool aux = std::strcmp(command, "aux") == 0;
   const bool ir = std::strcmp(command, "ir") == 0;
+  const bool optics = std::strcmp(command, "optics") == 0;
   const bool calfloor = std::strcmp(command, "calfloor") == 0;
   const bool calfront = std::strcmp(command, "calfront") == 0;
   const bool calfresh = std::strcmp(command, "calfresh") == 0;
   const bool calcommit = std::strcmp(command, "calcommit") == 0;
   const bool calabort = std::strcmp(command, "calabort") == 0;
   const bool calibration = calfloor || calfront || calfresh || calcommit || calabort;
-  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || ir || halt || calibration)) {
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || ir || optics || halt || calibration)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
@@ -542,6 +559,53 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(e.code));
     if (written < 0 || static_cast<std::size_t>(written) >= capacity)
       std::snprintf(reply, capacity, "ERR ir response_too_long");
+  } else if (optics) {
+    unsigned present_mask = 0, valid_mask = 0;
+    std::uint32_t age[8]{};
+    for (unsigned i = 0; i < 8; ++i) {
+      const auto& sample = state_.optical[i];
+      if (!sample.present) continue;
+      present_mask |= 1U << i;
+      age[i] = now_ms - sample.at_ms;
+      const auto fresh = i < 5 ? age[i] < 200U : age[i] <= 350U;
+      if (sample.valid && fresh) valid_mask |= 1U << i;
+    }
+    // Compact source words already read by ToF: never sensor calibration,
+    // never a new motor or charging permit. A 512B reply is ample.
+    const int written = std::snprintf(
+        reply, capacity,
+        "{\"optics\":{\"ambient_97\":[%u,%u,%u,%u,%u,%u,%u,%u],"
+        "\"signal_97\":[%u,%u,%u,%u,%u,%u,%u,%u],"
+        "\"age_ms\":[%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu],"
+        "\"present_mask\":%u,\"valid_mask\":%u,"
+        "\"physical_qualified\":false,\"motor_authorized\":false}}",
+        static_cast<unsigned>(state_.optical[0].ambient_97),
+        static_cast<unsigned>(state_.optical[1].ambient_97),
+        static_cast<unsigned>(state_.optical[2].ambient_97),
+        static_cast<unsigned>(state_.optical[3].ambient_97),
+        static_cast<unsigned>(state_.optical[4].ambient_97),
+        static_cast<unsigned>(state_.optical[5].ambient_97),
+        static_cast<unsigned>(state_.optical[6].ambient_97),
+        static_cast<unsigned>(state_.optical[7].ambient_97),
+        static_cast<unsigned>(state_.optical[0].signal_97),
+        static_cast<unsigned>(state_.optical[1].signal_97),
+        static_cast<unsigned>(state_.optical[2].signal_97),
+        static_cast<unsigned>(state_.optical[3].signal_97),
+        static_cast<unsigned>(state_.optical[4].signal_97),
+        static_cast<unsigned>(state_.optical[5].signal_97),
+        static_cast<unsigned>(state_.optical[6].signal_97),
+        static_cast<unsigned>(state_.optical[7].signal_97),
+        static_cast<unsigned long>(age[0]),
+        static_cast<unsigned long>(age[1]),
+        static_cast<unsigned long>(age[2]),
+        static_cast<unsigned long>(age[3]),
+        static_cast<unsigned long>(age[4]),
+        static_cast<unsigned long>(age[5]),
+        static_cast<unsigned long>(age[6]),
+        static_cast<unsigned long>(age[7]),
+        present_mask, valid_mask);
+    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
+      std::snprintf(reply, capacity, "ERR optics response_too_long");
   } else if (aux) {
     const auto& raw = state_.paw_pulse;
     const auto& a = state_.accessories;
