@@ -900,3 +900,50 @@ def test_fault_reboots_and_gaps_preserve_prior_shake_cooldown(fault, when):
     assert qualified(gate, changed, when) == ()
     assert gate.last_shake == pytest.approx(observed)
     assert gate.reference is None
+
+
+def test_cached_imu_conversion_after_reconnect_cannot_repeat_recent_shake():
+    """A one-second host gap invalidates pose, not the human shake cooldown."""
+    gate = HandlingGate()
+    calibrated(gate)
+    shaking = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, shaking, 102.0) == ()
+    assert qualified(gate, shaking, 102.15) == ("handling_shake",)
+    assert gate.last_shake == 102.15
+    # Reconnected status reuses the last physical sample even though its
+    # host timestamp is new. It cannot create a new shake or clear cooldown.
+    cached = sample(sample_ms=gate.last_sample_ms)
+    assert qualified(gate, cached, 103.25, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_shake == 102.15
+    for i in range(8):
+        assert qualified(gate, sample(), 103.35 + i * 0.10) == ()
+    assert gate.reference is not None
+    assert qualified(gate, shaking, 104.25) == ()
+    assert qualified(gate, shaking, 104.40) == ()
+    assert gate.last_shake == 102.15
+
+
+def test_conflicting_stationary_calibration_norm_keeps_shake_cooldown():
+    """Physically inconsistent 1g baselines cannot reannounce a recent shake."""
+    gate = HandlingGate()
+    calibrated(gate)
+    shaking = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, shaking, 102.0) == ()
+    assert qualified(gate, shaking, 102.15) == ("handling_shake",)
+    # Invalid actual IMU identity revokes pose, then eight individually
+    # plausible, alternating 1g readings have a near-zero aggregate norm.
+    assert qualified(gate, sample(family=3), 102.20) == ()
+    for i in range(8):
+        z = 16384 if i % 2 == 0 else -16384
+        assert qualified(gate, sample(acc=(0, 0, z)),
+                         102.30 + i * 0.10) == ()
+    assert gate.reference is None
+    assert gate.startup_samples == []
+    assert gate.last_shake == 102.15
+    for i in range(8):
+        assert qualified(gate, sample(), 103.10 + i * 0.10) == ()
+    assert gate.reference is not None
+    assert qualified(gate, shaking, 104.0) == ()
+    assert qualified(gate, shaking, 104.15) == ()
+    assert gate.last_shake == 102.15
