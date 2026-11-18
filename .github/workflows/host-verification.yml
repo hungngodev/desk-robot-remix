@@ -58,6 +58,15 @@ jobs:
             echo "::error::Partial repository tree: only $tracked_count tracked files"
             exit 1
           fi
+          # git ls-files counts sparse-checkout entries even when an entire
+          # non-sentinel subtree is absent from the actual worktree. A green
+          # source test requires every tracked path to exist on disk.
+          while IFS= read -r -d '' tracked_path; do
+            if [ ! -e "$tracked_path" ] && [ ! -L "$tracked_path" ]; then
+              echo "::error::Missing tracked worktree path: $tracked_path"
+              exit 1
+            fi
+          done < <(git ls-files -z)
       - name: Install Python and locked dependencies
         working-directory: code
         run: |
