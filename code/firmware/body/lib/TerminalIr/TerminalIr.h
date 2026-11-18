@@ -9,6 +9,12 @@
 namespace desk_robot {
 // RMT driver is the pinned ESP-IDF 4.4 legacy API, not Arduino 3.x.
 // Read-only source of left/right NEC observations. NEVER drive/charge here.
+// IrFrameQueueGate's drain bound, two-packet-per-side poll and 100ms gap
+// are UNQUALIFIED engineering candidates on legacy ESP-IDF 4.4 RMT, whose
+// ringbuffer does not provide arrival timestamps. These must be evaluated
+// against real biased GPIO36/39 receivers, WiFi/ADC noise, NEC waveform
+// edges and burst saturation before bearing or terminal motion is enabled.
+// Do not promote a matching decoded ID into a charger or motor permit.
 class TerminalIr {
  public:
   bool begin(int left_gpio, int right_gpio);
