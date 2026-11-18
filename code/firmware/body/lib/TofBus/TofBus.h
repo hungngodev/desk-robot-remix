@@ -53,6 +53,12 @@ class TofBus {
   // Any bus fault or invalid data immediately feeds the local CliffGuard.
   void poll(CliffGuard& guard, std::uint32_t now_ms);
   bool ready() const { return initialized_; }
+  // The optional 0x71 mux can NACK our first startup probe and then be
+  // independently recognized by a later touch or accessory driver. Once
+  // observed, ALWAYS prove 0x71 is disabled before selecting a 0x70 lane:
+  // both generic CAP1188 and VL53L0X carriers can answer at 0x29.
+  // Never clear the required quiescence rule on a later transient NACK.
+  void note_optional_mux_present() { optional_mux_present_ = true; }
   std::uint8_t last_channel() const { return next_channel_; }
   std::uint32_t errors() const { return bus_errors_; }
   // 0 left, 1 right, 2 rear. Read-only; no new motion permission.
