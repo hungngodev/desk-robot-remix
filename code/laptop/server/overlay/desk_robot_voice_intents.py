@@ -359,6 +359,7 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
                 "physically_qualified": False,
             }
         if (power.get("fuel_valid") is True
+                and measured(power.get("fuel_seq"), 1, 0xffffffff)
                 and measured(power.get("soc_centi"), 0, 10000)
                 and measured(power.get("cell_mv"), 0, 4500)):
             observed["fuel_gauge"] = {
@@ -394,6 +395,11 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
         if result.get("gauge_available") is not True:
             return {"source": "wroom_fuel_gauge", "available": False}
         soc, mv = result.get("reported_soc_centi"), result.get("reported_cell_mv")
+        # The authenticated Mac endpoint forwards only successful MAX17048
+        # I2C acquisitions. A model-facing transport may not drop this token
+        # and still assert that an estimate is current.
+        if not measured(result.get("raw_fuel_acquisition_seq"), 1, 0xffffffff):
+            return None
         if (type(soc) is not int or type(mv) is not int
                 or not 0 <= soc <= 10000 or not 0 <= mv <= 4500):
             return None
