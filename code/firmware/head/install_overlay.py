@@ -311,8 +311,8 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         # 24 kHz PCM to the 32 kHz I2S DAC when output_resampler_ was null.
         service = replace_once(
             service,
-            '                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&\\n'
-            '                        output_resampler_ != nullptr) {'.replace('\\n', '\n'),
+            '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ != nullptr) {''',
             '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
                         output_resampler_ == nullptr) {
                         ESP_LOGE(TAG, "Sense speaker resampler unavailable: discarding mismatched PCM");
@@ -322,12 +322,12 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         )
         service = replace_once(
             service,
-            '                    decoded = true;\\n'
-            '                } else {\\n'
-            '                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);'.replace('\\n', '\n'),
-            '                    decoded = !task.pcm.empty();\\n'
-            '                } else {\\n'
-            '                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);'.replace('\\n', '\n'),
+            '''                    decoded = true;
+                } else {
+                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
+            '''                    decoded = !task.pcm.empty();
+                } else {
+                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
         )
         files[path] = service.encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
