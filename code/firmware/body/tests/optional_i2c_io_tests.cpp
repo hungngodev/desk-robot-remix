@@ -264,8 +264,13 @@ int main() {
     // The FIFO has been drained by the repeated polls above. The last
     // optical bytes remain diagnostic history, NOT new live paw contact.
     CHECK(!pulse.sample().valid);
-    CHECK(pulse.sample().red == 1003);
-    CHECK(pulse.sample().ir == 5003);
+#if DESK_ROBOT_MAX30102_FIFO_IR_FIRST
+    CHECK(pulse.sample().red == 5003U);
+    CHECK(pulse.sample().ir == 1003U);
+#else
+    CHECK(pulse.sample().red == 1003U);
+    CHECK(pulse.sample().ir == 5003U);
+#endif
     CHECK(pulse.sample().sample_seq > 0U);
     const auto& read = accessories.readings();
     for (unsigned i = 0; i < 3; ++i) {
