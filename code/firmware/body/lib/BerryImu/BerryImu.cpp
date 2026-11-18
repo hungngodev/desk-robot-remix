@@ -12,6 +12,12 @@ BerryModel BerryImu::identify(std::uint8_t gyro, std::uint8_t other) {
 }
 
 void BerryImu::decode_mpu6050(const std::uint8_t (&bytes)[14], BerryReading& sample) {
+  // TEMP_OUT is already present in the same atomic 14-byte MPU sample.
+  // Preserve the signed register for per-device drift characterization;
+  // this does not apply an unmeasured temperature compensation curve.
+  const auto temperature = static_cast<std::uint16_t>(
+      (static_cast<unsigned>(bytes[6]) << 8) | bytes[7]);
+  sample.temperature_raw = static_cast<std::int16_t>(temperature);
   for (int i = 0; i < 3; ++i) {
     const auto accel = static_cast<std::uint16_t>((static_cast<unsigned>(bytes[2*i]) << 8) | bytes[2*i + 1]);
     const auto gyro = static_cast<std::uint16_t>((static_cast<unsigned>(bytes[8 + 2*i]) << 8) | bytes[9 + 2*i]);
