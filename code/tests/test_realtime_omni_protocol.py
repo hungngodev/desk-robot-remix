@@ -551,3 +551,21 @@ def test_native_handshake_requires_epoch_on_response_and_pcm_delta():
     assert wire.handle_event(stale) is None
     assert wire.handle_event(delta("current", epoch=4)) is None
     assert wire.handle_event(delta("current", epoch=5)) is not None
+
+
+def test_playback_ack_rejects_absent_or_interrupted_speaker_authority():
+    """A matching None response ID is not evidence of physical playback."""
+    wire = OmniDuplexWire()
+    for invalid in (None, ""):
+        with pytest.raises(ValueError, match="playback evidence"):
+            wire.playback_ack(response_id=invalid, actually_played_ms=0)
+    wire.handle_event({
+        "type": "response.created", "response_id": "live",
+        "response": {"id": "live", "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    with pytest.raises(ValueError, match="playback evidence"):
+        wire.playback_ack(response_id="live", actually_played_ms=0)
+    wire.handle_event(delta("live"))
+    wire.interrupt()
+    with pytest.raises(ValueError, match="playback evidence"):
+        wire.playback_ack(response_id="live", actually_played_ms=0)
