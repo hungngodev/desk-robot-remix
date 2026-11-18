@@ -111,6 +111,12 @@ class HandlingGate:
         self.last_at = None
         self.last_boot_id = None
         self.last_sample_ms = None
+        if not preserve_shake_cooldown:
+            # The bounded retired-boot replay fence belongs to one operator
+            # session. Keep it through every automatic sensor fault/reset,
+            # but let an explicit session restart recover after eight real
+            # device boot changes. This never authorizes motors or motion.
+            self.retired_boot_ids.clear()
 
     def observe(
         self, body: dict, now: float, *, qualified: bool,
