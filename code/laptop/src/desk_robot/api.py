@@ -14,8 +14,8 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .brain_context import compose_brain_context
 from .api_readonly_context import register_readonly_context_routes
+from .brain_context import compose_brain_context
 from .config import Settings, secret
 from .controller import OperationError
 from .conversation import conversation_turns
