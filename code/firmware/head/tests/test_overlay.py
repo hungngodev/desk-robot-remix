@@ -219,6 +219,10 @@ class OverlayTests(unittest.TestCase):
                 overlay.apply(self.root)
         self.assertGreaterEqual(attempts, 2)
         self.assertFalse((self.root / overlay.MARKER).exists())
+        self.assertFalse((self.root / (overlay.MARKER + ".tmp")).exists())
+        self.assertFalse((self.root / overlay.BOARD).exists())
+        for name, original in self.original.items():
+            self.assertEqual((self.root / name).read_bytes(), original)
 
     def test_wrong_commit_refused(self):
         self.git.stop()
