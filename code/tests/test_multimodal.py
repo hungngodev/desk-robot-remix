@@ -67,6 +67,43 @@ def config(enabled=True):
 
 
 
+async def test_invalid_live_frame_receipts_cannot_poison_sampling_cursor():
+    """Future, stale, NaN, and duplicate receipts never starve fresh frames."""
+    class BadClockHead(Head):
+        async def stream_frames(self):
+            frame = image(square=True)
+            timestamp = time.monotonic()
+            yield frame, float("nan")
+            yield frame, timestamp + 3600
+            yield frame, timestamp - 30
+            yield frame, timestamp
+            yield frame, timestamp  # Replay of the already accepted frame.
+            await asyncio.sleep(0.56)
+            yield frame, time.monotonic()
+            await asyncio.Event().wait()
+
+    head = BadClockHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        async with asyncio.timeout(2):
+            while visual.status("robot-01")["software_timings"][
+                "stream_frames_selected"
+            ] < 2:
+                await asyncio.sleep(0.02)
+        metrics = visual.status("robot-01")["software_timings"]
+        assert metrics["stream_frames_received"] >= 6
+        assert metrics["stream_frames_skipped"] >= 4
+        assert metrics["stream_frames_selected"] == 2
+        assert metrics["stream_reconnects"] == 0
+        assert head.captures == 0
+    finally:
+        await visual.close()
+
+
 @pytest.mark.parametrize("malformed", [True, False])
 async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream(malformed):
     """Malformed bytes and deceptive JPEG dimensions must not break video."""
