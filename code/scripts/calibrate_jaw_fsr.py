@@ -92,7 +92,13 @@ async def capture(
             headers={"Authorization": f"Bearer {token}"}, timeout=3.0,
         )
         response.raise_for_status()
-        adc, seq = force_observation(response.json())
+        payload = response.json()
+        # The live API normally enforces this identity itself. The raw
+        # calibration capture must still reject a misrouted or cached
+        # response before it enters a measured per-robot candidate.
+        if not isinstance(payload, dict) or payload.get("robot_id") != robot:
+            raise ValueError("Jaw calibration robot identity mismatch")
+        adc, seq = force_observation(payload)
         if seen is None or _fresh_jaw_sequence(seq, seen):
             samples.append((adc, seq))
             seen = seq
