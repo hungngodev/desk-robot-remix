@@ -662,7 +662,7 @@ async def test_memory_context_error_releases_fleet_owner(settings):
 
 async def test_conversation_cancellation_releases_session(settings):
     class SlowSpeaker(SimulatedSpeaker):
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             await asyncio.sleep(20)
 
     c = Conversation(settings, SimulatedChat(), SlowSpeaker())
@@ -852,10 +852,10 @@ async def test_proactive_consent_revoked_during_alternate_speaker_send(settings)
             super().__init__()
             self.interruptions = []
 
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             entered.set()
             await release.wait()
-            await super().say(robot, text)
+            await super().say(robot, text, permission_check=permission_check)
 
         async def interrupt(self, robot):
             self.interruptions.append(robot.id)
@@ -1205,3 +1205,35 @@ async def test_kokoro_all_stop_routes_require_device_bound_receipts(
     assert calls[0]["device_id"] == "head01"
     assert calls[0].get("monitor_unavailable", False) is (route == "monitor_lost")
     assert calls[0].get("revoke_initiative", False) is (route == "operator_stop")
+
+
+async def test_speaker_doubles_advertising_permission_support_accept_keyword():
+    """A hardware speaker mock must not advertise a keyword it rejects."""
+    import ast
+    import inspect
+    from pathlib import Path
+
+    for path in (Path(__file__), Path(__file__).with_name("test_fleet.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if not any(isinstance(base, ast.Name) and base.id == "SimulatedSpeaker"
+                       for base in node.bases):
+                continue
+            unaware = any(
+                isinstance(stmt, ast.Assign)
+                and any(isinstance(target, ast.Name)
+                        and target.id == "supports_permission_checks"
+                        for target in stmt.targets)
+                and isinstance(stmt.value, ast.Constant)
+                and stmt.value.value is False
+                for stmt in node.body
+            )
+            if unaware:
+                continue
+            for method in node.body:
+                if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) and method.name == "say":
+                    assert any(arg.arg == "permission_check" for arg in method.args.kwonlyargs), (
+                        f"{path.name}:{node.name}.say must accept permission_check"
+                    )

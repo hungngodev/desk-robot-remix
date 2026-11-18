@@ -68,11 +68,11 @@ async def test_five_round_robin_broadcasts_every_line_to_all_peers(fleet):
             finally:
                 self.exited = True
 
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             self.active += 1
             self.maximum = max(self.maximum, self.active)
             await asyncio.sleep(0)
-            await super().say(robot, text)
+            await super().say(robot, text, permission_check=permission_check)
             self.active -= 1
 
     chat, speaker = UniqueChat(), TrackingSpeaker()
@@ -123,7 +123,7 @@ async def test_five_cancellation_and_repeated_stop_finish_session_cleanup(fleet)
                 await release_cleanup.wait()
                 self.cleaned += 1
 
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             entered.set()
             await asyncio.Event().wait()
 
@@ -155,10 +155,10 @@ async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(flee
             finally:
                 self.exited = True
 
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             if robot.id == "robot-03":
                 raise RuntimeError("head disconnected")
-            await super().say(robot, text)
+            await super().say(robot, text, permission_check=permission_check)
 
     speaker = LostSpeaker()
     conversation = Conversation(fleet, SimulatedChat(), speaker)
@@ -185,7 +185,7 @@ async def test_cancelled_stop_caller_cannot_interrupt_session_cleanup(fleet):
                 await release.wait()
                 self.cleaned = True
 
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             entered.set()
             await asyncio.Event().wait()
 
