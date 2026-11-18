@@ -78,6 +78,19 @@ async def guarded_grasp(
             raise ValueError("Foreign or missing jaw sensor robot identity")
         return force_observation(sample)
 
+    async def confirmed_health() -> None:
+        # The normal Coordinator raises for disarmed/foreign WROOM status,
+        # but an alternate head/health adapter may merely return a false
+        # verdict. Never interpret completion of that callback as a permit.
+        status = await _bounded_head_reply(
+            health(), seconds=_HEALTH_READ_TIMEOUT_S,
+            timeout_message="Gripper WROOM health check timed out",
+        )
+        if (not isinstance(status, dict)
+                or status.get("armed") is not True
+                or ("robot_id" in status and status["robot_id"] != robot_id)):
+            raise OperationError("Gripper operation blocked by WROOM health")
+
     try:
         baseline_a, seq_a = await read_force()
         # One ADS1115 jaw channel conversion approximately every 144ms;
@@ -98,19 +111,13 @@ async def guarded_grasp(
         for angle in grip_angles(
             calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
         )[1:]:
-            await _bounded_head_reply(
-                health(), seconds=_HEALTH_READ_TIMEOUT_S,
-                timeout_message="Gripper WROOM health check timed out",
-            )
+            await confirmed_health()
             await _bounded_head_reply(
                 head.command(f"grip {angle}"), seconds=_GRIP_COMMAND_TIMEOUT_S,
                 timeout_message="Gripper servo command unconfirmed",
             )
             await asyncio.sleep(0.18)
-            await _bounded_head_reply(
-                health(), seconds=_HEALTH_READ_TIMEOUT_S,
-                timeout_message="Gripper WROOM health check timed out",
-            )
+            await confirmed_health()
             try:
                 measured, seq = await read_force()
             except (KeyError, TypeError, ValueError, AttributeError,
@@ -140,10 +147,7 @@ async def guarded_grasp(
         # ONLY while the WROOM still reports fresh local safety authority.
         # If touch/cliff/IMU disarmed the body, NEVER bypass that interlock.
         try:
-            await _bounded_head_reply(
-                health(), seconds=_HEALTH_READ_TIMEOUT_S,
-                timeout_message="Gripper relief health check timed out",
-            )
+            await confirmed_health()
             await _bounded_head_reply(
                 head.command(f"grip {calibration.grip_open}"),
                 seconds=_GRIP_COMMAND_TIMEOUT_S,
