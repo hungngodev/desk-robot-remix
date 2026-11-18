@@ -844,3 +844,33 @@ def test_implausible_acceleration_recalibration_preserves_shake_cooldown():
     assert qualified(gate, shaking, 103.7) == ()
     assert qualified(gate, shaking, 103.85) == ()
     assert gate.last_shake == 102.15
+
+def test_qualification_revoke_keeps_shake_cooldown():
+    """A temporary source fault must not repeat a proactive shake greeting."""
+    gate = HandlingGate()
+    calibrated(gate)
+    shaking = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, shaking, 102.0) == ()
+    assert qualified(gate, shaking, 102.15) == ("handling_shake",)
+    assert gate.last_shake == pytest.approx(102.15)
+
+    # Even a temporarily disabled physical profile revokes pose, not the
+    # human facing event cooldown. Explicit reset() still starts a new session.
+    assert gate.observe(sample(), 102.2, qualified=False) == ()
+    assert gate.reference is None
+    assert gate.last_shake == pytest.approx(102.15)
+    for i in range(8):
+        assert qualified(gate, sample(), 102.3 + i * 0.1) == ()
+    assert gate.reference is not None
+    assert qualified(gate, shaking, 103.2) == ()
+    assert qualified(gate, shaking, 103.3) == ()
+    assert gate.last_shake == pytest.approx(102.15)
+    # Wait for the original three second host cooldown without gaps that
+    # would trigger a fresh calibration.
+    for when in (103.6, 104.0, 104.4, 104.8, 105.1):
+        assert qualified(gate, sample(), when) == ()
+    assert qualified(gate, shaking, 105.2) == ()
+    assert qualified(gate, shaking, 105.3) == ("handling_shake",)
+
+    gate.reset()
+    assert gate.last_shake == -float("inf")
