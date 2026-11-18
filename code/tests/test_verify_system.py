@@ -144,6 +144,8 @@ def test_python_suite_accepts_exact_pinned_upstream_commits(
     calls = []
 
     def pinned_git(args, **kwargs):
+        if args == ["git", "status", "--porcelain", "--untracked-files=no"]:
+            return ""  # Synthetic locked fixture has no tracked modifications.
         assert args == ["git", "rev-parse", "HEAD"]
         return commits[kwargs["cwd"].name] + "\n"
 
