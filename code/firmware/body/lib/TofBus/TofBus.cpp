@@ -68,6 +68,7 @@ void TofBus::failed(CliffGuard& guard) {
   // floor/front samples. Retain presence and last measured millimeters for
   // diagnostics, but do not publish these values as currently valid.
   for (auto& sample : extra_) sample.valid = false;
+  for (auto& sample : optical_) sample.valid = false;
   guard.bus_fault();
 }
 
@@ -75,7 +76,9 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   initialized_ = false;
   scan_.reset();
   new_extra_channel_ = 255;
+  new_optical_channel_ = 255;
   for (auto& sample : extra_) sample = ExtraSample{};
+  for (auto& sample : optical_) sample = OpticalSample{};
   // Pinned Pololu VL53L0X setup uses an 80ms timeout per device.
   // The critical polling path uses nonblocking status checks and the Wire
   // controller's independent 15ms I2C timeout.
@@ -217,8 +220,25 @@ RangeDiagnostic TofBus::extra_diagnostic(std::uint8_t index,
   return result;
 }
 
+TofOpticalDiagnostic TofBus::optical_diagnostic(
+    std::uint8_t channel, std::uint32_t now_ms) const {
+  TofOpticalDiagnostic result{};
+  if (channel >= kRangeCount || !optical_[channel].present) return result;
+  const auto& raw = optical_[channel];
+  result.present = true;
+  result.age_ms = now_ms - raw.at_ms;
+  // Five floor/front lanes have the 200ms CliffGuard bound. The three
+  // read-only side/rear lanes use the existing 350ms Mac freshness policy.
+  const auto fresh = channel < kFloorAndFrontCount ? 200U : 350U;
+  result.valid = raw.valid && result.age_ms < fresh;
+  result.ambient_97 = raw.ambient_97;
+  result.signal_97 = raw.signal_97;
+  return result;
+}
+
 void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   new_extra_channel_ = 255;
+  new_optical_channel_ = 255;
   if (!initialized_) {
     failed(guard);
     return;
@@ -256,6 +276,20 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   // The inexpensive L0X's practical minimum is roughly 30mm. Never
   // authorize motion on extrapolated 1mm "measurements" near the lens.
   const bool accepted = valid && distance >= 30 && distance <= 1300;
+  // ST's RESULT_RANGE_STATUS block places ambient in bytes 6..7, signal
+  // in 8..9 as 9.7 Mcps, and range mm in 10..11. Verified against the
+  // independent DCC-EX MIT VL53L0X implementation; do not apply a guessed
+  // SNR threshold or override the chip's calibrated range-status 11 policy.
+  // Read-only raw quality comes from the very same transaction as mm.
+  auto& optics = optical_[channel];
+  optics.present = true;
+  optics.valid = accepted;
+  optics.ambient_97 = static_cast<std::uint16_t>(
+      (static_cast<std::uint16_t>(result[6]) << 8) | result[7]);
+  optics.signal_97 = static_cast<std::uint16_t>(
+      (static_cast<std::uint16_t>(result[8]) << 8) | result[9]);
+  optics.at_ms = now_ms;
+  new_optical_channel_ = channel;
   if (channel < kFloorAndFrontCount) {
     guard.sample(channel, distance, accepted, now_ms);
   } else {
