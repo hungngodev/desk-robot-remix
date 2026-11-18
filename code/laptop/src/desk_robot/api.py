@@ -13,16 +13,24 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .api_memory_routes import (
     CoreMemoryRequest as CoreMemoryRequest,
+)
+from .api_memory_routes import (
     register_memory_routes,
 )
 from .api_native_omni_routes import (
     NativeHeardRequest as NativeHeardRequest,
+)
+from .api_native_omni_routes import (
     NativeSpokenRequest as NativeSpokenRequest,
+)
+from .api_native_omni_routes import (
     register_native_omni_routes,
 )
 from .api_readonly_context import register_readonly_context_routes
 from .api_readonly_planner import (
     ReadonlyPlanRequest as ReadonlyPlanRequest,
+)
+from .api_readonly_planner import (
     register_readonly_planner_routes,
 )
 from .api_robot_status import register_robot_status_routes
