@@ -441,6 +441,11 @@ void setup() {
   const bool paw_present = paw_pulse.begin(Wire);
   Serial.println(paw_present ? "INFO max30102_raw_optical_available" :
                                "INFO max30102_optional_unavailable");
+#if defined(DESK_ROBOT_MAX30102_FIFO_IR_FIRST) && DESK_ROBOT_MAX30102_FIFO_IR_FIRST
+  Serial.println("INFO max30102_fifo_ir_first_compiled_unqualified");
+#else
+  Serial.println("INFO max30102_fifo_red_first_compiled_unqualified");
+#endif
   const bool accessory_mux = accessories.begin(Wire);
   Serial.println(accessory_mux ? "INFO optional_accessory_bus_probed" :
                                  "INFO optional_accessory_bus_unavailable");
