@@ -104,6 +104,20 @@ int main() {
     CHECK(cap_failed_write_wire.ranges == 0);
     CHECK(cap_failed_write_wire.extras == 0);
     CHECK(!cap_failed_write_wire.unsafe_parallel_mux);
+    // Corrupted high bits in a FIFO pointer must not be silently masked
+    // into a plausible fresh touch sample. The 0x71 lane closes on error.
+    for (const int reg : {0, 1, 2}) {
+      TwoWire bad_pointer_wire;
+      desk_robot::PulsePad bad_pointer;
+      CHECK(bad_pointer.begin(bad_pointer_wire));
+      if (reg == 0) bad_pointer_wire.pulse_fifo_write_pointer = 0x84;
+      if (reg == 1) bad_pointer_wire.pulse_fifo_read_pointer = 0x80;
+      if (reg == 2) bad_pointer_wire.pulse_fifo_overflow = 0x80;
+      CHECK(!bad_pointer.poll(0));
+      CHECK(!bad_pointer.sample().valid);
+      CHECK(bad_pointer.sample().sample_seq == 0U);
+      CHECK(bad_pointer_wire.ranges == 0 && bad_pointer_wire.extras == 0);
+    }
     // A delayed WROOM poll must not convert old MAX30102 FIFO backlog
     // into a newly timestamped petting event. Discard >4 pending samples.
     TwoWire stale_pulse_wire;
