@@ -229,8 +229,9 @@ TofOpticalDiagnostic TofBus::optical_diagnostic(
   result.age_ms = now_ms - raw.at_ms;
   // Five floor/front lanes have the 200ms CliffGuard bound. The three
   // read-only side/rear lanes use the existing 350ms Mac freshness policy.
-  const auto fresh = channel < kFloorAndFrontCount ? 200U : 350U;
-  result.valid = raw.valid && result.age_ms < fresh;
+  result.valid = raw.valid && (
+      channel < kFloorAndFrontCount
+          ? result.age_ms < 200U : result.age_ms <= 350U);
   result.ambient_97 = raw.ambient_97;
   result.signal_97 = raw.signal_97;
   return result;
