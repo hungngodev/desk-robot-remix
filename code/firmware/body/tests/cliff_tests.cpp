@@ -298,6 +298,34 @@ void diagnostics_expire_validity_without_clearing_raw_or_latched_fault() {
   CHECK(!wrapped.diagnostic(0, 0x40U).valid); // 80 ms elapsed
 }
 
+void delayed_range_sample_never_replaces_newer_evidence() {
+  CliffGuard guard;
+  ready(guard, 100);
+  guard.sample(0, 46, true, 110);
+  CHECK(guard.diagnostic(0, 111).distance_mm == 46);
+  // A late completion from the previous scan must not replace the 110 ms
+  // sample or make an old obstacle result appear newly measured.
+  guard.sample(0, 45, true, 105);
+  CHECK(!guard.evaluate(111));
+  CHECK(guard.fault() != CliffFault::None);
+  const auto preserved = guard.diagnostic(0, 111);
+  CHECK(preserved.present);
+  CHECK(preserved.distance_mm == 46);
+  CHECK(preserved.age_ms == 1);
+
+  // New timestamps across uint32 wrap are forward, whereas an older
+  // pre-wrap completion must never overwrite the post-wrap sample.
+  CliffGuard wrapped;
+  const auto start = std::numeric_limits<std::uint32_t>::max() - 10U;
+  ready(wrapped, start);
+  wrapped.sample(0, 47, true, 5U);
+  CHECK(wrapped.evaluate(5U));
+  wrapped.sample(0, 48, true,
+                 std::numeric_limits<std::uint32_t>::max() - 5U);
+  CHECK(!wrapped.evaluate(6U));
+  CHECK(wrapped.diagnostic(0, 6U).distance_mm == 47);
+}
+
 void fault_names() {
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::None), "none") == 0);
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::Unconfigured), "unconfigured") == 0);
@@ -326,6 +354,8 @@ int main(int argc, char** argv) {
       {"configuration_replacement_invalidates_samples", configuration_replacement_invalidates_samples},
       {"first_fault_and_invalid_channel", first_fault_and_invalid_channel},
       {"unsigned_clock_rollover", unsigned_clock_rollover},
+      {"delayed_range_sample_never_replaces_newer_evidence",
+       delayed_range_sample_never_replaces_newer_evidence},
       {"fault_names", fault_names},
       {"diagnostics_read_only_and_bounded", diagnostics_read_only_and_bounded},
       {"diagnostics_expire_validity_without_clearing_raw_or_latched_fault",
