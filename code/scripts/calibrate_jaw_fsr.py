@@ -16,7 +16,7 @@ import statistics
 from pathlib import Path
 
 import httpx
-from desk_robot.grasp_feedback import force_observation
+from desk_robot.grasp_feedback import _fresh_jaw_sequence, force_observation
 
 
 def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
@@ -41,8 +41,13 @@ def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
         values = [value for value, _seq in rows]
         medians[name] = statistics.median(values)
         spans[name] = max(values) - min(values)
-    if history != sorted(set(history)):
-        raise ValueError("FSR readings must come from strictly increasing actual conversions")
+    # Both the body firmware and live gripper use a nonzero uint32 sequence.
+    # It wraps from 0xffffffff to 1 without making a fresh frame stale.
+    # Reuse the same half-range ordering as the live safety-critical grasp;
+    # duplicate, backward and reset/replayed samples remain unacceptable.
+    if any(not _fresh_jaw_sequence(new, old)
+           for old, new in zip(history, history[1:])):
+        raise ValueError("FSR readings must come from distinct forward hardware conversions")
     base, touch, upper = (medians[name] for name in ("free", "contact", "upper"))
     sign = 1 if touch > base else -1
     light = (touch - base) * sign
@@ -88,7 +93,7 @@ async def capture(
         )
         response.raise_for_status()
         adc, seq = force_observation(response.json())
-        if seen is None or seq > seen:
+        if seen is None or _fresh_jaw_sequence(seq, seen):
             samples.append((adc, seq))
             seen = seq
         if len(samples) == count:
