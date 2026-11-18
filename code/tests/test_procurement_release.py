@@ -1185,13 +1185,14 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     pilot = mod.first_robot_pilot_samples(report)
     rows = {item["id"]: item for item in pilot["roles"]}
     assert len(rows) == 49
-    assert pilot["pilot_sample_count"] == 24
-    assert pilot["pilot_historical_quoted_subtotal_usd"] == 40.27
+    assert pilot["pilot_sample_count"] == 17
+    assert pilot["pilot_historical_quoted_subtotal_usd"] == 27.63
     assert not pilot["whole_first_robot_purchase_approved"]
     assert not pilot["lithium_charging_or_motor_motion_authorized"]
     assert not pilot["actual_current_landed_cost_verified"]
-    assert rows["cliff_obstacle"]["pilot_sample_quantity"] == 8
+    assert rows["cliff_obstacle"]["pilot_sample_quantity"] == 1
     assert rows["cliff_obstacle"]["source_sku"] == "SEN-19-006"
+    assert rows["cliff_obstacle"]["historical_unit_quote_usd"] == 1.44
     assert rows["speaker"]["source_sku"] == "CS20-02P110-04-1X"
     # A bare TSAL6200 LED is not a safe functional dock emitter channel.
     ir = rows["dock_ir_emitter_channels"]
@@ -1231,7 +1232,7 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert text.count("## 1.") == 1
     assert text.count("## 2.") == 1
     assert "SEN-19-006" in text
-    assert "40.27" in text
+    assert "27.63" in text
     assert "not a physically qualified robot" in text
 
 
@@ -1282,8 +1283,8 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
     cart = mod.pilot_supplier_cart(mod.generate(plan))
     assert cart["exact_sku_count"] == 13
-    assert cart["component_quantity"] == 24
-    assert cart["historical_priced_partial_subtotal_usd"] == 40.27
+    assert cart["component_quantity"] == 17
+    assert cart["historical_priced_partial_subtotal_usd"] == 27.63
     assert not cart["landed_total_verified"]
     assert not cart["complete_robot_purchase_approved"]
     assert not cart["lithium_charging_or_motor_motion_authorized"]
@@ -1291,7 +1292,7 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert len(set((x["vendor"], x["sku"]) for x in cart["items"])) == 13
     assert Counter(x["vendor"] for x in cart["items"])["ElectroPeak"] == 6
     rows = {x["id"]: x for x in cart["items"]}
-    assert rows["cliff_obstacle"]["quantity"] == 8
+    assert rows["cliff_obstacle"]["quantity"] == 1
     assert rows["i2c_mux"]["quantity"] == 2
     assert rows["dock_ir_emitter_channels"]["quantity"] == 2
     assert rows["dock_ir_emitter_channels"][
@@ -1301,7 +1302,7 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert "cap_power" in cart["unresolved_roles"]
     assert "dock_contacts" in cart["unresolved_roles"]
     rendered = mod.render_pilot_supplier_cart(mod.generate(plan))
-    assert "13 SKUs; 24 items." in rendered
+    assert "13 SKUs; 17 items." in rendered
     assert "Priced-only historical subtotal" in rendered
     assert "not verified" in rendered
     assert "NOT complete driven dock channels" in rendered
