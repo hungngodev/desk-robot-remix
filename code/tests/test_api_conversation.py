@@ -52,6 +52,62 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
 
 
 
+async def test_unaware_custom_hardware_speaker_fails_before_group_audio(settings):
+    """No type-specific Kokoro exception may authorize unknown physical output."""
+    settings.mode = "hardware"
+
+    class UnawareHardwareSpeaker(SimulatedSpeaker):
+        supports_permission_checks = False
+
+        async def say(self, robot, text):
+            raise AssertionError("Unaware physical output was reached")
+
+    speaker = UnawareHardwareSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+    with pytest.raises(RuntimeError, match="permission-aware speech contract"):
+        await conversation.run(["robot-01", "robot-02"], "Hello", 2)
+    assert speaker.spoken == []
+
+
+async def test_unaware_custom_hardware_speaker_fails_before_proactive_audio(settings):
+    settings.mode = "hardware"
+
+    class UnawareHardwareSpeaker(SimulatedSpeaker):
+        supports_permission_checks = False
+
+        async def say(self, robot, text):
+            raise AssertionError("Unaware physical output was reached")
+
+    speaker = UnawareHardwareSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+    with pytest.raises(RuntimeError, match="permission-aware speech contract"):
+        await conversation.say_proactive(
+            settings.robot("robot-01"), "A tempting but unauthorized line",
+            permission_check=lambda: True,
+        )
+    assert speaker.spoken == []
+
+
+async def test_non_kokoro_permission_aware_speaker_blocks_revoked_group_audio(settings):
+    """Opted-in custom speaker must actually be passed the live consent check."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+
+    class CheckedHardwareSpeaker(SimulatedSpeaker):
+        async def say(self, robot, text, *, permission_check=None):
+            assert permission_check is not None
+            settings.fleet_text_sharing_enabled = False
+            await super().say(
+                robot, text, permission_check=permission_check,
+            )
+
+    speaker = CheckedHardwareSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+    with pytest.raises(RuntimeError, match="Simulated speech permission revoked"):
+        await conversation.run(["robot-01", "robot-02"], "A private topic", 2)
+    assert speaker.spoken == []
+
+
 async def test_kokoro_wav_generated_after_group_memory_revoke_never_reaches_xiaozhi(
     settings, monkeypatch,
 ):
