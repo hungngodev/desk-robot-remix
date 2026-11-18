@@ -1,8 +1,8 @@
 """Physical interactions are per-pet; repeated shared camera scenes are not."""
 from __future__ import annotations
 
-from types import SimpleNamespace
 import time
+from types import SimpleNamespace
 
 import pytest
 from desk_robot.pet import PetController
