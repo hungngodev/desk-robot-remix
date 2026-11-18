@@ -204,7 +204,7 @@ class OverlayTests(unittest.TestCase):
 
     def test_interrupted_overlay_write_has_no_success_marker(self):
         """An interrupted source patch must not be mistaken for an install."""
-        write_original = Path.write_bytes
+        atomic_write = overlay.atomic_replace_bytes
         attempts = 0
 
         def interrupted_write(path, data):
@@ -212,9 +212,12 @@ class OverlayTests(unittest.TestCase):
             attempts += 1
             if attempts == 2:
                 raise OSError("simulated interrupted overlay write")
-            return write_original(path, data)
+            return atomic_write(path, data)
 
-        with patch.object(Path, "write_bytes", interrupted_write):
+        # Journal publication now uses atomic_replace_bytes, not
+        # Path.write_bytes. Inject failure in the real transaction seam.
+        with patch.object(overlay, "atomic_replace_bytes",
+                          side_effect=interrupted_write):
             with self.assertRaisesRegex(OSError, "simulated interrupted"):
                 overlay.apply(self.root)
         self.assertGreaterEqual(attempts, 2)
