@@ -200,8 +200,8 @@ def test_manual_or_other_branch_success_cannot_qualify_pr17():
         {"head_repository": {"full_name": "someone/other-repo"}},
         {"head_repository": None},
     ):
-        def wrong_origin(_url):
-            return {**canonical, **overrides}
+        def wrong_origin(_url, changes=overrides):
+            return {**canonical, **changes}
         assert not verify.verified_actions_run(RUN, SHA, wrong_origin)
         assert any("CI run not verified" in problem
                    for problem in verify.audit(promoted(), wrong_origin))
