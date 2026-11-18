@@ -32,6 +32,14 @@ int main() {
     BerryImu::decode_mpu6050(mpu_wire, mpu);
     CHECK(mpu.accel[0] == 16384 && mpu.accel[1] == -16384 && mpu.accel[2] == 2);
     CHECK(mpu.gyro[0] == -16 && mpu.gyro[1] == 0 && mpu.gyro[2] == 256);
+    CHECK(mpu.temperature_raw == static_cast<std::int16_t>(0xfafa));
+    // Signed TEMP_OUT is raw evidence, not a calibrated temperature.
+    const std::uint8_t mpu_hot[14] = {
+      0x40, 0x00, 0xc0, 0x00, 0x00, 0x02, 0x01, 0x58,
+      0xff, 0xf0, 0x00, 0x00, 0x01, 0x00
+    };
+    BerryImu::decode_mpu6050(mpu_hot, mpu);
+    CHECK(mpu.temperature_raw == 344);
     CHECK(BerryImu::identify(0x6a, 0x49) == BerryModel::Unknown);
     CHECK(BerryImu::identify(0x00, 0x3d) == BerryModel::Unknown);
 
@@ -56,6 +64,7 @@ int main() {
     CHECK(reply.find("\"imu\":{\"family\":1,\"gyro_id\":212,\"aux_id\":73,\"valid\":true") != std::string::npos);
     CHECK(reply.find("\"acc\":[-32768,4567,16384]") != std::string::npos);
     CHECK(reply.find("\"gyro\":[-5,31,2000]") != std::string::npos);
+    CHECK(reply.find("\"temp_valid\":false") != std::string::npos);
     CHECK(reply.find("\"age_ms\":20") != std::string::npos);
     CHECK(reply.find("\"extras\":{\"mask\":0") != std::string::npos);
     CHECK(!body.state().armed);
@@ -66,12 +75,14 @@ int main() {
     reply = status(body, 215);
     CHECK(reply.find("\"family\":4,\"gyro_id\":104,\"aux_id\":0,\"valid\":true") != std::string::npos);
     CHECK(reply.find("\"acc\":[16384,-16384,2]") != std::string::npos);
+    CHECK(reply.find("\"temp_raw\":344,\"temp_valid\":true") != std::string::npos);
     // Switch back to Berry before the old expected status assertions.
     body.set_imu_identity(1, 212, 73);
     body.set_imu(reading);
 
     reply = status(body, 301);
     CHECK(reply.find("\"aux_id\":73,\"valid\":false") != std::string::npos);
+    CHECK(reply.find("\"temp_valid\":false") != std::string::npos);
     CHECK(!body.state().armed);
     reading.valid = false;
     body.set_imu(reading);
