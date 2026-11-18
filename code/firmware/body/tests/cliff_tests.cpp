@@ -234,6 +234,24 @@ void first_fault_and_invalid_channel() {
   CHECK(!guard.evaluate(2));
 }
 
+void invalid_channel_requires_five_new_measurements() {
+  CliffGuard guard;
+  ready(guard, 100);
+  guard.sample(5, 45, true, 101);
+  CHECK(guard.fault() == CliffFault::InvalidChannel);
+  for (std::uint8_t sensor = 0; sensor < desk_robot::kCliffSensorCount; ++sensor) {
+    const auto old = guard.diagnostic(sensor, 101);
+    CHECK(old.present && !old.valid); // preserve raw mm but deny clearance
+  }
+  CHECK(!guard.try_rearm(101));
+  for (std::uint8_t sensor = 0; sensor < desk_robot::kFloorSensorCount; ++sensor)
+    guard.sample(sensor, 45, true, 102);
+  CHECK(!guard.try_rearm(102)); // front channel still not refreshed
+  guard.sample(4, 300, true, 102);
+  CHECK(guard.try_rearm(102));
+  CHECK(guard.evaluate(102));
+}
+
 void unsigned_clock_rollover() {
   CliffGuard guard;
   const std::uint32_t start = std::numeric_limits<std::uint32_t>::max() - 30U;
@@ -367,6 +385,8 @@ int main(int argc, char** argv) {
       {"bus_fault_requires_new_samples", bus_fault_requires_new_samples},
       {"configuration_replacement_invalidates_samples", configuration_replacement_invalidates_samples},
       {"first_fault_and_invalid_channel", first_fault_and_invalid_channel},
+      {"invalid_channel_requires_five_new_measurements",
+       invalid_channel_requires_five_new_measurements},
       {"unsigned_clock_rollover", unsigned_clock_rollover},
       {"delayed_range_sample_never_replaces_newer_evidence",
        delayed_range_sample_never_replaces_newer_evidence},
