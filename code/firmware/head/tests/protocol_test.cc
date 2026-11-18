@@ -29,6 +29,10 @@ int main() {
     assert(c.verb == "aux");
     assert(ParseCommand("ir", false, c));
     assert(c.verb == "ir");
+    assert(ParseCommand("optics", false, c));
+    assert(c.verb == "optics");
+    assert(!ParseCommand("optics 1", false, c));
+    assert(!ParseCommand("optics nonsense", true, c));
     assert(!ParseCommand("ir 1", false, c));
     assert(!ParseCommand("aux 1", false, c));
     assert(!ParseCommand("aux urgent", true, c));
