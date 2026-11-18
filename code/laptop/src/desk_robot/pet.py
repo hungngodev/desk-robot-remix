@@ -2057,6 +2057,82 @@ class PetController:
         context = compose_brain_context(memory, core_memory, timeline)
         return recent_memory, context, private_memory_allowed, live_context_used
 
+    async def _speak_social(
+        self, robot_id: str, change: SceneChange, generation: int,
+        *, offered_at: float, social_peer_id: str,
+        social_peer_generation: int | None, camera_derived: bool,
+        newer_human_turn: Callable[[], bool],
+    ) -> None:
+        """Reuse one fleet speech owner for a consent-fenced social event."""
+        state = self.states[robot_id]
+        robot = self.settings.robot(robot_id)
+        peer = self.states[social_peer_id]
+        if (not state.enabled or state.quiet
+                or state.generation != generation or self._closed
+                or not peer.enabled or peer.quiet
+                or peer.generation != social_peer_generation
+                or (camera_derived and self.settings.mode == "hardware"
+                    and not self.settings.voice_vision_tools_enabled)
+                or not self.voice_monitor_ready
+                or self._human_active_in_fleet(time.monotonic())
+                or newer_human_turn()
+                or time.monotonic() - offered_at > self.max_observation_age):
+            state.suppressed += 1
+            state.last_initiative_suppression = "social_peer_or_event_unavailable"
+            return
+        topic = (
+            f"{robot.name} reported this new event from its own "
+            f"{'camera model' if camera_derived else 'sensor'}: "
+            f"{change.description[:160]}. Only {robot.name} observed it. "
+            "Respond to each other naturally in one short sentence each. "
+            "Suggest a harmless verbal game or shared curiosity. "
+            "The listening pet must not pretend it saw or sensed the event. "
+            "Do not move, grasp, command motors or claim new physical facts."
+        )
+        # Keep the original group speaker and memory owner, but
+        # pass a LIVE camera consent fence to every speech segment.
+        # Merely checking when the topic was created is insufficient
+        # if the operator opts out while two heads are talking.
+        def social_permission() -> bool:
+            # A sensor-triggered social turn needs the SAME current
+            # speech, peer and operator consent fences as camera
+            # conversation. Recheck throughout both robot replies.
+            return (
+                not self._closed and self.voice_monitor_ready
+                and self.settings.fleet_social_autonomy_enabled
+                and self.settings.fleet_text_sharing_enabled
+                and state.enabled and not state.quiet
+                and state.generation == generation
+                and peer.enabled and not peer.quiet
+                and peer.generation == social_peer_generation
+                and (not camera_derived
+                     or self.settings.mode != "hardware"
+                     or self.settings.voice_vision_tools_enabled)
+                and not self._human_active_in_fleet(time.monotonic())
+                and not newer_human_turn()
+            )
+        turns = await asyncio.wait_for(
+            self.conversation.run(
+                [robot_id, social_peer_id], topic, utterances=2,
+                permission_check=social_permission,
+            ), timeout=75.0
+        )
+        if len(turns) == 2:
+            state.spoken += 1
+            peer.spoken += 1
+            now = time.monotonic()
+            self._group_last_spoken = now
+            if self.multimodal is not None:
+                remember_spoken = getattr(
+                    self.multimodal.hub, "remember_spoken", None
+                )
+                if callable(remember_spoken):
+                    for turn in turns:
+                        remember_spoken(
+                            turn["robot_id"], turn["text"], now
+                        )
+        return
+
     async def _speak(
         self, robot_id: str, change: SceneChange, generation: int,
         *, offered_at: float, social_peer_id: str | None = None,
@@ -2085,71 +2161,13 @@ class PetController:
             # each pet's own persona, two bounded turns and per-pet memory.
             # The other pet only *hears* this firsthand source event.
             if social_peer_id is not None:
-                peer = self.states[social_peer_id]
-                if (not state.enabled or state.quiet
-                        or state.generation != generation or self._closed
-                        or not peer.enabled or peer.quiet
-                        or peer.generation != social_peer_generation
-                        or (camera_derived and self.settings.mode == "hardware"
-                            and not self.settings.voice_vision_tools_enabled)
-                        or not self.voice_monitor_ready
-                        or self._human_active_in_fleet(time.monotonic())
-                        or newer_human_turn()
-                        or time.monotonic() - offered_at > self.max_observation_age):
-                    state.suppressed += 1
-                    state.last_initiative_suppression = "social_peer_or_event_unavailable"
-                    return
-                topic = (
-                    f"{robot.name} reported this new event from its own "
-                    f"{'camera model' if camera_derived else 'sensor'}: "
-                    f"{change.description[:160]}. Only {robot.name} observed it. "
-                    "Respond to each other naturally in one short sentence each. "
-                    "Suggest a harmless verbal game or shared curiosity. "
-                    "The listening pet must not pretend it saw or sensed the event. "
-                    "Do not move, grasp, command motors or claim new physical facts."
+                await self._speak_social(
+                    robot_id, change, generation,
+                    offered_at=offered_at, social_peer_id=social_peer_id,
+                    social_peer_generation=social_peer_generation,
+                    camera_derived=camera_derived,
+                    newer_human_turn=newer_human_turn,
                 )
-                # Keep the original group speaker and memory owner, but
-                # pass a LIVE camera consent fence to every speech segment.
-                # Merely checking when the topic was created is insufficient
-                # if the operator opts out while two heads are talking.
-                def social_permission() -> bool:
-                    # A sensor-triggered social turn needs the SAME current
-                    # speech, peer and operator consent fences as camera
-                    # conversation. Recheck throughout both robot replies.
-                    return (
-                        not self._closed and self.voice_monitor_ready
-                        and self.settings.fleet_social_autonomy_enabled
-                        and self.settings.fleet_text_sharing_enabled
-                        and state.enabled and not state.quiet
-                        and state.generation == generation
-                        and peer.enabled and not peer.quiet
-                        and peer.generation == social_peer_generation
-                        and (not camera_derived
-                             or self.settings.mode != "hardware"
-                             or self.settings.voice_vision_tools_enabled)
-                        and not self._human_active_in_fleet(time.monotonic())
-                        and not newer_human_turn()
-                    )
-                turns = await asyncio.wait_for(
-                    self.conversation.run(
-                        [robot_id, social_peer_id], topic, utterances=2,
-                        permission_check=social_permission,
-                    ), timeout=75.0
-                )
-                if len(turns) == 2:
-                    state.spoken += 1
-                    peer.spoken += 1
-                    now = time.monotonic()
-                    self._group_last_spoken = now
-                    if self.multimodal is not None:
-                        remember_spoken = getattr(
-                            self.multimodal.hub, "remember_spoken", None
-                        )
-                        if callable(remember_spoken):
-                            for turn in turns:
-                                remember_spoken(
-                                    turn["robot_id"], turn["text"], now
-                                )
                 return
 
             def model_context_permitted() -> bool:
