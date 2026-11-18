@@ -630,9 +630,11 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool bmp_fresh = a.barometer.present && a.barometer.valid &&
                            now_ms - a.barometer.at_ms < 2000U;
     const bool fuel_fresh = a.gauge.fuel_valid &&
-                            now_ms - a.gauge.at_ms < 500U;
+                            a.gauge.fuel_sample_seq != 0U &&
+                            now_ms - a.gauge.fuel_at_ms < 500U;
     const bool monitor_fresh = a.gauge.monitor_valid &&
-                               now_ms - a.gauge.at_ms < 500U;
+                               a.gauge.monitor_sample_seq != 0U &&
+                               now_ms - a.gauge.monitor_at_ms < 500U;
     const bool proximity_fresh = a.proximity.valid &&
                                  now_ms - a.proximity.at_ms < 350U;
     const bool dock_fresh = a.dock.present && a.dock.valid &&
