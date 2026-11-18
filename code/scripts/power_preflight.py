@@ -485,6 +485,10 @@ def main() -> None:
     # could screen the wrong regulator topology, so require an explicit
     # physically inspected variant for every dock analysis.
     parser.add_argument("--dock-charger-variant", choices=("BQ24074", "BQ24075"))
+    parser.add_argument("--dock-regulator-topology",
+                        choices=("boost_only", "buck_boost"))
+    parser.add_argument("--dock-regulator-min-input-v", type=float)
+    parser.add_argument("--dock-regulator-max-input-v", type=float)
     parser.add_argument("--dock-boost-efficiency", type=float)
     parser.add_argument("--dock-charger-input-limit-a", type=float)
     parser.add_argument("--dock-board-thermal-input-a", type=float)
@@ -533,6 +537,10 @@ def main() -> None:
             parser.error("Dock mode requires the actual BQ24074 or BQ24075 charger variant")
         if any(v is None for v in dock_inputs):
             parser.error("Dock mode requires idle current, charge current, SYS voltage and efficiency")
+        if (args.dock_regulator_topology is None
+                or args.dock_regulator_min_input_v is None
+                or args.dock_regulator_max_input_v is None):
+            parser.error("Dock mode requires converter topology and actual input voltage ratings")
         if args.peak_5v_a is not None or args.continuous_5v_a is not None:
             parser.error("Use one mode: undocked peak load OR docked idle load")
         if pack_requested:
@@ -549,6 +557,18 @@ def main() -> None:
             motors_confirmed_disarmed=args.dock_motors_disarmed,
             charger_variant=args.dock_charger_variant,
         )
+        voltage_path = screen_bq2407x_output_path(
+            args.dock_charger_variant,
+            regulator_min_input_v=args.dock_regulator_min_input_v,
+            regulator_max_input_v=args.dock_regulator_max_input_v,
+            regulator_topology=args.dock_regulator_topology,
+        )
+        result["voltage_path"] = voltage_path
+        if not voltage_path["regulator_covers_charger_output_on_paper"]:
+            # The current limit arithmetic alone must not claim paper
+            # compatibility while a boost-only converter faces a BQ24075
+            # 5.6V OUT node, or the regulator VIN envelope is inadequate.
+            result["candidate_docked_load_on_paper"] = False
     else:
         if args.peak_5v_a is None or args.continuous_5v_a is None:
             parser.error("Undocked mode requires --peak-5v-a and --continuous-5v-a")
