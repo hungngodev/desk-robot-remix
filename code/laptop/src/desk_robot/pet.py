@@ -22,10 +22,11 @@ from .config import Settings
 from .conversation import Conversation
 from .handling import HandlingGate
 from .memory import MemoryStore
-from .side_ranging import SideRangeEvents
 from .sensor_event_contract import (
-    DIRECT_INTERACTION_KINDS, PHYSICAL_INITIATIVE_KINDS,
+    DIRECT_INTERACTION_KINDS,
+    PHYSICAL_INITIATIVE_KINDS,
 )
+from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
 from .vision import SceneChange, VisualChangeGate
 
