@@ -555,6 +555,8 @@ static void required_imu_is_a_local_freshness_interlock() {
   CHECK(send(body, "arm", 50) == "ERR arm imu_missing_or_stale");
   body.set_imu_identity(2, 0x68, 0x3d);
   CHECK(send(body, "arm", 50) == "ERR arm imu_missing_or_stale");
+  body.set_imu_identity(1, 0xd4, 0x00);
+  CHECK(send(body, "arm", 50) == "ERR arm imu_missing_or_stale");
   body.set_imu_identity(1, 0xd4, 0x49);
   CHECK(send(body, "arm", 50) == "OK arm");
   CHECK(send(body, "drive 20 20 250", 50).find("OK drive") == 0);
