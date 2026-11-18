@@ -13,31 +13,31 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 from procurement_release import PART_GATES, SUPPLEMENTAL_DECISIONS, SYSTEM_GATES
 from verify_playbook_receipts import verified_raw_record
+from verify_system import source_snapshot
 
 ROOT = Path(__file__).resolve().parents[2]
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 def checkout_sha() -> str:
-    """A working tree change invalidates a signed purchasing snapshot."""
-    sha = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT,
-        text=True, timeout=10,
-    ).strip()
-    dirty = subprocess.check_output(
-        ["git", "status", "--porcelain", "--untracked-files=no"],
-        cwd=ROOT, text=True, timeout=10,
-    )
-    if not SHA.fullmatch(sha) or dirty.strip():
-        raise ValueError("A clean exact commit is required for ordering")
-    return sha
+    """Require a clean complete tree, not a sparse/truncated Git index.
 
+    Share the canonical host verification's real worktree presence checks.
+    A clean SHA and 400 index entries alone previously missed directories
+    removed by sparse checkout or an accidental partial repository tree.
+    """
+    snapshot = source_snapshot()
+    sha = snapshot.get("sha")
+    if (not isinstance(sha, str) or not SHA.fullmatch(sha)
+            or snapshot.get("tracked_clean") is not True
+            or snapshot.get("root_tree_intact") is not True):
+        raise ValueError("A clean exact commit and full repository tree are required for ordering")
+    return sha
 
 def required_receipts(evidence: dict):
     """Scope each receipt to its specific purchased part, station or gate."""
