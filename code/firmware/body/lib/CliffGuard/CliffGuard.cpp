@@ -76,8 +76,18 @@ bool CliffGuard::current_health(std::uint32_t now_ms, CliffFault& reason,
 
 void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
                         bool valid, std::uint32_t now_ms) {
-  // A newly arriving sample must not erase evidence that earlier data already
-  // expired during a stalled loop. Check pre-update health before replacement.
+  // Reject out-of-order completion BEFORE checking freshness at its older
+  // timestamp. Otherwise unsigned subtraction misattributes a backward
+  // clock to StaleSample, hiding the true InvalidSample diagnostic. Preserve
+  // the existing newer observation and the sticky local STOP policy.
+  if (channel < kCliffSensorCount && samples_[channel].present &&
+      static_cast<std::uint32_t>(
+          now_ms - samples_[channel].at_ms) >= 0x80000000U) {
+    latch(CliffFault::InvalidSample, channel);
+    return;
+  }
+  // A newly arriving valid-order sample must not erase evidence that earlier
+  // data expired during a stalled loop. Check before replacement.
   CliffFault previous_reason;
   std::uint8_t previous_sensor;
   if (fault_ == CliffFault::None &&
@@ -88,16 +98,6 @@ void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
     return;
   }
   auto& sample = samples_[channel];
-  // Reject a delayed I2C completion for this channel instead of letting an
-  // older reading overwrite newer evidence. Half-range unsigned comparison
-  // admits normal millis() rollover without trusting timestamps from a
-  // different clock epoch. A rejected observation latches a local fault;
-  // only a fresh, explicitly authorized rearm can restore movement.
-  if (sample.present &&
-      static_cast<std::uint32_t>(now_ms - sample.at_ms) >= 0x80000000U) {
-    latch(CliffFault::InvalidSample, channel);
-    return;
-  }
   sample.present = true;
   sample.valid = valid;
   sample.mm = distance_mm;
