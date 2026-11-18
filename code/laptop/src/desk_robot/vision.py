@@ -164,6 +164,17 @@ class VisualChangeGate:
         return baseline
 
 
+def _check_camera_jpeg(frame: bytes) -> None:
+    """Cheap trusted-source image header gate before any VLM network upload."""
+    if (not isinstance(frame, bytes) or not 12 <= len(frame) <= 1_000_000
+            or not frame.startswith(b"\xff\xd8")):
+        raise ValueError("Bounded JPEG scene evidence required")
+    with Image.open(BytesIO(frame)) as candidate:
+        if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
+                or not 1 <= candidate.height <= 4096):
+            raise ValueError("Camera dimensions invalid")
+
+
 @dataclass(frozen=True)
 class SceneChange:
     kind: str
@@ -190,13 +201,7 @@ class OllamaScene:
         # Check transport size and header dimensions before allocating a
         # base64 payload or sending private frames to a model endpoint.
         for frame in (before, after):
-            if (not isinstance(frame, bytes) or not 12 <= len(frame) <= 1_000_000
-                    or not frame.startswith(b"\xff\xd8")):
-                raise ValueError("Bounded JPEG scene evidence required")
-            with Image.open(BytesIO(frame)) as candidate:
-                if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
-                        or not 1 <= candidate.height <= 4096):
-                    raise ValueError("Camera dimensions invalid")
+            _check_camera_jpeg(frame)
 
         response = await self.client.post(
             self.url + "/api/chat",
@@ -263,6 +268,8 @@ class OllamaScene:
                        or len(frame) > 1_000_000 or not frame.startswith(b"\xff\xd8")
                        for frame in jpeg_frames)):
             raise ValueError("Real bounded camera frames and vision model required")
+        for frame in jpeg_frames:
+            _check_camera_jpeg(frame)
         temporal = len(jpeg_frames) == 2
         prompt = (
             "You are this desk robot's local vision adapter. Answer the human's "
