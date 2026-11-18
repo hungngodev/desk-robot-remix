@@ -142,6 +142,9 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         if method not in (None, "manual_review"):
             errors.append(f"procedure {identifier}: unsupported verification method")
             continue
+        if type(identifier) is int and 1 <= identifier <= 8 and method != "manual_review":
+            errors.append(f"procedure {identifier}: manual review evidence is compulsory")
+            continue
         if method == "manual_review":
             try:
                 if not verified_manual_review(row, sha, lookup):
