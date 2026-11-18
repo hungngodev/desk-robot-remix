@@ -83,6 +83,11 @@ void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
   if (channel < kCliffSensorCount && samples_[channel].present &&
       static_cast<std::uint32_t>(
           now_ms - samples_[channel].at_ms) >= 0x80000000U) {
+    // Preserve the last raw millimeters/timestamp for diagnostics, but
+    // invalidate their clearance authority. Otherwise an explicit try_rearm
+    // can immediately clear this fault from the old cached good reading,
+    // without any fresh result from the affected physical sensor.
+    samples_[channel].valid = false;
     latch(CliffFault::InvalidSample, channel);
     return;
   }
