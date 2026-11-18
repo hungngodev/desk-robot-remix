@@ -195,8 +195,11 @@ class HandlingGate:
         if self.last_at is not None and now - self.last_at > 1.0:
             # Host reconnect invalidates calibration, not source identity.
             previous = (self.last_boot_id, self.last_sample_ms)
+            cooldown = self.last_shake
             self.reset()
             self.last_boot_id, self.last_sample_ms = previous
+            # A transport gap invalidates pose, not the gesture cooldown.
+            self.last_shake = cooldown
         sample = raw_mpu6050(body)
         if sample is None:
             # Bad telemetry invalidates pose, not the last trusted acquisition.

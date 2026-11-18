@@ -762,3 +762,22 @@ def test_invalid_imu_does_not_restart_recent_shake_cooldown():
         assert qualified(gate, sample(), when) == ()
     assert qualified(gate, shake, 105.2) == ()
     assert qualified(gate, shake, 105.35) == ("handling_shake",)
+
+
+def test_poll_gap_recalibration_cannot_bypass_shake_cooldown():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    shaking = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, shaking, 102.0) == ()
+    assert qualified(gate, shaking, 102.15) == ("handling_shake",)
+    # A new acquisition after a transport gap revokes pose but must not
+    # reset the independent three-second gesture cooldown.
+    assert qualified(gate, sample(), 103.2) == ()
+    assert gate.reference is None
+    assert gate.last_shake == 102.15
+    for i in range(7):
+        assert qualified(gate, sample(), 103.35 + i * .15) == ()
+    assert gate.reference is not None
+    assert qualified(gate, shaking, 104.45) == ()
+    assert qualified(gate, shaking, 104.60) == ()
+    assert gate.last_shake == 102.15
