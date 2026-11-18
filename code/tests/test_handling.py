@@ -781,3 +781,27 @@ def test_poll_gap_recalibration_cannot_bypass_shake_cooldown():
     assert qualified(gate, shaking, 104.45) == ()
     assert qualified(gate, shaking, 104.60) == ()
     assert gate.last_shake == 102.15
+
+
+def test_mpu_clock_rollover_preserves_shake_cooldown():
+    gate = HandlingGate()
+    # Establish a legitimate near-wrap acquisition and stationary baseline.
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=0xfffffff0 + i),
+                         100.0 + .1 * i, new_sample=False) == ()
+    assert gate.reference is not None
+    gate.last_shake = 100.7  # An already announced gesture.
+    assert qualified(gate, sample(sample_ms=2), 100.8,
+                     new_sample=False) == ()
+    assert gate.reference is None  # Rollover requires a new pose baseline.
+    assert gate.last_shake == 100.7  # But must not bypass cooldown.
+    for i in range(7):
+        assert qualified(gate, sample(sample_ms=3 + i),
+                         100.9 + .1 * i, new_sample=False) == ()
+    assert gate.reference is not None
+    shaking = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, dict(shaking, imu=dict(shaking["imu"], sample_ms=10)),
+                     101.7, new_sample=False) == ()
+    assert qualified(gate, dict(shaking, imu=dict(shaking["imu"], sample_ms=11)),
+                     101.8, new_sample=False) == ()
+    assert gate.last_shake == 100.7

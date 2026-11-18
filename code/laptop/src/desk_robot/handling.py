@@ -242,7 +242,11 @@ class HandlingGate:
                     # A delayed conversion cannot invalidate a newer pose.
                     # Real boot changes and forward host gaps still reset it.
                     return ()
+                # A 32-bit sensor clock rollover invalidates pose but must
+                # not reset the human gesture cooldown on the host clock.
+                cooldown = self.last_shake
                 self.reset()
+                self.last_shake = cooldown
             elif sample_ms - self.last_sample_ms > 0x7fffffff:
                 # A pre-wrap conversion arriving after wrap looks numerically
                 # newer. Reject implausibly large forward jumps as replay.
