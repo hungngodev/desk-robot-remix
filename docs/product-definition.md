@@ -294,10 +294,10 @@ These are **current compiled software assignments, not a finished tested wiring 
 | Right ULN2003 phases | 27, 32, 33, 23 | Confirm phase order and track direction on real hardware |
 | Lift servo / grip servo | 18 / 19 | Rated independent actuator rail; servo target is not position feedback |
 | Body I2C SDA / SCL | 21 / 22 | 3.3V pullups, TCA9548A upstream; bus health and scan time measured |
-| TCA9548A reset | 4 | Only if purchased board actually exposes RESET |
+| TCA9548A reset | No GPIO, tied HIGH to 3.3 V through required pullup | GPIO4 is a WROOM boot strapping pin and must not drive mux RESET; source `kMuxReset = -1` |
 | Head touch | 34 input | AT42QT1010 OUT, input-only GPIO |
 | UART head link RX / TX | 16 / 17 | Head TX2 / RX1, common logic ground |
-| Candidate other signals | 35,36,39 input-only | External pullups if needed, no unqualified extra digital outputs |
+| Reserved body inputs | 35 NC bumper; 36/39 left/right terminal IR | GPIO35 requires external pullup; GPIO36/39 require qualified 38 kHz receiver interface and physical RMT timing trials; no output use |
 
 | Sense head | GPIO | Notes |
 | --- | --- | --- |
