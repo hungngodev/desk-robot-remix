@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import os
+import re
 import time
+from urllib.parse import urlsplit
 from pathlib import Path
 
 import httpx
@@ -18,6 +21,27 @@ import httpx
 from desk_robot.handling import raw_mpu6050
 
 LABELS = (("upright", 8), ("tilted", 4), ("shaking", 4))
+_ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\\Z")
+
+
+def _safe_endpoint(url: str, robot: str) -> str:
+    if not isinstance(robot, str) or not _ROBOT_ID.fullmatch(robot):
+        raise ValueError("Require exact configured robot identity")
+    parsed = urlsplit(url)
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+        raise ValueError("Invalid private Mac API endpoint")
+    if parsed.scheme == "http":
+        try:
+            local = parsed.hostname == "localhost" or ipaddress.ip_address(
+                parsed.hostname
+            ).is_loopback
+        except ValueError:
+            local = False
+        if not local:
+            raise ValueError("Bearer token requires loopback HTTP or HTTPS")
+    return url.rstrip("/") + "/v1/robots/" + robot + "/status"
 
 
 async def capture_phase(
@@ -35,11 +59,12 @@ async def capture_phase(
     if not all(isinstance(x, str) and 1 <= len(x.strip()) <= 128
                for x in (firmware_commit, mount_id)):
         raise ValueError("Require actual firmware and IMU mount identities")
+    endpoint = _safe_endpoint(base_url, robot)
     samples: list[dict] = []
     seen, boot, receipt = previous_sample, previous_boot, previous_receipt
     for _ in range(count * 10):
         response = await client.get(
-            f"{base_url.rstrip('/')}/v1/robots/{robot}/status",
+            endpoint,
             headers={"Authorization": f"Bearer {token}"}, timeout=3.0,
         )
         response.raise_for_status()
@@ -83,8 +108,7 @@ async def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--interval", type=float, default=0.18)
     args = parser.parse_args()
-    if not args.robot or not args.robot.isascii() or len(args.robot) > 40:
-        raise ValueError("Require explicit configured robot identity")
+    _safe_endpoint(args.url, args.robot)
     token = os.getenv(args.token_env, "")
     if len(token) < 24:
         raise ValueError("Operator bearer token not configured")
