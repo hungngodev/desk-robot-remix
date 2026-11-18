@@ -7,7 +7,10 @@ import argparse
 import base64
 import hashlib
 import json
+import os
+import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 PIN = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
@@ -508,6 +511,29 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def atomic_replace_bytes(path: Path, contents: bytes) -> None:
+    """Replace one source atomically so interrupted writes retain old/new bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="wb", prefix=f".{path.name}.desk-overlay-", dir=path.parent,
+        delete=False,
+    ) as stream:
+        staged = Path(stream.name)
+        try:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            staged.unlink(missing_ok=True)
+            raise
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+        staged.chmod(mode)
+        staged.replace(path)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def remove(target: Path) -> None:
     marker = target / MARKER
     if not marker.exists():
@@ -535,7 +561,7 @@ def remove(target: Path) -> None:
             if path.is_file():
                 path.unlink()
         else:
-            path.write_bytes(base64.b64decode(info["original"]))
+            atomic_replace_bytes(path, base64.b64decode(info["original"]))
     marker.unlink()
     for name in BOARDS.values():
         board = target / name
