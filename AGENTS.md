@@ -1,5 +1,14 @@
 # November 17 pilot purchasing clarification for parallel agents
 
+**Live verification rule, superseding historical runner failure claims:** Every
+new commit must be checked against the latest SHA and its own GitHub Actions
+workflow run. Some November 11 jobs failed before runner steps, but the
+November 17 run 44203205736 completed all four jobs successfully on historical
+SHA 91c248a034d0f3ee4b8d8b93608cacc6dadc8fe3. Later source changes require
+new per-SHA verification; never extrapolate that success, a failed run, or a
+queued run to the current head. Always check the live PR and jobs rather than
+keeping a static current-head green claim in AGENTS.md.
+
 The user wants an actual first-robot shopping list, NOT repeated global
 purchase HOLD reports that make bench validation impossible. Canonical
 `code/scripts/procurement_release.py` now has a separate
@@ -114,7 +123,7 @@ The archived HTML from the user's original research has **active design decision
 
 One **full-feature** robot is physically qualified first, then four functionally identical siblings, each with its own name, persona, memories, camera, face and cosmetic removable costume. The ultimate five-pet experience includes independent and shared spontaneous activities, meaningful camera-grounded speech, continuous opt-in exploration, quiet/pause, selective peer stories with first-hand provenance, touch, handling, gestures, games, real key and wrapped-candy manipulation, and safe docking/recharging.
 
-Three compute owners are fixed: **Mac** for AI, five-pet arbitration, private memory and visual reasoning; **XIAO ESP32S3 Sense** for microphone, camera, OLED, speaker, software echo reference and local head expression; **ESP32 WROOM32** for motors, lift/grip, local IMU and local emergency/safety I/O. Keep the Sense, existing 28BYJ48 + ULN2003 tracked SMARS base, two MG90S positional servos for lift + jaw, fixed rounded head and existing original CAD sources. No extra head servo, substitute Pi, invented custom chassis or fresh PCB without a documented incompatibility and user's changed instruction.
+Three compute owners are fixed: **Mac** for AI, five-pet arbitration, private memory and visual reasoning; **XIAO ESP32S3 Sense** for microphone, camera, OLED, speaker, software echo reference and local head expression; **ESP32 WROOM32** for motors, lift/grip, local IMU and local emergency/safety I/O. Keep the Sense and the existing 28BYJ48 + ULN2003 tracked SMARS **software/CAD reference baseline**, two MG90S positional servos for lift + jaw, fixed rounded head and original CAD sources. The **purchase decision** between that stepper drivetrain and the guarded N20/DRV8833 DC alternative is currently UNRESOLVED; neither alternative may be ordered or represented as production qualified until its actual loaded stopping, cutoff, voltage, thermal and mounting trials pass. The DC watchdog and nFAULT source contract do not automatically protect the stepper variant. No extra head servo, substitute Pi, invented custom chassis or fresh PCB without a documented incompatibility and user's changed instruction.
 
 The full requirement does **not** mean every historical brainstorm is mandatory hardware: distinguish accepted core functions, selected expansion modules, optional external room stations and reference-only ideas in the source map. Do not silently remove requested core interactions to reach a simpler build. Proactive vision is real change / event observation, contextual memory, bounded initiation and ordinary human interruption, not a random "hello" timer.
 
