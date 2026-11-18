@@ -141,6 +141,27 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertEqual((self.root / 'main/boards/common/esp32_camera.cc').read_text()
                          .count('camera_lock(AccessMutex())'), 6)
 
+    def test_urgent_barge_flush_can_play_subsequent_tts(self):
+        """Pinned Xiaozhi output worker reopens the codec for the next PCM."""
+        overlay.apply(self.root, 'sense')
+        application = (self.root / 'main/application.cc').read_text()
+        audio = (UPSTREAM / 'main/audio/audio_service.cc').read_text()
+        # An interrupted reply urgently clears both queued decoder data and
+        # the hardware output. The next queued *new* reply must turn it on.
+        self.assertIn('audio_service_.ResetDecoder();', application)
+        self.assertIn('GetAudioCodec()->EnableOutput(false);', application)
+        worker = audio.split('void AudioService::AudioOutputTask()', 1)[1]
+        worker = worker.split('void AudioService::', 1)[0]
+        self.assertLess(
+            worker.index('if (!codec_->output_enabled())'),
+            worker.index('codec_->EnableOutput(true);'),
+        )
+        self.assertLess(
+            worker.index('codec_->EnableOutput(true);'),
+            worker.index('codec_->OutputData(task.pcm);'),
+        )
+
+
     def test_reference_generation_fence_prevents_stale_barge_audio(self):
         """Source contract only; physical DMA silence still needs A2 trials."""
         header = (HEAD / "sense/sense_reference_codec.h").read_text()
