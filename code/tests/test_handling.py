@@ -720,3 +720,27 @@ def test_missing_gyro_bias_revokes_pose_without_replaying_same_conversion():
     assert qualified(gate, sample(sample_ms=3009),
                      102.0, new_sample=False) == ()
     assert len(gate.startup_samples) == 1
+
+
+def test_backdated_fresh_acquisitions_cannot_shorten_shake_cooldown():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    last_at, last_sample = gate.last_at, gate.last_sample_ms
+    # A newer conversion may carry an older callback time; cooldowns must
+    # use the monotonic accepted clock rather than that callback time.
+    for i in range(2):
+        frame = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0),
+                       sample_ms=last_sample + i + 1)
+        expected = ("handling_shake",) if i == 1 else ()
+        assert qualified(gate, frame, last_at - .1 + .01 * i,
+                         new_sample=False) == expected
+    assert gate.last_shake == last_at
+    for i in range(1, 6):
+        assert qualified(gate, sample(sample_ms=last_sample + i + 2),
+                         last_at + .5 * i, new_sample=False) == ()
+    for i, delta in enumerate((2.6, 2.7), start=8):
+        frame = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0),
+                       sample_ms=last_sample + i)
+        assert qualified(gate, frame, last_at + delta,
+                         new_sample=False) == ()
+    assert gate.last_shake == last_at

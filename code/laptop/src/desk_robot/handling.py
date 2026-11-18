@@ -321,8 +321,8 @@ class HandlingGate:
         # AND noticeable gyro motion, unlike a normal soft static tilt.
         shook = (abs(g - 1.0) * 1000 >= shake_delta_mg and rotation_dps >= 50)
         self.shake_hits = min(2, self.shake_hits + 1) if shook else 0
-        if self.shake_hits >= 2 and now - self.last_shake >= 3.0:
-            self.last_shake = now
+        if self.shake_hits >= 2 and self.last_at - self.last_shake >= 3.0:
+            self.last_shake = self.last_at
             events.append("handling_shake")
         if not 0.75 <= g <= 1.25 or rotation_dps > 70:
             # Dynamic acceleration has no reliable gravity direction.
