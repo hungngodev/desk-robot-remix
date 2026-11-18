@@ -179,6 +179,13 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('sample_rate != 24000', setter)
         self.assertIn('sample_rate != 48000', setter)
         self.assertIn('Rejecting unsupported Sense Opus rate', setter)
+        # An invalid frame duration such as 30 ms must be rejected before
+        # touching the active decoder, even when its sample rate is valid.
+        for duration in (5, 10, 20, 40, 60):
+            self.assertIn(f'frame_duration != {duration}', setter)
+        self.assertIn('Rejecting unsupported Sense Opus frame duration', setter)
+        self.assertLess(setter.index('frame_duration != 60'),
+                        setter.index('esp_opus_dec_open('))
         # Invalid rates are rejected before any replacement is attempted.
         # A successful replacement is opened first, then atomically
         # published under decoder_mutex_ and only then the old decoder
