@@ -13,15 +13,15 @@ import json
 import os
 import re
 import time
-from urllib.parse import urlsplit
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
 from desk_robot.handling import raw_mpu6050
 
 LABELS = (("upright", 8), ("tilted", 4), ("shaking", 4))
-_ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\\Z")
+_ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 
 
 def _safe_endpoint(url: str, robot: str) -> str:
