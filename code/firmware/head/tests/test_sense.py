@@ -519,6 +519,12 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     assert "static constexpr uint32_t kSpeakerRate = 32000;" in header
     assert "static constexpr uint32_t kMicRate = 16000;" in header
     assert "kSpeakerRate % kMicRate == 0" in header
+    assert "static_assert(AUDIO_INPUT_SAMPLE_RATE == kMicRate" in header
+    assert "static_assert(AUDIO_OUTPUT_SAMPLE_RATE == kSpeakerRate" in header
+    # The fixed 2:1 ratio permits zero or one publish per output sample,
+    # never a misleading loop over unsupported fractional rate profiles.
+    assert "if (phase_ < 1.0f)" in codec
+    assert "while (phase_ < 1.0f)" not in codec
     assert "phase_ += static_cast<float>(kSpeakerRate) / kMicRate;" in codec
     assert "samples > static_cast<int>(kSpeakerRate)" in codec
     overlay_source = (HEAD / "install_overlay.py").read_text()
