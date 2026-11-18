@@ -4682,3 +4682,25 @@ async def test_person_face_cue_needs_fresh_credible_live_source(fleet, tmp_path)
         3, fresh, 1,
     )
     assert head.cues == ["person_detected"]
+
+
+def test_direct_visual_change_gate_rejects_oversized_jpeg_header_before_decode():
+    """Direct pet vision must enforce the same raster limits as camera hub."""
+    frame = bytearray(jpeg("white"))
+    sof = frame.find(b"\\xff\\xc0")
+    assert sof > 0
+    frame[sof + 5:sof + 9] = (5000).to_bytes(2, "big") * 2
+    gate = VisualChangeGate()
+    with pytest.raises(ValueError, match="Camera dimensions invalid"):
+        gate.observe(bytes(frame))
+    assert gate._baseline is None
+    assert gate._pixel_baseline is None
+    assert gate._hits == 0
+
+
+@pytest.mark.parametrize("frame", [b"", b"not-a-jpeg", b"\\x89PNG"])
+def test_direct_visual_change_gate_rejects_invalid_image_transport(frame):
+    gate = VisualChangeGate()
+    with pytest.raises(ValueError, match="Camera JPEG size invalid"):
+        gate.observe(frame)
+    assert gate._baseline is None
