@@ -59,6 +59,22 @@ def test_every_declared_platformio_environment_is_exercised(tmp_path):
         assert {stage for stage in stages if stage.startswith(prefix)} == expected
 
 
+def test_github_actions_also_compiles_all_body_and_room_envs():
+    """The CI runner, not just the optional local script, must build every profile."""
+    workflow = (ROOT / ".github/workflows/host-verification.yml").read_text()
+    for directory in ("body", "room_station"):
+        config = (ROOT / "code/firmware" / directory / "platformio.ini").read_text()
+        environments = re.findall(r"^\[env:([^\]]+)\]$", config,
+                                  flags=re.MULTILINE)
+        assert environments, directory
+        for name in environments:
+            command = f"pio run -d code/firmware/{directory} -e {name}"
+            assert command in workflow, f"Missing GitHub Actions build: {command}"
+    # The five Nano dock variants are intentionally built by a single loop.
+    assert "for id in 01 02 03 04 05; do" in workflow
+    assert 'pio run -d code/firmware/dock -e "bench_nano_dock_$id"' in workflow
+
+
 def test_runner_returns_real_failures_and_does_not_retry_motion(monkeypatch, tmp_path):
     calls = []
 
