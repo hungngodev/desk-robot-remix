@@ -11,6 +11,10 @@ from pathlib import Path
 import pytest
 from desk_robot.config import Settings, load_settings
 from desk_robot.multimodal import TRIGGERS
+from desk_robot.sensor_event_contract import (
+    DIRECT_INTERACTION_KINDS, PHYSICAL_INITIATIVE_KINDS,
+    TRIGGERS as SHARED_TRIGGERS,
+)
 from desk_robot.pet import (
     _DIRECT_INTERACTION_KINDS,
     _PHYSICAL_INITIATIVE_KINDS,
@@ -21,6 +25,17 @@ from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = json.loads((ROOT / "docs/hardware/full-feature-plan.json").read_text())
+
+
+def test_one_shared_real_sensor_event_registry_owns_camera_and_pet_kinds():
+    """Different owners cannot silently disagree on actual event names."""
+    assert TRIGGERS is SHARED_TRIGGERS
+    assert _PHYSICAL_INITIATIVE_KINDS is PHYSICAL_INITIATIVE_KINDS
+    assert _DIRECT_INTERACTION_KINDS is DIRECT_INTERACTION_KINDS
+    assert TRIGGERS - PHYSICAL_INITIATIVE_KINDS == {
+        "human_voice", "safety_fault",
+    }
+    assert _DIRECT_INTERACTION_KINDS <= _PHYSICAL_INITIATIVE_KINDS
 
 
 def test_optional_reed_event_is_real_and_unwired_pir_bumper_are_lab_only():
