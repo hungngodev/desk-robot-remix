@@ -109,6 +109,32 @@ def run(name: str, argv: list[str], cwd: Path, timeout: int) -> dict:
     return result
 
 
+def source_snapshot() -> dict:
+    """Identify the exact tracked checkout used by an executed verification.
+
+    Pull request CI may check out a synthetic merge commit rather than the
+    PR branch head. Record what actually ran, never infer a different SHA.
+    """
+    snapshot = {"sha": None, "tracked_clean": None, "error": None}
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
+            timeout=10, stderr=subprocess.DEVNULL,
+        ).strip()
+        if len(sha) != 40 or any(ch not in "0123456789abcdef" for ch in sha):
+            raise ValueError("Git did not return a full commit SHA")
+        changes = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=ROOT, text=True, timeout=10, stderr=subprocess.DEVNULL,
+        )
+        snapshot["sha"] = sha
+        snapshot["tracked_clean"] = not bool(changes.strip())
+    except (OSError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired, ValueError) as exc:
+        snapshot["error"] = type(exc).__name__ + ": " + str(exc)[:200]
+    return snapshot
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=["python", "body", "wroom", "sense", "room", "dock", "all"],
@@ -118,6 +144,7 @@ def main() -> int:
     parser.add_argument("--build-dir", type=Path,
                         default=Path(tempfile.gettempdir()) / "desk-robot-body-verify")
     args = parser.parse_args()
+    checkout_before = source_snapshot()
     # A workspace or remote environment failing before pytest/cmake/Pio is
     # explicitly INCOMPLETE. Never manufacture a green CI result.
     records = []
@@ -130,8 +157,17 @@ def main() -> int:
         if not record["pass"]:
             print(record["output_tail"][-2000:] or record["error"], file=sys.stderr)
             break
+    checkout_after = source_snapshot()
+    clean_same_commit = (
+        checkout_before["sha"] is not None
+        and checkout_before == checkout_after
+        and checkout_before["tracked_clean"] is True
+    )
     receipt = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "checkout_before": checkout_before,
+        "checkout_after": checkout_after,
+        "same_commit_clean_checkout": clean_same_commit,
         "suite": args.suite, "stages": records,
         "source_suite_pass": bool(records) and len(records) == len(steps(
             args.suite, args.build_dir)) and all(r["pass"] for r in records),
@@ -155,7 +191,7 @@ def main() -> int:
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     print("Machine-readable verification: " + str(args.report))
-    return 0 if receipt["source_suite_pass"] else 1
+    return 0 if receipt["source_suite_pass"] and clean_same_commit else 1
 
 
 if __name__ == "__main__":
