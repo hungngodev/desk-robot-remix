@@ -534,11 +534,41 @@ def atomic_replace_bytes(path: Path, contents: bytes) -> None:
         staged.unlink(missing_ok=True)
 
 
+def read_overlay_journal(target: Path, marker: Path) -> dict:
+    """Reject malformed or escaping recovery journals before any file IO."""
+    if not marker.is_file() or marker.is_symlink() or marker.stat().st_size > 16_000_000:
+        raise ValueError("Invalid head overlay journal")
+    state = json.loads(marker.read_text())
+    if not isinstance(state, dict) or not state:
+        raise ValueError("Invalid head overlay journal")
+    root = target.resolve()
+    for name, info in state.items():
+        if (not isinstance(name, str) or not name.startswith("main/")
+                or "\\" in name or any(part in ("", ".", "..") for part in name.split("/"))
+                or not isinstance(info, dict)
+                or set(info) != {"sha256", "original"}
+                or type(info["sha256"]) is not str
+                or len(info["sha256"]) != 64
+                or any(ch not in "0123456789abcdef" for ch in info["sha256"])
+                or (info["original"] is not None and
+                    type(info["original"]) is not str)):
+            raise ValueError("Invalid head overlay journal entry")
+        path = target / name
+        if path.is_symlink() or not path.parent.resolve().is_relative_to(root):
+            raise ValueError("Overlay journal path escapes pinned checkout")
+        if info["original"] is not None:
+            try:
+                base64.b64decode(info["original"], validate=True)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise ValueError("Invalid original bytes in overlay journal") from exc
+    return state
+
+
 def remove(target: Path) -> None:
     marker = target / MARKER
     if not marker.exists():
         return
-    state = json.loads(marker.read_text())
+    state = read_overlay_journal(target, marker)
     # The marker is committed before the overlaid files. A killed installer
     # can leave any file at its pinned original bytes, its overlaid bytes,
     # or (for a new board file) not yet created. Those are recoverable.
@@ -590,7 +620,7 @@ def apply(target: Path, board: str = "cores3") -> None:
         raise ValueError(f"Requires Xiaozhi commit {PIN}, found {head}")
     marker = target / MARKER
     if marker.exists():
-        state = json.loads(marker.read_text())
+        state = read_overlay_journal(target, marker)
         if not any(name.startswith(BOARDS[board] + "/") for name in state):
             raise ValueError("A different board overlay is installed; use a separate build copy")
         for name, info in state.items():
