@@ -33,6 +33,20 @@ def test_guarded_full_dc_must_compile_with_cpu_watchdog_even_outside_lab():
     assert "!defined(DESK_ROBOT_ENABLE_DC_WATCHDOG)" in firmware
 
 
+def test_default_full_stepper_refuses_arming_without_independent_motor_cutoff():
+    ini = (BODY / "platformio.ini").read_text(encoding="utf-8")
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    assert "-DDESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED=0" in ini
+    assert "#define DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED 0" in main
+    assert main.count(
+        "#if DESK_ROBOT_STEPPER && !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED"
+    ) >= 1
+    assert "#if !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED" in main
+    assert 'write_stepper(body_pins::kLeftStepperPins, 0);' in main
+    assert 'write_stepper(body_pins::kRightStepperPins, 0);' in main
+    assert '"ERR arm stepper_cutoff_unqualified"' in main
+
+
 def test_gpio23_is_cpu_only_and_cannot_share_stepper_phase_or_ledc():
     pins = (BODY / "include/BodyPins.h").read_text(encoding="utf-8")
     main = (BODY / "src/main.cpp").read_text(encoding="utf-8")

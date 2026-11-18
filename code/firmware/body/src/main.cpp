@@ -9,6 +9,13 @@
 #if DESK_ROBOT_STEPPER && !DESK_ROBOT_FULL_SENSORS
 #error Stepper backend requires the full sensor guard
 #endif
+// Existing 28BYJ48/ULN2003 has NO hardware nSLEEP. Its unqualified
+// stepper motor rail must remain OFF even if USB issues a local arm.
+// Only a reviewed, physically measured independent power-cutoff circuit may
+// enable stepper motion in an explicit qualified firmware build.
+#ifndef DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
+#define DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED 0
+#endif
 // A guarded DC image must not silently omit its CPU-stall motor cutoff.
 // The historical unguarded DC bench remains separate from full-sensor motion.
 #if !DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && \
@@ -249,11 +256,20 @@ void apply_outputs() {
   }
   const auto& state = control.state();
 #if DESK_ROBOT_STEPPER
+#if !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
+  // This is the default release-safe state: no coil may be energized when
+  // there is no independently timed and physically qualified motor cutoff.
+  // A software watchdog is not a substitute if the WROOM CPU stalls.
+  control.force_disarm();
+  write_stepper(body_pins::kLeftStepperPins, 0);
+  write_stepper(body_pins::kRightStepperPins, 0);
+#else
   const std::uint32_t now_us = micros();
   write_stepper(body_pins::kLeftStepperPins,
                 left_stepper.update(now_us, state.left, state.armed));
   write_stepper(body_pins::kRightStepperPins,
                 right_stepper.update(now_us, state.right, state.armed));
+#endif
 #else
   if ((applied_left > 0 && state.left < 0) ||
       (applied_left < 0 && state.left > 0) ||
@@ -306,6 +322,12 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool loca
       control.force_disarm();
       snprintf(reply, sizeof(reply), "ERR arm pwm_unavailable");
     }
+#if DESK_ROBOT_STEPPER && !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
+    if (completed && strcmp(reply, "OK arm") == 0) {
+      control.force_disarm();
+      snprintf(reply, sizeof(reply), "ERR arm stepper_cutoff_unqualified");
+    }
+#endif
 #if DESK_ROBOT_FULL_SENSORS
     if (completed && local_usb && strcmp(reply, "OK calcommit") == 0 &&
         !save_calibration()) {
