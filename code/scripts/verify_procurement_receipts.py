@@ -12,6 +12,7 @@ ordering. No physical or charging authorization is inferred by this script.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -39,7 +40,16 @@ def checkout_sha() -> str:
             or snapshot.get("tracked_clean") is not True
             or snapshot.get("root_tree_intact") is not True):
         raise ValueError("A clean exact commit and full repository tree are required for ordering")
+    # Source authority is the existing PR branch. A clean main checkout,
+    # stale fork or detached synthetic merge is not the purchase baseline.
+    current_branch = subprocess.check_output(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=ROOT, text=True, timeout=10,
+    ).strip()
+    if current_branch != "impl/mac-hardware-safety-preflight-2026-11-10":
+        raise ValueError("Purchasing requires the canonical PR #17 branch")
     return sha
+
 
 def required_receipts(evidence: dict, *, first_robot: bool = False):
     """Scope each receipt to its specific purchased part, station or gate."""
