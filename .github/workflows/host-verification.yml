@@ -101,6 +101,8 @@ jobs:
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
       - name: Compile full eight low-cost VL53L0X robot firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full
+      - name: Compile generic MAX30102 reversed FIFO lab (motor power disabled)
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full_pulse_reversed_lab
       - name: Compile optional bumper and PIR interaction lab
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full_interaction_lab
       - name: Compile opt-in haptic MCP23017 lab firmware
