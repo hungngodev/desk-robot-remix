@@ -2,8 +2,7 @@
 
 **No five robot purchase approval.** The source selected is a particular
 [ElectroPeak SEN-19-006 GY-530](https://electropeak.com/gy-530-vl53l0x-laser-range-finder)
-rather than the premium VL53L4CD board. The vendor advertises USD 1.76 per
-module before shipping, 10.5 x 13.3 mm envelope, 2.8 to 5 V supply, 30 mm
+rather than the premium VL53L4CD board. The vendor listed USD 1.44 per module on 2026-11-18 before shipping and tax, 10.5 x 13.3 mm envelope, 2.8 to 5 V supply, 30 mm
 to 2 m sensing and I2C. This is a source candidate, not a schematic or tested
 logic level. The frozen purchasing role is 8 per robot, 40 total.
 
