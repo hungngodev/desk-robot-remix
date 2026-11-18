@@ -540,6 +540,17 @@ def test_wroom_mux_reset_must_remain_hardware_pullup_not_boot_gpio():
     assert "| TCA9548A reset | 4 |" not in plan
 
 
+def test_documented_pet_voice_budget_matches_passive_and_touch_code():
+    """Physical contact is deliberate, not a silent 120-second greeting."""
+    pet = (ROOT / "code/laptop/src/desk_robot/pet.py").read_text()
+    definition = (ROOT / "docs/product-definition.md").read_text()
+    assert "speech_cooldown: float = 120.0" in pet
+    assert "interaction_cooldown: float = 12.0" in pet
+    assert "passive camera/ambient spontaneous spoken initiation" in definition
+    assert "default 12-second interaction cooldown" in definition
+    assert "single global speaker" in definition
+
+
 def test_round2_safety_driver_preserves_all_eight_muxed_ready_checked_ranges():
     """No two-XSHUT or two-sample cliff replacement can silently land."""
     body = (ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp").read_text()
