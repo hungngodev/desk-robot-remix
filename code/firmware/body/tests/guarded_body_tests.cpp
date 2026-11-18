@@ -551,6 +551,11 @@ static void required_imu_is_a_local_freshness_interlock() {
   reading.at_ms = 50;
   reading.accel[2] = 16384;  // synthetic raw 1g, not a physical orientation test
   body.set_imu(reading);
+  // The reader is fresh but no startup WHO_AM_I identity was confirmed.
+  CHECK(send(body, "arm", 50) == "ERR arm imu_missing_or_stale");
+  body.set_imu_identity(2, 0x68, 0x3d);
+  CHECK(send(body, "arm", 50) == "ERR arm imu_missing_or_stale");
+  body.set_imu_identity(1, 0xd4, 0x49);
   CHECK(send(body, "arm", 50) == "OK arm");
   CHECK(send(body, "drive 20 20 250", 50).find("OK drive") == 0);
   // Keep optical samples alive throughout the interval. CliffGuard
@@ -570,6 +575,10 @@ static void required_imu_is_a_local_freshness_interlock() {
   CHECK(!body.state().armed);
   CHECK(body.state().left == 0 && body.state().right == 0);
   CHECK(body.state().servos_attached);  // no deliberate drop of held object
+  // Even a later ID mismatch cannot be treated as fresh motor clearance.
+  body.set_imu_identity(4, 0x68, 0);
+  CHECK(send(body, "arm", 252) == "ERR arm imu_missing_or_stale");
+  body.set_imu_identity(1, 0xd4, 0x49);
   CHECK(send(body, "arm", 252) == "ERR arm imu_missing_or_stale");
   reading.valid = false;
   reading.at_ms = 252;
