@@ -1317,7 +1317,6 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
 
 def test_pilot_cart_exposes_actual_source_and_test_not_hardware_approval():
     import json
-    from pathlib import Path
 
     report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
     cart = mod.pilot_supplier_cart(report)
