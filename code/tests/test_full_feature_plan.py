@@ -77,7 +77,7 @@ def test_status_uart_and_usb_bounds_are_consistent_after_petting_telemetry():
     body = (root / "firmware/body/lib/BodyControl/BodyControl.h").read_text()
     bridge = (root / "firmware/head/overlay/robot_bridge.cc").read_text()
     usb = (root / "scripts/serial_bench.py").read_text()
-    assert "kReplyCapacity = 1600" in body
+    assert "kReplyCapacity = 1632" in body
     assert "kMaxReply = 1664" in bridge
     assert "port.readline(1664)" in usb
 
