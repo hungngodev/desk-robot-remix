@@ -562,6 +562,19 @@ def remove(target: Path) -> None:
                 path.unlink()
         else:
             atomic_replace_bytes(path, base64.b64decode(info["original"]))
+    # A force-killed atomic write can leave its hidden staging file in the
+    # newly created board directory. Only our namespaced temporary source
+    # files belonging to entries in this verified journal are disposable.
+    # Remove them before dropping the journal so --remove stays repeatable.
+    for name in state:
+        path = target / name
+        prefix = f".{path.name}.desk-overlay-"
+        if path.parent.is_dir():
+            for staged in path.parent.iterdir():
+                if staged.name.startswith(prefix) and (
+                    staged.is_file() or staged.is_symlink()
+                ):
+                    staged.unlink()
     marker.unlink()
     for name in BOARDS.values():
         board = target / name
