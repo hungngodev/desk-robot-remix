@@ -1,3 +1,28 @@
+## 2026-11-18 100-page playbook, 96 procedures, checked source and execution gates
+
+Canonical input: user supplied 100-page engineering playbook, procedures 01 to 96, 12 phases. This checkpoint records **actual** changes made on the existing PR #17, not completion of 96 physical or integration procedures. Every later agent must read the live head SHA and rerun checks on that exact head before changing a state to TESTED. A pending or cancelled GitHub workflow is not green.
+
+**Actual incremental source changes from this pass**: `0806f6e` adds the existing bumper/PIR PlatformIO interaction lab to the local full verifier; `4d66cbf` adds environment inventory coverage; `d609034` repairs its regex; `b5c2abf` captures real tracked Git HEAD and cleanliness before/after local verification and requires unchanged clean source for a successful runner exit; `aa54264` exercises missing Git, dirty source and moving commit; `d1b74ef` enforces a 400 tracked file integrity floor beyond sentinel paths; `0ebb71f` compiles the one-VL53L0X motor-disconnected pilot bench in CI; `ba28d89` guards CI's full body, room and dock PlatformIO build selection. These are code and test commits, **not independently observed successful same-SHA CI or hardware trials**.
+
+| Playbook phase and procedure coverage | Status of this audit | Actual owner / next hard gate |
+| --- | --- | --- |
+| 01, procedures 01–08: source integrity, review, traceability, licenses | CODED/REVIEWED portions, exact-head CI pending | `AGENTS.md`, PR #17, this handoff, `code/tests/test_verify_system.py`. Need checked full SHA and closure of each surviving review thread |
+| 02, procedures 09–16: architecture and interfaces | Selected architecture source inspected, not device-qualified | XIAO Sense + WROOM + Mac, 8x VL53L0X on 0x70, accessory 0x71; no report S3CAM/C3 substitution; pins and UART need received-board verification |
+| 03, procedures 17–24: motor and 1S power safety | SOURCE CONTRACT ONLY, physical release BLOCKED | `CliffGuard`, driver, physical CD74HC123 cutoff, cell and charger, USB isolation, loaded thermal and stop trials |
+| 04, procedures 25–32: ToF, handling, touch | Existing eight-channel firmware and optics tests; hardware OPEN | One exact sample carrier must demonstrate valid 3.3V bus, mux isolation, 30 mm near limit and desk-surface/geometry evidence before seven more units |
+| 05, procedures 33–40: body controls | Software build coverage expanded, CI unverified | Local disarm and latch, no automatic reverse. Verify all CTest sanitizer paths, driver truth and timing on the same commit |
+| 06, procedures 41–48: Sense audio/video | Current XiaoZhi overlay, codec and JPEG source inspected, physical OPEN | Confirm true playback silence, reference alignment, continuous video, echo and actual board build |
+| 07, procedures 49–56: Mac brain and streams | Prior source implementation, not live multi-input qualification | Authenticated events, VAD priority, stale camera cancellation, quiet initiative, tools plus one conversation |
+| 08, procedures 57–64: voice/tools/memory/fleet | Prior source implementation, not five-device qualification | One Xiaozhi/MCP tool owner, private SQLite per pet, genuine completed receipts and multi-pet acoustic floor |
+| 09, procedures 65–72: CAD/dock and gripper | CAD scaffolds exist, printable/measured acceptance OPEN | Exact carrier dimensions, fit gauges, jaw force, protected contacts, IR dock and thermal trials |
+| 10, procedures 73–80: procurement | Pilot-sample route exists, full purchase release BLOCKED | 13 historically quoted sample SKUs/17 pieces/$39.93 items only; exact variants and real checkout prices unverified; full 63-role decisions still gated |
+| 11, procedures 81–88: adversarial tests | More build profile coverage CODED, current exact SHA CI pending | 23 local verifier stages; monitor GitHub CI status and run physical bench/audio/video scenarios, no inferred passes |
+| 12, procedures 89–96: first build, fleet and governance | NOT QUALIFIED | One complete robot must pass real electrical, optical, acoustic, drivetrain, docking and mechanic acceptance before buying/assembling four copies |
+
+**Release rule:** No automation, GitHub comment, passing Python test or sample invoice may mark charging, motion, print fit, one-robot acceptance, five-robot release, or full shopping list safe while required physical evidence is missing. Keep existing conditional first-robot and fleet procurement gates. A newly changed part, firmware version or CAD footprint reopens affected gates.
+
+---
+
 ## November 18 uploaded 75 KB dual MCU and XiaoZhi report disposition
 
 **Input checked:** user-uploaded `Pasted text(20261118-153132).txt` (75,457 bytes, 554 lines), an engineering research and proposed drop-in implementation, **not** actual PR source or measured robot evidence. GitHub was accessible through the connected account on November 18; the report's claim that `hungngodev/desk-robot-remix` is inaccessible is not true of this authenticated inspection. Draft PR #17 remains the **only** implementation branch. Do not create another firmware skeleton or supplant current pins, code, ledgers, shopping list, or state machine.
