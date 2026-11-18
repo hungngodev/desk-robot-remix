@@ -546,6 +546,27 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     assert "while (phase_ < 1.0f)" not in codec
     assert "phase_ += static_cast<float>(kSpeakerRate) / kMicRate;" in codec
     assert "samples > static_cast<int>(kSpeakerRate)" in codec
+    # Audio chunks have a virtual playback END, so the 10 ms Read cadence
+    # cannot count the 60 ms reference data a second time.
+    assert "last_write_us_ + 20000" not in codec
+    assert "now_us - last_write_us_" in codec
+    assert "last_write_us_ += static_cast<int64_t>(samples) * 1000000 / kSpeakerRate" in codec
+
+    def accepted_reference_samples(read_period_ms):
+        end_us = 0
+        pushed = 0
+        for now_us in range(0, 60_000_000, read_period_ms * 1000):
+            # Model the same virtual end clock for the Read/Write operations.
+            if now_us > end_us:
+                pushed += (now_us - end_us) * 16000 // 1_000_000
+                end_us = now_us
+            if now_us % 60_000 == 0:
+                pushed += 960
+                end_us += 60_000
+        return pushed
+
+    for cadence_ms in (10, 20, 30, 60):
+        assert accepted_reference_samples(cadence_ms) == 960_000
     overlay_source = (HEAD / "install_overlay.py").read_text()
     assert "initial_decoder_rate = 24000" in overlay_source
     assert "esp_ae_rate_cvt_open(&cfg, &output_resampler_)" in overlay_source
