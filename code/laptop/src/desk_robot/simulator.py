@@ -94,6 +94,10 @@ class SimulationVision:
 
 
 class SimulatedSpeaker:
+    # Test-only capability: mirrors checks at the nonblocking simulated send.
+    # It does not assert any physical decoder, DMA, or loudspeaker state.
+    supports_permission_checks = True
+
     def __init__(self):
         self.spoken = []
 
@@ -101,7 +105,9 @@ class SimulatedSpeaker:
     async def session(self, robots):
         yield
 
-    async def say(self, robot, text):
+    async def say(self, robot, text, *, permission_check=None):
+        if permission_check is not None and not permission_check():
+            raise RuntimeError("Simulated speech permission revoked")
         self.spoken.append((robot.id, text))
 
 
