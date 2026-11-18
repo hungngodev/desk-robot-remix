@@ -176,3 +176,33 @@ def test_native_heard_and_sent_schemas_remain_bounded_after_split():
         NativeSpokenRequest(
             event_id=sent.event_id, model_text="sent", sent_at_us=0,
         )
+
+
+def test_voice_retrieval_remains_authenticated_after_memory_split():
+    config = Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    app = create_app(load_settings(config), runtime=SimpleNamespace())
+    matches = [
+        route for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/v1/pet/{robot_id}/voice-context"
+    ]
+    assert len(matches) == 1
+    route = matches[0]
+    assert route.methods == {"GET"}
+    assert route.endpoint.__module__ == "desk_robot.api_memory_routes"
+    assert any(
+        getattr(dep.call, "__name__", None) == "authorize"
+        for dep in route.dependant.dependencies
+    )
+    # A model-only credential may not access the operator's mutation APIs.
+    for protected in (
+        "/v1/pet/{robot_id}/core-memory/{slot}",
+        "/v1/pet/{robot_id}/memories/{event_id}",
+    ):
+        for candidate in app.routes:
+            if not isinstance(candidate, APIRoute) or candidate.path != protected:
+                continue
+            assert any(
+                getattr(dep.call, "__name__", None) == "operator"
+                for dep in candidate.dependant.dependencies
+            )
