@@ -131,9 +131,20 @@ def source_snapshot() -> dict:
         snapshot["sha"] = sha
         snapshot["tracked_clean"] = not bool(changes.strip())
         tracked = subprocess.check_output(
-            ["git", "ls-files"], cwd=ROOT, text=True, timeout=10,
+            ["git", "ls-files", "-z"], cwd=ROOT, text=True, timeout=10,
             stderr=subprocess.DEVNULL,
-        ).splitlines()
+        ).split("\\0")
+        if tracked and tracked[-1] == "":
+            tracked.pop()
+        # Git's index includes skip-worktree paths in sparse checkouts.
+        # The full worktree must contain every tracked file, not merely 400
+        # index entries and a handful of sentinels. Broken symlink entries
+        # count as present Git objects; missing files and sparse directories
+        # do not. NUL framing handles unusual Git filenames without ambiguity.
+        tracked_present = all(
+            (ROOT / name).exists() or (ROOT / name).is_symlink()
+            for name in tracked
+        )
         # Mirror CI's root sentinels and 400-file conservative floor.
         # A valid-looking commit can still refer to a truncated Git tree.
         directories = (".agent3d", ".github", "code", "docs")
@@ -145,6 +156,7 @@ def source_snapshot() -> dict:
                  "docs/records/verification.md")
         snapshot["root_tree_intact"] = (
             len(tracked) >= 400
+            and tracked_present
             and all((ROOT / name).is_dir() for name in directories)
             and all((ROOT / name).is_file() for name in files)
         )
