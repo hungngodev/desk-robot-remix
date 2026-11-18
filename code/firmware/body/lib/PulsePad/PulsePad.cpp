@@ -85,6 +85,14 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   bool ok = read_reg(0x04, write_pointer) &&
             read_reg(0x05, overflow) &&
             read_reg(0x06, read_pointer);
+  // MAX30102 FIFO pointers and overflow counters are five-bit values.
+  // Reject corrupt reserved bits rather than masking them into a plausible
+  // fresh paw-contact sample. No sensor output is used to authorize motors.
+  if (ok && ((write_pointer | read_pointer | overflow) & 0xe0U) != 0U) {
+    (void)close();
+    sample_.valid = false;
+    return false;
+  }
   const std::uint8_t available =
       static_cast<std::uint8_t>((write_pointer - read_pointer) & 31U);
   // The MAX30102 FIFO_RD_PTR (0x06) is writable. If the body loop was
