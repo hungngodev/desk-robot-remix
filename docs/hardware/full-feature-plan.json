@@ -112,7 +112,7 @@
       "name": "VL53L0X GY-530 small carrier candidate ElectroPeak SEN-19-006",
       "per_robot": 8,
       "reported_owned_total": 0,
-      "notes": "Four downward cliff sensors, one front and three read-only directions (8 total per robot). One exact low-price SOURCE CANDIDATE: ElectroPeak SEN-19-006 GY-530 VL53L0X, advertised 10.5 x 13.3 mm, 2.8 to 5V carrier power, 30mm to 2m sensing and $1.76 before shipping. This vendor page does not verify physical SDA/SCL 3.3V pullups, cloned IC or motor-loaded 30-80mm optical desk safety. Buy or borrow one sample to qualify, NEVER order all 40 without measurements. Rejected $80 premium VL53L4CD.",
+      "notes": "Four downward cliff sensors, one front and three read-only directions (8 total per robot). One exact low-price SOURCE CANDIDATE: ElectroPeak SEN-19-006 GY-530 VL53L0X, advertised 10.5 x 13.3 mm, 2.8 to 5V carrier power, 30mm to 2m sensing and USD $1.44 listed 2026-11-18 before shipping and tax. This vendor page does not verify physical SDA/SCL 3.3V pullups, cloned IC or motor-loaded 30-80mm optical desk safety. Buy or borrow one sample to qualify, NEVER order all 40 without measurements. Rejected $80 premium VL53L4CD.",
       "group": "pet"
     },
     {
