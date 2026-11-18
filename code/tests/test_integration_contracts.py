@@ -20,6 +20,8 @@ from desk_robot.pet import (
 from desk_robot.sensor_event_contract import (
     DIRECT_INTERACTION_KINDS,
     PHYSICAL_INITIATIVE_KINDS,
+)
+from desk_robot.sensor_event_contract import (
     TRIGGERS as SHARED_TRIGGERS,
 )
 from pydantic import ValidationError
