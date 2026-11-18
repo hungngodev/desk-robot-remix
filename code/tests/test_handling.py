@@ -635,3 +635,19 @@ def test_new_boot_with_older_host_timestamp_revokes_calibration():
     assert qualified(gate, sample(boot_id=1, sample_ms=previous_sample + 1),
                      previous_at + .15, new_sample=False) == ()
     assert gate.reference is None
+
+def test_older_host_timestamp_cannot_hide_malformed_new_acquisition():
+    gate = HandlingGate()
+    calibrated(gate, 100)
+    previous_at, previous_sample = gate.last_at, gate.last_sample_ms
+    assert gate.reference is not None
+    # Host callbacks may arrive out of order. A fresh but invalid WROOM
+    # conversion must not be ignored merely because its host time is older.
+    corrupt = sample(sample_ms=previous_sample + 1, valid=False)
+    assert qualified(gate, corrupt, previous_at - .05, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.startup_samples == []
+    # A genuinely old stationary acquisition is still harmless.
+    assert qualified(gate, sample(sample_ms=previous_sample), previous_at - .1,
+                     new_sample=False) == ()
+    assert gate.reference is None

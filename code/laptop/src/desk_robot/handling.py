@@ -141,7 +141,14 @@ class HandlingGate:
                 # callback timestamp precedes the last delivered callback.
                 pass
             elif _stationary_body(body):
-                return ()
+                # A callback timestamp alone cannot establish acquisition
+                # order. Reject only a replay of an older conversion; a
+                # malformed NEW conversion must still revoke calibration.
+                if (isinstance(imu, dict)
+                        and type(imu.get("sample_ms")) is int
+                        and self.last_sample_ms is not None
+                        and imu["sample_ms"] <= self.last_sample_ms):
+                    return ()
         # An older acquisition with an intact stationary safety envelope
         # cannot revoke a newer pose merely because its IMU payload was
         # corrupted in transit. Invalid CURRENT acquisitions still fail closed.
