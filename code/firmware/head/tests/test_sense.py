@@ -200,7 +200,7 @@ class SenseOverlayTests(unittest.TestCase):
         assert 'std::strcmp(command, "optics")' in body
         assert '"motor_authorized":false' not in body  # JSON is C++ escaped
         assert 'control.sample_range_optics(' in (
-            ROOT / "code/firmware/body/src/main.cpp"
+            ROOT / "firmware/body/src/main.cpp"
         ).read_text()
 
 
