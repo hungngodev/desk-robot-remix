@@ -6,9 +6,8 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
-from PIL import Image
-
 from desk_robot.vision import VisualChangeGate, YoloWorldVision, image_size
+from PIL import Image
 
 
 def frame() -> bytes:
