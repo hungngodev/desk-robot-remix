@@ -115,7 +115,8 @@ def source_snapshot() -> dict:
     Pull request CI may check out a synthetic merge commit rather than the
     PR branch head. Record what actually ran, never infer a different SHA.
     """
-    snapshot = {"sha": None, "tracked_clean": None, "error": None}
+    snapshot = {"sha": None, "tracked_clean": None,
+                "root_tree_intact": False, "error": None}
     try:
         sha = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
@@ -129,6 +130,24 @@ def source_snapshot() -> dict:
         )
         snapshot["sha"] = sha
         snapshot["tracked_clean"] = not bool(changes.strip())
+        tracked = subprocess.check_output(
+            ["git", "ls-files"], cwd=ROOT, text=True, timeout=10,
+            stderr=subprocess.DEVNULL,
+        ).splitlines()
+        # Mirror CI's root sentinels and 400-file conservative floor.
+        # A valid-looking commit can still refer to a truncated Git tree.
+        directories = (".agent3d", ".github", "code", "docs")
+        files = (".gitignore", "AGENTS.md", "LICENSE", "README.md",
+                 "code/firmware/body/include/BodyPins.h",
+                 "code/firmware/head/sense/config.h",
+                 "code/laptop/src/desk_robot/handling.py",
+                 "docs/hardware/full-feature-plan.json",
+                 "docs/records/verification.md")
+        snapshot["root_tree_intact"] = (
+            len(tracked) >= 400
+            and all((ROOT / name).is_dir() for name in directories)
+            and all((ROOT / name).is_file() for name in files)
+        )
     except (OSError, subprocess.CalledProcessError,
             subprocess.TimeoutExpired, ValueError) as exc:
         snapshot["error"] = type(exc).__name__ + ": " + str(exc)[:200]
@@ -162,6 +181,7 @@ def main() -> int:
         checkout_before["sha"] is not None
         and checkout_before == checkout_after
         and checkout_before["tracked_clean"] is True
+        and checkout_before["root_tree_intact"] is True
     )
     receipt = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
