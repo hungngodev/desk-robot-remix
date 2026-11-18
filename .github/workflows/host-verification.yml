@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
-          actual="$(git rev-parse HEAD)"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
           test "$actual" = "$expected" || {
             echo "::error::Wrong checkout: expected $expected, got $actual"
             exit 1
@@ -135,7 +135,7 @@ jobs:
         shell: bash
         run: |
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
-          actual="$(git rev-parse HEAD)"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
           test "$actual" = "$expected" || {
             echo "::error::Wrong checkout: expected $expected, got $actual"
             exit 1
@@ -184,7 +184,7 @@ jobs:
         shell: bash
         run: |
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
-          actual="$(git rev-parse HEAD)"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
           test "$actual" = "$expected" || {
             echo "::error::Wrong checkout: expected $expected, got $actual"
             exit 1
@@ -220,7 +220,7 @@ jobs:
         shell: bash
         run: |
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
-          actual="$(git rev-parse HEAD)"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
           test "$actual" = "$expected" || {
             echo "::error::Wrong checkout: expected $expected, got $actual"
             exit 1
