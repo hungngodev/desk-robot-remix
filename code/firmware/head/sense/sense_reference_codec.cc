@@ -115,11 +115,13 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         return 0;
     }
     const int frames = samples / 2;
-    std::vector<int16_t> microphone(frames);
-    std::vector<int16_t> reference(frames);
+    if (frames > kMaxReadFrames) return 0;
+    // The head owns one realtime capture reader. A bounded mutex also
+    // prevents concurrent callbacks from corrupting shared frame scratch.
+    std::lock_guard<std::mutex> input_lock(input_read_mutex_);
     // Keep microphone/I2S read outside reference_mutex_: it can block for
-    // samples and must never prevent the output task publishing a reference.
-    const int mic_read = NoAudioCodecSimplexPdm::Read(microphone.data(), frames);
+    // samples and must never prevent output publishing an AEC reference.
+    const int mic_read = NoAudioCodecSimplexPdm::Read(microphone_frame_.data(), frames);
     if (mic_read != frames) {
         return 0; // AudioCodec::InputData is boolean; reject partial frames.
     }
@@ -131,7 +133,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         std::lock_guard<std::mutex> lock(reference_mutex_);
         FillSilenceLocked(esp_timer_get_time());
         const uint32_t previous_overwrites = reference_overwrite_reads_;
-        reference_ready = ReadReferenceLocked(reference.data(), frames);
+        reference_ready = ReadReferenceLocked(reference_frame_.data(), frames);
         consecutive_missing = consecutive_missing_reference_reads_;
         overwrite_count = reference_overwrite_reads_;
         newly_overwritten = overwrite_count != previous_overwrites;
@@ -151,8 +153,8 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
                  static_cast<unsigned>(consecutive_missing));
     }
     for (int i = 0; i < frames; ++i) {
-        dest[2 * i] = microphone[i];
-        dest[2 * i + 1] = reference[i];
+        dest[2 * i] = microphone_frame_[i];
+        dest[2 * i + 1] = reference_frame_[i];
     }
     return samples;
 }
