@@ -106,6 +106,42 @@ bool StatusValid(cJSON* json) {
     return true;
 }
 
+bool OpticsValid(cJSON* json) {
+    // Same WROOM sample, not a second ToF driver or a motor permission.
+    const auto payload = cJSON_GetObjectItemCaseSensitive(json, "optics");
+    if (!cJSON_IsObject(payload)) return false;
+    const auto get = [payload](const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(payload, key);
+    };
+    const auto integer = [](cJSON* item, double max) {
+        return cJSON_IsNumber(item) && std::isfinite(item->valuedouble) &&
+               item->valuedouble == std::floor(item->valuedouble) &&
+               item->valuedouble >= 0 && item->valuedouble <= max;
+    };
+    const auto present = get("present_mask"), valid = get("valid_mask");
+    if (!integer(present, 255) || !integer(valid, 255) ||
+        (valid->valueint & ~present->valueint) != 0 ||
+        !cJSON_IsFalse(get("motor_authorized")) ||
+        !cJSON_IsFalse(get("physical_qualified"))) return false;
+    cJSON* amb = get("ambient_97");
+    cJSON* signal = get("signal_97");
+    cJSON* ages = get("age_ms");
+    if (!cJSON_IsArray(amb) || !cJSON_IsArray(signal) ||
+        !cJSON_IsArray(ages) || cJSON_GetArraySize(amb) != 8 ||
+        cJSON_GetArraySize(signal) != 8 || cJSON_GetArraySize(ages) != 8)
+        return false;
+    for (int i = 0; i < 8; ++i) {
+        auto age = cJSON_GetArrayItem(ages, i);
+        if (!integer(cJSON_GetArrayItem(amb, i), 65535) ||
+            !integer(cJSON_GetArrayItem(signal, i), 65535) ||
+            !integer(age, 4294967295.0)) return false;
+        if ((valid->valueint & (1 << i)) != 0 &&
+            (i < 5 ? age->valuedouble >= 200 :
+                     age->valuedouble > 350)) return false;
+    }
+    return true;
+}
+
 bool IrValid(cJSON* json) {
     // Explicit read-only RMT evidence; a matching carrier is not enough to
     // infer a bearing, permit a motor, or certify net cell charging.
@@ -266,7 +302,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 8;
+    config.max_uri_handlers = 9;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -275,7 +311,7 @@ void Bridge::Start() {
     }
     for (const auto& entry : std::vector<std::pair<const char*, httpd_method_t>>{
              {"/api/status", HTTP_GET}, {"/api/aux", HTTP_GET},
-             {"/api/ir", HTTP_GET},
+             {"/api/ir", HTTP_GET}, {"/api/optics", HTTP_GET},
              {"/api/command", HTTP_POST}, {"/api/face", HTTP_POST},
              {"/api/camera.jpg", HTTP_GET},
              {"/api/camera.mjpg", HTTP_GET},
@@ -318,11 +354,13 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         if (c == '\r') continue;
         if (c == '\n') {
             if (MatchingError(line, command)) return {400, false, line};
-            if (command.verb == "status" || command.verb == "aux" || command.verb == "ir") {
+            if (command.verb == "status" || command.verb == "aux" ||
+                command.verb == "ir" || command.verb == "optics") {
                 auto json = Parse(line);
                 if (json && (command.verb == "status" ?
                              StatusValid(json.get()) : command.verb == "aux" ?
-                             AuxValid(json.get()) : IrValid(json.get())))
+                             AuxValid(json.get()) : command.verb == "ir" ?
+                              IrValid(json.get()) : OpticsValid(json.get())))
                     return {200, true, line};
             } else if (line == ExpectedAck(command)) return {200, true, line};
             line.clear();  // EVT, startup output, and unrelated ACKs are never success.
@@ -567,10 +605,13 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     }
     if (strcmp(req->uri, "/api/status") == 0 ||
         strcmp(req->uri, "/api/aux") == 0 ||
-        strcmp(req->uri, "/api/ir") == 0) {
+        strcmp(req->uri, "/api/ir") == 0 ||
+        strcmp(req->uri, "/api/optics") == 0) {
         const bool aux = strcmp(req->uri, "/api/aux") == 0;
         const bool ir = strcmp(req->uri, "/api/ir") == 0;
-        auto reply = Transact(ir ? "ir" : aux ? "aux" : "status", false);
+        const bool optics = strcmp(req->uri, "/api/optics") == 0;
+        auto reply = Transact(
+            optics ? "optics" : ir ? "ir" : aux ? "aux" : "status", false);
         if (!reply.ok) return Json(req, reply.status, Envelope(false, reply.text));
         auto json = Parse(reply.text);
         cJSON_AddStringToObject(json.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
