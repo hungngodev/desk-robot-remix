@@ -112,6 +112,9 @@ def test_passing_source_checks_never_clear_commercial_or_physical_batch_gates(
 
     stages = [("standalone", ["true"], tmp_path, 1)]
     monkeypatch.setattr(verify, "steps", lambda suite, build: stages)
+    monkeypatch.setattr(verify, "source_snapshot", lambda: {
+        "sha": "a" * 40, "tracked_clean": True, "error": None,
+    })
     monkeypatch.setattr(verify, "run", lambda *args: {
         "name": "standalone", "pass": True, "exit_code": 0,
         "elapsed_s": 0.1, "output_tail": "", "error": None,
@@ -131,3 +134,45 @@ def test_passing_source_checks_never_clear_commercial_or_physical_batch_gates(
     assert receipt["sense_vbus_power_path_verified"] is False
     assert receipt["print_fit_verified"] is False
     assert receipt["five_robot_acoustics_verified"] is False
+    assert receipt["same_commit_clean_checkout"] is True
+    assert receipt["checkout_before"]["sha"] == "a" * 40
+
+
+@pytest.mark.parametrize("fault", ["changed_commit", "dirty_tree", "missing_git"])
+def test_successful_test_stages_do_not_certify_unpinned_checkout(
+    monkeypatch, tmp_path, fault,
+):
+    stages = [("stage", ["true"], tmp_path, 1)]
+    monkeypatch.setattr(verify, "steps", lambda suite, build: stages)
+    monkeypatch.setattr(verify, "run", lambda *args: {
+        "name": "stage", "pass": True, "exit_code": 0,
+        "elapsed_s": 0.1, "output_tail": "", "error": None,
+    })
+    clean = {"sha": "a" * 40, "tracked_clean": True, "error": None}
+    if fault == "changed_commit":
+        final = {**clean, "sha": "b" * 40}
+    elif fault == "dirty_tree":
+        final = {**clean, "tracked_clean": False}
+    else:
+        final = {"sha": None, "tracked_clean": None, "error": "git unavailable"}
+    snapshots = iter((clean, final))
+    monkeypatch.setattr(verify, "source_snapshot", lambda: next(snapshots))
+    report = tmp_path / "pin-receipt.json"
+    monkeypatch.setattr(verify.sys, "argv", [
+        "verify_system.py", "--suite", "all", "--report", str(report),
+    ])
+    assert verify.main() == 1
+    import json
+    receipt = json.loads(report.read_text())
+    assert receipt["source_suite_pass"] is True
+    assert receipt["same_commit_clean_checkout"] is False
+    assert receipt["assembly_ready"] is False
+
+
+def test_source_snapshot_rejects_unverified_or_dirty_git(monkeypatch):
+    outputs = iter(("a" * 40, " M code/scripts/verify_system.py\\n"))
+    monkeypatch.setattr(verify.subprocess, "check_output",
+                        lambda *args, **kwargs: next(outputs))
+    result = verify.source_snapshot()
+    assert result["sha"] == "a" * 40
+    assert result["tracked_clean"] is False
