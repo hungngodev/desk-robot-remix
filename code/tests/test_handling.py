@@ -758,4 +758,7 @@ def test_invalid_imu_does_not_restart_recent_shake_cooldown():
     assert qualified(gate, shake, 103.6) == ()
     assert qualified(gate, shake, 103.75) == ()
     assert gate.last_shake == 102.15
-    assert qualified(gate, shake, 105.2) == ("handling_shake",)
+    for when in (104.0, 104.5, 105.0):
+        assert qualified(gate, sample(), when) == ()
+    assert qualified(gate, shake, 105.2) == ()
+    assert qualified(gate, shake, 105.35) == ("handling_shake",)
