@@ -29,13 +29,15 @@ void SenseReferenceCodec::FillSilenceLocked(int64_t now_us) {
         last_write_us_ = now_us;
         return;
     }
-    if (now_us <= last_write_us_ + 20000) {
+    // last_write_us_ is the *virtual end time* of audio already accepted
+    // into the reference ring, not the previous callback timestamp.
+    // A 60 ms speaker chunk already occupies 60 ms of the reference clock;
+    // neither a 10 ms microphone read nor the next speaker write can count it
+    // again. Silence advances only after playback's represented end.
+    if (now_us <= last_write_us_) {
         return;
     }
-    // Reuse RIO's essential idea: a silent interval advances the reference.
-    // Otherwise the first word of a new turn would subtract the previous
-    // turn's old audio as though it had just played.
-    uint64_t sample_gap = static_cast<uint64_t>(now_us - last_write_us_ - 20000)
+    uint64_t sample_gap = static_cast<uint64_t>(now_us - last_write_us_)
                           * kMicRate / 1000000;
     sample_gap = std::min<uint64_t>(sample_gap, kMaxGapSamples);
     for (uint64_t n = 0; n < sample_gap; ++n) {
@@ -75,7 +77,10 @@ void SenseReferenceCodec::PublishAcceptedLocked(
         phase_ -= 1.0f;
         last_filtered_ = static_cast<int16_t>(filtered);
     }
-    last_write_us_ = now_us;
+    // The accepted chunk advances the clock by its actual sample duration.
+    // Never reset it to the callback time: that would count the same 60 ms
+    // of speech again when the 10 ms PDM capture reader fills silence.
+    last_write_us_ += static_cast<int64_t>(samples) * 1000000 / kSpeakerRate;
 }
 
 bool SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames) {
