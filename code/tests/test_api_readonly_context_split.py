@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from desk_robot.api import ReadonlyPlanRequest, create_app
+from desk_robot.api import CoreMemoryRequest, ReadonlyPlanRequest, create_app
 from desk_robot.config import load_settings
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
@@ -79,3 +79,50 @@ def test_voice_planner_request_schema_preserves_original_input_bounds():
             ReadonlyPlanRequest(transcript=invalid)
     with pytest.raises(ValidationError):
         ReadonlyPlanRequest(transcript="Look here", command="move")
+
+
+def test_operator_only_memory_routes_remain_private_and_distinct():
+    config = Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    app = create_app(load_settings(config), runtime=SimpleNamespace())
+    routes = {
+        "/v1/pet/{robot_id}/memories": "GET",
+        "/v1/pet/{robot_id}/core-memory": "GET",
+        "/v1/pet/{robot_id}/core-memory/{slot}": "PUT",
+        "/v1/pet/{robot_id}/memories/{event_id}": "DELETE",
+    }
+    for path, method in routes.items():
+        matches = [
+            route for route in app.routes
+            if isinstance(route, APIRoute) and route.path == path
+            and method in route.methods
+        ]
+        assert len(matches) == 1
+        route = matches[0]
+        assert route.endpoint.__module__ == "desk_robot.api_memory_routes"
+        assert any(
+            getattr(dependency.call, "__name__", None) == "operator"
+            for dependency in route.dependant.dependencies
+        )
+    # The same core fact path has GET/PUT/DELETE ownership, with the
+    # deletion registered separately rather than silently lost on extraction.
+    deletes = [
+        route for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/v1/pet/{robot_id}/core-memory/{slot}"
+        and "DELETE" in route.methods
+    ]
+    assert len(deletes) == 1
+    assert deletes[0].endpoint.__module__ == "desk_robot.api_memory_routes"
+    assert any(
+        getattr(dep.call, "__name__", None) == "operator"
+        for dep in deletes[0].dependant.dependencies
+    )
+
+
+def test_operator_memory_request_limits_survive_route_extraction():
+    assert CoreMemoryRequest(value="remember this").value == "remember this"
+    for invalid in ("", "x" * 201):
+        with pytest.raises(ValidationError):
+            CoreMemoryRequest(value=invalid)
+    with pytest.raises(ValidationError):
+        CoreMemoryRequest(value="private", motor_authorized=True)
