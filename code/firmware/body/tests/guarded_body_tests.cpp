@@ -1118,6 +1118,38 @@ static void status_readiness_matches_local_arm_interlocks() {
   CHECK(send(dock_body, "arm", 3) == "ERR arm dock_power_connected");
 }
 
+static void eight_lane_optical_words_are_read_only_and_expire() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
+  CHECK(send(body, "optics", 0).find(
+      "\"present_mask\":0,\"valid_mask\":0") != std::string::npos);
+  body.sample_range_optics(0, 0x0123, 0x4567, true, 10);
+  body.sample_range_optics(5, 0x0020, 0x0400, true, 10);
+  const auto fresh = send(body, "optics", 10);
+  CHECK(fresh.front() == '{' && fresh.back() == '}');
+  CHECK(fresh.find("\"ambient_97\":[291,0,0,0,0,32,0,0]") != std::string::npos);
+  CHECK(fresh.find("\"signal_97\":[17767,0,0,0,0,1024,0,0]") != std::string::npos);
+  CHECK(fresh.find("\"present_mask\":33,\"valid_mask\":33") != std::string::npos);
+  CHECK(fresh.find("\"physical_qualified\":false") != std::string::npos);
+  CHECK(fresh.find("\"motor_authorized\":false") != std::string::npos);
+  CHECK(send(body, "optics 1", 11) == "ERR optics bad_arguments");
+
+  const auto critical_expired = send(body, "optics", 210);
+  CHECK(critical_expired.find(
+      "\"present_mask\":33,\"valid_mask\":32") != std::string::npos);
+  const auto side_fresh = send(body, "optics", 360);
+  CHECK(side_fresh.find(
+      "\"present_mask\":33,\"valid_mask\":32") != std::string::npos);
+  const auto side_expired = send(body, "optics", 361);
+  CHECK(side_expired.find(
+      "\"present_mask\":33,\"valid_mask\":0") != std::string::npos);
+  body.sample_range_optics(7, 65535, 65535, true, 362);
+  body.invalidate_range_optics();
+  const auto invalid = send(body, "optics", 362);
+  CHECK(invalid.find("\"present_mask\":161,\"valid_mask\":0") != std::string::npos);
+  CHECK(invalid.find("\"signal_97\":[17767,0,0,0,0,1024,0,65535]") != std::string::npos);
+  CHECK(!body.state().armed); // diagnostic cannot grant any motor authority
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -1150,6 +1182,7 @@ int main() {
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
     extra_three_ranging_channels_are_diagnostics_only();
+    eight_lane_optical_words_are_read_only_and_expire();
     side_range_validity_clears_on_shared_bus_fault_without_fake_samples();
     cap_petting_zones_are_optional_and_never_arm();
     touch_telemetry_never_grants_motion();
