@@ -27,6 +27,15 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - name: Prevent partial repository trees
+        run: |
+          test -f AGENTS.md
+          test -f README.md
+          test -f code/firmware/body/include/BodyPins.h
+          test -f code/firmware/head/sense/config.h
+          test -f docs/hardware/full-feature-plan.json
+          test -f docs/records/verification.md
+          test -f code/laptop/src/desk_robot/handling.py
       - name: Install Python and locked dependencies
         working-directory: code
         run: |

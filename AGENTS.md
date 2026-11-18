@@ -1,3 +1,31 @@
+# Repository tree integrity after November 18 recovery
+
+A GitHub Git Database `create_tree` call without `base_tree_sha` creates a
+partial root tree, even when only one Python source file is being changed.
+This happened on PR #17 and accidentally removed nearly the entire robot
+project. Before every branch mutation, fetch the actual live PR head and
+its root Git tree. Use `create_tree(base_tree_sha=<current full root tree>)`
+with minimal changed entries, or GitHub Contents `update_file` with the
+current content blob SHA. For any candidate Git tree, read its root back
+before committing and require the full expected set: `.agent3d`,
+`.github`, `.gitignore`, `AGENTS.md`, `LICENSE`, `README.md`,
+`code` and `docs`. Verify the changed file objects are present and
+that no unrelated file has disappeared. Advance the canonical branch only
+with a nonforced expected-head lease. Abort and reconcile when another
+agent advanced it. Afterward, compare to the base branch and inspect
+unexpected removals. Never declare a partial tree a successful commit.
+The full-tree recovery commit is `46561a373011be5eaa4fd184e9832de2c3225294`.
+
+# Sense amplifier clock compatibility
+
+The selected generic MAX98357A explicitly does not support a 24 kHz I2S
+LRCLK. The Sense head output is 32 kHz, the PDM microphone and ESP-SR AEC
+reference are 16 kHz. Reuse Xiaozhi's pinned decoded PCM resampler and
+retain continuous 2:1 playback reference conversion plus audio generation
+cancellation. See Analog Devices MAX98357A Rev 16 page 16 and
+`firmware/head/tests/test_sense.py`. An ESP-IDF compile alone never
+qualifies the physical double-talk or speaker acoustics.
+
 # November 17 pilot purchasing clarification for parallel agents
 
 **Live verification rule, superseding historical runner failure claims:** Every

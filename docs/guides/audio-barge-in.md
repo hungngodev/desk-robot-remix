@@ -232,8 +232,11 @@ has been flashed by this project and no interruption test has passed.
 ## Per-robot playback reference alignment in the pinned Sense build
 
 The ESP-SR AFE input remains two-channel interleaved `MR` at 16 kHz;
-`SenseReferenceCodec` still resamples only the accepted 24 kHz speaker
-output and uses the existing Xiaozhi I2S writer. The earlier fixed 90 ms
+`SenseReferenceCodec` converts the accepted 32 kHz MAX98357A speaker
+output into a 16 kHz AEC reference and uses the existing Xiaozhi I2S writer.
+Xiaozhi's pinned decoder resamples incoming 24 kHz TTS PCM to the supported
+32 kHz amplifier clock. The upstream RIO 24 kHz reference described above
+is source history, not a safe MAX98357A board clock. The earlier fixed 90 ms
 reference alignment is now a Kconfig setting named
 `CONFIG_DESK_ROBOT_AEC_DELAY_MS` (0 to 250 ms). That **does not** make the
 robot acoustically calibrated. Each actual assembled robot must measure the

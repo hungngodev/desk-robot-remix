@@ -19,7 +19,7 @@ Known source paths below refer to those revisions. [Source record](../hardware/r
 | `main/audio/engines/afe_audio_engine.cc`, `AfeAudioEngine::Initialize` / `Feed` | Existing engine selects `MR` for two input channels with a reference. Input is interleaved signed 16-bit PCM at 16 kHz: mic, reference, mic, reference. Query its actual feed chunk size. |
 | `main/audio/audio_service.cc`, `ReadAudioData` / `AudioInputTask` | Requests 160 frames per 10 ms; two channels require 320 sample values. Processed output remains mono. |
 | `main/audio/codecs/no_audio_codec.cc`, `NoAudioCodecSimplexPdm::Read` | Current Sense input is mono 16 kHz PDM-demodulated PCM on I²S0. |
-| Same file, `NoAudioCodec::Write` | Takes 24 kHz output PCM, applies squared software volume/clamping, writes 32-bit mono I²S on I²S1. A tap before this method misses the effective speaker gain/clipping. |
+| Same file, `NoAudioCodec::Write` | Takes 32 kHz output PCM after XiaoZhi resamples its usual 24 kHz Opus stream, applies squared software volume/clamping, writes 32-bit mono I²S on I²S1. The MAX98357A excludes 24 kHz LRCLK; a tap before this method misses the effective speaker gain/clipping. |
 | `firmware/head/sense/desk_robot_sense.cc`, `GetAudioCodec` | Isolated place to select a Sense-only reference codec without changing camera, OLED, UART or amplifier pins. |
 | `firmware/head/install_overlay.py`, `planned_files` | Copies Sense board sources. A future opt-in must also extend the upstream device-AEC whitelist narrowly and reversibly. |
 
@@ -44,7 +44,7 @@ unknown alignment need explicit diagnostics and a failed qualification state.
 
 Reference must follow samples actually accepted/played by the output path,
 including partial writes, idle gaps, startup occupancy and audible tails.
-Current TX allocation is 6 × 240 frames, nominally 60 ms at 24 kHz; that is not a
+Current TX allocation is 6 × 240 frames, nominally 45 ms at 32 kHz; that is not a
 measured acoustic delay. Measure capture/output delay and clock drift on the
 assembled head. RIO's initial 90 ms is not our calibration.
 
@@ -57,7 +57,7 @@ must reach this device path and receive actual playback-completion information.
 ## Reference buffer integrity and observable failure
 
 The selected `SenseReferenceCodec` now reads real mono PDM input and
-interleaves it with a bounded 24 kHz to 16 kHz speaker reference before
+interleaves it with a bounded 32 kHz to 16 kHz speaker reference before
 Xiaozhi's existing ESP-SR AFE. It uses a generation fence on cancellation,
 post-volume reference samples and short ring copies under a mutex; actual
 blocking I2S reads and writes run outside that mutex. This software path
