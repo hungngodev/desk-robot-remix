@@ -18,7 +18,12 @@ from desk_robot.handling import (
 
 
 def _finite(value: object) -> bool:
-    return type(value) in (int, float) and math.isfinite(value)
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def analyze(records: list[dict]) -> dict:
@@ -58,6 +63,11 @@ def analyze(records: list[dict]) -> dict:
         firmware = record["firmware_commit"]
         mount = record["mount_id"]
         accel = decoded[0]
+        # The runtime HandlingGate refuses implausible accelerations even
+        # with otherwise valid raw bytes. Calibration must be at least as
+        # strict as the consumer it proposes to tune.
+        if not 0.05 <= math.hypot(*accel) <= 3.5:
+            raise ValueError("Implausible MPU6050 acceleration in trial log")
         gyro = tuple(raw / GYRO_COUNTS_PER_DPS for raw in imu["gyro"])
         groups[record["label"]].append((accel, gyro))
 
