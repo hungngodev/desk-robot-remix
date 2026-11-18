@@ -2914,10 +2914,19 @@ async def test_native_barge_drops_old_queued_tools_without_physical_retry(native
         ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
                           "gauge_available": False}, "wroom_fuel_gauge"),
         ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
-                          "gauge_available": True, "reported_soc_centi": 5000,
+                          "gauge_available": True, "raw_fuel_acquisition_seq": 19,
+                          "reported_soc_centi": 5000,
                           "reported_cell_mv": 3700}, "unqualified_wroom_gauge"),
         ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
-                          "gauge_available": True, "reported_soc_centi": "99",
+                          "gauge_available": True, "reported_soc_centi": 5000,
+                          "reported_cell_mv": 3700}, None),
+        ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
+                          "gauge_available": True, "raw_fuel_acquisition_seq": 0,
+                          "reported_soc_centi": 5000,
+                          "reported_cell_mv": 3700}, None),
+        ("power-status", {"source": "wroom_aux_fuel_gauge_raw_unqualified",
+                          "gauge_available": True, "raw_fuel_acquisition_seq": 19,
+                          "reported_soc_centi": "99",
                           "reported_cell_mv": 3700}, None),
         ("aux-status", {"robot_id": "robot-01", "climate": {
             "valid": True, "temp_centi": 2150, "rh_centi": 4400
@@ -2990,7 +2999,8 @@ def test_native_aux_sensor_facts_are_only_bounded_typed_physical_values(native):
             "age_ms": 40,
         },
         "power": {
-            "fuel_valid": True, "soc_centi": 5100, "cell_mv": 3750,
+            "fuel_valid": True, "fuel_seq": 7,
+            "soc_centi": 5100, "cell_mv": 3750,
         },
         "bmp280": {
             "valid": True, "pressure_pa": 101325, "temp_centi": 2140,
@@ -4446,7 +4456,8 @@ async def test_native_asr_camera_and_battery_clauses_are_spoken_together(
         return {
             "robot_id": "robot-01",
             "source": "wroom_aux_fuel_gauge_raw_unqualified",
-            "gauge_available": True, "reported_soc_centi": 5200,
+            "gauge_available": True, "raw_fuel_acquisition_seq": 25,
+            "reported_soc_centi": 5200,
             "reported_cell_mv": 3670, "charging_authorized": False,
             "motor_authorized": False,
         }
