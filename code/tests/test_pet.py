@@ -1862,7 +1862,7 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
     state.enabled = True
     state.generation = 3
 
-    def report(soc, nose, pressure, nearby):
+    def report(soc, nose, pressure, nearby, *, fuel_seq):
         return {
             "robot_id": robot_id,
             "pulse": {"present": False, "valid": False, "part_id": 0,
@@ -1872,37 +1872,51 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
             "force": {"adc": [pressure, 0], "jaw_seq": 10, "valid": True, "calibrated": False},
             "climate": {"temp_centi": 2150, "rh_centi": 5000, "valid": True},
             "power": {"cell_mv": 3700, "soc_centi": soc, "bus_mv": 5100,
-                      "shunt_uv": 5, "fuel_valid": True, "monitor_valid": True,
+                      "shunt_uv": 5, "fuel_valid": True, "fuel_seq": fuel_seq,
+                      "monitor_valid": True,
                       "current_calibrated": False},
             "proximity": {"raw": nearby, "valid": True, "gesture": 0,
                           "gesture_events": 0, "physically_qualified": False},
         }
 
     try:
-        first = report(5000, 100, 100, 40)
+        first = report(5000, 100, 100, 40, fuel_seq=1)
         assert validate_aux(first, robot_id) is first
         await pet._observe_aux(robot_id, 3, first)
         assert not any(m.kind in {"battery_low", "nose_twist", "squeeze", "nearby_object"}
                        for m in memory.recent(robot_id))
-        await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150))
+        await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=2))
+        await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=2))
+        assert not any(m.kind == "battery_low" for m in memory.recent(robot_id))
+        await pet._observe_aux(robot_id, 3, report(2300, 900, 10000, 150, fuel_seq=3))
+        for seq in (4, 5, 6):
+            await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=seq))
         kind = {m.kind for m in memory.recent(robot_id)}
         assert {"battery_low", "nose_twist", "squeeze", "nearby_object"} <= kind
         assert memory.count("robot-02") == 0
         before = sum(m.kind in kind for m in memory.recent(robot_id))
-        await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150))
+        await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=6))
+        await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=5))
         assert sum(m.kind in kind for m in memory.recent(robot_id)) == before
 
-        # Same readings after invalid sensor data must not imply continuing contact.
-        invalid = report(1900, 900, 10000, 150)
+        invalid = report(1900, 900, 10000, 150, fuel_seq=7)
         invalid["force"]["valid"] = False
         invalid["proximity"]["valid"] = False
         invalid["power"]["fuel_valid"] = False
         invalid["angles"]["valid_mask"] = 0
         await pet._observe_aux(robot_id, 3, invalid)
         assert sum(m.kind in kind for m in memory.recent(robot_id)) == before
+        for seq in (8, 9, 10, 11):
+            await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=seq))
+        assert sum(m.kind == "battery_low" for m in memory.recent(robot_id)) == 1
+        for seq in (12, 13):
+            await pet._observe_aux(robot_id, 3, report(2300, 900, 10000, 150, fuel_seq=seq))
+        for seq in (14, 15, 16):
+            await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=seq))
+        assert sum(m.kind == "battery_low" for m in memory.recent(robot_id)) == 2
         state.enabled = False
-        await pet._observe_aux(robot_id, 3, report(1900, 2000, 15000, 200))
-        assert sum(m.kind in kind for m in memory.recent(robot_id)) == before
+        await pet._observe_aux(robot_id, 3, report(1900, 2000, 15000, 200, fuel_seq=17))
+        assert sum(m.kind == "battery_low" for m in memory.recent(robot_id)) == 2
     finally:
         state.enabled = False
         await pet.close()

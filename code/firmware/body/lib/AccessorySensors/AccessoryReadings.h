@@ -84,6 +84,8 @@ struct ForceRaw {
 struct GaugeRaw {
   bool fuel_present = false, fuel_valid = false;
   unsigned cell_mv = 0, soc_centi = 0;
+  // Advance only after two valid MAX17048 register reads, not HTTP replay.
+  std::uint32_t fuel_sample_seq = 0;
   bool monitor_present = false, monitor_valid = false;
   unsigned bus_mv = 0;
   int shunt_uv = 0;

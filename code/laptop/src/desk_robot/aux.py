@@ -85,6 +85,14 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or not _bool(power.get("monitor_valid"))
             or power.get("current_calibrated") is not False):
         raise ValueError("Invalid uncalibrated battery or shunt source")
+    # Missing sequence is accepted for old read-only firmware, but cannot
+    # trigger proactive low-battery speech on the Mac.
+    fuel_seq = power.get("fuel_seq")
+    if fuel_seq is not None and (
+        not _uint(fuel_seq, 0xffffffff)
+        or (power["fuel_valid"] and fuel_seq == 0)
+    ):
+        raise ValueError("Invalid MAX17048 fuel acquisition provenance")
     # Optional until an inspected 5mOhm Kelvin sensor and matching WROOM
     # firmware actually exist. Raw calculated milliamp telemetry is not a
     # calibrated battery ammeter or charging authorization.

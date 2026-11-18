@@ -379,6 +379,8 @@ void AccessorySensors::power(std::uint32_t now_ms) {
       g.soc_centi = max17048_soc_centi(state_of_charge);
       g.fuel_valid = g.cell_mv >= 2500 && g.cell_mv <= 4500 &&
                      g.soc_centi <= 10000;
+      if (g.fuel_valid)
+        g.fuel_sample_seq = next_nonzero_sensor_sequence(g.fuel_sample_seq);
     }
   }
   if (g.monitor_present) {

@@ -123,6 +123,9 @@ class PetState:
     aux_read_task: asyncio.Task | None = field(default=None, repr=False)
     aux_reads: int = 0
     last_battery_low: bool | None = None
+    last_fuel_seq: int | None = None
+    low_fuel_streak: int = 0
+    recovered_fuel_streak: int = 0
     last_nose_angle: int | None = None
     last_force_squeeze: bool | None = None
     last_near_hand: bool | None = None
@@ -283,6 +286,9 @@ class PetController:
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
         state.aux_reads = 0
         state.last_battery_low = None
+        state.last_fuel_seq = None
+        state.low_fuel_streak = 0
+        state.recovered_fuel_streak = 0
         state.last_nose_angle = None
         state.last_force_squeeze = None
         state.last_near_hand = None
@@ -696,7 +702,11 @@ class PetController:
                 # Loss of an OPTIONAL sensor is not an excuse to bypass or
                 # overwrite the independent WROOM local motion safety guard.
                 state.last_error = f"Optional sensor: {type(exc).__name__}: {str(exc)[:80]}"
-                state.last_battery_low = None
+                # A failed optional read breaks confirmation, but does not
+                # erase an already announced low-charge state.
+                state.last_fuel_seq = None
+                state.low_fuel_streak = 0
+                state.recovered_fuel_streak = 0
                 state.last_nose_angle = None
                 state.last_force_squeeze = None
                 state.last_near_hand = None
@@ -898,15 +908,53 @@ class PetController:
             state.last_nfc_scan_seq = None
 
         power = data["power"]
-        if power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500:
-            low = power["soc_centi"] <= robot.battery_low_percent * 100
-            if state.last_battery_low is False and low:
-                changes.append(SceneChange(
-                    "battery_low", "My battery fuel gauge reports a low charge", 1.0
-                ))
-            state.last_battery_low = low
+        fuel_seq = power.get("fuel_seq")
+        if (power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500
+                and type(fuel_seq) is int and 0 < fuel_seq <= 0xffffffff):
+            advance = _sensor_counter_advance(fuel_seq, state.last_fuel_seq)
+            if advance == 0:
+                pass  # Cached or backwards sample cannot change battery state.
+            elif advance is None or advance > 1000:
+                state.last_fuel_seq = fuel_seq
+                state.low_fuel_streak = 0
+                state.recovered_fuel_streak = 0
+                if (state.last_battery_low is None
+                        and power["soc_centi"] >= min(
+                            10000, robot.battery_low_percent * 100 + 200
+                        )):
+                    state.last_battery_low = False
+            else:
+                state.last_fuel_seq = fuel_seq
+                low = power["soc_centi"] <= robot.battery_low_percent * 100
+                recovered = power["soc_centi"] >= min(
+                    10000, robot.battery_low_percent * 100 + 200
+                )
+                if low:
+                    state.recovered_fuel_streak = 0
+                    if state.last_battery_low is not True:
+                        state.low_fuel_streak += 1
+                        if state.low_fuel_streak >= 3:
+                            if state.last_battery_low is False:
+                                changes.append(SceneChange(
+                                    "battery_low",
+                                    "My fuel gauge reports a sustained low charge",
+                                    1.0,
+                                ))
+                            state.last_battery_low = True
+                            state.low_fuel_streak = 0
+                elif recovered:
+                    state.low_fuel_streak = 0
+                    state.recovered_fuel_streak += 1
+                    if state.recovered_fuel_streak >= 2:
+                        state.last_battery_low = False
+                        state.recovered_fuel_streak = 0
+                else:
+                    state.low_fuel_streak = 0
+                    state.recovered_fuel_streak = 0
         else:
-            state.last_battery_low = None
+            state.last_fuel_seq = None
+            state.low_fuel_streak = 0
+            state.recovered_fuel_streak = 0
 
         angles = data["angles"]
         if robot.nose_twist_threshold_counts is not None and angles["valid_mask"] & 1:
