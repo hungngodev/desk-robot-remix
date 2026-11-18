@@ -1002,7 +1002,12 @@ class MultimodalOrchestrator:
                         prepared = await self._prepare_bounded(
                             jpeg, priority=source == "speech"
                         )
-                    except RuntimeError:
+                    except (RuntimeError, ValueError, OSError):
+                        # A malformed or truncated JPEG is a bad FRAME, not
+                        # a dead camera connection. Preserve the continuous
+                        # stream and allow the next legitimate frame through.
+                        # A true stream transport failure is still handled
+                        # by the outer reconnect loop.
                         metrics["stream_frames_skipped"] += 1
                         continue
                     if not self.settings.voice_vision_tools_enabled:
