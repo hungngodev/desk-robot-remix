@@ -286,6 +286,27 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     return static_cast<int>(bytes_written / sizeof(int32_t));''',
         )
         files[path] = codec_source.encode()
+        # An I2S DAC at 32 kHz must not force an invalid 32 kHz Opus
+        # decoder. Reuse Xiaozhi's existing Opus and ESP-AE rate converter
+        # on the isolated Sense build; do not modify the pinned upstream.
+        path = "main/audio/audio_service.cc"
+        service = (target / path).read_text()
+        service = replace_once(
+            service,
+            "    esp_opus_dec_cfg_t opus_dec_cfg =\n        OPUS_DEC_CFG(codec->output_sample_rate(), OPUS_FRAME_DURATION_MS);",
+            "#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3\n    // MAX98357A accepts 32 kHz LRCLK, but Opus has no 32 kHz decoder mode.\n    // Open a valid 24 kHz decoder and resample to the 32 kHz I2S speaker.\n    constexpr int initial_decoder_rate = 24000;\n#else\n    const int initial_decoder_rate = codec->output_sample_rate();\n#endif\n    esp_opus_dec_cfg_t opus_dec_cfg =\n        OPUS_DEC_CFG(initial_decoder_rate, OPUS_FRAME_DURATION_MS);",
+        )
+        service = replace_once(
+            service,
+            "        decoder_sample_rate_ = codec->output_sample_rate();",
+            "        decoder_sample_rate_ = initial_decoder_rate;",
+        )
+        service = replace_once(
+            service,
+            "    }\n    esp_opus_enc_config_t opus_enc_cfg = AS_OPUS_ENC_CONFIG();",
+            "    }\n#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3\n    // The first packet may use the same Opus rate. Initialize the output\n    // converter NOW so SetDecodeSampleRate's equal-rate fast path cannot\n    // accidentally send 24 kHz PCM to the 32 kHz MAX98357A output.\n    if (opus_decoder_ && decoder_sample_rate_ != codec->output_sample_rate()) {\n        esp_ae_rate_cvt_cfg_t cfg = RATE_CVT_CFG(\n            decoder_sample_rate_, codec->output_sample_rate(), ESP_AUDIO_MONO);\n        auto resampler_ret = esp_ae_rate_cvt_open(&cfg, &output_resampler_);\n        if (output_resampler_ == nullptr) {\n            ESP_LOGE(TAG, \"Sense Opus output resampler startup failed: %d\",\n                     resampler_ret);\n        }\n    }\n#endif\n    esp_opus_enc_config_t opus_enc_cfg = AS_OPUS_ENC_CONFIG();",
+        )
+        files[path] = service.encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
         # not a second decoder or audio transport. Normal TTS stops retain the
         # upstream behavior; flush=true explicitly discards queued decoder PCM

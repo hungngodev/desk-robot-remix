@@ -34,7 +34,8 @@ class SenseOverlayTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         names = ['main/Kconfig.projbuild', 'main/CMakeLists.txt', 'main/mcp_server.cc',
-                 'main/application.cc', 'main/audio/codecs/no_audio_codec.cc']
+                 'main/application.cc', 'main/audio/audio_service.cc',
+                 'main/audio/codecs/no_audio_codec.cc']
         names += [f'main/boards/common/{name}' for name in (
             'camera.h', 'esp_video.h', 'esp_video.cc', 'esp32_camera.h', 'esp32_camera.cc')]
         names += [p.relative_to(UPSTREAM).as_posix()
@@ -145,7 +146,11 @@ class SenseOverlayTests(unittest.TestCase):
         """Pinned Xiaozhi output worker reopens the codec for the next PCM."""
         overlay.apply(self.root, 'sense')
         application = (self.root / 'main/application.cc').read_text()
-        audio = (UPSTREAM / 'main/audio/audio_service.cc').read_text()
+        audio = (self.root / 'main/audio/audio_service.cc').read_text()
+        self.assertIn('constexpr int initial_decoder_rate = 24000;', audio)
+        self.assertIn('decoder_sample_rate_ = initial_decoder_rate;', audio)
+        self.assertIn('esp_ae_rate_cvt_open(&cfg, &output_resampler_);', audio)
+        self.assertIn('OPUS_DEC_CFG(initial_decoder_rate, OPUS_FRAME_DURATION_MS)', audio)
         # An interrupted reply urgently clears both queued decoder data and
         # the hardware output. The next queued *new* reply must turn it on.
         self.assertIn('audio_service_.ResetDecoder();', application)
@@ -513,6 +518,9 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     assert "kSpeakerRate % kMicRate == 0" in header
     assert "phase_ += static_cast<float>(kSpeakerRate) / kMicRate;" in codec
     assert "samples > static_cast<int>(kSpeakerRate)" in codec
+    overlay_source = (HEAD / "install_overlay.py").read_text()
+    assert "initial_decoder_rate = 24000" in overlay_source
+    assert "esp_ae_rate_cvt_open(&cfg, &output_resampler_)" in overlay_source
     # Runtime resampling uses the pinned Xiaozhi decoder, not another audio stack.
     if UPSTREAM.is_dir():
         upstream = (UPSTREAM / "main/audio/audio_service.cc").read_text()
