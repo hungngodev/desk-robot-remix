@@ -145,7 +145,9 @@ def test_online_manual_review_requires_real_matching_pr_comment():
     def reviewed(url):
         if url.endswith("/issues/comments/5678"):
             return {
-                "html_url": comment_url, "body": f"Procedure 4 reviewed at {sha}",
+                "html_url": comment_url,
+                "body": f"ACCEPTED procedure 4 at {sha}",
+                "author_association": "OWNER",
                 "user": {"login": "physical_owner", "type": "User"},
             }
         return lookup(url)
@@ -166,7 +168,8 @@ def test_online_manual_review_requires_real_matching_pr_comment():
     bad["sha"] = sha
     def fabricated(url):
         if url.endswith("/issues/comments/5678"):
-            return {"html_url": comment_url, "body": "No matching procedure or SHA",
+            return {"html_url": comment_url, "body": "No matching acceptance or SHA",
+                    "author_association": "OWNER",
                     "user": {"login": "physical_owner", "type": "User"}}
         return lookup(url)
     assert any(
@@ -205,3 +208,32 @@ def test_manual_or_other_branch_success_cannot_qualify_pr17():
         assert not verify.verified_actions_run(RUN, SHA, wrong_origin)
         assert any("CI run not verified" in problem
                    for problem in verify.audit(promoted(), wrong_origin))
+
+
+def test_manual_review_mentioned_sha_is_not_authorized_acceptance():
+    row = promoted("TESTED")["procedures"][0]
+    row.update(id=4, evidence_class="source", verification_method="manual_review")
+    url = ("https://github.com/hungngodev/desk-robot-remix/pull/17"
+           "#issuecomment-101")
+    row["manual_review_receipt"] = {
+        "sha": SHA, "reviewer": "reviewer_a", "review_url": url,
+    }
+    def comment_lookup(_url, *, association="OWNER", body=None):
+        if "/issues/comments/" in _url:
+            return {
+                "html_url": url, "author_association": association,
+                "body": body if body is not None else f"ACCEPTED procedure 4 at {SHA}",
+                "user": {"login": "reviewer_a", "type": "User"},
+            }
+        return lookup(_url)
+    assert verify.verified_manual_review(row, SHA, comment_lookup)
+    for association in ("NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"):
+        assert not verify.verified_manual_review(
+            row, SHA, lambda url, group=association:
+            comment_lookup(url, association=group)
+        )
+    assert not verify.verified_manual_review(
+        row, SHA, lambda url: comment_lookup(
+            url, body=f"Procedure 4 proposed for review at {SHA}"
+        )
+    )
