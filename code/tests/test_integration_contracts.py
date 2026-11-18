@@ -75,6 +75,21 @@ def test_all_firmware_sensor_reactions_have_a_real_camera_priority_label():
     assert "battery_low" not in _SOCIAL_EVENT_KINDS
 
 
+def test_late_optional_mux_detection_reaches_active_tof_safety_owner():
+    """A later CAP1188 0x29 must not bypass the earlier 0x71 startup NACK."""
+    header = (ROOT / "code/firmware/body/lib/TofBus/TofBus.h").read_text()
+    tof = (ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp").read_text()
+    body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    touch = (ROOT / "code/firmware/body/lib/ExpansionTouch/ExpansionTouch.cpp").read_text()
+    assert "void note_optional_mux_present() { optional_mux_present_ = true; }" in header
+    assert "if (petting_present || paw_present || accessory_mux)" in body
+    assert "tof.note_optional_mux_present();" in body
+    assert "if (!optional_mux_present_) return true;" in tof
+    assert "return wire_.read() == 0;" in tof
+    assert "return mux(kRangeMux, 0) && mux(kExpansionMux, 1);" in touch
+    assert "kPreferredAddress" in touch  # generic 0x29 CAP1188 alternative
+
+
 def test_real_robot_pin_allocations_do_not_double_book_same_gpio():
     bus = PLAN["bus"]
     for key in ("body_gpio", "sense_gpio"):
