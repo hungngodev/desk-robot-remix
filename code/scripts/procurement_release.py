@@ -867,6 +867,12 @@ def first_robot_pilot_samples(report: dict) -> dict:
 def pilot_supplier_cart(report: dict) -> dict:
     """Exact-source first-robot evaluation cart; never a whole robot release."""
     pilot = first_robot_pilot_samples(report)
+    # Expose a real repository owner and test for each proposed sample. This
+    # is traceability, not proof the test ran or the exact PCB works.
+    ownership = json.loads((ROOT / "docs/hardware/full-63-role-source-ownership.json").read_text(encoding="utf-8"))
+    pet_owners = ownership.get("pet_roles")
+    if not isinstance(pet_owners, dict):
+        raise ValueError("Missing first-robot implementation ownership")
     items = []
     seen = set()
     for role in pilot["roles"]:
@@ -883,7 +889,28 @@ def pilot_supplier_cart(report: dict) -> dict:
             raise ValueError("Duplicate source SKU")
         seen.add((seller, sku))
         quote = role["historical_unit_quote_usd"]
+        owner = pet_owners.get(role["id"])
+        if not isinstance(owner, dict):
+            raise ValueError("Sample has no implementation owner: " + role["id"])
+        source_path = owner.get("source")
+        test_path = owner.get("host_test")
+        state = owner.get("source_state")
+        if not (isinstance(source_path, str)
+                and isinstance(test_path, str)
+                and isinstance(state, str) and state.strip()):
+            raise ValueError("Incomplete sample code trace: " + role["id"])
+        for relative in (source_path, test_path):
+            full = (ROOT / relative).resolve()
+            if (not full.is_relative_to(ROOT.resolve()) or not full.is_file()):
+                raise ValueError("Missing sample implementation file: " + relative)
+        if not test_path.startswith("code/") or "/tests/" not in test_path:
+            raise ValueError("Invalid sample test owner: " + role["id"])
         items.append({
+            "implementation_source": source_path,
+            "implementation_test": test_path,
+            "implementation_state": state,
+            "implementation_source_is_code": source_path.startswith("code/"),
+            "tests_executed_on_this_checkout": False,
             "id": role["id"], "name": role["name"], "vendor": seller,
             "sku": sku, "product_url": url, "quantity": qty,
             "historical_unit_quote_usd": quote,
@@ -929,10 +956,12 @@ def render_pilot_supplier_cart(report: dict) -> str:
         "",
         "Not a ready-to-assemble robot or a fleet order. Historical prices are "
         "not live checkout quotes and exclude tax, shipping, conversion and "
-        "stock checks. No lithium charging or motor motion is authorized.",
+        "stock checks. Source and test paths are real files, NOT executed tests "
+        "or proof that optional firmware is enabled. No lithium charging or "
+        "motor motion is authorized.",
         "",
-        "| Seller | SKU | Part | Qty | Historical USD each | Link |",
-        "| --- | --- | --- | ---: | ---: | --- |",
+        "| Seller | SKU | Part | Qty | Historical USD each | Link | Engineering source |",
+        "| --- | --- | --- | ---: | ---: | --- | --- |",
     ]
     for x in cart["items"]:
         quote = ("$" + format(x["historical_unit_quote_usd"], ".2f")
@@ -941,7 +970,8 @@ def render_pilot_supplier_cart(report: dict) -> str:
         lines.append(
             f"| {x['vendor']} | {x['sku']} | "
             f"{str(x['name']).replace('|', '/')} | "
-            f"{x['quantity']} | {quote} | {x['product_url']} |"
+            f"{x['quantity']} | {quote} | {x['product_url']} | "
+            f"{x['implementation_source']} ({x['implementation_state']}) |"
         )
     lines += [
         "",
