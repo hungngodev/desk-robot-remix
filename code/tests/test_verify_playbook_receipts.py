@@ -19,6 +19,9 @@ RAW = ("https://github.com/hungngodev/desk-robot-remix/blob/"
 def lookup(url):
     if url.endswith("/actions/runs/42"):
         return {"head_sha": SHA, "name": "Host verification",
+                "event": "pull_request",
+                "head_branch": "impl/mac-hardware-safety-preflight-2026-11-10",
+                "head_repository": {"full_name": "hungngodev/desk-robot-remix"},
                 "status": "completed", "conclusion": "success"}
     if "/contents/docs/records/bench.csv?ref=" in url:
         return {"type": "file", "size": 52}
@@ -185,3 +188,20 @@ def test_online_physical_receipts_refuse_placeholder_signoff_identities():
             "incomplete physical signoff" in item
             for item in verify.audit(bad, lookup)
         )
+
+
+def test_manual_or_other_branch_success_cannot_qualify_pr17():
+    canonical = lookup("https://api.github.com/repos/hungngodev/"
+                       "desk-robot-remix/actions/runs/42")
+    for overrides in (
+        {"event": "workflow_dispatch"},
+        {"event": "push"},
+        {"head_branch": "main"},
+        {"head_repository": {"full_name": "someone/other-repo"}},
+        {"head_repository": None},
+    ):
+        def wrong_origin(_url):
+            return {**canonical, **overrides}
+        assert not verify.verified_actions_run(RUN, SHA, wrong_origin)
+        assert any("CI run not verified" in problem
+                   for problem in verify.audit(promoted(), wrong_origin))
