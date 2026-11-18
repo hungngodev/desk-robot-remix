@@ -144,9 +144,12 @@ class BodyControl {
   // and host policy tests opt in explicitly rather than changing their ABI.
   void require_imu_for_motion(bool required) { imu_motion_required_ = required; }
   bool imu_fresh(std::uint32_t now_ms) const {
-    return imu_.valid && imu_.model != BerryModel::Unknown &&
-           imu_.model != BerryModel::Unsupported320G &&
-           now_ms - imu_.at_ms <= 200U;
+    // A fresh sample alone cannot authenticate the board. A previously
+    // probed WROOM sensor family must agree with the live driver reading.
+    // Unknown, absent or swapped identity fails closed for motor readiness.
+    return state_.imu_family >= 1 && state_.imu_family <= 4 &&
+           imu_.model == static_cast<BerryModel>(state_.imu_family) &&
+           imu_.valid && now_ms - imu_.at_ms <= 200U;
   }
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
   std::uint32_t drive_remaining(std::uint32_t now_ms) const;
