@@ -120,7 +120,13 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   if (ok && n > 0) ok = read_bytes(0x07, data, n * 6);
   const bool closed = close();
   if (!ok || !closed) { sample_.valid = false; return false; }
-  if (n == 0) return false; // no fresh sample, do not fabricate one
+  if (n == 0) {
+    // Do not keep reporting the last accepted sample as presently valid
+    // when the hardware FIFO has no new conversion. Preserve provenance
+    // (at_ms and sample_seq) for a read-only historical diagnostic.
+    sample_.valid = false;
+    return false;
+  }
   const std::uint8_t* latest = &data[(n - 1) * 6];
   sample_.red = optical18(latest);
   sample_.ir = optical18(latest + 3);
