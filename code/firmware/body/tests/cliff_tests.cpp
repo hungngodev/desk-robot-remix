@@ -309,10 +309,16 @@ void delayed_range_sample_never_replaces_newer_evidence() {
   CHECK(!guard.evaluate(111));
   CHECK(guard.fault() == CliffFault::InvalidSample);
   CHECK(guard.fault_sensor() == 0);
+  // The stale packet must not make a prior good result reusable as motor
+  // clearance, even when the operator explicitly attempts local rearm.
+  CHECK(!guard.try_rearm(111));
   const auto preserved = guard.diagnostic(0, 111);
-  CHECK(preserved.present);
+  CHECK(preserved.present && !preserved.valid);
   CHECK(preserved.distance_mm == 46);
   CHECK(preserved.age_ms == 1);
+  guard.sample(0, 46, true, 112);  // new actual conversion required
+  CHECK(guard.try_rearm(112));
+  CHECK(guard.evaluate(112));
 
   // New timestamps across uint32 wrap are forward, whereas an older
   // pre-wrap completion must never overwrite the post-wrap sample.
@@ -327,6 +333,11 @@ void delayed_range_sample_never_replaces_newer_evidence() {
   CHECK(wrapped.fault() == CliffFault::InvalidSample);
   CHECK(wrapped.fault_sensor() == 0);
   CHECK(wrapped.diagnostic(0, 6U).distance_mm == 47);
+  CHECK(!wrapped.diagnostic(0, 6U).valid);
+  CHECK(!wrapped.try_rearm(6U));  // never reuse pre-wrap evidence
+  wrapped.sample(0, 47, true, 7U);
+  CHECK(wrapped.try_rearm(7U));
+  CHECK(wrapped.evaluate(7U));
 }
 
 void fault_names() {
