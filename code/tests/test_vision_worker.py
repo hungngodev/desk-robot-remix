@@ -65,8 +65,15 @@ async def test_model_exception_releases_worker_lease():
 async def test_native_visual_question_huge_confidence_fails_closed_without_crash():
     """Oversized Ollama confidence must not abort the camera question worker."""
     import json
+    from io import BytesIO
+
+    from PIL import Image
 
     from desk_robot.vision import OllamaScene
+
+    jpeg = BytesIO()
+    Image.new("RGB", (16, 16), (100, 100, 100)).save(jpeg, "JPEG")
+    valid_frame = jpeg.getvalue()
 
     class Response:
         def __init__(self, confidence):
@@ -89,8 +96,8 @@ async def test_native_visual_question_huge_confidence_fails_closed_without_crash
     for confidence in (10 ** 1000, -(10 ** 1000)):
         client.confidence = confidence
         with pytest.raises(ValueError, match="Unbounded or malformed"):
-            await vision.answer("What do you see?", [bytes((0xff, 0xd8)) + b"jpeg"])
+            await vision.answer("What do you see?", [valid_frame])
     client.confidence = 0.91
-    assert await vision.answer("What do you see?", [bytes((0xff, 0xd8)) + b"jpeg"]) == (
+    assert await vision.answer("What do you see?", [valid_frame]) == (
         "A key is visible on the desk."
     )
