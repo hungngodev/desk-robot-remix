@@ -54,6 +54,7 @@ def test_stationary_biased_gyro_and_separated_handling_events():
 @pytest.mark.parametrize("mutation", [
     lambda rows: rows.pop(),
     lambda rows: rows[0].update({"label": "freefall"}),
+    lambda rows: rows[0].update({"label": []}),
     lambda rows: rows[0].update({"time_monotonic_s": float("nan")}),
     lambda rows: rows[0].update({"time_monotonic_s": 10 ** 1000}),
     lambda rows: rows[8].update({"time_monotonic_s": 100.0}),
