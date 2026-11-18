@@ -41,6 +41,23 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
         verify.steps("physical-accepted-by-a-badge", tmp_path)
 
 
+def test_all_four_ci_jobs_check_the_reviewed_pr_head_not_synthetic_merge():
+    """GitHub checkout defaults to refs/pull/N/merge without an explicit ref.
+
+    Keep every executable lane on the exact SHA of the source under review;
+    manual and push verification continue to use the event commit SHA.
+    """
+    workflow = (ROOT / ".github/workflows/host-verification.yml").read_text()
+    requested = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
+    expected = 'expected="${{ github.event.pull_request.head.sha || github.sha }}"'
+    assert workflow.count("      - uses: actions/checkout@v4") == 4
+    assert workflow.count(requested) == 4
+    assert workflow.count(expected) == 4
+    assert workflow.count('actual="$(git rev-parse HEAD)"') == 4
+    assert workflow.count("Verify exact source commit under test") == 4
+    assert "pull_request_target:" not in workflow
+
+
 def test_local_lint_covers_same_head_python_sources_as_ci(tmp_path):
     """Source receipt must include every Python Sense overlay file CI lints."""
     jobs = dict((name, argv) for name, argv, _, _ in
