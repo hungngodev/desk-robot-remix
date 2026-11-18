@@ -825,3 +825,22 @@ def test_new_boot_recalibration_preserves_recent_shake_cooldown():
                        boot_id=2, sample_ms=i)
         assert qualified(gate, frame, when, new_sample=False) == ()
     assert gate.last_shake == 102.15
+
+
+def test_implausible_acceleration_recalibration_preserves_shake_cooldown():
+    gate = HandlingGate()
+    calibrated(gate)
+    shaking = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, shaking, 102.0) == ()
+    assert qualified(gate, shaking, 102.15) == ("handling_shake",)
+    # Fresh but physically implausible near-zero acceleration must revoke
+    # the pose without granting another unsolicited gesture immediately.
+    assert qualified(gate, sample(acc=(0, 0, 0)), 102.3) == ()
+    assert gate.reference is None
+    assert gate.last_shake == 102.15
+    for i in range(8):
+        assert qualified(gate, sample(), 102.45 + .15 * i) == ()
+    assert gate.reference is not None
+    assert qualified(gate, shaking, 103.7) == ()
+    assert qualified(gate, shaking, 103.85) == ()
+    assert gate.last_shake == 102.15

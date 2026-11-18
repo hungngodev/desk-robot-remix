@@ -273,8 +273,11 @@ class HandlingGate:
             # Reject implausible acceleration without forgetting the source
             # conversion. A replay after the fault must not seed calibration.
             previous = (self.last_boot_id, self.last_sample_ms)
+            cooldown = self.last_shake
             self.reset()
             self.last_boot_id, self.last_sample_ms = previous
+            # Implausible acceleration revokes pose, not the host cooldown.
+            self.last_shake = cooldown
             return ()
         if self.reference is None:
             # Startup is an intentional physical calibration step. Accel
