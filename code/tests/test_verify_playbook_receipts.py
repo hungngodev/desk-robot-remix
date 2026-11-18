@@ -36,6 +36,8 @@ def promoted(gate="TESTED"):
         },
         "physical_measurement_receipt": {
             "result": "pass", "raw_data_url": RAW,
+            "operator": "fixture_operator_001",
+            "device_revision": "fixture_carrier_rev_A",
         },
     }]}
 
@@ -168,3 +170,18 @@ def test_online_manual_review_requires_real_matching_pr_comment():
         "manual review not verified" in msg
         for msg in verify.audit(manually_reviewed, fabricated)
     )
+
+
+def test_online_physical_receipts_refuse_placeholder_signoff_identities():
+    for field, wrong in [
+        ("operator", "bench engineer"),
+        ("operator", ""),
+        ("device_revision", "received carrier revision"),
+        ("device_revision", "unknown"),
+    ]:
+        bad = promoted("MEASURED")
+        bad["procedures"][0]["physical_measurement_receipt"][field] = wrong
+        assert any(
+            "incomplete physical signoff" in item
+            for item in verify.audit(bad, lookup)
+        )
