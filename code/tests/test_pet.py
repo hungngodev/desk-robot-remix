@@ -4704,3 +4704,24 @@ def test_direct_visual_change_gate_rejects_invalid_image_transport(frame):
     with pytest.raises(ValueError, match="Camera JPEG size invalid"):
         gate.observe(frame)
     assert gate._baseline is None
+
+
+async def test_scene_comparison_rejects_unbounded_frames_before_network():
+    """A corrupt camera header cannot trigger a model upload."""
+    calls = []
+
+    async def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"message": {"content": "{}"}})
+
+    frame = bytearray(jpeg("white"))
+    sof = frame.find(bytes([255, 192]))
+    assert sof > 0
+    frame[sof + 5:sof + 9] = (5000).to_bytes(2, "big") * 2
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        scene = OllamaScene(client, url="http://127.0.0.1:11434", model="local-vision")
+        with pytest.raises(ValueError, match="Camera dimensions invalid"):
+            await scene.compare(bytes(frame), jpeg("red"))
+        with pytest.raises(ValueError, match="Bounded JPEG scene evidence required"):
+            await scene.compare(b"not-a-jpeg", jpeg("red"))
+    assert calls == []
