@@ -203,8 +203,12 @@ class HandlingGate:
             # Otherwise replaying that conversion after a malformed status
             # could seed a fresh calibration with stale sensor data.
             previous = (self.last_boot_id, self.last_sample_ms)
+            cooldown = self.last_shake
             self.reset()
             self.last_boot_id, self.last_sample_ms = previous
+            # Bad telemetry revokes pose, not the recent gesture cooldown.
+            # Otherwise a quick recalibration can repeat a shake announcement.
+            self.last_shake = cooldown
             return ()
         boot_id = body["imu"]["boot_id"]
         sample_ms = body["imu"]["sample_ms"]

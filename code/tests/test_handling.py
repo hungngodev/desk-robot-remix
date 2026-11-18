@@ -744,3 +744,18 @@ def test_backdated_fresh_acquisitions_cannot_shorten_shake_cooldown():
         assert qualified(gate, frame, last_at + delta,
                          new_sample=False) == ()
     assert gate.last_shake == last_at
+
+
+def test_invalid_imu_does_not_restart_recent_shake_cooldown():
+    gate = HandlingGate()
+    calibrated(gate)
+    shake = sample(acc=(0, 0, 26000), gyro=(16500, 0, 0))
+    assert qualified(gate, shake, 102.0) == ()
+    assert qualified(gate, shake, 102.15) == ("handling_shake",)
+    assert qualified(gate, sample(valid=False), 102.2) == ()
+    assert gate.reference is None
+    calibrated(gate, 102.3)
+    assert qualified(gate, shake, 103.6) == ()
+    assert qualified(gate, shake, 103.75) == ()
+    assert gate.last_shake == 102.15
+    assert qualified(gate, shake, 105.2) == ("handling_shake",)
