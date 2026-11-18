@@ -9,6 +9,11 @@ namespace body_pins {
 constexpr int kUartRx = 16;
 constexpr int kUartTx = 17;
 #if DESK_ROBOT_STEPPER
+// The historical ULN2003 stepper profile has NO independent CPU-halt
+// actuator power cutoff equivalent to the DC watchdog/CD74HC123 nSLEEP
+// path. Software watchdog and CliffGuard alone cannot qualify a printed
+// mobile unit. Require a physically qualified independent motor-rail
+// cutoff before production stepper driving or product purchase release.
 constexpr int kLeftStepperPins[] = {13, 14, 25, 26};
 constexpr int kRightStepperPins[] = {27, 32, 33, 23};
 constexpr int kMotorPins[] = {13, 14, 25, 26, 27, 32, 33, 23};
@@ -20,6 +25,8 @@ constexpr int kSensorScl = 22;
 // pin; do not connect the multiplexer RESET there. Pull the active-low
 // TCA9548A RESET to 3.3V (through the module's required pull-up).
 constexpr int kMuxReset = -1;
+static_assert(kMuxReset == -1,
+              "TCA9548A RESET must be passively tied high, never WROOM GPIO4");
 // Adafruit AT42QT1010 OUT: active high, 3.3V logic. GPIO34 is input only.
 constexpr int kTouchOutput = 34;
 // Reserved disabled-by-default input-only GPIOs. No internal pull resistors.
