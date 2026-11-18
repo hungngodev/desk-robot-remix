@@ -1308,7 +1308,8 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     rendered = mod.render_pilot_supplier_cart(mod.generate(plan))
     assert "13 SKUs; 17 items." in rendered
     assert "Priced-only historical subtotal" in rendered
-    assert "not verified" in rendered
+    assert "0 SKUs have unknown comparable USD price" in rendered
+    assert "There is no verified landed total" in rendered
     assert "NOT complete driven dock channels" in rendered
 
 
