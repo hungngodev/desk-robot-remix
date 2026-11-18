@@ -520,14 +520,37 @@ def apply(target: Path, board: str = "cores3") -> None:
             "sha256": digest(data),
             "original": base64.b64encode(path.read_bytes()).decode() if path.exists() else None,
         }
-    for name, data in files.items():
-        path = target / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-    # A marker advertises a COMPLETE install. A failed write must not leave
-    # a marker that makes a subsequent run report "already applied" even
-    # though only part of the patch set reached the target.
-    marker.write_text(json.dumps(state, indent=2) + "\n")
+    # Apply to the disposable build clone as a rollback transaction.
+    # Record an attempted write BEFORE starting it, since write_bytes can
+    # truncate a file and then fail. A partial install never publishes a
+    # success marker, even if the process is interrupted during marker I/O.
+    attempted = []
+    marker_temp = target / (MARKER + ".tmp")
+    try:
+        for name, data in files.items():
+            path = target / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            attempted.append(name)
+            path.write_bytes(data)
+        marker_temp.write_text(json.dumps(state, indent=2) + "\n")
+        marker_temp.replace(marker)  # Atomic publication of completed state.
+    except BaseException:
+        # Restore each attempted file to its exact original byte content.
+        # In a failed rollback, do not pretend a clean install occurred.
+        marker.unlink(missing_ok=True)
+        marker_temp.unlink(missing_ok=True)
+        for name in reversed(attempted):
+            original = state[name]["original"]
+            path = target / name
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(base64.b64decode(original))
+        for board_name in BOARDS.values():
+            directory = target / board_name
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+        raise
     print(f"Installed {len(files)} overlay files into {target}")
 
 
