@@ -108,6 +108,25 @@ def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
     )
 
 
+def valid_physical_signoff(receipt: object) -> bool:
+    """Operator identity and actual carrier revision are mandatory metadata.
+
+    Live record existence is checked separately; these string checks alone
+    cannot attest to an instrument, measured force, stopping distance or cell.
+    """
+    if not isinstance(receipt, dict) or receipt.get("result") != "pass":
+        return False
+    fields = (
+        ("operator", {"", "unknown", "tbd", "bench engineer", "operator", "tester"}),
+        ("device_revision", {"", "unknown", "tbd", "generic", "received carrier revision"}),
+    )
+    for name, placeholders in fields:
+        value = receipt.get(name)
+        if not isinstance(value, str) or value.strip().casefold() in placeholders:
+            return False
+    return True
+
+
 def audit(ledger: dict, lookup=github_json) -> list[str]:
     """Return failures, never turn network errors into a success receipt."""
     errors: list[str] = []
@@ -161,8 +180,8 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
             errors.append(f"procedure {identifier}: CI lookup failed: {type(exc).__name__}")
         if row.get("gate") in {"MEASURED", "QUALIFIED"}:
             measurement = row.get("physical_measurement_receipt")
-            if not isinstance(measurement, dict):
-                errors.append(f"procedure {identifier}: no physical receipt")
+            if not valid_physical_signoff(measurement):
+                errors.append(f"procedure {identifier}: incomplete physical signoff")
                 continue
             try:
                 if not verified_raw_record(
