@@ -67,9 +67,8 @@ async def test_native_visual_question_huge_confidence_fails_closed_without_crash
     import json
     from io import BytesIO
 
-    from PIL import Image
-
     from desk_robot.vision import OllamaScene
+    from PIL import Image
 
     jpeg = BytesIO()
     Image.new("RGB", (16, 16), (100, 100, 100)).save(jpeg, "JPEG")
