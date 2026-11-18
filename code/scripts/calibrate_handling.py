@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 
 from desk_robot.handling import (
-    ACC_COUNTS_PER_G, GYRO_COUNTS_PER_DPS, raw_mpu6050,
+    GYRO_COUNTS_PER_DPS, raw_mpu6050,
 )
 
 
