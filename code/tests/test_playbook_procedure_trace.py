@@ -126,9 +126,9 @@ def test_all_96_playbook_procedures_have_distinct_source_and_verification_owners
         assert command.startswith("cd code && ")
         # A command that merely prints usage or collects tests can never
         # qualify any of these 96 required engineering procedures.
-        assert not re.search(r"--(?:help|version|collect-only)\\b|&& true\\b", command)
+        assert not re.search(r"--(?:help|version|collect-only)\b|&& true\b", command)
         # Every referenced pytest target must exist in this exact checkout.
-        for relative in re.findall(r"tests/[A-Za-z0-9_./-]+\\.py", command):
+        for relative in re.findall(r"tests/[A-Za-z0-9_./-]+\.py", command):
             assert (ROOT / "code" / relative).is_file(), (row["id"], relative)
         assert row.get("verification_method") in (None, "manual_review")
         if row["id"] <= 8:
