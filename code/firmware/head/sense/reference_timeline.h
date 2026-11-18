@@ -23,8 +23,8 @@ class PlaybackReferenceClock {
     if (now_us <= end_us_) return 0;
     const auto elapsed_us = static_cast<std::uint64_t>(now_us - end_us_);
     // Keep the fractional sample phase between irregular PDM reads. Rounding
-    // each 10.007 ms read independently would lose seven reference samples
-    // every ten reads, accumulating false AEC time drift over a conversation.
+    // each 10.007 ms read independently would lose fractional frames on
+    // every callback, accumulating false AEC drift over a long conversation.
     // Huge unattended gaps are bounded: do not multiply unbounded uptime.
     const auto available_us = (max_frames / kReferenceRate + 1U) * 1000000U;
     if (elapsed_us > available_us) {
