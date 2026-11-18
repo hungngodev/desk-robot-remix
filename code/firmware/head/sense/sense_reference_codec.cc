@@ -25,25 +25,13 @@ void SenseReferenceCodec::PushLocked(int16_t sample) {
 }
 
 void SenseReferenceCodec::FillSilenceLocked(int64_t now_us) {
-    if (last_write_us_ <= 0) {
-        last_write_us_ = now_us;
-        return;
-    }
-    // last_write_us_ is the *virtual end time* of audio already accepted
-    // into the reference ring, not the previous callback timestamp.
-    // A 60 ms speaker chunk already occupies 60 ms of the reference clock;
-    // neither a 10 ms microphone read nor the next speaker write can count it
-    // again. Silence advances only after playback's represented end.
-    if (now_us <= last_write_us_) {
-        return;
-    }
-    uint64_t sample_gap = static_cast<uint64_t>(now_us - last_write_us_)
-                          * kMicRate / 1000000;
-    sample_gap = std::min<uint64_t>(sample_gap, kMaxGapSamples);
+    // The pure clock is also compiled and exercised by host regression
+    // tests. Reads may not replay wall time already represented by PCM.
+    const uint64_t sample_gap =
+        reference_clock_.silence_frames(now_us, kMaxGapSamples);
     for (uint64_t n = 0; n < sample_gap; ++n) {
         PushLocked(0);
     }
-    last_write_us_ = now_us;
 }
 
 void SenseReferenceCodec::PublishAcceptedLocked(
@@ -80,7 +68,7 @@ void SenseReferenceCodec::PublishAcceptedLocked(
     // The accepted chunk advances the clock by its actual sample duration.
     // Never reset it to the callback time: that would count the same 60 ms
     // of speech again when the 10 ms PDM capture reader fills silence.
-    last_write_us_ += static_cast<int64_t>(samples) * 1000000 / kSpeakerRate;
+    reference_clock_.accepted_output_frames(samples);
 }
 
 bool SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames) {
@@ -216,7 +204,7 @@ void SenseReferenceCodec::ClearReference() {
     // A reset is not evidence that an audible stale TX tail vanished.
     reference_.fill(0);
     write_index_ = 0;
-    last_write_us_ = 0;
+    reference_clock_.reset();
     filter_last1_ = 0;
     filter_last2_ = 0;
     last_filtered_ = 0;
