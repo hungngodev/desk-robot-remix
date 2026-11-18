@@ -422,7 +422,7 @@ def test_real_wroom_power_tool_reports_raw_gauge_only_without_charging_claim(
             self.raw = {
                 "robot_id": robot,
                 "power": {
-                    "fuel_valid": True, "cell_mv": 3875,
+                    "fuel_valid": True, "fuel_seq": 7, "cell_mv": 3875,
                     "soc_centi": 6275, "current_calibrated": False,
                 },
             }
@@ -452,12 +452,20 @@ def test_real_wroom_power_tool_reports_raw_gauge_only_without_charging_claim(
         assert data["gauge_available"] is True
         assert data["reported_cell_mv"] == 3875
         assert data["reported_soc_centi"] == 6275
+        assert data["raw_fuel_acquisition_seq"] == 7
         assert data["sample_freshness_verified"] is False
         assert data["charging_verified"] is False
         assert data["battery_capacity_verified"] is False
         assert data["motor_authorized"] is False
         assert data["charging_authorized"] is False
         assert client.get(url).status_code == 401
+        # Legacy read-only payloads lacking a completed acquisition identity
+        # cannot claim a current numeric battery estimate.
+        head.raw["power"].pop("fuel_seq")
+        unsequenced = client.get(url, headers=headers).json()
+        assert unsequenced["gauge_available"] is False
+        assert unsequenced["reported_cell_mv"] is None
+        assert unsequenced["raw_fuel_acquisition_seq"] is None
         head.raw = {
             "robot_id": robot,
             "power": {
@@ -501,7 +509,8 @@ def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
             return {
                 "robot_id": robot,
                 "power": {
-                    "fuel_valid": True, "cell_mv": 3820, "soc_centi": 5400,
+                    "fuel_valid": True, "fuel_seq": 11,
+                    "cell_mv": 3820, "soc_centi": 5400,
                 },
             }
 
