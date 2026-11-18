@@ -81,7 +81,9 @@ class HandlingGate:
     """Relative upright baseline and bounded event edges, not motion authority."""
 
     startup_samples: list[tuple[float, float, float]] = field(default_factory=list)
+    startup_gyro_samples: list[tuple[float, float, float]] = field(default_factory=list)
     reference: tuple[float, float, float] | None = None
+    gyro_bias_dps: tuple[float, float, float] | None = None
     tilt_hits: int = 0
     shake_hits: int = 0
     tilt_active: bool = False
@@ -93,7 +95,9 @@ class HandlingGate:
 
     def reset(self) -> None:
         self.startup_samples.clear()
+        self.startup_gyro_samples.clear()
         self.reference = None
+        self.gyro_bias_dps = None
         self.tilt_hits = 0
         self.shake_hits = 0
         self.tilt_active = False
@@ -242,6 +246,13 @@ class HandlingGate:
         self.last_sample_ms = sample_ms
         self.last_at = now
         acceleration, rotation_dps = sample
+        # Decode the same validated MPU6050 axes, not a new I2C reader.
+        # Estimating stationary bias follows the standard mean-zero-rate
+        # gyro calibration pattern; it does NOT replace per-unit bench trials,
+        # temperature characterization or a complete Fusion AHRS.
+        gyro_axes = tuple(
+            raw / GYRO_COUNTS_PER_DPS for raw in body["imu"]["gyro"]
+        )
         g = math.hypot(*acceleration)
         if not 0.05 <= g <= 3.5:
             # Reject implausible acceleration without forgetting the source
@@ -255,8 +266,10 @@ class HandlingGate:
             # must be near 1g and gyro quiet for 8 consecutive fresh reads.
             if not (0.91 <= g <= 1.09 and rotation_dps <= 7):
                 self.startup_samples.clear()
+                self.startup_gyro_samples.clear()
                 return ()
             self.startup_samples.append(acceleration)
+            self.startup_gyro_samples.append(gyro_axes)
             if len(self.startup_samples) == 8:
                 x, y, z = (
                     sum(v[i] for v in self.startup_samples) / 8 for i in range(3)
@@ -269,10 +282,35 @@ class HandlingGate:
                     self.reset()
                     self.last_boot_id, self.last_sample_ms = previous
                     return ()
+                mean_gyro = tuple(
+                    sum(v[i] for v in self.startup_gyro_samples) / 8
+                    for i in range(3)
+                )
+                # An average of moving samples is not a gyro zero point.
+                # A stationary calibration must hold every axis within one
+                # degree per second of the whole-window mean.
+                if any(
+                    abs(v[axis] - mean_gyro[axis]) > 1.0
+                    for v in self.startup_gyro_samples
+                    for axis in range(3)
+                ):
+                    self.startup_samples.clear()
+                    self.startup_gyro_samples.clear()
+                    return ()
                 self.reference = (x / norm, y / norm, z / norm)
+                self.gyro_bias_dps = mean_gyro
                 self.startup_samples.clear()
+                self.startup_gyro_samples.clear()
             return ()
 
+        if self.gyro_bias_dps is None:
+            # A pose without stationary gyro evidence cannot emit handling.
+            self.reset()
+            return ()
+        rotation_dps = math.hypot(*(
+            raw - bias for raw, bias in
+            zip(gyro_axes, self.gyro_bias_dps, strict=True)
+        ))
         events = []
         # Shake requires a simultaneous accelerometer departure from 1g
         # AND noticeable gyro motion, unlike a normal soft static tilt.
