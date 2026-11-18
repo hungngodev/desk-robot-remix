@@ -345,6 +345,121 @@ def test_compound_spoken_intent_preserves_both_requested_tool_results(
     assert len(output) <= 400
 
 
+
+# Realistic completed ASR phrasings, not a synthetic intent classifier.
+# This corpus guards completed read-only tool receipt prioritization; it does
+# NOT claim ASR correctness, native model tool use or audible speech.
+_REQUEST_PHRASE_CORPUS = {
+    "memory_recall": (
+        "What do you remember about the mug?",
+        "Do you remember my red cup?",
+        "Do you recall the meeting?",
+        "What did I tell you about the key?",
+        "What did I say about the gripper?",
+        "Remind me of the blue box",
+        "What did we discuss last night?",
+        "What did we talk about yesterday?",
+        "Hey buddy, what do you remember about my desk?",
+        "Please do you remember the notebook?",
+        "Can you remind me about our plan?",
+        "Tell me what you remember about the plant",
+    ),
+    "visual_look": (
+        "What can you see near the chair?",
+        "What do you see on the desk?",
+        "What am I holding?",
+        "Look at this key",
+        "Look around the table",
+        "Look for the candy",
+        "Do you see the mug?",
+        "Describe what you see",
+        "What color is my notebook?",
+        "What shape is the box?",
+        "Does the screen say READY?",
+        "What's on the desk?",
+    ),
+    "pickup_status": (
+        "Is the pickup job finished?",
+        "Did you pick up the key?",
+        "Have you picked up the candy?",
+        "What is the pickup status?",
+        "Check the pickup",
+        "Check pickup",
+        "Has the pickup finished?",
+        "Did the gripper grab the key?",
+        "Are you holding the mug?",
+        "Is the key in your gripper?",
+        "Did the gripper lift the candy?",
+        "Has the pickup succeeded?",
+    ),
+    "robot_status": (
+        "Check your battery",
+        "What's your battery level?",
+        "What is your status?",
+        "How much battery remains?",
+        "How are your sensors?",
+        "Please check your battery",
+        "Can you check your battery?",
+        "How much charge remains?",
+        "What is the battery percentage?",
+        "Are you armed?",
+        "Is your motor faulted?",
+        "Hey buddy, what is your status?",
+    ),
+    "sensor_telemetry": (
+        "What is the temperature?",
+        "Is humidity rising?",
+        "What is the pressure reading?",
+        "Can you check climate?",
+        "Is there proximity near your face?",
+        "Read the NFC tag",
+        "Any SHT41 samples?",
+        "Check the BMP280",
+        "What are the sensor readings?",
+        "How are the dock contacts?",
+        "Check soil moisture",
+        "Is the air quality changing?",
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("wanted", "utterance"),
+    [(kind, speech) for kind, phrases in _REQUEST_PHRASE_CORPUS.items()
+     for speech in phrases],
+)
+def test_spoken_tool_request_corpus_preserves_exact_completed_receipt(
+    wanted, utterance,
+):
+    # The requested result is intentionally oldest; unrequested newer tools
+    # must not steal its 400-character prompt budget.
+    tools = ("memory_recall", "visual_look", "pickup_status",
+             "robot_status", "sensor_telemetry")
+    order = [wanted, *(tool for tool in tools if tool != wanted)]
+    timeline = [
+        {"channel": "tool", "kind": kind,
+         "content": kind.upper() + " " + "z" * 70}
+        for kind in order
+    ]
+    timeline += [
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": utterance},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ]
+    prompt = compose_brain_context([], [], timeline).interaction
+    labels = {
+        "memory_recall": "Opt-in private past memory",
+        "visual_look": "Earlier local VLM guess",
+        "pickup_status": "Mac pickup job receipt",
+        "robot_status": "Recent head telemetry",
+        "sensor_telemetry": "Recent validated raw WROOM accessory read",
+    }
+    assert labels[wanted] in prompt
+    assert "Recent model ASR guess" in prompt
+    assert len(prompt) <= 400
+    assert "motor_authorized" not in prompt
+
+
 def test_unrelated_human_asr_does_not_reprioritize_non_tool_modalities():
     timeline = [
         {"channel": "tool", "kind": "visual_look", "content": "Maybe a key"},
