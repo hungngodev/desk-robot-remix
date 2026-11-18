@@ -150,6 +150,9 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('constexpr int initial_decoder_rate = 24000;', audio)
         self.assertIn('decoder_sample_rate_ = initial_decoder_rate;', audio)
         self.assertIn('esp_ae_rate_cvt_open(&cfg, &output_resampler_);', audio)
+        self.assertIn('Sense speaker resampler unavailable: discarding mismatched PCM', audio)
+        self.assertIn('task.pcm.clear();', audio)
+        self.assertIn('decoded = !task.pcm.empty();', audio)
         self.assertIn('OPUS_DEC_CFG(initial_decoder_rate, OPUS_FRAME_DURATION_MS)', audio)
         # An interrupted reply urgently clears both queued decoder data and
         # the hardware output. The next queued *new* reply must turn it on.
@@ -521,6 +524,7 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     overlay_source = (HEAD / "install_overlay.py").read_text()
     assert "initial_decoder_rate = 24000" in overlay_source
     assert "esp_ae_rate_cvt_open(&cfg, &output_resampler_)" in overlay_source
+    assert "Sense speaker resampler unavailable" in overlay_source
     # Runtime resampling uses the pinned Xiaozhi decoder, not another audio stack.
     if UPSTREAM.is_dir():
         upstream = (UPSTREAM / "main/audio/audio_service.cc").read_text()

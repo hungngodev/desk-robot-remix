@@ -306,6 +306,29 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             "    }\n    esp_opus_enc_config_t opus_enc_cfg = AS_OPUS_ENC_CONFIG();",
             "    }\n#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3\n    // The first packet may use the same Opus rate. Initialize the output\n    // converter NOW so SetDecodeSampleRate's equal-rate fast path cannot\n    // accidentally send 24 kHz PCM to the 32 kHz MAX98357A output.\n    if (opus_decoder_ && decoder_sample_rate_ != codec->output_sample_rate()) {\n        esp_ae_rate_cvt_cfg_t cfg = RATE_CVT_CFG(\n            decoder_sample_rate_, codec->output_sample_rate(), ESP_AUDIO_MONO);\n        auto resampler_ret = esp_ae_rate_cvt_open(&cfg, &output_resampler_);\n        if (output_resampler_ == nullptr) {\n            ESP_LOGE(TAG, \"Sense Opus output resampler startup failed: %d\",\n                     resampler_ret);\n        }\n    }\n#endif\n    esp_opus_enc_config_t opus_enc_cfg = AS_OPUS_ENC_CONFIG();",
         )
+        # Never play at the wrong speed when the output rate converter
+        # could not be created. The original Xiaozhi code silently forwarded
+        # 24 kHz PCM to the 32 kHz I2S DAC when output_resampler_ was null.
+        service = replace_once(
+            service,
+            '                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&\\n'
+            '                        output_resampler_ != nullptr) {'.replace('\\n', '\n'),
+            '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ == nullptr) {
+                        ESP_LOGE(TAG, "Sense speaker resampler unavailable: discarding mismatched PCM");
+                        task.pcm.clear();
+                    } else if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ != nullptr) {''',
+        )
+        service = replace_once(
+            service,
+            '                    decoded = true;\\n'
+            '                } else {\\n'
+            '                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);'.replace('\\n', '\n'),
+            '                    decoded = !task.pcm.empty();\\n'
+            '                } else {\\n'
+            '                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);'.replace('\\n', '\n'),
+        )
         files[path] = service.encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
         # not a second decoder or audio transport. Normal TTS stops retain the
