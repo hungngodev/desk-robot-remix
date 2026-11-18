@@ -348,6 +348,14 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         ESP_LOGE(TAG, "Rejecting unsupported Sense Opus rate %d", sample_rate);
         return;
     }
+    // The ESP32 decoder API takes whole milliseconds. Reject an invalid
+    // Opus frame duration BEFORE replacing a working decoder.
+    if (frame_duration != 5 && frame_duration != 10 &&
+        frame_duration != 20 && frame_duration != 40 &&
+        frame_duration != 60) {
+        ESP_LOGE(TAG, "Rejecting unsupported Sense Opus frame duration %d", frame_duration);
+        return;
+    }
 #endif
     if (decoder_sample_rate_ == sample_rate &&
         decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {""",
