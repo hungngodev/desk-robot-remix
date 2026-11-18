@@ -477,7 +477,11 @@ void setup() {
 #endif
   Serial.println(pwm_ready ?
 #if DESK_ROBOT_STEPPER
+#if !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
+      "READY desk-robot-body stepper motor_disabled_cutoff_unqualified" :
+#else
       "READY desk-robot-body stepper disarmed local_rearm_required" :
+#endif
 #elif DESK_ROBOT_FULL_SENSORS
       "READY desk-robot-body dc_guarded disarmed local_rearm_required" :
 #else

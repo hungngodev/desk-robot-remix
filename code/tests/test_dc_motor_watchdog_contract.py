@@ -45,6 +45,7 @@ def test_default_full_stepper_refuses_arming_without_independent_motor_cutoff():
     assert 'write_stepper(body_pins::kLeftStepperPins, 0);' in main
     assert 'write_stepper(body_pins::kRightStepperPins, 0);' in main
     assert '"ERR arm stepper_cutoff_unqualified"' in main
+    assert '"READY desk-robot-body stepper motor_disabled_cutoff_unqualified"' in main
 
 
 def test_gpio23_is_cpu_only_and_cannot_share_stepper_phase_or_ledc():
