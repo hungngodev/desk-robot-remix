@@ -947,3 +947,51 @@ def test_conflicting_stationary_calibration_norm_keeps_shake_cooldown():
     assert qualified(gate, shaking, 104.0) == ()
     assert qualified(gate, shaking, 104.15) == ()
     assert gate.last_shake == 102.15
+
+
+def test_explicit_session_restart_recovers_exhausted_imu_boot_history():
+    """Operator restart reopens observation, never reuses old pose evidence."""
+    gate = HandlingGate()
+    for boot in range(1, 10):
+        assert qualified(
+            gate, sample(boot_id=boot, sample_ms=boot),
+            100 + boot * 0.1, new_sample=False,
+        ) == ()
+    assert gate.retired_boot_ids == list(range(1, 9))
+    assert qualified(
+        gate, sample(boot_id=10, sample_ms=1),
+        102, new_sample=False,
+    ) == ()
+    assert gate.last_boot_id == 9
+    gate.reset()
+    assert gate.retired_boot_ids == []
+    assert gate.last_boot_id is None
+    assert gate.reference is None
+    assert gate.last_shake == float("-inf")
+    # A new operator session must collect a fresh eight-conversion
+    # stationary reference rather than inherit a pose from the old boot.
+    for i in range(8):
+        assert qualified(
+            gate, sample(boot_id=10, sample_ms=i + 1),
+            105 + i * 0.1, new_sample=False,
+        ) == ()
+    assert gate.reference == (0, 0, 1)
+
+
+def test_internal_handling_reset_keeps_retired_boot_replay_fence():
+    """Sensor faults preserve earlier boot identities until operator reset."""
+    gate = HandlingGate()
+    for boot in (1, 2, 3):
+        assert qualified(
+            gate, sample(boot_id=boot, sample_ms=boot),
+            100 + boot * 0.1, new_sample=False,
+        ) == ()
+    assert gate.retired_boot_ids == [1, 2]
+    gate.reset(preserve_shake_cooldown=True)
+    assert gate.retired_boot_ids == [1, 2]
+    assert qualified(
+        gate, sample(boot_id=1, sample_ms=4000),
+        102, new_sample=False,
+    ) == ()
+    assert gate.reference is None
+    assert gate.startup_samples == []
