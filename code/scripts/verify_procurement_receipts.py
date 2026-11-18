@@ -11,7 +11,6 @@ ordering. No physical or charging authorization is inferred by this script.
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -49,7 +48,7 @@ def required_receipts(evidence: dict):
             yield "room:" + ident, gate, record.get(gate)
     for gate in SYSTEM_GATES:
         yield "system", gate, evidence.get("system", {}).get(gate)
-    for ident, (parent, count) in SUPPLEMENTAL_DECISIONS.items():
+    for ident in SUPPLEMENTAL_DECISIONS:
         selection = evidence.get("supplemental_decisions", {}).get(ident, {})
         scope = "supplemental:" + ident
         yield scope, "decision_receipt", selection.get("decision_receipt")
