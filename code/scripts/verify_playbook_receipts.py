@@ -106,9 +106,13 @@ def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
         and isinstance(actor, dict)
         and actor.get("type") == "User"
         and actor.get("login") == reviewer
+        and comment.get("author_association") in {"OWNER", "MEMBER", "COLLABORATOR"}
         and isinstance(body, str)
         and isinstance(identifier, int)
-        and bool(re.search(rf"\bprocedure\s*#?{identifier}\b", body, re.IGNORECASE))
+        and bool(re.search(
+            rf"\bACCEPTED\s+procedure\s*#?{identifier}\b",
+            body, re.IGNORECASE,
+        ))
         and sha in body
     )
 
