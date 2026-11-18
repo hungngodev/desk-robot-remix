@@ -186,6 +186,18 @@ class OllamaScene:
         import base64
         import json
 
+        # Direct comparisons do not necessarily pass through CameraFrameHub.
+        # Check transport size and header dimensions before allocating a
+        # base64 payload or sending private frames to a model endpoint.
+        for frame in (before, after):
+            if (not isinstance(frame, bytes) or not 12 <= len(frame) <= 1_000_000
+                    or not frame.startswith(b"\xff\xd8")):
+                raise ValueError("Bounded JPEG scene evidence required")
+            with Image.open(BytesIO(frame)) as candidate:
+                if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
+                        or not 1 <= candidate.height <= 4096):
+                    raise ValueError("Camera dimensions invalid")
+
         response = await self.client.post(
             self.url + "/api/chat",
             json={
