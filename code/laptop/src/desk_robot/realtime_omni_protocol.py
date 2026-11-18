@@ -380,7 +380,7 @@ class OmniDuplexWire:
         """
         if (not isinstance(response_id, str) or not response_id
                 or self.response_id is None
-                or not self.accept_output
+                or self._interrupted
                 or self.generated_bytes <= 0
                 or type(actually_played_ms) is not int
                 or type(truncate) is not bool
