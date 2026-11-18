@@ -378,10 +378,16 @@ class SenseOverlayTests(unittest.TestCase):
             if info['original'] is None and name.endswith('/config.h')
         )
         (self.root / new_file).unlink()
+        # A killed atomic replacement may strand a private partial temp.
+        staging = (self.root / new_file).with_name(
+            '.config.h.desk-overlay-synthetic'
+        )
+        staging.write_bytes(b'partial unpublished bytes')
         with self.assertRaisesRegex(ValueError, 'drift'):
             overlay.apply(self.root, 'sense')
         overlay.remove(self.root)
         self.assertFalse(marker.exists())
+        self.assertFalse(staging.exists())
         self.assertFalse((self.root / overlay.BOARDS['sense']).exists())
         for name, original in self.original.items():
             self.assertEqual((self.root / name).read_bytes(), original)
