@@ -160,7 +160,10 @@ static void drive_expiry_stops_coils_even_with_keepalive() {
   send(body, "rearm", 0, true);
   send(body, "arm", 0);
   send(body, "drive 40 40 50", 0);
-  for (std::uint32_t ms = 0; ms < 50; ++ms) {
+  // At t=0 the initial calibration sweep has already provided sensor
+  // conversions. Replaying those same timestamps is now correctly rejected
+  // as a duplicate, so only advance truly fresh sweeps from t=1 onward.
+  for (std::uint32_t ms = 1; ms < 50; ++ms) {
     fresh(guard, ms);
     body.tick(ms);
     motor.update(ms * 1000, body.state().left, body.state().armed);
