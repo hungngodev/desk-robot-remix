@@ -252,7 +252,9 @@ int main() {
     CHECK(accessories.readings().force.jaw_sample_seq > prior_jaw_seq);
     CHECK(bits == 0xA5);
     CHECK(pulse.sample().present);
-    CHECK(pulse.sample().valid);
+    // The FIFO has been drained by the repeated polls above. The last
+    // optical bytes remain diagnostic history, NOT new live paw contact.
+    CHECK(!pulse.sample().valid);
     CHECK(pulse.sample().red == 1003);
     CHECK(pulse.sample().ir == 5003);
     CHECK(pulse.sample().sample_seq > 0U);
