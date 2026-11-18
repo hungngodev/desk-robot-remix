@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Continuous PR updates must not cancel a running long firmware build.
 # GitHub keeps one running and the most recent pending run per group;
