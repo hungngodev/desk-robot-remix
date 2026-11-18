@@ -526,6 +526,20 @@ def test_wroom_motor_and_servo_ledc_timers_do_not_collide():
         assert main.count(f"body_pins::kServoChannels[{ch}]") >= 3
 
 
+def test_wroom_mux_reset_must_remain_hardware_pullup_not_boot_gpio():
+    """Prevent a dangerous product document from overriding the real pins."""
+    pins = (ROOT / "code/firmware/body/include/BodyPins.h").read_text()
+    bus = (ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp").read_text()
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    plan = (ROOT / "docs/product-definition.md").read_text()
+    assert "constexpr int kMuxReset = -1;" in pins
+    assert "if (mux_reset_pin >= 0)" in bus
+    assert "body_pins::kMuxReset" in main
+    assert "| TCA9548A reset | No GPIO, tied HIGH to 3.3 V" in plan
+    assert "| Reserved body inputs | 35 NC bumper; 36/39 left/right terminal IR |" in plan
+    assert "| TCA9548A reset | 4 |" not in plan
+
+
 def test_round2_safety_driver_preserves_all_eight_muxed_ready_checked_ranges():
     """No two-XSHUT or two-sample cliff replacement can silently land."""
     body = (ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp").read_text()
