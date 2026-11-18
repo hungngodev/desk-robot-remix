@@ -513,14 +513,27 @@ def remove(target: Path) -> None:
     if not marker.exists():
         return
     state = json.loads(marker.read_text())
+    # The marker is committed before the overlaid files. A killed installer
+    # can leave any file at its pinned original bytes, its overlaid bytes,
+    # or (for a new board file) not yet created. Those are recoverable.
+    # Reject all other content before changing even one file, so an actual
+    # user edit is never destroyed by a partial-install recovery.
     for name, info in state.items():
         path = target / name
-        if not path.is_file() or digest(path.read_bytes()) != info["sha256"]:
+        original = info["original"]
+        if not path.is_file():
+            if original is None and not path.exists():
+                continue
+            raise ValueError(f"Refusing removal: overlaid file was changed: {name}")
+        current = digest(path.read_bytes())
+        original_digest = digest(base64.b64decode(original)) if original is not None else None
+        if current != info["sha256"] and current != original_digest:
             raise ValueError(f"Refusing removal: overlaid file was changed: {name}")
     for name, info in state.items():
         path = target / name
         if info["original"] is None:
-            path.unlink()
+            if path.is_file():
+                path.unlink()
         else:
             path.write_bytes(base64.b64decode(info["original"]))
     marker.unlink()
