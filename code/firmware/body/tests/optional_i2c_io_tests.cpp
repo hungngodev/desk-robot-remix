@@ -134,6 +134,15 @@ int main() {
     CHECK(stale_pulse.poll(100));
     CHECK(stale_pulse.sample().valid);
     CHECK(stale_pulse.sample().sample_seq == 1U);
+    // The actual FIFO decoder, not just the portable helper, must honor
+    // the qualified carrier channel-order compile-time selection.
+#if DESK_ROBOT_MAX30102_FIFO_IR_FIRST
+    CHECK(stale_pulse.sample().red == 5001U);
+    CHECK(stale_pulse.sample().ir == 1001U);
+#else
+    CHECK(stale_pulse.sample().red == 1001U);
+    CHECK(stale_pulse.sample().ir == 5001U);
+#endif
     CHECK(stale_pulse_wire.pulse_fifo_read_pointer == 11);
     CHECK(stale_pulse_wire.ranges == 0 && stale_pulse_wire.extras == 0);
     // No new conversion must not increment the source sequence.
