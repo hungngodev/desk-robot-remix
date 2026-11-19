@@ -1417,6 +1417,10 @@ def main() -> int:
         "first-robot-json", "first-robot-markdown"
     ):
         parser.error("First robot release may only print a first robot view")
+    if args.require_release and args.format not in (
+        "json", "csv", "markdown"
+    ):
+        parser.error("Fleet release may only print a full fleet view")
     if args.require_release or args.require_first_robot:
         # The pure projection intentionally accepts synthetic unit-test
         # receipts. A REAL purchase command must verify immutable, scoped
