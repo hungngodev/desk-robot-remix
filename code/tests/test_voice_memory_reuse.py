@@ -149,3 +149,55 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
             headers={"x-desk-robot-tool-receipt": "1"},
         ).status_code == 403
         assert len(receipts) == 1
+
+def test_vision_revocation_during_memory_read_clears_live_cues(settings):
+    """A late opt-out must defeat cues captured before the SQLite await."""
+    from types import SimpleNamespace
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = True
+    collected = []
+
+    class Hub:
+        def recent_events(self, robot_id, clock):
+            collected.append("sensor")
+            return [{"private": "camera event"}]
+
+        def recent_tool_context(self, robot_id, clock):
+            collected.append("tool")
+            return [{"private": "tool interpretation"}]
+
+        def interaction_timeline(self, robot_id, clock, *, limit):
+            collected.append("timeline")
+            return [{"private": "interaction timeline"}]
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            settings.voice_vision_tools_enabled = False
+            return []
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=SimpleNamespace(hub=Hub())
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda request, robot_id: None,
+        remember_tool_context=lambda *args: None,
+    )
+    with TestClient(app) as client:
+        response = client.get("/v1/pet/robot-01/voice-context")
+    assert response.status_code == 200
+    assert collected == ["sensor", "tool", "timeline"]
+    body = response.json()
+    assert body["live_sensor_cues"] == []
+    assert body["recent_tool_interpretations"] == []
+    assert body["current_interaction_timeline"] == []
+    assert settings.voice_memory_tools_enabled is True
