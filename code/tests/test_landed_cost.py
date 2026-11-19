@@ -158,3 +158,9 @@ def test_wrong_input_types_do_not_crash_or_approve():
     out = calculate(ev)
     assert out["payable_now_cents"] is None
     assert out["errors"]
+
+def test_trailing_zero_supplier_decimal_is_valid():
+    assert mod.cents("5.950", "supplier price") == 595
+    assert mod.cents("0.4700", "supplier price") == 47
+    with pytest.raises(ValueError, match="subcent"):
+        mod.cents("5.951", "supplier price")
