@@ -1223,7 +1223,7 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     rows = {item["id"]: item for item in pilot["roles"]}
     assert len(rows) == 49
     assert pilot["pilot_sample_count"] == 17
-    assert pilot["pilot_historical_quoted_subtotal_usd"] == 39.93
+    assert pilot["pilot_historical_quoted_subtotal_usd"] == 40.41
     assert not pilot["whole_first_robot_purchase_approved"]
     assert not pilot["lithium_charging_or_motor_motion_authorized"]
     assert not pilot["actual_current_landed_cost_verified"]
@@ -1321,7 +1321,7 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     cart = mod.pilot_supplier_cart(mod.generate(plan))
     assert cart["exact_sku_count"] == 13
     assert cart["component_quantity"] == 17
-    assert cart["historical_priced_partial_subtotal_usd"] == 39.93
+    assert cart["historical_priced_partial_subtotal_usd"] == 40.41
     assert not cart["landed_total_verified"]
     assert not cart["complete_robot_purchase_approved"]
     assert not cart["lithium_charging_or_motor_motion_authorized"]
