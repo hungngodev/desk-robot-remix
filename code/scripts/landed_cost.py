@@ -206,8 +206,17 @@ def account_landed_cost(
     complete = (not errors and bool(required_roles)
                 and any(q > 0 for q in required_roles.values()))
     payable = sum(seller_totals.values()) if complete else None
-    already_paid = sum(paid_orders.values())
-    cumulative = payable + already_paid if payable is not None else None
+    # An absent or malformed historical spending register is UNKNOWN, not
+    # evidence that the owner has spent zero dollars already.
+    prior_spend_known = (
+        evidence.get("paid_orders_complete") is True
+        and isinstance(evidence.get("paid_orders", []), list)
+        and not any(error.startswith("paid order ") for error in errors)
+    )
+    already_paid = sum(paid_orders.values()) if prior_spend_known else None
+    cumulative = (payable + already_paid
+                  if payable is not None and already_paid is not None
+                  else None)
     return {
         "scope": expected_scope,
         "currency": "USD",
