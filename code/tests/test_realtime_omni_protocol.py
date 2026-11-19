@@ -203,6 +203,8 @@ def test_real_generated_pcm_is_not_automatically_acknowledged():
     with pytest.raises(ValueError):
         wire.playback_ack(response_id="r1", actually_played_ms=101)
     with pytest.raises(ValueError):
+        wire.playback_ack(response_id="r1", actually_played_ms=0)
+    with pytest.raises(ValueError):
         wire.playback_ack(response_id="different", actually_played_ms=70)
     assert wire.playback_ack(
         response_id="r1", actually_played_ms=70,
@@ -212,7 +214,16 @@ def test_real_generated_pcm_is_not_automatically_acknowledged():
     }
     with pytest.raises(ValueError):
         wire.playback_ack(response_id="r1", actually_played_ms=69)
-    assert wire.played_ms == 70
+    with pytest.raises(ValueError):
+        wire.playback_ack(response_id="r1", actually_played_ms=70)
+    # Speaker may finish draining queued audio after model generation ends.
+    wire.handle_event({"type": "response.done", "response_id": "r1"})
+    assert wire.playback_ack(response_id="r1", actually_played_ms=100)[
+        "played_ms"
+    ] == 100
+    with pytest.raises(ValueError):
+        wire.playback_ack(response_id="r1", actually_played_ms=100)
+    assert wire.played_ms == 100
 
 
 def test_interrupt_ignores_old_response_until_new_pcm_committed():
