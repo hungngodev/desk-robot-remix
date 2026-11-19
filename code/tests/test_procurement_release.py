@@ -1482,6 +1482,8 @@ def test_regular_cli_json_never_claims_untested_receipts(monkeypatch, capsys):
         "room_pod": [{"approved_for_fleet_purchase": True}],
     }
     monkeypatch.setattr(mod, "generate", lambda plan, evidence: fake)
+    monkeypatch.setattr(mod, "cost_quote",
+                        lambda report, evidence, scope: {})
     monkeypatch.setattr(sys, "argv", ["procurement_release.py", "--format", "json"])
     assert mod.main() == 0
     visible = json.loads(capsys.readouterr().out)
