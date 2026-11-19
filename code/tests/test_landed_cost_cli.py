@@ -88,3 +88,23 @@ def test_cli_keeps_supplier_quote_distinct_from_irreversible_cart(tmp_path):
     assert result.returncode == 2
     assert result.stdout == ""
     assert "HOLD" in result.stderr
+
+
+def test_markdown_missing_quotes_never_claims_zero_material_totals():
+    result = run_cost("--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Payable now: unknown" in result.stdout
+    for category in ("Robot", "Dock", "Station"):
+        assert f"{category} materials: unknown (incomplete quote)" in result.stdout
+        assert f"{category} materials: $0.00" not in result.stdout
+
+
+def test_markdown_budget_overrun_is_explicit_hold(tmp_path):
+    quote = sample_quote()
+    quote["costs"]["paid_orders"][0]["total_paid_usd"] = "49.00"
+    path = tmp_path / "over_budget_quote.json"
+    path.write_text(json.dumps(quote), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Cumulative prototype spending: $55.55" in result.stdout
+    assert "HOLD: cumulative prototype spending exceeds the $50.00 cap" in result.stdout
