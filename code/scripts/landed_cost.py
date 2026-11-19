@@ -41,10 +41,7 @@ def _url(value: object) -> bool:
         parsed = urlsplit(value)
         return (parsed.scheme == "https" and bool(parsed.hostname)
                 and parsed.username is None and parsed.password is None
-                and parsed.port not in (0, None) or
-                parsed.scheme == "https" and bool(parsed.hostname)
-                and parsed.username is None and parsed.password is None
-                and parsed.port is None)
+                and parsed.port != 0)
     except ValueError:
         return False
 
@@ -94,7 +91,11 @@ def account_landed_cost(
     seller_subtotals = defaultdict(int)
     charged_sellers = set()
     seller_totals = {}
-    for index, line in enumerate(evidence.get("lines", [])):
+    lines = evidence.get("lines", [])
+    if not isinstance(lines, list):
+        errors.append("Quote lines must be a list")
+        lines = []
+    for index, line in enumerate(lines):
         if not isinstance(line, dict):
             errors.append(f"quote {index}: invalid line")
             continue
@@ -117,7 +118,13 @@ def account_landed_cost(
         except (ValueError, KeyError) as exc:
             errors.append(f"quote {index}: {exc}")
     paid_orders = {}
-    for index, order in enumerate(evidence.get("paid_orders", [])):
+    if evidence.get("paid_orders_complete") is not True:
+        errors.append("Prior paid spending not verified as complete")
+    orders = evidence.get("paid_orders", [])
+    if not isinstance(orders, list):
+        errors.append("Prior paid orders must be a list")
+        orders = []
+    for index, order in enumerate(orders):
         try:
             reference = _nonempty(order.get("order_reference"), "paid reference")
             amount = cents(order.get("total_paid_usd"), "paid total")
@@ -126,7 +133,11 @@ def account_landed_cost(
             paid_orders[reference] = amount
         except (AttributeError, ValueError) as exc:
             errors.append(f"paid order {index}: {exc}")
-    for index, stock in enumerate(evidence.get("inventory", [])):
+    inventory = evidence.get("inventory", [])
+    if not isinstance(inventory, list):
+        errors.append("Inventory must be a list")
+        inventory = []
+    for index, stock in enumerate(inventory):
         try:
             role = _nonempty(stock.get("role_key"), "inventory role")
             if role not in required_roles:
@@ -137,7 +148,11 @@ def account_landed_cost(
             allocated[role] += quantity
         except (AttributeError, ValueError) as exc:
             errors.append(f"inventory {index}: {exc}")
-    for index, incoming in enumerate(evidence.get("paid_in_flight", [])):
+    incoming_items = evidence.get("paid_in_flight", [])
+    if not isinstance(incoming_items, list):
+        errors.append("Paid in-flight orders must be a list")
+        incoming_items = []
+    for index, incoming in enumerate(incoming_items):
         try:
             role = _nonempty(incoming.get("role_key"), "in-flight role")
             if role not in required_roles:
