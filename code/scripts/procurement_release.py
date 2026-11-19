@@ -1355,19 +1355,25 @@ def cost_quote_markdown(cost: dict) -> str:
         sign = "-" if value < 0 else ""
         absolute = abs(value)
         return f"{sign}\u0024{absolute // 100}.{absolute % 100:02d}"
+    complete = cost["calculation_complete_not_physical_approval"]
+    # Never let a partial or externally constructed report publish a payable
+    # total or apparent remaining budget. The accountant returns None for
+    # incomplete evidence; the presentation must independently fail closed.
+    payable = cost["payable_now_cents"] if complete else None
+    cumulative = cost["prototype_cumulative_cents"] if complete else None
+    remaining = cost["remaining_under_cap_cents"] if complete else None
     lines = [
         "# Landed purchasing cost",
         "",
         "Scope: " + cost["scope"],
         "Quote calculation complete: " +
-        ("yes, not purchase approval" if cost[
-            "calculation_complete_not_physical_approval"] else "NO"),
-        "Payable now: " + amount(cost["payable_now_cents"]),
+        ("yes, not purchase approval" if complete else "NO"),
+        "Payable now: " + amount(payable),
         "Previously paid: " + amount(cost["prior_paid_orders_cents"]),
         "Cumulative prototype spending: " +
-        amount(cost["prototype_cumulative_cents"]),
+        amount(cumulative),
         "Remaining under prototype $50 cap: " +
-        amount(cost["remaining_under_cap_cents"]),
+        amount(remaining),
         "These amounts are input calculations, not independently checked "
         "supplier stock, receipt, device fit or permission to buy.",
     ]
@@ -1375,13 +1381,12 @@ def cost_quote_markdown(cost: dict) -> str:
         # A missing quote can yield a numeric zero from an empty line list.
         # Never present that partial accounting as a fully priced category.
         shown = (amount(subtotal)
-                 if cost["calculation_complete_not_physical_approval"]
+                 if complete
                  else "unknown (incomplete quote)")
         lines.append(category.capitalize() + " materials: " + shown)
     # A single category view, with exact seller charges included once.
     # Partial quotations cannot show a plausible complete delivered total.
     allocated = cost.get("allocated_landed_subtotals_cents")
-    complete = cost["calculation_complete_not_physical_approval"]
     if allocated is None or not complete:
         lines.append("Allocated landed category costs: unknown (incomplete quote)")
     else:
@@ -1395,7 +1400,7 @@ def cost_quote_markdown(cost: dict) -> str:
                 category.capitalize() + " allocated landed cost: "
                 + amount(allocated.get(category))
             )
-    if (cost["prototype_cumulative_cents"] is not None
+    if (cumulative is not None
             and not cost["within_prototype_cap"]):
         lines.append("HOLD: cumulative prototype spending exceeds the "
                      + amount(cost["prototype_cap_cents"]) + " cap")
