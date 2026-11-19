@@ -137,7 +137,7 @@ def test_selected_vl53l0x_is_not_mislabelled_as_historical_only():
         ROOT / "code/firmware/body/lib/TofBus/TofBus.h"
     ).read_text()
     assert "VL53L0X uses a single-byte register address" in bus
-    assert "Historical VL6180X and VL53L4CD alternatives" in definition
+    assert "The selected VL53L0X source still requires exact carrier and optical qualification." in definition
     assert "historical VL53L0X options" not in definition
 
 
