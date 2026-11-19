@@ -2205,7 +2205,9 @@ async def test_uncooperative_visual_model_timeout_releases_fleet_inference_lock(
                 service.look("robot-01", "What is on my desk?"), timeout=.5,
             )
         assert entered.is_set()
-        assert cancelled.is_set()
+        # Cancellation is delivered on the next event loop turn, after the
+        # timeout handler has already relinquished its inference ownership.
+        await asyncio.wait_for(cancelled.wait(), timeout=.5)
         await asyncio.wait_for(service.inference_lock.acquire(), timeout=.2)
         service.inference_lock.release()
         assert not service._look_tasks
