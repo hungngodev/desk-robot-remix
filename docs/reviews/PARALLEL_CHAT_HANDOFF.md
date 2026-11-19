@@ -75,7 +75,7 @@ Canonical input: user supplied 100-page engineering playbook, procedures 01 to 9
 | 07, procedures 49–56: Mac brain and streams | Prior source implementation, not live multi-input qualification | Authenticated events, VAD priority, stale camera cancellation, quiet initiative, tools plus one conversation |
 | 08, procedures 57–64: voice/tools/memory/fleet | Prior source implementation, not five-device qualification | One Xiaozhi/MCP tool owner, private SQLite per pet, genuine completed receipts and multi-pet acoustic floor |
 | 09, procedures 65–72: CAD/dock and gripper | CAD scaffolds exist, printable/measured acceptance OPEN | Exact carrier dimensions, fit gauges, jaw force, protected contacts, IR dock and thermal trials |
-| 10, procedures 73–80: procurement | Pilot-sample route exists, full purchase release BLOCKED | 13 historically quoted sample SKUs/17 pieces/$39.93 items only; exact variants and real checkout prices unverified; full 63-role decisions still gated |
+| 10, procedures 73–80: procurement | Pilot-sample route exists, full purchase release BLOCKED | 13 historically quoted sample SKUs/17 pieces/$40.41 items only; exact variants and real checkout prices unverified; full 63-role decisions still gated |
 | 11, procedures 81–88: adversarial tests | More build profile coverage CODED, current exact SHA CI pending | 23 local verifier stages; monitor GitHub CI status and run physical bench/audio/video scenarios, no inferred passes |
 | 12, procedures 89–96: first build, fleet and governance | NOT QUALIFIED | One complete robot must pass real electrical, optical, acoustic, drivetrain, docking and mechanic acceptance before buying/assembling four copies |
 
