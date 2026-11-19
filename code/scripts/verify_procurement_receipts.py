@@ -17,8 +17,11 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 from procurement_release import (
-    FIRST_ROBOT_ROOM_GATE, FLEET_ONLY_SYSTEM_GATES, PART_GATES,
-    SUPPLEMENTAL_DECISIONS, SYSTEM_GATES,
+    FIRST_ROBOT_ROOM_GATE,
+    FLEET_ONLY_SYSTEM_GATES,
+    PART_GATES,
+    SUPPLEMENTAL_DECISIONS,
+    SYSTEM_GATES,
 )
 from verify_playbook_receipts import verified_raw_record
 from verify_system import source_snapshot
