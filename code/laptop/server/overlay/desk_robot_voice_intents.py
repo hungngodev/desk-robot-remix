@@ -302,6 +302,9 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
     """Small source-labelled facts, never full private HTTP/JSON dumps."""
     if not isinstance(result, dict):
         return None
+    def measured(value, low, high):
+        return type(value) is int and low <= value <= high
+
     if route == "look":
         answer = result.get("answer")
         if (result.get("source") != "authenticated_xiao_camera_and_local_vlm"
@@ -321,8 +324,6 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
         # boundary must also reject arbitrary nested strings, booleans as
         # integers, and out-of-range fields instead of forwarding them into
         # a generated spoken response as supposed physical observations.
-        def measured(value, low, high):
-            return type(value) is int and low <= value <= high
 
         observed = {
             "source": "validated_wroom_raw_aux_not_calibrated",
