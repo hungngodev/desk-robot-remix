@@ -1,3 +1,41 @@
+## 19 November 2026: landed cost presentation and hardware map source correction
+
+PR #17 only. This source and test batch does not close physical or commercial gates.
+The previously confirmed four-job green workflow was run 44616372911 at commit
+`421fb0634818a67b7ecaa0cb69baaff8b3180fd9`. New commits require their
+own completed exact-head CI; any pending or cancelled run is not PASS.
+
+* `a05af32b`, `13c40934`: incomplete price lists cannot masquerade as
+  $0.00 category quotes; over-$50 cumulative prototype spend prints HOLD.
+  Added real CLI regression cases.
+* `5d1ad461`, `21823a0b`: show exact-cent allocated delivered category
+  amounts, independently from goods-only subtotals; incomplete allocation
+  stays unknown. Extends the separately landed `3a96d265` category
+  accounting without copying or replacing it.
+* `f184c3fd`, `67233b23`: fix the GPIO35 normally closed bumper
+  documentation to match firmware's HIGH trip on opened/unplugged lead.
+  Tests pin documentation to the actual local input behavior. No measured
+  polarity trial.
+* `eced8135`, `2136d67c`: stop labelling the selected cheap
+  VL53L0X as a historical-only sensor and tie the specification to
+  `TofBus` source with a regression test.
+* `6dbeaa41`, `dd086e06`: replace a speculative MAX30102 bus lane
+  in the product definition with the existing WROOM accessory mux 0x71
+  channel 0, I2C address 0x57. Tests cross-check the wiring guide.
+* Source coupon `docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad` rendered
+  locally with OpenSCAD as a provisional watertight STL; external
+  measurements and full assembly print qualification remain open.
+
+Pending procurement: confirm exact sensor carrier sample, voltage/pullups,
+shipping/tax and compatibility. The $2.23 sensor+mux item subtotal is not a
+delivered quote. Local-only Mac checkout `codex/repair-shopping-voice` from
+the playbook is not a remote branch, so its independent fixes must be
+reconciled when its actual tree is accessible. Seven PR review threads remain
+open for handling qualification, reused power sensing, initiative thresholds,
+real Sense AEC capture and native speech playback receipts. The repo was
+still PUBLIC at this checkpoint; do not publish private evidence or claim
+a private release. Leave PR draft and physical buying/charging/motion HOLD.
+
 ## 18 November 2026: executed playbook continuation, source fixes, open verification
 
 Canonical PR #17 and unchanged Mac + XIAO Sense + WROOM + 8 VL53L0X hardware.
