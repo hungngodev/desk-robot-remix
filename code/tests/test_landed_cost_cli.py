@@ -117,14 +117,27 @@ def test_landed_cost_markdown_reports_delivered_category_allocation(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "Payable now: $6.55" in result.stdout
     assert "Robot materials: $2.23" in result.stdout
-    assert "Robot allocated delivered cost: $6.55" in result.stdout
-    assert "Dock allocated delivered cost: $0.00" in result.stdout
-    assert "Station allocated delivered cost: $0.00" in result.stdout
-    assert "not individual supplier quotes" in result.stdout
+    assert "Robot allocated landed cost: $6.55" in result.stdout
+    assert "Dock allocated landed cost: $0.00" in result.stdout
+    assert "Station allocated landed cost: $0.00" in result.stdout
+    assert "not individual supplier checkout prices" in result.stdout
 
 
 def test_incomplete_quote_never_displays_fake_delivered_allocation():
     result = run_cost("--format", "landed-cost-markdown")
     assert result.returncode == 0, result.stderr
-    assert "Delivered category allocations: unknown (incomplete quote)" in result.stdout
-    assert "Robot allocated delivered cost: $0.00" not in result.stdout
+    assert "Allocated landed category costs: unknown (incomplete quote)" in result.stdout
+    assert "Robot allocated landed cost: $0.00" not in result.stdout
+
+
+def test_partial_supplier_total_is_explicitly_not_full_cart(tmp_path):
+    quote = sample_quote()
+    quote["costs"]["lines"].pop()
+    path = tmp_path / "partial_seller_quote.json"
+    path.write_text(json.dumps(quote), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Payable now: unknown" in result.stdout
+    assert "Partial supplier quote ElectroPeak:" in result.stdout
+    assert "Supplier ElectroPeak:" not in result.stdout
+    assert "Allocated landed category costs: unknown (incomplete quote)" in result.stdout
