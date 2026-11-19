@@ -1514,5 +1514,12 @@ def test_landed_cost_markdown_allocations_are_visible_and_not_checkout_prices():
     values["calculation_complete_not_physical_approval"] = False
     values["allocated_landed_subtotals_cents"] = None
     shown = mod.cost_quote_markdown(values)
-    assert "Robot allocated landed cost: unknown (incomplete quote)" in shown
+    assert "Allocated landed category costs: unknown (incomplete quote)" in shown
+    assert "Robot allocated landed cost: $5.21" not in shown
     assert "Robot materials: unknown (incomplete quote)" in shown
+    # Even synthetic inconsistent caller data must not make incomplete
+    # evidence look like a confirmed supplier checkout or budget balance.
+    assert "Payable now: unknown" in shown
+    assert "Cumulative prototype spending: unknown" in shown
+    assert "Remaining under prototype $50 cap: unknown" in shown
+    assert "Partial supplier quote Example: $7.55" in shown
