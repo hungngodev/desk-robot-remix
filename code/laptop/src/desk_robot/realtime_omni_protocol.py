@@ -385,7 +385,10 @@ class OmniDuplexWire:
                 or type(actually_played_ms) is not int
                 or type(truncate) is not bool
                 or self.response_id != response_id
-                or actually_played_ms < self.played_ms
+                # Duplicate or zero progress is not evidence that any
+                # additional audio played. A final increasing drain receipt
+                # remains valid even after response.done disabled generation.
+                or actually_played_ms <= self.played_ms
                 or actually_played_ms > self.generated_bytes * 1000
                    // (self.OUTPUT_RATE * 2)):
             raise ValueError("No actual monotonic playback evidence")
