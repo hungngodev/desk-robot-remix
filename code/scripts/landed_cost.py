@@ -20,7 +20,7 @@ def cents(value: object, label: str) -> int:
         number = Decimal(value)
     except (InvalidOperation, ValueError, TypeError) as exc:
         raise ValueError(f"{label}: invalid USD amount") from exc
-    if not number.is_finite() or number < 0 or number.as_tuple().exponent < -2:
+    if not number.is_finite() or number < 0:
         raise ValueError(f"{label}: USD amount must be nonnegative cents")
     scaled = number * 100
     if scaled != scaled.to_integral_value():
