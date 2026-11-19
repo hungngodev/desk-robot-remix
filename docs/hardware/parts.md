@@ -111,8 +111,12 @@ shipping/tax and inventory before declaring the basket ready. Additional sensor
 features do not silently raise the cap. All fit, audio interruption, power,
 local edge/attitude stopping and physical pickup trials remain open.
 
-`python3 scripts/check_budget.py` reports unknown totals explicitly.
-`python3 scripts/check_budget.py --shipping 0 --tax 0 --require-ready` must still
-reject the current incomplete basket; those zeros demonstrate the gate, not
-free delivery. [Historical Amazon and supplier observations](archive/supplier-comparison.md)
+`python3 scripts/check_budget.py` now uses the canonical first-unit plan
+and source-locked evaluation cart, reports unknown landed costs, and keeps
+purchase approval on HOLD. The strict release path is
+`python3 scripts/procurement_release.py --require-first-robot --format first-robot-markdown --evidence ACTUAL_RECEIPTS.json`.
+The superseded budget remains inspectable only with
+`python3 scripts/check_budget.py --bom ../docs/hardware/bom.json`; this historical
+view is not a buying authorization. Shipping and tax guesses never release the
+current cart. [Historical Amazon and supplier observations](archive/supplier-comparison.md)
 record the earlier baskets.
