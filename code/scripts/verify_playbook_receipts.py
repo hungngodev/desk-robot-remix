@@ -139,10 +139,18 @@ def valid_physical_signoff(receipt: object) -> bool:
 def audit(ledger: dict, lookup=github_json) -> list[str]:
     """Return failures, never turn network errors into a success receipt."""
     errors: list[str] = []
+    states = {"OPEN", "TESTED", "MEASURED", "QUALIFIED"}
     for row in ledger.get("procedures", []):
-        if row.get("gate") == "OPEN":
-            continue
         identifier = row.get("id", "unknown")
+        if type(identifier) is not int or not 1 <= identifier <= 96:
+            errors.append(f"procedure {identifier}: invalid procedure id")
+            continue
+        gate = row.get("gate")
+        if type(gate) is not str or gate not in states:
+            errors.append(f"procedure {identifier}: unknown gate {gate!r}")
+            continue
+        if gate == "OPEN":
+            continue
         evidence_class = row.get("evidence_class")
         if evidence_class not in {"source", "mixed", "physical"}:
             errors.append(f"procedure {identifier}: missing evidence class")
