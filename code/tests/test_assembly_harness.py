@@ -128,3 +128,14 @@ def test_nc_bumper_wiring_instructions_match_firmware_trip_polarity():
     assert "normally closed contacts hold GPIO35 LOW" in row
     assert "active HIGH trip" in row
     assert "active LOW;" not in row
+
+
+def test_selected_vl53l0x_is_not_mislabelled_as_historical_only():
+    definition = (ROOT / "docs/product-definition.md").read_text()
+    bus = (ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp").read_text()
+    assert "#include <VL53L0X.h>" in (
+        ROOT / "code/firmware/body/lib/TofBus/TofBus.h"
+    ).read_text()
+    assert "VL53L0X uses a single-byte register address" in bus
+    assert "Historical VL6180X and VL53L4CD alternatives" in definition
+    assert "historical VL53L0X options" not in definition
