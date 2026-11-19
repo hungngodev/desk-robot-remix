@@ -115,3 +115,16 @@ def test_unqualified_bus_edits_cannot_silently_change_critical_floor():
     )
     with pytest.raises(ValueError, match="Double-booked"):
         harness.verify(bad, body, sense)
+
+
+def test_nc_bumper_wiring_instructions_match_firmware_trip_polarity():
+    """An assembler must not invert a fail-closed GPIO35 safety input."""
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    wiring = (ROOT / "docs/hardware/wiring.md").read_text()
+    row = next(line for line in wiring.splitlines()
+               if line.startswith("| GPIO35, build flag DESK_ROBOT_ENABLE_BUMPER |"))
+    assert "digitalRead(body_pins::kBumperInput) == HIGH" in main
+    assert "NC series to GND; open or unplugged -> HIGH trip" in main
+    assert "normally closed contacts hold GPIO35 LOW" in row
+    assert "active HIGH trip" in row
+    assert "active LOW;" not in row
