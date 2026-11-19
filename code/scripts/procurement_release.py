@@ -829,7 +829,7 @@ PILOT_SAMPLE_PRODUCTS = {
                 "Challenge Electronics", "CS20-02P110-04-1X",
                 "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069", 1, 3.24),
     "sensor_3v3": ("Dedicated regulated 3.3V expansion sensor supply",
-                   "Pololu", "2873", "https://www.pololu.com/product/2873", 1, 5.47),
+                   "Pololu", "2873", "https://www.pololu.com/product/2873", 1, 5.95),  # Single unit; $5.47 applies at quantity >= 5.
     "rgb": ("Single diffused WS2812B RGB pixel", "SparkFun", "BOB-13282",
             "https://www.sparkfun.com/sparkfun-rgb-led-breakout-ws2812b.html", 1, 1.50),
     "dock_ir_receivers": (
