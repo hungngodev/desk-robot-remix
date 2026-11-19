@@ -210,7 +210,7 @@ def test_shared_delivery_charges_are_allocated_in_exact_cents():
     }
     assert sum(out["allocated_landed_subtotals_cents"].values()) == 755
     assert out["prototype_cumulative_cents"] == 2005
-    assert not out["landed_price_is_a_verified_supplier_checkout"
+    assert not out["landed_price_is_a_verified_supplier_checkout"]
 
 
 def test_incomplete_quote_hides_landed_category_allocation():
