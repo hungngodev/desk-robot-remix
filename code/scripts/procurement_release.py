@@ -1340,6 +1340,25 @@ def cost_requirements(report: dict, scope: str) -> tuple[dict, dict]:
     return needed, categories
 
 
+
+def quoted_carrier_matches_signed_role(line: dict, selected: dict) -> bool:
+    """Strict release must bind the quoted *revision*, not merely chip/SKU.
+
+    Bench sample price projections may have unknown board revisions, but
+    irreversible orders must carry the exact revision from the inspected
+    and signed part record. Distributors may differ from manufacturers.
+    """
+    if not isinstance(line, dict) or not isinstance(selected, dict):
+        return False
+    for key in ("sku", "pcb_revision"):
+        quoted = line.get(key)
+        if (not isinstance(quoted, str) or not quoted.strip()
+                or quoted != selected.get(key)):
+            return False
+    retailer = selected.get("seller")
+    return retailer is None or line.get("seller") == retailer
+
+
 def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
     required, categories = cost_requirements(report, scope)
     values = evidence.get("costs", {}) if isinstance(evidence, dict) else {}
@@ -1499,11 +1518,9 @@ def main() -> int:
             # rather than the carrier manufacturer. Match the exact
             # selected part SKU; verify retailer only when independently
             # named on the signed part record.
-            if (line["sku"] != selected.get("sku")
-                    or (selected.get("seller") is not None
-                        and line["seller"] != selected["seller"])):
-                print("HOLD: quoted SKU or chosen retailer differs from "
-                      "signed carrier: " + role, file=sys.stderr)
+            if not quoted_carrier_matches_signed_role(line, selected):
+                print("HOLD: quoted SKU, PCB revision or chosen retailer "
+                      "differs from signed carrier: " + role, file=sys.stderr)
                 return 2
     report = public_purchase_view(
         report, live_receipts_verified=(args.require_release or args.require_first_robot)
