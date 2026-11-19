@@ -585,13 +585,16 @@ async def test_real_snapshot_deadline_cancels_stalled_capture_without_motion(tmp
             head, SimpleNamespace(id="robot-01", dock_calibration=path)
         ), timeout=4.0
     )
-    assert entered.is_set() and cancelled.is_set()
+    assert entered.is_set()
     assert result["phase"] == "hold"
     assert result["source"] == "head_snapshot_failed"
     assert result["pose"] is None
     assert not result["motor_authorized"] and not result["charging_authorized"]
     assert not result["physical_acceptance_pass"]
     assert head.commands == []
+    # The hold is immediate; cooperative cancellation cleanup may finish
+    # shortly afterward, especially with a macOS event-loop scheduler.
+    await asyncio.wait_for(cancelled.wait(), timeout=1.0)
 
 
 @pytest.mark.parametrize("payload", [
