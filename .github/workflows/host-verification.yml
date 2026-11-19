@@ -86,6 +86,10 @@ jobs:
         run: |
           uv python install 3.11
           uv sync --extra dev --python 3.11 --locked
+      - name: Python lint
+        working-directory: code
+        run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
+
       - name: Install pinned headless OpenCV for dock geometry tests
         working-directory: code
         run: uv pip install --python .venv/bin/python opencv-python-headless==4.13.0.92
@@ -124,9 +128,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: uv run --no-sync python scripts/verify_playbook_receipts.py
-      - name: Python lint
-        working-directory: code
-        run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
 
   body-platformio:
     name: ESP32 WROOM firmware compile
