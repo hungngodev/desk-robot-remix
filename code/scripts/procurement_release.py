@@ -656,6 +656,11 @@ def public_purchase_view(report: dict, *, live_receipts_verified: bool = False) 
     ]
     for row in (*visible["robots"], *visible["room_pod"]):
         row["approved_for_fleet_purchase"] = False
+    # A synthetic decision receipt may pass the pure generator without the
+    # source-pinned live audit. Do not print it as a reviewed linked purchase
+    # decision in Markdown, JSON, or the first-unit/pilot projections.
+    for detail in visible.get("supplemental_decisions", []):
+        detail["reviewed"] = False
     return visible
 
 
