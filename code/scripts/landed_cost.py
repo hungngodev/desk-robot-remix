@@ -120,6 +120,10 @@ def account_landed_cost(
     paid_orders = {}
     if evidence.get("paid_orders_complete") is not True:
         errors.append("Prior paid spending not verified as complete")
+    # A missing register is UNKNOWN, even if somebody marked it complete.
+    # Only an explicitly supplied empty list can mean verified zero spend.
+    if "paid_orders" not in evidence:
+        errors.append("Prior paid orders register missing; spending is unknown")
     orders = evidence.get("paid_orders", [])
     if not isinstance(orders, list):
         errors.append("Prior paid orders must be a list")
@@ -210,7 +214,8 @@ def account_landed_cost(
     # evidence that the owner has spent zero dollars already.
     prior_spend_known = (
         evidence.get("paid_orders_complete") is True
-        and isinstance(evidence.get("paid_orders", []), list)
+        and "paid_orders" in evidence
+        and isinstance(evidence["paid_orders"], list)
         and not any(error.startswith("paid order ") for error in errors)
     )
     already_paid = sum(paid_orders.values()) if prior_spend_known else None

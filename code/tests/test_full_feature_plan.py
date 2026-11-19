@@ -195,6 +195,20 @@ def test_third_party_notice_and_hardware_source_map_dont_reintroduce_premium_sen
     assert "OOMWOO is still in hardware development" in source_map
 
 
+def test_superseded_decision_log_cannot_reselect_premium_tof():
+    root = Path(__file__).resolve().parents[2]
+    log = (root / "docs/decision-log.md").read_text()
+    row = next(
+        line for line in log.splitlines()
+        if line.startswith("| Edge sensing (historical proposal, superseded) |")
+    )
+    assert "obsolete and not current purchasing selections" in row
+    assert "8 generic VL53L0X GY-530 sensors per robot" in row
+    assert "2 TCA9548A multiplexers" in row
+    assert "physical qualification" in row
+    assert "selected full source has eight VL53L4CDs" not in row
+
+
 def test_active_product_docs_and_workflow_cannot_resurrect_premium_ranger():
     """Historical research may retain VL53L4CD; current active guides may not."""
     root = Path(__file__).resolve().parents[2]

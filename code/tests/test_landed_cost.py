@@ -150,6 +150,27 @@ def test_missing_prior_spend_confirmation_hides_cumulative_cost():
     assert any("Prior paid spending" in err for err in out["errors"])
 
 
+def test_absent_paid_order_register_never_means_zero_spend():
+    ev = sample()
+    del ev["paid_orders"]
+    out = calculate(ev)
+    assert not out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] is None
+    assert out["prior_paid_orders_cents"] is None
+    assert out["prototype_cumulative_cents"] is None
+    assert out["remaining_under_cap_cents"] is None
+    assert any("paid orders register missing" in error for error in out["errors"])
+
+
+def test_explicit_verified_empty_paid_order_register_can_mean_zero():
+    ev = sample()
+    ev["paid_orders"] = []
+    out = calculate(ev)
+    assert out["calculation_complete_not_physical_approval"]
+    assert out["prior_paid_orders_cents"] == 0
+    assert out["prototype_cumulative_cents"] == out["payable_now_cents"]
+
+
 def test_wrong_input_types_do_not_crash_or_approve():
     ev = sample()
     ev["lines"] = None
