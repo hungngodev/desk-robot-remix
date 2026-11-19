@@ -144,6 +144,7 @@ def account_landed_cost(
             paid_orders[reference] = amount
         except (AttributeError, ValueError) as exc:
             errors.append(f"paid order {index}: {exc}")
+    inventory_claims: set[tuple[str, str]] = set()
     inventory = evidence.get("inventory", [])
     if not isinstance(inventory, list):
         errors.append("Inventory must be a list")
@@ -154,11 +155,17 @@ def account_landed_cost(
             if role not in required_roles:
                 raise ValueError("unknown inventory role")
             quantity = positive_count(stock.get("usable_allocated"), "inventory units")
-            if not _url(stock.get("inspection_receipt_url")):
+            receipt = stock.get("inspection_receipt_url")
+            if not _url(receipt):
                 raise ValueError("missing stock inspection receipt URL")
+            claim = (role, receipt)
+            if claim in inventory_claims:
+                raise ValueError("duplicate inspection receipt for same role")
+            inventory_claims.add(claim)
             allocated[role] += quantity
         except (AttributeError, ValueError) as exc:
             errors.append(f"inventory {index}: {exc}")
+    incoming_claims: set[tuple[str, str]] = set()
     incoming_items = evidence.get("paid_in_flight", [])
     if not isinstance(incoming_items, list):
         errors.append("Paid in-flight orders must be a list")
@@ -172,6 +179,10 @@ def account_landed_cost(
             ref = _nonempty(incoming.get("order_reference"), "in-flight order")
             if ref not in paid_orders:
                 raise ValueError("in-flight order lacks a paid record")
+            claim = (role, ref)
+            if claim in incoming_claims:
+                raise ValueError("duplicate in-flight order allocation for same role")
+            incoming_claims.add(claim)
             awaiting[role] += quantity
         except (AttributeError, ValueError) as exc:
             errors.append(f"in-flight {index}: {exc}")
