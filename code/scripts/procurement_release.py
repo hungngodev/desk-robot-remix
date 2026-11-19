@@ -1401,7 +1401,7 @@ def cost_quote_markdown(cost: dict) -> str:
                      + amount(cost["prototype_cap_cents"]) + " cap")
     for supplier, total in cost["seller_payable_cents"].items():
         # Seller strings are evidence inputs, not trusted Markdown.
-        safe_name = str(supplier).replace("\\n", " ").replace("\\r", " ").strip()
+        safe_name = str(supplier).replace("\n", " ").replace("\r", " ").strip()
         prefix = "Supplier " if complete else "Partial supplier quote "
         lines.append(prefix + safe_name + ": " + amount(total))
     for problem in cost["errors"]:
