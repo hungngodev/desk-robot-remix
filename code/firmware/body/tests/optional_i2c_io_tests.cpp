@@ -313,6 +313,49 @@ int main() {
       }
     }
     CHECK(saw_partial);
+    // A failed ADS1115 conversion-config write must retire the previous
+    // complete force pair even though both I2C mux controls still work.
+    TwoWire config_fault_wire;
+    desk_robot::AccessorySensors config_fault;
+    CHECK(config_fault.begin(config_fault_wire));
+    for (std::uint32_t ms = 0; ms < 2400; ms += 12)
+      config_fault.poll(ms);
+    CHECK(config_fault.readings().force.valid);
+    CHECK(config_fault.readings().force.valid_mask == 3U);
+    config_fault_wire.fail_ads_config_write = true;
+    std::uint32_t resume_ms = 0;
+    bool saw_write_failure = false;
+    for (std::uint32_t ms = 2400; ms < 3600; ms += 12) {
+      const auto prior_seq = config_fault.readings().force.jaw_sample_seq;
+      config_fault.poll(ms);
+      if (config_fault_wire.rejected_ads_config_writes == 0U) continue;
+      CHECK(!config_fault.readings().force.valid);
+      CHECK(config_fault.readings().force.valid_mask == 0U);
+      CHECK(config_fault.readings().force.jaw_sample_seq == prior_seq);
+      CHECK(!config_fault_wire.unsafe_parallel_mux);
+      saw_write_failure = true;
+      resume_ms = ms + 12;
+      break;
+    }
+    CHECK(saw_write_failure);
+    config_fault_wire.fail_ads_config_write = false;
+    bool reacquired_one = false, reacquired_pair = false;
+    for (std::uint32_t ms = resume_ms; ms < resume_ms + 2400; ms += 12) {
+      config_fault.poll(ms);
+      const auto& force = config_fault.readings().force;
+      if (force.valid_mask == 1U || force.valid_mask == 2U) {
+        CHECK(!force.valid);
+        reacquired_one = true;
+      }
+      if (force.valid_mask == 3U) {
+        CHECK(reacquired_one);
+        CHECK(force.valid);
+        reacquired_pair = true;
+        break;
+      }
+    }
+    CHECK(reacquired_one && reacquired_pair);
+    CHECK(config_fault_wire.ranges == 0 && config_fault_wire.extras == 0);
     CHECK(read.gauge.fuel_present && read.gauge.fuel_valid);
     CHECK(read.gauge.cell_mv == 3600);
     CHECK(read.gauge.soc_centi == 5000);

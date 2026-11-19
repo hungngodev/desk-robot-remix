@@ -13,6 +13,8 @@ class TwoWire {
   unsigned transactions = 0;
   std::uint8_t ads_config_high = 0xC3;
   bool ads_conversion_ready = true;
+  bool fail_ads_config_write = false;
+  unsigned rejected_ads_config_writes = 0;
   std::uint8_t current_address = 0, register_address = 0;
   std::vector<std::uint8_t> outbound;
   std::vector<std::uint8_t> inbound;
@@ -150,6 +152,12 @@ class TwoWire {
         current_address == 0x1c || current_address == 0x1d ||
         current_address == 0x1e) ++imu_terminated_transmissions;
     if (!connected(current_address)) return 4;
+    // Fail only the ADS1115 single-shot config WRITE, not its mux or reads.
+    if (fail_ads_config_write && current_address == 0x48 &&
+        outbound.size() == 3 && outbound[0] == 0x01) {
+      ++rejected_ads_config_writes;
+      return 4;
+    }
     const bool cap_target = current_address == 0x28 ||
         (current_address == 0x29 && extras == 1 && cap_uses_0x29);
     if (cap_target && outbound.size() == 2) {

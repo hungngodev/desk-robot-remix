@@ -292,7 +292,16 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   if (!f.present) return;
   if (!ads_pending_) {
     const std::uint16_t config = ads_channel_ == 0 ? 0xC383U : 0xD383U;
-    ads_pending_ = write16(0x48, 0x01, config);
+    // Losing the ADC config write invalidates the ENTIRE two-channel
+    // reading, even if the optional mux itself still works correctly.
+    // Otherwise an old accepted pair survives indefinitely as fresh force.
+    if (!write16(0x48, 0x01, config)) {
+      f.valid = false;
+      f.valid_mask = 0;
+      ads_pending_ = false;
+      return;
+    }
+    ads_pending_ = true;
     ads_started_ = now_ms;
     return;
   }
