@@ -1,0 +1,214 @@
+"""Pure USD landed-cost accounting for the existing first-unit purchase evidence.
+
+No price, stock, address, physical qualification or release is inferred here.
+Use full quoted package costs and explicit seller charges; missing is not zero.
+The strict procurement release still owns receipt verification.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from decimal import Decimal, InvalidOperation
+from urllib.parse import urlsplit
+
+
+def cents(value: object, label: str) -> int:
+    """Accept dollar strings or exact Decimal, never imprecise binary floats."""
+    if isinstance(value, bool) or not isinstance(value, (str, Decimal, int)):
+        raise ValueError(f"{label}: use an exact USD dollar amount")
+    try:
+        number = Decimal(value)
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{label}: invalid USD amount") from exc
+    if not number.is_finite() or number < 0 or number.as_tuple().exponent < -2:
+        raise ValueError(f"{label}: USD amount must be nonnegative cents")
+    scaled = number * 100
+    if scaled != scaled.to_integral_value():
+        raise ValueError(f"{label}: subcent amount")
+    return int(scaled)
+
+
+def positive_count(value: object, label: str) -> int:
+    if type(value) is not int or value < 1:
+        raise ValueError(f"{label}: expected a positive integer")
+    return value
+
+
+def _url(value: object) -> bool:
+    if not isinstance(value, str) or any(c.isspace() for c in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        return (parsed.scheme == "https" and bool(parsed.hostname)
+                and parsed.username is None and parsed.password is None
+                and parsed.port not in (0, None) or
+                parsed.scheme == "https" and bool(parsed.hostname)
+                and parsed.username is None and parsed.password is None
+                and parsed.port is None)
+    except ValueError:
+        return False
+
+
+def _nonempty(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label}: missing identifier")
+    return value.strip()
+
+
+def account_landed_cost(
+    evidence: dict,
+    required_roles: dict[str, int],
+    role_categories: dict[str, str],
+    *,
+    expected_scope: str = "first_robot",
+    cap_cents: int = 5000,
+) -> dict:
+    """Compute payable and lifetime prototype spend without authorizing a cart.
+
+    Evidence keys: scope, lines, seller_charges, inventory, paid_in_flight,
+    paid_orders. Every quote has role_key, seller, sku, quantity_packages,
+    units_per_package, package_price_usd, quote_reference, quoted_at,
+    stock_evidence_url. A seller charge has explicit shipping_usd, tax_usd,
+    duties_usd, discount_usd. Inventory needs an inspection_receipt_url and
+    paid in-flight quantities need a matching order_reference.
+    """
+    if not isinstance(evidence, dict):
+        evidence = {}
+    if expected_scope not in {"first_robot", "fleet", "evaluation"}:
+        raise ValueError("Unknown cost scope")
+    if type(cap_cents) is not int or cap_cents <= 0:
+        raise ValueError("Invalid prototype budget")
+    if any(type(qty) is not int or qty < 0 for qty in required_roles.values()):
+        raise ValueError("Invalid canonical requirement count")
+    if set(required_roles) != set(role_categories):
+        raise ValueError("Cost category map differs from canonical requirements")
+    errors: list[str] = []
+    if evidence.get("scope") != expected_scope:
+        errors.append("Missing or mismatched quote scope")
+    if evidence.get("currency") != "USD":
+        errors.append("Quote currency must be USD")
+    buckets = {"robot": 0, "dock": 0, "station": 0}
+    supplied = defaultdict(int)
+    allocated = defaultdict(int)
+    awaiting = defaultdict(int)
+    seller_subtotals = defaultdict(int)
+    charged_sellers = set()
+    seller_totals = {}
+    for index, line in enumerate(evidence.get("lines", [])):
+        if not isinstance(line, dict):
+            errors.append(f"quote {index}: invalid line")
+            continue
+        try:
+            role = _nonempty(line.get("role_key"), "role_key")
+            if role not in required_roles or required_roles[role] == 0:
+                raise ValueError("unknown or excluded role")
+            seller = _nonempty(line.get("seller"), "seller")
+            _nonempty(line.get("sku"), "sku")
+            _nonempty(line.get("quote_reference"), "quote_reference")
+            _nonempty(line.get("quoted_at"), "quoted_at")
+            if not _url(line.get("stock_evidence_url")):
+                raise ValueError("missing HTTPS stock evidence")
+            packages = positive_count(line.get("quantity_packages"), "packages")
+            units = positive_count(line.get("units_per_package"), "units")
+            total = packages * cents(line.get("package_price_usd"), "package price")
+            supplied[role] += packages * units
+            seller_subtotals[seller] += total
+            buckets[role_categories[role]] += total
+        except (ValueError, KeyError) as exc:
+            errors.append(f"quote {index}: {exc}")
+    paid_orders = {}
+    for index, order in enumerate(evidence.get("paid_orders", [])):
+        try:
+            reference = _nonempty(order.get("order_reference"), "paid reference")
+            amount = cents(order.get("total_paid_usd"), "paid total")
+            if reference in paid_orders and paid_orders[reference] != amount:
+                raise ValueError("conflicting duplicate paid reference")
+            paid_orders[reference] = amount
+        except (AttributeError, ValueError) as exc:
+            errors.append(f"paid order {index}: {exc}")
+    for index, stock in enumerate(evidence.get("inventory", [])):
+        try:
+            role = _nonempty(stock.get("role_key"), "inventory role")
+            if role not in required_roles:
+                raise ValueError("unknown inventory role")
+            quantity = positive_count(stock.get("usable_allocated"), "inventory units")
+            if not _url(stock.get("inspection_receipt_url")):
+                raise ValueError("missing stock inspection receipt URL")
+            allocated[role] += quantity
+        except (AttributeError, ValueError) as exc:
+            errors.append(f"inventory {index}: {exc}")
+    for index, incoming in enumerate(evidence.get("paid_in_flight", [])):
+        try:
+            role = _nonempty(incoming.get("role_key"), "in-flight role")
+            if role not in required_roles:
+                raise ValueError("unknown in-flight role")
+            quantity = positive_count(incoming.get("quantity"), "in-flight units")
+            ref = _nonempty(incoming.get("order_reference"), "in-flight order")
+            if ref not in paid_orders:
+                raise ValueError("in-flight order lacks a paid record")
+            awaiting[role] += quantity
+        except (AttributeError, ValueError) as exc:
+            errors.append(f"in-flight {index}: {exc}")
+    pending_roles = []
+    for role, needed in required_roles.items():
+        if allocated[role] + awaiting[role] + supplied[role] < needed:
+            pending_roles.append(role)
+        if allocated[role] + awaiting[role] > needed:
+            errors.append(f"{role}: allocated and incoming exceed needed stock")
+        if supplied[role] and allocated[role] + awaiting[role] >= needed:
+            errors.append(f"{role}: duplicated purchase despite covered inventory")
+        if (supplied[role] > needed - allocated[role] - awaiting[role]
+                and needed - allocated[role] - awaiting[role] > 0):
+            # A single package may contain extra units; this is an explicit
+            # review warning rather than silently discarding the package cost.
+            errors.append(f"{role}: over-order or package surplus needs review")
+    charges = evidence.get("seller_charges", [])
+    if not isinstance(charges, list):
+        errors.append("Seller charges must be a list")
+        charges = []
+    for index, group in enumerate(charges):
+        try:
+            seller = _nonempty(group.get("seller"), "charge seller")
+            if seller not in seller_subtotals or seller in charged_sellers:
+                raise ValueError("unknown or duplicate seller charges")
+            charged_sellers.add(seller)
+            charges_cents = (
+                cents(group.get("shipping_usd"), "shipping")
+                + cents(group.get("tax_usd"), "tax")
+                + cents(group.get("duties_usd"), "duties")
+                - cents(group.get("discount_usd"), "discount")
+            )
+            total = seller_subtotals[seller] + charges_cents
+            if total < 0:
+                raise ValueError("discount exceeds seller total")
+            seller_totals[seller] = total
+        except (AttributeError, ValueError) as exc:
+            errors.append(f"seller charges {index}: {exc}")
+    if set(seller_subtotals) != charged_sellers:
+        errors.append("Shipping, taxes, duties or discounts unknown for one or more sellers")
+    if pending_roles:
+        errors.append("Not all canonical roles are priced or accounted for")
+    complete = (not errors and bool(required_roles)
+                and any(q > 0 for q in required_roles.values()))
+    payable = sum(seller_totals.values()) if complete else None
+    already_paid = sum(paid_orders.values())
+    cumulative = payable + already_paid if payable is not None else None
+    return {
+        "scope": expected_scope,
+        "currency": "USD",
+        "calculation_complete_not_physical_approval": complete,
+        "errors": errors,
+        "unaccounted_roles": sorted(pending_roles),
+        "awaiting_arrival_roles": sorted(role for role in awaiting if awaiting[role]),
+        "material_subtotals_cents": buckets,
+        "seller_payable_cents": dict(sorted(seller_totals.items())),
+        "payable_now_cents": payable,
+        "prior_paid_orders_cents": already_paid,
+        "prototype_cumulative_cents": cumulative,
+        "prototype_cap_cents": cap_cents,
+        "remaining_under_cap_cents": cap_cents - cumulative
+        if cumulative is not None else None,
+        "within_prototype_cap": cumulative <= cap_cents
+        if cumulative is not None else False,
+        "landed_price_is_a_verified_supplier_checkout": False,
+    }
