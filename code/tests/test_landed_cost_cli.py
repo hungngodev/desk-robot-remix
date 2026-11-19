@@ -108,3 +108,23 @@ def test_markdown_budget_overrun_is_explicit_hold(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "Cumulative prototype spending: $55.55" in result.stdout
     assert "HOLD: cumulative prototype spending exceeds the $50.00 cap" in result.stdout
+
+
+def test_landed_cost_markdown_reports_delivered_category_allocation(tmp_path):
+    path = tmp_path / "quote_with_delivery.json"
+    path.write_text(json.dumps(sample_quote()), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Payable now: $6.55" in result.stdout
+    assert "Robot materials: $2.23" in result.stdout
+    assert "Robot allocated delivered cost: $6.55" in result.stdout
+    assert "Dock allocated delivered cost: $0.00" in result.stdout
+    assert "Station allocated delivered cost: $0.00" in result.stdout
+    assert "not individual supplier quotes" in result.stdout
+
+
+def test_incomplete_quote_never_displays_fake_delivered_allocation():
+    result = run_cost("--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Delivered category allocations: unknown (incomplete quote)" in result.stdout
+    assert "Robot allocated delivered cost: $0.00" not in result.stdout
