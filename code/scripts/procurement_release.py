@@ -1378,34 +1378,32 @@ def cost_quote_markdown(cost: dict) -> str:
                  if cost["calculation_complete_not_physical_approval"]
                  else "unknown (incomplete quote)")
         lines.append(category.capitalize() + " materials: " + shown)
+    # A single category view, with exact seller charges included once.
+    # Partial quotations cannot show a plausible complete delivered total.
     allocated = cost.get("allocated_landed_subtotals_cents")
-    for category in ("robot", "dock", "station"):
-        shown = (amount(allocated[category])
-                 if isinstance(allocated, dict)
-                 and isinstance(allocated.get(category), int)
-                 and cost["calculation_complete_not_physical_approval"]
-                 else "unknown (incomplete quote)")
-        lines.append(category.capitalize() + " allocated landed cost: " + shown)
-    lines.append(
-        "Allocated landed costs apportion shared seller charges by material "
-        "value, or by item count for free goods. They are not individual "
-        "supplier checkout prices."
-    )
+    complete = cost["calculation_complete_not_physical_approval"]
+    if allocated is None or not complete:
+        lines.append("Allocated landed category costs: unknown (incomplete quote)")
+    else:
+        lines.append(
+            "Allocated landed category costs apportion seller charges by "
+            "material value, or unit count for free goods. They are not "
+            "individual supplier checkout prices."
+        )
+        for category in ("robot", "dock", "station"):
+            lines.append(
+                category.capitalize() + " allocated landed cost: "
+                + amount(allocated.get(category))
+            )
     if (cost["prototype_cumulative_cents"] is not None
             and not cost["within_prototype_cap"]):
         lines.append("HOLD: cumulative prototype spending exceeds the "
                      + amount(cost["prototype_cap_cents"]) + " cap")
-    allocated = cost.get("allocated_landed_subtotals_cents")
-    if allocated is None:
-        lines.append("Delivered category allocations: unknown (incomplete quote)")
-    else:
-        lines.append("Delivered category allocations apportion seller charges "
-                     "for accounting, not individual supplier quotes.")
-        for category, subtotal in allocated.items():
-            lines.append(category.capitalize() + " allocated delivered cost: "
-                         + amount(subtotal))
     for supplier, total in cost["seller_payable_cents"].items():
-        lines.append("Supplier " + supplier + ": " + amount(total))
+        # Seller strings are evidence inputs, not trusted Markdown.
+        safe_name = str(supplier).replace("\\n", " ").replace("\\r", " ").strip()
+        prefix = "Supplier " if complete else "Partial supplier quote "
+        lines.append(prefix + safe_name + ": " + amount(total))
     for problem in cost["errors"]:
         lines.append("HOLD: " + problem)
     return "\n".join(lines) + "\n"
