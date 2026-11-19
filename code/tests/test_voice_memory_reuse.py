@@ -18,12 +18,14 @@ def test_xiaozhi_memory_tool_calls_only_scoped_readonly_mac_endpoint():
     root = Path(__file__).resolve().parents[1]
     bridge = (root / "laptop/server/overlay/desk_robot_tools.py").read_text()
     api = (root / "laptop/src/desk_robot/api.py").read_text()
+    routes = (root / "laptop/src/desk_robot/api_memory_routes.py").read_text()
     assert 'elif route == "voice-context"' in bridge
     assert 'client.get(f"/v1/pet/{robot}/voice-context")' in bridge
     assert '"desk_robot_memories"' in bridge
-    assert '@app.get("/v1/pet/{robot_id}/voice-context"' in api
-    assert 'if not settings.voice_memory_tools_enabled:' in api
-    assert '"no_new_motion_permission": True' in api
+    assert '@app.get("/v1/pet/{robot_id}/voice-context"' in routes
+    assert 'if not settings.voice_memory_tools_enabled:' in routes
+    assert '"no_new_motion_permission": True' in routes
+    assert 'register_memory_routes(app, settings' in api
 
 
 def test_natural_polite_memory_questions_reuse_existing_scoped_tool():
