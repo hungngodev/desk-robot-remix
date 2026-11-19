@@ -1,10 +1,12 @@
 """A design slot, popular part, or fabricated boolean is not a purchase approval."""
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/procurement_release.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("procurement_release", SCRIPT)
 assert spec and spec.loader
 mod = importlib.util.module_from_spec(spec)
