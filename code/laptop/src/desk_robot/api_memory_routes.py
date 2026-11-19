@@ -161,6 +161,11 @@ def register_voice_context_route(
         # during that read invalidates the entire current private tool reply.
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Voice memory consent revoked during read")
+        # Camera and interaction consent can be revoked while the SQLite
+        # core-fact query yields. Never return previously collected live cues
+        # after that independent opt-out.
+        if not settings.voice_vision_tools_enabled:
+            sensor_cues, tool_cues, timeline = [], [], []
         # Voice memory consent is independent from the vision opt-in.
         # Only a marked, still-current voice tool turn may publish a short
         # memory receipt; ordinary operator/dashboard reads cannot.
