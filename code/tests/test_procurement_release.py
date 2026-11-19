@@ -1523,3 +1523,38 @@ def test_landed_cost_markdown_allocations_are_visible_and_not_checkout_prices():
     assert "Cumulative prototype spending: unknown" in shown
     assert "Remaining under prototype $50 cap: unknown" in shown
     assert "Partial supplier quote Example: $7.55" in shown
+
+
+def test_strict_signed_quote_requires_exact_carrier_revision():
+    signed = {
+        "sku": "SEN-19-006", "pcb_revision": "rev-B",
+        "seller": "ElectroPeak",
+    }
+    quote = {
+        "sku": "SEN-19-006", "pcb_revision": "rev-B",
+        "seller": "ElectroPeak",
+    }
+    assert mod.quoted_carrier_matches_signed_role(quote, signed)
+    for changed in (
+        {"pcb_revision": None},
+        {"pcb_revision": ""},
+        {"pcb_revision": "rev-A"},
+        {"sku": "VL53L4CD-premium"},
+        {"seller": "unknown"},
+    ):
+        altered = {**quote, **changed}
+        assert not mod.quoted_carrier_matches_signed_role(altered, signed)
+
+    # A distributor may sell the exact frozen carrier if the signed
+    # selection did not separately freeze the retailer.
+    manufacturer_signed = {
+        "sku": "SEN-19-006", "pcb_revision": "rev-B",
+    }
+    assert mod.quoted_carrier_matches_signed_role(
+        {**quote, "seller": "Distributor"}, manufacturer_signed,
+    )
+    assert not mod.quoted_carrier_matches_signed_role(
+        {**quote, "pcb_revision": "unknown"}, manufacturer_signed,
+    )
+    assert not mod.quoted_carrier_matches_signed_role(None, signed)
+    assert not mod.quoted_carrier_matches_signed_role(quote, None)
