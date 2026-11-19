@@ -1378,6 +1378,19 @@ def cost_quote_markdown(cost: dict) -> str:
                  if cost["calculation_complete_not_physical_approval"]
                  else "unknown (incomplete quote)")
         lines.append(category.capitalize() + " materials: " + shown)
+    allocated = cost.get("allocated_landed_subtotals_cents")
+    for category in ("robot", "dock", "station"):
+        shown = (amount(allocated[category])
+                 if isinstance(allocated, dict)
+                 and isinstance(allocated.get(category), int)
+                 and cost["calculation_complete_not_physical_approval"]
+                 else "unknown (incomplete quote)")
+        lines.append(category.capitalize() + " allocated landed cost: " + shown)
+    lines.append(
+        "Allocated landed costs apportion shared seller charges by material "
+        "value, or by item count for free goods. They are not individual "
+        "supplier checkout prices."
+    )
     if (cost["prototype_cumulative_cents"] is not None
             and not cost["within_prototype_cap"]):
         lines.append("HOLD: cumulative prototype spending exceeds the "

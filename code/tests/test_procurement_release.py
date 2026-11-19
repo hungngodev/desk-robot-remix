@@ -1491,3 +1491,28 @@ def test_regular_cli_json_never_claims_untested_receipts(monkeypatch, capsys):
     visible = json.loads(capsys.readouterr().out)
     assert visible["order_released"] is False
     assert visible["robots"][0]["approved_for_fleet_purchase"] is False
+
+
+def test_landed_cost_markdown_allocations_are_visible_and_not_checkout_prices():
+    values = {
+        "scope": "evaluation", "calculation_complete_not_physical_approval": True,
+        "payable_now_cents": 755, "prior_paid_orders_cents": 1250,
+        "prototype_cumulative_cents": 2005, "remaining_under_cap_cents": 2995,
+        "material_subtotals_cents": {"robot": 223, "dock": 100, "station": 0},
+        "allocated_landed_subtotals_cents": {
+            "robot": 521, "dock": 234, "station": 0,
+        },
+        "within_prototype_cap": True, "prototype_cap_cents": 5000,
+        "seller_payable_cents": {"Example": 755}, "errors": [],
+    }
+    shown = mod.cost_quote_markdown(values)
+    assert "Robot materials: $2.23" in shown
+    assert "Robot allocated landed cost: $5.21" in shown
+    assert "Dock allocated landed cost: $2.34" in shown
+    assert "Station allocated landed cost: $0.00" in shown
+    assert "They are not individual supplier checkout prices." in shown
+    values["calculation_complete_not_physical_approval"] = False
+    values["allocated_landed_subtotals_cents"] = None
+    shown = mod.cost_quote_markdown(values)
+    assert "Robot allocated landed cost: unknown (incomplete quote)" in shown
+    assert "Robot materials: unknown (incomplete quote)" in shown
