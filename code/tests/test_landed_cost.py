@@ -187,3 +187,64 @@ def test_trailing_zero_supplier_decimal_is_valid():
     assert mod.cents("0.4700", "supplier price") == 47
     with pytest.raises(ValueError, match="subcent"):
         mod.cents("5.951", "supplier price")
+
+
+def test_shared_delivery_charges_are_allocated_in_exact_cents():
+    ev = sample()
+    ev["lines"].append({
+        **ev["lines"][0], "role_key": "dock:cradle", "sku": "CRADLE",
+        "package_price_usd": "1.00",
+    })
+    required = {**REQUIRED, "dock:cradle": 1}
+    categories = {**CATEGORIES, "dock:cradle": "dock"}
+    out = mod.account_landed_cost(
+        ev, required, categories, expected_scope="evaluation"
+    )
+    assert out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] == 755
+    assert out["material_subtotals_cents"] == {
+        "robot": 223, "dock": 100, "station": 0,
+    }
+    assert out["allocated_landed_subtotals_cents"] == {
+        "robot": 521, "dock": 234, "station": 0,
+    }
+    assert sum(out["allocated_landed_subtotals_cents"].values()) == 755
+    assert out["prototype_cumulative_cents"] == 2005
+    assert not out["landed_price_is_a_verified_supplier_checkout"
+
+
+def test_incomplete_quote_hides_landed_category_allocation():
+    ev = sample()
+    del ev["seller_charges"][0]["shipping_usd"]
+    out = calculate(ev)
+    assert out["payable_now_cents"] is None
+    assert out["allocated_landed_subtotals_cents"] is None
+
+
+def test_free_items_split_shipping_by_units_without_dividing_by_zero():
+    ev = sample()
+    for line in ev["lines"]:
+        line["package_price_usd"] = "0.00"
+    ev["seller_charges"][0]["tax_usd"] = "0.00"
+    categories = {
+        "robot:cliff_obstacle": "robot",
+        "robot:i2c_mux": "station",
+    }
+    out = mod.account_landed_cost(
+        ev, REQUIRED, categories, expected_scope="evaluation"
+    )
+    assert out["payable_now_cents"] == 400
+    assert out["allocated_landed_subtotals_cents"] == {
+        "robot": 200, "dock": 0, "station": 200,
+    }
+
+
+def test_invalid_canonical_cost_category_fails_closed():
+    ev = sample()
+    categories = {**CATEGORIES, "robot:i2c_mux": "unknown"}
+    out = mod.account_landed_cost(
+        ev, REQUIRED, categories, expected_scope="evaluation"
+    )
+    assert out["payable_now_cents"] is None
+    assert out["allocated_landed_subtotals_cents"] is None
+    assert any("unknown robot, dock or station" in error for error in out["errors"])

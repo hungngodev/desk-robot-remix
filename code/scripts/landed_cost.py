@@ -89,6 +89,8 @@ def account_landed_cost(
     allocated = defaultdict(int)
     awaiting = defaultdict(int)
     seller_subtotals = defaultdict(int)
+    seller_category_goods = defaultdict(lambda: defaultdict(int))
+    seller_category_units = defaultdict(lambda: defaultdict(int))
     charged_sellers = set()
     seller_totals = {}
     lines = evidence.get("lines", [])
@@ -111,10 +113,15 @@ def account_landed_cost(
                 raise ValueError("missing HTTPS stock evidence")
             packages = positive_count(line.get("quantity_packages"), "packages")
             units = positive_count(line.get("units_per_package"), "units")
+            category = role_categories[role]
+            if category not in buckets:
+                raise ValueError("unknown robot, dock or station cost category")
             total = packages * cents(line.get("package_price_usd"), "package price")
             supplied[role] += packages * units
             seller_subtotals[seller] += total
-            buckets[role_categories[role]] += total
+            seller_category_goods[seller][category] += total
+            seller_category_units[seller][category] += packages * units
+            buckets[category] += total
         except (ValueError, KeyError) as exc:
             errors.append(f"quote {index}: {exc}")
     paid_orders = {}
@@ -210,6 +217,34 @@ def account_landed_cost(
     complete = (not errors and bool(required_roles)
                 and any(q > 0 for q in required_roles.values()))
     payable = sum(seller_totals.values()) if complete else None
+    # Shipping, tax, duties and discounts belong to sellers, not specific
+    # robot/dock/station roles. For reporting only, apportion each seller's
+    # exact payable cents by material value, with stable largest remainders.
+    # If all material is free, use item counts instead. Never show partial
+    # allocated totals or call these allocations direct supplier quotes.
+    allocated_landed_subtotals = None
+    if complete:
+        allocated_landed_subtotals = dict.fromkeys(buckets, 0)
+        for seller, gross in seller_totals.items():
+            weights = seller_category_goods[seller]
+            if sum(weights.values()) == 0:
+                weights = seller_category_units[seller]
+            denominator = sum(weights.values())
+            shares = {
+                category: gross * weight // denominator
+                for category, weight in weights.items()
+            }
+            remainder = gross - sum(shares.values())
+            ranking = sorted(
+                weights,
+                key=lambda category: (
+                    -(gross * weights[category] % denominator), category
+                ),
+            )
+            for category in ranking[:remainder]:
+                shares[category] += 1
+            for category, amount in shares.items():
+                allocated_landed_subtotals[category] += amount
     # An absent or malformed historical spending register is UNKNOWN, not
     # evidence that the owner has spent zero dollars already.
     prior_spend_known = (
@@ -230,6 +265,7 @@ def account_landed_cost(
         "unaccounted_roles": sorted(pending_roles),
         "awaiting_arrival_roles": sorted(role for role in awaiting if awaiting[role]),
         "material_subtotals_cents": buckets,
+        "allocated_landed_subtotals_cents": allocated_landed_subtotals,
         "seller_payable_cents": dict(sorted(seller_totals.items())),
         "payable_now_cents": payable,
         "prior_paid_orders_cents": already_paid,
