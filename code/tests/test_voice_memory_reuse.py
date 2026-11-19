@@ -92,3 +92,59 @@ def test_registered_voice_memory_endpoint_enforces_live_consent_and_operator_wri
         ).status_code == 403
         settings.voice_memory_tools_enabled = False
         assert client.get(path, headers=tool).status_code == 403
+
+
+def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
+    from types import SimpleNamespace
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = False
+    receipts = []
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 6
+            return [SimpleNamespace(
+                summary="The blue key was observed", witnessed=True,
+                source_robot="robot-01", kind="observation",
+            )]
+
+        def core_facts(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 8
+            return []
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(memory=Memory(), multimodal=None)
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda request, robot_id: (
+            "current-voice-turn"
+            if request.headers.get("x-desk-robot-tool-receipt") == "1"
+            and robot_id == "robot-01" else None
+        ),
+        remember_tool_context=lambda *args: receipts.append(args),
+    )
+    with TestClient(app) as client:
+        result = client.get(
+            "/v1/pet/robot-01/voice-context",
+            headers={"x-desk-robot-tool-receipt": "1"},
+        )
+        assert result.status_code == 200
+        assert result.json()["matched"] is True
+        assert receipts == [(
+            "current-voice-turn", "robot-01", "memory_recall",
+            "own observed event: The blue key was observed",
+        )]
+        # An operator fetch cannot silently seed the model's next speech.
+        assert client.get("/v1/pet/robot-01/voice-context").status_code == 200
+        assert len(receipts) == 1
+        settings.voice_memory_tools_enabled = False
+        assert client.get(
+            "/v1/pet/robot-01/voice-context",
+            headers={"x-desk-robot-tool-receipt": "1"},
+        ).status_code == 403
+        assert len(receipts) == 1
