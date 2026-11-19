@@ -1448,3 +1448,42 @@ def test_pilot_supplier_cart_rejects_malformed_source_url(monkeypatch):
             mod.pilot_supplier_cart(report)
     monkeypatch.setitem(mod.PILOT_SAMPLE_PRODUCTS, "cliff_obstacle", original)
     assert mod.pilot_supplier_cart(report)["exact_sku_count"] == 13
+
+def test_public_view_hides_pure_synthetic_receipts():
+    """Synthetic unit-test approvals cannot be printed as actual buying permits."""
+    eligible = {
+        "order_released": True,
+        "missing_first_robot_system_evidence": [],
+        "robots": [{"approved_for_fleet_purchase": True}],
+        "room_pod": [{"approved_for_fleet_purchase": True}],
+    }
+    visible = mod.public_purchase_view(eligible)
+    assert visible["order_released"] is False
+    assert all(not row["approved_for_fleet_purchase"]
+               for row in (*visible["robots"], *visible["room_pod"]))
+    assert "live_scoped_purchase_receipts_not_verified" in (
+        visible["missing_first_robot_system_evidence"]
+    )
+    assert eligible["order_released"] is True
+    assert mod.public_purchase_view(
+        eligible, live_receipts_verified=True
+    ) is eligible
+
+
+def test_regular_cli_json_never_claims_untested_receipts(monkeypatch, capsys):
+    """Even supplied evidence cannot print approval without strict live audit."""
+    import json
+    import sys
+
+    fake = {
+        "order_released": True,
+        "missing_first_robot_system_evidence": [],
+        "robots": [{"approved_for_fleet_purchase": True}],
+        "room_pod": [{"approved_for_fleet_purchase": True}],
+    }
+    monkeypatch.setattr(mod, "generate", lambda plan, evidence: fake)
+    monkeypatch.setattr(sys, "argv", ["procurement_release.py", "--format", "json"])
+    assert mod.main() == 0
+    visible = json.loads(capsys.readouterr().out)
+    assert visible["order_released"] is False
+    assert visible["robots"][0]["approved_for_fleet_purchase"] is False
