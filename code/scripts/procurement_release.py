@@ -1382,6 +1382,15 @@ def cost_quote_markdown(cost: dict) -> str:
             and not cost["within_prototype_cap"]):
         lines.append("HOLD: cumulative prototype spending exceeds the "
                      + amount(cost["prototype_cap_cents"]) + " cap")
+    allocated = cost.get("allocated_landed_subtotals_cents")
+    if allocated is None:
+        lines.append("Delivered category allocations: unknown (incomplete quote)")
+    else:
+        lines.append("Delivered category allocations apportion seller charges "
+                     "for accounting, not individual supplier quotes.")
+        for category, subtotal in allocated.items():
+            lines.append(category.capitalize() + " allocated delivered cost: "
+                         + amount(subtotal))
     for supplier, total in cost["seller_payable_cents"].items():
         lines.append("Supplier " + supplier + ": " + amount(total))
     for problem in cost["errors"]:
