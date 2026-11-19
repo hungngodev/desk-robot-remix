@@ -1372,7 +1372,16 @@ def cost_quote_markdown(cost: dict) -> str:
         "supplier stock, receipt, device fit or permission to buy.",
     ]
     for category, subtotal in cost["material_subtotals_cents"].items():
-        lines.append(category.capitalize() + " materials: " + amount(subtotal))
+        # A missing quote can yield a numeric zero from an empty line list.
+        # Never present that partial accounting as a fully priced category.
+        shown = (amount(subtotal)
+                 if cost["calculation_complete_not_physical_approval"]
+                 else "unknown (incomplete quote)")
+        lines.append(category.capitalize() + " materials: " + shown)
+    if (cost["prototype_cumulative_cents"] is not None
+            and not cost["within_prototype_cap"]):
+        lines.append("HOLD: cumulative prototype spending exceeds the "
+                     + amount(cost["prototype_cap_cents"]) + " cap")
     for supplier, total in cost["seller_payable_cents"].items():
         lines.append("Supplier " + supplier + ": " + amount(total))
     for problem in cost["errors"]:
