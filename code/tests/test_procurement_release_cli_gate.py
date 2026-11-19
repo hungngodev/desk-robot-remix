@@ -10,7 +10,7 @@ SCRIPT = ROOT / "code/scripts/procurement_release.py"
 def test_full_fleet_release_holds_before_printing_order_without_real_evidence():
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--require-release",
-         "--format", "first-robot-markdown"],
+         "--format", "markdown"],
         cwd=ROOT / "code", text=True, capture_output=True,
         check=False, timeout=20,
     )
