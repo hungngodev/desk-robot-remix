@@ -248,3 +248,65 @@ def test_invalid_canonical_cost_category_fails_closed():
     assert out["payable_now_cents"] is None
     assert out["allocated_landed_subtotals_cents"] is None
     assert any("unknown robot, dock or station" in error for error in out["errors"])
+
+
+def test_one_inspection_receipt_cannot_create_two_allocations():
+    ev = sample()
+    ev["lines"].pop(0)
+    stock = {
+        "role_key": "robot:cliff_obstacle", "usable_allocated": 1,
+        "inspection_receipt_url": "https://github.com/org/real-inspection",
+    }
+    ev["inventory"] = [stock.copy(), stock.copy()]
+    requirements = {**REQUIRED, "robot:cliff_obstacle": 2}
+    out = mod.account_landed_cost(ev, requirements, CATEGORIES,
+                                  expected_scope="evaluation")
+    assert out["payable_now_cents"] is None
+    assert not out["calculation_complete_not_physical_approval"]
+    assert any("duplicate inspection receipt" in err for err in out["errors"])
+    # Separate physical inspections are valid even for the same part role.
+    ev["inventory"][1]["inspection_receipt_url"] += "-second"
+    out = mod.account_landed_cost(ev, requirements, CATEGORIES,
+                                  expected_scope="evaluation")
+    assert out["errors"] == []
+    assert out["calculation_complete_not_physical_approval"]
+
+
+def test_one_paid_order_cannot_be_counted_twice_for_one_role():
+    ev = sample()
+    ev["lines"].pop(0)
+    claim = {
+        "role_key": "robot:cliff_obstacle", "quantity": 1,
+        "order_reference": "already-paid",
+    }
+    ev["paid_in_flight"] = [claim.copy(), claim.copy()]
+    requirements = {**REQUIRED, "robot:cliff_obstacle": 2}
+    out = mod.account_landed_cost(ev, requirements, CATEGORIES,
+                                  expected_scope="evaluation")
+    assert out["payable_now_cents"] is None
+    assert any("duplicate in-flight order allocation" in err
+               for err in out["errors"])
+    ev["paid_orders"].append({
+        "order_reference": "second-paid", "total_paid_usd": "2.00",
+    })
+    ev["paid_in_flight"][1]["order_reference"] = "second-paid"
+    out = mod.account_landed_cost(ev, requirements, CATEGORIES,
+                                  expected_scope="evaluation")
+    assert out["errors"] == []
+    assert out["awaiting_arrival_roles"] == ["robot:cliff_obstacle"]
+
+
+def test_one_inspection_can_cover_distinct_roles_without_double_counting():
+    ev = sample()
+    ev["lines"] = []
+    ev["seller_charges"] = []
+    receipt = "https://github.com/org/combined-inspection"
+    ev["inventory"] = [
+        {"role_key": role, "usable_allocated": 1,
+         "inspection_receipt_url": receipt}
+        for role in REQUIRED
+    ]
+    out = calculate(ev)
+    assert out["errors"] == []
+    assert out["payable_now_cents"] == 0
+    assert out["prototype_cumulative_cents"] == 1250
