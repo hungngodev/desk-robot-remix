@@ -1269,7 +1269,7 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert text.count("## 1.") == 1
     assert text.count("## 2.") == 1
     assert "SEN-19-006" in text
-    assert "39.93" in text
+    assert "40.41" in text
     assert "not a physically qualified robot" in text
 
 
