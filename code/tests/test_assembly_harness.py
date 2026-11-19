@@ -139,3 +139,13 @@ def test_selected_vl53l0x_is_not_mislabelled_as_historical_only():
     assert "VL53L0X uses a single-byte register address" in bus
     assert "Historical VL6180X and VL53L4CD alternatives" in definition
     assert "historical VL53L0X options" not in definition
+
+
+def test_max30102_wiring_assignment_is_not_speculative():
+    """Pin the accepted accessory lane; code must not route it to Sense PDM."""
+    definition = (ROOT / "docs/product-definition.md").read_text()
+    wiring = (ROOT / "docs/hardware/wiring.md").read_text()
+    assert "MAX30102 belongs on the **WROOM body** I2C" in definition
+    assert "accessory mux `0x71` channel 0 at address `0x57`" in definition
+    assert "potentially an unused mux channel" not in definition
+    assert "CH0 CAP1188 0x29 default / 0x28 strapped + MAX30102 0x57" in wiring
