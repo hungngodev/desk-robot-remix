@@ -1458,6 +1458,9 @@ def test_public_view_hides_pure_synthetic_receipts():
         "missing_first_robot_system_evidence": [],
         "robots": [{"approved_for_fleet_purchase": True}],
         "room_pod": [{"approved_for_fleet_purchase": True}],
+        "supplemental_decisions": [
+            {"id": "linked_power", "reviewed": True, "disposition": "selected"}
+        ],
     }
     visible = mod.public_purchase_view(eligible)
     assert visible["order_released"] is False
@@ -1466,6 +1469,8 @@ def test_public_view_hides_pure_synthetic_receipts():
     assert "live_scoped_purchase_receipts_not_verified" in (
         visible["missing_first_robot_system_evidence"]
     )
+    assert visible["supplemental_decisions"][0]["reviewed"] is False
+    assert eligible["supplemental_decisions"][0]["reviewed"] is True
     assert eligible["order_released"] is True
     assert mod.public_purchase_view(
         eligible, live_receipts_verified=True
