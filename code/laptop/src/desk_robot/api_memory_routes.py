@@ -161,23 +161,22 @@ def register_voice_context_route(
         # during that read invalidates the entire current private tool reply.
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Voice memory consent revoked during read")
-        if settings.voice_vision_tools_enabled and visual is not None:
-            # Only the explicit authenticated voice-tool lookup may supply a
-            # short-lived memory receipt to the native speech model.
-            # Operator/dashboard polling must not inject historical claims.
-            if owner is not None:
-                if records:
-                    item = records[0]
-                    provenance = (
-                        "own observed event" if item.witnessed
-                        else f"reported by {item.source_robot}"
-                    )
-                    summary = provenance + ": " + item.summary[:160]
-                else:
-                    summary = "No matching historical memories for this query"
-                remember_tool_context(
-                    owner, robot_id, "memory_recall", summary[:200]
+        # Voice memory consent is independent from the vision opt-in.
+        # Only a marked, still-current voice tool turn may publish a short
+        # memory receipt; ordinary operator/dashboard reads cannot.
+        if owner is not None:
+            if records:
+                item = records[0]
+                provenance = (
+                    "own observed event" if item.witnessed
+                    else f"reported by {item.source_robot}"
                 )
+                summary = provenance + ": " + item.summary[:160]
+            else:
+                summary = "No matching historical memories for this query"
+            remember_tool_context(
+                owner, robot_id, "memory_recall", summary[:200]
+            )
         return {
             "robot_id": robot_id,
             "core_facts": [
