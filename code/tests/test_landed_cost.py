@@ -144,6 +144,8 @@ def test_missing_prior_spend_confirmation_hides_cumulative_cost():
     del ev["paid_orders_complete"]
     out = calculate(ev)
     assert out["payable_now_cents"] is None
+    assert out["prior_paid_orders_cents"] is None
+    assert out["prototype_cumulative_cents"] is None
     assert not out["calculation_complete_not_physical_approval"]
     assert any("Prior paid spending" in err for err in out["errors"])
 
