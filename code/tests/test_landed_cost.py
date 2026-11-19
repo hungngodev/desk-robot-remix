@@ -17,6 +17,7 @@ CATEGORIES = {"robot:cliff_obstacle": "robot", "robot:i2c_mux": "robot"}
 def sample():
     return {
         "scope": "evaluation", "currency": "USD",
+        "paid_orders_complete": True,
         "lines": [
             {"role_key": "robot:cliff_obstacle", "seller": "ElectroPeak",
              "sku": "SEN-19-006", "quantity_packages": 1,
@@ -136,3 +137,24 @@ def test_budget_overflow_remains_visible():
     assert out["prototype_cumulative_cents"] == 5555
     assert not out["within_prototype_cap"]
     assert out["remaining_under_cap_cents"] == -555
+
+
+def test_missing_prior_spend_confirmation_hides_cumulative_cost():
+    ev = sample()
+    del ev["paid_orders_complete"]
+    out = calculate(ev)
+    assert out["payable_now_cents"] is None
+    assert not out["calculation_complete_not_physical_approval"]
+    assert any("Prior paid spending" in err for err in out["errors"])
+
+
+def test_wrong_input_types_do_not_crash_or_approve():
+    ev = sample()
+    ev["lines"] = None
+    ev["inventory"] = None
+    ev["paid_in_flight"] = None
+    ev["paid_orders"] = None
+    ev["seller_charges"] = None
+    out = calculate(ev)
+    assert out["payable_now_cents"] is None
+    assert out["errors"]
