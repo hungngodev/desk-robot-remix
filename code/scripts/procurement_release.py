@@ -1349,8 +1349,12 @@ def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
 
 def cost_quote_markdown(cost: dict) -> str:
     """Show accurate totals only when all needed quote inputs are present."""
-    amount = lambda value: ("unknown" if value is None
-                            else "$" + format(value / 100, ".2f"))
+    def amount(value: int | None) -> str:
+        if value is None:
+            return "unknown"
+        sign = "-" if value < 0 else ""
+        absolute = abs(value)
+        return f"{sign}\u0024{absolute // 100}.{absolute % 100:02d}"
     lines = [
         "# Landed purchasing cost",
         "",
@@ -1397,11 +1401,15 @@ def main() -> int:
     evidence = (json.loads(args.evidence.read_text(encoding="utf-8"))
                 if args.evidence else {})
     report = generate(plan, evidence)
-    pricing_scope = ("fleet" if args.require_release else
-                     "first_robot" if args.require_first_robot
-                     else evidence.get("costs", {}).get("scope", "first_robot")
-                     if isinstance(evidence.get("costs", {}), dict)
-                     else "first_robot")
+    provided_costs = evidence.get("costs")
+    requested_scope = (provided_costs.get("scope", "first_robot")
+                       if isinstance(provided_costs, dict) else "first_robot")
+    if args.require_release:
+        pricing_scope = "fleet"
+    elif args.require_first_robot:
+        pricing_scope = "first_robot"
+    else:
+        pricing_scope = requested_scope
     if pricing_scope not in {"first_robot", "fleet", "evaluation"}:
         parser.error("Unknown cost quote scope")
     cost = cost_quote(report, evidence, pricing_scope)
@@ -1449,10 +1457,15 @@ def main() -> int:
             role = line["role_key"]
             kind, ident = role.split(":", 1)
             selected = by_role[0 if kind == "station" else 1].get(ident, {})
-            if (line["seller"] != selected.get("vendor")
-                    or line["sku"] != selected.get("sku")):
-                print("HOLD: quoted seller or SKU differs from signed "
-                      "carrier: " + role, file=sys.stderr)
+            # A supplier can be a distributor (for example, DigiKey)
+            # rather than the carrier manufacturer. Match the exact
+            # selected part SKU; verify retailer only when independently
+            # named on the signed part record.
+            if (line["sku"] != selected.get("sku")
+                    or (selected.get("seller") is not None
+                        and line["seller"] != selected["seller"])):
+                print("HOLD: quoted SKU or chosen retailer differs from "
+                      "signed carrier: " + role, file=sys.stderr)
                 return 2
     report = public_purchase_view(
         report, live_receipts_verified=(args.require_release or args.require_first_robot)
