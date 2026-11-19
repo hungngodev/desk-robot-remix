@@ -88,6 +88,12 @@ if __name__ == "__main__":
                       "historical quotes cannot authorize an order.\n")
     else:
         result = budget(json.loads(args.bom.read_text()), args.shipping, args.tax)
+        # Explicit historical math is useful for comparison, but even an
+        # entirely green synthetic legacy file has no purchase authority.
+        result["historical_math_ready"] = result["purchase_ready"]
+        result["purchase_ready"] = False
+        result["source"] = "explicit_legacy_bom_not_release_authority"
         print(json.dumps(result, indent=2))
-        if args.require_ready and not result["purchase_ready"]:
-            p.exit(1, "Complete quotes and fit checks are still needed before ordering.\n")
+        if args.require_ready:
+            p.exit(2, "HOLD: legacy BOM cannot approve a purchase. Use "
+                      "the strict canonical first-robot receipt verifier.\n")
