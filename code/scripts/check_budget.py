@@ -61,7 +61,10 @@ if __name__ == "__main__":
         # Current parts, motor alternatives and unquoted physical roles come
         # from the one canonical source used by procurement_release.py.
         from procurement_release import (
-            PLAN, first_robot_projection, generate, pilot_supplier_cart,
+            PLAN,
+            first_robot_projection,
+            generate,
+            pilot_supplier_cart,
         )
 
         if args.shipping is not None or args.tax is not None:
