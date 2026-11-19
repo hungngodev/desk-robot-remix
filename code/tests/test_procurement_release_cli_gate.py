@@ -56,3 +56,16 @@ def test_first_robot_release_refuses_fleet_or_pilot_output():
     assert result.returncode != 0
     assert result.stdout == ""
     assert "First robot release may only print a first robot view" in result.stderr
+
+def test_fleet_release_refuses_nonfleet_views():
+    for view in ("first-robot-json", "pilot-cart-json",
+                 "landed-cost-json", "pilot-samples-markdown"):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--require-release",
+             "--format", view],
+            cwd=ROOT / "code", text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        assert result.returncode != 0
+        assert result.stdout == ""
+        assert "Fleet release may only print a full fleet view" in result.stderr
