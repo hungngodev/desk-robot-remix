@@ -611,6 +611,14 @@ async def test_hung_shared_audio_owner_times_out_without_claiming_flush():
         assert entered.is_set()
         assert attempts == ["stream_unavailable"]
         assert listener._stream_failed is False
+        # Cancellation is a request, not an ACK. Wait for the first task to
+        # finish teardown before asserting an independent retry can begin.
+        async def previous_abort_finished():
+            while (listener._global_abort_task is not None
+                   and not listener._global_abort_task.done()):
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(previous_abort_finished(), timeout=1)
         # An abort timeout must remain retryable, never an acoustic ACK.
         with pytest.raises(TimeoutError, match="Shared fleet interruption incomplete"):
             await asyncio.wait_for(listener._preempt_all("stream_unavailable"), 1)
