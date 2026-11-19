@@ -54,7 +54,7 @@ Pilot sourcing MUST preserve `SOURCE_REFERENCES` for the generated fleet CSV.
 The `PILOT_SAMPLE_PRODUCTS` table is independent. CI enforces the original
 fleet CSV and `test_pilot_supplier_rows_never_mutate_canonical_fleet_source_references`
 checks that source maps cannot be accidentally mixed. At 2026-11-18 source review, the first robot evaluation cart has 13
-exact SKUs and 17 individual items with 39.93 USD in item-only quoted
+exact SKUs and 17 individual items with 40.41 USD in item-only quoted
 prices. Every pilot SKU now has a USD price source, but shipping, sales tax,
 seller checkout stock, delivered variants and physical suitability are NOT
 verified. The VL53L0X pilot purchase is ONE SEN-19-006 sample; seven more
