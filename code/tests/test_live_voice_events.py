@@ -467,6 +467,13 @@ async def test_voice_callback_failure_silences_fleet_without_terminating_watcher
         watcher = asyncio.create_task(listener.run())
         try:
             await asyncio.wait_for(preempted.wait(), timeout=2)
+            # The callback event fires before the listener finishes reporting
+            # stream health. Wait for that state, not a scheduler-dependent tick.
+            async def monitor_reported_failure():
+                while health != [True, False]:
+                    await asyncio.sleep(0)
+
+            await asyncio.wait_for(monitor_reported_failure(), timeout=1)
             assert not watcher.done()
             assert listener.monitor_ready is False
             assert listener.cursor == 1  # failed callback never consumed seq 2
@@ -509,6 +516,13 @@ async def test_failed_global_abort_is_retried_while_voice_stream_is_unavailable(
         task = asyncio.create_task(listener.run())
         try:
             await asyncio.wait_for(eventually_aborted.wait(), timeout=3)
+            # The abort callback signals before run() records the stream
+            # failure; await that transition explicitly.
+            async def stream_failure_recorded():
+                while not listener._stream_failed:
+                    await asyncio.sleep(0)
+
+            await asyncio.wait_for(stream_failure_recorded(), timeout=1)
             assert not task.done()
             assert abort_attempts == [
                 "stream_unavailable", "stream_unavailable",
