@@ -294,3 +294,28 @@ def test_default_budget_cli_uses_canonical_first_unit_not_historical_bom():
                             capture_output=True, text=True, timeout=15)
     assert denied.returncode == 2
     assert "HOLD" in denied.stderr
+
+
+def test_legacy_complete_bom_cannot_approve_purchase_cli(tmp_path):
+    import subprocess
+    import sys
+
+    fabricated = {
+        "cap_usd": 50, "fit_confirmed": True,
+        "readiness_checks": {"power": True},
+        "items": [{"item": "fictional approved part", "quantity": 1,
+                   "unit_usd": 1, "price_status": "verified"}],
+    }
+    path = tmp_path / "historical.json"
+    path.write_text(json.dumps(fabricated), encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_budget.py"),
+         "--bom", str(path), "--shipping", "0", "--tax", "0",
+         "--require-ready"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert completed.returncode == 2
+    output = json.loads(completed.stdout)
+    assert output["historical_math_ready"] is True
+    assert output["purchase_ready"] is False
+    assert "legacy BOM cannot approve" in completed.stderr
