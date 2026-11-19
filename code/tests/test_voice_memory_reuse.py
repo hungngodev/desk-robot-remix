@@ -18,6 +18,7 @@ def test_xiaozhi_memory_tool_calls_only_scoped_readonly_mac_endpoint():
     root = Path(__file__).resolve().parents[1]
     bridge = (root / "laptop/server/overlay/desk_robot_tools.py").read_text()
     api = (root / "laptop/src/desk_robot/api.py").read_text()
+    routes = (root / "laptop/src/desk_robot/api_memory_routes.py").read_text()
     assert 'elif route == "voice-context"' in bridge
     assert 'client.get(f"/v1/pet/{robot}/voice-context")' in bridge
     assert '"desk_robot_memories"' in bridge
