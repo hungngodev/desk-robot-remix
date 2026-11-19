@@ -7,6 +7,7 @@ must independently inspect the original measurements before ordering.
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import io
 import json
@@ -635,6 +636,25 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             "robots": rows, "room_pod": room}
 
 
+
+
+def public_purchase_view(report: dict, *, live_receipts_verified: bool = False) -> dict:
+    """Never expose synthetic gate eligibility as a real checkout approval.
+
+    The pure generator intentionally accepts test receipts. Only the strict
+    source-pinned receipt audit permits an APPROVED public CLI view.
+    """
+    if live_receipts_verified:
+        return report
+    visible = copy.deepcopy(report)
+    visible["order_released"] = False
+    visible["missing_first_robot_system_evidence"] = [
+        *visible["missing_first_robot_system_evidence"],
+        "live_scoped_purchase_receipts_not_verified",
+    ]
+    for row in (*visible["robots"], *visible["room_pod"]):
+        row["approved_for_fleet_purchase"] = False
+    return visible
 
 
 def first_robot_projection(report: dict) -> dict:
@@ -1332,6 +1352,9 @@ def main() -> int:
                 print(f"HOLD: {len(failures) - 20} further evidence failures",
                       file=sys.stderr)
             return 2
+    report = public_purchase_view(
+        report, live_receipts_verified=(args.require_release or args.require_first_robot)
+    )
     if args.format == "csv":
         print(render_csv(report), end="")
     elif args.format == "markdown":
