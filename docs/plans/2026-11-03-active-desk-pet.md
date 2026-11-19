@@ -88,8 +88,8 @@ Read [master plan](../PLAN.md), [inventory](../hardware/fleet-inventory.json),
    delivery/tax. Budget checker must still reject unknown fit/allowances.
 
 **Validation:** `python3 scripts/check_budget.py`; after actual completed quotes,
-`python3 scripts/check_budget.py --shipping ACTUAL_TOTAL --tax ACTUAL_TOTAL --require-ready`.
-The latter is intentionally not runnable with invented zero charges. Mechanical
+`python3 scripts/procurement_release.py --require-first-robot --format first-robot-markdown --evidence ACTUAL_RECEIPTS.json`.
+The strict release command requires genuine linked receipts, seller quotes, fit, and physical safety signoffs; it will reject invented delivery or tax values. Mechanical
 fit/load and sufficient printer/filament stock are separate documented checks.
 The purchase checker covers first-prototype quotes, inventory and preliminary
 fit/variant checks. Separate `qualification_checks` in the BOM remain false until
