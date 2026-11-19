@@ -45,7 +45,7 @@
     {
       "id": 3,
       "page": 7,
-      "title": "Inventory 317 changed files without assumptions",
+      "title": "Inventory the live PR changed paths without assumptions",
       "phase": "01 Evidence and source control",
       "source_owner": "PR #17 changed filenames and branch diff",
       "verification_command": "cd code && git diff --name-only origin/codex/initial-remix...HEAD",
