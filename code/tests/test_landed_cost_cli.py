@@ -17,9 +17,40 @@ def run_cost(*args):
 
 
 def sample_quote():
-    from test_landed_cost import sample
-
-    return {"costs": sample()}
+    """Self-contained quoted two-piece fixture for CLI subprocess tests."""
+    lines = []
+    for role, sku, price in (
+        ("robot:cliff_obstacle", "SEN-19-006", "1.76"),
+        ("robot:i2c_mux", "COM-05-067", "0.47"),
+    ):
+        lines.append({
+            "role_key": role,
+            "seller": "ElectroPeak",
+            "sku": sku,
+            "quantity_packages": 1,
+            "units_per_package": 1,
+            "package_price_usd": price,
+            "quote_reference": "fixture-quote",
+            "quoted_at": "2026-11-18",
+            "stock_evidence_url": "https://electropeak.com/quoted-fixture",
+        })
+    return {"costs": {
+        "scope": "evaluation",
+        "currency": "USD",
+        "paid_orders_complete": True,
+        "lines": lines,
+        "seller_charges": [{
+            "seller": "ElectroPeak",
+            "shipping_usd": "4.00",
+            "tax_usd": "0.32",
+            "duties_usd": "0.00",
+            "discount_usd": "0.00",
+        }],
+        "paid_orders": [{
+            "order_reference": "already-paid",
+            "total_paid_usd": "12.50",
+        }],
+    }}
 
 
 def test_cli_without_supplier_quotation_shows_unknown_not_zero():
