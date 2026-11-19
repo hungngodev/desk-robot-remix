@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from landed_cost import account_landed_cost
+
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs/hardware/full-feature-plan.json"
 
@@ -1301,6 +1303,79 @@ def render_markdown(report: dict) -> str:
     return "\n".join(output)
 
 
+# The dock is included in one-unit parent roles; linked subassemblies are
+# selected pieces of those roles, never additional automatic order quantities.
+DOCK_COST_ROLES = frozenset({
+    "dock_ir_receivers", "dock_ir_beacon_controller",
+    "dock_ir_emitter_channels", "dock_contacts", "dock_fixture",
+})
+
+
+def cost_requirements(report: dict, scope: str) -> tuple[dict, dict]:
+    """Derive payable part counts from the same canonical quantity owner."""
+    if scope == "evaluation":
+        keys = ("robot:cliff_obstacle", "robot:i2c_mux")
+        return dict.fromkeys(keys, 1), dict.fromkeys(keys, "robot")
+    if scope == "first_robot":
+        entries = (
+            (row["id"], row["prototype_target"], row["scope"])
+            for row in first_robot_projection(report)["roles"]
+        )
+    elif scope == "fleet":
+        entries = (
+            (row["id"], row.get("effective_selected_fleet_total",
+                               row.get("fleet_total", row.get("shared_total", 0))),
+             origin)
+            for origin, row in _purchase_rows(report)
+        )
+    else:
+        raise ValueError("Unsupported quote scope")
+    needed, categories = {}, {}
+    for ident, quantity, origin in entries:
+        category = ("station" if origin == "shared station"
+                    else "dock" if ident in DOCK_COST_ROLES else "robot")
+        key = category + ":" + ident
+        needed[key] = _count(quantity, key)
+        categories[key] = category
+    return needed, categories
+
+
+def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
+    required, categories = cost_requirements(report, scope)
+    values = evidence.get("costs", {}) if isinstance(evidence, dict) else {}
+    return account_landed_cost(values, required, categories,
+                               expected_scope=scope)
+
+
+def cost_quote_markdown(cost: dict) -> str:
+    """Show accurate totals only when all needed quote inputs are present."""
+    amount = lambda value: ("unknown" if value is None
+                            else "$" + format(value / 100, ".2f"))
+    lines = [
+        "# Landed purchasing cost",
+        "",
+        "Scope: " + cost["scope"],
+        "Quote calculation complete: " +
+        ("yes, not purchase approval" if cost[
+            "calculation_complete_not_physical_approval"] else "NO"),
+        "Payable now: " + amount(cost["payable_now_cents"]),
+        "Previously paid: " + amount(cost["prior_paid_orders_cents"]),
+        "Cumulative prototype spending: " +
+        amount(cost["prototype_cumulative_cents"]),
+        "Remaining under prototype $50 cap: " +
+        amount(cost["remaining_under_cap_cents"]),
+        "These amounts are input calculations, not independently checked "
+        "supplier stock, receipt, device fit or permission to buy.",
+    ]
+    for category, subtotal in cost["material_subtotals_cents"].items():
+        lines.append(category.capitalize() + " materials: " + amount(subtotal))
+    for supplier, total in cost["seller_payable_cents"].items():
+        lines.append("Supplier " + supplier + ": " + amount(total))
+    for problem in cost["errors"]:
+        lines.append("HOLD: " + problem)
+    return "\n".join(lines) + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, default=PLAN)
@@ -1314,13 +1389,22 @@ def main() -> int:
     parser.add_argument("--format", choices=(
         "json", "csv", "markdown", "first-robot-json", "first-robot-markdown",
         "pilot-samples-json", "pilot-samples-markdown",
-        "pilot-cart-json", "pilot-cart-markdown"
+        "pilot-cart-json", "pilot-cart-markdown",
+        "landed-cost-json", "landed-cost-markdown"
     ), default="json", help="Project the canonical ledger without buying permits")
     args = parser.parse_args()
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
     evidence = (json.loads(args.evidence.read_text(encoding="utf-8"))
                 if args.evidence else {})
     report = generate(plan, evidence)
+    pricing_scope = ("fleet" if args.require_release else
+                     "first_robot" if args.require_first_robot
+                     else evidence.get("costs", {}).get("scope", "first_robot")
+                     if isinstance(evidence.get("costs", {}), dict)
+                     else "first_robot")
+    if pricing_scope not in {"first_robot", "fleet", "evaluation"}:
+        parser.error("Unknown cost quote scope")
+    cost = cost_quote(report, evidence, pricing_scope)
     if args.require_first_robot and args.format not in (
         "first-robot-json", "first-robot-markdown"
     ):
@@ -1352,10 +1436,32 @@ def main() -> int:
                 print(f"HOLD: {len(failures) - 20} further evidence failures",
                       file=sys.stderr)
             return 2
+        if (not cost["calculation_complete_not_physical_approval"]
+                or args.require_first_robot and not cost["within_prototype_cap"]
+                or cost["awaiting_arrival_roles"]):
+            print("HOLD: actual landed quotation, budget or received stock "
+                  "has not cleared the purchase gates", file=sys.stderr)
+            return 2
+        # The approved system receipt for the costed exact carrier BOM must
+        # separately attest that the supplier and SKU match every quote line.
+        by_role = (evidence.get("room_pod", {}), evidence.get("parts", {}))
+        for line in evidence["costs"]["lines"]:
+            role = line["role_key"]
+            kind, ident = role.split(":", 1)
+            selected = by_role[0 if kind == "station" else 1].get(ident, {})
+            if (line["seller"] != selected.get("vendor")
+                    or line["sku"] != selected.get("sku")):
+                print("HOLD: quoted seller or SKU differs from signed "
+                      "carrier: " + role, file=sys.stderr)
+                return 2
     report = public_purchase_view(
         report, live_receipts_verified=(args.require_release or args.require_first_robot)
     )
-    if args.format == "csv":
+    if args.format == "landed-cost-json":
+        print(json.dumps(cost, indent=2))
+    elif args.format == "landed-cost-markdown":
+        print(cost_quote_markdown(cost), end="")
+    elif args.format == "csv":
         print(render_csv(report), end="")
     elif args.format == "markdown":
         print(render_markdown(report), end="")
