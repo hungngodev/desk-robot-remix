@@ -270,3 +270,27 @@ def test_actual_wroom_stepper_wiring_has_unique_boot_safe_pins():
     assert one("kSensorSda", stepper) == 21
     assert one("kSensorScl", stepper) == 22
     assert (one("kUartRx", pins), one("kUartTx", pins)) == (16, 17)
+
+
+def test_default_budget_cli_uses_canonical_first_unit_not_historical_bom():
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, str(ROOT / "scripts/check_budget.py")]
+    completed = subprocess.run(cmd, capture_output=True, text=True,
+                               check=True, timeout=15)
+    current = json.loads(completed.stdout)
+    assert current["source"] == "canonical full-feature-plan.json"
+    assert current["purchase_ready"] is False
+    assert current["landed_total_usd"] is None
+    assert current["first_robot"]["purchase_approved"] is False
+    assert len(current["first_robot"]["linked_decisions"]) == 14
+    assert current["evaluation_cart"]["exact_sku_count"] == 13
+    assert current["evaluation_cart"]["component_quantity"] == 17
+    assert current["evaluation_cart"]["historical_priced_partial_subtotal_usd"] == 40.41
+    assert all("VL53L4CD" not in item["name"]
+               for item in current["evaluation_cart"]["items"])
+    denied = subprocess.run([*cmd, "--require-ready"],
+                            capture_output=True, text=True, timeout=15)
+    assert denied.returncode == 2
+    assert "HOLD" in denied.stderr
