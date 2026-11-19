@@ -237,3 +237,19 @@ def test_manual_review_mentioned_sha_is_not_authorized_acceptance():
             url, body=f"Procedure 4 proposed for review at {SHA}"
         )
     )
+
+
+def test_online_audit_rejects_invalid_gate_values_without_network():
+    # Even credible source and CI receipts must not promote a misspelled gate.
+    for gate in ("MEASURED ", "QUALIFIED ", "TESTED ", "WEIRD", "", None, 7):
+        bad = promoted(gate)
+        errors = verify.audit(bad, lambda _: 1 / 0)
+        assert any("unknown gate" in problem for problem in errors)
+
+
+def test_online_audit_rejects_invalid_procedure_ids_without_network():
+    for identifier in ("9", True, None, 0, 97):
+        bad = promoted("MEASURED")
+        bad["procedures"][0]["id"] = identifier
+        errors = verify.audit(bad, lambda _: 1 / 0)
+        assert any("invalid procedure id" in problem for problem in errors)
