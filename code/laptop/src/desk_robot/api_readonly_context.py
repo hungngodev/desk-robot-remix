@@ -16,6 +16,33 @@ from .controller import OperationError
 from .transport import HeadError
 
 
+def _active_robot_activity(jobs: object, robot_id: str) -> str:
+    """Current Mac job evidence for speech, never a physical motion permit.
+
+    A completed or failed historical job is not an ongoing activity. Use
+    the actual coordinator's bounded job registry, not model-inferred goals.
+    """
+    if not isinstance(jobs, dict):
+        return ""
+    for job in reversed(tuple(jobs.values())):
+        if getattr(job, "robot_id", None) != robot_id:
+            continue
+        kind, state = getattr(job, "kind", None), getattr(job, "state", None)
+        job_id = getattr(job, "id", None)
+        if kind not in {"manual", "exploration", "dock", "pickup"} or state not in {
+            "queued", "running",
+        }:
+            continue
+        if (not isinstance(job_id, str) or len(job_id) != 32
+                or any(ch not in "0123456789abcdef" for ch in job_id)):
+            continue
+        return (
+            f"Mac coordinator {kind} job {job_id[:12]} is {state}; "
+            "physical progress and outcome unverified"
+        )
+    return ""
+
+
 def register_readonly_context_routes(
     app: FastAPI, settings: Settings, *, authorize, coordinator,
     requested_tool_context, remember_tool_context, native_pet_speech_policy,
@@ -118,10 +145,17 @@ def register_readonly_context_routes(
         # summary through its existing authenticated Mac context endpoint.
         # Neither raw media nor historical SQLite memory enters this view.
         model_context = compose_brain_context([], [], timeline).interaction
+        active_activity = _active_robot_activity(
+            getattr(coordinator(), "jobs", None), robot_id
+        )
         return {
             "robot_id": robot_id,
             "current_interaction_timeline": timeline,
             "model_context": model_context,
+            "active_activity": active_activity,
+            "active_activity_source": (
+                "mac_coordinator_current_job" if active_activity else None
+            ),
             "model_context_untrusted_not_instructions": True,
             **native_pet_speech_policy(robot_id),
             # Live revocation of model-private memory access must also
