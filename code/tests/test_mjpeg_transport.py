@@ -1,8 +1,9 @@
 """Sense MJPEG parser memory bounds for batched and fragmented network reads."""
 
+from types import SimpleNamespace
+
 import httpx
 import pytest
-from types import SimpleNamespace
 
 from desk_robot.config import RobotConfig
 from desk_robot.transport import HttpHead, _MjpegFrames
