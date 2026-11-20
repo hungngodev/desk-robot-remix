@@ -123,6 +123,16 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert (rendered / "dock_stls/dock_rail_entry_coupon.stl").is_file()
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
+    assert all(item["installed_quantity_per_robot"] == 0
+               for item in report["parts"])
+    assert next(item for item in report["parts"]
+                if item["part"] == "dock_rail_entry_coupon")[
+                    "temporary_fit_coupon"
+                ] is True
+    assert next(item for item in report["parts"]
+                if item["part"] == "head_bridge")[
+                    "temporary_fit_coupon"
+                ] is False
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
     assert source.verify_fit_kit(tmp_path, output_dir=rendered) == report
     # A modified JSON receipt must never promote a reversible fit kit
@@ -137,6 +147,16 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         edited = dict(report, **{unsafe_flag: True})
         manifest.write_text(json.dumps(edited))
         with pytest.raises(ValueError, match="Unsafe fit kit provenance flags"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
+    for field, forged in (("installed_quantity_per_robot", 1),
+                          ("temporary_fit_coupon", False)):
+        changed = json.loads(original)
+        coupon = next(item for item in changed["parts"]
+                      if item["part"] == "dock_rail_entry_coupon")
+        coupon[field] = forged
+        manifest.write_text(json.dumps(changed))
+        with pytest.raises(ValueError, match="Unqualified installed CAD part"):
             source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
     assert all(item["units"] == "mm" for item in report["parts"])
