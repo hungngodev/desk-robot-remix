@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from desk_robot.config import RobotConfig
-from desk_robot.transport import HttpHead, _MjpegFrames
+from desk_robot.transport import HeadError, HttpHead, _MjpegFrames
 
 
 def _part(sequence: int, jpeg: bytes) -> bytes:
@@ -120,6 +120,6 @@ async def test_batched_stream_rejects_replayed_identity_before_latest(monkeypatc
             ),
             client,
         )
-        with pytest.raises(ValueError, match="stale or replayed"):
+        with pytest.raises(HeadError, match="stale or replayed"):
             async for _ in head.stream_frames():
                 pass
