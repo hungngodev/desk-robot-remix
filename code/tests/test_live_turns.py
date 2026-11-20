@@ -450,3 +450,15 @@ def test_boolean_generation_cannot_impersonate_first_live_turn_or_camera_connect
     assert offer(value, b"real frame", captured_at=1, now=1,
                  connection_epoch=1)
     assert value.take_video_frame(now=1).jpeg == b"real frame"
+
+
+@pytest.mark.parametrize("bad_clock", [10 ** 400, -(10 ** 400)])
+def test_extreme_integer_monotonic_clocks_fail_with_value_error(bad_clock):
+    with pytest.raises(ValueError, match="finite monotonic"):
+        core(frame_interval=bad_clock)
+    value = connected()
+    with pytest.raises(ValueError, match="finite monotonic"):
+        offer(value, b"untrusted", captured_at=bad_clock, now=0)
+    with pytest.raises(ValueError, match="finite monotonic"):
+        value.take_video_frame(now=bad_clock)
+    assert value.take_video_frame(now=0) is None

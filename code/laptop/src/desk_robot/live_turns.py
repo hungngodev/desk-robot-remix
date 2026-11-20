@@ -68,9 +68,18 @@ class ObservationRequest:
 
 
 def _seconds(value: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("Use finite monotonic seconds")
-    return float(value)
+    # A huge Python int can OverflowError during float/isfinite conversion.
+    # Untrusted capture timestamps must fail as validation, not crash the
+    # owning event loop while a newer frame is waiting.
+    try:
+        seconds = float(value)
+    except OverflowError as exc:
+        raise ValueError("Use finite monotonic seconds") from exc
+    if not math.isfinite(seconds):
+        raise ValueError("Use finite monotonic seconds")
+    return seconds
 
 
 class LiveTurns:
