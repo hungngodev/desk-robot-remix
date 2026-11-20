@@ -347,3 +347,15 @@ def test_current_2w_rectangular_front_grille_renders(tmp_path):
     assert dimensions == (32.0, 28.0, 3.0)
     # A watertight frontal plate is still not the tested speaker baffle,
     # mounting gasket, sealed 1cc box, or electrical/thermal certification.
+
+
+def test_selected_gy530_board_outline_matches_provisional_eight_mount_brackets():
+    """Do not silently keep the old 14x18 placeholder after selecting the SKU."""
+    board = (ROOT / "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad").read_text()
+    mounts = (ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad").read_text()
+    assert "SEN-19-006" in board and "SEN-19-006" in mounts
+    assert "board_x = 10.5;" in board
+    assert "board_y = 13.3;" in board
+    assert "tof_pcb_w=10.5;" in mounts
+    assert "tof_pcb_h=13.3;" in mounts
+    assert "Lens center, holes, connector overhang and true mounting height UNMEASURED" in mounts
