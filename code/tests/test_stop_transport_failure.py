@@ -9,6 +9,36 @@ from desk_robot.controller import Coordinator, Job
 
 
 class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_terminal_stop_halts_body_but_short_pulse_preserves_arm(self):
+        from desk_robot.controller import _bounded_pulse_stop
+        from desk_robot.simulator import SimulatedHead
+        from desk_robot.transport import HeadError
+
+        head = SimulatedHead("robot-01")
+        await head.command("arm")
+        self.assertTrue(head.armed)
+        pulse = await _bounded_pulse_stop(head)
+        self.assertEqual(pulse["reply"], "OK stop")
+        self.assertTrue(head.armed)  # one authorized job can drive again
+        await head.command("drive 20 20 100")
+
+        coordinator = object.__new__(Coordinator)
+        coordinator.settings = SimpleNamespace(robot=lambda robot_id: object())
+        coordinator.heads = {"robot-01": head}
+        coordinator.jobs = {}
+        coordinator.tasks = {}
+        coordinator.permits = {"robot-01": 123.0}
+        coordinator._permit_epoch = {"robot-01": 0}
+
+        receipt = await coordinator.stop("robot-01")
+        self.assertEqual(receipt["reply"], "OK halt")
+        self.assertEqual(head.commands[-1], "halt")
+        self.assertFalse(head.armed)
+        self.assertNotIn("robot-01", coordinator.permits)
+        with self.assertRaisesRegex(HeadError, "Body disarmed"):
+            await head.command("drive 20 20 100")
+
+
     async def test_failed_stop_receipt_survives_cancelled_job_timeout(self):
         release = asyncio.Event()
         started = asyncio.Event()
