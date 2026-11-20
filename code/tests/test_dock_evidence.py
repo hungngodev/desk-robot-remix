@@ -56,6 +56,9 @@ async def test_three_stable_charger_indications_are_not_battery_proof(monkeypatc
     result = await observe_dock_evidence(head, "robot-01")
     assert result["state"] == "charger_reports_active"
     assert result["stable_three_samples"] is True
+    assert result["source"] == "wroom_mcp23017_dock_status_pins_unqualified"
+    assert "bq24074" not in result["source"].lower()
+    assert "bq24075" not in result["source"].lower()
     assert result["charging_verified"] is False
     assert result["battery_current_measured"] is False
     assert result["charger_electrically_qualified"] is False

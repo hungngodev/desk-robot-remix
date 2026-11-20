@@ -125,7 +125,9 @@ def _result(robot_id: str, state: str, stable: bool) -> dict:
         "robot_id": robot_id,
         "state": state,
         "stable_three_samples": stable,
-        "source": "wroom_mcp23017_bq24074_status_pins",
+        # The WROOM observes GPIO levels, not an authenticated charger
+        # IC identity. The BQ24075 candidate is not an installed board.
+        "source": "wroom_mcp23017_dock_status_pins_unqualified",
         "physical_contact_verified": False,
         "battery_current_measured": False,
         "raw_pack_direction": "not_available",
