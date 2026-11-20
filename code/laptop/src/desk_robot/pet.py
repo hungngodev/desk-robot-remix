@@ -432,6 +432,7 @@ class PetController:
     async def _store_observation(
         self, robot_id: str, change: SceneChange, *,
         camera_derived: bool = False, camera_generation: int | None = None,
+        preemption_epoch: int | None = None,
     ) -> None:
         """Same text/event ID, different eyewitness provenance per local DB.
 
@@ -440,9 +441,18 @@ class PetController:
         Operator must explicitly enable text sharing in local settings.
         """
         def current_visual_epoch() -> bool:
-            return (not camera_derived or camera_generation is None
-                    or (self.multimodal is not None
-                        and self.multimodal.hub._generation[robot_id] == camera_generation))
+            # SQLite work runs in a native thread and can outlive the awaiter.
+            # Capture both the camera reconnect identity and the direct-look
+            # priority epoch, so an obsolete worker retracts its own insert.
+            return (
+                not camera_derived
+                or ((preemption_epoch is None
+                     or self._vision_preemption_epoch == preemption_epoch)
+                    and (camera_generation is None
+                         or (self.multimodal is not None
+                             and self.multimodal.hub._generation[robot_id]
+                             == camera_generation)))
+            )
 
         if (not current_visual_epoch()
                 or (camera_derived and self.settings.mode == "hardware"
@@ -1611,6 +1621,7 @@ class PetController:
                         await self._store_observation(
                             robot_id, change, camera_derived=True,
                             camera_generation=hub_generation,
+                            preemption_epoch=preemption_epoch,
                         )
                         if (hub_generation is not None and
                                 self.multimodal.hub._generation[robot_id] != hub_generation):
