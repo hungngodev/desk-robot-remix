@@ -25,9 +25,20 @@ def fixture():
             {"id": "mg90s", "name": "MG90S", "per_robot": 2,
              "reported_owned_total": 0, "group": "pet"},
         ],
-        "room_pod": {"modules": [
-            {"id": "scd40", "name": "SCD40", "quantity_per_room": 1}
-        ]},
+        "room_pod": {
+            "power_reference": {
+                "room_controller": {"exact_board_current_qualified": False},
+                "scd40": {"exact_carrier_current_qualified": False},
+                "bme688": {"exact_carrier_current_qualified": False},
+                "amg8833": {"exact_carrier_current_qualified": False},
+                "ld2410c": {"exact_carrier_current_qualified": False},
+                "soil_probe": {"exact_carrier_current_qualified": False},
+                "references": ["https://example.com/room-power-reference"],
+            },
+            "modules": [
+                {"id": "scd40", "name": "SCD40", "quantity_per_room": 1}
+            ],
+        },
     }
 
 
@@ -528,10 +539,6 @@ def test_fake_or_overcounted_reported_stock_cannot_erase_purchase_quantity(
         mod.generate(plan)
 
 
-@pytest.mark.parametrize("stock_key,output_key", [
-    ("reported_owned_total", "reported_owned_not_verified"),
-    ("ordered_unreceived_total", "ordered_unreceived_not_verified"),
-])
 def test_room_station_power_reference_cannot_disappear_from_buying_ledger():
     plan = fixture()
     del plan["room_pod"]["power_reference"]
@@ -546,6 +553,10 @@ def test_room_station_power_reference_requires_every_powered_role():
         mod.generate(plan)
 
 
+@pytest.mark.parametrize("stock_key,output_key", [
+    ("reported_owned_total", "reported_owned_not_verified"),
+    ("ordered_unreceived_total", "ordered_unreceived_not_verified"),
+])
 def test_room_station_owned_or_ordered_stock_is_not_double_counted(
     stock_key, output_key
 ):
