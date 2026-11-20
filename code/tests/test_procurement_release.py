@@ -172,6 +172,21 @@ def test_bona_fide_receipts_are_operator_provided_not_inferred():
 
 
 
+def test_room_power_reference_survives_builder_markdown():
+    import json
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    room = next(row for row in report["room_pod"] if row["id"] == "scd40")
+    assert room["power_reference"]["peak_ma_at_3v3_max"] == 205
+    full = mod.render_markdown(report)
+    first = mod.render_first_robot_markdown(report)
+    for shown in (full, first):
+        assert "Power reference" in shown
+        assert "3.3 V candidate rail" in shown
+        assert "205 mA peak max" in shown
+        assert "18 mA periodic average max" in shown
+        assert "exact fitted current unqualified" in shown
+
+
 def test_reviewed_room_carrier_identity_survives_builder_projections():
     p = fixture()
     ev = {"room_pod": {"scd40": {
@@ -566,6 +581,7 @@ def test_room_station_owned_or_ordered_stock_is_not_double_counted(
     room = report["room_pod"][0]
     assert room[output_key] == 1
     assert room["remaining_if_reported_stock_works"] == 0
+    assert room["power_reference"]["exact_carrier_current_qualified"] is False
 
     projected = mod.first_robot_projection(report)
     room_role = next(
@@ -574,6 +590,7 @@ def test_room_station_owned_or_ordered_stock_is_not_double_counted(
     )
     assert room_role[output_key] == 1
     assert room_role["conditional_remaining"] == 0
+    assert room_role["power_reference"] == room["power_reference"]
 
 
 def test_common_chip_reference_does_not_force_premium_breakout_purchase():

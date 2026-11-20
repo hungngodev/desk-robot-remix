@@ -384,6 +384,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                      "notes": module.get("location", ""),
                      "shopping_decision": "hold_until_qualified",
                      "selected_carrier": selected_carrier,
+                     "power_reference": copy.deepcopy(power.get(ident)),
                      "reference_only": None,
                      "approved_for_fleet_purchase": not missing,
                      "missing_part_evidence": missing})
@@ -779,6 +780,7 @@ def first_robot_projection(report: dict) -> dict:
                 "conditional_remaining": available,
                 "reference_only": part.get("reference_only"),
                 "selected_carrier": part.get("selected_carrier"),
+                "power_reference": copy.deepcopy(part.get("power_reference")),
                 "verified_checkout_quotes": copy.deepcopy(
                     part.get("verified_checkout_quotes", [])
                 ),
@@ -1205,6 +1207,35 @@ def _verified_checkout_summary(report: dict) -> list[str]:
     return lines
 
 
+def _power_reference_summary(row: dict) -> str:
+    ref = row.get("power_reference")
+    if not isinstance(ref, dict):
+        return ""
+    items = []
+    rail = ref.get("rail_candidate_v")
+    if isinstance(rail, (int, float)):
+        items.append(f"{rail:g} V candidate rail")
+    if isinstance(ref.get("regulator_3v3_peak_ma"), (int, float)):
+        items.append(f"3.3 V regulator {ref['regulator_3v3_peak_ma']:g} mA peak")
+    for key, label in (
+        ("peak_ma_at_3v3_max", "peak max"),
+        ("periodic_average_ma_at_3v3_max", "periodic average max"),
+        ("custom_mode_current_ma_max", "custom mode max"),
+        ("reference_current_ma_typ", "reference typical"),
+        ("reference_average_current_ma", "reference average"),
+    ):
+        value = ref.get(key)
+        if isinstance(value, (int, float)):
+            items.append(f"{value:g} mA {label}")
+    capacity = ref.get("supply_capacity_ma_must_exceed")
+    if isinstance(capacity, (int, float)):
+        items.append(f"supply capacity > {capacity:g} mA")
+    if any(key.endswith("_qualified") and value is False
+           for key, value in ref.items()):
+        items.append("exact fitted current unqualified")
+    return "; ".join(items)
+
+
 def _verified_checkout_quote(row: dict) -> str:
     quotes = row.get("verified_checkout_quotes", [])
     if not isinstance(quotes, list):
@@ -1267,8 +1298,8 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
         "## 2. First-unit remaining slots and conditional alternatives",
         "",
-        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier | Verified checkout quote |",
-        "| --- | --- | ---: | ---: | --- | --- | --- |",
+        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier | Power reference | Verified checkout quote |",
+        "| --- | --- | ---: | ---: | --- | --- | --- | --- |",
     ]
     for row in projection["roles"]:
         selected = row.get("selected_carrier") or {}
@@ -1284,6 +1315,7 @@ def render_first_robot_markdown(report: dict) -> str:
             f"| {cell(row['scope'])} | {cell(row['name'])} | "
             f"{row['prototype_target']} | {row['conditional_remaining']} | "
             f"{row['decision']} | {cell(reviewed)} | "
+            f"{cell(_power_reference_summary(row))} | "
             f"{cell(_verified_checkout_quote(row))} |"
         )
     for item in projection["linked_decisions"]:
@@ -1291,7 +1323,7 @@ def render_first_robot_markdown(report: dict) -> str:
             f"| linked detail, never additive | {cell(item['name'])} | "
             f"{item['conditional_one_robot_quantity']} if selected | "
             "not independently counted | "
-            f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} | | |"
+            f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} | | | |"
         )
     lines += [
         "",
@@ -1391,8 +1423,8 @@ def render_markdown(report: dict) -> str:
         "",
         "## 2. Remaining components or unqualified roles",
         "",
-        "| Scope | Component | Fleet required | Conditional remaining | Status | Vendor reference or design blocker | Verified checkout quote |",
-        "| --- | --- | ---: | ---: | --- | --- | --- |",
+        "| Scope | Component | Fleet required | Conditional remaining | Status | Vendor reference or design blocker | Power reference | Verified checkout quote |",
+        "| --- | --- | ---: | ---: | --- | --- | --- | --- |",
     ))
     for scope, part in _purchase_rows(report):
         total = part.get("effective_selected_fleet_total",
@@ -1418,6 +1450,7 @@ def render_markdown(report: dict) -> str:
         output.append(
             f"| {cell(scope)} | {cell(part['name'])} | {total} | "
             f"{remaining} | {status} | {cell(note)} | "
+            f"{cell(_power_reference_summary(part))} | "
             f"{cell(_verified_checkout_quote(part))} |"
         )
     # These fourteen are alternatives or parts already covered by a parent
@@ -1432,7 +1465,7 @@ def render_markdown(report: dict) -> str:
             f"{detail['fleet_quantity']} if selected | not independently counted | "
             f"{status} | Linked parent {detail['parent_role']}; "
             f"disposition {detail['disposition'] or 'unresolved'}; "
-            "see the canonical 14-row source register before buying | |"
+            "see the canonical 14-row source register before buying | | |"
         )
     output.extend((
         "",
