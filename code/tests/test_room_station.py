@@ -358,6 +358,7 @@ def test_unterminated_or_oversized_serial_fragments_never_become_room_frames(mon
         b"X" * (MAX_FRAME_BYTES + 1),  # size-limited overlong frame
         json.dumps(frame(4, 4000)).encode() + b"\n",  # overlong line suffix
         json.dumps(frame(5, 5000)).encode() + b"\n",  # recovered frame
+        b"",  # one final idle read before ending the worker
     ]
     opened = []
     received = []
