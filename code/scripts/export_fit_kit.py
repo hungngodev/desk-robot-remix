@@ -53,6 +53,16 @@ def closed_mesh_edges(path: Path) -> int:
     triangles = binary_stl_triangles(path)
     incidence: Counter = Counter()
     winding: Counter = Counter()
+    # Watertight disconnected islands are not one printable adapter.
+    # Check triangle connectivity as well as closed edge incidence.
+    parents: dict[tuple[float, float, float], tuple[float, float, float]] = {}
+
+    def root(point):
+        while parents[point] != point:
+            parents[point] = parents[parents[point]]
+            point = parents[point]
+        return point
+
     for index in range(triangles):
         offset = 84 + 50 * index + 12  # skip the STL facet normal
         points = tuple(
@@ -63,8 +73,11 @@ def closed_mesh_edges(path: Path) -> int:
             isfinite(value) for point in points for value in point
         ):
             raise ValueError(f"Degenerate or nonfinite STL triangle: {path.name}")
+        for point in points:
+            parents.setdefault(point, point)
         for corner in range(3):
             a, b = points[corner], points[(corner + 1) % 3]
+            parents[root(b)] = root(a)
             edge = (a, b) if a < b else (b, a)
             incidence[edge] += 1
             winding[edge] += 1 if a < b else -1
@@ -72,6 +85,8 @@ def closed_mesh_edges(path: Path) -> int:
             or any(count != 2 for count in incidence.values())
             or any(direction != 0 for direction in winding.values())):
         raise ValueError(f"Open or inconsistent STL mesh: {path.name}")
+    if len({root(point) for point in parents}) != 1:
+        raise ValueError(f"Disconnected STL mesh: {path.name}")
     return len(incidence)
 
 
