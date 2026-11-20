@@ -2074,6 +2074,15 @@ class PetController:
             ongoing = getattr(self.conversation, "group_activity_timeline", None)
             if callable(ongoing):
                 activity.extend(ongoing(robot_id))
+        now = time.monotonic()
+        attention = getattr(self, "attention", None)
+        continuity = (
+            attention.timeline(robot_id, now)
+            if (attention is not None and
+                (self.settings.mode != "hardware"
+                 or self.settings.voice_vision_tools_enabled))
+            else []
+        )
         timeline = []
         # A physical touch can still trigger curiosity after visual opt
         # out; it must not reuse the old opt-in ASR/camera/tool timeline.
@@ -2084,7 +2093,9 @@ class PetController:
             now = time.monotonic()
             ordered = getattr(hub, "interaction_timeline", None)
             if callable(ordered):
-                timeline = ordered(robot_id, now, limit=10 - len(activity))
+                timeline = ordered(
+                    robot_id, now, limit=10 - len(activity) - len(continuity)
+                )
                 if not self.settings.voice_memory_tools_enabled:
                     timeline = [
                         item for item in timeline
@@ -2100,6 +2111,7 @@ class PetController:
         # Mac activity remains a nonauthoritative live status, never a
         # separate speech trigger, past memory, or motor permission.
         timeline.extend(activity)
+        timeline.extend(continuity)
         live_context_used = self.settings.mode == "hardware" and bool(timeline)
         context = compose_brain_context(memory, core_memory, timeline)
         return recent_memory, context, private_memory_allowed, live_context_used
