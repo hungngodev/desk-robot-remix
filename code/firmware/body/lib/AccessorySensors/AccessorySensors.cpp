@@ -430,11 +430,11 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
   if (!dock.valid) return;
   dock.left_seated = (bits & 0x01U) != 0;
   dock.right_seated = (bits & 0x02U) != 0;
-  dock.input_good = (bits & 0x04U) == 0;
+  dock.input_good = dock_pgood_asserted(bits);
   // CHG and PGOOD are independent open-drain physical status pins.
   // Do not mask a CHG-low/PGOOD-high contradiction; BodyControl must
   // see it and latch contact safety, while Mac reports a charger fault.
-  dock.charge_indicated = (bits & 0x08U) == 0;
+  dock.charge_indicated = dock_chg_asserted(bits);
   dock.at_ms = now_ms;
   dock.sample_seq = next_nonzero_sensor_sequence(dock.sample_seq); // fresh GPIOA read
 }

@@ -110,6 +110,15 @@ struct ProximityRaw {
   std::uint32_t gesture_events = 0;
   bool gesture_decoder_available = false;
 };
+// MCP23017 GPIOA fixed source mapping. PGOOD and CHG are independent,
+// active-low charger outputs. Preserve contradictory raw pin evidence so
+// local safety and Mac fault diagnostics can reject it.
+constexpr bool dock_pgood_asserted(std::uint8_t gpioa) {
+  return (gpioa & 0x04U) == 0;
+}
+constexpr bool dock_chg_asserted(std::uint8_t gpioa) {
+  return (gpioa & 0x08U) == 0;
+}
 struct DockPinRaw {
   bool present = false, valid = false;
   bool left_seated = false, right_seated = false;

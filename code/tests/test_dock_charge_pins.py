@@ -55,7 +55,13 @@ def test_real_chg_low_without_pgood_stays_observable_and_latches_safety():
     local_guard = (
         root / "firmware/body/lib/BodyControl/BodyControl.cpp"
     ).read_text()
-    assert "dock.charge_indicated = (bits & 0x08U) == 0;" in firmware
+    helper = (
+        root / "firmware/body/lib/AccessorySensors/AccessoryReadings.h"
+    ).read_text()
+    assert "dock.input_good = dock_pgood_asserted(bits);" in firmware
+    assert "dock.charge_indicated = dock_chg_asserted(bits);" in firmware
+    assert "constexpr bool dock_pgood_asserted(std::uint8_t gpioa)" in helper
+    assert "constexpr bool dock_chg_asserted(std::uint8_t gpioa)" in helper
     assert "dock.charge_indicated = (bits & 0x08U) == 0 &&" not in firmware
     assert "dock.input_good || dock.left_seated ||" in local_guard
     assert "dock.right_seated || dock.charge_indicated" in local_guard

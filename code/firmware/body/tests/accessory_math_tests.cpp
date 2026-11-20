@@ -17,6 +17,17 @@ int main() {
     CHECK(desk_robot::ina226_bus_mv(9584) == 11980);
     CHECK(desk_robot::ina226_shunt_uv(8000) == 20000);
     CHECK(desk_robot::ina226_shunt_uv(-8000) == -20000);
+    // Four physically distinct BQ2407x PGOOD/CHG combinations.
+    // PGOOD high while CHG low is a diagnostic contradiction, not
+    // permission to erase CHG before the WROOM receives it.
+    CHECK(desk_robot::dock_pgood_asserted(0x08U));
+    CHECK(!desk_robot::dock_chg_asserted(0x08U));
+    CHECK(!desk_robot::dock_pgood_asserted(0x04U));
+    CHECK(desk_robot::dock_chg_asserted(0x04U));
+    CHECK(desk_robot::dock_pgood_asserted(0x00U));
+    CHECK(desk_robot::dock_chg_asserted(0x00U));
+    CHECK(!desk_robot::dock_pgood_asserted(0x0CU));
+    CHECK(!desk_robot::dock_chg_asserted(0x0CU));
     // Bosch BMP280 datasheet example: T=25.08C, P=100653Pa.
     desk_robot::Bmp280Trim trim{};
     trim.t1 = 27504; trim.t2 = 26435; trim.t3 = -1000;
