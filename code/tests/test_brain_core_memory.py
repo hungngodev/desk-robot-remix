@@ -29,11 +29,33 @@ def test_core_memory_is_private_persistent_small_and_separate_from_episodes(
     assert store.forget_core_fact("robot-01", "favorite_game")
     assert not store.forget_core_fact("robot-01", "favorite_game")
     assert store.set_core_fact("robot-01", "over_capacity", "now permitted")
-    # An explicit local episode deletion cannot erase another pet's copy.
+    # An operator correction changes only this pet's text. The original
+    # observation identity and provenance remain immutable, and FTS follows.
     store.remember("robot-01", "memory_a", "A silver key appeared",
-                   kind="key", source_robot="robot-01", witnessed=True)
+                   kind="key", source_robot="robot-01", witnessed=True,
+                   observed_at=1234.5, confidence=0.75)
     store.remember("robot-02", "memory_a", "A silver key appeared",
-                   kind="key", source_robot="robot-01", witnessed=False)
+                   kind="key", source_robot="robot-01", witnessed=False,
+                   observed_at=1234.5, confidence=0.75)
+    before = store.recent("robot-01")[0]
+    assert store.correct_episode("robot-01", "memory_a", " A brass key appeared ")
+    after = store.recent("robot-01")[0]
+    assert after.summary == "A brass key appeared"
+    assert (
+        after.event_id, after.source_robot, after.witnessed, after.kind,
+        after.observed_at, after.confidence,
+    ) == (
+        before.event_id, before.source_robot, before.witnessed, before.kind,
+        before.observed_at, before.confidence,
+    )
+    assert store.search("robot-01", "brass")[0].event_id == "memory_a"
+    assert store.search("robot-01", "silver") == []
+    assert store.recent("robot-02")[0].summary == "A silver key appeared"
+    assert not store.correct_episode("robot-01", "memory_a", "A brass key appeared")
+    assert not store.correct_episode("robot-01", "missing", "Nothing to change")
+    with pytest.raises(ValueError, match="Bounded nonempty"):
+        store.correct_episode("robot-01", "memory_a", "   ")
+    # Explicit local deletion still cannot erase another pet's copy.
     assert store.forget_episode("robot-01", "memory_a")
     assert store.count("robot-01") == 0
     assert store.count("robot-02") == 1
@@ -61,6 +83,34 @@ def test_only_operator_can_edit_and_models_need_opt_in_to_read_core(
     with TestClient(create_app(settings)) as client:
         assert client.put(url, headers=tool, json={"value": "checkers"}).status_code == 403
         assert client.delete(url, headers=tool).status_code == 403
+        memory = client.app.state.runtime.memory
+        memory.remember(
+            "robot-01", "operator_fix", "The key was blue", kind="key",
+            source_robot="robot-01", witnessed=True,
+        )
+        episode = "/v1/pet/robot-01/memories/operator_fix"
+        assert client.patch(
+            episode, headers=tool, json={"summary": "The key was green"},
+        ).status_code == 403
+        corrected = client.patch(
+            episode, headers=operator, json={"summary": "The key was green"},
+        )
+        assert corrected.status_code == 200
+        assert corrected.json() == {
+            "robot_id": "robot-01", "event_id": "operator_fix",
+            "corrected": True, "provenance_preserved": True,
+            "local_only": True, "motor_authorized": False,
+        }
+        records = client.get(
+            "/v1/pet/robot-01/memories", headers=operator,
+        ).json()["records"]
+        assert next(
+            item for item in records if item["event_id"] == "operator_fix"
+        )["summary"] == "The key was green"
+        assert client.patch(
+            "/v1/pet/unconfigured/memories/operator_fix",
+            headers=operator, json={"summary": "No cross-pet write"},
+        ).status_code == 404
         assert client.get(
             "/v1/pet/unconfigured/core-memory", headers=operator,
         ).status_code == 404

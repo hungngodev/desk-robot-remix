@@ -342,6 +342,28 @@ class MemoryStore:
                 "DELETE FROM core_facts WHERE slot=?", (slot,)
             ).rowcount == 1
 
+    def correct_episode(self, robot_id: str, event_id: str, summary: str) -> bool:
+        """Correct local episode text without rewriting its evidence provenance."""
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        if (not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300
+                or "\x00" in summary):
+            raise ValueError("Bounded nonempty description required")
+        clean = summary.strip()
+        with self._connect(robot_id) as db:
+            current = db.execute(
+                "SELECT summary FROM memories WHERE event_id=?", (event_id,)
+            ).fetchone()
+            if current is None or current[0] == clean:
+                return False
+            # Only the operator-correctable description changes. Event identity,
+            # source, firsthand/peer attribution, kind, time and confidence stay
+            # immutable, and the existing FTS UPDATE trigger refreshes search.
+            return db.execute(
+                "UPDATE memories SET summary=? WHERE event_id=?",
+                (clean, event_id),
+            ).rowcount == 1
+
     def forget_episode(self, robot_id: str, event_id: str) -> bool:
         """Explicit per-pet deletion; does not silently mutate peer memories."""
         if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):

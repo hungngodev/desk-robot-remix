@@ -19,6 +19,11 @@ class CoreMemoryRequest(BaseModel):
     value: str = Field(min_length=1, max_length=200)
 
 
+class EpisodeMemoryCorrectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    summary: str = Field(min_length=1, max_length=300)
+
+
 
 def register_memory_routes(
     app: FastAPI, settings: Settings, *, operator,
@@ -93,6 +98,31 @@ def register_memory_routes(
             app.state.runtime.memory.forget_core_fact, robot_id, slot
         )
         return {"robot_id": robot_id, "slot": slot, "removed": removed}
+
+    @app.patch("/v1/pet/{robot_id}/memories/{event_id}",
+               dependencies=[Depends(operator)])
+    async def correct_episode(
+        robot_id: str, event_id: str, request: EpisodeMemoryCorrectionRequest,
+    ):
+        try:
+            settings.robot(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
+        try:
+            corrected = await asyncio.to_thread(
+                app.state.runtime.memory.correct_episode,
+                robot_id, event_id, request.summary,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {
+            "robot_id": robot_id,
+            "event_id": event_id,
+            "corrected": corrected,
+            "provenance_preserved": True,
+            "local_only": True,
+            "motor_authorized": False,
+        }
 
     @app.delete("/v1/pet/{robot_id}/memories/{event_id}",
                 dependencies=[Depends(operator)])

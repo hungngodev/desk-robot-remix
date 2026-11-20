@@ -10,6 +10,7 @@ from desk_robot.api import (
     ReadonlyPlanRequest,
     create_app,
 )
+from desk_robot.api_memory_routes import EpisodeMemoryCorrectionRequest
 from desk_robot.api_readonly_context import _active_robot_activity
 from desk_robot.config import load_settings
 from fastapi.routing import APIRoute
@@ -91,13 +92,14 @@ def test_voice_planner_request_schema_preserves_original_input_bounds():
 def test_operator_only_memory_routes_remain_private_and_distinct():
     config = Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
     app = create_app(load_settings(config), runtime=SimpleNamespace())
-    routes = {
-        "/v1/pet/{robot_id}/memories": "GET",
-        "/v1/pet/{robot_id}/core-memory": "GET",
-        "/v1/pet/{robot_id}/core-memory/{slot}": "PUT",
-        "/v1/pet/{robot_id}/memories/{event_id}": "DELETE",
-    }
-    for path, method in routes.items():
+    routes = [
+        ("/v1/pet/{robot_id}/memories", "GET"),
+        ("/v1/pet/{robot_id}/core-memory", "GET"),
+        ("/v1/pet/{robot_id}/core-memory/{slot}", "PUT"),
+        ("/v1/pet/{robot_id}/memories/{event_id}", "PATCH"),
+        ("/v1/pet/{robot_id}/memories/{event_id}", "DELETE"),
+    ]
+    for path, method in routes:
         matches = [
             route for route in app.routes
             if isinstance(route, APIRoute) and route.path == path
@@ -133,6 +135,16 @@ def test_operator_memory_request_limits_survive_route_extraction():
             CoreMemoryRequest(value=invalid)
     with pytest.raises(ValidationError):
         CoreMemoryRequest(value="private", motor_authorized=True)
+
+    correction = EpisodeMemoryCorrectionRequest(summary="corrected observation")
+    assert correction.summary == "corrected observation"
+    for invalid in ("", "x" * 301):
+        with pytest.raises(ValidationError):
+            EpisodeMemoryCorrectionRequest(summary=invalid)
+    with pytest.raises(ValidationError):
+        EpisodeMemoryCorrectionRequest(
+            summary="private correction", motor_authorized=True
+        )
 
 
 def test_native_omni_routes_still_have_the_same_audio_video_auth():
