@@ -723,8 +723,10 @@ class Conversation:
                                         current_robot.id, confirmed_text[:200],
                                         time.monotonic(),
                                     )
-                                except ValueError:
-                                    pass  # Invalid text is not speech evidence.
+                                except Exception:
+                                    # Best-effort RAM context must never mask
+                                    # the original urgent voice cancellation.
+                                    pass
                             # Private SQLite is optional, with its existing
                             # independent consent and cancellation safeguards.
                             prefix = "I started to say (sent, playback unverified): "
