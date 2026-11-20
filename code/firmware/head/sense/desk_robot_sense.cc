@@ -15,6 +15,7 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <string_view>
@@ -34,8 +35,13 @@ private:
     stackchan::behavior::HsmBehavior face_behavior_{0x5a17};
     bool face_was_speaking_ = false;
     desk_robot::Bridge* body_bridge_ = nullptr;  // existing single UART owner
-    bool body_fault_active_ = true;  // offline or unchecked body is not a healthy pet
+    // A 350 ms UART timeout cannot block the OLED animation task.
+    // Keep one actual bridge UART owner; only read-only polling moves tasks.
+    std::atomic<bool> body_fault_active_{true};
+    std::atomic<uint32_t> body_last_valid_ms_{0};
+    std::atomic<int> pending_face_touches_{0};
     TaskHandle_t face_task_ = nullptr;
+    TaskHandle_t body_poll_task_ = nullptr;
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
     // The operator can stop mic streaming with BOOT. Do not silently
     // restart listening after that explicit human action.
@@ -56,39 +62,54 @@ private:
         }
     }
 
+    static void BodyPollTask(void* context) {
+        auto* board = static_cast<DeskRobotSenseBoard*>(context);
+        while (true) {
+            // Blocking WROOM reads remain off the local OLED scheduler.
+            const auto body = board->body_bridge_->PollInteraction();
+            if (body.valid) {
+                const uint32_t at_ms =
+                    static_cast<uint32_t>(esp_timer_get_time() / 1000);
+                board->body_fault_active_.store(body.fault, std::memory_order_release);
+                board->body_last_valid_ms_.store(at_ms, std::memory_order_release);
+                // A paused face must never replay unbounded old touch cues.
+                int real_pets = std::clamp(body.touch_events, 0, 3) +
+                                std::clamp(body.cap_touch_events, 0, 3);
+                real_pets = std::min(real_pets, 3);
+                int queued = board->pending_face_touches_.load(std::memory_order_relaxed);
+                while (!board->pending_face_touches_.compare_exchange_weak(
+                    queued, std::min(3, queued + real_pets),
+                    std::memory_order_release, std::memory_order_relaxed)) {}
+            } else {
+                // A timeout or malformed status cannot leave healthy eyes.
+                board->body_fault_active_.store(true, std::memory_order_release);
+                board->body_last_valid_ms_.store(0, std::memory_order_release);
+                board->pending_face_touches_.store(0, std::memory_order_release);
+            }
+            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+    }
+
     static void FaceTask(void* context) {
         auto* board = static_cast<DeskRobotSenseBoard*>(context);
         using namespace stackchan::behavior;
-        uint32_t last_body_poll_ms = 0;
         bool last_rendered_fault = false;
         bool last_was_idle = false;
         bool last_person_cue_active = false;
         uint32_t person_cue_until_ms = 0;
         while (true) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
-            // Stackchan-agent already defines kTouched. Supply the actual
-            // WROOM GPIO34 touch edges via the existing head UART status path.
-            // This remains independent of Mac VLM latency and never calls a
-            // servo or motion tool.
-            if (board->body_bridge_ && now_ms - last_body_poll_ms >= 300) {
-                last_body_poll_ms = now_ms;
-                const auto body = board->body_bridge_->PollInteraction();
-                if (body.valid) {
-                    // Dedicated head pad and verified CAP1188 zones both
-                    // drive immediate local eyes, without waiting for Mac VLM.
-                    // Bound a burst to protect the Stackchan event queue.
-                    int real_pets = body.touch_events + body.cap_touch_events;
-                    if (real_pets > 3) real_pets = 3;
-                    for (int i = 0; i < real_pets; ++i) {
-                        board->face_behavior_.pushEvent(
-                            Event(EventType::kTouched));
-                    }
-                    board->body_fault_active_ = body.fault;
-                } else {
-                    // A missing WROOM cannot be treated as a safe idle state.
-                    // Network or UART status loss never creates fake touches.
-                    board->body_fault_active_ = true;
-                }
+            const uint32_t valid_at =
+                board->body_last_valid_ms_.load(std::memory_order_acquire);
+            // A stalled polling task cannot preserve an old healthy report.
+            const bool body_unhealthy =
+                valid_at == 0 || now_ms - valid_at > 1200U ||
+                board->body_fault_active_.load(std::memory_order_acquire);
+            const int real_pets =
+                board->pending_face_touches_.exchange(0, std::memory_order_acq_rel);
+            if (!body_unhealthy) {
+                for (int i = 0; i < real_pets; ++i)
+                    board->face_behavior_.pushEvent(Event(EventType::kTouched));
             }
             // Consume an authenticated Mac visual cue on the face task:
             // no HSM cross-thread push, no movement and no extra AI stack.
@@ -130,18 +151,18 @@ private:
             const bool person_cue_active =
                 person_cue_until_ms != 0U &&
                 static_cast<int32_t>(person_cue_until_ms - now_ms) > 0 &&
-                !board->body_fault_active_;
+                !body_unhealthy;
             if (idle && board->display_ != nullptr) {
                 // Update only on a change or return from conversation, not
                 // through 10 redundant LVGL/I2C writes every second.
-                if (board->body_fault_active_ != last_rendered_fault ||
+                if (body_unhealthy != last_rendered_fault ||
                     person_cue_active != last_person_cue_active ||
                     !last_was_idle) {
                     board->display_->SetEmotion(
-                        board->body_fault_active_ ? "sad" :
+                        body_unhealthy ? "sad" :
                         person_cue_active ? "surprised" : "neutral");
-                    last_rendered_fault = board->body_fault_active_;
-                } else if (!board->body_fault_active_ && !person_cue_active &&
+                    last_rendered_fault = body_unhealthy;
+                } else if (!body_unhealthy && !person_cue_active &&
                            action.set_mood) {
                     board->display_->SetEmotion(MoodName(action.mood));
                 }
@@ -267,10 +288,13 @@ public:
         for (const unsigned char c : std::string_view(CONFIG_DESK_ROBOT_ID))
             pet_seed = (pet_seed ^ c) * 16777619U;
         face_behavior_.seed(pet_seed);
-        // One local OLED mood task; no new speech stack, camera task or motor
-        // service. Keep idle expressions out of Xiaozhi active voice UI.
+        // Face rendering must keep running if a physical UART reply stalls.
+        // The separate poll remains read-only on the same bridge/UART owner.
         if (!face_task_) {
             xTaskCreate(FaceTask, "stackchan_idle_face", 4096, this, 1, &face_task_);
+        }
+        if (!body_poll_task_) {
+            xTaskCreate(BodyPollTask, "sense_body_poll", 4096, this, 1, &body_poll_task_);
         }
     }
 

@@ -43,6 +43,11 @@ The existing `modular_snapshot.inc` passes through the already compressed JPEG
 under the camera mutex and now checks both JPEG boundary markers and a 512 KiB
 size cap. The OLED is used for emotional expressions, not the upstream LVGL
 camera preview, which the pinned upstream explicitly skips for JPEG.
+A separate read-only body-polling task now protects the 100 ms local
+Stackchan face renderer from a 350 ms WROOM UART timeout. Bounded atomic
+touch cues and a 1.2 second body health freshness gate prevent a missing
+controller from appearing healthy or replaying queued touch events.
+The actual five-minute unplugged face responsiveness test remains open.
 
 A physical non-motion camera/status stress probe is in
 `code/scripts/bench_head_camera.py`. With a real camera-connected XIAO,
