@@ -11,18 +11,24 @@ namespace desk_robot {
 class MotorHeartbeat {
  public:
   static constexpr std::uint32_t kToggleIntervalMs = 15;
+  // Conservative CPU scheduling deadline, NOT the measured CD74HC123 RC
+  // cutoff. A missed deadline latches LOW even if the old drive lease lives.
+  static constexpr std::uint32_t kMissedDeadlineMs = 45;
 
+  // Startup or explicit successful local USB recovery ONLY. A routine stop
+  // must not clear a missed heartbeat; the external one-shot can have expired.
   void reset() {
-    active_ = false;
-    high_ = false;
-    last_toggle_ms_ = 0;
+    idle();
+    missed_deadline_ = false;
   }
+
+  bool missed_deadline() const { return missed_deadline_; }
 
   // Caller must already have run local floor, dock and body guards.
   // Return LOW if disarmed, stopped, unavailable or any guard is false.
   bool update(std::uint32_t now_ms, bool local_motion_authorized) {
-    if (!local_motion_authorized) {
-      reset();
+    if (!local_motion_authorized || missed_deadline_) {
+      idle();
       return false;
     }
     if (!active_) {
@@ -30,6 +36,13 @@ class MotorHeartbeat {
       high_ = true;
       last_toggle_ms_ = now_ms;
       return high_;
+    }
+    // A CPU pause may let the external retriggerable one-shot expire. Never
+    // restart it from a stale drive command, even before the drive lease ends.
+    if (now_ms - last_toggle_ms_ >= kMissedDeadlineMs) {
+      missed_deadline_ = true;
+      idle();
+      return false;
     }
     if (now_ms - last_toggle_ms_ >= kToggleIntervalMs) {
       high_ = !high_;
@@ -39,8 +52,14 @@ class MotorHeartbeat {
   }
 
  private:
+  void idle() {
+    active_ = false;
+    high_ = false;
+    last_toggle_ms_ = 0;
+  }
   bool active_ = false;
   bool high_ = false;
+  bool missed_deadline_ = false;
   std::uint32_t last_toggle_ms_ = 0;
 };
 

@@ -86,6 +86,9 @@ class BodyControl {
                char* reply, std::size_t capacity, bool local_safety_rearm = false);
   // Hardware adapter may force disarm on a fault without renewing the lease.
   void force_disarm();
+  // A missed CPU heartbeat latches wheels off without dropping jaw PWM.
+  // Only an authorized local USB recovery may clear this body fault.
+  void motor_watchdog_trip();
   // Hardware GPIO input only; never grants or clears a motion permit.
   void set_touch(bool active, std::uint32_t now_ms = 0);
   // Un-debounced local reflex: even one sensed high stops wheels and ramp,
@@ -183,6 +186,7 @@ class BodyControl {
   bool dock_monitor_required_ = false; // full robot build, set at boot only
   bool dc_fault_required_ = false;  // fail closed for DRV8833 full DC profile
   bool dc_fault_latched_ = false;   // only local USB may clear
+  bool motor_watchdog_latched_ = false;  // only local USB may clear
   bool dc_driver_fault_bad(std::uint32_t now_ms) const;
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};

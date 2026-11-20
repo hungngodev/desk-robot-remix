@@ -328,6 +328,11 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool loca
       snprintf(reply, sizeof(reply), "ERR arm stepper_cutoff_unqualified");
     }
 #endif
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+    // Successful local USB rearm alone clears the missed CPU heartbeat.
+    if (completed && local_usb && strcmp(reply, "OK rearm") == 0)
+      motor_heartbeat.reset();
+#endif
 #if DESK_ROBOT_FULL_SENSORS
     if (completed && local_usb && strcmp(reply, "OK calcommit") == 0 &&
         !save_calibration()) {
@@ -568,8 +573,13 @@ void loop() {
   const auto& drive = control.state();
   const bool allow_heartbeat = pwm_ready && drive.armed &&
       (drive.left != 0 || drive.right != 0);
-  digitalWrite(body_pins::kDcHeartbeatPin,
-      motor_heartbeat.update(millis(), allow_heartbeat) ? HIGH : LOW);
+  const bool pulse = motor_heartbeat.update(millis(), allow_heartbeat);
+  digitalWrite(body_pins::kDcHeartbeatPin, pulse ? HIGH : LOW);
+  if (motor_heartbeat.missed_deadline()) {
+    // Do not retrigger an expired one-shot from the old drive lease.
+    // BodyControl keeps the gripper's holding PWM while disarming wheels.
+    control.motor_watchdog_trip();
+  }
 #endif
   apply_outputs();
   process_input(head_uart, head_receiver, false);

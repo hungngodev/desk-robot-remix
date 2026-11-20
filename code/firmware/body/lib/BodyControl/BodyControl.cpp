@@ -289,6 +289,14 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   }
 }
 
+void BodyControl::motor_watchdog_trip() {
+  // A recovered CPU must never restart its old drive lease after cutoff.
+  // Retain servo holding PWM instead of dropping a held payload.
+  motor_watchdog_latched_ = true;
+  stop_motion();
+  state_.armed = false;
+}
+
 void BodyControl::force_disarm() {
   stop_motion();
   state_.armed = false;
@@ -345,6 +353,11 @@ void BodyControl::tick(std::uint32_t now_ms) {
   if (dock_telemetry_bad(now_ms)) {
     // Optional installed dock input is a mandatory local interlock once
     // present. Never keep stepping toward contacts on stale input data.
+    stop_motion();
+    state_.armed = false;
+    return;
+  }
+  if (motor_watchdog_latched_) {
     stop_motion();
     state_.armed = false;
     return;
@@ -757,13 +770,14 @@ void BodyControl::execute(const char* line, std::size_t length,
         (state_.bumper_raw || state_.bumper_active);
     const bool touch_hit = state_.touch_active || state_.touch_raw_active;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
-        !dock_unhealthy && !bumper_hit && !touch_hit &&
+        !motor_watchdog_latched_ && !dock_unhealthy && !bumper_hit && !touch_hit &&
         (!imu_motion_required_ || imu_valid);
     // A critical cliff/bus fault takes precedence over a simultaneous
     // cosmetic or optional-input event in the Mac's multimodal context.
     const char* local_fault =
         dc_fault_latched_ ? "dc_driver_fault_latched" :
         dc_driver_fault_bad(now_ms) ? "dc_driver_fault_unavailable" :
+        motor_watchdog_latched_ ? "motor_watchdog_latched" :
         guarded_motion_profile() && !cliff_ready ?
             guard_ == nullptr ? "missing_guard" :
             CliffGuard::fault_name(guard_->fault()) :
@@ -867,8 +881,13 @@ void BodyControl::execute(const char* line, std::size_t length,
       return;
     }
     dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
+    motor_watchdog_latched_ = false; // no old drive resumed
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (motor_watchdog_latched_) {
+      std::snprintf(reply, capacity, "ERR arm motor_watchdog_latched");
+      return;
+    }
     if (dc_fault_latched_ || dc_driver_fault_bad(now_ms)) {
       std::snprintf(reply, capacity, "ERR arm dc_driver_fault_interlock");
       return;

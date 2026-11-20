@@ -31,6 +31,40 @@ static void fresh(desk_robot::CliffGuard& guard, std::uint32_t now) {
     guard.sample(i, i < 4 ? 50 : 200, true, now);
 }
 
+static void cpu_heartbeat_fault_is_sticky_and_holds_gripper() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "arm", 0) == "OK arm");
+  CHECK(send(body, "drive 40 40 250", 0) ==
+        "OK drive left=40 right=40 ms=250");
+  send(body, "lift 120", 0);
+  send(body, "grip 60", 0);
+  body.tick(20);
+  const auto grip = body.state().grip;
+  const auto lift = body.state().lift;
+  body.motor_watchdog_trip();
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0);
+  CHECK(body.state().servos_attached && body.state().grip == grip &&
+        body.state().lift == lift);
+  CHECK(body.state().grip_target == grip && body.state().lift_target == lift);
+  CHECK(send(body, "status", 20).find("motor_watchdog_latched") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 20) == "ERR arm motor_watchdog_latched");
+  CHECK(send(body, "rearm", 20) == "ERR rearm local_only");
+  CHECK(send(body, "drive 20 20 100", 20) == "ERR drive disarmed");
+  fresh(guard, 21);
+  CHECK(send(body, "rearm", 21, true) == "OK rearm");
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "status", 21).find("motor_watchdog_latched") ==
+        std::string::npos);
+  CHECK(send(body, "arm", 21) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+}
+
 static void recovery_is_local_and_not_an_arm() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -1253,6 +1287,8 @@ int main() {
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
+    cpu_heartbeat_fault_is_sticky_and_holds_gripper();
+    std::cout << "PASS CPU heartbeat fault latches drive and holds gripper\n";
     recovery_is_local_and_not_an_arm();
     std::cout << "PASS only local recovery can clear a healthy fault latch\n";
     receiver_recovery_authority_is_not_shared();
