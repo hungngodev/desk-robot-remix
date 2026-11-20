@@ -161,6 +161,31 @@ def test_bona_fide_receipts_are_operator_provided_not_inferred():
 
 
 
+def test_reviewed_room_carrier_identity_survives_builder_projections():
+    p = fixture()
+    ev = {"room_pod": {"scd40": {
+        "vendor": "Sensirion",
+        "sku": "SCD40-CARRIER",
+        "pcb_revision": "rev-A",
+        "product_url": "https://supplier.example/scd40-carrier",
+    }}}
+    report = mod.generate(p, ev)
+    room = report["room_pod"][0]
+    assert room["selected_carrier"] == {
+        "vendor": "Sensirion",
+        "sku": "SCD40-CARRIER",
+        "pcb_revision": "rev-A",
+        "product_url": "https://supplier.example/scd40-carrier",
+    }
+    full = mod.render_markdown(report)
+    assert "Sensirion SCD40-CARRIER, rev rev-A" in full
+    assert "https://supplier.example/scd40-carrier" in full
+
+    one = mod.render_first_robot_markdown(report)
+    assert "Reviewed carrier" in one
+    assert "Sensirion SCD40-CARRIER, rev rev-A" in one
+
+
 def test_new_adafruit_hardware_is_never_approved_even_with_receipts():
     p = fixture()
     p["qualified_assumptions"] = True

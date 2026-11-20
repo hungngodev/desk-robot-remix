@@ -203,6 +203,22 @@ def _receipt(obj: object) -> bool:
             and bool(obj["reviewer"].strip()))
 
 
+def _selected_carrier(part_evidence: object) -> dict | None:
+    """Preserve the exact reviewed carrier identity in builder projections."""
+    if not isinstance(part_evidence, dict):
+        return None
+    fields = {}
+    for key in ("vendor", "sku", "pcb_revision"):
+        value = part_evidence.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return None
+        fields[key] = value.strip()
+    product_url = part_evidence.get("product_url")
+    if isinstance(product_url, str) and _evidence_https_url(product_url):
+        fields["product_url"] = product_url
+    return fields
+
+
 def _ad_fruit_new_hardware(part_evidence: object, quantity: int) -> bool:
     """Reject branded NEW boards, even when a reseller is named as vendor.
 
@@ -262,9 +278,8 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         if not isinstance(ev, dict):
             raise ValueError(f"Invalid part evidence: {ident}")
         missing = [name for name in PART_GATES if not _receipt(ev.get(name))]
-        if not (isinstance(ev.get("vendor"), str) and ev["vendor"].strip()
-                and isinstance(ev.get("sku"), str) and ev["sku"].strip()
-                and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
+        selected_carrier = _selected_carrier(ev)
+        if selected_carrier is None:
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
         if _ad_fruit_new_hardware(ev, max(needed - owned, 0)):
             missing.append("no_new_adafruit_hardware")
@@ -281,6 +296,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             "remaining_if_reported_stock_works": max(needed - owned - estimated - ordered, 0),
             "shopping_decision": part.get("shopping_decision", "hold_until_qualified"),
             "notes": part.get("notes", ""),
+            "selected_carrier": selected_carrier,
             "reference_only": ({"vendor": vendor[0], "sku": vendor[1],
                                 "url": vendor[2]} if vendor else None),
             "approved_for_fleet_purchase": not missing,
@@ -328,9 +344,8 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         if not isinstance(ev, dict):
             raise ValueError(f"Invalid shared station evidence: {ident}")
         missing = [name for name in PART_GATES if not _receipt(ev.get(name))]
-        if not (isinstance(ev.get("vendor"), str) and ev["vendor"].strip()
-                and isinstance(ev.get("sku"), str) and ev["sku"].strip()
-                and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
+        selected_carrier = _selected_carrier(ev)
+        if selected_carrier is None:
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
         remaining = qty - owned - estimated - ordered
         if _ad_fruit_new_hardware(ev, remaining):
@@ -343,6 +358,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                      "remaining_if_reported_stock_works": remaining,
                      "notes": module.get("location", ""),
                      "shopping_decision": "hold_until_qualified",
+                     "selected_carrier": selected_carrier,
                      "reference_only": None,
                      "approved_for_fleet_purchase": not missing,
                      "missing_part_evidence": missing})
@@ -737,6 +753,7 @@ def first_robot_projection(report: dict) -> dict:
                 **allocations,
                 "conditional_remaining": available,
                 "reference_only": part.get("reference_only"),
+                "selected_carrier": part.get("selected_carrier"),
                 "missing_part_evidence": part["missing_part_evidence"],
                 "decision": (
                     "HOLD MOTOR CHOICE" if motor == "unresolved"
@@ -1148,14 +1165,23 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
         "## 2. First-unit remaining slots and conditional alternatives",
         "",
-        "| Scope | Role | One-unit target | Remaining if stock verified | Decision |",
-        "| --- | --- | ---: | ---: | --- |",
+        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier |",
+        "| --- | --- | ---: | ---: | --- | --- |",
     ]
     for row in projection["roles"]:
+        selected = row.get("selected_carrier") or {}
+        reviewed = ""
+        if selected:
+            reviewed = (
+                f"{selected['vendor']} {selected['sku']}, "
+                f"rev {selected['pcb_revision']}"
+            )
+            if selected.get("product_url"):
+                reviewed += f": {selected['product_url']}"
         lines.append(
             f"| {cell(row['scope'])} | {cell(row['name'])} | "
             f"{row['prototype_target']} | {row['conditional_remaining']} | "
-            f"{row['decision']} |"
+            f"{row['decision']} | {cell(reviewed)} |"
         )
     for item in projection["linked_decisions"]:
         lines.append(
@@ -1271,9 +1297,18 @@ def render_markdown(report: dict) -> str:
             status = "EXCLUDED MOTOR ALTERNATIVE, DO NOT BUY"
         elif part["shopping_decision"].startswith("hold_until_drivetrain"):
             status = "HOLD MOTOR CHOICE"
+        selected = part.get("selected_carrier") or {}
         reference = part.get("reference_only") or {}
-        note = (f"{reference['vendor']} {reference['sku']}: {reference['url']}"
-                if reference else part["notes"])
+        if selected:
+            note = (
+                f"{selected['vendor']} {selected['sku']}, "
+                f"rev {selected['pcb_revision']}"
+            )
+            if selected.get("product_url"):
+                note += f": {selected['product_url']}"
+        else:
+            note = (f"{reference['vendor']} {reference['sku']}: {reference['url']}"
+                    if reference else part["notes"])
         output.append(
             f"| {cell(scope)} | {cell(part['name'])} | {total} | "
             f"{remaining} | {status} | {cell(note)} |"
