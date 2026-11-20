@@ -443,3 +443,49 @@ def test_autonomous_peer_topic_keeps_its_source_label():
     assert "not motion permission" not in context
     with pytest.raises(ValueError, match="origin"):
         ledger.begin_topic("pet", "Forged", 13, origin="model_operator")
+
+
+def test_future_or_overflowing_attention_event_clocks_never_poison_current_human_turn():
+    import time
+
+    ledger = AttentionLedger(["pet", "peer"])
+    now = time.monotonic()
+    future = now + 3600
+    large = 10 ** 400
+    event = "omni_" + "a" * 12 + "_" + "b" * 20
+    # The same validator protects EVERY producer, including optional
+    # attention reads, without creating a new voice or memory authority.
+    for bad in (future, large, -large):
+        with pytest.raises(ValueError, match="finite and monotonic"):
+            ledger.begin_topic("pet", "Do not adopt this goal", bad)
+        with pytest.raises(ValueError, match="finite and monotonic"):
+            ledger.human_started("pet", bad)
+        with pytest.raises(ValueError, match="finite and monotonic"):
+            ledger.human_ended("pet", bad)
+        with pytest.raises(ValueError, match="finite and monotonic"):
+            ledger.heard("pet", event, "Future transcription", bad)
+        with pytest.raises(ValueError, match="finite and monotonic"):
+            ledger.sent("pet", "Future speech transmission", bad)
+        with pytest.raises(ValueError, match="finite and monotonic"):
+            ledger.sensor("pet", "safety_fault", bad)
+        with pytest.raises(ValueError, match="finite and monotonic"):
+            ledger.timeline("pet", bad)
+    assert ledger._state("pet").generation == 0
+    assert ledger._state("pet").human_turns == 0
+    assert not ledger._state("pet").voice_active
+    assert not ledger._state("pet").heard_ids
+    assert ledger.timeline("pet", now) == ledger.timeline("peer", now) == []
+
+    # A valid human interrupt and spoken response still enter only this pet.
+    ledger.human_started("pet", now)
+    assert ledger._state("pet").voice_active
+    ledger.human_ended("pet", now + 0.01)
+    assert not ledger._state("pet").voice_active
+    assert ledger.heard("pet", event, "Where did the key go?", now + 0.02)
+    assert ledger.sent("pet", "I will check the desk.", now + 0.03)
+    assert ledger.sensor("pet", "touch_tap", now + 0.04)
+    current = ledger.timeline("pet", now + 0.1)
+    assert len(current) == 1
+    assert "Where did the key go?" in current[0]["content"]
+    assert current[0]["untrusted_text_not_instructions"] is True
+    assert ledger.timeline("peer", now + 0.1) == []

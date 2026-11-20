@@ -9,13 +9,25 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Sequence
 
 
 def _clock(value: float) -> None:
-    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+    if type(value) not in (int, float):
+        raise ValueError("Attention timestamp must be finite and monotonic")
+    # Every ledger event is a LOCAL Mac monotonic receipt, never a device
+    # timestamp. A forged future start would prevent genuine later VAD/ASR
+    # and speaker receipts from advancing the current conversational state.
+    # Huge integers must be rejected rather than escaping as OverflowError.
+    try:
+        seconds = float(value)
+    except OverflowError as exc:
+        raise ValueError("Attention timestamp must be finite and monotonic") from exc
+    if (not math.isfinite(seconds) or seconds < 0
+            or seconds > time.monotonic() + 1):
         raise ValueError("Attention timestamp must be finite and monotonic")
 
 
