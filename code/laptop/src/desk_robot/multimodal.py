@@ -424,6 +424,11 @@ class CameraFrameHub:
                 or not 1 <= len(summary.strip()) <= 2000
                 or not _finite(received_at)):
             raise ValueError("Invalid read-only tool evidence")
+        # Receipt stamps are local Mac monotonic time, not untrusted device
+        # clocks. A far-future completion would otherwise occupy this kind's
+        # latest-only slot and reject every subsequent genuine tool result.
+        if received_at > time.monotonic() + 1:
+            raise ValueError("Future read-only tool receipt clock")
         cleaned = " ".join(summary.split())[:160]
         if cleaned:
             # Repeated status queries are not independent events: keep one
@@ -525,6 +530,10 @@ class CameraFrameHub:
                 or not 1 <= len(transcript.strip()) <= 240
                 or "\x00" in transcript or not _finite(received_at)):
             raise ValueError("Invalid native ASR turn evidence")
+        # A future Mac receipt could remain dormant and later reappear as
+        # a new human request. Keep historical ASR only within its normal TTL.
+        if received_at > time.monotonic() + 1:
+            raise ValueError("Future native ASR receipt clock")
         if any(entry[0] == event_id for entry in self.heard_history[robot_id]):
             return False
         self.heard_history[robot_id].append(

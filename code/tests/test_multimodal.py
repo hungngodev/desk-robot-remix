@@ -2490,3 +2490,35 @@ def test_aged_physical_situation_is_history_not_live_motion_authority():
                    for item in hub.interaction_timeline("robot-01", 63.0))
     hub.clear("robot-01")
     assert not hub.situation_edges["robot-01"]
+
+
+def test_future_tool_receipt_cannot_poison_latest_completed_result():
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    with pytest.raises(ValueError, match="Future read-only tool receipt clock"):
+        hub.remember_tool("robot-01", "robot_status",
+                          "FUTURE_UNTRUSTED_STATUS", now + 3600)
+    hub.remember_tool("robot-01", "robot_status",
+                      "CURRENT_AUTHENTIC_STATUS", now)
+    receipts = hub.recent_tool_context("robot-01", time.monotonic())
+    assert len(receipts) == 1
+    assert receipts[0]["summary"] == "CURRENT_AUTHENTIC_STATUS"
+    assert "FUTURE_UNTRUSTED_STATUS" not in str(
+        hub.interaction_timeline("robot-01", time.monotonic())
+    )
+    assert hub.recent_tool_context("robot-02", time.monotonic()) == []
+
+
+def test_future_asr_receipt_is_rejected_before_dedup_and_turn_context():
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    with pytest.raises(ValueError, match="Future native ASR receipt clock"):
+        hub.remember_heard("robot-01", "voice-001",
+                           "FUTURE_UNTRUSTED_REQUEST", now + 3600)
+    assert hub.remember_heard("robot-01", "voice-001",
+                              "CURRENT_HUMAN_REQUEST", now)
+    timeline = hub.interaction_timeline("robot-01", time.monotonic())
+    assert [event["content"] for event in timeline
+            if event["channel"] == "human_transcript"] == [
+                "CURRENT_HUMAN_REQUEST"
+            ]
