@@ -62,6 +62,12 @@ def test_room_station_power_budget_is_machine_readable_and_fail_closed():
 
 
 
+def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
+    code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    assert "isfinite(bme.gas_resistance) && bme.gas_resistance > 0" in code
+    assert "bme.gas_resistance >= 0" not in code
+
+
 def test_bme688_gas_conversion_never_blocks_radar_uart_or_fakes_sample_age():
     # The pinned Adafruit_BME680 2.0.5 API supports an asynchronous
     # conversion; this is a source contract until physical Feather trials.

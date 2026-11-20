@@ -102,6 +102,20 @@ def test_room_station_soil_calibration_requires_a_real_pair_and_live_source():
                  room_station_soil_wet_adc=1300)
 
 
+
+@pytest.mark.parametrize("raw", [0, -1, 0.5])
+def test_bme688_unstable_zero_gas_is_not_a_valid_room_measurement(raw):
+    # Adafruit BME680 2.0.5 endReading() sets gas_resistance=0
+    # when the gas heater has not stabilized. Never report a fake 0 ohm.
+    payload = frame()
+    payload["readings"]["bme688"]["gas_ohms"] = raw
+    with pytest.raises(ValueError, match="out of range"):
+        accept(payload)
+    payload["readings"]["bme688"]["gas_ohms"] = 35201
+    evidence = accept(payload)
+    assert evidence.readings["bme688"]["gas_ohms"] == 35201
+
+
 @pytest.mark.parametrize("pixel,valid", [
     (0.0, True), (80.0, True), (-0.25, False), (80.25, False),
     (-40.0, False), (125.0, False),

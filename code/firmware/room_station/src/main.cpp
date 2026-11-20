@@ -108,7 +108,7 @@ void bme_step(uint32_t now) {
   bme_valid = finite_temperature(bme.temperature)
       && isfinite(bme.humidity) && bme.humidity >= 0 && bme.humidity <= 100
       && isfinite(bme.pressure) && bme.pressure > 0
-      && isfinite(bme.gas_resistance) && bme.gas_resistance >= 0;
+      && isfinite(bme.gas_resistance) && bme.gas_resistance > 0;
   if (bme_valid) bme_sample_ms = now;
 }
 void bme_observation(uint32_t now) {

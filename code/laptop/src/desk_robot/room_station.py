@@ -115,7 +115,8 @@ def _valid_reading(sensor: str, data: dict, clock: int) -> bool:
         _value(data, "temp_c", -40, 125)
         _value(data, "humidity_pct", 0, 100)
         _value(data, "pressure_pa", 30000, 125000)
-        _value(data, "gas_ohms", 0, 1e9)
+        # Pinned BME680 2.0.5 uses zero as the unstable heater sentinel.
+        _value(data, "gas_ohms", 1, 1e9)
     elif sensor == "ld2410c":
         for key in ("presence", "stationary", "moving"):
             _boolean(data, key)
