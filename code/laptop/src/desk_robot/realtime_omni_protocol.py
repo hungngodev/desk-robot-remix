@@ -294,6 +294,11 @@ class OmniDuplexWire:
                 # response cleared _interrupted. vLLM-Omni advertises epoch
                 # in response.metadata.duplex_event for native sessions.
                 return None
+            # A replayed response.created is not a new speaker lease.
+            # Resetting its counters would erase generated and acknowledged
+            # progress and let late PCM replay as a fresh response.
+            if response_id == self.response_id:
+                return None
             self._interrupted = False
             if server_epoch is not None:
                 self._server_epoch_seen = server_epoch

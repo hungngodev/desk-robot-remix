@@ -580,3 +580,48 @@ def test_playback_ack_rejects_absent_or_interrupted_speaker_authority():
     wire.interrupt()
     with pytest.raises(ValueError, match="playback evidence"):
         wire.playback_ack(response_id="live", actually_played_ms=0)
+
+
+def test_duplicate_created_never_reopens_or_resets_playback_progress():
+    wire = OmniDuplexWire()
+    created = {
+        "type": "response.created",
+        "response_id": "same-response",
+        "response": {
+            "id": "same-response",
+            "metadata": {"duplex_event": {"epoch": 0}},
+        },
+    }
+    wire.handle_event(created)
+    assert wire.handle_event(delta("same-response")) is not None
+    assert wire.generated_bytes == 4800
+    ack = wire.playback_ack(response_id="same-response", actually_played_ms=100)
+    assert ack["played_ms"] == 100
+
+    # Duplicate delivery must neither reset PCM counters nor allow the same
+    # speaker position to be acknowledged twice.
+    assert wire.handle_event(created) is None
+    assert wire.generated_bytes == 4800
+    assert wire.played_ms == 100
+    with pytest.raises(ValueError, match="playback evidence"):
+        wire.playback_ack(response_id="same-response", actually_played_ms=100)
+
+    wire.handle_event({"type": "response.done", "response_id": "same-response"})
+    assert not wire.accept_output
+    assert wire.handle_event(created) is None
+    assert not wire.accept_output
+    assert wire.generated_bytes == 4800
+
+    # A genuinely new response keeps the ordinary backend scheduling path.
+    wire.handle_event({
+        "type": "response.created",
+        "response_id": "next-response",
+        "response": {
+            "id": "next-response",
+            "metadata": {"duplex_event": {"epoch": 1}},
+        },
+    })
+    assert wire.response_id == "next-response"
+    assert wire.generated_bytes == 0
+    assert wire.played_ms == 0
+    assert wire.accept_output
