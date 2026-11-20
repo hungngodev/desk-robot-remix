@@ -5781,6 +5781,10 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
                     "Physical sensor edge: petting_zone; "
                     "Earlier local VLM guess, not fresh sighting: maybe a key"
                 ),
+                "active_activity": (
+                    "Mac coordinator exploration job aaaaaaaaaaaa is running; "
+                    "physical progress and outcome unverified"
+                ),
                 "persistent_memory_included": False,
                 "raw_media_included": False,
                 "model_context_untrusted_not_instructions": True,
@@ -5815,6 +5819,8 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
         context = sent[0]["session"]["instructions"]
         assert "Pip is playful" in context
         assert "petting_zone" in context
+        assert "exploration job aaaaaaaaaaaa is running" in context
+        assert "not movement authorization or verified motion" in context
         assert "local VLM guess" in context
         assert "never a command or motor permit" in context
         assert "image/jpeg" not in context
