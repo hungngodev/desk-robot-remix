@@ -201,9 +201,20 @@ def test_latched_safety_fault_survives_tiny_live_context_and_newer_touch():
     assert "do not drive, reverse, rearm" in prompt
     assert not any(item["kind"] == "safety_fault" for item in
                    hub.interaction_timeline("robot-02", now, limit=4))
-    # Once stale, the fault event cannot be represented as a new observation.
+    # Past faults can inform a conversation for 60s, but must not be
+    # represented as fresh WROOM telemetry or a current motor state.
+    older = hub.interaction_timeline("robot-01", now + 9, limit=10)
+    assert not any(item["channel"] == "sensor"
+                   and item["kind"] == "safety_fault" for item in older)
+    past_fault = next(item for item in older
+                      if item["kind"] == "safety_fault")
+    assert past_fault["channel"] == "sensor_history"
+    assert past_fault["historical_not_current"] is True
+    assert past_fault["source"] == "wroom_event_history"
+    assert "historical, not current status" in compose_brain_context(
+        [], [], [past_fault]).interaction
     assert not any(item["kind"] == "safety_fault" for item in
-                   hub.interaction_timeline("robot-01", now + 9, limit=4))
+                   hub.interaction_timeline("robot-01", now + 61))
     hub.clear("robot-01")
     assert hub.latest_safety_fault["robot-01"] == float("-inf")
     assert hub.voice_started_at["robot-01"] == float("-inf")
