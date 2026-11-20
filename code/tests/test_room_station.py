@@ -10,7 +10,7 @@ import pytest
 from desk_robot.brain_context import compose_brain_context
 from desk_robot.config import RobotConfig, Settings
 from desk_robot.multimodal import CameraFrameHub
-from desk_robot.room_station import RoomSerialFeed, RoomStationDecoder
+from desk_robot.room_station import MAX_FRAME_BYTES, RoomSerialFeed, RoomStationDecoder
 from desk_robot.soil_calibration import SoilCalibration
 
 
@@ -344,6 +344,47 @@ def test_room_reader_requests_posix_exclusive_port_ownership(monkeypatch):
     assert feed.rejected == 0
 
 
+
+def test_unterminated_or_oversized_serial_fragments_never_become_room_frames(monkeypatch):
+    # pySerial readline() can return partial bytes on timeout or size cap.
+    # A syntactically valid JSON suffix is not a new newline-framed packet.
+    import sys
+    from types import SimpleNamespace
+
+    chunks = [
+        json.dumps(frame(1, 1000)).encode(),  # timed out without LF
+        json.dumps(frame(2, 2000)).encode() + b"\n",  # prior line suffix
+        json.dumps(frame(3, 3000)).encode() + b"\n",  # first real new frame
+        b"X" * (MAX_FRAME_BYTES + 1),  # size-limited overlong frame
+        json.dumps(frame(4, 4000)).encode() + b"\n",  # overlong line suffix
+        json.dumps(frame(5, 5000)).encode() + b"\n",  # recovered frame
+    ]
+    opened = []
+    received = []
+
+    class Port:
+        def __init__(self, *args, **kwargs):
+            self.reads = 0
+            opened.append(self)
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def readline(self, size):
+            assert size == MAX_FRAME_BYTES + 1
+            packet = chunks[self.reads]
+            self.reads += 1
+            return packet
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda observation: received.append(observation.seq))
+    feed._read_port(lambda: not opened or opened[0].reads < len(chunks))
+    assert received == [3, 5]
+    assert feed.received == 2
+    assert feed.rejected == 2  # one timeout and one overlong frame
+    assert feed.callback_failures == 0
+
+
 def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatch):
     """A failed consumer must not turn replayed USB frames into new evidence."""
     import sys
@@ -367,7 +408,7 @@ def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatc
 
         def readline(self, size):
             self.reads += 1
-            return json.dumps(packets[self.reads - 1]).encode() if self.reads <= 3 else b""
+            return (json.dumps(packets[self.reads - 1]).encode() + b"\n") if self.reads <= 3 else b""
 
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=FakePort))
     attempts = []
@@ -409,7 +450,7 @@ def test_room_callback_failure_is_not_erased_by_clean_reader_shutdown(monkeypatc
         def readline(self, size):
             self.reads += 1
             if self.reads == 1:
-                return json.dumps(frame()).encode()
+                return json.dumps(frame()).encode() + b"\n"
             threading.Event().wait(0.001)
             return b""
 

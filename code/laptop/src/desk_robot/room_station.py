@@ -264,9 +264,22 @@ class RoomSerialFeed:
             # Reset at real connection opening, not after a callback failure.
             self.last_error = None
             decoder = RoomStationDecoder(soil_calibration=self.soil_calibration)
+            discard_until_newline = False
             while running():
                 line = port.readline(MAX_FRAME_BYTES + 1)
                 if not line:
+                    continue
+                # readline() may return partial bytes on timeout or the size
+                # limit. Do not accept a parseable suffix as a fresh, distinct
+                # Feather frame until the truncated line is terminated.
+                complete_line = line.endswith(b"\n")
+                if discard_until_newline:
+                    if complete_line:
+                        discard_until_newline = False
+                    continue
+                if not complete_line:
+                    self.rejected += 1
+                    discard_until_newline = True
                     continue
                 try:
                     evidence = decoder.accept(line, now=time.monotonic())
