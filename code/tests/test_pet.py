@@ -683,6 +683,93 @@ async def test_wroom_gesture_counters_feed_firsthand_memory_without_replaying_re
         await pet.close()
 
 
+
+async def test_touch_reboot_without_zero_recovers_and_rejects_retired_boot(
+    fleet, tmp_path
+):
+    """Reuse real WROOM boot provenance even when Mac misses the zero count."""
+    class RebootHead:
+        def __init__(self):
+            # First new-boot sample is already 1; stale boot 10 returns late.
+            self.rows = [
+                (10, 100, 15, 4),
+                (11, 1, 0, 0),
+                (11, 2, 1, 0),
+                (10, 101, 16, 5),
+                (11, 3, 1, 1),
+            ]
+
+        async def status(self):
+            boot_id, count, taps, holds = self.rows.pop(0)
+            return {
+                "imu": {"boot_id": boot_id},
+                "side_ranges": {"boot_id": boot_id},
+                "touch": {
+                    "active": False, "count": count,
+                    "tap_count": taps, "double_count": 0,
+                    "hold_count": holds,
+                },
+            }
+
+    head = RebootHead()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": head},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(), interval=.01,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 3
+    try:
+        for _ in range(5):
+            await pet._touch_from_body("robot-01", 3)
+        kinds = [entry.kind for entry in memory.recent("robot-01")]
+        assert kinds.count("touch_tap") == 1
+        assert kinds.count("touch_hold") == 1
+        assert pet.status("robot-01")["quiet"]
+        assert state.last_touch_count == 3
+        assert state.last_touch_boot_id == 11
+        assert 10 in state.retired_touch_boot_ids
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_touch_rejects_conflicting_boot_id_without_replaying_gesture(
+    fleet, tmp_path
+):
+    class ConflictingHead:
+        async def status(self):
+            return {
+                "imu": {"boot_id": 11},
+                "side_ranges": {"boot_id": 10},
+                "touch": {
+                    "count": 1, "tap_count": 1,
+                    "double_count": 0, "hold_count": 1,
+                },
+            }
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": ConflictingHead()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 4
+    try:
+        await pet._touch_from_body("robot-01", 4)
+        assert state.last_touch_count is None
+        assert state.last_touch_boot_id is None
+        assert not state.quiet
+        assert not memory.recent("robot-01")
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_opt_in_camera_observation_shares_only_text_with_correct_fleet_provenance(
     fleet, tmp_path
 ):
