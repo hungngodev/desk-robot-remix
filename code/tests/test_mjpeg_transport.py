@@ -1,6 +1,11 @@
 """Sense MJPEG parser memory bounds for batched and fragmented network reads."""
 
-from desk_robot.transport import _MjpegFrames
+import httpx
+import pytest
+from types import SimpleNamespace
+
+from desk_robot.config import RobotConfig
+from desk_robot.transport import HttpHead, _MjpegFrames
 
 
 def _part(sequence: int, jpeg: bytes) -> bytes:
@@ -56,3 +61,37 @@ def test_stream_iterator_yields_before_exhausting_large_batch():
     assert len(reader.buffer) < 64 * 1024
     assert [identity[1] for _, identity in frames] == list(range(2, 8))
     assert not reader.buffer
+
+@pytest.mark.asyncio
+async def test_batched_stream_frames_keep_actual_network_receipt_timestamp(
+    monkeypatch,
+):
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    jpeg = b"\xff\xd8" + b"z" * 500 + b"\xff\xd9"
+    stream = _part(1, jpeg) + _part(2, jpeg)
+
+    def respond(request):
+        assert request.headers["authorization"] == "Bearer " + "x" * 32
+        return httpx.Response(
+            200,
+            content=stream,
+            headers={"content-type": "multipart/x-mixed-replace; boundary=deskrobotframe"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        head = HttpHead(
+            RobotConfig(
+                id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+                head_url="http://head.example",
+            ),
+            client,
+        )
+        ticks = iter((123.0, 456.0))
+        monkeypatch.setattr(
+            "desk_robot.transport.time",
+            SimpleNamespace(monotonic=lambda: next(ticks)),
+        )
+        received = [when async for _, when in head.stream_frames()]
+    # Both frames arrived in one HTTP read, even if a slow consumer takes
+    # time between yields. The second frame must not get fictitious freshness.
+    assert received == [123.0, 123.0]

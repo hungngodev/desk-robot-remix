@@ -337,8 +337,10 @@ class HttpHead:
                     self._stream_connected = True
                     self._stream_condition.notify_all()
                 async for chunk in response.aiter_bytes():
+                    # Record receipt at the network boundary, not later as a
+                    # slow consumer iterates several older frames in a batch.
+                    received = time.monotonic()
                     for jpeg, identity in reader.iter_feed(chunk):
-                        received = time.monotonic()
                         async with self._stream_condition:
                             if generation != self._stream_generation:
                                 raise HeadError("Superseded XIAO camera stream")
