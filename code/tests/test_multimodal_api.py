@@ -2084,3 +2084,50 @@ def test_readonly_planner_does_not_treat_casual_visual_words_as_camera_permissio
             reply = client.post(url, headers=headers, json={"transcript": transcript})
             assert reply.status_code == 200
             assert [item["route"] for item in reply.json()["tools"]] == ["look"]
+
+
+def test_memory_anecdote_does_not_authorize_private_retrieval(settings, tokens):
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class EagerMemoryModel:
+        async def reply(self, history):
+            return json.dumps({"tools": [{"route": "voice-context"}]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=EagerMemoryModel()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        for anecdote in (
+            "I remember our walk yesterday",
+            "Our previous conversation was nice",
+            "We talked about gardening earlier",
+            "This is a memory I cherish",
+            "I am recalling the movie",
+        ):
+            result = client.post(url, headers=headers, json={"transcript": anecdote})
+            assert result.status_code == 200
+            assert result.json()["tools"] == []
+        for question in (
+            "What did I say yesterday?",
+            "Do you remember our discussion?",
+            "Can you recall what we discussed?",
+            "Tell me about our previous conversation",
+            "What did I say earlier and can you look at the desk?",
+        ):
+            result = client.post(url, headers=headers, json={"transcript": question})
+            assert result.status_code == 200
+            assert result.json()["tools"] == [
+                {"route": "voice-context", "payload": {"question": question}}
+            ]

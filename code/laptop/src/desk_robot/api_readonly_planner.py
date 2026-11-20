@@ -146,6 +146,26 @@ def register_readonly_planner_routes(
                 utterance,
             ) is not None
         )
+        # Memory opt-in alone is not a per-request retrieval instruction.
+        # A person sharing a story containing "remember" or "memory" must
+        # not cause an overeager model to open their private history.
+        # Recognize explicit recall questions in compound requests as well.
+        if memory_question:
+            memory_question = any(
+                re.match(
+                    r"^(?:hey [a-z]+[, ]+|please )*"
+                    r"(?:what (?:do you remember|did (?:i|you|we) "
+                    r"(?:say|tell|talk|discuss))|"
+                    r"do you (?:remember|recall)|"
+                    r"(?:can|could|would) you (?:remember|recall|remind me)|"
+                    r"tell me (?:what you remember|about (?:our|my|the) "
+                    r"(?:earlier|previous|past) (?:conversation|chat|memory))|"
+                    r"remind me|did we (?:talk|discuss)|"
+                    r"have we (?:talked|discussed)|recall (?:what|our|my))\b",
+                    piece.strip(),
+                ) is not None
+                for piece in re.split(r"\b(?:and|then|also)\b", utterance)
+            )
         # A model-selected camera route needs an EXPLICIT human observation
         # request. Substring-only checks interpreted ordinary "see you later"
         # and "I left a photo on the desk" as permission to look. Keep
