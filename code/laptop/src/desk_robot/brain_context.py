@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from .memory import CoreFact, Memory
 
@@ -47,6 +47,28 @@ def _memory_label(entry: Memory) -> str:
                 else f"{entry.source_robot} reported a camera model guess")
     return ("I observed" if entry.witnessed and entry.source_robot == entry.robot_id
             else f"{entry.source_robot} reported")
+
+
+def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict]:
+    """Read one live Coordinator job without copying its untrusted task text.
+
+    The Coordinator owns the actual job; this is only conversational evidence.
+    A job being queued or running cannot prove motion, grasp or completion.
+    """
+    for job in reversed(tuple(jobs)):
+        if (getattr(job, "robot_id", None) != robot_id
+                or getattr(job, "state", None) not in {"queued", "running"}):
+            continue
+        kind = getattr(job, "kind", None)
+        if kind not in {"manual", "exploration", "dock_approach", "pickup"}:
+            kind = "unclassified"
+        return [{
+            "channel": "mac_activity", "kind": "coordinator_job",
+            "job_type": kind, "status": job.state,
+            "source": "mac_coordinator_active_job",
+            "physical_action_verified": False, "motor_authorized": False,
+        }]
+    return []
 
 
 def compose_brain_context(
@@ -117,7 +139,7 @@ def compose_brain_context(
     # guesses must not influence which tool receipt is treated as requested.
     crossed_voice_boundary = False
     priorities = {
-        "human_transcript": 0, "tool": 1, "sensor": 2,
+        "human_transcript": 0, "mac_activity": 0.5, "tool": 1, "sensor": 2,
         "room_station": 2, "human_voice": 3, "robot_speech": 4, "camera": 5,
     }
     # A burst of camera receipts must not erase older tool or touch evidence
@@ -157,6 +179,18 @@ def compose_brain_context(
                 )
             else:
                 phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
+        elif channel == "mac_activity" and kind == "coordinator_job":
+            job_type, status = item.get("job_type"), item.get("status")
+            if (item.get("source") == "mac_coordinator_active_job"
+                    and item.get("physical_action_verified") is False
+                    and item.get("motor_authorized") is False
+                    and job_type in {"manual", "exploration", "dock_approach",
+                                     "pickup", "unclassified"}
+                    and status in {"queued", "running"}):
+                phrase = (
+                    f"Mac operator-submitted {job_type} job is {status}; "
+                    "completion unverified; WROOM owns motion safety"
+                )
         elif channel == "room_station":
             reading = item.get("content")
             if (item.get("shared_not_robot_eyewitness") is True
