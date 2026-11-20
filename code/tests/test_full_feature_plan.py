@@ -80,10 +80,10 @@ def test_status_uart_and_usb_bounds_are_consistent_after_petting_telemetry():
     usb = (root / "scripts/serial_bench.py").read_text()
     # These values grow when another optional sensor field joins status.
     # Check the real source contract instead of freezing the old constants.
-    body_cap = int(re.search(r"kReplyCapacity\\s*=\\s*(\\d+)", body).group(1))
-    head_cap = int(re.search(r"kMaxReply\\s*=\\s*(\\d+)", bridge).group(1))
-    rx_cap = int(re.search(r"uart_driver_install\\(kUart,\\s*(\\d+)", bridge).group(1))
-    usb_cap = int(re.search(r"port\\.readline\\((\\d+)\\)", usb).group(1))
+    body_cap = int(re.search(r"kReplyCapacity\s*=\s*(\d+)", body).group(1))
+    head_cap = int(re.search(r"kMaxReply\s*=\s*(\d+)", bridge).group(1))
+    rx_cap = int(re.search(r"uart_driver_install\(kUart,\s*(\d+)", bridge).group(1))
+    usb_cap = int(re.search(r"port\.readline\((\d+)\)", usb).group(1))
     assert 0 < body_cap < head_cap < rx_cap
     assert usb_cap == head_cap
 
