@@ -10,8 +10,8 @@ import json
 import time
 
 import serial
-from desk_robot.transport import expected_ack, validate_command
 
+from desk_robot.transport import expected_ack, validate_command
 
 
 def inspect_native_low_g(imu: dict, family: int, raw_valid: bool) -> dict:
