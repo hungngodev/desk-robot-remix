@@ -17,7 +17,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Protocol
 
-from .brain_context import compose_brain_context, repeated_spontaneous_line
+from .brain_context import (
+    active_job_timeline,
+    compose_brain_context,
+    repeated_spontaneous_line,
+)
 from .config import Settings
 from .conversation import Conversation
 from .handling import HandlingGate
@@ -201,6 +205,9 @@ class PetController:
         self._vision_preemption_epoch = 0
         self._direct_vision_requests = 0
         self.multimodal = None  # Hardware runtime attaches the ONE camera hub.
+        # Read the EXISTING operator Coordinator job table, never a second
+        # planner or motion controller. Runtime sets the shared dict.
+        self.coordinator_jobs = None
         # No unsolicited physical speaker output before Xiaozhi VAD has
         # authenticated a healthy live event stream. Simulation stays usable.
         self.voice_monitor_ready = settings.mode != "hardware"
@@ -2047,6 +2054,11 @@ class PetController:
         # Pure context formatter owns provenance labels and length caps.
         # The existing camera hub owns all transient sensor/tool events.
         # No second model, audio stack or memory database is introduced.
+        jobs = getattr(self, "coordinator_jobs", None)
+        activity = (
+            active_job_timeline(jobs.values(), robot_id)
+            if isinstance(jobs, dict) else []
+        )
         timeline = []
         # A physical touch can still trigger curiosity after visual opt
         # out; it must not reuse the old opt-in ASR/camera/tool timeline.
@@ -2057,7 +2069,7 @@ class PetController:
             now = time.monotonic()
             ordered = getattr(hub, "interaction_timeline", None)
             if callable(ordered):
-                timeline = ordered(robot_id, now, limit=10)
+                timeline = ordered(robot_id, now, limit=10 - len(activity))
                 if not self.settings.voice_memory_tools_enabled:
                     timeline = [
                         item for item in timeline
@@ -2070,6 +2082,9 @@ class PetController:
                     {"channel": "sensor", "kind": item["kind"]}
                     for item in hints
                 ]
+        # Mac activity remains a nonauthoritative live status, never a
+        # separate speech trigger, past memory, or motor permission.
+        timeline.extend(activity)
         live_context_used = self.settings.mode == "hardware" and bool(timeline)
         context = compose_brain_context(memory, core_memory, timeline)
         return recent_memory, context, private_memory_allowed, live_context_used
