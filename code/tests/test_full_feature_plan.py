@@ -1,5 +1,6 @@
 """Machine check the chosen full-feature five-pet hardware electrical plan."""
 import json
+import re
 from pathlib import Path
 
 PLAN = Path(__file__).resolve().parents[2] / "docs/hardware/full-feature-plan.json"
@@ -77,9 +78,14 @@ def test_status_uart_and_usb_bounds_are_consistent_after_petting_telemetry():
     body = (root / "firmware/body/lib/BodyControl/BodyControl.h").read_text()
     bridge = (root / "firmware/head/overlay/robot_bridge.cc").read_text()
     usb = (root / "scripts/serial_bench.py").read_text()
-    assert "kReplyCapacity = 1632" in body
-    assert "kMaxReply = 1664" in bridge
-    assert "port.readline(1664)" in usb
+    # These values grow when another optional sensor field joins status.
+    # Check the real source contract instead of freezing the old constants.
+    body_cap = int(re.search(r"kReplyCapacity\\s*=\\s*(\\d+)", body).group(1))
+    head_cap = int(re.search(r"kMaxReply\\s*=\\s*(\\d+)", bridge).group(1))
+    rx_cap = int(re.search(r"uart_driver_install\\(kUart,\\s*(\\d+)", bridge).group(1))
+    usb_cap = int(re.search(r"port\\.readline\\((\\d+)\\)", usb).group(1))
+    assert 0 < body_cap < head_cap < rx_cap
+    assert usb_cap == head_cap
 
 
 
