@@ -121,24 +121,35 @@ async def test_kokoro_wav_generated_after_group_memory_revoke_never_reaches_xiao
     calls = []
 
     class Response:
-        def __init__(self, content=b""):
+        def __init__(self, content=b"", payload=None):
             self.content = content
+            self.payload = payload or {}
 
         def raise_for_status(self):
             pass
 
         def json(self):
-            return {}
+            return self.payload
 
     class Client:
         async def post(self, url, **kwargs):
             calls.append(url)
+            body = kwargs.get("json", {})
+            if url.endswith("/session"):
+                return Response(payload={
+                    "device_ids": sorted(body["device_ids"]),
+                    "enabled": body["enabled"],
+                    "expires_in_seconds": 305 if body["enabled"] else 0,
+                })
             if url.endswith("/v1/audio/speech"):
                 settings.voice_memory_tools_enabled = False
                 return Response(b"RIFFsynthetic-wav-fixture")
             if url.endswith("/speak"):
                 raise AssertionError("Revoked group memory reached Xiaozhi")
-            return Response()
+            return Response(payload={
+                "device_id": body["device_id"],
+                "interrupted": True, "head_flush_requested": True,
+            })
 
     class Chat:
         async def reply(self, history):
@@ -840,10 +851,12 @@ async def test_kokoro_permission_revoked_during_bridge_transmission_stops_head(
                     "transmitted": True,
                     "physical_playback_verified": False,
                 })
-            return Response({
-                "device_id": body["device_id"],
-                "interrupted": True, "head_flush_requested": True,
-            })
+            if url.endswith("/interrupt"):
+                return Response({
+                    "device_id": body["device_id"],
+                    "interrupted": True, "head_flush_requested": True,
+                })
+            return Response({})
 
     class Chat:
         async def reply(self, history):
