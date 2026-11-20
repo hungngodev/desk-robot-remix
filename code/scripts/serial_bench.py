@@ -47,8 +47,9 @@ def inspect_native_low_g(imu: dict, family: int, raw_valid: bool) -> dict:
 
 def inspect_status(status: dict) -> dict:
     """Summarize the actual five-channel WROOM JSON without granting movement."""
-    if not isinstance(status, dict) or status.get("backend") != "stepper_28byj48":
-        raise ValueError("Expected guarded WROOM stepper body, not a DC or mock profile")
+    if (not isinstance(status, dict)
+            or status.get("backend") not in ("stepper_28byj48", "dc_pwm_guarded")):
+        raise ValueError("Expected guarded WROOM stepper or DC body, not unguarded/mocked motion")
     touch, safety, ranges = (
         status.get("touch"), status.get("safety"), status.get("ranges")
     )
@@ -223,7 +224,11 @@ def inspect_status(status: dict) -> dict:
             for index in range(5)
         ],
         "eligible_for_manual_local_rearm": (
-            status.get("armed") is False
+            # The guarded DC profile has its own nFAULT, dock and external
+            # watchdog prerequisites. This generic bench may INSPECT DC but
+            # must not advertise a physical DC rearm permit based on ToF alone.
+            status.get("backend") == "stepper_28byj48"
+            and status.get("armed") is False
             and touch["active"] is False
             and not extra_data["bumper"]
             and present == 31 and valid == 31
