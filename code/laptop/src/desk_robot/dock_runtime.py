@@ -143,7 +143,26 @@ async def observe_actual_dock(head, robot) -> dict:
         )
     # Receipt timestamp is not the end of OpenCV computation. A slow or
     # stalled detector cannot authorize a now-stale dock observation.
-    assessment = assess_dock(pose, now=time.monotonic(), target_distance_mm=target)
+    # Report alignment relative to the TRACK CENTERLINE when the camera's
+    # measured mount offset exists. A centered lens view is not necessarily
+    # a centered dock approach. Preserve raw camera coordinates separately.
+    assessed_pose = pose
+    chassis_lateral = None
+    if pose is not None and calib.mount_lateral_offset_mm is not None:
+        try:
+            chassis_lateral = calib.chassis_lateral_mm(pose)
+            assessed_pose = DockPose(
+                chassis_lateral, pose.y_mm, pose.z_mm,
+                pose.reprojection_error_px, pose.captured_at,
+            )
+        except ValueError:
+            return _hold(
+                robot.id, reason="Invalid measured camera to chassis transform",
+                source="dock_mount_geometry_invalid",
+            )
+    assessment = assess_dock(
+        assessed_pose, now=time.monotonic(), target_distance_mm=target
+    )
     return {
         "robot_id": robot.id, "phase": assessment.phase,
         "reason": assessment.reason,
@@ -152,6 +171,7 @@ async def observe_actual_dock(head, robot) -> dict:
             {
                 "x_mm": pose.x_mm, "y_mm": pose.y_mm, "z_mm": pose.z_mm,
                 "reprojection_error_px": pose.reprojection_error_px,
+                "chassis_lateral_mm": chassis_lateral,
             } if pose is not None else None
         ),
         "motor_authorized": False,
