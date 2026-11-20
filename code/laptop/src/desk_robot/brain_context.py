@@ -34,11 +34,14 @@ def _memory_label(entry: Memory) -> str:
                 else f"{entry.source_robot} reported uncertain human speech")
     if (entry.kind == "own_utterance" and entry.witnessed
             and entry.source_robot == entry.robot_id):
-        return "I said"
+        # Current persistence records successful speech transmission, NOT
+        # speaker DMA progress or acoustically confirmed words heard by a user.
+        return "I sent for speech (playback unverified)"
     if entry.kind == "peer_utterance":
-        # A peer's words never establish this pet's firsthand observation.
-        return (f"I heard {entry.source_robot} say" if entry.witnessed
-                else f"{entry.source_robot} said (peer report, not my sighting)")
+        # Peer conversation is relayed digitally by the Mac. Even an
+        # inconsistent witnessed flag cannot convert it into direct hearing,
+        # physical playback evidence, or this pet's own camera observation.
+        return f"{entry.source_robot} said (peer report, not my sighting)"
     if entry.kind in {"person", "hand", "key", "candy", "object", "scene"}:
         # The robot witnessed a camera frame, NOT the truth of a local VLM
         # classification. Keep uncertainty across local and peer memory.

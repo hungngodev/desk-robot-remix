@@ -84,9 +84,9 @@ def test_peer_utterance_cannot_become_firsthand_visual_evidence():
                    "There is a key on the desk", source="robot-02",
                    witnessed=True)
     context = compose_brain_context([peer], [], [])
-    assert "I heard robot-02 say" in context.recent
+    assert "robot-02 said (peer report, not my sighting)" in context.recent
+    assert "I heard robot-02 say" not in context.recent
     assert "I observed" not in context.recent
-    assert "peer report, not my sighting" not in context.recent
 
 def test_unwitnessed_peer_speech_cannot_claim_firsthand_hearing():
     peer = episode("robot-01", "unwitnessed-peer", "peer_utterance",
@@ -1678,3 +1678,18 @@ def test_over_capacity_requested_tool_results_must_disclose_omission():
     assert "Some requested tool results did not fit" in result
     assert "do not claim a complete factual answer" in result
     assert len(result) <= 400
+
+
+def test_persisted_spoken_line_does_not_invent_acoustic_playback():
+    own = episode("robot-01", "sent0001", "own_utterance",
+                  "I can help find that key")
+    text = compose_brain_context([own], [], []).recent
+    assert "I sent for speech (playback unverified):" in text
+    assert "I said:" not in text
+    # Other robots can receive this digitally, not claim their microphone
+    # witnessed the speech or that the origin head played the Opus frames.
+    peer = episode("robot-02", "peer0001", "peer_utterance",
+                   "I can help find that key", source="robot-01", witnessed=False)
+    peer_text = compose_brain_context([peer], [], []).recent
+    assert "robot-01 said (peer report, not my sighting)" in peer_text
+    assert "I heard robot-01 say" not in peer_text
