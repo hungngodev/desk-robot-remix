@@ -105,6 +105,31 @@ def test_independent_input_truth_table(left, right, good, charging, state):
     assert classify_dock(dock) == state
 
 
+
+async def test_real_aux_path_preserves_chg_without_pgood_as_read_only_fault(monkeypatch):
+    # CHG and PGOOD are independent active-low hardware signals.
+    # A contradictory acquisition is a fault to surface, not an
+    # exception that prevents the Mac's diagnostic from reaching the user.
+    from desk_robot.aux import validate_aux
+
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for frame in samples:
+        frame["dock"].update(input_good=False, charge_indicated=True)
+        assert validate_aux(frame, "robot-01")["dock"]["charge_indicated"]
+    head = FakeHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["state"] == "charge_signal_without_input_fault"
+    assert result["stable_three_samples"]
+    assert not result["charger_electrically_qualified"]
+    assert not result["charging_verified"]
+    assert not result["motor_authorized"]
+    assert not result["charging_authorized"]
+    assert head.commands == []
+
+
 async def test_active_charger_with_no_seat_is_fault_not_routine_input(monkeypatch):
     async def fast(_seconds):
         pass

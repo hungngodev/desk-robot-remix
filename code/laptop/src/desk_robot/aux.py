@@ -151,7 +151,10 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                 or (dock["valid"] and (
                     not dock["present"] or dock["seq"] == 0
                     or dock["age_ms"] >= 500))
-                or (dock["charge_indicated"] and not dock["input_good"])
+                # Independent CHG-low / PGOOD-high is a real electrical
+                # contradiction to report, not a malformed JSON frame.
+                # The read-only dock classifier labels it a fault and no
+                # physical or charging privilege can come from this telemetry.
                 or (not dock["valid"] and any(dock[key] for key in (
                     "left_seated", "right_seated", "input_good",
                     "charge_indicated",
