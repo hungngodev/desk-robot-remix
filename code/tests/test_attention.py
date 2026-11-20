@@ -360,3 +360,17 @@ async def test_attention_cleanup_failure_is_not_a_false_audio_failure(settings):
     assert len(turns) == 2
     assert conversation.attention_failures == 2
     assert conversation.active is None
+
+
+def test_autonomous_peer_topic_keeps_its_source_label():
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic(
+        "pet", "The other robot wonders about a desk toy", 10,
+        origin="autonomous_social",
+    )
+    context = ledger.timeline("pet", 12)[0]["content"]
+    assert "autonomous peer topic" in context
+    assert "not an operator command" in context
+    assert "not motion permission" not in context
+    with pytest.raises(ValueError, match="origin"):
+        ledger.begin_topic("pet", "Forged", 13, origin="model_operator")
