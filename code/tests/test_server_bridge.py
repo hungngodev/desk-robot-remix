@@ -438,7 +438,10 @@ def body_request(body):
 async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypatch):
     ids, handlers = fleet_handlers(bridge, monkeypatch)
     session = handlers["/session"]
-    await session(body_request({"device_ids": ids, "enabled": True}))
+    granted = await session(body_request({"device_ids": ids, "enabled": True}))
+    assert json.loads(granted.text) == {
+        "device_ids": sorted(ids), "enabled": True, "expires_in_seconds": 305,
+    }
     active, maximum, spoken = 0, 0, []
 
     async def transmit(connection, text, frames):
@@ -466,7 +469,10 @@ async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypat
         for device in ids
     ]
     assert maximum == 1 and spoken == ids
-    await session(body_request({"device_ids": ids, "enabled": False}))
+    released = await session(body_request({"device_ids": ids, "enabled": False}))
+    assert json.loads(released.text) == {
+        "device_ids": sorted(ids), "enabled": False, "expires_in_seconds": 0,
+    }
     assert not bridge.lease_ids and not bridge.lease_stopping
     assert all(not bridge.muted(device) for device in ids)
     assert all(connection.client_abort for connection in bridge.connections.values())
