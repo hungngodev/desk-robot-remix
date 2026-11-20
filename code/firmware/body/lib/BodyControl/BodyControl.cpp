@@ -779,7 +779,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
         "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
-        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"extras\":{\"mask\":%u,\"bumper\":%s,\"bumps\":%lu,\"reed\":%s,\"reed_count\":%lu,\"pir\":%s,\"pir_count\":%lu,\"cap\":%u,\"cap_ok\":%s,\"cap_events\":%lu},\"side_ranges\":{\"mm\":[%u,%u,%u],\"age_ms\":[%lu,%lu,%lu],\"sample_ms\":[%lu,%lu,%lu],\"boot_id\":%lu,\"present_mask\":%u,\"valid_mask\":%u,\"motion_certified\":false},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"temp_raw\":%d,\"temp_valid\":%s,\"age_ms\":%lu,\"sample_ms\":%lu,\"boot_id\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
+        "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"extras\":{\"mask\":%u,\"bumper\":%s,\"bumps\":%lu,\"reed\":%s,\"reed_count\":%lu,\"pir\":%s,\"pir_count\":%lu,\"cap\":%u,\"cap_ok\":%s,\"cap_events\":%lu},\"side_ranges\":{\"mm\":[%u,%u,%u],\"age_ms\":[%lu,%lu,%lu],\"sample_ms\":[%lu,%lu,%lu],\"boot_id\":%lu,\"present_mask\":%u,\"valid_mask\":%u,\"motion_certified\":false},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"temp_raw\":%d,\"temp_valid\":%s,\"low_g_valid\":%s,\"low_g_irq\":%s,\"low_g_seq\":%lu,\"age_ms\":%lu,\"sample_ms\":%lu,\"boot_id\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
         "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
         "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
@@ -823,6 +823,11 @@ void BodyControl::execute(const char* line, std::size_t length,
         imu_.gyro[0], imu_.gyro[1], imu_.gyro[2],
         imu_.temperature_raw,
         (imu_valid && imu_.model == BerryModel::Mpu6050) ? "true" : "false",
+        (imu_valid && imu_.model == BerryModel::Mpu6050 &&
+         imu_.low_g_status_valid) ? "true" : "false",
+        (imu_valid && imu_.model == BerryModel::Mpu6050 &&
+         imu_.low_g_status_valid && imu_.low_g_irq) ? "true" : "false",
+        static_cast<unsigned long>(imu_.low_g_event_seq),
         static_cast<unsigned long>(imu_.valid ? imu_age : 0U),
         static_cast<unsigned long>(imu_.valid ? imu_.at_ms : 0U),
         static_cast<unsigned long>(boot_epoch_),
