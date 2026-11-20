@@ -1124,6 +1124,74 @@ def render_first_robot_pilot_samples(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _checkout_money(value: object) -> str:
+    if type(value) is not int:
+        return "unknown"
+    sign = "-" if value < 0 else ""
+    absolute = abs(value)
+    return f"{sign}$" + str(absolute // 100) + f".{absolute % 100:02d}"
+
+
+def _verified_checkout_summary(report: dict) -> list[str]:
+    checkout = report.get("verified_checkout_cost")
+    if not isinstance(checkout, dict):
+        return []
+    lines = [
+        "**VERIFIED CHECKOUT EVIDENCE FOR THIS RELEASE:**",
+        "Payable now: " + _checkout_money(checkout.get("payable_now_cents")),
+        "Previously paid: " + _checkout_money(
+            checkout.get("prior_paid_orders_cents")
+        ),
+        "Cumulative recorded spend: " + _checkout_money(
+            checkout.get("prototype_cumulative_cents")
+        ),
+    ]
+    if checkout.get("scope") == "first_robot":
+        lines.append(
+            "Remaining under prototype $50 cap: "
+            + _checkout_money(checkout.get("remaining_under_cap_cents"))
+        )
+    for charge in checkout.get("seller_charges", []):
+        if not isinstance(charge, dict):
+            continue
+        seller = str(charge.get("seller", "")).replace("\n", " ").strip()
+        if not seller:
+            continue
+        lines.append(
+            "Supplier charges "
+            + seller
+            + ": shipping "
+            + str(charge.get("shipping_usd", "unknown"))
+            + " USD, tax "
+            + str(charge.get("tax_usd", "unknown"))
+            + " USD, duties "
+            + str(charge.get("duties_usd", "unknown"))
+            + " USD, discount "
+            + str(charge.get("discount_usd", "unknown"))
+            + " USD."
+        )
+    lines.append("")
+    return lines
+
+
+def _verified_checkout_quote(row: dict) -> str:
+    quotes = row.get("verified_checkout_quotes", [])
+    if not isinstance(quotes, list):
+        return ""
+    rendered = []
+    for quote in quotes:
+        if not isinstance(quote, dict):
+            continue
+        rendered.append(
+            f"{quote['seller']} {quote['sku']} rev {quote['pcb_revision']}; "
+            f"{quote['quantity_packages']} package(s) x "
+            f"{quote['units_per_package']} unit(s) at "
+            f"USD {quote['package_price_usd']}/package; quoted "
+            f"{quote['quoted_at']}; stock {quote['stock_evidence_url']}"
+        )
+    return "; ".join(rendered)
+
+
 def render_first_robot_markdown(report: dict) -> str:
     """Exactly two source-derived lists for the first complete robot."""
     projection = first_robot_projection(report)
@@ -1141,6 +1209,9 @@ def render_first_robot_markdown(report: dict) -> str:
         "five-pet source. Only actual physical system receipts can approve "
         "one complete unit. No new Adafruit hardware.",
         "",
+    ]
+    lines.extend(_verified_checkout_summary(report))
+    lines += [
         "## 1. Reported owned or ordered, still unverified",
         "",
         "| Role | All reported on hand | All estimated on hand | All ordered, unreceived | Allocated to first unit |",
@@ -1165,8 +1236,8 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
         "## 2. First-unit remaining slots and conditional alternatives",
         "",
-        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier |",
-        "| --- | --- | ---: | ---: | --- | --- |",
+        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier | Verified checkout quote |",
+        "| --- | --- | ---: | ---: | --- | --- | --- |",
     ]
     for row in projection["roles"]:
         selected = row.get("selected_carrier") or {}
@@ -1181,14 +1252,15 @@ def render_first_robot_markdown(report: dict) -> str:
         lines.append(
             f"| {cell(row['scope'])} | {cell(row['name'])} | "
             f"{row['prototype_target']} | {row['conditional_remaining']} | "
-            f"{row['decision']} | {cell(reviewed)} |"
+            f"{row['decision']} | {cell(reviewed)} | "
+            f"{cell(_verified_checkout_quote(row))} |"
         )
     for item in projection["linked_decisions"]:
         lines.append(
             f"| linked detail, never additive | {cell(item['name'])} | "
             f"{item['conditional_one_robot_quantity']} if selected | "
             "not independently counted | "
-            f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} |"
+            f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} | | |"
         )
     lines += [
         "",
@@ -1263,6 +1335,9 @@ def render_markdown(report: dict) -> str:
         "** Quantities are design slots, not certified supplier checkouts. "
         "Estimated owned counts and ordered units have not been inspected.",
         "",
+    ]
+    output.extend(_verified_checkout_summary(report))
+    output += [
         "## 1. Owned or ordered, as reported",
         "",
         "| Component | Reported on hand, unverified | Estimated on hand, unverified | Ordered, not received |",
@@ -1285,8 +1360,8 @@ def render_markdown(report: dict) -> str:
         "",
         "## 2. Remaining components or unqualified roles",
         "",
-        "| Scope | Component | Fleet required | Conditional remaining | Status | Vendor reference or design blocker |",
-        "| --- | --- | ---: | ---: | --- | --- |",
+        "| Scope | Component | Fleet required | Conditional remaining | Status | Vendor reference or design blocker | Verified checkout quote |",
+        "| --- | --- | ---: | ---: | --- | --- | --- |",
     ))
     for scope, part in _purchase_rows(report):
         total = part.get("effective_selected_fleet_total",
@@ -1311,7 +1386,8 @@ def render_markdown(report: dict) -> str:
                     if reference else part["notes"])
         output.append(
             f"| {cell(scope)} | {cell(part['name'])} | {total} | "
-            f"{remaining} | {status} | {cell(note)} |"
+            f"{remaining} | {status} | {cell(note)} | "
+            f"{cell(_verified_checkout_quote(part))} |"
         )
     # These fourteen are alternatives or parts already covered by a parent
     # role. Expose all of them in the SAME remaining-components list without
@@ -1325,7 +1401,7 @@ def render_markdown(report: dict) -> str:
             f"{detail['fleet_quantity']} if selected | not independently counted | "
             f"{status} | Linked parent {detail['parent_role']}; "
             f"disposition {detail['disposition'] or 'unresolved'}; "
-            "see the canonical 14-row source register before buying |"
+            "see the canonical 14-row source register before buying | |"
         )
     output.extend((
         "",
@@ -1409,6 +1485,53 @@ def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
     values = evidence.get("costs", {}) if isinstance(evidence, dict) else {}
     return account_landed_cost(values, required, categories,
                                expected_scope=scope)
+
+
+def attach_verified_checkout_evidence(
+    report: dict, cost: dict, cost_evidence: dict
+) -> dict:
+    """Attach already audited checkout facts to the existing two shopping lists."""
+    if (not isinstance(report, dict) or not isinstance(cost, dict)
+            or not isinstance(cost_evidence, dict)
+            or cost.get("calculation_complete_not_physical_approval") is not True):
+        raise ValueError("Verified complete checkout evidence required")
+    quote_lines = cost_evidence.get("lines")
+    charges = cost_evidence.get("seller_charges")
+    if not isinstance(quote_lines, list) or not isinstance(charges, list):
+        raise ValueError("Verified quote lines and seller charges required")
+    output = copy.deepcopy(report)
+    output["verified_checkout_cost"] = {
+        "scope": cost.get("scope"),
+        "payable_now_cents": cost.get("payable_now_cents"),
+        "prior_paid_orders_cents": cost.get("prior_paid_orders_cents"),
+        "prototype_cumulative_cents": cost.get("prototype_cumulative_cents"),
+        "remaining_under_cap_cents": cost.get("remaining_under_cap_cents"),
+        "seller_charges": copy.deepcopy(charges),
+    }
+    rows = {}
+    for part in output["robots"]:
+        prefix = "dock" if part["id"] in DOCK_COST_ROLES else "robot"
+        rows[prefix + ":" + part["id"]] = part
+    for part in output["room_pod"]:
+        rows["station:" + part["id"]] = part
+    for line in quote_lines:
+        if not isinstance(line, dict):
+            raise ValueError("Verified quote line must be an object")
+        role = line.get("role_key")
+        if role not in rows:
+            raise ValueError("Verified quote references unknown shopping role")
+        normalized = {}
+        for key in (
+            "seller", "sku", "pcb_revision", "quantity_packages",
+            "units_per_package", "package_price_usd", "quoted_at",
+            "stock_evidence_url", "quote_reference",
+        ):
+            value = line.get(key)
+            if value is None:
+                raise ValueError("Verified quote line missing " + key)
+            normalized[key] = value
+        rows[role].setdefault("verified_checkout_quotes", []).append(normalized)
+    return output
 
 
 def cost_quote_markdown(cost: dict) -> str:
@@ -1567,6 +1690,9 @@ def main() -> int:
                 print("HOLD: quoted SKU, PCB revision or chosen retailer "
                       "differs from signed carrier: " + role, file=sys.stderr)
                 return 2
+        report = attach_verified_checkout_evidence(
+            report, cost, evidence["costs"]
+        )
     report = public_purchase_view(
         report, live_receipts_verified=(args.require_release or args.require_first_robot)
     )

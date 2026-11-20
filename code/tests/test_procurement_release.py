@@ -1548,6 +1548,54 @@ def test_regular_cli_json_never_claims_untested_receipts(monkeypatch, capsys):
     assert visible["robots"][0]["approved_for_fleet_purchase"] is False
 
 
+def test_verified_checkout_evidence_is_embedded_in_existing_shopping_lists():
+    import json
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    quote = {
+        "role_key": "robot:i2c_mux",
+        "seller": "Example Seller",
+        "sku": "MUX-REV-A",
+        "pcb_revision": "A",
+        "quantity_packages": 1,
+        "units_per_package": 2,
+        "package_price_usd": "3.25",
+        "quote_reference": "checkout-2026-11-20",
+        "quoted_at": "2026-11-20",
+        "stock_evidence_url": "https://supplier.example/mux",
+    }
+    cost = {
+        "scope": "first_robot",
+        "calculation_complete_not_physical_approval": True,
+        "payable_now_cents": 725,
+        "prior_paid_orders_cents": 1250,
+        "prototype_cumulative_cents": 1975,
+        "remaining_under_cap_cents": 3025,
+    }
+    evidence = {
+        "lines": [quote],
+        "seller_charges": [{
+            "seller": "Example Seller",
+            "shipping_usd": "0.50",
+            "tax_usd": "0.25",
+            "duties_usd": "0.00",
+            "discount_usd": "0.00",
+        }],
+    }
+    shown_report = mod.attach_verified_checkout_evidence(report, cost, evidence)
+    one = mod.render_first_robot_markdown(shown_report)
+    full = mod.render_markdown(shown_report)
+    for shown in (one, full):
+        assert "VERIFIED CHECKOUT EVIDENCE FOR THIS RELEASE" in shown
+        assert "Payable now: $7.25" in shown
+        assert "Previously paid: $12.50" in shown
+        assert "shipping 0.50 USD, tax 0.25 USD" in shown
+        assert "Example Seller MUX-REV-A rev A" in shown
+        assert "1 package(s) x 2 unit(s) at USD 3.25/package" in shown
+        assert "quoted 2026-11-20" in shown
+        assert "https://supplier.example/mux" in shown
+    assert "Remaining under prototype $50 cap: $30.25" in one
+
+
 def test_landed_cost_markdown_allocations_are_visible_and_not_checkout_prices():
     values = {
         "scope": "evaluation", "calculation_complete_not_physical_approval": True,
