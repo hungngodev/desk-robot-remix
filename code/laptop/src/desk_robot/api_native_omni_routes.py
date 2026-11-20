@@ -185,6 +185,14 @@ def register_native_omni_routes(
                     robot_id, request.event_id,
                 )
             raise HTTPException(403, "Transcript storage consent changed during read")
+        # Keep the same ephemeral and consented model ASR in the shared
+        # Mac attention snapshot. A transcript is uncertain context only,
+        # never an instruction or automatic permission to operate motors.
+        attention = getattr(app.state.runtime, "attention", None)
+        if ephemeral and settings.voice_vision_tools_enabled and attention is not None:
+            attention.heard(
+                robot_id, request.event_id, spoken[:240], time.monotonic()
+            )
         return {
             "robot_id": robot_id, "stored": inserted,
             "ephemeral_context_added": ephemeral,
@@ -209,10 +217,15 @@ def register_native_omni_routes(
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None:
             raise HTTPException(503, "No authenticated Mac interaction owner")
+        sent_at = request.sent_at_us / 1_000_000
         added = visual.hub.remember_native_spoken(
-            robot_id, request.event_id, request.model_text,
-            request.sent_at_us / 1_000_000,
+            robot_id, request.event_id, request.model_text, sent_at,
         )
+        attention = getattr(app.state.runtime, "attention", None)
+        if added and attention is not None and settings.voice_vision_tools_enabled:
+            # This receipt proves the server forwarded encoded audio, not
+            # that the XIAO speaker acoustically played every word.
+            attention.sent(robot_id, request.model_text, sent_at)
         return {
             "robot_id": robot_id,
             "ephemeral_context_added": added,
