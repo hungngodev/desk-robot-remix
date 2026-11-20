@@ -99,6 +99,13 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
+    assert all(item["units"] == "mm" for item in report["parts"])
+    assert all(len(item["source_sha256"]) == 64 for item in report["parts"])
+    assert all(len(item["mesh_sha256"]) == 64 for item in report["parts"])
+    from hashlib import sha256
+    for item in report["parts"]:
+        assert sha256((tmp_path / item["source"]).read_bytes()).hexdigest() == item["source_sha256"]
+        assert sha256((rendered / item["location"]).read_bytes()).hexdigest() == item["mesh_sha256"]
     for key in (
         "hardware_fit_verified", "full_printable_assembly_verified",
         "dock_charge_contacts_approved", "commercial_manufacture_authorized",
@@ -127,6 +134,8 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
 
     monkeypatch.setattr(source.subprocess, "run", fail_after_one)
     output = tmp_path / "rendered"
+    output.mkdir()
+    (output / "fit_kit_manifest.json").write_text("stale evidence")
     with pytest.raises(subprocess.CalledProcessError):
         source.export_kit(tmp_path, output_dir=output)
     assert not list(output.rglob("*.stl"))

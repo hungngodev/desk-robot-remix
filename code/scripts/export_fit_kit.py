@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from hashlib import sha256
 from collections import Counter
 from math import isfinite
 from pathlib import Path
@@ -93,11 +94,14 @@ def export_kit(
         if not source.is_file():
             raise FileNotFoundError(f"Missing original parametric source: {source}")
     out.mkdir(parents=True, exist_ok=True)
+    # Fail closed: a failed rebuild cannot retain an old success manifest.
+    (out / "fit_kit_manifest.json").unlink(missing_ok=True)
     rendered: list[dict] = []
     # No incomplete candidate part gets published if any SCAD render fails.
     with tempfile.TemporaryDirectory(prefix="desk-fit-", dir=out) as folder:
         stage = Path(folder)
         for kind, source, parts in sources:
+            scad_digest = sha256(source.read_bytes()).hexdigest()
             for name in parts:
                 target = stage / kind / (name + ".stl")
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -112,6 +116,10 @@ def export_kit(
                 edges = closed_mesh_edges(target)
                 rendered.append({
                     "part": name, "location": f"{kind}/{name}.stl",
+                    "source": source.relative_to(root).as_posix(),
+                    "source_sha256": scad_digest,
+                    "mesh_sha256": sha256(target.read_bytes()).hexdigest(),
+                    "units": "mm",
                     "triangles": triangles, "manifold_edges": edges,
                     "quantity_per_robot": 8 if name == "tof_adjustable" else 1,
                 })

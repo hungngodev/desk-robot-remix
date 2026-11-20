@@ -13,8 +13,12 @@ This renders seven adapter candidates including the rectangular speaker front to
 three existing power, docking and jaw fit gauges to
 `docs/cad/remixes/fit_stls/`. Each STL is exported in deterministic binary
 format, checked for nonzero triangles and exact file length, and listed in
-`docs/cad/remixes/fit_kit_manifest.json`. A render error publishes no
-partial candidates. The manifest explicitly says physical fit, final assembly,
+`docs/cad/remixes/fit_kit_manifest.json`, including SHA256 digests of every
+binary STL and its source SCAD file and explicit millimeter units. Compare
+those digests with the files before slicing; they prove source provenance,
+not physical fit or licensing. A failed rebuild invalidates an earlier
+manifest rather than presenting stale output as a fresh successful export.
+A render error publishes no new candidates. The manifest explicitly says physical fit, final assembly,
 electrical docking and commercial manufacturing remain unqualified. Source
 dimensions are still **provisional** until real components are measured.
 This is not a printable, integrated production robot.
