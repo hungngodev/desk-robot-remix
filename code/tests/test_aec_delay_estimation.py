@@ -114,3 +114,39 @@ def test_large_acoustic_delay_is_diagnostic_only_not_copyable_to_idf():
     assert not report["esp_idf_delay_setting_applicable"]
     assert report["esp_idf_delay_max_ms"] == 250
     assert not report["aec_physically_verified"]
+
+def test_sense_32khz_speaker_wav_matches_reference_phase(tmp_path):
+    """Synthetic source and lag, not proof of acoustic qualification."""
+    import wave
+
+    rng = np.random.default_rng(335)
+    pcm = np.clip(rng.normal(0, 0.12, 64000), -0.99, 0.99)
+    file = tmp_path / "sense_32k.wav"
+    with wave.open(str(file), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(32000)
+        wav.writeframes((pcm * 32767).astype("<i2").tobytes())
+    recorded, rate = source["read_wav"](file)
+    reference = resample_reference(recorded, rate)
+    assert rate == 32000
+    assert len(reference) == 32000
+    assert reference[0] == 0
+    assert reference[1] == pytest.approx((2 * recorded[0] + recorded[1]) / 4)
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    report = estimate_delay(reference, microphone)
+    assert report["reference_delay_ms"] == 70.0
+    assert not report["aec_physically_verified"]
+
+
+def test_sense_32khz_speaker_over_ten_seconds_is_rejected(tmp_path):
+    import wave
+
+    file = tmp_path / "too_long.wav"
+    with wave.open(str(file), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(32000)
+        wav.writeframes(bytes(320001 * 2))
+    with pytest.raises(ValueError, match="WAV"):
+        source["read_wav"](file)
