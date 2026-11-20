@@ -47,6 +47,7 @@ async def measure(
         raise ValueError("Invalid read-only bench duration or periods")
     camera_times: list[float] = []
     stream_intervals: list[float] = []
+    sense_capture_intervals: list[float] = []
     status_times: list[float] = []
     camera_sizes: list[int] = []
     camera_errors: list[str] = []
@@ -96,6 +97,7 @@ async def measure(
         """
         nonlocal camera_error_count
         last_frame_at: float | None = None
+        last_source_identity: tuple[int, int, int] | None = None
         try:
             async with asyncio.timeout(seconds + 0.5):
                 async for jpeg, received in head.stream_frames():
@@ -123,6 +125,22 @@ async def measure(
                         raise ValueError("Stream has no authenticated frame identity")
                     if identity in seen_camera_identities:
                         raise ValueError("Duplicate live camera frame identity")
+                    if last_source_identity is not None:
+                        if identity[0] != last_source_identity[0]:
+                            raise RuntimeError("Sense camera rebooted during continuous bench")
+                        # These are two elapsed times on the SAME Sense boot,
+                        # not an ESP-to-Mac absolute clock synchronization.
+                        source_gap = (
+                            identity[2] - last_source_identity[2]
+                        ) / 1_000_000
+                        if source_gap <= 0:
+                            raise ValueError("Sense frame completion clock regressed")
+                        sense_capture_intervals.append(source_gap)
+                        if source_gap > MAX_CAMERA_GAP_S:
+                            raise RuntimeError(
+                                f"Sense camera capture stalled for {source_gap:.2f}s"
+                            )
+                    last_source_identity = identity
                     seen_camera_identities.add(identity)
                     camera_sizes.append(len(jpeg))
                 # A feed can end exactly at the requested deadline after
@@ -135,7 +153,7 @@ async def measure(
         except TimeoutError:
             # Hitting the deadline is expected only if recent real JPEGs
             # arrived. A stalled stream does not count as continuous video.
-            if last_frame_at is None or deadline - last_frame_at > 1.2:
+            if last_frame_at is None or deadline - last_frame_at > MAX_CAMERA_GAP_S:
                 camera_error_count += 1
                 camera_errors.append("TimeoutError: continuous camera stalled")
         except Exception as exc:
@@ -180,6 +198,7 @@ async def measure(
         "successful_camera_fps": round(len(camera_sizes) / elapsed, 3),
         "camera_frames_received": len(camera_sizes),
         "stream_frame_interarrival": summarize(stream_intervals),
+        "sense_capture_completion_interarrival": summarize(sense_capture_intervals),
         "camera_latency": summarize(camera_times),
         "status_latency": summarize(status_times),
         "largest_jpeg_bytes": max(camera_sizes, default=0),
