@@ -40,3 +40,31 @@ def test_missing_dock_module_never_implies_charging():
     ).read_text()
     assert "bool present = false, valid = false;" in body
     assert "charge_indicated = false;" in body
+
+
+def test_real_chg_low_without_pgood_stays_observable_and_latches_safety():
+    # TI BQ2407x CHG and PGOOD are independent open-drain GPIO inputs.
+    # The old producer masked CHG when PGOOD was high, making this genuine
+    # pin contradiction impossible for the Mac or WROOM to diagnose.
+    from desk_robot.dock_evidence import classify_dock
+
+    root = Path(__file__).resolve().parents[1]
+    firmware = (
+        root / "firmware/body/lib/AccessorySensors/AccessorySensors.cpp"
+    ).read_text()
+    local_guard = (
+        root / "firmware/body/lib/BodyControl/BodyControl.cpp"
+    ).read_text()
+    assert "dock.charge_indicated = (bits & 0x08U) == 0;" in firmware
+    assert "dock.charge_indicated = (bits & 0x08U) == 0 &&" not in firmware
+    assert "dock.input_good || dock.left_seated ||" in local_guard
+    assert "dock.right_seated || dock.charge_indicated" in local_guard
+    state = classify_dock({
+        "present": True,
+        "valid": True,
+        "left_seated": False,
+        "right_seated": False,
+        "input_good": False,
+        "charge_indicated": True,
+    })
+    assert state == "charge_signal_without_input_fault"
