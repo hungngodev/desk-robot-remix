@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import runpy
 from pathlib import Path
 
@@ -100,7 +101,29 @@ def catalog() -> dict:
     return {key: dict(value) for key, value in _PACKS.items()}
 
 
-def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
+_TRAY_CAD = Path(__file__).resolve().parents[2] / (
+    "docs/cad/remixes/remaining_fit_gauges.scad"
+)
+
+
+def cad_tray_mm(source: Path = _TRAY_CAD) -> tuple[float, float, float]:
+    """Read the one current CAD candidate cavity, never a stale CLI default."""
+    text = source.read_text(encoding="utf-8")
+    sizes = []
+    for axis in ("l", "w", "h"):
+        matches = re.findall(
+            rf"^power_{axis}\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)\\s*;",
+            text, flags=re.MULTILINE,
+        )
+        if len(matches) != 1:
+            raise ValueError(f"Missing or ambiguous power_{axis} CAD dimension")
+        sizes.append(float(matches[0]))
+    if not all(0 < dimension < 1000 for dimension in sizes):
+        raise ValueError("CAD battery cavity dimensions are invalid")
+    return tuple(sizes)
+
+
+def evaluate(model: str, demand: dict, *, tray_mm=None,
              wire_relief_mm=8.0, clearance_mm=1.0) -> dict:
     if model not in _PACKS:
         raise ValueError("Unknown sourced protected pack model")
@@ -122,6 +145,8 @@ def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
     ]:
         raise ValueError("Continuous battery demand exceeds peak demand")
     a, b, h = src["size_mm"]
+    if tray_mm is None:
+        tray_mm = cad_tray_mm()
     lt, wt, ht = tray_mm
     dims = (lt, wt, ht, wire_relief_mm, clearance_mm)
     if not all(type(v) in (int, float) and 0 <= v < 1000 for v in dims):
@@ -191,15 +216,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--peak-5v-a", required=True, type=float)
     parser.add_argument("--continuous-5v-a", required=True, type=float)
-    parser.add_argument("--tray-length-mm", type=float, default=68)
-    parser.add_argument("--tray-width-mm", type=float, default=35)
-    parser.add_argument("--tray-height-mm", type=float, default=14)
+    parser.add_argument("--tray-length-mm", type=float)
+    parser.add_argument("--tray-width-mm", type=float)
+    parser.add_argument("--tray-height-mm", type=float)
     args = parser.parse_args()
     sizing = runpy.run_path(
         str(Path(__file__).with_name("power_preflight.py")))
     demand = sizing["size_5v_supply"](
         args.peak_5v_a, args.continuous_5v_a)
-    tray = (args.tray_length_mm, args.tray_width_mm, args.tray_height_mm)
+    cad = cad_tray_mm()
+    tray = tuple(
+        override if override is not None else baseline
+        for override, baseline in zip(
+            (args.tray_length_mm, args.tray_width_mm, args.tray_height_mm),
+            cad, strict=True,
+        )
+    )
     print(json.dumps({
         "load_source": "hypothetical until operator measured",
         "sizing": demand,
