@@ -760,8 +760,8 @@
         "id": "room_controller",
         "name": "Station controller with timestamped USB serial protocol, reuse owned Feather nRF52840 if feasible",
         "quantity_per_room": 1,
-        "location": "ventilated stationary USB enclosure; no motor or charge authority; owned Feather nRF52840 is a candidate, not yet an approved controller",
-        "estimated_owned_total": 1
+        "location": "ventilated stationary USB enclosure; no motor or charge authority; reported-owned Feather nRF52840 is a candidate, not yet an approved controller",
+        "reported_owned_total": 1
       }
     ],
     "transport": "Room pod presents timestamped named readings to Mac over USB; no safety or motor control and no assumption that a missing pod means a person is present.",

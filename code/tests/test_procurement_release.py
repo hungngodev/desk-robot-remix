@@ -532,7 +532,8 @@ def test_canonical_full_fleet_plan_has_all_forty_nine_roles():
     assert robots["mg90s"]["remaining_if_reported_stock_works"] == 0
     assert robots["max30102"]["estimated_owned_not_verified"] == 5
     assert robots["max30102"]["remaining_if_reported_stock_works"] == 0
-    assert room["room_controller"]["estimated_owned_not_verified"] == 1
+    assert room["room_controller"]["reported_owned_not_verified"] == 1
+    assert room["room_controller"]["estimated_owned_not_verified"] == 0
     assert room["room_controller"]["remaining_if_reported_stock_works"] == 0
     assert robots["stepper"]["shopping_decision"].startswith("hold_until_drivetrain")
     assert not report["order_released"]

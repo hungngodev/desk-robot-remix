@@ -1486,8 +1486,9 @@ def render_markdown(report: dict) -> str:
         "",
         "Other reported spares are not interchangeable with chosen modules: "
         "BerryIMU, MAX9814, an extra camera, GY61, PAM8403, spare DRV8833 "
-        "and assorted IR sensors. The owned Feather nRF52840 is only "
-        "an estimated station controller until its actual firmware works.",
+        "and assorted IR sensors. The reported-owned Feather nRF52840 "
+        "still needs carrier inspection, firmware, power and USB qualification "
+        "before it becomes the approved station controller.",
         "",
         "## 2. Remaining components or unqualified roles",
         "",
