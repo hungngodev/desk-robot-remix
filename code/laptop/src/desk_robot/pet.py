@@ -1589,6 +1589,12 @@ class PetController:
                             if self._vision_inflight is inference:
                                 self._vision_inflight = None
                     if (time.monotonic() - received > self.max_observation_age
+                            # A direct visual question may take precedence
+                            # just as the speculative VLM returns. The model
+                            # result is not yet permission to persist/share
+                            # a camera memory or animate the face.
+                            or preemption_epoch != self._vision_preemption_epoch
+                            or self._direct_vision_requests
                             or (hub_generation is not None and
                                 self.multimodal.hub._generation[robot_id] != hub_generation)
                             or (self.settings.mode == "hardware"
