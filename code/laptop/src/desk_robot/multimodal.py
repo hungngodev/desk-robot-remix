@@ -135,6 +135,9 @@ class CameraFrameHub:
         self.event_history = {
             robot: deque(maxlen=12) for robot in robot_ids
         }
+        # Past physical edges remain relevant during a longer conversation.
+        # Never treat these historical events as live actuator readings.
+        self.situation_edges = {robot: {} for robot in robot_ids}
         # A local WROOM disarm must not be evicted by a dozen routine touch
         # edges within its eight-second context lifetime. This is a cached
         # observation timestamp, never an independent motion authority.
@@ -183,6 +186,11 @@ class CameraFrameHub:
             raise ValueError("Unknown physical event or invalid time")
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
+        if kind != "human_voice":
+            past = self.situation_edges[robot_id]
+            past[kind] = max(now, past.get(kind, -math.inf))
+            if len(past) > 12:
+                del past[min(past, key=past.get)]
         if kind == "safety_fault":
             self.latest_safety_fault[robot_id] = max(
                 self.latest_safety_fault[robot_id], now
@@ -563,6 +571,18 @@ class CameraFrameHub:
                     "content": None,
                     "physical_action_verified": False,
                 }))
+        # Keep original ages visible when an old tilt or nearby object
+        # may explain the conversation. This is NOT a live sensor state.
+        for kind, stamp in self.situation_edges[robot_id].items():
+            age = now - stamp
+            if 8 < age <= 60:
+                items.append((stamp, {
+                    "channel": "sensor_history", "kind": kind,
+                    "age_ms": round(1000 * age),
+                    "source": "wroom_event_history",
+                    "historical_not_current": True,
+                    "physical_action_verified": False,
+                }))
         # The generic bounded event deque can overflow during a sensor burst.
         # Preserve one authentic local fault until its original TTL expires,
         # but never fabricate another observation or extend the timestamp.
@@ -651,7 +671,8 @@ class CameraFrameHub:
         # Retain each present modality's LATEST event, then use remaining
         # capacity for recent detail. Never turn a frame into a sighting.
         modalities = ("human_voice", "human_transcript", "tool",
-                      "sensor", "room_station", "robot_speech", "camera")
+                      "sensor", "room_station", "robot_speech",
+                      "sensor_history", "camera")
         required: set[int] = set()
         # A physical WROOM safety fault outranks optional camera, idle pet
         # remarks and routine sensor events in ANY bounded timeline. Without
@@ -739,6 +760,7 @@ class CameraFrameHub:
         self.native_spoken_ids[robot_id].clear()
         self.heard_history[robot_id].clear()
         self.event_history[robot_id].clear()
+        self.situation_edges[robot_id].clear()
         self.latest_safety_fault[robot_id] = -math.inf
         self.voice_started_at[robot_id] = -math.inf
         self.voice_until[robot_id] = -math.inf

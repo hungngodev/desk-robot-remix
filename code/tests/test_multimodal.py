@@ -2458,3 +2458,30 @@ def test_missed_vad_start_snapshot_rejects_stale_end_and_preserves_epoch():
     assert not hub.user_active("robot-02", 102.0)
     assert hub.spontaneous_floor_busy(102.79)
     assert not hub.spontaneous_floor_busy(102.81)
+
+
+def test_aged_physical_situation_is_history_not_live_motion_authority():
+    """An extended utterance should not erase older physical context."""
+    from desk_robot.brain_context import compose_brain_context
+
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-01", "handling_tilt", 1.0)
+    hub.notify("robot-01", "side_object", 2.0)
+    for index in range(20):
+        hub.notify("robot-01", "touch", 2.1 + index * 0.01)
+    timeline = hub.interaction_timeline("robot-01", 15.0, limit=10)
+    past = {item["kind"]: item for item in timeline
+            if item["channel"] == "sensor_history"}
+    assert {"handling_tilt", "side_object"} <= past.keys()
+    assert past["handling_tilt"]["age_ms"] == 14000
+    assert all(item["historical_not_current"] is True for item in past.values())
+    assert not any(item["channel"] == "sensor"
+                   and item["kind"] == "handling_tilt" for item in timeline)
+    prompt = compose_brain_context([], [], timeline).interaction
+    assert "Earlier physical edge (14s ago; historical" in prompt
+    assert "handling_tilt" in prompt
+    assert hub.interaction_timeline("robot-02", 15.0) == []
+    assert not any(item["channel"] == "sensor_history"
+                   for item in hub.interaction_timeline("robot-01", 63.0))
+    hub.clear("robot-01")
+    assert not hub.situation_edges["robot-01"]

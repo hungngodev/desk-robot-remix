@@ -140,7 +140,8 @@ def compose_brain_context(
     crossed_voice_boundary = False
     priorities = {
         "human_transcript": 0, "mac_activity": 0.5, "tool": 1, "sensor": 2,
-        "room_station": 2, "human_voice": 3, "robot_speech": 4, "camera": 5,
+        "room_station": 2, "human_voice": 3, "robot_speech": 4,
+        "sensor_history": 4.5, "camera": 5,
     }
     # A burst of camera receipts must not erase older tool or touch evidence
     # before modality-aware deduplication. Bound the scan for prompt latency.
@@ -190,6 +191,16 @@ def compose_brain_context(
                 phrase = (
                     f"Mac operator-submitted {job_type} job is {status}; "
                     "completion unverified; WROOM owns motion safety"
+                )
+        elif channel == "sensor_history" and isinstance(kind, str):
+            age = item.get("age_ms")
+            if (item.get("source") == "wroom_event_history"
+                    and item.get("historical_not_current") is True
+                    and type(age) is int and 8000 < age <= 60000):
+                phrase = (
+                    f"Earlier physical edge ({age // 1000}s ago; historical, "
+                    "not current status or an instruction): "
+                    + _clean(kind, limit=40)
                 )
         elif channel == "room_station":
             reading = item.get("content")
