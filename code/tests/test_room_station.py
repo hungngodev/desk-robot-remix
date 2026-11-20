@@ -203,6 +203,34 @@ def test_uint32_clock_and_sequence_wrap_uses_real_forward_progress():
         accept(frame(0xffffffff, 0xffffff00), decoder=decoder)
 
 
+
+def test_future_usb_station_clock_does_not_poison_decoder_epoch():
+    decoder = RoomStationDecoder()
+    assert accept(frame(10, 1000), decoder=decoder, now=10.0).seq == 10
+    # Fresh sensor fields matching a forged far-future station millis value
+    # are insufficient to change Mac's host reception chronology.
+    with pytest.raises(ValueError, match="jumped ahead"):
+        accept(frame(11, 800000), decoder=decoder, now=10.1)
+    # A rejected packet cannot move seq/time fences; real station recovers.
+    assert accept(frame(11, 2000), decoder=decoder, now=11.0).seq == 11
+    with pytest.raises(ValueError, match="Backwards Mac"):
+        accept(frame(12, 3000), decoder=decoder, now=10.9)
+    assert accept(frame(12, 3000), decoder=decoder, now=12.0).seq == 12
+
+
+def test_cumulative_usb_clock_advance_cannot_launder_future_station_time():
+    decoder = RoomStationDecoder()
+    accept(frame(1, 1000), decoder=decoder, now=1.0)
+    # Individual one-second jumps look plausible against the 3s allowance,
+    # but cumulatively a near-instant burst must not claim a future clock.
+    for seq in (2, 3, 4):
+        assert accept(frame(seq, seq * 1000), decoder=decoder,
+                      now=1.0 + seq / 100.0).seq == seq
+    with pytest.raises(ValueError, match="jumped ahead"):
+        accept(frame(5, 5000), decoder=decoder, now=1.05)
+    assert accept(frame(5, 5000), decoder=decoder, now=5.0).seq == 5
+
+
 def test_shared_room_is_one_short_lived_context_not_robot_memory_or_vision():
     ids = [f"robot-0{i}" for i in range(1, 6)]
     hub = CameraFrameHub(ids)
