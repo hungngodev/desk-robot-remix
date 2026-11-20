@@ -1458,7 +1458,7 @@ async def test_group_streaming_receives_transient_live_evidence(settings):
 
 
 async def test_active_group_goal_is_shared_only_while_running(settings):
-    """Only participants receive the temporary goal, never motor permits."""
+    """The canonical activity owner retains a per-pet goal without motor authority."""
     ids = [robot.id for robot in settings.robots]
     assert len(ids) >= 3
     settings.mode = "hardware"
@@ -1468,14 +1468,14 @@ async def test_active_group_goal_is_shared_only_while_running(settings):
 
     class IntentChat:
         async def reply(self, history):
-            mine = conversation.active_dialogue_timeline(ids[0])
-            peer = conversation.active_dialogue_timeline(ids[1])
-            outsider = conversation.active_dialogue_timeline(ids[2])
+            mine = conversation.group_activity_timeline(ids[0])
+            peer = conversation.group_activity_timeline(ids[1])
+            outsider = conversation.group_activity_timeline(ids[2])
             assert len(mine) == len(peer) == 1
             assert outsider == []
-            assert mine[0]["source"] == "mac_conversation_active_session"
+            assert mine[0]["source"] == "mac_operator_group_conversation"
             assert mine[0]["motor_authorized"] is False
-            assert mine[0]["audio_playback_verified"] is False
+            assert mine[0]["playback_verified"] is False
             seen.append(compose_brain_context([], [], mine).interaction)
             return "I will keep singing without inventing a physical result."
 
@@ -1484,32 +1484,34 @@ async def test_active_group_goal_is_shared_only_while_running(settings):
         ids[:2], "Sing during our desk exploration", utterances=2,
     )
     assert len(result) == 2
-    assert all("Mac dialogue ongoing" in prompt for prompt in seen)
+    assert all("Group dialogue" in prompt for prompt in seen)
     assert all("Sing during our desk exploration" in prompt for prompt in seen)
-    assert conversation.active_dialogue_timeline(ids[0]) == []
-    assert conversation.active_dialogue_timeline(ids[1]) == []
-    assert conversation._dialogue_goals == {}
+    completed = conversation.group_activity_timeline(ids[0])
+    assert len(completed) == 1
+    assert completed[0]["status"] == "completed"
+    assert completed[0]["motor_authorized"] is False
 
 
 def test_dialogue_goal_and_coordinator_job_remain_distinct():
-    """The brain cannot mistake speech intent for authorized motor activity."""
+    """Dialogue intent is never evidence of authorization to move."""
     goal = {
-        "channel": "mac_activity", "kind": "dialogue_goal",
-        "source": "mac_conversation_active_session",
-        "topic": "Sing as we approach the desk edge", "status": "active",
+        "channel": "mac_activity", "kind": "group_conversation",
+        "source": "mac_operator_group_conversation",
+        "topic": "Sing as we approach the desk edge", "status": "speaking",
+        "activity_epoch": 1, "sent_segments": 0, "age_ms": 0,
         "physical_action_verified": False,
-        "audio_playback_verified": False, "motor_authorized": False,
+        "playback_verified": False, "motor_authorized": False,
     }
     physical = active_job_timeline([
         SimpleNamespace(robot_id="robot-01", kind="exploration",
                         state="running"),
     ], "robot-01")
     prompt = compose_brain_context([], [], [goal, *physical]).interaction
-    assert "Mac dialogue ongoing" in prompt
+    assert "Group dialogue speaking" in prompt
     assert "Sing as we approach the desk edge" in prompt
     assert "Mac operator-submitted exploration job is running" in prompt
     assert len(prompt) <= 400
-    forged = dict(goal, audio_playback_verified=True)
+    forged = dict(goal, playback_verified=True)
     assert compose_brain_context([], [], [forged]).interaction == ""
 
 
