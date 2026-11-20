@@ -835,11 +835,17 @@ class Coordinator:
             raise OperationError("Real pickup requires measured ADS1115 gripper contact threshold")
         return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
 
-    async def _observe(self, robot_id: str, target: str, c: Calibration) -> Detection:
+    async def _observe(
+        self, robot_id: str, target: str, c: Calibration,
+    ) -> tuple[Detection, float]:
         jpeg = await _bounded_head_reply(
             self.heads[robot_id].snapshot(), seconds=3.0,
             timeout_message="Pickup camera snapshot timeout",
         )
+        # This is the Mac JPEG receipt time, NOT sensor exposure time.
+        # Returning it to the physical action owner prevents slow inference
+        # or later slow WROOM preflight from driving on obsolete pixels.
+        jpeg_received_at = time.monotonic()
         if image_size(jpeg) != (c.image_width, c.image_height):
             raise OperationError("Camera resolution differs from measured calibration")
         objects = [
@@ -855,7 +861,10 @@ class Coordinator:
         ]
         if len(objects) != 1:
             raise OperationError("Lost or ambiguous target; stop and request operator intervention")
-        return objects[0]
+        if (self.settings.mode == "hardware"
+                and time.monotonic() - jpeg_received_at > 2.0):
+            raise OperationError("Pickup visual evidence expired during inference")
+        return objects[0], jpeg_received_at
 
     async def _pickup(self, job: Job, target: str, c: Calibration) -> dict:
         head = self.heads[job.robot_id]
@@ -867,7 +876,7 @@ class Coordinator:
         initial = None
         for attempt in range(24):
             await self._assert_armed_health(job.robot_id)
-            detection = await self._observe(job.robot_id, target, c)
+            detection, visual_received_at = await self._observe(job.robot_id, target, c)
             point = c.ground(detection.center)
             if not c.within(point):
                 raise OperationError("Target outside calibrated work area")
@@ -885,6 +894,9 @@ class Coordinator:
             # Vision and geometry may have taken seconds. Never re-use the
             # pre-camera WROOM fault/IMU/cliff/bumper verdict for a drive.
             await self._assert_armed_health(job.robot_id)
+            if (self.settings.mode == "hardware"
+                    and time.monotonic() - visual_received_at > 2.0):
+                raise OperationError("Pickup visual evidence expired before movement")
             await head.command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)
@@ -916,7 +928,7 @@ class Coordinator:
             if sample:
                 await asyncio.sleep(c.hold_seconds)
             await self._assert_armed_health(job.robot_id)
-            detection = await self._observe(job.robot_id, target, c)
+            detection, _ = await self._observe(job.robot_id, target, c)
             px, py = detection.center
             if not (a <= px <= x and b <= py <= y):
                 raise OperationError(
@@ -941,7 +953,7 @@ class Coordinator:
         await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
-        lowered = await self._observe(job.robot_id, target, c)
+        lowered, _ = await self._observe(job.robot_id, target, c)
         lowered_ground = c.ground(lowered.center)
         if (
             not c.within(lowered_ground)
@@ -963,7 +975,7 @@ class Coordinator:
             if sample:
                 await asyncio.sleep(0.15)
             await self._assert_armed_health(job.robot_id)
-            placed = await self._observe(job.robot_id, target, c)
+            placed, _ = await self._observe(job.robot_id, target, c)
             ground = c.ground(placed.center)
             if (
                 not c.within(ground)
