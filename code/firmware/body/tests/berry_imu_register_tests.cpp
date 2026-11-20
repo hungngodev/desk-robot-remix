@@ -76,6 +76,13 @@ int main() {
     BerryImu unverified_ff;
     CHECK(!unverified_ff.begin(bad_readback, BerryModel::Mpu6050, 0x68, 0x00));
     CHECK(!unverified_ff.configured());
+
+    TwoWire wrong_clear_mode;
+    wrong_clear_mode.reject_read_reg = 0x37;
+    BerryImu cannot_prove_latched_status;
+    CHECK(!cannot_prove_latched_status.begin(
+        wrong_clear_mode, BerryModel::Mpu6050, 0x68, 0x00));
+    CHECK(!cannot_prove_latched_status.configured());
     std::cout << "PASS IMU register BDU, native low-g IRQ and fail-closed setup\\n";
     return 0;
   } catch (const std::exception& e) {
