@@ -1459,6 +1459,10 @@ async def test_group_streaming_receives_transient_live_evidence(settings):
 
 async def test_active_group_goal_is_shared_only_while_running(settings):
     """The canonical activity owner retains a per-pet goal without motor authority."""
+    # Keep a third pet outside the participating group; global fixture has two.
+    settings.robots.append(
+        settings.robots[0].model_copy(update={"id": "robot-03", "name": "Third"})
+    )
     ids = [robot.id for robot in settings.robots]
     assert len(ids) >= 3
     settings.mode = "hardware"
