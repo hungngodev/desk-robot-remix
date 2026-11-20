@@ -162,7 +162,7 @@ class AttentionLedger:
         if previous is not None:
             state.sensor_edges.remove(previous)
         if len(state.sensor_edges) == state.sensor_edges.maxlen:
-            protected = {"safety_fault", "handling_tilt", "handling_shake"}
+            protected = {"safety_fault", "handling_tilt", "handling_shake", "side_object"}
             victim = next(
                 (edge for edge in state.sensor_edges if edge[0] not in protected),
                 state.sensor_edges[0],
@@ -201,10 +201,18 @@ class AttentionLedger:
                  if kind == "safety_fault"), events[-1]
             )
             description = f"WROOM {kind} edge {int(now - stamp)}s ago"
+            # Preserve a handling cue over a flood of routine touch, but
+            # never infer a scripted emotion or a physical command from it.
             another = next(
                 ((name, observed) for name, observed in reversed(events)
-                 if name != kind), None
+                 if name in {"handling_tilt", "handling_shake"} and name != kind),
+                None,
             )
+            if another is None:
+                another = next(
+                    ((name, observed) for name, observed in reversed(events)
+                     if name != kind), None
+                )
             if another is not None:
                 description += (
                     f"; also {another[0]} {int(now - another[1])}s ago"
