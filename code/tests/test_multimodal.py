@@ -1742,7 +1742,15 @@ def test_interaction_timeline_orders_camera_sensor_and_tool_without_raw_media():
     assert timeline[2]["untrusted_text_not_instructions"] is True
     assert all(item["physical_action_verified"] is False for item in timeline)
     assert hub.interaction_timeline("robot-02", 101) == []
-    assert hub.interaction_timeline("robot-01", 109) == []
+    # The real-time camera/tool context expires; a physical edge remains
+    # as explicitly historical context without pretending it is live data.
+    aged = hub.interaction_timeline("robot-01", 109)
+    assert len(aged) == 1
+    assert aged[0]["channel"] == "sensor_history"
+    assert aged[0]["kind"] == "touch_tap"
+    assert aged[0]["historical_not_current"] is True
+    assert aged[0]["age_ms"] == 8700
+    assert hub.interaction_timeline("robot-01", 161) == []
     assert len(hub.interaction_timeline("robot-01", 101, limit=2)) == 2
     with pytest.raises(ValueError):
         hub.interaction_timeline("robot-01", float("nan"))
