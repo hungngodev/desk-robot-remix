@@ -1,9 +1,13 @@
 import asyncio
+import time
+from types import SimpleNamespace
 
 import pytest
 from desk_robot.api import create_app
 from desk_robot.conversation import Conversation, KokoroHeadSpeaker, conversation_turns
+from desk_robot.brain_context import compose_brain_context
 from desk_robot.memory import MemoryStore
+from desk_robot.multimodal import CameraFrameHub
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 from fastapi.testclient import TestClient
 
@@ -352,6 +356,8 @@ async def test_group_stream_revocation_stops_next_segment_and_never_shares_parti
 
     speaker = SimulatedSpeaker()
     c = Conversation(settings, SlowStream(), speaker, memory=memory)
+    hub = CameraFrameHub([robot.id for robot in settings.robots])
+    c.multimodal = SimpleNamespace(hub=hub)
     task = asyncio.create_task(c.run(
         ["robot-01", "robot-02"], "Say something", 2,
     ))
@@ -370,6 +376,19 @@ async def test_group_stream_revocation_stops_next_segment_and_never_shares_parti
         assert "playback unverified" in own[0].summary
         assert "The first phrase." in own[0].summary
         assert "A private second phrase." not in str(own)
+        # A subsequent turn can remember what this robot transmitted before
+        # interruption. Neither acoustic playback nor a peer sighting is
+        # fabricated when the stream is cancelled.
+        assert hub.spoken_history["robot-02"] == []
+        sent = list(hub.spoken_history["robot-01"])
+        assert len(sent) == 1
+        assert sent[0][2] == "mac_tts_transmitted_not_speaker_playback_ack"
+        live = compose_brain_context(
+            [], [], hub.interaction_timeline("robot-01", time.monotonic())
+        ).interaction
+        assert "The first phrase." in live
+        assert "playback unverified" in live
+        assert "A private second phrase." not in live
     finally:
         release.set()
         task.cancel()
