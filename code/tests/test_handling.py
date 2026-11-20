@@ -1055,3 +1055,78 @@ def test_nonzero_low_g_below_pose_invalidation_boundary_revokes_reference():
     assert qualified(gate, sample(acc=(8192, 0, 0)), 104.0) == ()
     assert gate.reference is not None
     assert gate.tilt_hits == 0
+
+
+def _mpu_native_low_g(seq, *, irq=False, valid=True, boot_id=1):
+    frame = sample(boot_id=boot_id)
+    frame["imu"].update(low_g_valid=valid, low_g_irq=irq, low_g_seq=seq)
+    return frame
+
+
+def test_hardware_low_g_counter_survives_missing_host_pulse():
+    """Mac may read after the FF_INT pulse, while WROOM seq retains it."""
+    gate = HandlingGate()
+    calibrated(gate)
+    assert qualified(gate, _mpu_native_low_g(0), 102.0) == ()
+    assert gate.reference == (0, 0, 1)
+    event = _mpu_native_low_g(1, irq=False)
+    assert qualified(gate, event, 102.2) == ()
+    assert gate.reference is None
+    assert gate.last_low_g_seq == 1
+    assert gate.last_sample_ms == event["imu"]["sample_ms"]
+    # A cached HTTP/UART status cannot seed calibration or be seen twice.
+    assert qualified(gate, event, 102.3, new_sample=False) == ()
+    assert gate.startup_samples == []
+    for i in range(8):
+        assert qualified(gate, _mpu_native_low_g(1),
+                         102.4 + 0.1 * i) == ()
+    assert gate.reference == (0, 0, 1)
+    assert qualified(gate, _mpu_native_low_g(1, irq=True),
+                     103.25) == ()
+    assert gate.reference == (0, 0, 1)  # same physical event
+    assert qualified(gate, _mpu_native_low_g(2), 103.4) == ()
+    assert gate.reference is None
+    assert gate.last_low_g_seq == 2
+    assert gate.observe(_mpu_native_low_g(2), 103.5, qualified=False) == ()
+    assert gate.last_low_g_seq == 2  # requalify cannot replay old event
+
+
+def test_native_low_g_status_faults_revoke_pose_and_preserve_event_fence():
+    gate = HandlingGate()
+    calibrated(gate)
+    assert qualified(gate, _mpu_native_low_g(4), 102) == ()
+    assert gate.last_low_g_seq == 4
+    for override in (
+        {"low_g_valid": True, "low_g_irq": True, "low_g_seq": 0},
+        {"low_g_valid": True, "low_g_irq": False, "low_g_seq": 3},
+        {"low_g_valid": 1, "low_g_irq": False, "low_g_seq": 4},
+        {"low_g_valid": False, "low_g_irq": True, "low_g_seq": 4},
+        {"low_g_valid": True, "low_g_irq": False, "low_g_seq": 0x100000000},
+    ):
+        gate.reset(preserve_shake_cooldown=True)
+        gate.last_low_g_seq = 4
+        calibrated(gate, 103)
+        frame = _mpu_native_low_g(4)
+        frame["imu"].update(override)
+        assert qualified(gate, frame, 105) == ()
+        assert gate.reference is None
+        assert gate.last_low_g_seq == 4
+    gate.reset()
+    assert gate.last_low_g_seq is None
+
+
+def test_low_g_status_read_failure_cannot_erase_counter_or_claim_event():
+    gate = HandlingGate()
+    calibrated(gate)
+    assert qualified(gate, _mpu_native_low_g(0), 102.0) == ()
+    assert qualified(gate, _mpu_native_low_g(1, valid=False), 102.2) == ()
+    assert gate.reference == (0, 0, 1)  # do not trust unverified status
+    assert gate.last_low_g_seq == 0
+    assert qualified(gate, _mpu_native_low_g(1), 102.4) == ()
+    assert gate.reference is None  # the later valid counter reveals the IRQ
+    assert gate.last_low_g_seq == 1
+    # A genuinely new MCU boot may restart its native interrupt counter.
+    assert qualified(gate, _mpu_native_low_g(0, boot_id=2),
+                     102.6) == ()
+    assert gate.last_low_g_seq == 0
+    assert gate.last_boot_id == 2
