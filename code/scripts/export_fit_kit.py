@@ -147,9 +147,17 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
     """Reject stale or changed print files; does not certify fit or power."""
     output = output_dir or root / "docs/cad/remixes"
     report = json.loads((output / "fit_kit_manifest.json").read_text(encoding="utf-8"))
-    if (not report.get("provisional_fit_parts_only")
-            or report.get("hardware_fit_verified") is not False
-            or report.get("dock_charge_contacts_approved") is not False):
+    # Generated STLs are only reversible coupons. A hand-edited manifest
+    # cannot turn any missing physical, assembly or licensing evidence into
+    # a passing release claim without invalidating source verification.
+    if (report.get("provisional_fit_parts_only") is not True
+            or report.get("source_geometry_rendered") is not True
+            or any(report.get(flag) is not False for flag in (
+                "hardware_fit_verified",
+                "full_printable_assembly_verified",
+                "dock_charge_contacts_approved",
+                "commercial_manufacture_authorized",
+            ))):
         raise ValueError("Unsafe fit kit provenance flags")
     expected = {}
     for folder, filename, names in (
