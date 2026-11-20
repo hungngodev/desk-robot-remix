@@ -123,3 +123,39 @@ def test_dock_mesh_clearances_with_openscad(tmp_path):
         assert abs((xs[2] - xs[1]) - (
             width + 2 * clearance + (2 * flare if y == 0 else 0)
         )) < 0.01
+
+
+def test_real_track_measurement_override_preserves_rail_clearance(tmp_path):
+    """A custom measured track width changes the guide, not rail thickness."""
+    import shutil
+    import struct
+    import subprocess
+
+    import pytest
+
+    executable = shutil.which("openscad")
+    if executable is None:
+        pytest.skip("OpenSCAD not installed")
+    output = tmp_path / "measured_track_entry.stl"
+    subprocess.run([
+        executable, "--export-format", "binstl", "-o", str(output),
+        "-D", 'part="dock_rail_entry_coupon"',
+        "-D", "track_outer_width_mm=112", str(SOURCE),
+    ], check=True, capture_output=True, text=True, timeout=180)
+    blob = output.read_bytes()
+    faces = struct.unpack_from("<I", blob, 80)[0]
+    assert len(blob) == 84 + faces * 50
+    points = [
+        struct.unpack_from("<fff", blob, 84 + i * 50 + 12 + j * 12)
+        for i in range(faces) for j in range(3)
+    ]
+    assert max(p[0] for p in points) == 142
+    for y, expected in ((0, (1, 6, 136, 141)),
+                        (37, (8, 13, 129, 134))):
+        xs = sorted({
+            round(x, 3) for x, yy, z in points
+            if abs(yy - y) < .001 and z > 3.001
+        })
+        assert xs == list(expected)
+    # Measured 112 mm tracks + 2 mm each side gives 116 mm straight opening.
+    assert 129 - 13 == 116
