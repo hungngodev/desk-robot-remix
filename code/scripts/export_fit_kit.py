@@ -143,15 +143,57 @@ def export_kit(
     return report
 
 
+def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict:
+    """Reject stale or changed print files; does not certify fit or power."""
+    output = output_dir or root / "docs/cad/remixes"
+    report = json.loads((output / "fit_kit_manifest.json").read_text(encoding="utf-8"))
+    if (not report.get("provisional_fit_parts_only")
+            or report.get("hardware_fit_verified") is not False
+            or report.get("dock_charge_contacts_approved") is not False):
+        raise ValueError("Unsafe fit kit provenance flags")
+    expected = {}
+    for folder, filename, names in (
+        ("adapter_stls", "one_robot_adapter_kit.scad", ADAPTERS),
+        ("fit_stls", "remaining_fit_gauges.scad", GAUGES),
+        ("fit_stls", "speaker_rect_fit_gauge.scad", SPEAKER_FITS),
+        ("fit_stls", "vl53l0x_gy530_fit_gauge.scad", RANGER_FITS),
+        ("dock_stls", "dock/dock_passive_fit.scad", DOCKS),
+    ):
+        for name in names:
+            expected[f"{folder}/{name}.stl"] = f"docs/cad/remixes/{filename}"
+    items = report.get("parts")
+    if (not isinstance(items, list) or len(items) != len(expected)
+            or {item.get("location") for item in items} != set(expected)):
+        raise ValueError("Missing or duplicate fit kit parts")
+    for item in items:
+        location = item["location"]
+        if item.get("source") != expected[location]:
+            raise ValueError(f"Wrong source for {location}")
+        source = root / expected[location]
+        mesh = output / location
+        if sha256(source.read_bytes()).hexdigest() != item.get("source_sha256"):
+            raise ValueError(f"SCAD source changed: {location}")
+        if sha256(mesh.read_bytes()).hexdigest() != item.get("mesh_sha256"):
+            raise ValueError(f"STL changed: {location}")
+        if (binary_stl_triangles(mesh) != item.get("triangles")
+                or closed_mesh_edges(mesh) != item.get("manifold_edges")):
+            raise ValueError(f"Mesh geometry mismatch: {location}")
+    return report
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=ROOT)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--openscad", default="openscad")
+    parser.add_argument("--verify", action="store_true",
+                        help="Validate existing mesh and source digests")
     args = parser.parse_args()
-    report = export_kit(
-        args.repo, output_dir=args.output, openscad=args.openscad,
-    )
+    if args.verify:
+        report = verify_fit_kit(args.repo, output_dir=args.output)
+    else:
+        report = export_kit(
+            args.repo, output_dir=args.output, openscad=args.openscad,
+        )
     print(json.dumps(report, indent=2))
 
 

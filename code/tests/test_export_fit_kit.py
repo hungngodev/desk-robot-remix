@@ -99,6 +99,7 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
+    assert source.verify_fit_kit(tmp_path, output_dir=rendered) == report
     assert all(item["units"] == "mm" for item in report["parts"])
     assert all(len(item["source_sha256"]) == 64 for item in report["parts"])
     assert all(len(item["mesh_sha256"]) == 64 for item in report["parts"])
@@ -106,6 +107,16 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     for item in report["parts"]:
         assert sha256((tmp_path / item["source"]).read_bytes()).hexdigest() == item["source_sha256"]
         assert sha256((rendered / item["location"]).read_bytes()).hexdigest() == item["mesh_sha256"]
+    source_path = tmp_path / report["parts"][0]["source"]
+    original_source = source_path.read_bytes()
+    source_path.write_bytes(original_source + b"// altered source\n")
+    with pytest.raises(ValueError, match="SCAD source changed"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    source_path.write_bytes(original_source)
+    mesh_path = rendered / "dock_stls/dock_rail_entry_coupon.stl"
+    mesh_path.write_bytes(mesh_path.read_bytes() + b"stale")
+    with pytest.raises(ValueError, match="STL changed"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
     for key in (
         "hardware_fit_verified", "full_printable_assembly_verified",
         "dock_charge_contacts_approved", "commercial_manufacture_authorized",

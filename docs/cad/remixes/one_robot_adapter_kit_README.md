@@ -14,9 +14,10 @@ three existing power, docking and jaw fit gauges to
 `docs/cad/remixes/fit_stls/`. Each STL is exported in deterministic binary
 format, checked for nonzero triangles and exact file length, and listed in
 `docs/cad/remixes/fit_kit_manifest.json`, including SHA256 digests of every
-binary STL and its source SCAD file and explicit millimeter units. Compare
-those digests with the files before slicing; they prove source provenance,
-not physical fit or licensing. A failed rebuild invalidates an earlier
+binary STL and its source SCAD file and explicit millimeter units. Run `python3 code/scripts/export_fit_kit.py --verify` before slicing. It
+checks every expected part, current SCAD and STL digests, and watertight mesh
+topology. Passing verifies source traceability, not actual part fit, license,
+dock power, charging or physical qualification. A failed rebuild invalidates an earlier
 manifest rather than presenting stale output as a fresh successful export.
 A render error publishes no new candidates. The manifest explicitly says physical fit, final assembly,
 electrical docking and commercial manufacturing remain unqualified. Source
