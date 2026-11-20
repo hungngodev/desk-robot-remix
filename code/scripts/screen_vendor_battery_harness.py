@@ -114,6 +114,13 @@ def evaluate(model: str, demand: dict, *, tray_mm=(68.0, 35.0, 14.0),
                     "minimum_continuous_cell_input_a")
     ):
         raise ValueError("No valid measured-load power preflight")
+    # Both inputs derive from the same peak/continuous 5V load and
+    # low-cell boost calculation. A sustained requirement larger than its
+    # peak is contradictory, not an alternative battery recommendation.
+    if demand["minimum_continuous_cell_input_a"] > demand[
+        "minimum_rated_cell_and_boost_input_a"
+    ]:
+        raise ValueError("Continuous battery demand exceeds peak demand")
     a, b, h = src["size_mm"]
     lt, wt, ht = tray_mm
     dims = (lt, wt, ht, wire_relief_mm, clearance_mm)

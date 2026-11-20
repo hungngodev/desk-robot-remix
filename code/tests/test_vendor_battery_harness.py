@@ -91,6 +91,26 @@ def test_bad_or_fake_load_receipts_are_rejected(invalid):
         module("screen_vendor_battery_harness").evaluate("LP103650", invalid)
 
 
+
+def test_forged_continuous_demand_above_peak_cannot_show_pack_as_adequate():
+    screen = module("screen_vendor_battery_harness")
+    # A profile assembled from inconsistent measurements must not say that
+    # a sourced 3.4 A pack is electrically adequate even on paper.
+    contradictory = {
+        "minimum_rated_cell_and_boost_input_a": 1.0,
+        "minimum_continuous_cell_input_a": 2.5,
+    }
+    with pytest.raises(ValueError, match="Continuous battery demand exceeds peak"):
+        screen.evaluate("NX-MGL00850-1S2P", contradictory,
+                        tray_mm=(90, 46, 25))
+    equal_peak = {**contradictory,
+                  "minimum_rated_cell_and_boost_input_a": 2.5}
+    result = screen.evaluate("NX-MGL00850-1S2P", equal_peak,
+                             tray_mm=(90, 46, 25))
+    assert result["pack_current_enough_on_paper"] is True
+    assert result["complete_power_path_safe_to_buy"] is False
+
+
 def test_unknown_pack_and_invalid_tray_dimensions_rejected():
     screen = module("screen_vendor_battery_harness")
     demand = module("power_preflight").size_5v_supply(1.0, .6)
