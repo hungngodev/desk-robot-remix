@@ -133,7 +133,7 @@ def register_readonly_context_routes(
         # consent. It remains separate from Coordinator motion authority.
         conversation = getattr(app.state.runtime, "conversation", None)
         if settings.fleet_text_sharing_enabled:
-            dialogue = getattr(conversation, "active_dialogue_timeline", None)
+            dialogue = getattr(conversation, "group_activity_timeline", None)
             if callable(dialogue):
                 activity.extend(dialogue(robot_id))
         ongoing = getattr(
