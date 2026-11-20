@@ -12,8 +12,10 @@ head_bridge_y=46;
 head_mount_x=39;
 head_mount_y=32;
 head_wire_clearance=20;
-tof_pcb_w=14;
-tof_pcb_h=18;
+// Selected pilot GY-530 (ElectroPeak SEN-19-006) nominal PCB outline.
+// Lens center, holes, connector overhang and true mounting height UNMEASURED.
+tof_pcb_w=10.5;
+tof_pcb_h=13.3;
 tof_lens_d=6;
 oled_pcb_x=27;
 oled_pcb_y=27;
