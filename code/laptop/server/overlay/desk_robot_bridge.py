@@ -758,7 +758,10 @@ def create_app():
                         or generation != interrupt_generation.get(device, 0)):
                     raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
                 await transmit(connection, text, frames)
-        return web.json_response({"transmitted": True, "physical_playback_verified": False})
+        return web.json_response({
+            "device_id": device, "transmitted": True,
+            "physical_playback_verified": False,
+        })
 
     async def interrupt(request):
         """Immediate authenticated head DMA flush without awaiting speaker_lock.
