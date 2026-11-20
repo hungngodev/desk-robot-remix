@@ -10,7 +10,6 @@ import json
 import time
 
 import serial
-
 from desk_robot.transport import expected_ack, validate_command
 
 
