@@ -5072,3 +5072,47 @@ async def test_proactive_context_stage_never_reads_private_memory_without_optin(
         assert memory.count("robot-01") == 1
     finally:
         await pet.close()
+
+
+@pytest.mark.parametrize("existing_cues,expected_hub_limit", [(9, 1), (10, 0), (12, 0)])
+async def test_proactive_context_skip_overfull_hub_budget(
+    fleet, tmp_path, existing_cues, expected_hub_limit,
+):
+    """Combined live job/attention context must not request a negative hub limit."""
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    limits = []
+
+    class Attention:
+        def timeline(self, robot_id, now):
+            assert robot_id == "robot-01"
+            return [
+                {"channel": "human_voice", "kind": "human_voice",
+                 "source": "authenticated_xiaozhi_vad"}
+                for _ in range(existing_cues)
+            ]
+
+    class StrictHub:
+        def interaction_timeline(self, robot_id, now, *, limit):
+            assert robot_id == "robot-01"
+            assert 1 <= limit <= 16
+            limits.append(limit)
+            return [{"channel": "sensor", "kind": "touch"}]
+
+        def discard_video(self, robot_id):
+            assert robot_id in {robot.id for robot in fleet.robots}
+
+    pet.attention = Attention()
+    pet.multimodal = SimpleNamespace(hub=StrictHub())
+    try:
+        result = await pet._load_proactive_context(
+            "robot-01", SceneChange("key", "A key appeared", 0.96),
+        )
+        assert result is not None
+        assert limits == ([expected_hub_limit] if expected_hub_limit else [])
+        assert result[1].interaction
+    finally:
+        await pet.close()

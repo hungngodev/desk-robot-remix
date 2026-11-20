@@ -2218,15 +2218,19 @@ class PetController:
             now = time.monotonic()
             ordered = getattr(hub, "interaction_timeline", None)
             if callable(ordered):
-                timeline = ordered(
-                    robot_id, now, limit=10 - len(activity) - len(continuity)
-                )
-                if not self.settings.voice_memory_tools_enabled:
-                    timeline = [
-                        item for item in timeline
-                        if not (item.get("channel") == "tool"
-                                and item.get("kind") == "memory_recall")
-                    ]
+                # Active jobs and current turn ownership take precedence over
+                # optional past events. The hub rejects limit <= 0; when
+                # those higher-priority cues fill this budget, skip the read
+                # instead of crashing the normal spontaneous activity path.
+                remaining = max(0, 10 - len(activity) - len(continuity))
+                if remaining:
+                    timeline = ordered(robot_id, now, limit=remaining)
+                    if not self.settings.voice_memory_tools_enabled:
+                        timeline = [
+                            item for item in timeline
+                            if not (item.get("channel") == "tool"
+                                    and item.get("kind") == "memory_recall")
+                        ]
             else:
                 hints = hub.recent_events(robot_id, now)
                 timeline = [
