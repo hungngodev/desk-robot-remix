@@ -453,7 +453,7 @@ async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypat
     monkeypatch.setattr(bridge, "wav_audio", lambda encoded: b"RIFF")
     monkeypatch.setattr(bridge, "encode_opus", lambda audio: [b"opus"])
     monkeypatch.setattr(bridge, "transmit", transmit)
-    await asyncio.gather(
+    receipts = await asyncio.gather(
         *(
             handlers["/speak"](
                 body_request({"device_id": device, "text": "hello", "wav_base64": ""})
@@ -461,6 +461,10 @@ async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypat
             for device in ids
         )
     )
+    assert [json.loads(receipt.text) for receipt in receipts] == [
+        {"device_id": device, "transmitted": True, "physical_playback_verified": False}
+        for device in ids
+    ]
     assert maximum == 1 and spoken == ids
     await session(body_request({"device_ids": ids, "enabled": False}))
     assert not bridge.lease_ids and not bridge.lease_stopping
