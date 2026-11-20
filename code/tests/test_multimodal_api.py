@@ -2184,3 +2184,48 @@ def test_battery_statement_and_memory_recall_never_trigger_unsolicited_fuel_gaug
             assert result.json()["tools"] == [
                 {"route": "power-status", "payload": {}}
             ]
+
+
+def test_status_and_aux_anecdotes_do_not_trigger_extra_live_tool_reads(
+    settings, tokens,
+):
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class OvereagerModel:
+        async def reply(self, history):
+            return json.dumps({"tools": [
+                {"route": "status"}, {"route": "aux-status"},
+            ]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=OvereagerModel()),
+        multimodal=None, start=noop, close=noop,
+    )
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        cases = (
+            ("I fixed your sensors yesterday", []),
+            ("Your safety status used to scare me", []),
+            ("We discussed your temperature last week", []),
+            ("I left a sensor on the desk, can you look at it?", []),
+            ("What is your safety status?", ["status"]),
+            ("Show your sensor readings", ["aux-status"]),
+            ("How are your sensors?", ["aux-status"]),
+            ("What is your status and temperature?", ["status", "aux-status"]),
+            ("What is your temperature and safety status?", ["status", "aux-status"]),
+            ("I moved the mug, could you check your humidity?", ["aux-status"]),
+        )
+        for transcript, expected in cases:
+            answer = client.post(url, headers=auth, json={"transcript": transcript})
+            assert answer.status_code == 200
+            assert [entry["route"] for entry in answer.json()["tools"]] == expected
+            assert answer.json()["motor_authorized"] is False

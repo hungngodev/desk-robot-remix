@@ -231,10 +231,42 @@ def register_readonly_planner_routes(
             ):
                 visual_question = True
                 break
-        status_question = any(cue in utterance for cue in (
-            "status", "safety", "fault", "health", "are your sensors",
-            "are you armed", "robot state", "motors running",
-        ))
+        # A background status or auxiliary poll requires the same actual
+        # human question/imperative as vision and fuel telemetry. Do not
+        # let an overeager planner turn "my sensors were broken yesterday"
+        # into a new live query. Coordinated short clauses remain requests.
+        def explicitly_requested(cues: tuple[str, ...],
+                                 elliptical: re.Pattern[str]) -> bool:
+            return any(
+                bool(is_request[i] and any(
+                    re.search(r"\b" + re.escape(cue) + r"\b", piece)
+                    for cue in cues
+                ))
+                or bool(i > 0 and any(is_request[:i])
+                        and elliptical.fullmatch(piece))
+                for i, piece in enumerate(clauses)
+            )
+
+        status_question = explicitly_requested(
+            ("status", "safety", "fault", "health", "are your sensors working",
+             "are you armed", "robot state", "motors running"),
+            re.compile(
+                r"^(?:(?:your|my|the) )?"
+                r"(?:status|safety|safety status|sensor status|"
+                r"robot status|faults?|health)\??$"
+            ),
+        )
+        aux_question = explicitly_requested(
+            ("sensor", "sensors", "temperature", "humidity", "pressure", "climate",
+             "proximity", "nfc", "sht41", "bmp280", "apds9960", "as5600",
+             "touch", "paw", "dock contact"),
+            re.compile(
+                r"^(?:(?:your|my|the) )?"
+                r"(?:sensors?|sensor readings?|temperature|humidity|"
+                r"pressure|climate|proximity|nfc|touch|paw|"
+                r"dock contacts?)\??$"
+            ),
+        )
         pickup_question = (
             any(cue in utterance for cue in (
                 "pickup", "pick up", "picked up", "grasp", "grasped",
@@ -272,13 +304,7 @@ def register_readonly_planner_routes(
                 continue
             if route == "interaction-context" and not interaction_question:
                 continue
-            if route == "aux-status" and not any(
-                cue in utterance for cue in (
-                    "sensor", "temperature", "humidity", "pressure",
-                    "climate", "proximity", "nfc", "sht41", "bmp280",
-                    "apds9960", "as5600", "touch", "paw", "dock contact",
-                )
-            ):
+            if route == "aux-status" and not aux_question:
                 continue
             if route == "voice-context" and (
                 not settings.voice_memory_tools_enabled or not memory_question
