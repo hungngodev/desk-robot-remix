@@ -1,6 +1,12 @@
 """The attention ledger is volatile context, never a second motion or voice owner."""
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 from desk_robot.attention import AttentionLedger
 from desk_robot.brain_context import compose_brain_context
+from desk_robot.pet import PetController
+from desk_robot.runtime import Runtime
 
 
 def test_concurrent_song_and_motion_survive_sensor_events_without_fixed_speech():
@@ -189,3 +195,36 @@ async def test_cancelled_conversation_marks_attention_interrupted_not_played(set
     assert "Earlier speech transmitted" not in ended[0]["content"]
     assert conversation.active_dialogue_timeline(ids[0]) == []
     release.set()
+
+
+def test_pet_sensor_producer_uses_same_attention_without_second_camera_owner():
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "Still discussing the song", 1)
+    pet = PetController.__new__(PetController)
+    pet.attention = ledger
+    pet.multimodal = None
+    pet._notify_sensor("pet", "handling_tilt")
+    # Only a history cue, no speech, drive or camera request was produced.
+    transcript = ledger.timeline("pet", __import__("time").monotonic())
+    assert "handling_tilt" in transcript[0]["content"]
+    assert transcript[0]["motor_authorized"] is False
+
+
+@pytest.mark.asyncio
+async def test_authenticated_runtime_voice_edge_fences_attention_speech():
+    ledger = AttentionLedger(["pet"])
+    runtime = Runtime.__new__(Runtime)
+    runtime._closed = False
+    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id="pet")])
+    runtime.multimodal = None
+    runtime.attention = ledger
+    runtime._preempt_audio_floor = AsyncMock()
+    runtime._stop_autonomous_roaming_for_voice = AsyncMock()
+    await runtime._on_voice_interrupt("pet", "speech_start")
+    assert ledger._state("pet").human_turns == 1
+    assert ledger._state("pet").voice_active is True
+    assert not ledger.sent("pet", "A delayed obsolete response", 0)
+    await runtime._on_voice_interrupt("pet", "speech_end")
+    assert ledger._state("pet").voice_active is False
+    runtime._preempt_audio_floor.assert_awaited_once()
+    runtime._stop_autonomous_roaming_for_voice.assert_awaited_once()
