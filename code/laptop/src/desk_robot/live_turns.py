@@ -152,6 +152,8 @@ class LiveTurns:
         return FlushPlayback(self._epoch, reason, discarded)
 
     def set_connected(self, connected: bool) -> FlushPlayback | None:
+        if type(connected) is not bool:
+            raise ValueError("Connection state must be a boolean")
         if connected == self._connected:
             return None
         self._connected = connected
@@ -307,7 +309,9 @@ class LiveTurns:
         The adapter must keep model busy until playback is complete. This method
         alone does not mark generation or device playback idle.
         """
-        if epoch != self._pending_observation:
+        if (type(epoch) is not int or self._pending_observation is None
+                or not self.is_current(epoch)
+                or epoch != self._pending_observation):
             return False
         self._pending_observation = None
         return True

@@ -399,3 +399,30 @@ def test_busy_and_quiet_flags_reject_nonboolean_values(invalid):
     value.enable_proactivity(now=0)
     offer(value, b"fresh", captured_at=1)
     assert value.poll_observation(now=1) is not None
+
+
+def test_absent_observation_never_reports_successful_completion():
+    value = connected(heartbeat_interval=1)
+    # No real observation has ever been acquired. A missing identity is not
+    # permission to report a successful completed operation.
+    assert not value.finish_observation(None)
+    assert not value.finish_observation(value.epoch)
+    value.enable_proactivity(now=0)
+    offer(value, b"fresh", captured_at=1)
+    request = value.poll_observation(now=1)
+    assert request is not None
+    assert not value.finish_observation(None)
+    assert value.finish_observation(request.epoch)
+    assert not value.finish_observation(request.epoch)
+    assert not value.finish_observation(None)
+
+
+@pytest.mark.parametrize("invalid", [None, 0, 1, "", "false", []])
+def test_connection_state_rejects_nonboolean_values(invalid):
+    value = connected()
+    epoch = value.epoch
+    connection_epoch = value.connection_epoch
+    with pytest.raises(ValueError, match="boolean"):
+        value.set_connected(invalid)
+    assert value.is_current(epoch)
+    assert value.connection_epoch == connection_epoch
