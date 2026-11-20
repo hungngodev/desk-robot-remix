@@ -732,9 +732,11 @@ def create_app():
                 await asyncio.shield(lease_cleanup_task)
         else:
             raise ValueError("enabled must be a boolean")
-        return web.json_response(
-            {"enabled": body["enabled"], "expires_in_seconds": 305 if body["enabled"] else 0}
-        )
+        return web.json_response({
+            "device_ids": sorted(selected),
+            "enabled": body["enabled"],
+            "expires_in_seconds": 305 if body["enabled"] else 0,
+        })
 
     async def speak(request):
         body = await request.json()
