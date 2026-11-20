@@ -529,21 +529,23 @@ class Conversation:
                 # Reuse the existing per-pet Mac timeline, not a second
                 # camera, microphone or sensor event owner. This snapshot
                 # may change between turns in the same group conversation.
-                if (self.multimodal is None
-                        or not self.settings.voice_vision_tools_enabled
-                        or not self.settings.fleet_text_sharing_enabled):
+                if not self.settings.fleet_text_sharing_enabled:
                     return ""
-                # An active physical job is ongoing context even if bursty
-                # camera and sensor events compete for the fixed cue budget.
-                # This NEVER authorizes the model to issue motion commands.
+                # Operator-owned physical activity is not camera evidence.
+                # Preserve it even when vision consent is disabled, without
+                # enabling camera or sensor history through that consent gate.
+                # A job never authorizes movement or certifies completion.
                 jobs = self.coordinator_jobs
                 activity = (
                     active_job_timeline(jobs.values(), robot_id)
                     if isinstance(jobs, dict) else []
                 )
-                timeline = self.multimodal.hub.interaction_timeline(
-                    robot_id, time.monotonic(), limit=10 - len(activity)
-                )
+                timeline = []
+                if (self.multimodal is not None
+                        and self.settings.voice_vision_tools_enabled):
+                    timeline = self.multimodal.hub.interaction_timeline(
+                        robot_id, time.monotonic(), limit=10 - len(activity)
+                    )
                 timeline.extend(activity)
                 if not self.settings.voice_memory_tools_enabled:
                     timeline = [
