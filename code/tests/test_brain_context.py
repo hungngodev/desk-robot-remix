@@ -1186,3 +1186,69 @@ def test_running_job_survives_multimodal_burst_but_not_safety_priority():
     assert len(result) <= 400
     # The activity is conversational context only; it cannot clear the fault.
     assert "do not drive, reverse, rearm" in result
+
+
+async def test_group_conversation_refreshes_live_cues_between_speakers(settings):
+    """A later speaker sees newly observed handling without a scripted reply."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    ids = [robot.id for robot in settings.robots]
+    assert len(ids) >= 2
+    hub = CameraFrameHub(ids)
+    seen = []
+
+    class GroupChat:
+        async def reply(self, history):
+            seen.append(history)
+            if len(seen) == 1:
+                hub.notify(ids[1], "handling_tilt", time.monotonic())
+                hub.remember_tool(
+                    ids[1], "memory_recall",
+                    "PRIVATE_PHRASE_NOT_CONSENTED", time.monotonic(),
+                )
+            return "I can keep discussing our song."
+
+    dialogue = Conversation(settings, GroupChat(), SimulatedSpeaker())
+    dialogue.multimodal = SimpleNamespace(hub=hub)
+    result = await dialogue.run(
+        ids[:2], "Sing while we go toward the desk edge", utterances=2,
+    )
+    assert len(result) == 2
+    first_prompt = str(seen[0])
+    second_prompt = str(seen[1])
+    assert "handling_tilt" not in first_prompt
+    assert "Sing while we go toward the desk edge" in second_prompt
+    assert "Physical sensor edge: handling_tilt" in second_prompt
+    assert "PRIVATE_PHRASE_NOT_CONSENTED" not in second_prompt
+    assert not any(
+        "New per-pet live observations" in str(message)
+        for messages in dialogue.histories.values() for message in messages
+    )
+
+
+async def test_group_conversation_does_not_repeat_unchanged_live_context(settings):
+    """An unchanging sensor state must not create a synthetic new user turn."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = True
+    ids = [robot.id for robot in settings.robots]
+    hub = CameraFrameHub(ids)
+    now = time.monotonic()
+    hub.notify(ids[1], "touch_tap", now)
+    seen = []
+
+    class GroupChat:
+        async def reply(self, history):
+            seen.append(history)
+            return "Let's keep the conversation flowing."
+
+    dialogue = Conversation(settings, GroupChat(), SimulatedSpeaker())
+    dialogue.multimodal = SimpleNamespace(hub=hub)
+    await dialogue.run(ids[:2], "Continue our story", utterances=2)
+    assert "Physical sensor edge: touch_tap" in str(seen[1])
+    assert not any(
+        "New per-pet live observations" in str(message)
+        for message in seen[1]
+    )
