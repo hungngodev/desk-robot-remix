@@ -321,8 +321,14 @@ class KokoroHeadSpeaker:
         # decoder STOP before releasing the shared speaker floor.
         if permission_check is not None and not permission_check():
             raise RuntimeError("Speech permission revoked during transmission")
-        if result.get("transmitted") is not True:
-            raise RuntimeError("Speech transmission to head failed")
+        if (not isinstance(result, dict)
+                or result.get("device_id") != robot.device_id
+                or result.get("transmitted") is not True
+                or result.get("physical_playback_verified") is not False):
+            # A bridge receipt without the selected identity or with a
+            # fabricated acoustic ACK cannot certify this robot received
+            # its queued Opus. The session owner will request STOP.
+            raise RuntimeError("Speech transmission receipt missing matching head identity")
 
 
 class Conversation:
