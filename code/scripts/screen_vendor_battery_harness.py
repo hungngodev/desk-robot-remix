@@ -112,7 +112,7 @@ def cad_tray_mm(source: Path = _TRAY_CAD) -> tuple[float, float, float]:
     sizes = []
     for axis in ("l", "w", "h"):
         matches = re.findall(
-            rf"^power_{axis}\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)\\s*;",
+            rf"^power_{axis}\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*;",
             text, flags=re.MULTILINE,
         )
         if len(matches) != 1:
