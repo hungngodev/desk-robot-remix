@@ -398,6 +398,39 @@ class Conversation:
             "physical_action_verified": False,
         }]
 
+    @property
+    def _dialogue_goals(self) -> dict[str, tuple[int, str]]:
+        """Compatibility projection of the ONE existing group activity owner."""
+        task = self.active
+        if task is None or task.done() or task.cancelling():
+            return {}
+        return {
+            robot_id: (record["epoch"], record["topic"][:90])
+            for robot_id, record in self._group_activity.items()
+            if record["status"] in {"waiting", "speaking"}
+        }
+
+    def active_dialogue_timeline(self, robot_id: str) -> list[dict]:
+        """Current dialogue goal view for older Mac context consumers.
+
+        Both views derive from group_activity_timeline and the same task.
+        No second mutable goal register or speaker session is introduced.
+        """
+        task = self.active
+        if task is None or task.done() or task.cancelling():
+            return []
+        active = self.group_activity_timeline(robot_id)
+        if not active or active[0]["status"] not in {"waiting", "speaking"}:
+            return []
+        return [{
+            "channel": "mac_activity", "kind": "dialogue_goal",
+            "source": "mac_conversation_active_session",
+            "topic": active[0]["topic"][:90], "status": "active",
+            "physical_action_verified": False,
+            "audio_playback_verified": False,
+            "motor_authorized": False,
+        }]
+
     async def _say_with_permission(
         self, robot: RobotConfig, text: str,
         permission_check: Callable[[], bool] | None,
