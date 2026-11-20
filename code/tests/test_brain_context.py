@@ -1394,3 +1394,64 @@ async def test_group_activity_does_not_require_camera_consent(settings):
     prompts.clear()
     await conversation.run(ids[:2], "Keep singing", utterances=2)
     assert "Mac operator-submitted exploration job" not in prompts[1]
+
+
+async def test_group_dialogue_expires_initial_live_evidence(settings):
+    """A past tilt must not become permanent 'currently tilted' dialogue."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    ids = [robot.id for robot in settings.robots]
+    hub = CameraFrameHub(ids)
+    hub.notify(ids[0], "handling_tilt", time.monotonic())
+    prompts = []
+
+    class StoryChat:
+        async def reply(self, history):
+            prompts.append(list(history))
+            if len(prompts) == 1:
+                # Simulate an event aging out before this pet speaks again.
+                hub.clear(ids[0])
+            return "Let's continue the same story."
+
+    dialogue = Conversation(settings, StoryChat(), SimulatedSpeaker())
+    dialogue.multimodal = SimpleNamespace(hub=hub)
+    turns = await dialogue.run(
+        ids[:2], "Keep telling our story", utterances=3,
+    )
+    assert len(turns) == 3
+    assert "Physical sensor edge: handling_tilt" in str(prompts[0])
+    assert "handling_tilt" not in str(prompts[1])
+    assert "handling_tilt" not in str(prompts[2])
+    assert "Keep telling our story" in str(prompts[2])
+    assert "handling_tilt" not in str(dialogue.histories)
+    assert not any(
+        "Current per-pet observations" in str(message)
+        for messages in dialogue.histories.values() for message in messages
+    )
+
+
+async def test_group_streaming_receives_transient_live_evidence(settings):
+    """Streaming speech has the same fresh evidence fence as normal replies."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = True
+    ids = [robot.id for robot in settings.robots]
+    hub = CameraFrameHub(ids)
+    hub.notify(ids[0], "touch_tap", time.monotonic())
+    prompts = []
+
+    class StreamingChat:
+        async def stream_reply(self, history):
+            prompts.append(list(history))
+            if len(prompts) == 1:
+                hub.clear(ids[0])
+            yield "I can keep talking."
+
+    dialogue = Conversation(settings, StreamingChat(), SimulatedSpeaker())
+    dialogue.multimodal = SimpleNamespace(hub=hub)
+    await dialogue.run(ids[:2], "Tell me a story", utterances=3)
+    assert "Physical sensor edge: touch_tap" in str(prompts[0])
+    assert "touch_tap" not in str(prompts[2])
+    assert "Tell me a story" in str(prompts[2])
