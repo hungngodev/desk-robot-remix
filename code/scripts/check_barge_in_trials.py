@@ -28,7 +28,9 @@ def evaluate(records: list[dict]) -> dict:
     on_time = 0
     understood = 0
     volumes, positions, loads, speakers, turns = set(), set(), set(), set(), set()
-    firmware_revisions, audio_configs, placements = set(), set(), set()
+    firmware_revisions, audio_configs, placements, robot_ids = (
+        set(), set(), set(), set()
+    )
     for r in human:
         volume = r.get("volume")
         if volume not in ("low", "medium", "high"):
@@ -66,13 +68,17 @@ def evaluate(records: list[dict]) -> dict:
         if not 45 <= distance <= 55 or not 0 <= noise <= 100:
             raise ValueError("Record 50 cm speaking distance and measured room noise")
 
-        for label in ("firmware_commit", "audio_config_id", "mic_speaker_placement_id"):
+        for label in (
+            "firmware_commit", "audio_config_id", "mic_speaker_placement_id",
+            "robot_id",
+        ):
             value = r.get(label)
             if type(value) is not str or not value.strip() or len(value) > 128:
                 raise ValueError(f"Missing physical trial provenance: {label}")
         firmware_revisions.add(r["firmware_commit"])
         audio_configs.add(r["audio_config_id"])
         placements.add(r["mic_speaker_placement_id"])
+        robot_ids.add(r["robot_id"])
         captured = r.get("new_utterance_captured")
         correct = r.get("new_intent_correct")
         beginning = r.get("utterance_beginning_intelligible")
@@ -100,10 +106,20 @@ def evaluate(records: list[dict]) -> dict:
     # AEC settings or microphone/speaker geometry across its twenty trials.
     # Those require separate complete acoustic trial sets.
     if any(len(values) != 1 for values in (
-            firmware_revisions, audio_configs, placements)):
+            firmware_revisions, audio_configs, placements, robot_ids)):
         raise ValueError("Do not mix firmware, audio config or physical mounting trials")
 
     control = alone[0]
+    # The ten-minute echo-only control must run on the SAME robot and
+    # flashed AEC setup as the human barge trials, not a quieter second unit.
+    for field in (
+        "robot_id", "firmware_commit", "audio_config_id",
+        "mic_speaker_placement_id",
+    ):
+        if control.get(field) != human[0][field]:
+            raise ValueError(
+                "Robot-only control must match human trial robot and setup"
+            )
     duration = _number(control.get("duration_seconds"), "robot-only duration")
     echoes = control.get("self_interruptions")
     if duration < 600 or type(echoes) is not int or echoes < 0:
