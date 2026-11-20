@@ -170,24 +170,33 @@ def register_readonly_planner_routes(
         # request. Substring-only checks interpreted ordinary "see you later"
         # and "I left a photo on the desk" as permission to look. Keep
         # genuine questions, imperatives and compound camera/battery requests.
-        asks_to_observe = (
-            re.match(
+        # A natural request may follow a statement in the same ASR turn.
+        # Require the observation verb and visual subject in ONE clause;
+        # otherwise "I showed a photo, and check your battery" would grant
+        # a camera call based on the unrelated preceding photo mention.
+        visual_question = False
+        for clause in re.split(r",|\b(?:and|then|also)\b", utterance):
+            piece = clause.strip()
+            if (re.match(
                 r"^(?:(?:hey [a-z]+[, ]+|please )*)"
                 r"(?:what|where|how|can|could|would|do|does|did|is|are|"
                 r"look|inspect|show|describe|count|check|tell me|"
-                r"take a look|see if|see whether)\b", utterance,
-            ) is not None
-            and re.match(r"^(?:please )?look forward\b", utterance) is None
-        )
-        visual_question = asks_to_observe and any(
-            re.search(r"\b" + re.escape(cue) + r"\b", utterance)
-            for cue in (
-                "see", "look", "inspect", "camera", "picture", "photo",
-                "image", "visible", "on the desk", "on my desk",
-                "on the table", "object", "in front of", "what color",
-                "what colour", "what shape", "what size", "how many",
-            )
-        )
+                r"take a look|see if|see whether)\b", piece,
+            ) is None or re.match(
+                r"^(?:please )?look forward\b", piece
+            ) is not None):
+                continue
+            if any(
+                re.search(r"\b" + re.escape(cue) + r"\b", piece)
+                for cue in (
+                    "see", "look", "inspect", "camera", "picture", "photo",
+                    "image", "visible", "on the desk", "on my desk",
+                    "on the table", "object", "in front of", "what color",
+                    "what colour", "what shape", "what size", "how many",
+                )
+            ):
+                visual_question = True
+                break
         status_question = any(cue in utterance for cue in (
             "status", "safety", "fault", "health", "are your sensors",
             "are you armed", "robot state", "motors running",

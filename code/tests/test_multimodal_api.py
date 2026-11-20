@@ -2071,6 +2071,7 @@ def test_readonly_planner_does_not_treat_casual_visual_words_as_camera_permissio
             "I left a photo on the desk",
             "Please look forward to tomorrow",
             "We should inspect that later",
+            "I showed you a photo, and can you check your battery?",
         ):
             reply = client.post(url, headers=headers, json={"transcript": transcript})
             assert reply.status_code == 200
@@ -2080,6 +2081,8 @@ def test_readonly_planner_does_not_treat_casual_visual_words_as_camera_permissio
             "Please look at the mug",
             "Could you inspect the photo?",
             "See if there is a key in front of you",
+            "I put the mug down, can you look at it?",
+            "I just moved the key and could you see it now?",
         ):
             reply = client.post(url, headers=headers, json={"transcript": transcript})
             assert reply.status_code == 200
