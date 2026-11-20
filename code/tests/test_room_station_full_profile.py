@@ -61,6 +61,26 @@ def test_room_station_power_budget_is_machine_readable_and_fail_closed():
     assert power["physical_release"].startswith("HOLD")
 
 
+
+def test_bme688_gas_conversion_never_blocks_radar_uart_or_fakes_sample_age():
+    # The pinned Adafruit_BME680 2.0.5 API supports an asynchronous
+    # conversion; this is a source contract until physical Feather trials.
+    code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    assert "bme.performReading()" not in code
+    assert "bme_pending = bme.beginReading() != 0U;" in code
+    assert "const int remaining = bme.remainingReadingMillis();" in code
+    assert "if (remaining > Adafruit_BME680::reading_complete) return;" in code
+    assert "remaining != Adafruit_BME680::reading_complete || !bme.endReading()" in code
+    assert "bme_step(now);" in code
+    assert code.index("radar.read();") < code.index("bme_step(now);")
+    report = code.split("void bme_observation(", 1)[1].split("void radar_observation", 1)[0]
+    assert "bme.beginReading()" not in report
+    assert "bme.endReading()" not in report
+    assert "const bool fresh = bme_valid && now - bme_sample_ms <= kBmeStaleMs;" in report
+    assert 'Serial.print(bme_sample_ms);' in report
+    assert "constexpr uint32_t kBmeStaleMs = 3000;" in code
+
+
 def test_ci_builds_complete_station_not_just_sensor_disabled_stub():
     ci = (ROOT / ".github/workflows/host-verification.yml").read_text()
     assert "pio run -d code/firmware/room_station -e feather_nrf52840_room_full" in ci

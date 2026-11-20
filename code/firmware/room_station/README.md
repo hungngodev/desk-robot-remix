@@ -74,6 +74,18 @@ Panasonic AMG8833 product data, ncmreynolds LD2410 v0.2.2 protocol notes, and
 the official Feather nRF52840 power management guide. The same URLs are stored
 under `room_pod.power_reference.references` in the canonical hardware plan.
 
+## Nonblocking shared radar and BME688 sampling
+
+The pinned Adafruit BME680 2.0.5 source uses `beginReading()` and
+`remainingReadingMillis()` to avoid holding the Feather loop during its
+150 ms gas-heater cycle. The firmware calls `endReading()` only after the
+conversion reports completion; the LD2410C UART remains polled independently.
+The USB frame timestamps the last successfully collected BME sample, and
+the Mac rejects a sample older than 3 seconds. The source regression checks
+this producer contract but does not prove actual UART packet loss, gas warmup,
+electrical fit, thermal accuracy or a physical station trial. Upstream:
+https://github.com/adafruit/Adafruit_BME680/tree/2.0.5
+
 ## Real build and test sequence
 
 1. Use the existing owned Feather alone on USB. Build with

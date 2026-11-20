@@ -22,6 +22,7 @@
 namespace {
 constexpr uint32_t kReportMs = 1000;
 constexpr uint32_t kScdStaleMs = 8500;
+constexpr uint32_t kBmeStaleMs = 3000;
 constexpr uint32_t kBootWaitMs = 1200;
 constexpr uint8_t kBmePrimary = 0x77;
 constexpr uint8_t kBmeAlternate = 0x76;
@@ -36,6 +37,8 @@ ld2410 radar;
 bool scd_started = false;
 bool scd_valid = false;
 bool bme_started = false;
+bool bme_pending = false, bme_valid = false;
+uint32_t bme_last_start_ms = 0, bme_sample_ms = 0;
 bool amg_started = false;
 uint16_t co2_ppm = 0;
 float scd_temp = 0, scd_humidity = 0;
@@ -81,23 +84,45 @@ void scd_observation(uint32_t now) {
   }
   Serial.print('}');
 }
-void bme_observation(uint32_t now) {
-  bool valid = false;
-  if (bme_started && bme.performReading()) {
-    valid = finite_temperature(bme.temperature)
-            && isfinite(bme.humidity) && bme.humidity >= 0
-            && bme.humidity <= 100
-            && isfinite(bme.pressure) && bme.pressure > 0
-            && isfinite(bme.gas_resistance) && bme.gas_resistance >= 0;
+// Pinned Adafruit BME680 v2.0.5: beginReading starts a forced conversion;
+// remainingReadingMillis is nonblocking, and endReading must run only at
+// reading_complete. The LD2410C UART must remain serviced while the
+// BME688 gas heater and oversampling complete.
+void bme_step(uint32_t now) {
+  if (!bme_started) return;
+  if (!bme_pending) {
+    if (bme_last_start_ms != 0 && now - bme_last_start_ms < kReportMs)
+      return;
+    bme_last_start_ms = now;
+    bme_pending = bme.beginReading() != 0U;
+    if (!bme_pending) bme_valid = false;
+    return;
   }
-  Serial.print(F("\"bme688\":{\"valid\":")); jsbool(valid);
-  if (valid) {
-    Serial.print(F(",\"sample_ms\":")); Serial.print(now);
+  const int remaining = bme.remainingReadingMillis();
+  if (remaining > Adafruit_BME680::reading_complete) return;
+  bme_pending = false;
+  if (remaining != Adafruit_BME680::reading_complete || !bme.endReading()) {
+    bme_valid = false;
+    return;
+  }
+  bme_valid = finite_temperature(bme.temperature)
+      && isfinite(bme.humidity) && bme.humidity >= 0 && bme.humidity <= 100
+      && isfinite(bme.pressure) && bme.pressure > 0
+      && isfinite(bme.gas_resistance) && bme.gas_resistance >= 0;
+  if (bme_valid) bme_sample_ms = now;
+}
+void bme_observation(uint32_t now) {
+  // Serial reporting never starts or waits for a gas conversion.
+  // Preserve the actual last completed sample time, not the report time.
+  const bool fresh = bme_valid && now - bme_sample_ms <= kBmeStaleMs;
+  Serial.print(F("\"bme688\":{\"valid\":")); jsbool(fresh);
+  if (fresh) {
+    Serial.print(F(",\"sample_ms\":")); Serial.print(bme_sample_ms);
     Serial.print(F(",\"temp_c\":")); number(bme.temperature);
     Serial.print(F(",\"humidity_pct\":")); number(bme.humidity);
     Serial.print(F(",\"pressure_pa\":")); number(bme.pressure, 0);
     Serial.print(F(",\"gas_ohms\":")); number(bme.gas_resistance, 0);
-    // Gas resistance is NOT a calibrated VOC ppm or indoor air quality index.
+    // Gas resistance is raw resistance, never calibrated VOC or AQI.
   }
   Serial.print('}');
 }
@@ -209,6 +234,7 @@ void setup() {
 void loop() {
   radar.read();
   const uint32_t now = millis();
+  bme_step(now); // no heater-time sleep; preserve 256000 baud radar service
   if (now - last_report_ms >= kReportMs) {
     last_report_ms = now;
     report(now);
