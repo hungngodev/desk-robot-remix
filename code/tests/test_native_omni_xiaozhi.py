@@ -5750,7 +5750,7 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
         conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
         model="openbmb/MiniCPM-o-4_5", token="p" * 32,
     )
-    session._base_instructions = "Pip is playful. No motor authorization."
+    session._base_instructions = "Pip is playful. No motor authorization." + "X" * 1600
     session._context_instructions = session._base_instructions
     session.connected = True
     session._live_transcript_enabled = True
@@ -5818,6 +5818,7 @@ async def test_native_duplex_receives_live_mac_tool_context_without_new_audio_ow
         assert sent[0]["type"] == "session.update"
         context = sent[0]["session"]["instructions"]
         assert "Pip is playful" in context
+        assert context.startswith(session._base_instructions[:1500])
         assert "petting_zone" in context
         assert "exploration job aaaaaaaaaaaa is running" in context
         assert "not movement authorization or verified motion" in context
