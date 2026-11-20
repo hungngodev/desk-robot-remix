@@ -8200,3 +8200,64 @@ async def test_native_failed_local_tool_is_explicitly_unavailable_in_compound_fa
     packed = module.pack_grounded_facts(facts)
     assert "mac_tool_execution_unavailable" in packed
     assert "wroom_fuel_gauge" in packed
+
+
+async def test_native_overcapacity_facts_speak_explicit_limitation_instead_of_silence(native):
+    import io
+    import wave
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    session._voice_persona = "Pip"
+    async def live_context(*args, **kwargs):
+        return ""
+    session._current_tool_scene = live_context
+    wav_data = io.BytesIO()
+    with wave.open(wav_data, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(24000)
+        output.writeframes(b"\x00" * 4800)
+    encoded = base64.b64encode(wav_data.getvalue()).decode()
+    sent = []
+
+    class Response:
+        status = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+        async def json(self):
+            return {"choices": [
+                {"message": {"content": "I cannot fit all those results."}},
+                {"message": {"audio": {"data": encoded}}},
+            ]}
+
+    class Http:
+        def post(self, url, *, json, timeout):
+            sent.append(json)
+            return Response()
+
+    # A large immutable measurement array cannot be shortened as model text.
+    facts = [{"source": "raw_measurements", "values": list(range(600))}]
+    with pytest.raises(ValueError, match="Complete tool facts"):
+        module.pack_grounded_facts(facts)
+    await session._speak_tool_results(
+        Http(), "Tell me every measurement", facts, 0, 0,
+    )
+    assert len(sent) == 1
+    text_prompt = sent[0]["messages"][1]["content"]
+    assert "complete_tool_results_over_capacity" in text_prompt
+    assert '"complete_answer_available":false' in text_prompt
+    assert '"tool_measurements_included":false' in text_prompt
+    assert '"values":' not in text_prompt
+    assert session.native_tool_audio_queued == 1
+    assert session.outgoing.get_nowait()[1] == b"\x00" * 4800
+    assert session.outgoing.get_nowait()[1] is None
