@@ -125,6 +125,12 @@ def evaluate(records: list[dict]) -> dict:
     if duration < 600 or type(echoes) is not int or echoes < 0:
         raise ValueError("Need 600s real robot-only control and self-interrupt count")
     return {
+        # Bind the result to the one measured assembly; never present a
+        # twenty-trial pass as a generic fleet or firmware certification.
+        "robot_id": human[0]["robot_id"],
+        "firmware_commit": human[0]["firmware_commit"],
+        "audio_config_id": human[0]["audio_config_id"],
+        "mic_speaker_placement_id": human[0]["mic_speaker_placement_id"],
         "human_trials": 20,
         "audible_stops_within_500ms": on_time,
         "new_intents_understood": understood,
