@@ -201,18 +201,6 @@ def compose_brain_context(
                     f"Mac operator-submitted {job_type} job is {status}; "
                     "completion unverified; WROOM owns motion safety"
                 )
-        elif channel == "mac_activity" and kind == "dialogue_goal":
-            topic = item.get("topic")
-            if (item.get("source") == "mac_conversation_active_session"
-                    and item.get("status") == "active"
-                    and item.get("physical_action_verified") is False
-                    and item.get("audio_playback_verified") is False
-                    and item.get("motor_authorized") is False
-                    and type(topic) is str and 0 < len(topic) <= 90):
-                phrase = (
-                    "Mac dialogue ongoing (playback unverified; no motor "
-                    "permission): " + _clean(topic, limit=70)
-                )
         elif channel == "mac_activity" and kind == "group_conversation":
             status, topic = item.get("status"), item.get("topic")
             epoch, sent = item.get("activity_epoch"), item.get("sent_segments")
@@ -332,7 +320,7 @@ def compose_brain_context(
             priority = (
                 -1 if channel == "sensor" and kind == "safety_fault"
                 else 0.75 if channel == "mac_activity"
-                and kind == "dialogue_goal" else priorities[channel]
+                and kind == "group_conversation" else priorities[channel]
             )
             if channel == "human_transcript":
                 priority = 0 if heard_count == 0 else 5
