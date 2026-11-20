@@ -1,5 +1,7 @@
 """Real purchasing approval cannot use fake or unscoped trial receipts."""
+import base64
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -16,21 +18,38 @@ spec.loader.exec_module(release)
 
 SHA = "a" * 40
 URL = ("https://github.com/hungngodev/desk-robot-remix/blob/"
-       + SHA + "/docs/records/one-unit-physical-trials.csv")
+       + SHA + "/docs/records/release-evidence.json")
 
 
 def receipt(scope, gate):
     return {
+        "record_id": scope + ":" + gate,
         "result": "pass", "source_sha": SHA, "scope": scope, "gate": gate,
         "reviewer": "real_review_account", "tested_on": "2026-11-18",
+        "device_revision": "inspected_rev_A",
+        "measurement": {"observed": "trial for " + scope + "." + gate},
         "evidence_url": URL,
     }
 
 
-def lookup(url):
+def lookup(url, records=None):
     assert url.endswith("/contents/docs/records/"
-                        "one-unit-physical-trials.csv?ref=" + SHA)
-    return {"type": "file", "size": 1000}
+                        "release-evidence.json?ref=" + SHA)
+    if records is None:
+        records = [receipt("part:imu", gate) for gate in release.PART_GATES]
+        records += [receipt("system", gate) for gate in release.SYSTEM_GATES]
+        records.append(receipt("system", release.FIRST_ROBOT_ROOM_GATE))
+        for ident in release.SUPPLEMENTAL_DECISIONS:
+            scope = "supplemental:" + ident
+            records += [
+                receipt(scope, "decision_receipt"),
+                receipt(scope, "alternative_or_parent_receipt"),
+            ]
+    raw = json.dumps({"receipts": records}).encode("utf-8")
+    return {
+        "type": "file", "size": len(raw), "encoding": "base64",
+        "content": base64.b64encode(raw).decode("ascii"),
+    }
 
 
 def test_scoped_immutable_actual_records_are_required():
@@ -72,6 +91,52 @@ def test_release_receipt_rejects_fake_sha_scope_and_origin(mutated):
     evidence["parts"]["imu"][release.PART_GATES[0]].update(mutated)
     errors = release.audit_release(evidence, SHA, lookup)
     assert errors
+
+
+@pytest.mark.parametrize("changed", [
+    {"scope": "part:foreign"},
+    {"gate": "unrelated_gate"},
+    {"source_sha": "b" * 40},
+    {"reviewer": "forged_reviewer"},
+    {"tested_on": "2026-11-19"},
+    {"device_revision": "another_board"},
+    {"record_id": "foreign_receipt"},
+    {"measurement": {"observed": "invented trial"}},
+])
+def test_immutable_scoped_source_rejects_forged_local_claim(changed):
+    gate = release.PART_GATES[0]
+    original = receipt("part:imu", gate)
+    assert release.verified_scoped_record(original, SHA, lookup)
+    assert not release.verified_scoped_record(
+        {**original, **changed}, SHA, lookup
+    )
+
+
+def test_existing_file_without_claim_cannot_release_purchase():
+    gate = release.PART_GATES[0]
+    original = receipt("part:imu", gate)
+
+    def unrelated(url):
+        return lookup(url, records=[receipt("part:unrelated", gate)])
+
+    assert not release.verified_scoped_record(original, SHA, unrelated)
+    errors = release.audit_release(
+        {"parts": {"imu": {gate: original}}}, SHA, unrelated,
+    )
+    assert any("immutable scoped record" in error for error in errors)
+
+
+def test_duplicate_and_missing_measurement_records_fail_closed():
+    gate = release.PART_GATES[0]
+    original = receipt("part:imu", gate)
+    for records in (
+        [original, original],
+        [dict(original, measurement={})],
+        [dict(original, record_id="")],
+    ):
+        assert not release.verified_scoped_record(
+            original, SHA, lambda url, records=records: lookup(url, records)
+        )
 
 
 def test_empty_evidence_fails_closed_even_with_valid_sha():

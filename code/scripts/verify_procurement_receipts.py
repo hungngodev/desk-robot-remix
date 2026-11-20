@@ -11,9 +11,13 @@ ordering. No physical or charging authorization is inferred by this script.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
 
 from procurement_release import (
@@ -86,6 +90,65 @@ def required_receipts(evidence: dict, *, first_robot: bool = False):
             )
 
 
+def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
+    """Require one matching record in a versioned docs/records/*.json file.
+
+    The file must contain {"receipts": [record, ...]}, with an explicit
+    result, reviewer, tested date, exact revision and measurement payload.
+    Mere existence of an unrelated nonempty file never releases purchasing.
+    """
+    url = receipt.get("evidence_url")
+    if not isinstance(url, str) or not urlsplit(url).path.endswith(".json"):
+        return False
+    response = {}
+
+    def capture(target):
+        data = lookup(target)
+        response["file"] = data
+        return data
+
+    if not verified_raw_record(url, sha, capture):
+        return False
+    file = response.get("file")
+    if (not isinstance(file, dict)
+            or file.get("encoding") != "base64"
+            or not isinstance(file.get("content"), str)
+            or not 0 < file["size"] <= 1_000_000):
+        return False
+    try:
+        raw = base64.b64decode("".join(file["content"].split()), validate=True)
+        if len(raw) != file["size"]:
+            return False
+        document = json.loads(raw.decode("utf-8"))
+    except (ValueError, TypeError, UnicodeError, binascii.Error):
+        return False
+    rows = document.get("receipts") if type(document) is dict else None
+    if not isinstance(rows, list) or not 0 < len(rows) <= 2000:
+        return False
+    identifiers = [row.get("record_id") for row in rows if type(row) is dict]
+    if (len(identifiers) != len(rows)
+            or any(not isinstance(i, str) or not i.strip() for i in identifiers)
+            or len(set(identifiers)) != len(identifiers)):
+        return False
+    matched = [
+        row for row in rows
+        if row.get("scope") == receipt.get("scope")
+        and row.get("gate") == receipt.get("gate")
+    ]
+    if len(matched) != 1:
+        return False
+    record = matched[0]
+    fields = (
+        "record_id", "source_sha", "scope", "gate", "result",
+        "reviewer", "tested_on", "device_revision",
+    )
+    measurement = record.get("measurement")
+    return (record.get("result") == "pass"
+            and all(record.get(key) == receipt.get(key) for key in fields)
+            and isinstance(measurement, dict) and bool(measurement)
+            and measurement == receipt.get("measurement"))
+
+
 def audit_release(evidence: dict, sha: str, lookup=None, *,
                   first_robot: bool = False) -> list[str]:
     """Fail closed if a receipt is missing, mis-scoped or not actually present."""
@@ -95,6 +158,13 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
     lookup = github_json if lookup is None else lookup
     errors = []
     seen = 0
+    fetched = {}
+
+    def cached_lookup(url):
+        if url not in fetched:
+            fetched[url] = lookup(url)
+        return fetched[url]
+
     for scope, gate, receipt in required_receipts(
         evidence, first_robot=first_robot
     ):
@@ -111,14 +181,20 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
                     "", "unknown", "tbd", "operator", "tester", "fixture",
                 }
                 or not isinstance(receipt.get("tested_on"), str)
-                or not receipt["tested_on"].strip()):
+                or not receipt["tested_on"].strip()
+                or not isinstance(receipt.get("record_id"), str)
+                or not receipt["record_id"].strip()
+                or not isinstance(receipt.get("device_revision"), str)
+                or receipt["device_revision"].strip().casefold() in {
+                    "", "unknown", "tbd", "generic",
+                }
+                or not isinstance(receipt.get("measurement"), dict)
+                or not receipt["measurement"]):
             errors.append(f"{scope}.{gate}: unpinned or generic signoff")
             continue
         try:
-            if not verified_raw_record(
-                receipt.get("evidence_url"), sha, lookup
-            ):
-                errors.append(f"{scope}.{gate}: immutable source record absent")
+            if not verified_scoped_record(receipt, sha, cached_lookup):
+                errors.append(f"{scope}.{gate}: immutable scoped record absent or mismatched")
         except (HTTPError, URLError, ValueError, TimeoutError, OSError):
             errors.append(f"{scope}.{gate}: record lookup unavailable")
     if seen == 0:
