@@ -142,10 +142,18 @@ def register_readonly_context_routes(
         )
         if callable(ongoing):
             activity.extend(ongoing(robot_id, now=now))
+        # Share the one Runtime-owned volatile attention history. This is
+        # co-occurring conversation and sensor evidence, never a second media
+        # stream, a transcript memory write, or a model motion permit.
+        attention = getattr(app.state.runtime, "attention", None)
+        continuity = (
+            attention.timeline(robot_id, now) if attention is not None else []
+        )
         timeline = visual.hub.interaction_timeline(
-            robot_id, now, limit=10 - len(activity)
+            robot_id, now, limit=10 - len(activity) - len(continuity)
         )
         timeline.extend(activity)
+        timeline.extend(continuity)
         if not settings.voice_memory_tools_enabled:
             # Revoking memory consent also revokes the transient retrieval
             # result. A still-active camera permit is not permission to read
