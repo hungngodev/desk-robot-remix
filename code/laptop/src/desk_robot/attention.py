@@ -187,12 +187,25 @@ class AttentionLedger:
         _clock(now)
         state = self._state(robot_id)
         pieces: list[str] = []
+        # The accepted model transcript belongs to a newer authenticated
+        # human voice epoch than the previous topic. It is still uncertain
+        # ASR, NEVER a motion command, but must not be masked by old dialogue.
+        newer_asr = (
+            bool(state.asr) and 0 <= now - state.asr_at <= 90
+            and state.asr_at > state.topic_updated_at
+            and state.asr_at >= state.voice_at
+        )
+        if newer_asr:
+            pieces.append(
+                "Newer uncertain ASR words (not verified command): "
+                + state.asr[:66]
+            )
         if (state.topic and
                 (state.topic_state == "active" or
                  0 <= now - state.topic_updated_at <= 120)):
             label = (
                 "Ongoing conversation topic"
-                if state.topic_state == "active"
+                if state.topic_state == "active" and not newer_asr
                 else "Earlier " + state.topic_state + " conversation"
             )
             qualifier = (
@@ -201,7 +214,7 @@ class AttentionLedger:
                 else "autonomous peer topic, not an operator command"
             )
             pieces.append(f"{label} ({qualifier}): {state.topic[:72]}")
-        elif state.asr and 0 <= now - state.asr_at <= 90:
+        elif state.asr and 0 <= now - state.asr_at <= 90 and not newer_asr:
             pieces.append(
                 "Earlier uncertain ASR words (not verified command): "
                 + state.asr[:66]
