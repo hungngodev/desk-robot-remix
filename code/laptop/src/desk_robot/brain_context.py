@@ -167,7 +167,7 @@ def compose_brain_context(
                 continue
             identity = (channel, str(heard_count))
         else:
-            identity = (channel, kind if channel in {"sensor", "tool"}
+            identity = (channel, kind if channel in {"sensor", "sensor_history", "tool"}
                         and isinstance(kind, str) else channel)
         if identity in seen_cues:
             continue
