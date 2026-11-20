@@ -146,12 +146,28 @@ def register_readonly_planner_routes(
                 utterance,
             ) is not None
         )
-        visual_question = any(cue in utterance for cue in (
-            "see", "look", "inspect", "camera", "picture", "photo",
-            "image", "visible", "on the desk", "on my desk",
-            "on the table", "object", "in front of", "what color",
-            "what colour", "what shape", "what size", "how many",
-        ))
+        # A model-selected camera route needs an EXPLICIT human observation
+        # request. Substring-only checks interpreted ordinary "see you later"
+        # and "I left a photo on the desk" as permission to look. Keep
+        # genuine questions, imperatives and compound camera/battery requests.
+        asks_to_observe = (
+            re.match(
+                r"^(?:(?:hey [a-z]+[, ]+|please )*)"
+                r"(?:what|where|how|can|could|would|do|does|did|is|are|"
+                r"look|inspect|show|describe|count|check|tell me|"
+                r"take a look|see if|see whether)\b", utterance,
+            ) is not None
+            and re.match(r"^(?:please )?look forward\b", utterance) is None
+        )
+        visual_question = asks_to_observe and any(
+            re.search(r"\b" + re.escape(cue) + r"\b", utterance)
+            for cue in (
+                "see", "look", "inspect", "camera", "picture", "photo",
+                "image", "visible", "on the desk", "on my desk",
+                "on the table", "object", "in front of", "what color",
+                "what colour", "what shape", "what size", "how many",
+            )
+        )
         status_question = any(cue in utterance for cue in (
             "status", "safety", "fault", "health", "are your sensors",
             "are you armed", "robot state", "motors running",

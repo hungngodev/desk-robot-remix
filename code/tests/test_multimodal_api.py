@@ -2039,3 +2039,48 @@ def test_live_interaction_includes_operator_job_without_peer_leak(
         assert "Mac operator-submitted" not in finished.json()["model_context"]
         settings.voice_vision_tools_enabled = False
         assert client.get(url, headers=headers).status_code == 403
+
+
+def test_readonly_planner_does_not_treat_casual_visual_words_as_camera_permission(
+    settings, tokens,
+):
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class OvereagerModel:
+        async def reply(self, history):
+            return json.dumps({"tools": [{"route": "look"}]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=OvereagerModel()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        for transcript in (
+            "See you tomorrow",
+            "I look forward to seeing you",
+            "I left a photo on the desk",
+            "Please look forward to tomorrow",
+            "We should inspect that later",
+        ):
+            reply = client.post(url, headers=headers, json={"transcript": transcript})
+            assert reply.status_code == 200
+            assert reply.json()["tools"] == []
+        for transcript in (
+            "What do you see on my desk?",
+            "Please look at the mug",
+            "Could you inspect the photo?",
+            "See if there is a key in front of you",
+        ):
+            reply = client.post(url, headers=headers, json={"transcript": transcript})
+            assert reply.status_code == 200
+            assert [item["route"] for item in reply.json()["tools"]] == ["look"]
