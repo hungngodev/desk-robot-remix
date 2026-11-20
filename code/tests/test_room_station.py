@@ -301,6 +301,35 @@ def test_cancelled_room_reader_joins_thread_before_task_exits_even_if_cancelled_
     asyncio.run(scenario())
 
 
+
+def test_room_reader_requests_posix_exclusive_port_ownership(monkeypatch):
+    """A cooperating serial monitor cannot silently split the USB byte stream."""
+    import sys
+    from types import SimpleNamespace
+
+    opens = []
+
+    class FakePort:
+        def __init__(self, port, *, baudrate, timeout, exclusive):
+            opens.append((port, baudrate, timeout, exclusive))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            raise AssertionError("Reader should not run after stop")
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=FakePort))
+    feed = RoomSerialFeed("/dev/cu.test", lambda observation: None)
+    feed._read_port(lambda: False)
+    assert opens == [("/dev/cu.test", 115200, .25, True)]
+    assert feed.received == 0
+    assert feed.rejected == 0
+
+
 def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatch):
     """A failed consumer must not turn replayed USB frames into new evidence."""
     import sys

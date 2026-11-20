@@ -255,7 +255,11 @@ class RoomSerialFeed:
 
     def _read_port(self, running: Callable[[], bool]) -> None:
         import serial  # optional hardware-only pyserial package, no simulation
-        with serial.Serial(self.port, baudrate=115200, timeout=.25) as port:
+        # pySerial 3.5 POSIX advisory lock: avoid two cooperating readers
+        # interleaving bytes on this sole local USB station transport.
+        # Device access and user consent remain separately enforced.
+        with serial.Serial(self.port, baudrate=115200, timeout=.25,
+                           exclusive=True) as port:
             # Reset at real connection opening, not after a callback failure.
             self.last_error = None
             decoder = RoomStationDecoder(soil_calibration=self.soil_calibration)
