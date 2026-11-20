@@ -13,6 +13,38 @@ import serial
 from desk_robot.transport import expected_ack, validate_command
 
 
+
+def inspect_native_low_g(imu: dict, family: int, raw_valid: bool) -> dict:
+    """Read-only MPU FF_INT evidence from the existing WROOM status sample.
+
+    A latched event may have ended by the USB read, so preserve its counter.
+    Nothing here calibrates an actual fall or licenses robot motion.
+    """
+    fields = ("low_g_valid", "low_g_irq", "low_g_seq")
+    if not any(key in imu for key in fields):
+        return {
+            "reported": False, "status_valid": False,
+            "interrupt_in_last_sample": False, "event_seq": None,
+            "physical_qualification_pass": False,
+        }
+    if not all(key in imu for key in fields):
+        raise ValueError("Incomplete MPU6050 free-fall interrupt telemetry")
+    status_valid, irq, seq = (imu[key] for key in fields)
+    if (type(status_valid) is not bool or type(irq) is not bool
+            or type(seq) is not int or not 0 <= seq <= 0xffffffff
+            or (status_valid and (family != 4 or not raw_valid))
+            or (irq and (not status_valid or seq == 0))
+            or (family != 4 and (irq or seq != 0))):
+        raise ValueError("Invalid MPU6050 free-fall interrupt provenance")
+    return {
+        "reported": True,
+        "status_valid": status_valid,
+        "interrupt_in_last_sample": irq,
+        "event_seq": seq,
+        "physical_qualification_pass": False,
+    }
+
+
 def inspect_status(status: dict) -> dict:
     """Summarize the actual five-channel WROOM JSON without granting movement."""
     if not isinstance(status, dict) or status.get("backend") != "stepper_28byj48":
@@ -162,6 +194,7 @@ def inspect_status(status: dict) -> dict:
             "accelerometer_raw": accelerometer,
             "gyroscope_raw": gyroscope,
             "sample_age_ms": sample_age,
+            "native_low_g": inspect_native_low_g(imu, family, raw_valid),
             "physical_qualification_pass": False,
         },
         "armed": status.get("armed") is True,
