@@ -53,3 +53,25 @@ def test_provisional_dock_and_fit_references_stage_when_exported(tmp_path):
     original.unlink()
     with pytest.raises(FileNotFoundError, match="Missing source mesh"):
         module.build_manifest(tmp_path)
+
+
+def test_fusion_rejects_stale_stl_sources_before_import(tmp_path, monkeypatch):
+    module = load()
+    # No generated parts means there is nothing to validate.
+    module.verify_optional_fit_references(tmp_path)
+    generated = tmp_path / "docs/cad/remixes/adapter_stls/head_bridge.stl"
+    generated.parent.mkdir(parents=True, exist_ok=True)
+    generated.write_bytes(b"unverified-mesh")
+    calls = []
+
+    def fake_runpy(script):
+        assert script == str(tmp_path / "code/scripts/export_fit_kit.py")
+        def verify(root, *, output_dir):
+            calls.append((root, output_dir))
+            raise ValueError("SCAD source changed")
+        return {"verify_fit_kit": verify}
+
+    monkeypatch.setattr(module.runpy, "run_path", fake_runpy)
+    with pytest.raises(ValueError, match="SCAD source changed"):
+        module.verify_optional_fit_references(tmp_path)
+    assert calls == [(tmp_path, tmp_path / "docs/cad/remixes")]
