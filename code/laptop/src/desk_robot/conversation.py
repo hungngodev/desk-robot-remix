@@ -578,15 +578,22 @@ class Conversation:
         # volatile attention view. It never authorizes motion or queues speech.
         attention = self.attention
         attention_tokens: dict[str, int] = {}
-        if attention is not None and topic_excerpt:
-            for robot in robots:
-                attention_tokens[robot.id] = attention.begin_topic(
-                    robot.id, topic_excerpt, time.monotonic()
-                )
         outcome = "failed"
         transcript = []
         current_robot = None
         try:
+            # This optional RAM ledger cannot strand an owned speaker session
+            # if its first or second pet refuses a contextual topic.
+            if attention is not None and topic_excerpt:
+                try:
+                    for robot in robots:
+                        attention_tokens[robot.id] = attention.begin_topic(
+                            robot.id, topic_excerpt, time.monotonic()
+                        )
+                except (KeyError, ValueError):
+                    for robot_id in tuple(attention_tokens):
+                        attention.clear(robot_id)
+                    attention_tokens.clear()
             # Each physical pet owns a separate SQLite connection. Disk
             # contention cannot block urgent Xiaozhi VAD and speaker abort on
             # the Mac event loop. The active lease is already held so another
@@ -824,28 +831,30 @@ class Conversation:
             outcome = "interrupted"
             raise
         finally:
-            for robot in robots:
-                record = self._group_activity.get(robot.id)
-                if record is not None and record["epoch"] == epoch:
-                    record["status"] = outcome
-                    record["updated_at"] = time.monotonic()
-                    revoked = (
-                        (sharing_at_start
-                         and not self.settings.fleet_text_sharing_enabled)
-                        or (visual_at_start
-                            and not self.settings.voice_vision_tools_enabled)
-                    )
-                    if revoked:
-                        record["topic"] = ""
-                    if robot.id in attention_tokens:
+            try:
+                for robot in robots:
+                    record = self._group_activity.get(robot.id)
+                    if record is not None and record["epoch"] == epoch:
+                        record["status"] = outcome
+                        record["updated_at"] = time.monotonic()
+                        revoked = (
+                            (sharing_at_start
+                             and not self.settings.fleet_text_sharing_enabled)
+                            or (visual_at_start
+                                and not self.settings.voice_vision_tools_enabled)
+                        )
                         if revoked:
-                            attention.clear(robot.id)
-                        else:
-                            attention.finish_topic(
-                                robot.id, attention_tokens[robot.id],
-                                time.monotonic(), interrupted=outcome != "completed",
-                            )
-            self.active = None
+                            record["topic"] = ""
+                        if robot.id in attention_tokens:
+                            if revoked:
+                                attention.clear(robot.id)
+                            else:
+                                attention.finish_topic(
+                                    robot.id, attention_tokens[robot.id],
+                                    time.monotonic(), interrupted=outcome != "completed",
+                                )
+            finally:
+                self.active = None
 
     async def say_proactive(
         self, robot: RobotConfig, text: str, *,
