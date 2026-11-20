@@ -260,6 +260,9 @@ class Runtime:
             # a real turn, preempt old camera work and start speech frames.
             if visual.hub.voice_until[robot_id] != float("inf")
         ]
+        # Reconnect must also reconcile the volatile conversation turn
+        # clock, so a delayed transmitted sentence cannot revive after barge.
+        # This is read-only state, independent of the urgent physical STOP.
         # A reconnect snapshot can contain speech edges missed by the
         # ordered event stream. Merely setting hub.voice_until did not cancel
         # other pets' optional JPEGs or prime the speaking head's camera.
@@ -271,6 +274,8 @@ class Runtime:
         ]
         preempt_error = None
         if missing_starts:
+            for robot_id in missing_starts:
+                self.attention.human_started(robot_id, time.monotonic())
             prepare = getattr(visual, "prepare_human_turn", None)
             # Mark authenticated VAD NOW. A slow Xiaozhi STOP cannot keep
             # old camera or VLM activity alive during speaker teardown.
@@ -302,6 +307,7 @@ class Runtime:
         # A lost speech_end must stop that head's optional 1 FPS sampler,
         # not just clear the speaker lease in the hub.
         for robot_id in sorted(missing_ends):
+            self.attention.human_ended(robot_id, time.monotonic())
             visual.voice_ended(robot_id)
         visual.hub.reconcile_speech_snapshot(active, time.monotonic())
         # A transport outage cancels optional camera workers without
@@ -368,7 +374,10 @@ class Runtime:
             return
         if robot_id not in {robot.id for robot in self.settings.robots}:
             raise KeyError(f"Unknown voice source: {robot_id}")
+        if kind in ("speech_start", "normal", "group"):
+            self.attention.human_started(robot_id, time.monotonic())
         if kind == "speech_end":
+            self.attention.human_ended(robot_id, time.monotonic())
             # A real VAD-negative transition only slows camera sampling.
             # It MUST NOT stop current Xiaozhi playback or clear the last
             # visual evidence needed by the human's just-finished question.
