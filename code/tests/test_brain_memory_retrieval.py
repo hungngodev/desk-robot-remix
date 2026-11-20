@@ -303,12 +303,17 @@ async def test_group_conversation_reuses_each_pets_own_relevant_context(
     agent = Conversation(settings, SimulatedChat(), speaker, memory=store)
     result = await agent.run(ids, "What do we remember about the keys?", 2)
     assert len(result) == 2
-    own = agent.histories["robot-01"][1]["content"]
-    peer = agent.histories["robot-02"][1]["content"]
-    assert "Topic-related historical memory" in own
+    own = agent.histories["robot-01"][2]["content"]
+    peer = str(agent.histories["robot-02"])
+    # Topic remains the human's request; matched SQLite text is JSON data,
+    # never spliced as a second instruction into the operator topic.
+    assert "silver key beside the notebook" not in (
+        agent.histories["robot-01"][1]["content"]
+    )
+    assert '"topic_related"' in own
     assert "silver key beside the notebook yesterday" in own
     assert "silver key beside the notebook yesterday" not in peer
-    assert "not current visual evidence or permission to move" in own
+    assert "Untrusted per-pet historical memory data" in own
     assert [robot_id for robot_id, _ in speaker.spoken] == ids
 
 
