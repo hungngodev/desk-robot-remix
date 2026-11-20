@@ -109,7 +109,9 @@ class AttentionLedger:
         if (not isinstance(event_id, str)
                 or re.fullmatch(r"omni_[0-9a-f]{12}_[0-9a-f]{20}", event_id) is None):
             return False
-        if event_id in state.heard_ids or at < state.asr_at:
+        if event_id in state.heard_ids or at < max(state.asr_at, state.voice_at):
+            # An old model transcript completing after a newer authenticated
+            # VAD start cannot become that newer turn's conversational goal.
             return False
         cleaned = _text(transcript, 90)
         if not cleaned:
@@ -152,6 +154,20 @@ class AttentionLedger:
             return False
         if state.sensor_edges and state.sensor_edges[-1][0] == kind:
             return False
+        # Repeated low-value gestures must not evict the one meaningful
+        # handling or local safety cue during a longer conversation.
+        previous = next(
+            (edge for edge in state.sensor_edges if edge[0] == kind), None
+        )
+        if previous is not None:
+            state.sensor_edges.remove(previous)
+        if len(state.sensor_edges) == state.sensor_edges.maxlen:
+            protected = {"safety_fault", "handling_tilt", "handling_shake"}
+            victim = next(
+                (edge for edge in state.sensor_edges if edge[0] not in protected),
+                state.sensor_edges[0],
+            )
+            state.sensor_edges.remove(victim)
         state.sensor_edges.append((kind, at, state.generation))
         return True
 
@@ -184,10 +200,16 @@ class AttentionLedger:
                 ((kind, stamp) for kind, stamp in reversed(events)
                  if kind == "safety_fault"), events[-1]
             )
-            pieces.append(
-                f"WROOM {kind} edge {int(now - stamp)}s ago "
-                "(historical, not current telemetry)"
+            description = f"WROOM {kind} edge {int(now - stamp)}s ago"
+            another = next(
+                ((name, observed) for name, observed in reversed(events)
+                 if name != kind), None
             )
+            if another is not None:
+                description += (
+                    f"; also {another[0]} {int(now - another[1])}s ago"
+                )
+            pieces.append(description + " (historical, not current telemetry)")
         if state.sent and 0 <= now - state.sent_at <= 45:
             pieces.append(
                 "Earlier speech transmitted, playback unverified: "
