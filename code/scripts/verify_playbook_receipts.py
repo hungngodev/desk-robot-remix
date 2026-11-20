@@ -134,8 +134,15 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
     if not isinstance(records, list) or not 0 < len(records) <= 2000:
         return False
     identifier = row.get("id")
+    # Python treats true == 1 and 9.0 == 9. A malformed JSON identity
+    # must never qualify an immutable physical procedure record.
+    def exact_procedure_id(value: object) -> bool:
+        return (type(value) is int and value == identifier) or (
+            type(value) is str and value == str(identifier)
+        )
+
     matches = [record for record in records if isinstance(record, dict)
-               and record.get("procedure_id") in (identifier, str(identifier))]
+               and exact_procedure_id(record.get("procedure_id"))]
     if len(matches) != 1:
         return False
     record = matches[0]

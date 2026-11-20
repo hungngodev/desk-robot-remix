@@ -147,6 +147,35 @@ def test_immutable_physical_record_binds_gate_signoff_and_json_measurements():
             url, [{**receipt, "procedure_id": 42}]))
 
 
+
+def test_immutable_procedure_identity_rejects_boolean_float_or_padded_ids():
+    row = promoted("MEASURED")["procedures"][0]
+    row["id"] = 1
+    signoff = row["physical_measurement_receipt"]
+    signoff["raw_data_url"] = RAW.replace("bench.csv", "identities.json")
+    valid = {
+        "procedure_id": 1, "source_sha": SHA, "gate": "MEASURED",
+        "result": "pass", "operator": signoff["operator"],
+        "device_revision": signoff["device_revision"],
+        "tested_on": signoff["tested_on"],
+        "measurement": {"tilt_deg": 42.0},
+    }
+
+    def identity_lookup(url, value):
+        if "/contents/" not in url:
+            return lookup(url)
+        raw = json.dumps({"receipts": [{**valid, "procedure_id": value}]}).encode()
+        return {"type": "file", "size": len(raw), "encoding": "base64",
+                "content": base64.b64encode(raw).decode()}
+
+    for valid_id in (1, "1"):
+        assert verify.verified_procedure_record(
+            row, SHA, lambda url, v=valid_id: identity_lookup(url, v))
+    for invalid in (True, 1.0, "01", "1.0", None):
+        assert not verify.verified_procedure_record(
+            row, SHA, lambda url, v=invalid: identity_lookup(url, v))
+
+
 def test_unavailable_api_cannot_approve_evidence():
     def offline(_):
         raise URLError("offline")
