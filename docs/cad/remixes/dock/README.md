@@ -2,6 +2,21 @@
 
 This is an example **fit tester**, not the final charging dock.
 
+Before the full cradle, render and print the smaller rail entry coupon:
+
+```sh
+openscad --export-format binstl -o dock_rail_entry_coupon.stl \\
+  -D 'part="dock_rail_entry_coupon"' dock_passive_fit.scad
+```
+
+The default 96 mm track example yields a 126 by 48 by 15 mm coupon,
+including the entire flare and 11 mm of straight guide. Measure the actual
+track pair against its 114 mm entry mouth and 100 mm straight channel,
+then update the track width and clearance parameters. It has no tag,
+backstop, contacts, or charging function; passing does not qualify docking.
+The default `part="dock_passive_fit"` still renders the full cradle.
+`code/scripts/export_fit_kit.py` exports both models.
+
 Source: dock_passive_fit.scad in the same directory. Change
 track_outer_width_mm and side_clearance_each_mm to measured values in
 OpenSCAD or Fusion. A 96 mm example outer track width plus 2 mm

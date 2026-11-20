@@ -40,7 +40,7 @@ The rectangular front grille and [separate speaker pocket gauge](speaker_rect_fi
 
 **Grasp tuning**: Print the existing MG90S fit coupons first. The jaw FSR pocket is only a cable-safe pad; the controlled incremental closure is in `code/laptop/src/desk_robot/grasp_feedback.py`. It requires two distinct measured ADC conversions and actual calibration values. Neither a watertight STL nor a simulated code test proves lifting force.
 
-**Docking**: The passive cradle `dock/dock_passive_fit.scad` and AprilTag plate are mechanical alignment prototypes, not wired charging electronics. **Do not energize dock contacts** without a protected, measured charging power path and safe interlock. Image tag detection is not contact confirmation.
+**Docking**: The passive cradle `dock/dock_passive_fit.scad` now exports a short rail entry coupon from the same geometry. Test actual track clearance before printing the full cradle. The separate 80 mm AprilTag backplate is an alternative fixture, **not a drop-in insert** for the cradle's 71.2 mm paper pocket. Both are mechanical alignment prototypes, not wired charging electronics. **Do not energize dock contacts** without a protected, measured charging power path and safe interlock. Image tag detection is not contact confirmation.
 
 Mechanical provenance remains separate: SMARS tracks/lift noncommercial/share-alike, Bluino gripper CC BY, and Sparky head CC BY-SA. These original files are not relicensed here.
 

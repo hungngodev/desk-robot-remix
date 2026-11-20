@@ -28,7 +28,7 @@ GAUGES = (
 )
 SPEAKER_FITS = ("speaker_rect_fit_gauge",)
 RANGER_FITS = ("vl53l0x_gy530_fit_gauge",)
-DOCKS = ("dock_passive_fit",)
+DOCKS = ("dock_passive_fit", "dock_rail_entry_coupon")
 
 
 def binary_stl_triangles(path: Path) -> int:

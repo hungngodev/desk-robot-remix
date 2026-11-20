@@ -88,13 +88,14 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     report = source.export_kit(tmp_path, output_dir=rendered)
     assert len(commands) == (
         len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS) + len(source.RANGER_FITS) + len(source.DOCKS)
-    ) == 13
-    assert len(report["parts"]) == 13
+    ) == 14
+    assert len(report["parts"]) == 14
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
     assert (rendered / "fit_stls/speaker_rect_fit_gauge.stl").is_file()
     assert (rendered / "fit_stls/vl53l0x_gy530_fit_gauge.stl").is_file()
     assert (rendered / "dock_stls/dock_passive_fit.stl").is_file()
+    assert (rendered / "dock_stls/dock_rail_entry_coupon.stl").is_file()
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
@@ -220,6 +221,38 @@ def test_passive_dock_tag_registration_mesh_stays_watertight_and_centered(tmp_pa
 
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs real OpenSCAD CLI")
+def test_passive_dock_low_material_entry_coupon_matches_full_guide(tmp_path):
+    """Test rail clearance before committing to the full 93mm-high dock."""
+    from struct import unpack_from
+
+    source = ROOT / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    output = tmp_path / "entry.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(output),
+        "-D", 'part="dock_rail_entry_coupon"', str(source),
+    ], check=True, timeout=60)
+    assert module().closed_mesh_edges(output) > 0
+    blob = output.read_bytes()
+    n = unpack_from("<I", blob, 80)[0]
+    vertices = [
+        unpack_from("<3f", blob, 84 + i * 50 + 12 + j * 12)
+        for i in range(n) for j in range(3)
+    ]
+    bounds = tuple(
+        (min(v[axis] for v in vertices), max(v[axis] for v in vertices))
+        for axis in range(3)
+    )
+    assert bounds == ((0.0, 126.0), (0.0, 48.0), (0.0, 15.0))
+    # 96mm tracks + 2mm clearance per side. Entry mouth is wider.
+    for y, expected_x in ((0.0, (6.0, 120.0)),
+                          (37.0, (13.0, 113.0))):
+        for x in expected_x:
+            assert any(abs(v[0] - x) < 0.01 and
+                       abs(v[1] - y) < 0.01 for v in vertices)
+    # Passing a fit print does not authorize powered docking.
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs real OpenSCAD CLI")
 def test_real_openscad_renders_provisional_source_parts(tmp_path):
     source = module()
     output = tmp_path / "rendered"
@@ -228,9 +261,10 @@ def test_real_openscad_renders_provisional_source_parts(tmp_path):
         len(source.ADAPTERS) + len(source.GAUGES)
         + len(source.SPEAKER_FITS) + len(source.RANGER_FITS)
         + len(source.DOCKS)
-    ) == 13
+    ) == 14
     assert (output / "adapter_stls/speaker_grille.stl").is_file()
     assert (output / "dock_stls/dock_passive_fit.stl").is_file()
+    assert (output / "dock_stls/dock_rail_entry_coupon.stl").is_file()
     for item in report["parts"]:
         assert source.binary_stl_triangles(output / item["location"]) > 0
     assert report["full_printable_assembly_verified"] is False
