@@ -128,6 +128,14 @@ def register_readonly_context_routes(
             active_job_timeline(jobs.values(), robot_id)
             if isinstance(jobs, dict) else []
         )
+        # An actual running group dialogue also has a temporary Mac goal.
+        # Expose it only to participating pets with explicit shared-text
+        # consent. It remains separate from Coordinator motion authority.
+        conversation = getattr(app.state.runtime, "conversation", None)
+        if settings.fleet_text_sharing_enabled:
+            dialogue = getattr(conversation, "active_dialogue_timeline", None)
+            if callable(dialogue):
+                activity.extend(dialogue(robot_id))
         timeline = visual.hub.interaction_timeline(
             robot_id, now, limit=10 - len(activity)
         )

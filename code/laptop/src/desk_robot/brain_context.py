@@ -167,8 +167,12 @@ def compose_brain_context(
                 continue
             identity = (channel, str(heard_count))
         else:
-            identity = (channel, kind if channel in {"sensor", "sensor_history", "tool"}
-                        and isinstance(kind, str) else channel)
+            identity = (
+                channel,
+                kind if channel in {"sensor", "sensor_history", "tool",
+                                    "mac_activity"} and isinstance(kind, str)
+                else channel,
+            )
         if identity in seen_cues:
             continue
         phrase = ""
@@ -196,6 +200,18 @@ def compose_brain_context(
                 phrase = (
                     f"Mac operator-submitted {job_type} job is {status}; "
                     "completion unverified; WROOM owns motion safety"
+                )
+        elif channel == "mac_activity" and kind == "dialogue_goal":
+            topic = item.get("topic")
+            if (item.get("source") == "mac_conversation_active_session"
+                    and item.get("status") == "active"
+                    and item.get("physical_action_verified") is False
+                    and item.get("audio_playback_verified") is False
+                    and item.get("motor_authorized") is False
+                    and type(topic) is str and 0 < len(topic) <= 90):
+                phrase = (
+                    "Mac dialogue ongoing (playback unverified; no motor "
+                    "permission): " + _clean(topic, limit=70)
                 )
         elif channel == "sensor_history" and isinstance(kind, str):
             age = item.get("age_ms")
@@ -286,7 +302,11 @@ def compose_brain_context(
                 phrase = label + _clean(result, limit=90)
         if phrase:
             seen_cues.add(identity)
-            priority = -1 if channel == "sensor" and kind == "safety_fault" else priorities[channel]
+            priority = (
+                -1 if channel == "sensor" and kind == "safety_fault"
+                else 0.75 if channel == "mac_activity"
+                and kind == "dialogue_goal" else priorities[channel]
+            )
             if channel == "human_transcript":
                 priority = 0 if heard_count == 0 else 5
                 heard_count += 1
