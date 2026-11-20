@@ -1592,6 +1592,9 @@ async def test_group_dialogue_cancellation_preserves_unplayed_status(settings):
     ))
     await asyncio.wait_for(started.wait(), timeout=3)
     task.cancel()
+    # A cancelled task cannot remain a current voice activity while the
+    # speaker abort coroutine is still unwinding.
+    assert conversation.group_activity_timeline("robot-01") == []
     with pytest.raises(asyncio.CancelledError):
         await task
     record = conversation.group_activity_timeline("robot-01")
