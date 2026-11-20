@@ -652,12 +652,17 @@ class Conversation:
                         robot_id, time.monotonic(), limit=10 - len(activity)
                     )
                 timeline.extend(activity)
-                if not self.settings.voice_memory_tools_enabled:
-                    timeline = [
-                        item for item in timeline
-                        if not (item.get("channel") == "tool"
-                                and item.get("kind") == "memory_recall")
-                    ]
+                # A completed recall from a DIFFERENT human turn is not
+                # permission to discuss private facts in an unrelated group
+                # conversation. The group owner has no verified turn-bound
+                # recall receipt, so never import the hub's orphaned result.
+                # Consented, topic-relevant SQLite retrieval above is the
+                # dedicated memory evidence path for this group session.
+                timeline = [
+                    item for item in timeline
+                    if not (item.get("channel") == "tool"
+                            and item.get("kind") == "memory_recall")
+                ]
                 return compose_brain_context([], [], timeline).interaction
 
             def topic_prompt(robot_id: str, matches) -> str:
