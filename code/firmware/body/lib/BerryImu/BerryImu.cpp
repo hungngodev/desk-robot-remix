@@ -101,11 +101,13 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
          write_byte(gyro_address_, 0x38, 0x80);
     // An I2C write ACK is not proof that a clone honored FF registers.
     // An unverified configuration cannot claim actual low-g interrupts.
-    std::uint8_t threshold = 0, duration = 0, int_enable = 0;
+    std::uint8_t threshold = 0, duration = 0, pin_cfg = 0xff, int_enable = 0;
     ok = ok && read_bytes(gyro_address_, 0x1d, &threshold, 1) &&
          read_bytes(gyro_address_, 0x1e, &duration, 1) &&
+         read_bytes(gyro_address_, 0x37, &pin_cfg, 1) &&
          read_bytes(gyro_address_, 0x38, &int_enable, 1) &&
-         threshold == 150 && duration == 40 && int_enable == 0x80;
+         threshold == 150 && duration == 40 &&
+         pin_cfg == 0 && int_enable == 0x80;
   } else if (reading_.model == BerryModel::V1Lsm9ds0) {
     // LSM9DS0 CTRL_REG1_XM bit 2 and CTRL_REG4_G bit 7 enable
     // block-data-update on both six-byte reads. Without gyro BDU,
