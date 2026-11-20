@@ -679,3 +679,56 @@ async def test_dock_diagnostic_uncooperative_camera_returns_hold(
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+async def test_dock_diagnostic_uses_measured_chassis_offset_not_centered_lens(
+    tmp_path, monkeypatch,
+):
+    """A tag centered in the JPEG may be off center of the actual tracks."""
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410,
+        "cx": 320, "cy": 240, "tag_side_mm": 60,
+        "marker_id": 12, "target_distance_mm": 120,
+        "mount_lateral_offset_mm": 40.0,
+        "mount_yaw_deg": 0.0,
+    }))
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda jpeg, camera, *, captured_at: DockPose(
+            0, 0, 450, 0.5, captured_at,
+        ),
+    )
+    head = Head()
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=calibration)
+    )
+    assert result["phase"] == "align"
+    assert result["pose"]["x_mm"] == 0
+    assert result["pose"]["chassis_lateral_mm"] == 40
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert not result["physical_acceptance_pass"]
+    assert not head.commands
+
+
+async def test_dock_diagnostic_keeps_raw_camera_only_when_mount_unmeasured(
+    tmp_path, monkeypatch,
+):
+    """Provisional camera geometry is not secretly a chassis measurement."""
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410,
+        "cx": 320, "cy": 240, "tag_side_mm": 60,
+        "marker_id": 12, "target_distance_mm": 120,
+    }))
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda jpeg, camera, *, captured_at: DockPose(
+            0, 0, 450, 0.5, captured_at,
+        ),
+    )
+    result = await dock_runtime.observe_actual_dock(
+        Head(), SimpleNamespace(id="robot-01", dock_calibration=calibration)
+    )
+    assert result["pose"]["chassis_lateral_mm"] is None
+    assert not result["motor_authorized"] and not result["charging_authorized"]
