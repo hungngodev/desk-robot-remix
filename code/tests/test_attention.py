@@ -251,3 +251,30 @@ def test_delayed_old_topic_sensor_and_speech_do_not_enter_new_generation():
     assert "side_object" in current
     assert "New song begins" in current
     assert ledger.timeline("pet2", 24) == []
+
+
+def test_old_asr_cannot_cross_authenticated_new_turn():
+    ledger = AttentionLedger(["pet"])
+    ledger.human_started("pet", 10)
+    old_event = "omni_" + "c" * 12 + "_" + "d" * 20
+    # The original Mac receipt was at 12 but SQLite took eight seconds.
+    ledger.human_started("pet", 19)
+    assert not ledger.heard("pet", old_event, "Outdated question", at=12)
+    assert ledger.timeline("pet", 20) == []
+    current = "omni_" + "e" * 12 + "_" + "f" * 20
+    assert ledger.heard("pet", current, "What just happened?", at=20)
+    assert "What just happened?" in ledger.timeline("pet", 21)[0]["content"]
+
+
+def test_one_handling_event_survives_many_distinct_routine_contacts():
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "An unfinished song", at=1)
+    assert ledger.sensor("pet", "handling_tilt", 2)
+    for i in range(15):
+        assert ledger.sensor("pet", f"gesture_{chr(97+i)}", at=3+i)
+    state = ledger._state("pet")
+    assert len(state.sensor_edges) <= 6
+    assert any(kind == "handling_tilt" for kind, _, _ in state.sensor_edges)
+    current = ledger.timeline("pet", 20)[0]["content"]
+    assert "handling_tilt" in current
+    assert "historical" in current
