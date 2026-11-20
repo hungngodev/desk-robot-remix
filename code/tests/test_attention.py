@@ -228,3 +228,26 @@ async def test_authenticated_runtime_voice_edge_fences_attention_speech():
     assert ledger._state("pet").voice_active is False
     runtime._preempt_audio_floor.assert_awaited_once()
     runtime._stop_autonomous_roaming_for_voice.assert_awaited_once()
+
+
+def test_delayed_old_topic_sensor_and_speech_do_not_enter_new_generation():
+    ledger = AttentionLedger(["pet1", "pet2"])
+    first = ledger.begin_topic("pet1", "Old conversation", at=10)
+    assert ledger.sensor("pet1", "handling_tilt", 11)
+    assert ledger.finish_topic("pet1", first, 12, interrupted=False)
+    next_generation = ledger.begin_topic("pet1", "New song", at=20)
+    assert next_generation > first
+    # Worker callbacks may arrive now even though their source time is old.
+    assert not ledger.sensor("pet1", "side_object", 19)
+    assert not ledger.sent("pet1", "obsolete prior speech", 18)
+    current = ledger.timeline("pet1", 21)[0]["content"]
+    assert "New song" in current
+    assert "side_object" not in current
+    assert "obsolete prior speech" not in current
+    assert "handling_tilt" not in current
+    assert ledger.sensor("pet1", "side_object", 22)
+    assert ledger.sent("pet1", "New song begins", 23)
+    current = ledger.timeline("pet1", 24)[0]["content"]
+    assert "side_object" in current
+    assert "New song begins" in current
+    assert ledger.timeline("pet2", 24) == []
