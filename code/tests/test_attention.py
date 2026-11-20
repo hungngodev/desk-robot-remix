@@ -125,3 +125,67 @@ def test_confirmed_safety_fault_outweighs_optional_attention_in_small_budget():
     context = compose_brain_context([], [], [*transcript, current_fault])
     assert "WROOM reported latched safety fault" in context.interaction
     assert "do not drive" in context.interaction
+
+
+async def test_real_conversation_feeds_attention_receipts_and_finishes(settings):
+    """Dialogue lifecycle and transmitted words share the Runtime attention."""
+    import time
+
+    from desk_robot.conversation import Conversation
+    from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+
+    ids = [robot.id for robot in settings.robots]
+    ledger = AttentionLedger(ids)
+    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    conversation.attention = ledger
+    result = await conversation.run(
+        ids[:2], "Sing while exploring safely near the desk edge", utterances=2
+    )
+    assert len(result) == 2
+    now = time.monotonic()
+    first, second = ledger.timeline(ids[0], now), ledger.timeline(ids[1], now)
+    assert "Earlier completed conversation" in first[0]["content"]
+    assert "Sing while exploring safely" in first[0]["content"]
+    assert "Earlier speech transmitted" in first[0]["content"]
+    assert "playback unverified" in first[0]["content"]
+    assert "Earlier completed conversation" in second[0]["content"]
+    assert ledger.timeline(ids[2], now) == []
+    assert first[0]["motor_authorized"] is False
+    assert conversation.group_activity_timeline(ids[0])[0]["status"] == "completed"
+
+
+async def test_cancelled_conversation_marks_attention_interrupted_not_played(settings):
+    import asyncio
+    import time
+
+    import pytest
+    from desk_robot.conversation import Conversation
+    from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+
+    ids = [robot.id for robot in settings.robots]
+    ledger = AttentionLedger(ids)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    class BlockedSpeaker(SimulatedSpeaker):
+        async def say(self, robot, text):
+            started.set()
+            await release.wait()
+            await super().say(robot, text)
+
+    conversation = Conversation(settings, SimulatedChat(), BlockedSpeaker())
+    conversation.attention = ledger
+    task = asyncio.create_task(conversation.run(
+        ids[:2], "Continue the song", utterances=2
+    ))
+    await asyncio.wait_for(started.wait(), timeout=3)
+    live = ledger.timeline(ids[0], time.monotonic())
+    assert "Ongoing conversation topic" in live[0]["content"]
+    assert "Earlier speech transmitted" not in live[0]["content"]
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    ended = ledger.timeline(ids[0], time.monotonic())
+    assert "Earlier interrupted conversation" in ended[0]["content"]
+    assert "Earlier speech transmitted" not in ended[0]["content"]
+    assert conversation.active_dialogue_timeline(ids[0]) == []
+    release.set()
