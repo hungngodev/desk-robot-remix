@@ -813,18 +813,37 @@ async def test_kokoro_permission_revoked_during_bridge_transmission_stops_head(
     class Response:
         content = b"RIFFsynthetic-wav-fixture"
 
+        def __init__(self, payload):
+            self.payload = payload
+
         def raise_for_status(self):
             pass
 
         def json(self):
-            return {"transmitted": True}
+            return self.payload
 
     class Client:
         async def post(self, url, **kwargs):
             calls.append(url.rsplit("/", 1)[-1])
+            body = kwargs.get("json", {})
+            if url.endswith("/session"):
+                enabled = body["enabled"]
+                return Response({
+                    "device_ids": sorted(body["device_ids"]),
+                    "enabled": enabled,
+                    "expires_in_seconds": 305 if enabled else 0,
+                })
             if url.endswith("/speak"):
                 settings.voice_memory_tools_enabled = False
-            return Response()
+                return Response({
+                    "device_id": body["device_id"],
+                    "transmitted": True,
+                    "physical_playback_verified": False,
+                })
+            return Response({
+                "device_id": body["device_id"],
+                "interrupted": True, "head_flush_requested": True,
+            })
 
     class Chat:
         async def reply(self, history):
