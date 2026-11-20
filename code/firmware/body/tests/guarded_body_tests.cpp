@@ -678,8 +678,12 @@ static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
   read.dock.charge_indicated = false;
   read.dock.sample_seq = 1; // genuine completed GPIOA conversion
   read.dock.at_ms = 1;
+  CHECK(send(body, "grip 60", 1) == "OK grip angle=60");
+  CHECK(body.state().servos_attached);
   body.set_accessories(read, 1);
   CHECK(!body.state().armed);
+  CHECK(body.state().servos_attached); // hold jaw PWM at contact
+  CHECK(body.state().grip_target == body.state().grip);
   CHECK(send(body, "arm", 2) == "ERR arm dock_power_connected");
   read.dock.valid = false; // lost expander must not clear the contact latch
   body.set_accessories(read, 3);

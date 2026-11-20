@@ -278,7 +278,10 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   state_.accessories.dock.valid =
       (new_sample || repeated) && !dock_provenance_fault_;
   if (dock_power_lockout_) {
-    force_disarm();
+    // Contact must veto wheel motion without detaching holding servo PWM.
+    // Only an explicit disarm should deliberately release a grasped payload.
+    stop_motion();
+    state_.armed = false;
   } else if ((dock.present || dock_monitor_required_) &&
              (!state_.accessories.dock.valid || !dock.present ||
               dock.sample_seq == 0U)) {
