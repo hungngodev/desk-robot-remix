@@ -142,7 +142,8 @@ def compose_brain_context(
     # guesses must not influence which tool receipt is treated as requested.
     crossed_voice_boundary = False
     priorities = {
-        "human_transcript": 0, "mac_activity": 0.5, "mac_attention": 0.75, "tool": 1, "sensor": 2,
+        "human_transcript": 0, "mac_activity": 0.5, "tool": 1,
+        "mac_attention": 1.5, "sensor": 2,
         "room_station": 2, "human_voice": 3, "robot_speech": 4,
         "sensor_history": 4.5, "camera": 5,
     }
