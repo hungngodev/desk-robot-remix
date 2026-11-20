@@ -1,5 +1,7 @@
 """Online playbook receipts must be checked against actual GitHub metadata."""
+import base64
 import importlib.util
+import json
 from pathlib import Path
 from urllib.error import URLError
 
@@ -24,7 +26,14 @@ def lookup(url):
                 "head_repository": {"full_name": "hungngodev/desk-robot-remix"},
                 "status": "completed", "conclusion": "success"}
     if "/contents/docs/records/bench.csv?ref=" in url:
-        return {"type": "file", "size": 52}
+        raw = (
+            "procedure_id,source_sha,gate,result,operator,device_revision,"
+            "tested_on,measurement\n"
+            f"9,{SHA},MEASURED,pass,fixture_operator_001,"
+            "fixture_carrier_rev_A,2026-11-20,10 mm lift\n"
+        ).encode()
+        return {"type": "file", "size": len(raw), "encoding": "base64",
+                "content": base64.b64encode(raw).decode()}
     raise AssertionError("Unexpected URL " + url)
 
 
@@ -41,6 +50,7 @@ def promoted(gate="TESTED"):
             "result": "pass", "raw_data_url": RAW,
             "operator": "fixture_operator_001",
             "device_revision": "fixture_carrier_rev_A",
+            "tested_on": "2026-11-20",
         },
     }]}
 
@@ -67,15 +77,74 @@ def test_physical_record_must_exist_at_same_commit():
     bad = promoted("MEASURED")
     bad["procedures"][0]["physical_measurement_receipt"]["raw_data_url"] = (
         RAW.replace(SHA, "b" * 40))
-    assert any("raw physical record not found" in item
+    assert any("immutable physical record not matched" in item
                for item in verify.audit(bad, lookup))
 
     def empty_record(url):
         if "/contents/" in url:
             return {"type": "file", "size": 0}
         return lookup(url)
-    assert any("raw physical record not found" in item
+    assert any("immutable physical record not matched" in item
                for item in verify.audit(promoted("MEASURED"), empty_record))
+
+
+def test_existing_unrelated_record_cannot_promote_physical_procedure():
+    row = promoted("MEASURED")["procedures"][0]
+    good = lookup("https://api.github.com/repos/hungngodev/"
+                  "desk-robot-remix/contents/docs/records/bench.csv?ref=" + SHA)
+    original = base64.b64decode(good["content"]).decode()
+    for bad in (
+        original.replace(f"9,{SHA}", f"11,{SHA}"),
+        original.replace("10 mm lift", ""),
+        original.replace("10 mm lift", "pass"),
+        original.replace("2026-11-20", "2026-99-99"),
+        original.replace(f"9,{SHA}", f"9,{'b' * 40}"),
+        original + original.splitlines()[1] + "\n",
+    ):
+        raw = bad.encode()
+        def altered(url, data=raw):
+            if "/contents/" not in url:
+                return lookup(url)
+            return {**good, "size": len(data),
+                    "content": base64.b64encode(data).decode()}
+        assert verify.verified_raw_record(RAW, SHA, altered)
+        assert not verify.verified_procedure_record(row, SHA, altered)
+        assert any("immutable physical record not matched" in error
+                   for error in verify.audit({"procedures": [row]}, altered))
+
+
+def test_immutable_physical_record_binds_gate_signoff_and_json_measurements():
+    row = promoted("MEASURED")["procedures"][0]
+    assert verify.verified_procedure_record(row, SHA, lookup)
+    signoff = row["physical_measurement_receipt"]
+    for key, altered in (("operator", "another_person"),
+                         ("device_revision", "another_board"),
+                         ("tested_on", "2026-11-19")):
+        old = signoff[key]
+        signoff[key] = altered
+        assert not verify.verified_procedure_record(row, SHA, lookup)
+        signoff[key] = old
+    row["gate"] = "QUALIFIED"
+    assert not verify.verified_procedure_record(row, SHA, lookup)
+    row["gate"] = "MEASURED"
+    signoff["raw_data_url"] = RAW.replace("bench.csv", "bench.json")
+    receipt = {"procedure_id": 9, "source_sha": SHA, "gate": "MEASURED",
+               "result": "pass", "operator": signoff["operator"],
+               "device_revision": signoff["device_revision"],
+               "tested_on": signoff["tested_on"],
+               "measurement": {"lift_mm": 10}}
+    def json_lookup(url, records=None):
+        if "/contents/" not in url:
+            return lookup(url)
+        data = json.dumps({"receipts": [receipt] if records is None else records}).encode()
+        return {"type": "file", "size": len(data), "encoding": "base64",
+                "content": base64.b64encode(data).decode()}
+    assert verify.verified_procedure_record(row, SHA, json_lookup)
+    assert not verify.verified_procedure_record(
+        row, SHA, lambda url: json_lookup(url, [receipt, receipt]))
+    assert not verify.verified_procedure_record(
+        row, SHA, lambda url: json_lookup(
+            url, [{**receipt, "procedure_id": 42}]))
 
 
 def test_unavailable_api_cannot_approve_evidence():

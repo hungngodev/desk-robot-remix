@@ -9,10 +9,15 @@ physical reviewer signoff remains mandatory.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import csv
+import io
 import json
 import os
 import re
 import sys
+from datetime import date
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
@@ -82,6 +87,79 @@ def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
     return data.get("type") == "file" and type(data.get("size")) is int \
         and data["size"] > 0
 
+
+
+def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
+    """Require the immutable data file to identify the measured procedure.
+
+    Existence of an unrelated nonempty docs/records file is insufficient.
+    """
+    signoff = row.get("physical_measurement_receipt")
+    if not isinstance(signoff, dict):
+        return False
+    url = signoff.get("raw_data_url")
+    if not isinstance(url, str):
+        return False
+    captured = {}
+
+    def capture(target):
+        result = lookup(target)
+        captured["file"] = result
+        return result
+
+    if not verified_raw_record(url, sha, capture):
+        return False
+    file = captured.get("file")
+    if (not isinstance(file, dict) or file.get("encoding") != "base64"
+            or not isinstance(file.get("content"), str)
+            or not 0 < file.get("size", 0) <= 1_000_000):
+        return False
+    try:
+        raw = base64.b64decode("".join(file["content"].split()), validate=True)
+        if len(raw) != file["size"]:
+            return False
+        content = raw.decode("utf-8-sig")
+        if urlsplit(url).path.lower().endswith(".csv"):
+            reader = csv.DictReader(io.StringIO(content), strict=True)
+            if not reader.fieldnames or len(reader.fieldnames) != len(set(reader.fieldnames)):
+                return False
+            records = list(reader)
+        elif urlsplit(url).path.lower().endswith(".json"):
+            document = json.loads(content)
+            records = document.get("receipts") if isinstance(document, dict) else None
+        else:
+            return False
+    except (ValueError, TypeError, UnicodeError, binascii.Error, csv.Error):
+        return False
+    if not isinstance(records, list) or not 0 < len(records) <= 2000:
+        return False
+    identifier = row.get("id")
+    matches = [record for record in records if isinstance(record, dict)
+               and record.get("procedure_id") in (identifier, str(identifier))]
+    if len(matches) != 1:
+        return False
+    record = matches[0]
+    measured = record.get("measurement")
+    has_measurement = (
+        (isinstance(measured, dict) and bool(measured))
+        or (isinstance(measured, str) and measured.strip().casefold()
+            not in {"", "unknown", "tbd", "n/a", "pass", "none"})
+    )
+    tested_on = record.get("tested_on")
+    try:
+        valid_date = (isinstance(tested_on, str)
+                      and date.fromisoformat(tested_on).isoformat() == tested_on)
+    except ValueError:
+        valid_date = False
+    return bool(
+        record.get("source_sha") == sha
+        and record.get("gate") == row.get("gate")
+        and record.get("result") == "pass"
+        and record.get("operator") == signoff.get("operator")
+        and record.get("device_revision") == signoff.get("device_revision")
+        and valid_date and tested_on == signoff.get("tested_on")
+        and has_measurement
+    )
 
 def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
     """Resolve exact PR review evidence, not a self-declared URL string."""
@@ -201,10 +279,8 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
                 errors.append(f"procedure {identifier}: incomplete physical signoff")
                 continue
             try:
-                if not verified_raw_record(
-                    measurement.get("raw_data_url", ""), sha, lookup
-                ):
-                    errors.append(f"procedure {identifier}: raw physical record not found")
+                if not verified_procedure_record(row, sha, lookup):
+                    errors.append(f"procedure {identifier}: immutable physical record not matched")
             except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
                 errors.append(
                     f"procedure {identifier}: physical lookup failed: {type(exc).__name__}"
