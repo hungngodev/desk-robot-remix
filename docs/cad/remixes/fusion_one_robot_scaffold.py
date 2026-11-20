@@ -6,6 +6,7 @@ Source meshes have arbitrary coordinates; this does not align joints,
 generate missing mounts, or certify any printed part or charging circuit.
 """
 from pathlib import Path
+import runpy
 import traceback
 
 SOURCE_MESHES = (
@@ -68,6 +69,19 @@ def build_manifest(root: Path):
             + [(name, path) for name, path in fits if path.is_file()])
 
 
+def verify_optional_fit_references(root: Path) -> None:
+    """Reject stale generated STLs before Fusion imports their envelopes."""
+    remixes = root / "docs/cad/remixes"
+    generated = [
+        remixes / "adapter_stls" / (name + ".stl")
+        for name in ADAPTER_NAMES
+    ] + [remixes / relative for _, relative in FIT_REFERENCES]
+    if not any(path.is_file() for path in generated):
+        return
+    checker = root / "code/scripts/export_fit_kit.py"
+    runpy.run_path(str(checker))["verify_fit_kit"](root, output_dir=remixes)
+
+
 def run(context):
     import adsk.core
     import adsk.fusion
@@ -76,6 +90,7 @@ def run(context):
     ui = app.userInterface
     try:
         repo = find_repo(Path(__file__).resolve())
+        verify_optional_fit_references(repo)
         sources = build_manifest(repo)
         app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
         design = adsk.fusion.Design.cast(app.activeProduct)
