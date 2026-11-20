@@ -100,6 +100,20 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert report["parts"][1]["quantity_per_robot"] == 8
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
     assert source.verify_fit_kit(tmp_path, output_dir=rendered) == report
+    # A modified JSON receipt must never promote a reversible fit kit
+    # to a physically qualified assembly, energized dock, or licensed product.
+    import json
+    manifest = rendered / "fit_kit_manifest.json"
+    original = manifest.read_text()
+    for unsafe_flag in (
+        "hardware_fit_verified", "full_printable_assembly_verified",
+        "dock_charge_contacts_approved", "commercial_manufacture_authorized",
+    ):
+        edited = dict(report, **{unsafe_flag: True})
+        manifest.write_text(json.dumps(edited))
+        with pytest.raises(ValueError, match="Unsafe fit kit provenance flags"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
     assert all(item["units"] == "mm" for item in report["parts"])
     assert all(len(item["source_sha256"]) == 64 for item in report["parts"])
     assert all(len(item["mesh_sha256"]) == 64 for item in report["parts"])
