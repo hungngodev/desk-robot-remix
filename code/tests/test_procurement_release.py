@@ -945,7 +945,7 @@ def test_motor_selection_requires_both_independent_qualified_decisions():
 
 
 def test_supplemental_decisions_reject_unresolved_real_subparts():
-    """All 14 priced alternatives need decisions, not just the 49 parent roles."""
+    """Selected linked hardware needs receipts; deferred thermal stays visible."""
     import copy
     import json
 
@@ -981,10 +981,19 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
                    "decision_receipt": receipt,
                    **dict(approved_part)}
             for name, (parent, qty) in mod.SUPPLEMENTAL_DECISIONS.items()
+            if name != "room_amg8833"
         },
     }
-    assert len(evidence["supplemental_decisions"]) == 14
-    assert mod.generate(plan, evidence)["order_released"]  # test fixture only
+    assert len(evidence["supplemental_decisions"]) == 13
+    complete = mod.generate(plan, evidence)
+    assert complete["order_released"]  # test fixture only
+    assert len(complete["supplemental_decisions"]) == 14
+    deferred = next(
+        item for item in complete["supplemental_decisions"]
+        if item["id"] == "room_amg8833"
+    )
+    assert deferred["reviewed"] is True
+    assert deferred["disposition"] == "deferred_optional"
     # Even a synthetic otherwise fully approved fleet MUST NOT contain a
     # renamed cheap sensor carrier or revert to the unsafe 1W speaker.
     for name, replacement in (
@@ -1103,6 +1112,7 @@ def test_linked_subassembly_plan_is_not_deletable():
     linked = {item["id"]: item for item in plan["linked_subassemblies"]}
     assert set(linked) == set(mod.SUPPLEMENTAL_DECISIONS)
     assert len(linked) == 14
+    assert linked["room_amg8833"]["disposition"] == "deferred_optional"
     for ident, (parent, count) in mod.SUPPLEMENTAL_DECISIONS.items():
         assert linked[ident]["parent_role"] == parent
         assert linked[ident]["fleet_quantity"] == count
