@@ -204,6 +204,12 @@ class MemoryStore:
             raise ValueError("Confidence outside [0,1]")
         if not math.isfinite(when):
             raise ValueError("Nonfinite timestamp or confidence")
+        # A bad device clock or replayed future event must not outrank genuine
+        # observations forever or evict them from the bounded 250-row store.
+        # Historical events remain importable; only impossible future times
+        # beyond a small clock-skew allowance are rejected.
+        if when > time.time() + 60:
+            raise ValueError("Observation timestamp exceeds local clock")
         with self._connect(robot_id) as db:
             cursor = db.execute(
                 """INSERT OR IGNORE INTO memories
