@@ -16,6 +16,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <string_view>
@@ -111,10 +112,13 @@ private:
                 for (int i = 0; i < real_pets; ++i)
                     board->face_behavior_.pushEvent(Event(EventType::kTouched));
             }
+            // A WROOM fault or expired status revokes prior cosmetic visual
+            // evidence. It cannot reappear as a fresh sighting on recovery.
+            if (body_unhealthy) person_cue_until_ms = 0;
             // Consume an authenticated Mac visual cue on the face task:
             // no HSM cross-thread push, no movement and no extra AI stack.
             if (board->body_bridge_ && board->body_bridge_->TakePersonCue() &&
-                !board->body_fault_active_) {
+                !body_unhealthy) {
                 // Do not replay a sighting received during a fault after
                 // the body reconnects: it is already stale visual evidence.
                 person_cue_until_ms = now_ms + 1500U;

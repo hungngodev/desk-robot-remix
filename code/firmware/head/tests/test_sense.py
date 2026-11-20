@@ -730,7 +730,7 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'body_bridge_->TakePersonCue()' in board
     assert 'Event(EventType::kPersonDetected)' in board
     assert 'person_cue_active ? "surprised" : "neutral"' in board
-    assert 'board->body_fault_active_ ? "sad" :' in board
+    assert 'body_unhealthy ? "sad" :' in board
     assert 'Transact(event' not in bridge  # never send cue to WROOM
 
 
@@ -817,7 +817,9 @@ def test_sense_face_discards_person_cues_received_during_body_fault():
     guard = board.split(
         "if (board->body_bridge_ && board->body_bridge_->TakePersonCue()", 1
     )[1].split("person_cue_until_ms = now_ms + 1500U;", 1)[0]
-    assert "!board->body_fault_active_" in guard
+    assert "!body_unhealthy" in guard
+    assert "if (body_unhealthy) person_cue_until_ms = 0;" in board
+    assert "#include <algorithm>" in board
     # Existing face priority also suppresses previously active cues while
     # fault remains. Neither cosmetic cue is a body motion command.
     assert "person_cue_until_ms != 0U" in board
