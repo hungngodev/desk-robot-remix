@@ -57,6 +57,11 @@ _speaker_handoff_lock = asyncio.Lock()
 _terminal_errors: dict[str, str] = {}
 _retry_after: dict[str, float] = {}
 
+# Passive model speech is an opportunity, not a periodic announcement.
+# One unsolicited START across all native pets consumes the fleet budget.
+_PASSIVE_SPEECH_COOLDOWN_S = 120.0
+_last_passive_speech_started_at = float("-inf")
+
 _NATIVE_WORKER_CANCEL_TIMEOUT_S = 0.8
 
 
@@ -2037,31 +2042,32 @@ class NativeOmniSession:
                     break
 
     async def _send_device_state(self, state: str, generation: int) -> bool:
-        global _output_owner
+        global _output_owner, _last_passive_speech_started_at
         if self.closed or generation != self._generation:
             return False
         import desk_robot_bridge as bridge
         if bridge.connections.get(self.device) is not self.conn:
             raise RuntimeError("Physical robot identity changed during native speech")
+        passive_start = False
         if state == "start":
             if self._monitor_lost:
                 return False  # Lost fleet VAD forbids all native audio.
-            # Both quiet and pause prohibit unsolicited model speech, not
-            # a single genuine reply to the next authenticated human VAD.
-            # A recent timestamp alone was not sufficient: it previously
-            # let unlimited unrelated model responses slip through.
-            direct_required = self._pet_quiet or not self._pet_autonomy_enabled
-            if (direct_required and not (
+            # One authenticated VAD turn gets one direct reply even when pet
+            # autonomy is enabled. Later responses from that turn are passive.
+            now = time.monotonic()
+            direct_reply = (
                 self._direct_reply_available
-                and 0 <= time.monotonic() -
-                    self._last_human_speech_at <= 12.0
-            )):
+                and 0 <= now - self._last_human_speech_at <= 12.0
+            )
+            direct_required = self._pet_quiet or not self._pet_autonomy_enabled
+            if direct_required and not direct_reply:
                 return False
+            passive_start = not direct_reply
             if self._external_speech_active:
                 return False  # The Mac proactive owner already holds this decoder.
             # Source-authenticated human VAD has priority even if this model
             # response was already queued. Never speak over another pet's user.
-            if not await claim_speaker(self):
+            if not await claim_speaker(self, passive=passive_start):
                 if self._external_speech_active or _external_speaker_owner is not None:
                     return False  # Do not flush the Mac voice that already owns it.
                 events = await self._invalidate_head_first()
@@ -2083,15 +2089,19 @@ class NativeOmniSession:
                 # Quiet/autonomy can change AFTER the first policy check while
                 # claim_speaker waits for the physical send lock. Never trust a
                 # pre-await snapshot for speaker authorization.
+                now = time.monotonic()
+                direct_reply = (
+                    self._direct_reply_available
+                    and 0 <= now - self._last_human_speech_at <= 12.0
+                )
                 direct_required = self._pet_quiet or not self._pet_autonomy_enabled
                 if (self.closed or generation != self._generation
                         or self._external_speech_active
                         or (state == "start" and self._monitor_lost)
-                        or (state == "start" and direct_required and not (
-                            self._direct_reply_available
-                            and 0 <= time.monotonic() -
-                                self._last_human_speech_at <= 12.0
-                        ))):
+                        or (state == "start" and not passive_start
+                            and not direct_reply)
+                        or (state == "start" and direct_required
+                            and not direct_reply)):
                     refused_after_claim = True
                 # VAD may start between claim_speaker and acquiring the device
                 # send lock. Suppress the TTS START packet in that case.
@@ -2111,9 +2121,13 @@ class NativeOmniSession:
                         # Sending to the old socket does not stop the new head.
                         # Do not release the fleet lease for a stale TTS STOP.
                         raise RuntimeError("Head replaced during native TTS control")
-                    if state == "start" and direct_required:
-                        self._direct_reply_available = False
-                        self._direct_reply_active = True
+                    if state == "start":
+                        if passive_start:
+                            _last_passive_speech_started_at = time.monotonic()
+                        else:
+                            # Consume this VAD turn for autonomous pets too.
+                            self._direct_reply_available = False
+                            self._direct_reply_active = True
         if refused_after_claim:
             if state == "start":
                 async with _output_owner_lock:
@@ -2653,8 +2667,10 @@ async def end_external_speech(
             _output_owner_unverified = conn.device_id
 
 
-async def claim_speaker(session: NativeOmniSession) -> bool:
-    """One native speaker owner; a stalled old STOP cannot block human VAD."""
+async def claim_speaker(
+    session: NativeOmniSession, *, passive: bool = False,
+) -> bool:
+    """One native speaker owner; passive starts also share the fleet budget."""
     global _output_owner
     import desk_robot_bridge as bridge
     async with _speaker_handoff_lock:
@@ -2699,6 +2715,10 @@ async def claim_speaker(session: NativeOmniSession) -> bool:
                     )):
                 # The old STOP may fail while we awaited its flush.
                 # Never grant another pet a decoder with uncertain state.
+                return False
+            if (passive and time.monotonic()
+                    - _last_passive_speech_started_at
+                    < _PASSIVE_SPEECH_COOLDOWN_S):
                 return False
             _output_owner = session.device
             return True

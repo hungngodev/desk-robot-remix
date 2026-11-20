@@ -1030,6 +1030,80 @@ async def test_uncertain_mac_decoder_recovery_bounds_all_lock_waits(
 
 
 @pytest.mark.parametrize("owner_present", [False, True])
+async def test_native_passive_speech_budget_is_shared_across_pets(
+    native, monkeypatch,
+):
+    module, bridge = native
+    clock = [1000.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    first, first_sent = connection()
+    second, second_sent = connection()
+    second.device_id = "mac-02"
+    second.session_id = "second-head"
+    bridge.robot_for_device = lambda device: {
+        "mac-01": "robot-01", "mac-02": "robot-02",
+    }.get(device)
+    bridge.connections.update({"mac-01": first, "mac-02": second})
+    one = module.NativeOmniSession(
+        first, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    two = module.NativeOmniSession(
+        second, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions.update({"mac-01": one, "mac-02": two})
+
+    assert await one._send_device_state("start", one._generation)
+    assert module._last_passive_speech_started_at == 1000.0
+    assert await one._send_device_state("stop", one._generation)
+    assert not await two._send_device_state("start", two._generation)
+    assert not any(
+        isinstance(packet, str)
+        and json.loads(packet).get("state") == "start"
+        for packet in second_sent
+    )
+
+    clock[0] += module._PASSIVE_SPEECH_COOLDOWN_S
+    assert await two._send_device_state("start", two._generation)
+    assert await two._send_device_state("stop", two._generation)
+    assert any(
+        isinstance(packet, str)
+        and json.loads(packet).get("state") == "start"
+        for packet in first_sent
+    )
+
+
+async def test_native_direct_reply_bypasses_passive_budget_once(
+    native, monkeypatch,
+):
+    module, bridge = native
+    clock = [2000.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    conn, sent = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions["mac-01"] = session
+    module._last_passive_speech_started_at = clock[0]
+    session._last_human_speech_at = clock[0]
+    session._direct_reply_available = True
+
+    assert await session._send_device_state("start", session._generation)
+    assert not session._direct_reply_available
+    assert session._direct_reply_active
+    assert await session._send_device_state("stop", session._generation)
+    # A second response from the same VAD turn is passive and remains blocked.
+    assert not await session._send_device_state("start", session._generation)
+    assert sum(
+        1 for packet in sent
+        if isinstance(packet, str)
+        and json.loads(packet).get("state") == "start"
+    ) == 1
+
+
 async def test_native_speaker_refuses_orphan_or_closed_prior_owner(
     native, owner_present,
 ):
