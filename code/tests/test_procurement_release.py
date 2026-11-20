@@ -1582,6 +1582,12 @@ def test_verified_checkout_evidence_is_embedded_in_existing_shopping_lists():
         }],
     }
     shown_report = mod.attach_verified_checkout_evidence(report, cost, evidence)
+    projected = mod.first_robot_projection(shown_report)
+    assert projected["verified_checkout_cost"]["payable_now_cents"] == 725
+    projected_mux = next(
+        row for row in projected["roles"] if row["id"] == "i2c_mux"
+    )
+    assert projected_mux["verified_checkout_quotes"] == [quote]
     one = mod.render_first_robot_markdown(shown_report)
     full = mod.render_markdown(shown_report)
     for shown in (one, full):

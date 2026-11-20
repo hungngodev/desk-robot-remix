@@ -754,6 +754,9 @@ def first_robot_projection(report: dict) -> dict:
                 "conditional_remaining": available,
                 "reference_only": part.get("reference_only"),
                 "selected_carrier": part.get("selected_carrier"),
+                "verified_checkout_quotes": copy.deepcopy(
+                    part.get("verified_checkout_quotes", [])
+                ),
                 "missing_part_evidence": part["missing_part_evidence"],
                 "decision": (
                     "HOLD MOTOR CHOICE" if motor == "unresolved"
@@ -805,6 +808,9 @@ def first_robot_projection(report: dict) -> dict:
             "owned stock before irreversible purchases."
         ),
         "roles": rows, "linked_decisions": linked,
+        "verified_checkout_cost": copy.deepcopy(
+            report.get("verified_checkout_cost")
+        ),
     }
 
 
