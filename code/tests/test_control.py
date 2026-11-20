@@ -13,6 +13,30 @@ def make(settings):
     return Coordinator(settings, heads, SimulationVision()), head
 
 
+async def test_slow_pickup_visual_result_expires_without_motion(settings):
+    """A correct but old YOLO box cannot become a fresh motor decision."""
+    from desk_robot.calibration import Calibration
+    from desk_robot.vision import Detection
+
+    settings.mode = "hardware"
+    c, head = make(settings)
+
+    class DelayedDetection:
+        async def detect(self, jpeg, target):
+            await asyncio.sleep(2.05)
+            return [Detection(target, 0.99, (50.0, 50.0, 70.0, 70.0))]
+
+    c.vision = DelayedDetection()
+    calibration = Calibration.load(settings.robots[0].calibration)
+    try:
+        with pytest.raises(OperationError, match="visual evidence expired"):
+            await c._observe("robot-01", "key", calibration)
+        assert not any(cmd.startswith(("drive ", "grip ", "lift "))
+                       for cmd in head.commands)
+    finally:
+        await c.close()
+
+
 async def test_permit_is_operator_only_one_use_per_robot(settings):
     c, head = make(settings)
     try:
