@@ -51,6 +51,7 @@ def test_dock_mesh_clearances_with_openscad(tmp_path):
     import shutil
     import struct
     import subprocess
+
     import pytest
 
     openscad = shutil.which("openscad")
