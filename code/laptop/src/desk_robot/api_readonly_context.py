@@ -10,7 +10,7 @@ import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
-from .brain_context import compose_brain_context
+from .brain_context import active_job_timeline, compose_brain_context
 from .config import Settings
 from .controller import OperationError
 from .transport import HeadError
@@ -93,7 +93,18 @@ def register_readonly_context_routes(
         if visual is None:
             raise OperationError("No current multimodal camera/sensor owner")
         now = time.monotonic()
-        timeline = visual.hub.interaction_timeline(robot_id, now, limit=10)
+        # The same Coordinator table supplies the active physical task to
+        # both native Xiaozhi context and Mac pet dialogue. No new planner,
+        # command, persistent memory, or per-event scripted reaction.
+        jobs = getattr(getattr(app.state.runtime, "coordinator", None), "jobs", None)
+        activity = (
+            active_job_timeline(jobs.values(), robot_id)
+            if isinstance(jobs, dict) else []
+        )
+        timeline = visual.hub.interaction_timeline(
+            robot_id, now, limit=10 - len(activity)
+        )
+        timeline.extend(activity)
         if not settings.voice_memory_tools_enabled:
             # Revoking memory consent also revokes the transient retrieval
             # result. A still-active camera permit is not permission to read
