@@ -2701,18 +2701,26 @@ async def test_proactive_private_wav_revoked_during_kokoro_never_reaches_head(
     calls = []
 
     class Response:
-        def __init__(self, content=b""):
+        def __init__(self, content=b"", payload=None):
             self.content = content
+            self.payload = payload or {}
 
         def raise_for_status(self):
             pass
 
         def json(self):
-            return {}
+            return self.payload
 
     class Client:
         async def post(self, url, **kwargs):
             calls.append(url)
+            body = kwargs.get("json", {})
+            if url.endswith("/session"):
+                return Response(payload={
+                    "device_ids": sorted(body["device_ids"]),
+                    "enabled": body["enabled"],
+                    "expires_in_seconds": 305 if body["enabled"] else 0,
+                })
             if url.endswith("/v1/audio/speech"):
                 if revocation == "private_memory":
                     fleet.voice_memory_tools_enabled = False
@@ -2721,7 +2729,10 @@ async def test_proactive_private_wav_revoked_during_kokoro_never_reaches_head(
                 return Response(b"RIFFsynthetic-wav-fixture")
             if url.endswith("/speak"):
                 raise AssertionError("Revoked proactive reply reached head")
-            return Response()
+            return Response(payload={
+                "device_id": body["device_id"],
+                "interrupted": True, "head_flush_requested": True,
+            })
 
     speaker = KokoroHeadSpeaker(fleet, Client())
     pet = PetController(
@@ -2980,19 +2991,34 @@ async def test_proactive_sensor_private_live_context_revoked_during_tts(
     class Response:
         content = b"RIFFsynthetic-wav-fixture"
 
+        def __init__(self, payload=None):
+            self.payload = payload or {}
+
         def raise_for_status(self):
             pass
 
         def json(self):
-            return {}
+            return self.payload
 
     class Client:
         async def post(self, url, **kwargs):
             calls.append(url)
+            body = kwargs.get("json", {})
+            if url.endswith("/session"):
+                return Response({
+                    "device_ids": sorted(body["device_ids"]),
+                    "enabled": body["enabled"],
+                    "expires_in_seconds": 305 if body["enabled"] else 0,
+                })
             if url.endswith("/v1/audio/speech"):
                 fleet.voice_vision_tools_enabled = False
             if url.endswith("/speak"):
                 raise AssertionError("Revoked live context was sent to the head")
+            if url.endswith("/interrupt"):
+                return Response({
+                    "device_id": body["device_id"],
+                    "interrupted": True, "head_flush_requested": True,
+                })
             return Response()
 
     memory = MemoryStore(tmp_path, ids)
