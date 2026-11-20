@@ -45,6 +45,15 @@ _object_image.save(_object_bytes, "JPEG")
 RED = _object_bytes.getvalue()
 
 
+class StaticCamera:
+    def __init__(self):
+        self.calls = 0
+
+    async def snapshot(self):
+        self.calls += 1
+        return WHITE
+
+
 class ChangingCamera:
     def __init__(self):
         self.frames = [WHITE, WHITE, RED, RED, RED, RED]
@@ -79,6 +88,107 @@ async def wait_for(predicate, timeout=2):
     async with asyncio.timeout(timeout):
         while not predicate():
             await asyncio.sleep(0.01)
+
+
+def test_activity_policy_defaults_and_rejects_reversed_range(fleet):
+    assert fleet.pet_activity_min_interval_seconds == 30
+    assert fleet.pet_activity_max_interval_seconds == 90
+    payload = fleet.model_dump()
+    payload["pet_activity_min_interval_seconds"] = 91
+    payload["pet_activity_max_interval_seconds"] = 90
+    with pytest.raises(
+        ValueError, match="Pet activity minimum interval cannot exceed maximum"
+    ):
+        type(fleet).model_validate(payload)
+
+
+async def test_activity_scheduler_reevaluates_idle_scene_without_fake_perception(
+    fleet, tmp_path,
+):
+    class ActivityChat:
+        def __init__(self):
+            self.prompts = []
+
+        async def proactive_decision(self, history):
+            self.prompts.append(history)
+            return {"action": "silence", "text": "", "tool": "none"}
+
+    class NoScene:
+        async def compare(self, before, after):
+            raise AssertionError("Unchanged idle frames need no semantic comparison")
+
+    chat = ActivityChat()
+    speaker = SimulatedSpeaker()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, chat, speaker, memory=memory)
+    heads = {r.id: StaticCamera() for r in fleet.robots}
+    pet = PetController(
+        fleet, heads, conversation, memory, NoScene(),
+        interval=.01, speech_cooldown=0,
+        activity_min_interval=.02, activity_max_interval=.02,
+    )
+    pet.start("robot-01")
+    await wait_for(
+        lambda: pet.status("robot-01")["activity_reevaluations"] >= 1
+    )
+    await wait_for(
+        lambda: pet.status("robot-01")["activity_silences"] >= 1
+    )
+    status = pet.status("robot-01")
+    assert status["last_activity_decision"] == "silence"
+    assert status["activity_scheduler_running"] is True
+    assert speaker.spoken == []
+    assert memory.count("robot-01") == 0
+    assert chat.prompts
+    user_prompt = chat.prompts[0][1]["content"]
+    assert "There is no new sensor or camera observation" in user_prompt
+    assert "Camera model assessment" not in user_prompt
+    await pet.close()
+    assert pet.status("robot-01")["activity_scheduler_running"] is False
+
+
+async def test_activity_reconsideration_round_robins_enabled_pets_with_one_speaker(
+    fleet, tmp_path,
+):
+    class ActivityChat:
+        async def proactive_decision(self, history):
+            assert "There is no new sensor or camera observation" in history[1]["content"]
+            return {
+                "action": "speak",
+                "text": "Want a tiny desk break?",
+                "tool": "none",
+            }
+
+    class NoScene:
+        async def compare(self, before, after):
+            raise AssertionError("Static frames should not create scene events")
+
+    speaker = SimulatedSpeaker()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, ActivityChat(), speaker, memory=memory
+    )
+    pet = PetController(
+        fleet, {r.id: StaticCamera() for r in fleet.robots},
+        conversation, memory, NoScene(), interval=.01, speech_cooldown=0,
+        activity_min_interval=30, activity_max_interval=30,
+    )
+    pet.start("robot-01")
+    pet.start("robot-02")
+
+    pet._reconsider_activity()
+    await wait_for(lambda: len(speaker.spoken) == 1)
+    pet._reconsider_activity()
+    await wait_for(lambda: len(speaker.spoken) == 2)
+
+    assert [robot_id for robot_id, _ in speaker.spoken] == [
+        "robot-01", "robot-02"
+    ]
+    assert pet.status("robot-01")["activity_reevaluations"] == 1
+    assert pet.status("robot-02")["activity_reevaluations"] == 1
+    assert pet.status("robot-01")["last_activity_decision"] == "speak"
+    assert pet.status("robot-02")["last_activity_decision"] == "speak"
+    await pet.close()
 
 
 def test_visual_change_gate_requires_persistent_difference():

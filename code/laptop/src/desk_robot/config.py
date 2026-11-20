@@ -79,6 +79,8 @@ class Settings(BaseModel):
     voice_transcript_memory_enabled: bool = False  # Separate consent to retain model-estimated spoken words as text.
     voice_vision_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi camera questions/voice frame selection.
     pet_autostart_enabled: bool = False  # Explicit hardware opt-in for idle camera and sensor observation.
+    pet_activity_min_interval_seconds: float = Field(default=30.0, ge=5.0, le=600.0)
+    pet_activity_max_interval_seconds: float = Field(default=90.0, ge=5.0, le=600.0)
     fleet_text_sharing_enabled: bool = False  # Opt-in local, provenance-tagged text only.
     fleet_social_autonomy_enabled: bool = False  # Bounded pet-to-pet talk, explicit opt-in.
     fleet_social_min_interval_seconds: int = Field(default=300, ge=30, le=3600)
@@ -95,6 +97,10 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def unique_ids(self):
+        if self.pet_activity_min_interval_seconds > self.pet_activity_max_interval_seconds:
+            raise ValueError(
+                "Pet activity minimum interval cannot exceed maximum"
+            )
         if self.voice_transcript_memory_enabled and (
             self.mode != "hardware" or not self.voice_memory_tools_enabled
         ):
