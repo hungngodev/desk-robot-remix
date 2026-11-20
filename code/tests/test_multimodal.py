@@ -2583,3 +2583,18 @@ def test_future_camera_and_shared_room_receipts_cannot_block_real_observations()
     assert "FUTURE_SHARED_STATION" not in str(
         hub.interaction_timeline("robot-01", now)
     )
+
+
+def test_future_transmitted_speech_does_not_resurface_as_live_own_utterance():
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    with pytest.raises(ValueError, match="Invalid actual transmitted pet speech"):
+        hub.remember_spoken("robot-01", "FUTURE_SPEECH_NOT_PLAYED", now + 3600)
+    assert hub.spoken_history["robot-01"] == hub.spoken_history["robot-02"]
+    hub.remember_spoken("robot-01", "REAL_RECENT_AUDIO_SENT", now)
+    entries = [item for item in hub.interaction_timeline("robot-01", now)
+               if item["channel"] == "robot_speech"]
+    assert len(entries) == 1
+    assert entries[0]["content"] == "REAL_RECENT_AUDIO_SENT"
+    assert entries[0]["playback_verified"] is False
+    assert hub.interaction_timeline("robot-02", now) == []

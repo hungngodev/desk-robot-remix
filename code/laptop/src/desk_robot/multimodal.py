@@ -485,7 +485,8 @@ class CameraFrameHub:
         """Bounded sent audio text, never proof of acoustic playback."""
         self._check(robot_id)
         if (not isinstance(text, str) or not 1 <= len(text.strip()) <= 280
-                or "\x00" in text or not _finite(sent_at) or source not in {
+                or "\x00" in text or not _admissible_mac_event_clock(sent_at)
+                or source not in {
                     "mac_tts_transmitted_not_speaker_playback_ack",
                     "native_model_text_opus_sent_playback_unverified",
                 }):
