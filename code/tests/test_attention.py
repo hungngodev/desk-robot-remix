@@ -69,6 +69,28 @@ def test_only_original_topic_generation_may_finish_and_relabel_activities():
     assert ledger.timeline("b", 20) == []
 
 
+def test_new_human_question_preempts_old_topic_in_attention_context():
+    ledger = AttentionLedger(["pet", "peer"])
+    token = ledger.begin_topic("pet", "Sing toward the desk edge", 10)
+    assert ledger.finish_topic("pet", token, 20, interrupted=True)
+    ledger.human_started("pet", 30)
+    event = "omni_" + "a" * 12 + "_" + "b" * 20
+    assert ledger.heard("pet", event, "What is the temperature now?", 31)
+    text = ledger.timeline("pet", 32)[0]["content"]
+    assert "Newer uncertain ASR words" in text
+    assert "What is the temperature now?" in text
+    assert "Earlier interrupted conversation" in text
+    assert text.index("What is the temperature now?") < text.index(
+        "Earlier interrupted conversation"
+    )
+    assert ledger.timeline("peer", 32) == []
+    assert not ledger.heard(
+        "pet", "omni_" + "c" * 12 + "_" + "d" * 20,
+        "Old reply from the interrupted topic", 29,
+    )
+    assert "Old reply from" not in ledger.timeline("pet", 32)[0]["content"]
+
+
 def test_sensor_buffer_bounds_and_rejects_untrusted_kinds_and_order():
     ledger = AttentionLedger(["p"])
     ledger.begin_topic("p", "A live conversation", 10)
