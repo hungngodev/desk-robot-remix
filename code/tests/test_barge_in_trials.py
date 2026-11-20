@@ -31,6 +31,7 @@ def fake_rows():
         "conversation_turn": 1 + n // 4,
         "speaker_distance_cm": 50,
         "room_noise_db_a": 32,
+        "robot_id": "robot-01",
         "firmware_commit": "sha-of-physically-flashed-build",
         "audio_config_id": "bench-config-1",
         "mic_speaker_placement_id": "prototype-enclosure-a",
@@ -38,6 +39,10 @@ def fake_rows():
     return rows + [{
         "kind": "robot_only", "duration_seconds": 600,
         "self_interruptions": 0,
+        "robot_id": "robot-01",
+        "firmware_commit": "sha-of-physically-flashed-build",
+        "audio_config_id": "bench-config-1",
+        "mic_speaker_placement_id": "prototype-enclosure-a",
     }]
 
 
@@ -102,6 +107,7 @@ def test_incomplete_acoustic_trial_coverage_fails(field, value):
 
 @pytest.mark.parametrize("field", [
     "firmware_commit", "audio_config_id", "mic_speaker_placement_id",
+    "robot_id",
 ])
 def test_mixed_hardware_or_software_setup_cannot_be_certified(field):
     rows = fake_rows()
@@ -121,3 +127,21 @@ def test_stage_boundary_cannot_precede_human_speech():
     rows[0]["vad_arrival_ms"] = rows[0]["human_onset_ms"] - 1
     with pytest.raises(ValueError, match="not monotonic"):
         evaluate(rows)
+
+
+@pytest.mark.parametrize("field", [
+    "robot_id", "firmware_commit", "audio_config_id",
+    "mic_speaker_placement_id",
+])
+def test_echo_only_control_cannot_borrow_another_robots_setup(field):
+    records = fake_rows()
+    records[-1][field] = "different-physical-setup"
+    with pytest.raises(ValueError, match="same robot and setup"):
+        evaluate(records)
+
+
+def test_human_acoustic_gate_cannot_mix_distinct_robot_identities():
+    records = fake_rows()
+    records[10]["robot_id"] = "robot-02"
+    with pytest.raises(ValueError, match="Do not mix firmware"):
+        evaluate(records)
