@@ -426,3 +426,27 @@ def test_connection_state_rejects_nonboolean_values(invalid):
         value.set_connected(invalid)
     assert value.is_current(epoch)
     assert value.connection_epoch == connection_epoch
+
+
+def test_boolean_generation_cannot_impersonate_first_live_turn_or_camera_connection():
+    value = connected(heartbeat_interval=1)
+    # Python bool is a subclass of int: True == 1 must never confer
+    # possession of this first connected audio or camera generation.
+    assert value.epoch == value.connection_epoch == 1
+    assert not value.is_current(True)
+    assert not value.is_connection_current(True)
+    assert not value.set_busy(True, model=False)
+    assert not value.queue_audio(True, b"\x01\x00")
+    assert not offer(value, b"untrusted frame", captured_at=1, now=1,
+                     connection_epoch=True)
+    assert value.queued_audio_bytes == 0
+    assert value.take_video_frame(now=1) is None
+    # The legitimate integer tokens still work without granting permission
+    # to model speech or moving the robot.
+    assert value.is_current(1)
+    assert value.is_connection_current(1)
+    assert value.set_busy(1, model=True)
+    assert value.queue_audio(1, b"\x02\x00")
+    assert offer(value, b"real frame", captured_at=1, now=1,
+                 connection_epoch=1)
+    assert value.take_video_frame(now=1).jpeg == b"real frame"

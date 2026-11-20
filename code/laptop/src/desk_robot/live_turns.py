@@ -136,11 +136,12 @@ class LiveTurns:
 
     def is_connection_current(self, connection_epoch: int) -> bool:
         """Recheck popped frames before sending to an external video transport."""
-        return self._connected and connection_epoch == self._connection_epoch
+        return (self._connected and type(connection_epoch) is int
+                and connection_epoch == self._connection_epoch)
 
     def is_current(self, epoch: int) -> bool:
         """Recheck popped chunks before sending; a device flush is still required."""
-        return self._connected and epoch == self._epoch
+        return self._connected and type(epoch) is int and epoch == self._epoch
 
     def _invalidate(self, reason: str) -> FlushPlayback:
         discarded = self._audio_bytes
