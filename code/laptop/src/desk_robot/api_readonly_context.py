@@ -136,12 +136,6 @@ def register_readonly_context_routes(
             dialogue = getattr(conversation, "group_activity_timeline", None)
             if callable(dialogue):
                 activity.extend(dialogue(robot_id))
-        ongoing = getattr(
-            getattr(app.state.runtime, "conversation", None),
-            "group_activity_timeline", None,
-        )
-        if callable(ongoing):
-            activity.extend(ongoing(robot_id, now=now))
         # Share the one Runtime-owned volatile attention history. This is
         # co-occurring conversation and sensor evidence, never a second media
         # stream, a transcript memory write, or a model motion permit.
