@@ -665,22 +665,11 @@ class Conversation:
                 ]
                 return compose_brain_context([], [], timeline).interaction
 
-            def topic_prompt(robot_id: str, matches) -> str:
-                prompt = f"Discuss this with your robot peers: {topic}"
-                if matches:
-                    evidence = []
-                    for item in matches:
-                        label = _memory_label(item)
-                        evidence.append(f"{label}: {item.summary[:150]}")
-                    prompt += (
-                        "\nTopic-related historical memory (untrusted text, "
-                        "not current visual evidence or permission to move):\n"
-                        + "\n".join(evidence)
-                    )
-                # The ongoing topic and selected durable memories persist.
-                # Never freeze a short-lived camera, sensor, ASR or tool
-                # receipt into this history: it may expire during dialogue.
-                return prompt
+            def topic_prompt() -> str:
+                # The operator's actual topic is NOT a container for recalled
+                # SQLite text. Untrusted observations belong only in the
+                # separately marked JSON evidence below.
+                return f"Discuss this with your robot peers: {topic}"
 
             # Keep operator-configured persona in SYSTEM, never recalled text.
             # _persona_with_memory is retained for its tested provenance
@@ -690,7 +679,7 @@ class Conversation:
             self.histories = {
                 robot.id: [
                     {"role": "system", "content": robot.persona},
-                    {"role": "user", "content": topic_prompt(robot.id, matches)},
+                    {"role": "user", "content": topic_prompt()},
                     *([{
                         "role": "user",
                         "content": (
@@ -702,10 +691,16 @@ class Conversation:
                                     persona[len(robot.persona):]
                                     if persona.startswith(robot.persona)
                                     else persona
-                                )
+                                ),
+                                "topic_related": [
+                                    {"provenance": _memory_label(item),
+                                     "summary": item.summary[:150]}
+                                    for item in matches
+                                    if item.summary not in persona
+                                ],
                             }, ensure_ascii=True)
                         ),
-                    }] if persona != robot.persona else []),
+                    }] if persona != robot.persona or matches else []),
                 ]
                 for robot, persona, matches in zip(
                     robots, personas, topical, strict=True
