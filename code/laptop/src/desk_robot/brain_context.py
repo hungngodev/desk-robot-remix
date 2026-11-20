@@ -204,7 +204,9 @@ def compose_brain_context(
         elif channel == "mac_activity" and kind == "group_conversation":
             status, topic = item.get("status"), item.get("topic")
             epoch, sent = item.get("activity_epoch"), item.get("sent_segments")
-            if (item.get("source") == "mac_operator_group_conversation"
+            origin = item.get("source")
+            if (origin in {"mac_operator_group_conversation",
+                           "mac_autonomous_social_group_conversation"}
                     and item.get("playback_verified") is False
                     and item.get("motor_authorized") is False
                     and item.get("physical_action_verified") is False
@@ -213,9 +215,13 @@ def compose_brain_context(
                     and type(epoch) is int and epoch > 0
                     and type(sent) is int and 0 <= sent <= 10000
                     and isinstance(topic, str) and len(topic) <= 100):
+                owner = (
+                    "operator topic" if origin == "mac_operator_group_conversation"
+                    else "autonomous pet social topic"
+                )
                 phrase = (
                     f"Group dialogue {status}; {sent} audio segments sent "
-                    "(playback unverified); operator topic as context, "
+                    f"(playback unverified); {owner} as context, "
                     "not a new command: " + _clean(topic, limit=75)
                 )
         elif channel == "mac_attention" and kind == "conversation_continuity":
