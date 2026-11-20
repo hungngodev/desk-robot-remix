@@ -810,3 +810,16 @@ def test_max98357a_output_rate_and_aec_reference_contract():
         upstream = (UPSTREAM / "main/audio/audio_service.cc").read_text()
         assert "SetDecodeSampleRate(packet->sample_rate, packet->frame_duration)" in upstream
         assert "RATE_CVT_CFG(decoder_sample_rate_, codec->output_sample_rate()" in upstream
+
+def test_sense_face_discards_person_cues_received_during_body_fault():
+    """A Mac sighting during fault cannot animate as fresh after recovery."""
+    board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    guard = board.split(
+        "if (board->body_bridge_ && board->body_bridge_->TakePersonCue()", 1
+    )[1].split("person_cue_until_ms = now_ms + 1500U;", 1)[0]
+    assert "!board->body_fault_active_" in guard
+    # Existing face priority also suppresses previously active cues while
+    # fault remains. Neither cosmetic cue is a body motion command.
+    assert "person_cue_until_ms != 0U" in board
+    assert "Event(EventType::kPersonDetected)" in board
+    assert "Transact(event" not in (HEAD / "overlay/robot_bridge.cc").read_text()

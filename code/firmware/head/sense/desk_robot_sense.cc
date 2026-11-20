@@ -113,7 +113,10 @@ private:
             }
             // Consume an authenticated Mac visual cue on the face task:
             // no HSM cross-thread push, no movement and no extra AI stack.
-            if (board->body_bridge_ && board->body_bridge_->TakePersonCue()) {
+            if (board->body_bridge_ && board->body_bridge_->TakePersonCue() &&
+                !board->body_fault_active_) {
+                // Do not replay a sighting received during a fault after
+                // the body reconnects: it is already stale visual evidence.
                 person_cue_until_ms = now_ms + 1500U;
                 board->face_behavior_.pushEvent(
                     Event(EventType::kPersonDetected));
