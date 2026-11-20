@@ -434,3 +434,89 @@ async def test_kokoro_speech_receipt_must_match_exact_head_and_not_claim_acousti
                 await speaker.say(robot, "Hello there")
     assert seen == ["/v1/audio/speech", "/speak"]
 
+
+@pytest.mark.parametrize("corrupt_grant", [
+    None, "wrong_head", "missing_ids", "false_grant", "fake_lease", "duplicate_head",
+])
+async def test_kokoro_session_grant_and_release_bind_exact_device_set(
+    monkeypatch, corrupt_grant,
+):
+    """A valid HTTP status alone cannot authorize the shared acoustic floor."""
+    monkeypatch.setenv("DESK_SESSION_PROOF_TOKEN", "s" * 40)
+    requests = []
+    ids = ["head-01", "head-02"]
+
+    def respond(request):
+        assert request.url.path == "/session"
+        assert request.headers["authorization"] == "Bearer " + "s" * 40
+        sent = json.loads(request.content)
+        requests.append(sent)
+        permitted = {
+            "device_ids": sorted(ids),
+            "enabled": sent["enabled"],
+            "expires_in_seconds": 305 if sent["enabled"] else 0,
+        }
+        if sent["enabled"]:
+            if corrupt_grant == "wrong_head":
+                permitted["device_ids"] = ["head-01", "head-03"]
+            elif corrupt_grant == "missing_ids":
+                permitted.pop("device_ids")
+            elif corrupt_grant == "false_grant":
+                permitted["enabled"] = False
+            elif corrupt_grant == "fake_lease":
+                permitted["expires_in_seconds"] = True
+            elif corrupt_grant == "duplicate_head":
+                permitted["device_ids"] = ["head-01", "head-01"]
+        return httpx.Response(200, json=permitted)
+
+    settings = SimpleNamespace(
+        speech_bridge_url="http://xiaozhi.local",
+        speech_bridge_token_env="DESK_SESSION_PROOF_TOKEN",
+    )
+    robots = [SimpleNamespace(device_id=device) for device in ids]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        speaker = KokoroHeadSpeaker(settings, client)
+        if corrupt_grant is None:
+            async with speaker.session(robots):
+                assert requests == [{"device_ids": ids, "enabled": True}]
+        else:
+            with pytest.raises(RuntimeError, match="grant identity unconfirmed"):
+                async with speaker.session(robots):
+                    pytest.fail("Corrupt session grant must never hand over audio")
+    assert requests == [
+        {"device_ids": ids, "enabled": True},
+        {"device_ids": ids, "enabled": False},
+    ]
+
+
+async def test_kokoro_session_rejects_unconfirmed_release_and_duplicate_devices(
+    monkeypatch,
+):
+    monkeypatch.setenv("DESK_SESSION_PROOF_TOKEN", "s" * 40)
+    requests = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        return httpx.Response(200, json={
+            "device_ids": body["device_ids"],
+            "enabled": True,  # release request must not be misacknowledged
+            "expires_in_seconds": 305,
+        })
+
+    settings = SimpleNamespace(
+        speech_bridge_url="http://xiaozhi.local",
+        speech_bridge_token_env="DESK_SESSION_PROOF_TOKEN",
+    )
+    robot = SimpleNamespace(device_id="head-01")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        speaker = KokoroHeadSpeaker(settings, client)
+        with pytest.raises(RuntimeError, match="distinct Xiaozhi"):
+            async with speaker.session([robot, robot]):
+                pytest.fail("Duplicated physical robot identity cannot open a session")
+        assert requests == []
+        with pytest.raises(RuntimeError, match="release unconfirmed"):
+            async with speaker.session([robot]):
+                pass
+    assert [request["enabled"] for request in requests] == [True, False]
+
