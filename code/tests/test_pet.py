@@ -1288,6 +1288,53 @@ async def test_cancelled_camera_eyewitness_insert_retracts_revoked_visual(
         await pet.close()
 
 
+async def test_direct_look_retracts_old_eyewitness_even_during_sqlite_commit(
+    fleet, tmp_path, monkeypatch,
+):
+    """A completed SQLite write cannot revive a preempted camera guess."""
+    import threading
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    original = memory.remember
+    written, release = threading.Event(), threading.Event()
+
+    def blocked_write(*args, **kwargs):
+        result = original(*args, **kwargs)
+        written.set()
+        assert release.wait(3)
+        return result
+
+    monkeypatch.setattr(memory, "remember", blocked_write)
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    epoch = pet._vision_preemption_epoch
+    task = asyncio.create_task(pet._store_observation(
+        "robot-01", SceneChange("key", "An old camera key", .96),
+        camera_derived=True, preemption_epoch=epoch,
+    ))
+    try:
+        assert await asyncio.to_thread(written.wait, 2)
+        # A human direct-look request claims the fleet camera while the
+        # previous native SQLite worker has already inserted its guess.
+        pet.preempt_background_vision()
+        assert pet._vision_preemption_epoch != epoch
+    finally:
+        release.set()
+    try:
+        await asyncio.wait_for(task, timeout=2)
+        assert memory.count("robot-01") == 0
+        assert all(memory.count(r.id) == 0 for r in fleet.robots[1:])
+    finally:
+        await pet.close()
+
+
 async def test_cancelled_fleet_fanout_retracts_all_new_peer_copies(
     fleet, tmp_path, monkeypatch,
 ):
