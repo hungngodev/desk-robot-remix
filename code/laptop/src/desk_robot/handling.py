@@ -108,6 +108,7 @@ class HandlingGate:
     last_at: float | None = None
     last_boot_id: int | None = None
     last_sample_ms: int | None = None
+    last_low_g_seq: int | None = None  # MPU FF interrupt counter for same boot
     retired_boot_ids: list[int] = field(default_factory=list)
 
     def reset(self, *, preserve_shake_cooldown: bool = False) -> None:
@@ -117,6 +118,7 @@ class HandlingGate:
         gaps, invalid samples and qualification changes must preserve it.
         """
         last_shake = self.last_shake if preserve_shake_cooldown else -math.inf
+        low_g_seq = self.last_low_g_seq if preserve_shake_cooldown else None
         self.startup_samples.clear()
         self.startup_gyro_samples.clear()
         self.reference = None
@@ -128,6 +130,7 @@ class HandlingGate:
         self.last_at = None
         self.last_boot_id = None
         self.last_sample_ms = None
+        self.last_low_g_seq = low_g_seq
         if not preserve_shake_cooldown:
             # The bounded retired-boot replay fence belongs to one operator
             # session. Keep it through every automatic sensor fault/reset,
@@ -258,6 +261,7 @@ class HandlingGate:
                     return ()
                 old_boot = self.last_boot_id
                 self.reset(preserve_shake_cooldown=True)  # new WROOM boot identity requires fresh calibration
+                self.last_low_g_seq = None  # MCU counter begins at zero per boot
                 self.retired_boot_ids.append(old_boot)
             elif sample_ms < self.last_sample_ms:
                 # Only a near-uint32 wrap can legitimately restart the clock.
@@ -281,6 +285,42 @@ class HandlingGate:
         # Accepted sensor acquisitions may arrive with an older host callback
         # time. Never rewind the gate's cooldown and polling clock.
         self.last_at = max(now, self.last_at) if self.last_at is not None else now
+        # FF_THR/FF_DUR are sampled by the WROOM silicon, not inferred from
+        # the last accelerometer snapshot. A brief hardware IRQ can vanish
+        # before a slow Mac body poll; preserve the monotonically increasing
+        # count across automatic telemetry faults. This is an unqualified
+        # low-g candidate, never a verified fall or motor/speech command.
+        source = body["imu"]
+        fields = ("low_g_valid", "low_g_irq", "low_g_seq")
+        if any(key in source for key in fields):
+            seq = source.get("low_g_seq")
+            valid = source.get("low_g_valid")
+            irq = source.get("low_g_irq")
+            malformed = (
+                type(valid) is not bool or type(irq) is not bool
+                or type(seq) is not int or not 0 <= seq <= 0xffffffff
+                or (irq and not valid) or (irq and seq == 0)
+            )
+            new_irq = (
+                not malformed and valid
+                and (self.last_low_g_seq is None and seq > 0
+                     or self.last_low_g_seq is not None
+                     and seq > self.last_low_g_seq)
+            )
+            backward = (
+                not malformed and valid and self.last_low_g_seq is not None
+                and seq < self.last_low_g_seq
+            )
+            if not malformed and valid and not backward:
+                self.last_low_g_seq = seq
+            if malformed or new_irq or backward:
+                # Keep the accepted source identity and event fence. A new
+                # event invalidates the old upright mount pose even when the
+                # current 20 Hz acceleration is back to 1g.
+                previous = (self.last_boot_id, self.last_sample_ms)
+                self.reset(preserve_shake_cooldown=True)
+                self.last_boot_id, self.last_sample_ms = previous
+                return ()
         acceleration, rotation_dps = sample
         # Decode the same validated MPU6050 axes, not a new I2C reader.
         # Estimating stationary bias follows the standard mean-zero-rate
