@@ -385,7 +385,7 @@ class Conversation:
                        and age > 45):
             return []
         if record["status"] in {"waiting", "speaking"} and (
-            self.active is None or self.active.done()
+            self.active is None or self.active.done() or self.active.cancelling()
         ):
             return []
         return [{
