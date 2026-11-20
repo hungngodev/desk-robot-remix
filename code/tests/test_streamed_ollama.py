@@ -375,3 +375,48 @@ async def test_existing_xiaozhi_speaker_keeps_human_barge_distinct_from_operator
         {"device_id": "mac-01"},
         {"device_id": "mac-01", "revoke_initiative": True},
     ]
+
+
+@pytest.mark.parametrize("receipt,acceptable", [
+    ({"device_id": "head-01", "transmitted": True,
+      "physical_playback_verified": False}, True),
+    ({"device_id": "head-02", "transmitted": True,
+      "physical_playback_verified": False}, False),
+    ({"transmitted": True, "physical_playback_verified": False}, False),
+    ({"device_id": "head-01", "transmitted": 1,
+      "physical_playback_verified": False}, False),
+    ({"device_id": "head-01", "transmitted": True}, False),
+    ({"device_id": "head-01", "transmitted": True,
+      "physical_playback_verified": True}, False),
+    ([], False),
+])
+async def test_kokoro_speech_receipt_must_match_exact_head_and_not_claim_acoustic_playback(
+    monkeypatch, receipt, acceptable,
+):
+    """No queued Opus receipt can impersonate a different fleet speaker."""
+    monkeypatch.setenv("DESK_SPEECH_RECEIPT_TOKEN", "s" * 40)
+    seen = []
+
+    def respond(request):
+        seen.append(request.url.path)
+        if request.url.path == "/v1/audio/speech":
+            return httpx.Response(200, content=b"RIFFsynthetic-audio")
+        assert request.url.path == "/speak"
+        assert json.loads(request.content)["device_id"] == "head-01"
+        return httpx.Response(200, json=receipt)
+
+    settings = SimpleNamespace(
+        kokoro_url="http://kokoro.local",
+        speech_bridge_url="http://xiaozhi.local",
+        speech_bridge_token_env="DESK_SPEECH_RECEIPT_TOKEN",
+    )
+    robot = SimpleNamespace(device_id="head-01", voice="af_bella")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        speaker = KokoroHeadSpeaker(settings, client)
+        if acceptable:
+            await speaker.say(robot, "Hello there")
+        else:
+            with pytest.raises(RuntimeError, match="receipt missing matching head identity"):
+                await speaker.say(robot, "Hello there")
+    assert seen == ["/v1/audio/speech", "/speak"]
+
