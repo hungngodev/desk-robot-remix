@@ -75,6 +75,17 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
                        + first + second)
     with pytest.raises(ValueError, match="Disconnected STL mesh"):
         source.closed_mesh_edges(output)
+    # One corner touching another is also not a printable joined part.
+    # Shift the second tetra to x+1: only the vertex (1,0,0) is shared.
+    for triangle_index in range(4):
+        for corner in range(3):
+            x_offset = triangle_index * 50 + 12 + corner * 12
+            old_x = unpack_from("<f", second, x_offset)[0]
+            pack_into("<f", second, x_offset, old_x - 9.0)
+    output.write_bytes(bytes(80) + (8).to_bytes(4, "little")
+                       + first + second)
+    with pytest.raises(ValueError, match="Disconnected STL mesh"):
+        source.closed_mesh_edges(output)
 
 
 def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatch, tmp_path):
