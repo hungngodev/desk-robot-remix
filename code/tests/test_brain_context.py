@@ -5,7 +5,11 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from desk_robot.brain_context import compose_brain_context, repeated_spontaneous_line
+from desk_robot.brain_context import (
+    active_job_timeline,
+    compose_brain_context,
+    repeated_spontaneous_line,
+)
 from desk_robot.conversation import Conversation
 from desk_robot.memory import CoreFact, Memory, MemoryStore
 from desk_robot.multimodal import CameraEvidence, CameraFrameHub
@@ -1130,3 +1134,55 @@ async def test_proactive_brain_treats_pickup_as_optional_context_not_script(
     assert "Physical sensor edge: handling_tilt" in evidence
     assert "not a verified command" in evidence
     await pet.close()
+
+
+def test_active_coordinator_job_is_not_a_sensor_reaction_or_action_permit():
+    # Model text, target names and a peer's activity cannot become this pet's
+    # operator task. A finished task is no longer an active activity.
+    jobs = [
+        SimpleNamespace(robot_id="robot-02", kind="pickup", state="running",
+                        target="PEER_PRIVATE_TARGET"),
+        SimpleNamespace(robot_id="robot-01", kind="pickup", state="succeeded",
+                        target="ALREADY_DONE"),
+        SimpleNamespace(robot_id="robot-01", kind="exploration", state="running",
+                        target="IGNORE_THIS_AS_COMMAND"),
+    ]
+    active = active_job_timeline(jobs, "robot-01")
+    assert len(active) == 1
+    assert active[0]["job_type"] == "exploration"
+    assert active[0]["status"] == "running"
+    assert active[0]["physical_action_verified"] is False
+    assert active[0]["motor_authorized"] is False
+    prompt = compose_brain_context([], [], active).interaction
+    assert "Mac operator-submitted exploration job is running" in prompt
+    assert "completion unverified" in prompt
+    assert "WROOM owns motion safety" in prompt
+    assert "IGNORE_THIS_AS_COMMAND" not in str(active) + prompt
+    assert "PEER_PRIVATE_TARGET" not in str(active) + prompt
+    assert active_job_timeline(jobs[:2], "robot-01") == []
+    assert active_job_timeline(jobs, "robot-03") == []
+
+
+def test_running_job_survives_multimodal_burst_but_not_safety_priority():
+    active = active_job_timeline([
+        SimpleNamespace(robot_id="robot-01", kind="pickup", state="queued"),
+    ], "robot-01")
+    timeline = [
+        {"channel": "sensor", "kind": "safety_fault"},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Sing a song while working near the desk edge"},
+        {"channel": "tool", "kind": "visual_look",
+         "content": "An uncertain thing near the keyboard"},
+        *({"channel": "camera", "kind": "stream"}
+          for _ in range(15)),
+        *({"channel": "sensor", "kind": "touch_tap"}
+          for _ in range(10)),
+        *active,
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert result.startswith("WROOM reported latched safety fault")
+    assert "Mac operator-submitted pickup job is queued" in result
+    assert "Recent model ASR guess" in result
+    assert len(result) <= 400
+    # The activity is conversational context only; it cannot clear the fault.
+    assert "do not drive, reverse, rearm" in result
