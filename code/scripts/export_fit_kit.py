@@ -198,6 +198,15 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         raise ValueError("Missing or duplicate fit kit parts")
     for item in items:
         location = item["location"]
+        # A manifest is not a release BOM. Even a syntactically valid edit
+        # must never turn a test coupon into an installed robot component.
+        name = Path(location).stem
+        coupon = name in (*GAUGES, *SPEAKER_FITS, *RANGER_FITS,
+                          "dock_rail_entry_coupon")
+        if (item.get("installed_quantity_per_robot") != 0
+                or type(item.get("installed_quantity_per_robot")) is not int
+                or item.get("temporary_fit_coupon") is not coupon):
+            raise ValueError(f"Unqualified installed CAD part: {location}")
         if item.get("source") != expected[location]:
             raise ValueError(f"Wrong source for {location}")
         source = root / expected[location]
