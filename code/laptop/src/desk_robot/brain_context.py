@@ -56,11 +56,14 @@ def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict]:
     A job being queued or running cannot prove motion, grasp or completion.
     """
     for job in reversed(tuple(jobs)):
+        state = getattr(job, "state", None)
         if (getattr(job, "robot_id", None) != robot_id
-                or getattr(job, "state", None) not in {"queued", "running"}):
+                or type(state) is not str
+                or state not in {"queued", "running"}):
             continue
         kind = getattr(job, "kind", None)
-        if kind not in {"manual", "exploration", "dock_approach", "pickup"}:
+        if (type(kind) is not str
+                or kind not in {"manual", "exploration", "dock_approach", "pickup"}):
             kind = "unclassified"
         return [{
             "channel": "mac_activity", "kind": "coordinator_job",
@@ -185,8 +188,10 @@ def compose_brain_context(
             if (item.get("source") == "mac_coordinator_active_job"
                     and item.get("physical_action_verified") is False
                     and item.get("motor_authorized") is False
+                    and type(job_type) is str
                     and job_type in {"manual", "exploration", "dock_approach",
                                      "pickup", "unclassified"}
+                    and type(status) is str
                     and status in {"queued", "running"}):
                 phrase = (
                     f"Mac operator-submitted {job_type} job is {status}; "
