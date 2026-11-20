@@ -22,7 +22,7 @@ namespace desk_robot {
 namespace {
 constexpr uart_port_t kUart = UART_NUM_1;
 constexpr int kTimeoutMs = 350;
-constexpr size_t kMaxReply = 1664;  // 1600-byte WROOM status buffer and its worst 1566-byte JSON fit; UART RX ring is 2048
+constexpr size_t kMaxReply = 1920;  // WROOM 1800-byte JSON and worst-case 1726-byte status fit inside the 2048-byte UART RX ring
 constexpr size_t kMaxBody = 160;
 const char* kTag = "DeskRobotHead";
 using JsonPtr = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
