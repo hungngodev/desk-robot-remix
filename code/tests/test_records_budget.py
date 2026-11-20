@@ -209,6 +209,34 @@ def test_source_crosswalk_matches_41_original_html_section_ids():
     assert digest == "1128952b6b42f42eb0a5650714c541b7916b3f07b91856cf9ae82e3a9a3d43be"
 
 
+def test_only_canonical_generated_file_keeps_static_shopping_tables():
+    canonical = (
+        DOCS / "hardware/complete-shopping-checklist.md"
+    ).read_text(encoding="utf-8")
+    wiring = (
+        DOCS / "hardware/full-feature-wiring-and-shopping.md"
+    ).read_text(encoding="utf-8")
+    one = (
+        DOCS / "hardware/one-robot-inventory-and-shopping.md"
+    ).read_text(encoding="utf-8")
+
+    assert "## 1. Owned or ordered, as reported" in canonical
+    assert "## 2. Remaining components or unqualified roles" in canonical
+
+    assert "## What you already have" not in wiring
+    assert "## Buy and allocate per finished robot" not in wiring
+    assert "| Component | Per robot | Five robots |" not in wiring
+    assert "complete-shopping-checklist.md" in wiring
+    assert "--format first-robot-markdown" in wiring
+    assert "## Fixed pin wiring" in wiring
+
+    assert "| Component | Have or buy |" not in one
+    assert "| SCD40 CO2 module |" not in one
+    assert "| AMG8833 thermal grid sensor |" not in one
+    assert "complete-shopping-checklist.md" in one
+    assert "--format first-robot-markdown" in one
+
+
 def test_historical_bom_tracks_selected_vl53l0x_without_authorizing_bulk_buy():
     data = json.loads((DOCS / "hardware/bom.json").read_text(encoding="utf-8"))
     ranging = [

@@ -6,79 +6,26 @@
 
 **Use one Mac plus five identical Sense heads and WROOM bodies.** Reuse the owned motors and MG90S before buying duplicates. No second camera, additional onboard microphone, Raspberry Pi, or unrelated motor driver is required.
 
-## What you already have
+## Canonical procurement
 
-| Module | Known quantity or status |
-| --- | --- |
-| ESP32 WROOM32 | At least 1 |
-| XIAO ESP32S3 Sense | At least 1 ordered; delivery count unknown |
-| SSD1306 OLED | At least 1 |
-| 28BYJ48 5V motors | 5 |
-| ULN2003 drivers | 5 |
-| MG90S positional servos | About 10, not counted |
-| MPU6050 | At least 1 reported |
-| AT42QT1010 touch | At least 1 photographed |
-| BerryIMU | At least 1, spare |
-| BMP280, PIR, reed, vibration motor | At least 1 each photographed |
-| PAM8403, MAX9814, GY61, IR modules | Spares reported |
-| Filament and jumper ribbons | Reported owned; counts/condition not fully verified |
+This file is the wiring and architecture guide. It deliberately does **not**
+maintain a second shopping table. The only static builder-facing inventory and
+purchase lists are the two sections in
+[complete-shopping-checklist.md](complete-shopping-checklist.md), generated
+from [full-feature-plan.json](full-feature-plan.json) by
+`code/scripts/procurement_release.py`.
 
-## Buy and allocate per finished robot
+For a one-unit quantity projection from that same source, run:
 
-**Full five is the real target:** The table includes the extra interaction features, not just the five-sensor prototype. Buying the first unit of a selected module to verify the pinout, I2C voltage, height and optical performance is a purchasing quality check, not a feature cut.
+```bash
+cd code
+uv run --no-sync python scripts/procurement_release.py --format first-robot-markdown
+```
 
-### Main body, head and safety
-
-| Component | 1 robot | 5 robots total | Inventory note |
-| --- | ---: | ---: | --- |
-| XIAO ESP32S3 Sense camera + microphone | 1 | 5 | One ordered; verify arrival |
-| ESP32 WROOM32 development board | 1 | 5 | 1 reported owned |
-| SSD1306 0.96 inch OLED | 1 | 5 | 1 reported owned |
-| 28BYJ48 5V stepper motor | 2 | 10 | 5 reported owned |
-| ULN2003 driver for 28BYJ48 | 2 | 10 | 5 reported owned |
-| MG90S positional servo | 2 | 10 | Count stock before buying |
-| MPU6050 GY521 compatible six axis breakout | 1 | 5 | 1 reported owned |
-| AT42QT1010 momentary capacitive head touch | 1 | 5 | 1 reported owned |
-| VL53L0X time of flight carrier | 8 | 40 | None verified owned |
-| TCA9548A 8 channel 3.3V compatible I2C multiplexer | 2 | 10 | None verified owned |
-| MAX98357A I2S mono amplifier | 1 | 5 | None verified owned |
-| Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker | 1 | 5 | None verified owned; source SKU fixed, physical fit unverified |
-| Matched protected rechargeable 1S power assembly with charge and load sharing | 1 | 5 | None verified owned |
-| Dedicated regulated 3.3V expansion sensor supply | 1 | 5 | None verified owned |
-| Rated switch, fuse, power leads, JST style keyed connectors, decoupling | 1 | 5 | None verified owned |
-| Filament, printed chassis/head/gripper mounts, fasteners, inserts, insulated harness | 1 | 5 | None verified owned |
-
-### Additional interactions, sensing and games
-
-| Component | 1 robot | 5 robots total | Inventory note |
-| --- | ---: | ---: | --- |
-| CAP1188 8 zone capacitive touch breakout | 1 | 5 | None verified owned |
-| MAX30102 optical heartbeat paw pad breakout | 1 | 5 | HTML claims about five owned, photo confirmation missing |
-| Copper tape touch electrode and insulating backing set | 1 | 5 | None verified owned |
-| APDS9960 gesture proximity color light module | 1 | 5 | None verified owned |
-| FSR402 type force sensing resistor | 2 | 10 | None verified owned |
-| ADS1115 4 channel ADC breakout | 1 | 5 | None verified owned |
-| Single diffused WS2812B RGB pixel | 1 | 5 | None verified owned |
-| 74AHCT1G125 3.3V to 5V RGB buffer | 1 | 5 | None verified owned |
-| AS5600 magnetic rotary angle breakout | 3 | 15 | None verified owned |
-| Diametric AS5600 compatible magnets | 3 | 15 | None verified owned |
-| INA226 current voltage monitor with rated external shunt | 1 | 5 | None verified owned |
-| MAX17048 single cell fuel gauge | 1 | 5 | None verified owned |
-| Normally closed micro bumper switch | 2 | 10 | None verified owned |
-| Magnetic reed switch | 1 | 5 | 1 reported owned |
-| PIR thermal motion sensor | 1 | 5 | 1 reported owned |
-| BMP280 pressure and temperature module | 1 | 5 | 1 reported owned |
-| SHT41 humidity and temperature module | 1 | 5 | None verified owned |
-| PN532 I2C NFC reader module with IRQ/reset pins | 1 | 5 | None verified owned |
-| MCP23017 16 channel I2C GPIO expander | 1 | 5 | None verified owned |
-| 3V coin vibration motor | 1 | 5 | 1 reported owned |
-| AO3400 class logic MOSFET, flyback diode and pulldown | 1 | 5 | None verified owned |
-| Keyed charging contacts and alignment switch set | 1 | 5 | None verified owned |
-| Printed docking cradle, printed camera marker and 5V charging input | 1 | 5 | None verified owned |
-
-**Full profile boot requirement:** The selected MCP23017 dock/status input module is now mandatory for `esp32_full` to allow arming. Allowing a completely absent or unresponsive dock board as an optional peripheral would defeat contact safety. Keep one module per robot in the existing parts list, plus the two independent normally closed seat switches and chip status pins; do not invent current sensing from PGOOD/CHG. The `esp32_stepper` staging profile can be used for unpowered bench checks before the dock electronics are assembled, but it does not qualify the full robot for free roaming or powered docking.
-
-The selected full `esp32_full` profile already contains source code to read **eight VL53L0Xs** from TCA9548A `0x70`: four independent downward cliff channels, one forward obstacle channel, and **three additional left, right, rear read-only channels**. The earlier `esp32_stepper` profile reads the five safety/facing channels only. The additional readings feed Mac event detection but **never grant motor permission or an automatic retreat**. All eight boards need actual carrier voltage, orientation, short-range performance, stale-data handling and stopping-envelope measurements before full movement approval. The source driver is not evidence that eight modules are already bought, wired or physically operational.
+That projection is still a HOLD until the physical and supplier receipts pass.
+Reported stock, reference links and this wiring guide are never checkout
+authority. Photo and ownership evidence stays in the dedicated photo inventory
+records instead of being copied into another cart.
 
 ## Fixed pin wiring
 
