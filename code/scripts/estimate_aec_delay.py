@@ -21,7 +21,8 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
         rate = file.getframerate()
         count = file.getnframes()
         if (file.getnchannels() != 1 or file.getsampwidth() != 2
-                or rate not in (16000, 24000) or not 320 <= count <= 240000):
+                or rate not in (16000, 24000, 32000)
+                or not rate // 50 <= count <= 10 * rate):
             raise ValueError("Need mono PCM16, 16 or 24 kHz, up to ten seconds")
         samples = np.frombuffer(file.readframes(count), dtype="<i2").astype(np.float64)
     return samples / 32768, rate
@@ -30,9 +31,18 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
 def resample_reference(source: np.ndarray, original_rate: int) -> np.ndarray:
     if original_rate == 16000:
         return source
+    if original_rate == 32000:
+        # Match the selected Sense 3-tap 32-to-16 kHz AEC reference phase.
+        # Real acoustic delay still requires synchronized board recordings.
+        values = np.asarray(source, dtype=np.float64)
+        if values.ndim != 1 or len(values) < 2:
+            raise ValueError("Need mono speaker PCM")
+        padded = np.pad(values, (2, 0))
+        filtered = (padded[:-2] + 2 * padded[1:-1] + padded[2:]) / 4.0
+        return np.concatenate((np.zeros(1), filtered[1:-1:2]))
     if original_rate != 24000:
         raise ValueError("Unsupported speaker sample rate")
-    # Offline rough estimate. The actual device uses a stateful resampler.
+    # Historical RIO captures at 24 kHz remain supported.
     ticks = np.arange(round(len(source) * 2 / 3)) * 1.5
     return np.interp(ticks, np.arange(len(source)), source)
 
