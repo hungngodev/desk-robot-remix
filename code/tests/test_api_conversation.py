@@ -92,6 +92,105 @@ async def test_unaware_custom_hardware_speaker_fails_before_proactive_audio(sett
     assert speaker.spoken == []
 
 
+async def test_kokoro_proactive_session_declares_passive_before_synthesis(
+    settings, monkeypatch,
+):
+    settings.mode = "hardware"
+    robot = settings.robot("robot-01")
+    robot.device_id = "mac-01"
+    monkeypatch.setenv(settings.speech_bridge_token_env, "p" * 32)
+    session_bodies = []
+
+    class Response:
+        def __init__(self, *, content=b"", payload=None):
+            self.content = content
+            self.payload = payload or {}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        async def post(self, url, **kwargs):
+            body = kwargs.get("json", {})
+            if url.endswith("/session"):
+                session_bodies.append(body.copy())
+                payload = {
+                    "device_ids": sorted(body["device_ids"]),
+                    "enabled": body["enabled"],
+                    "expires_in_seconds": 305 if body["enabled"] else 0,
+                }
+                if body.get("passive") is True:
+                    payload["passive"] = True
+                return Response(payload=payload)
+            if url.endswith("/v1/audio/speech"):
+                return Response(content=b"RIFFsynthetic-wav-fixture")
+            if url.endswith("/speak"):
+                return Response(payload={
+                    "device_id": body["device_id"],
+                    "transmitted": True,
+                    "physical_playback_verified": False,
+                })
+            raise AssertionError(url)
+
+    conversation = Conversation(
+        settings, SimulatedChat(), KokoroHeadSpeaker(settings, Client())
+    )
+    assert await conversation.say_proactive(
+        robot, "A bounded optional remark", permission_check=lambda: True,
+    )
+    assert session_bodies == [
+        {"device_ids": ["mac-01"], "enabled": True, "passive": True},
+        {"device_ids": ["mac-01"], "enabled": False, "passive": True},
+    ]
+
+
+async def test_kokoro_passive_session_rejects_old_bridge_before_synthesis(
+    settings, monkeypatch,
+):
+    settings.mode = "hardware"
+    robot = settings.robot("robot-01")
+    robot.device_id = "mac-01"
+    monkeypatch.setenv(settings.speech_bridge_token_env, "p" * 32)
+    synth_calls = 0
+
+    class Response:
+        def __init__(self, payload):
+            self.content = b""
+            self.payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        async def post(self, url, **kwargs):
+            nonlocal synth_calls
+            body = kwargs.get("json", {})
+            if url.endswith("/session"):
+                # Simulate a pre-budget bridge that silently ignores passive.
+                return Response({
+                    "device_ids": sorted(body["device_ids"]),
+                    "enabled": body["enabled"],
+                    "expires_in_seconds": 305 if body["enabled"] else 0,
+                })
+            if url.endswith("/v1/audio/speech"):
+                synth_calls += 1
+            raise AssertionError("Proactive synthesis must not reach an old bridge")
+
+    speaker = KokoroHeadSpeaker(settings, Client())
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+    with pytest.raises(RuntimeError, match="speaker session grant identity"):
+        await conversation.say_proactive(
+            robot, "Must fail before synthesis", permission_check=lambda: True,
+        )
+    assert synth_calls == 0
+
+
 async def test_non_kokoro_permission_aware_speaker_blocks_revoked_group_audio(settings):
     """Opted-in custom speaker must actually be passed the live consent check."""
     settings.mode = "hardware"

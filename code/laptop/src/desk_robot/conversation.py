@@ -228,6 +228,7 @@ class OllamaChat:
 class KokoroHeadSpeaker:
     """Native Kokoro HTTP -> upstream Xiaozhi audio conversion -> the chosen physical head."""
     supports_permission_checks = True
+    supports_passive_speech_budget = True
 
 
     def __init__(self, settings: Settings, client: httpx.AsyncClient):
@@ -244,7 +245,9 @@ class KokoroHeadSpeaker:
         return response.json()
 
     @asynccontextmanager
-    async def session(self, robots):
+    async def session(self, robots, *, passive: bool = False):
+        if type(passive) is not bool:
+            raise RuntimeError("Passive speaker mode must be a boolean")
         ids = [r.device_id for r in robots]
         if (not 1 <= len(ids) <= 5
                 or any(not isinstance(device, str) or not device for device in ids)
@@ -257,24 +260,32 @@ class KokoroHeadSpeaker:
                     and receipt.get("enabled") is enabled
                     and type(receipt.get("expires_in_seconds")) is int
                     and (receipt["expires_in_seconds"] > 0 if enabled
-                         else receipt["expires_in_seconds"] == 0))
+                         else receipt["expires_in_seconds"] == 0)
+                    and (not passive or receipt.get("passive") is True))
 
-        granted = await self._bridge("/session", {"device_ids": ids, "enabled": True})
+        grant_request = {"device_ids": ids, "enabled": True}
+        if passive:
+            grant_request["passive"] = True
+        granted = await self._bridge("/session", grant_request)
         if not matches(granted, True):
             # A damaged/misdirected response does not prove which heads have
             # their microphones muted. Ask the same bridge to relinquish any
             # possible partial lease; never send audio into an unknown floor.
             try:
-                await self._bridge("/session", {"device_ids": ids, "enabled": False})
+                release_request = {"device_ids": ids, "enabled": False}
+                if passive:
+                    release_request["passive"] = True
+                await self._bridge("/session", release_request)
             except Exception:
                 pass
             raise RuntimeError("Xiaozhi speaker session grant identity unconfirmed")
         try:
             yield
         finally:
-            released = await self._bridge(
-                "/session", {"device_ids": ids, "enabled": False}
-            )
+            release_request = {"device_ids": ids, "enabled": False}
+            if passive:
+                release_request["passive"] = True
+            released = await self._bridge("/session", release_request)
             if not matches(released, False):
                 raise RuntimeError("Xiaozhi speaker session release unconfirmed")
 
@@ -911,7 +922,21 @@ class Conversation:
                 permission_check is not None and not permission_check()
             ):
                 return False
-            async with self.speaker.session([robot]):
+            passive_budget = (
+                getattr(self.speaker, "supports_passive_speech_budget", False)
+                is True
+            )
+            if (self.settings.mode == "hardware"
+                    and getattr(self.speaker, "supports_permission_checks", False)
+                    is True and not passive_budget):
+                raise RuntimeError(
+                    "Hardware proactive speaker lacks shared passive speech budget"
+                )
+            speaker_session = (
+                self.speaker.session([robot], passive=True)
+                if passive_budget else self.speaker.session([robot])
+            )
+            async with speaker_session:
                 async with self.speaker_lock:
                     # A group can become active while either lease is awaited.
                     # Human/group speech must outrank a queued optional remark.

@@ -478,6 +478,51 @@ async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypat
     assert all(connection.client_abort for connection in bridge.connections.values())
 
 
+async def test_passive_session_fails_closed_and_echoes_budget_capability(
+    bridge, monkeypatch,
+):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    allowed = [True]
+
+    class Native:
+        @staticmethod
+        def active(_device):
+            return False
+
+        @staticmethod
+        def passive_speech_allowed():
+            return allowed[0]
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: Native())
+    session = handlers["/session"]
+    grant = await session(body_request({
+        "device_ids": [ids[0]], "enabled": True, "passive": True,
+    }))
+    assert json.loads(grant.text) == {
+        "device_ids": [ids[0]], "enabled": True,
+        "expires_in_seconds": 305, "passive": True,
+    }
+    assert bridge.lease_passive is True
+    release = await session(body_request({
+        "device_ids": [ids[0]], "enabled": False, "passive": True,
+    }))
+    assert json.loads(release.text) == {
+        "device_ids": [ids[0]], "enabled": False,
+        "expires_in_seconds": 0, "passive": True,
+    }
+    assert bridge.lease_passive is False
+
+    allowed[0] = False
+    with pytest.raises(RuntimeError, match="Passive fleet speech cooldown"):
+        await session(body_request({
+            "device_ids": [ids[0]], "enabled": True, "passive": True,
+        }))
+    with pytest.raises(ValueError, match="exactly one robot"):
+        await session(body_request({
+            "device_ids": ids[:2], "enabled": True, "passive": True,
+        }))
+
+
 async def test_bridge_stop_rejects_queued_speech_and_unmutes_all_five(bridge, monkeypatch):
     ids, handlers = fleet_handlers(bridge, monkeypatch)
     await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
@@ -688,15 +733,20 @@ async def test_mac_proactive_tts_claims_and_releases_native_speaker_owner(
     import types
 
     calls = []
-    async def begin(conn):
-        calls.append(("claim", conn.device_id))
+    async def begin(conn, *, passive=False):
+        calls.append(("claim", conn.device_id, passive))
         return True
+
+    async def mark(conn):
+        calls.append(("passive_started", conn.device_id))
 
     async def end(conn):
         calls.append(("release", conn.device_id))
 
     monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
-        begin_external_speech=begin, end_external_speech=end,
+        begin_external_speech=begin,
+        record_external_passive_start=mark,
+        end_external_speech=end,
     ))
     async def fake_tts(conn, state, message=None):
         calls.append((state, message))
@@ -724,8 +774,13 @@ async def test_mac_proactive_tts_claims_and_releases_native_speaker_owner(
     )
     bridge.lease_ids = frozenset({"mac-01"})
     bridge.lease_until = time.monotonic() + 30
-    await bridge.transmit(current, "I noticed you touched my head", [b"opus"])
-    assert calls[0] == ("claim", "mac-01")
+    await bridge.transmit(
+        current, "I noticed you touched my head", [b"opus"], passive=True,
+    )
+    assert calls[0] == ("claim", "mac-01", True)
+    assert calls.index(("start", None)) < calls.index(
+        ("passive_started", "mac-01")
+    )
     assert calls[-1] == ("release", "mac-01")
     assert ("start", None) in calls
     assert ("sentence_start", "I noticed you touched my head") in calls

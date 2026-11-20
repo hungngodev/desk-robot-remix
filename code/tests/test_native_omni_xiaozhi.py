@@ -1073,6 +1073,37 @@ async def test_native_passive_speech_budget_is_shared_across_pets(
     )
 
 
+async def test_mac_and_native_passive_speech_share_one_fleet_budget(
+    native, monkeypatch,
+):
+    module, bridge = native
+    clock = [3000.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    conn, _sent = connection()
+    bridge.connections[conn.device_id] = conn
+
+    assert module.passive_speech_allowed()
+    assert await module.begin_external_speech(conn, passive=True)
+    await module.record_external_passive_start(conn)
+    assert module._last_passive_speech_started_at == clock[0]
+    await module.end_external_speech(conn)
+
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    assert not await session._send_device_state("start", session._generation)
+
+    clock[0] += module._PASSIVE_SPEECH_COOLDOWN_S
+    assert await session._send_device_state("start", session._generation)
+    assert await session._send_device_state("stop", session._generation)
+
+    assert not await module.begin_external_speech(conn, passive=True)
+    assert await module.begin_external_speech(conn)
+    await module.end_external_speech(conn)
+
+
 async def test_native_direct_reply_bypasses_passive_budget_once(
     native, monkeypatch,
 ):

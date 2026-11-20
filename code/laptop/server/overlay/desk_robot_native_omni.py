@@ -49,6 +49,7 @@ _output_owner: str | None = None
 _output_owner_unverified: str | None = None
 _external_speaker_owner: str | None = None
 _external_speaker_connection = None
+_external_speaker_passive = False
 _output_owner_lock = asyncio.Lock()
 # Serialize native speaker handoffs, but NEVER hold the fleet floor lock
 # across a slow physical STOP or model cancellation await.
@@ -61,6 +62,15 @@ _retry_after: dict[str, float] = {}
 # One unsolicited START across all native pets consumes the fleet budget.
 _PASSIVE_SPEECH_COOLDOWN_S = 120.0
 _last_passive_speech_started_at = float("-inf")
+
+
+def passive_speech_allowed() -> bool:
+    """One fleet budget shared by native and Mac initiated passive speech."""
+    return (
+        time.monotonic() - _last_passive_speech_started_at
+        >= _PASSIVE_SPEECH_COOLDOWN_S
+    )
+
 
 _NATIVE_WORKER_CANCEL_TIMEOUT_S = 0.8
 
@@ -2587,14 +2597,17 @@ async def send_external_opus(conn, packet: bytes, generation: int) -> None:
                 raise RuntimeError("Head replaced during Mac Opus send")
 
 
-async def begin_external_speech(conn) -> bool:
+async def begin_external_speech(conn, *, passive: bool = False) -> bool:
     """Lease the ONE Xiaozhi decoder for existing Mac proactive/group speech.
 
     Live human mic, native tool answers and current native speech always win.
-    Never let two robots narrate at once or give the Mac a second audio owner.
+    Passive Mac initiative shares the same fleet cooldown as native initiative.
     """
     global _external_speaker_owner, _external_speaker_connection
+    global _external_speaker_passive
     global _output_owner, _output_owner_unverified
+    if type(passive) is not bool:
+        raise ValueError("Passive external speech flag must be a boolean")
     import desk_robot_bridge as bridge
     if bridge.connections.get(getattr(conn, "device_id", None)) is not conn:
         return False
@@ -2648,8 +2661,11 @@ async def begin_external_speech(conn) -> bool:
                          or (session._readonly_inflight is not None
                              and not session._readonly_inflight.done())))):
             return False
+        if passive and not passive_speech_allowed():
+            return False
         _external_speaker_owner = conn.device_id
         _external_speaker_connection = conn
+        _external_speaker_passive = passive
         if session is not None and not session.closed:
             session._external_speech_active = True
     if session is not None and not session.closed:
@@ -2670,11 +2686,23 @@ async def begin_external_speech(conn) -> bool:
     return True
 
 
+async def record_external_passive_start(conn) -> None:
+    """Commit the shared fleet budget only after external TTS START was sent."""
+    global _last_passive_speech_started_at
+    async with _output_owner_lock:
+        if (_external_speaker_owner != getattr(conn, "device_id", None)
+                or _external_speaker_connection is not conn
+                or not _external_speaker_passive):
+            raise RuntimeError("No passive external speaker lease to record")
+        _last_passive_speech_started_at = time.monotonic()
+
+
 async def end_external_speech(
     conn, *, stop_confirmed: bool = True,
 ) -> None:
     """Release a Mac lease only when decoder STOP reached the head transport."""
     global _external_speaker_owner, _external_speaker_connection
+    global _external_speaker_passive
     global _output_owner, _output_owner_unverified
     import desk_robot_bridge as bridge
     async with _output_owner_lock:
@@ -2683,6 +2711,7 @@ async def end_external_speech(
             return
         _external_speaker_owner = None
         _external_speaker_connection = None
+        _external_speaker_passive = False
         session = _sessions.get(conn.device_id)
         if session is not None and session.conn is conn:
             session._external_speech_active = False
@@ -2753,9 +2782,7 @@ async def claim_speaker(
                 # The old STOP may fail while we awaited its flush.
                 # Never grant another pet a decoder with uncertain state.
                 return False
-            if (passive and time.monotonic()
-                    - _last_passive_speech_started_at
-                    < _PASSIVE_SPEECH_COOLDOWN_S):
+            if passive and not passive_speech_allowed():
                 return False
             _output_owner = session.device
             return True

@@ -25,6 +25,7 @@ connections = {}
 lease_ids: frozenset[str] = frozenset()
 lease_until = 0.0
 lease_stopping = False
+lease_passive = False
 lease_cleanup_task: asyncio.Task | None = None
 speaker_lock = asyncio.Lock()
 # The upstream WAV to Opus conversion is synchronous CPU work. Cancellation
@@ -389,11 +390,12 @@ def _start_lease_cleanup() -> None:
     lease_stopping = True
 
     async def finish_stop():
-        global lease_ids, lease_until, lease_stopping, active_device_id
+        global lease_ids, lease_until, lease_stopping, active_device_id, lease_passive
         async with speaker_lock:
             lease_until = 0
             lease_ids = frozenset()
             lease_stopping = False
+            lease_passive = False
             active_device_id = None
             voice_frames.clear()
             voice_last_frame_at.clear()
@@ -544,10 +546,12 @@ def encode_opus(audio):
     return frames
 
 
-async def transmit(conn, text, frames):
+async def transmit(conn, text, frames, *, passive: bool = False):
     from core.handle.sendAudioHandle import send_tts_message
 
     global active_device_id
+    if type(passive) is not bool:
+        raise ValueError("Passive speech flag must be a boolean")
     if conn.conn_from_mqtt_gateway:
         raise ValueError("Speech bridge currently requires direct Xiaozhi WebSocket transport")
     # This is the SAME physical decoder used by native MiniCPM. Preserve
@@ -561,7 +565,7 @@ async def transmit(conn, text, frames):
     begin = getattr(native, "begin_external_speech", None)
     leased = False
     if callable(begin):
-        leased = await begin(conn)
+        leased = await begin(conn, passive=True) if passive else await begin(conn)
         if not leased:
             raise RuntimeError("Live human/native tool speech owns the Xiaozhi speaker")
     if (generation != interrupt_generation.get(conn.device_id, 0)
@@ -593,6 +597,13 @@ async def transmit(conn, text, frames):
 
     try:
         await send_control("start")
+        if passive:
+            record_passive = getattr(native, "record_external_passive_start", None)
+            if not leased or not callable(record_passive):
+                raise RuntimeError(
+                    "Native adapter cannot account for passive fleet speech"
+                )
+            await record_passive(conn)
         # The real microphone may have interrupted during the async START.
         # Never publish even the old caption or subsequent Opus in that case.
         if (conn.client_abort
@@ -687,8 +698,12 @@ def create_app():
 
     async def session(request):
         global lease_ids, lease_until, lease_stopping, lease_cleanup_task
+        global lease_passive
         body = await request.json()
         ids = body.get("device_ids")
+        passive = body.get("passive", False)
+        if type(passive) is not bool:
+            raise ValueError("passive must be a boolean")
         if (
             not isinstance(ids, list)
             or not ids
@@ -700,11 +715,21 @@ def create_app():
         if len(selected) != len(ids) or not selected.issubset(set(device_map().values())):
             raise ValueError("Unknown or duplicate device identity")
         if body.get("enabled") is True:
+            if passive and len(selected) != 1:
+                raise ValueError("Passive initiative must own exactly one robot")
             native = _native_adapter()
             if native is not None and any(
                 native.active(device) for device in device_map().values()
             ):
                 raise RuntimeError("Native realtime model owns the shared fleet speech floor")
+            if passive:
+                allowed = getattr(native, "passive_speech_allowed", None)
+                if not callable(allowed):
+                    raise RuntimeError(
+                        "Native adapter lacks the shared passive speech budget"
+                    )
+                if not allowed():
+                    raise RuntimeError("Passive fleet speech cooldown is active")
             if lease_stopping or time.monotonic() < lease_until:
                 raise RuntimeError("A coordinated session is already active")
             for device in selected:
@@ -719,9 +744,12 @@ def create_app():
                 ):
                     raise RuntimeError("Wait for the current robot speech to finish")
             lease_ids, lease_until = selected, time.monotonic() + 305
+            lease_passive = passive
         elif body.get("enabled") is False:
             if lease_ids and lease_ids != selected:
                 raise RuntimeError("Session identities differ")
+            if lease_ids and passive is not lease_passive:
+                raise RuntimeError("Session passive mode differs")
             if not lease_stopping:
                 for device in lease_ids:
                     interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
@@ -732,11 +760,14 @@ def create_app():
                 await asyncio.shield(lease_cleanup_task)
         else:
             raise ValueError("enabled must be a boolean")
-        return web.json_response({
+        response = {
             "device_ids": sorted(selected),
             "enabled": body["enabled"],
             "expires_in_seconds": 305 if body["enabled"] else 0,
-        })
+        }
+        if passive:
+            response["passive"] = True
+        return web.json_response(response)
 
     async def speak(request):
         body = await request.json()
@@ -759,7 +790,10 @@ def create_app():
                 if (lease_stopping or not muted(device) or connections.get(device) is not connection
                         or generation != interrupt_generation.get(device, 0)):
                     raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
-                await transmit(connection, text, frames)
+                if lease_passive:
+                    await transmit(connection, text, frames, passive=True)
+                else:
+                    await transmit(connection, text, frames)
         return web.json_response({
             "device_id": device, "transmitted": True,
             "physical_playback_verified": False,
