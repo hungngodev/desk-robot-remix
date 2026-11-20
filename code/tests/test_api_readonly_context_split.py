@@ -234,3 +234,16 @@ def test_native_activity_context_only_reflects_live_same_robot_coordinator_work(
     )
     assert _active_robot_activity(jobs, "pet-one") == ""
 
+
+    # The real Coordinator labels an active docking job "dock_approach".
+    # Do not silently omit it from native speech context as "dock".
+    docking = SimpleNamespace(
+        id="d" * 32, robot_id="pet-one",
+        kind="dock_approach", state="running",
+    )
+    jobs["docking"] = docking
+    status = _active_robot_activity(jobs, "pet-one")
+    assert "dock_approach" in status and "running" in status
+    assert "physical progress and outcome unverified" in status
+    docking.state = "succeeded"
+    assert _active_robot_activity(jobs, "pet-one") == ""
