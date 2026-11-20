@@ -29,6 +29,7 @@ def _text(value: str, max_length: int) -> str:
 class _Attention:
     generation: int = 0
     topic: str = ""
+    topic_origin: str = "operator"
     topic_state: str = "none"
     topic_updated_at: float = 0
     voice_at: float = -math.inf
@@ -60,15 +61,21 @@ class AttentionLedger:
     def _state(self, robot_id: str) -> _Attention:
         return self._robots[robot_id]
 
-    def begin_topic(self, robot_id: str, topic: str, at: float) -> int:
+    def begin_topic(
+        self, robot_id: str, topic: str, at: float, *,
+        origin: str = "operator",
+    ) -> int:
         """Record a real Mac Conversation.run topic, never a motion command."""
         _clock(at)
+        if origin not in {"operator", "autonomous_social"}:
+            raise ValueError("Unsupported conversation origin")
         cleaned = _text(topic, 100)
         if not cleaned:
             raise ValueError("Empty conversation topic")
         state = self._state(robot_id)
         state.generation += 1
         state.topic = cleaned
+        state.topic_origin = origin
         state.topic_state = "active"
         state.topic_updated_at = at
         # Events from an earlier task cannot impersonate current task context.
@@ -184,7 +191,12 @@ class AttentionLedger:
                 if state.topic_state == "active"
                 else "Earlier " + state.topic_state + " conversation"
             )
-            pieces.append(f"{label} (not motion permission): {state.topic[:72]}")
+            qualifier = (
+                "not motion permission"
+                if state.topic_origin == "operator"
+                else "autonomous peer topic, not an operator command"
+            )
+            pieces.append(f"{label} ({qualifier}): {state.topic[:72]}")
         elif state.asr and 0 <= now - state.asr_at <= 90:
             pieces.append(
                 "Earlier uncertain ASR words (not verified command): "
