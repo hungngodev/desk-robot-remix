@@ -447,20 +447,28 @@ async def test_group_chat_uses_each_pet_own_live_audio_sensor_and_tool_context(s
     hub.remember_tool(
         "robot-02", "robot_status", "backend=stepper_28byj48; armed=False", now,
     )
-    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    class RecordingChat(SimulatedChat):
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            return await super().reply(history)
+
+    chat = RecordingChat()
+    conversation = Conversation(settings, chat, SimulatedSpeaker())
     conversation.multimodal = SimpleNamespace(hub=hub)
     await conversation.run(["robot-01", "robot-02"], "Play a tiny game", 2)
-    own = conversation.histories["robot-01"][1]["content"]
-    peer = conversation.histories["robot-02"][1]["content"]
-    assert "Recent model ASR guess" in own
+    # Live sensor/ASR/tool evidence belongs only to the CURRENT model turn,
+    # never frozen in the persistent topic/assistant history.
+    own, peer = chat.prompts
     assert "Can we play hide the key?" in own
-    assert "Physical sensor edge: petting_zone" in own
-    assert "Recent head telemetry" not in own
-    assert "Recent head telemetry" in peer
+    assert "petting_zone" in own
+    assert "backend=stepper_28byj48" not in own
+    assert "backend=stepper_28byj48" in peer
     assert "Can we play hide the key?" not in peer
-    assert "Physical sensor edge: petting_zone" not in peer
-    assert "not physical action permits" in own
-    assert "not physical action permits" in peer
+    assert "petting_zone" not in peer
+    assert "petting_zone" not in str(conversation.histories["robot-01"])
 
 
 
@@ -654,14 +662,26 @@ async def test_group_chat_does_not_expose_revoked_private_memory_tool_result(
         "The user's private key location is under the green mug",
         time.monotonic(),
     )
-    agent = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    class RecordingChat(SimulatedChat):
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            return await super().reply(history)
+
+    chat = RecordingChat()
+    agent = Conversation(settings, chat, SimulatedSpeaker())
     agent.multimodal = SimpleNamespace(hub=hub)
     await agent.run(["robot-01", "robot-02"], "Tell a harmless riddle", 2)
+    assert "green mug" not in str(chat.prompts)
     assert "green mug" not in str(agent.histories)
     settings.voice_memory_tools_enabled = True
     await agent.run(["robot-01", "robot-02"], "Tell a harmless riddle", 2)
-    assert "green mug" in str(agent.histories["robot-01"])
-    assert "green mug" not in str(agent.histories["robot-02"][0])
+    # Consent permits a relevant authenticated recall, but does not make an
+    # unrelated old receipt part of this new current human request.
+    assert "green mug" not in str(chat.prompts)
+    assert "green mug" not in str(agent.histories)
 
 
 async def test_unknown_robot_does_not_poison_future_conversation(settings):
