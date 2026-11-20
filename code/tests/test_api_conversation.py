@@ -854,9 +854,18 @@ async def test_group_prompts_never_promote_forged_peer_memory_to_firsthand(setti
     assert "robot-01 reported: I picked up a key" in persona
     assert "robot-01 reported uncertain human speech" in persona
     await c.run(ids, "picked up a key", 1)
-    prompt = c.histories["robot-02"][1]["content"]
-    assert "robot-01 reported: I picked up a key" in prompt
-    assert "I said previously: I picked up a key" not in prompt
+    messages = c.histories["robot-02"]
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert "robot-01 reported:" not in messages[0]["content"]
+    assert "robot-01 reported:" not in messages[1]["content"]
+    # Peer hearsay is retrieved as JSON-quoted, explicitly untrusted data,
+    # not promoted to either the pet's SYSTEM persona or operator's topic.
+    evidence = messages[2]
+    assert evidence["role"] == "user"
+    assert "Untrusted per-pet historical memory data" in evidence["content"]
+    assert "robot-01 reported: I picked up a key" in evidence["content"]
+    assert "I said previously: I picked up a key" not in evidence["content"]
 
 
 @pytest.mark.parametrize("lease", ["session_lock", "speaker_lock"])
