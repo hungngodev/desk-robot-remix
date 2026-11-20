@@ -178,3 +178,28 @@ def test_nx_one_s_two_p_real_pcm_rating_is_not_bare_cell_and_not_harness():
     high = screen.evaluate("NX-MGL00850-1S2P", demand, tray_mm=(90, 46, 25))
     assert high["pack_peak_within_published_max_on_paper"] is False
     assert high["pack_current_enough_on_paper"] is False
+
+
+def test_default_battery_fit_screen_reads_current_cad_tray_not_stale_constants(
+    tmp_path, monkeypatch,
+):
+    screen = module("screen_vendor_battery_harness")
+    demand = module("power_preflight").size_5v_supply(1.0, 0.6)
+    assert screen.cad_tray_mm() == (68.0, 35.0, 14.0)
+    original = screen._TRAY_CAD.read_text(encoding="utf-8")
+    revised_cad = tmp_path / "remaining_fit_gauges.scad"
+    revised_cad.write_text(
+        original.replace("power_l = 68;", "power_l = 100;")
+                .replace("power_w = 35;", "power_w = 38;")
+                .replace("power_h = 14;", "power_h = 15;"),
+        encoding="utf-8",
+    )
+    read_cad = screen.cad_tray_mm
+    assert read_cad(revised_cad) == (100.0, 38.0, 15.0)
+    monkeypatch.setattr(screen, "cad_tray_mm", lambda: read_cad(revised_cad))
+    result = screen.evaluate("LPHD7430085", demand)
+    assert result["pack_fits_current_tray_on_paper"] is True
+    assert result["complete_power_path_safe_to_buy"] is False
+    revised_cad.write_text("power_l = 100; power_l = 120;")
+    with pytest.raises(ValueError, match="Missing or ambiguous"):
+        read_cad(revised_cad)
