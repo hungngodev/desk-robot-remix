@@ -209,6 +209,24 @@ def test_required_room_role_cannot_be_relabelled_optional():
         mod.generate(plan)
 
 
+def test_required_room_status_records_match_current_selected_plan():
+    source = (mod.PLAN.parent.parent / "source-map.md").read_text(
+        encoding="utf-8"
+    )
+    register = (
+        mod.PLAN.parent / "2026-11-16-five-pet-purchase-register.md"
+    ).read_text(encoding="utf-8")
+    for feature in ("S027", "S043", "S045", "S062"):
+        row = next(line for line in source.splitlines()
+                   if line.startswith("| `" + feature + "` |"))
+        assert "ACTIVE REQUIRED SHARED STATION ROLE, PHYSICAL HOLD" in row
+    thermal = next(line for line in source.splitlines()
+                   if line.startswith("| `S042` |"))
+    assert "CONDITIONAL SHARED STATION OPTION, NOT SELECTED" in thermal
+    assert "Required shared-station capacitive soil probe" in register
+    assert "CONDITIONAL OPTIONAL, NOT SELECTED" in register
+
+
 def test_room_power_reference_survives_builder_markdown():
     import json
     report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))

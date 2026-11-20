@@ -246,7 +246,7 @@ is a separate historical objective, not a robot dependency.
 | `S024` | MAX30102 pulse sensor | OPT-IN EXPANSION | Breakout/logic rails, WROOM I2C not Sense mic, nonmedical heartbeat petting |
 | `S025` | BLE heart rate strap | OPT-IN EXPANSION | External opt-in data rather than onboard inference |
 | `S026` | MR60BHA1 breathing radar | EXPANSION | Human-aware radar, consent, UART/power and vendor driver |
-| `S027` | LD2410 mmWave presence | EXPANSION | Presence but not person identity/bearing; different rail/harness |
+| `S027` | LD2410 mmWave presence | ACTIVE REQUIRED SHARED STATION ROLE, PHYSICAL HOLD | Selected for the one shared room station as presence-only evidence; 5V supply, 3.3V UART, carrier identity, placement and live power measurements remain unqualified; never person identity or movement authority |
 | `S028` | AM312 mini PIR | OPTIONAL STOCK | Human movement detection; no location or reliable stationary detection |
 | `S029` | WiFi CSI presence | RESEARCH | Radio firmware/calibration, no guaranteed person distance or direction |
 | `S030` | APDS9960 gesture/proximity/color/light | EXPANSION | I2C 0x39; different job from floor ToF and BerryIMU |
@@ -262,9 +262,9 @@ is a separate historical objective, not a robot dependency.
 | `S040` | MLX90614 noncontact temperature | EXPANSION | Thermal reading at distance, no health diagnosis |
 | `S041` | MLX90640 thermal camera | RESEARCH | Power/processing budget and privacy; thermal silhouettes not identities |
 | `S042` | AMG8833 Grid-EYE thermal array | CONDITIONAL SHARED STATION OPTION, NOT SELECTED | Remains visible for later opt-in thermal play, but is excluded from the core first-robot and default fleet checkout until explicitly selected and physically qualified |
-| `S043` | SCD40 real CO2 | EXPANSION | Physical airflow and warm-up; not inferred from equivalent VOC |
+| `S043` | SCD40 real CO2 | ACTIVE REQUIRED SHARED STATION ROLE, PHYSICAL HOLD | Selected for the one shared room station; exact carrier, airflow, warm-up, power and comparison readings remain unqualified; CO2 is not inferred from a VOC sensor |
 | `S044` | SGP30 VOC | EXPANSION | Air-quality game, baseline/calibration and ventilation |
-| `S045` | BME688 gas/environment | EXPANSION | Gas signatures not medical/food safety diagnosis |
+| `S045` | BME688 gas/environment | ACTIVE REQUIRED SHARED STATION ROLE, PHYSICAL HOLD | Selected for the one shared room station; exact carrier, heater load, ventilation and baseline remain unqualified; raw gas resistance is not VOC ppm or a medical/food-safety diagnosis |
 | `S046` | ENS160 air quality | EXPANSION | Alternative gas sensor, offset and humidity compensation |
 | `S047` | PM2.5 SPS30/PMS5003 | RESEARCH | Bulky fan/air path, power/noise conflict with mini enclosure |
 | `S048` | MAX9814 analog mic | OWNED SPARE | Not a speaker amplifier; Sense already includes PDM mic |
