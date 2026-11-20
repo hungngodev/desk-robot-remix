@@ -144,7 +144,7 @@
       "unit_usd": null,
       "price_status": "sample_quote_only",
       "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
-      "fit": "One forward guarded VL53L0X on TCA9548A 0x70 channel 4 using the same selected driver and carrier candidate. It does not prove gripper clearance or authorize reversing. Qualify the same one-sample carrier electrically and optically before fleet purchase.",
+      "fit": "One forward guarded VL53L0X on TCA9548A 0x70 channel 4 using the same selected driver and carrier candidate. It does not prove gripper clearance or authorize reversing. Qualify the same one sample carrier electrically and optically before fleet purchase.",
       "reference_unit_usd": 1.75,
       "reference_price_date": "2026-11-20"
     },
@@ -154,7 +154,7 @@
       "unit_usd": null,
       "price_status": "sample_quote_only",
       "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
-      "fit": "Three diagnostic VL53L0X directions on TCA9548A 0x70 channels 5-7. These read-only side and rear observations never authorize reversing or turning. Use the same physically qualified carrier as the five critical lanes; do not order all three until the one-sample electrical, optical and fit trial passes.",
+      "fit": "Three diagnostic VL53L0X directions on TCA9548A 0x70 channels 5-7. These read-only side and rear observations never authorize reversing or turning. Use the same physically qualified carrier as the five critical lanes; do not order all three until the one sample electrical, optical and fit trial passes.",
       "reference_unit_usd": 1.75,
       "reference_price_date": "2026-11-20"
     },
