@@ -2069,7 +2069,8 @@ class PetController:
             else []
         )
         if (self.settings.mode != "hardware"
-                or self.settings.voice_vision_tools_enabled):
+                or (self.settings.voice_vision_tools_enabled
+                    and self.settings.fleet_text_sharing_enabled)):
             ongoing = getattr(self.conversation, "group_activity_timeline", None)
             if callable(ongoing):
                 activity.extend(ongoing(robot_id))
