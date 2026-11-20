@@ -209,21 +209,32 @@ def test_source_crosswalk_matches_41_original_html_section_ids():
     assert digest == "1128952b6b42f42eb0a5650714c541b7916b3f07b91856cf9ae82e3a9a3d43be"
 
 
-def test_obsolete_floor_sensor_is_not_an_active_purchase_item():
+def test_historical_bom_tracks_selected_vl53l0x_without_authorizing_bulk_buy():
     data = json.loads((DOCS / "hardware/bom.json").read_text(encoding="utf-8"))
-    down = [
+    ranging = [
         item for item in data["items"]
-        if "VL53L4CD compatible downward short range ToF carriers" in item["item"]
+        if "VL53L0X GY-530 generic" in item["item"]
     ]
-    assert len(down) == 1
-    assert down[0]["quantity"] == 4
-    assert down[0]["unit_usd"] is None
-    assert down[0]["url"] == "", "An unqualified obsolete-part purchase link cannot be active"
-    assert "vl6180x" in down[0]["historical_reference_url"].lower()
-    assert "vl53l4cd" in down[0]["fit"].lower()
+    assert len(ranging) == 3
+    assert sum(item["quantity"] for item in ranging) == 8
+    assert sorted(item["quantity"] for item in ranging) == [1, 3, 4]
+    assert all(item["unit_usd"] is None for item in ranging)
+    assert all(item["price_status"] == "sample_quote_only" for item in ranging)
+    assert all(item["reference_unit_usd"] == 1.75 for item in ranging)
+    assert all(item["reference_price_date"] == "2026-11-20" for item in ranging)
+    assert all("one sample" in item["fit"].lower() for item in ranging)
+    assert not any(
+        "VL53L4CD compatible" in item["item"] for item in data["items"]
+    )
+    replacement = next(
+        item for item in data["optional_items"]
+        if item["item"].startswith("Conditional generic MPU6050")
+    )
+    assert replacement["price_status"] == "not_selected"
+    assert "adafruit.com" not in replacement["url"].lower()
+    assert data["quote_status"] == "incomplete_eight_vl53l0x_breakouts_and_1s_power"
     parts = (DOCS / "hardware/parts.md").read_text(encoding="utf-8")
     assert "Sensor purchase hold" in parts
-    assert "|[VL6180X breakout]" not in parts
     wiring = (DOCS / "hardware/wiring.md").read_text(encoding="utf-8")
     assert "CH0 front-left floor VL53L0X 0x29" in wiring
     assert "front-left downward VL53L4CD candidate" not in wiring

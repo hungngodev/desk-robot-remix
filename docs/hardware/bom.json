@@ -129,22 +129,34 @@
       "reference_price_date": "2026-11-03"
     },
     {
-      "item": "VL53L4CD compatible downward short range ToF carriers, exact breakout unqualified",
+      "item": "VL53L0X GY-530 generic downward cliff carriers, exact sample unqualified",
       "quantity": 4,
       "unit_usd": null,
-      "price_status": "quote_pending",
-      "url": "",
-      "fit": "Four independent downward corners with VL53L4CD initialization and bounded checked read firmware, Pololu pinned code. Exact 3.3V carrier, near floor black/glossy/transparent performance, mounting geometry, sample freshness, cost and shipping not verified. Do not buy all four until one actual breakout is tested. Old VL6180X obsolete.",
-      "historical_reference_url": "https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module"
+      "price_status": "sample_quote_only",
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
+      "fit": "Four independent downward corners on TCA9548A 0x70 channels 0-3 using the selected VL53L0X firmware path. ElectroPeak GY-530 is a low-cost candidate only. Buy or borrow one sample before any bulk order; verify real chip identity, 3.3V SDA/SCL behavior, lens height, black/glossy/transparent desk returns, loaded stopping margin, mount geometry and delivered price.",
+      "reference_unit_usd": 1.75,
+      "reference_price_date": "2026-11-20"
     },
     {
-      "item": "VL53L4CD compatible independent forward obstacle carrier, exact breakout unqualified",
+      "item": "VL53L0X GY-530 generic forward obstacle carrier, exact sample unqualified",
       "quantity": 1,
       "unit_usd": null,
-      "price_status": "quote_pending",
-      "url": "",
-      "fit": "Fifth same-model VL53L4CD on mux channel4, using same pinned Pololu initialization and checked reads. Not gripper proof or all-direction collision. Prior VL53L0X URL historical only.",
-      "historical_reference_url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole"
+      "price_status": "sample_quote_only",
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
+      "fit": "One forward guarded VL53L0X on TCA9548A 0x70 channel 4 using the same selected driver and carrier candidate. It does not prove gripper clearance or authorize reversing. Qualify the same one-sample carrier electrically and optically before fleet purchase.",
+      "reference_unit_usd": 1.75,
+      "reference_price_date": "2026-11-20"
+    },
+    {
+      "item": "VL53L0X GY-530 generic side and rear observation carriers, exact sample unqualified",
+      "quantity": 3,
+      "unit_usd": null,
+      "price_status": "sample_quote_only",
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
+      "fit": "Three diagnostic VL53L0X directions on TCA9548A 0x70 channels 5-7. These read-only side and rear observations never authorize reversing or turning. Use the same physically qualified carrier as the five critical lanes; do not order all three until the one-sample electrical, optical and fit trial passes.",
+      "reference_unit_usd": 1.75,
+      "reference_price_date": "2026-11-20"
     },
     {
       "item": "Owned Adafruit AT42QT1010 momentary touch breakout #1374",
@@ -172,7 +184,7 @@
     }
   ],
   "head_configuration": "Active head is user-purchased XIAO ESP32S3 Sense. Retain existing compiled Sense baseline; reuse pinned RIO software AEC/cancellation and official Google/Pipecat streaming patterns before considering replacement. Voice interruption remains first-build gate, not yet passed. Waveshare is optional fallback only.",
-  "note": "No full total established for revised1S/compactToF/touch/IMU core. Null prices are unknown, not free. Historical basket archived. Cap50includesreportedSensemoney; exactreceiptstillunknown. OptionalRGB/bumper excluded from required core until selected. Photo audit holds the prototype new-IMU purchase in favor of owned BerryIMU; MAX9814 is analog mic input and does not replace MAX98357A speaker output. No working-condition/fit gate changed.\n2026-11-10 MPU6050 is user-preferred. BerryIMU remains reported owned optional spare, not required buy.\n2026-11-10 Pololu official VL53L4CD carrier listing at $13.95 per breakout implies 5 x $13.95 = $69.75 for just 5 sensor roles, above $50 total cap. That is one vendor option, not an approved quote for the as-yet-unknown compatible breakout. Needs cheaper qualified sourcing or explicit budget revision before any fleet purchase.",
+  "note": "No full total established for revised1S/compactToF/touch/IMU core. Null prices are unknown, not free. Historical basket archived. Cap50includesreportedSensemoney; exactreceiptstillunknown. OptionalRGB/bumper excluded from required core until selected. Photo audit holds the prototype new-IMU purchase in favor of owned BerryIMU; MAX9814 is analog mic input and does not replace MAX98357A speaker output. No working-condition/fit gate changed.\n2026-11-10 MPU6050 is user-preferred. BerryIMU remains reported owned optional spare, not required buy.\n2026-11-20 the accepted ranging design is eight generic VL53L0X GY-530 roles per robot. ElectroPeak currently lists the double-hole GY-530 at $1.75 each before shipping and tax, with lower volume pricing, but that is a reference candidate rather than a delivered or physically qualified quote. Buy or borrow one sample first; do not order all 40 until carrier identity, 3.3V signaling, optics, stopping margin and fit pass.",
   "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
   "qualification_checks": {
     "sense_board_configuration_and_8mb_build_confirmed": true,
@@ -187,7 +199,7 @@
     "proactive_camera_pipeline_physically_passed": false
   },
   "reported_already_purchased_usd": 18.87,
-  "quote_status": "incomplete_five_vl53l4cd_breakouts_and_1s_power",
+  "quote_status": "incomplete_eight_vl53l0x_breakouts_and_1s_power",
   "optional_items": [
     {
       "item": "One diffused RGB pixel plus level buffer and passives",
@@ -206,12 +218,12 @@
       "fit": "Optional; bodyGPIO35, small mount and stop policy must be qualified."
     },
     {
-      "item": "Conditional six-axis replacement ONLY if existing MPU6050 and BerryIMU both fail testing",
+      "item": "Conditional generic MPU6050 GY-521 replacement ONLY if existing MPU6050 and BerryIMU both fail testing",
       "quantity": 1,
       "unit_usd": null,
-      "price_status": "quote_pending",
-      "url": "https://www.adafruit.com/product/4503",
-      "fit": "User now reports MPU6050 in use; do not order any replacement until its actual variant, I2C signal level and readout have been tested. BerryIMU remains a spare. Fleet quantity remains unconfirmed."
+      "price_status": "not_selected",
+      "url": "https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Register-Map.pdf",
+      "fit": "No replacement purchase is selected. First identify and test the reported-owned MPU6050 and the BerryIMU spare. If both fail, select a generic MPU6050 GY-521 compatible carrier only after verifying 3.3V I2C signaling, pullups, board marking, orientation and delivered price. Do not buy a premium Adafruit replacement."
     }
   ],
   "html_research_reconciliation": {
