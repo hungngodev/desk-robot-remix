@@ -70,12 +70,17 @@ int main() {
     CHECK(!body.state().armed);
     mpu.valid = true;
     mpu.at_ms = 200;
+    mpu.low_g_status_valid = true;
+    mpu.low_g_irq = true;
+    mpu.low_g_event_seq = 7;
     body.set_imu_identity(4, 0x68, 0);
     body.set_imu(mpu);
     reply = status(body, 215);
     CHECK(reply.find("\"family\":4,\"gyro_id\":104,\"aux_id\":0,\"valid\":true") != std::string::npos);
     CHECK(reply.find("\"acc\":[16384,-16384,2]") != std::string::npos);
     CHECK(reply.find("\"temp_raw\":344,\"temp_valid\":true") != std::string::npos);
+    CHECK(reply.find("\"low_g_valid\":true,\"low_g_irq\":true,\"low_g_seq\":7") != std::string::npos);
+    CHECK(status(body, 500).find("\"low_g_valid\":false,\"low_g_irq\":false,\"low_g_seq\":7") != std::string::npos);
     // Switch back to Berry before the old expected status assertions.
     body.set_imu_identity(1, 212, 73);
     body.set_imu(reading);
