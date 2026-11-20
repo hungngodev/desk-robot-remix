@@ -50,8 +50,8 @@ Each human row records a unique `id`, `volume` (`low`, `medium`,
 `load_profile` (`voice_only`, `camera_wifi`, or
 `motors_servos_stand`), `speaker_id`, a positive
 `conversation_turn`, `speaker_distance_cm` within 45 to 55,
-`room_noise_db_a`, `firmware_commit`, `audio_config_id`, and
-`mic_speaker_placement_id`. The twenty rows must actually cover both
+`room_noise_db_a`, `robot_id`, `firmware_commit`, `audio_config_id`,
+and `mic_speaker_placement_id`. The twenty rows must actually cover both
 positions, all three load profiles and intended speaker volumes, two
 human speakers and adjacent conversation turn numbers.
 
@@ -62,8 +62,12 @@ Each human row also supplies measured monotonic timestamps, in order:
 `utterance_beginning_intelligible`, and
 `obsolete_audio_never_resumed` as booleans. A claim of correct new intent
 requires actual retained speech at its start. The robot-only row records
-`duration_seconds` of at least 600 and nonnegative integer
-`self_interruptions`. The proposed acoustic gate needs 19/20 audible
+`duration_seconds` of at least 600, nonnegative integer
+`self_interruptions`, and the exact same `robot_id`, `firmware_commit`,
+`audio_config_id`, and `mic_speaker_placement_id` as the twenty human
+trials. A control from another robot or mounting configuration is invalid.
+The checker includes those identities in its result so no generic
+five-robot qualification can be inferred. The proposed acoustic gate needs 19/20 audible
 stops within 500 ms, 18/20 correctly retained and understood intents,
 zero self-interruptions and no obsolete audio ever resuming.
 
@@ -241,7 +245,18 @@ reference alignment is now a Kconfig setting named
 `CONFIG_DESK_ROBOT_AEC_DELAY_MS` (0 to 250 ms). That **does not** make the
 robot acoustically calibrated. Each actual assembled robot must measure the
 reference-to-microphone lag and run the 20 interruption trials at different
-speaker volumes, distances and motor load.
+speaker volumes, distances and motor load. The offline
+`code/scripts/estimate_aec_delay.py` now accepts a synchronized mono PCM16
+speaker recording at the actual 32 kHz I2S rate and a simultaneous 16 kHz
+mono microphone recording, with an explicit ten-second limit. Its causal
+three-tap 2:1 reference conversion models the selected Sense codec phase.
+Use `python code/scripts/estimate_aec_delay.py --speaker
+sense_playback_32k.wav --microphone sense_microphone_16k.wav` with
+private real recordings from the SAME assembly and clock alignment.
+A 24 kHz decoded TTS file alone is not the actual post-resampler speaker
+output and cannot certify echo delay. The command only estimates lag and
+drift; it does not capture audio, prove acoustic isolation, or qualify
+barge-in without the separate physical trial evidence.
 
 For a private physical Sense build, pass `--board sense --aec-delay-ms 115`
 to the existing `firmware/head/private_config.py` command after measuring a
