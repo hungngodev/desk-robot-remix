@@ -115,6 +115,8 @@ class PetState:
     last_error: str | None = None
     last_touch_count: int | None = None
     last_touch_events: dict[str, int] | None = None
+    last_touch_boot_id: int | None = None
+    retired_touch_boot_ids: set[int] = field(default_factory=set, repr=False)
     last_safety_fault: str | None = None
     safety_fault_events: int = 0
     last_extra_mask: int | None = None
@@ -284,6 +286,8 @@ class PetController:
             self.multimodal.hub.discard_video(robot_id)
         state.last_touch_count = None
         state.last_touch_events = None
+        state.last_touch_boot_id = None
+        state.retired_touch_boot_ids.clear()
         state.last_cap_events = None
         state.last_cap_mask = None
         state.side_events = SideRangeEvents()  # new physical head generation
@@ -1348,6 +1352,30 @@ class PetController:
         if type(count) is not int or not 0 <= count <= 0xffffffff:
             return
         state = self.states[robot_id]
+        # Both fields come from the SAME WROOM status formatter. Reuse its
+        # per-boot identity instead of adding another MCU counter or poller.
+        # A late packet from a retired boot must not reset gesture baselines.
+        reported_boot_ids = [
+            section["boot_id"]
+            for name in ("imu", "side_ranges")
+            if isinstance((section := body.get(name)), dict)
+            and "boot_id" in section
+        ]
+        if reported_boot_ids:
+            if (any(type(value) is not int or not 1 <= value <= 0xffffffff
+                    for value in reported_boot_ids)
+                    or len(set(reported_boot_ids)) != 1):
+                return  # contradictory or invalid WROOM source identity
+            boot_id = reported_boot_ids[0]
+            if boot_id in state.retired_touch_boot_ids:
+                return
+            if state.last_touch_boot_id not in (None, boot_id):
+                state.retired_touch_boot_ids.add(state.last_touch_boot_id)
+                state.last_touch_count = None
+                state.last_touch_events = None
+            state.last_touch_boot_id = boot_id
+        elif state.last_touch_boot_id is not None:
+            return  # never downgrade to identity-free packets mid-session
         previous_count = state.last_touch_count
         if previous_count is not None and 0 < count < previous_count:
             # Firmware reboot resets the count to zero. A delayed old nonzero
