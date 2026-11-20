@@ -35,9 +35,13 @@ a per-robot dock_calibration JSON sets measured=true and real camera intrinsics,
 AprilTag marker size/ID and target distance.
 
 A missing or unmeasured file returns HOLD without even opening a camera frame.
-With a real JPEG, the endpoint returns camera-relative tag pose and qualitative
-alignment phase. No drive command, motor arm, or live charge output is reachable
-from this observer. Mac image receipt time is not claimed to equal exposure time.
+With a real JPEG, the endpoint returns the raw camera-relative tag pose.
+When the actual lens-to-chassis lateral offset and yaw have been measured, its
+qualitative alignment phase uses the corrected chassis-centerline lateral
+coordinate and reports that coordinate separately; a centered lens alone need
+not mean aligned tracks. Without mount measurements, the camera-only
+observation remains provisional. No drive command, motor arm, or live charge
+output is reachable from this observer. Mac image receipt time is not claimed to equal exposure time.
 
 Physical final contact approach, charging power electronics and actual printed
 mechanical fit remain explicitly unverified.
