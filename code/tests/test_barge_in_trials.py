@@ -50,6 +50,10 @@ def test_well_formed_synthetic_rows_only_verify_test_criteria():
     report = evaluate(fake_rows())
     assert report["meets_proposed_gate"]
     assert report["records_are_operator_supplied_not_independently_attested"]
+    assert report["robot_id"] == "robot-01"
+    assert report["firmware_commit"] == "sha-of-physically-flashed-build"
+    assert report["audio_config_id"] == "bench-config-1"
+    assert report["mic_speaker_placement_id"] == "prototype-enclosure-a"
     assert report["coverage"]["human_speakers"] == 2
     assert report["coverage"]["load_profiles"] == [
         "camera_wifi", "motors_servos_stand", "voice_only",
