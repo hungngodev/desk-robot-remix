@@ -52,9 +52,17 @@ async def ollama_speech_segments(
             raise RuntimeError("Ollama streaming frame must be an object")
         if packet.get("error"):
             raise RuntimeError("Ollama streaming provider error")
+        if "done" in packet and type(packet["done"]) is not bool:
+            raise RuntimeError("Ollama streaming completion marker invalid")
         message = packet.get("message", {})
         if not isinstance(message, dict):
             raise RuntimeError("Ollama streaming message invalid")
+        # The speech channel owns assistant words, NOT tool output or
+        # untrusted user/system frames. A model tool request needs the
+        # separately authorized completed-tool path before speech synthesis.
+        if ("role" in message and message["role"] != "assistant"
+                or message.get("tool_calls")):
+            raise RuntimeError("Ollama streaming non-assistant/tool frame rejected")
         fragment = message.get("content", "")
         if not isinstance(fragment, str):
             raise RuntimeError("Ollama streaming content invalid")
