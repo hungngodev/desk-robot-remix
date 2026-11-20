@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 from desk_robot.api import create_app
-from desk_robot.conversation import Conversation, KokoroHeadSpeaker, conversation_turns
 from desk_robot.brain_context import compose_brain_context
+from desk_robot.conversation import Conversation, KokoroHeadSpeaker, conversation_turns
 from desk_robot.memory import MemoryStore
 from desk_robot.multimodal import CameraFrameHub
 from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
@@ -379,7 +379,7 @@ async def test_group_stream_revocation_stops_next_segment_and_never_shares_parti
         # A subsequent turn can remember what this robot transmitted before
         # interruption. Neither acoustic playback nor a peer sighting is
         # fabricated when the stream is cancelled.
-        assert hub.spoken_history["robot-02"] == []
+        assert not hub.spoken_history["robot-02"]
         sent = list(hub.spoken_history["robot-01"])
         assert len(sent) == 1
         assert sent[0][2] == "mac_tts_transmitted_not_speaker_playback_ack"
