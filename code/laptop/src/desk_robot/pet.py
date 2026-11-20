@@ -2057,7 +2057,10 @@ class PetController:
         jobs = getattr(self, "coordinator_jobs", None)
         activity = (
             active_job_timeline(jobs.values(), robot_id)
-            if isinstance(jobs, dict) else []
+            if (isinstance(jobs, dict)
+                and (self.settings.mode != "hardware"
+                     or self.settings.voice_vision_tools_enabled))
+            else []
         )
         timeline = []
         # A physical touch can still trigger curiosity after visual opt
