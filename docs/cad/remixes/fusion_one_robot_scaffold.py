@@ -28,6 +28,18 @@ ADAPTER_NAMES = (
     "fsr_jaw_pocket", "dock_tag_backplate", "wire_clip",
 )
 
+# These are unaligned dimensional references, NOT finished fitted components.
+# export_fit_kit.py generates them from the same provisional SCAD sources.
+FIT_REFERENCES = (
+    ("Passive Dock Fit Only", "dock_stls/dock_passive_fit.stl"),
+    ("Dock Entry Coupon Only", "dock_stls/dock_rail_entry_coupon.stl"),
+    ("Battery Tray Gauge Only", "fit_stls/battery_boost_tray.stl"),
+    ("Contact Pocket Gauge Only", "fit_stls/dock_contact_recess_gauge.stl"),
+    ("Jaw Reference Coupon Only", "fit_stls/jaw_calibration_coupon.stl"),
+    ("Speaker Fit Gauge Only", "fit_stls/speaker_rect_fit_gauge.stl"),
+    ("GY530 Sensor Fit Gauge Only", "fit_stls/vl53l0x_gy530_fit_gauge.stl"),
+)
+
 
 def find_repo(script_path: Path) -> Path:
     for ancestor in (script_path.parent, *script_path.parents):
@@ -47,7 +59,13 @@ def build_manifest(root: Path):
         ("Adapter " + name, root / "docs/cad/remixes/adapter_stls" / (name + ".stl"))
         for name in ADAPTER_NAMES
     ]
-    return paths + [(name, path) for name, path in adapters if path.is_file()]
+    fits = [
+        (name, root / "docs/cad/remixes" / relative)
+        for name, relative in FIT_REFERENCES
+    ]
+    return (paths
+            + [(name, path) for name, path in adapters if path.is_file()]
+            + [(name, path) for name, path in fits if path.is_file()])
 
 
 def run(context):
@@ -77,6 +95,7 @@ def run(context):
                 raise RuntimeError("Cannot import STL: " + str(path))
         ui.messageBox(
             f"Imported {len(sources)} separate unaligned mesh components.\\n"
+            "Dock and fit gauges, when available, are labeled unqualified references. "
             "This is not the finished robot. Align shaft centers and gears, "
             "validate track compatibility and inspect collisions. Then model "
             "adapters to caliper measurements before printing."
