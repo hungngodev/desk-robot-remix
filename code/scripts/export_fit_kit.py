@@ -137,7 +137,14 @@ def export_kit(
                     "mesh_sha256": sha256(target.read_bytes()).hexdigest(),
                     "units": "mm",
                     "triangles": triangles, "manifold_edges": edges,
+                    # This number describes how many provisional candidates
+                    # to export for layout, NOT approved installed inventory.
                     "quantity_per_robot": 8 if name == "tof_adjustable" else 1,
+                    "installed_quantity_per_robot": 0,
+                    "temporary_fit_coupon": name in (
+                        *GAUGES, *SPEAKER_FITS, *RANGER_FITS,
+                        "dock_rail_entry_coupon",
+                    ),
                 })
         for entry in rendered:
             relative = Path(entry["location"])
