@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -365,6 +366,37 @@ class Conversation:
         self.histories: dict[str, list[dict]] = {}
         self.multimodal = None  # Existing Mac live context, attached in hardware mode.
         self.coordinator_jobs = None  # Existing Coordinator's read-only registry.
+        # The original speaker task owns this short lived dialogue state.
+        self._group_activity_epoch = 0
+        self._group_activity: dict[str, dict] = {}
+
+    def group_activity_timeline(
+        self, robot_id: str, *, now: float | None = None,
+    ) -> list[dict]:
+        """Bounded per-pet dialogue continuity, never an actuator permit."""
+        now = time.monotonic() if now is None else now
+        record = self._group_activity.get(robot_id)
+        if (record is None or type(now) not in (int, float)
+                or not math.isfinite(now)):
+            return []
+        age = now - record["updated_at"]
+        if age < 0 or (record["status"] not in {"waiting", "speaking"}
+                       and age > 45):
+            return []
+        if record["status"] in {"waiting", "speaking"} and (
+            self.active is None or self.active.done()
+        ):
+            return []
+        return [{
+            "channel": "mac_activity", "kind": "group_conversation",
+            "status": record["status"], "topic": record["topic"],
+            "activity_epoch": record["epoch"],
+            "sent_segments": record["sent_segments"],
+            "source": "mac_operator_group_conversation",
+            "age_ms": round(age * 1000),
+            "playback_verified": False, "motor_authorized": False,
+            "physical_action_verified": False,
+        }]
 
     async def _say_with_permission(
         self, robot: RobotConfig, text: str,
@@ -491,6 +523,16 @@ class Conversation:
             await self._say_with_permission(robot, text, consent_still_valid)
 
         self.active = asyncio.current_task()
+        self._group_activity_epoch += 1
+        epoch = self._group_activity_epoch
+        topic_excerpt = " ".join(topic.split())[:100]
+        for robot in robots:
+            self._group_activity[robot.id] = {
+                "epoch": epoch, "status": "waiting",
+                "topic": topic_excerpt, "sent_segments": 0,
+                "updated_at": time.monotonic(),
+            }
+        outcome = "failed"
         transcript = []
         current_robot = None
         try:
@@ -599,6 +641,9 @@ class Conversation:
                                 raise RuntimeError("Group conversation consent revoked")
                             robot = robots[index % len(robots)]
                             current_robot = robot
+                            record = self._group_activity[robot.id]
+                            record["status"] = "speaking"
+                            record["updated_at"] = time.monotonic()
                             async with self.speaker_lock:
                                 # Read only the CURRENT bounded evidence after
                                 # taking the speech lease. The durable chat
@@ -633,6 +678,8 @@ class Conversation:
                                             )
                                         await say_group(robot, segment)
                                         completed_segments.append(segment)
+                                        record["sent_segments"] += 1
+                                        record["updated_at"] = time.monotonic()
                                     if not completed_segments:
                                         # A successful HTTP stream with zero
                                         # spoken segments is not a completed
@@ -650,6 +697,8 @@ class Conversation:
                                             "Group conversation consent revoked"
                                         )
                                     await say_group(robot, text)
+                                    record["sent_segments"] += 1
+                                    record["updated_at"] = time.monotonic()
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
                             await self._persist_spoken_turn(robot, text, robots)
@@ -665,6 +714,8 @@ class Conversation:
                                         {"role": "user", "content": f"{robot.name} said: {text}"}
                                     )
                             transcript.append({"robot_id": robot.id, "text": text})
+                            record["status"] = "waiting"
+                            record["updated_at"] = time.monotonic()
                     except BaseException:
                         # Urgently stop the head first. Only completed sends,
                         # never the segment being cancelled or a guessed audio
@@ -706,8 +757,22 @@ class Conversation:
                             except Exception:
                                 pass  # Memory failures cannot mask audio abort.
                         raise
+            outcome = "completed"
             return transcript
+        except asyncio.CancelledError:
+            outcome = "interrupted"
+            raise
         finally:
+            for robot in robots:
+                record = self._group_activity.get(robot.id)
+                if record is not None and record["epoch"] == epoch:
+                    record["status"] = outcome
+                    record["updated_at"] = time.monotonic()
+                    if ((sharing_at_start
+                         and not self.settings.fleet_text_sharing_enabled)
+                            or (visual_at_start
+                                and not self.settings.voice_vision_tools_enabled)):
+                        record["topic"] = ""
             self.active = None
 
     async def say_proactive(
