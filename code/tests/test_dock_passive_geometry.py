@@ -73,18 +73,53 @@ def test_dock_mesh_clearances_with_openscad(tmp_path):
     ]
     lows = [min(vertex[axis] for vertex in points) for axis in range(3)]
     highs = [max(vertex[axis] for vertex in points) for axis in range(3)]
-    assert lows == [0, 0, 0]
-    assert highs == [126, 48, 15]
-    # Above the base, the left and right rails must form a 114 mm
-    # entry mouth and a 100 mm straight travel channel at the taper end.
-    for y, expected_x in (
-        (0, [1, 6, 120, 125]),
-        (37, [8, 13, 113, 118]),
+    # Do not lock the fit check to the provisional 96 mm track example.
+    # Measured robot widths must be able to change without disabling tests.
+    source = SOURCE.read_text()
+    def parameter(name):
+        match = re.search(
+            r"^" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*;",
+            source, re.M,
+        )
+        assert match is not None, name
+        return float(match.group(1))
+
+    width = parameter("track_outer_width_mm")
+    clearance = parameter("side_clearance_each_mm")
+    wall = parameter("guide_wall_mm")
+    margin = parameter("wall_outside_margin_mm")
+    flare = parameter("entry_flare_each_mm")
+    base = parameter("base_thickness_mm")
+    height = parameter("guide_height_mm")
+    coupon_length = parameter("entry_coupon_length_mm")
+    inner_x = wall + margin
+    outside = width + 2 * clearance + 2 * inner_x
+    assert all(abs(a - b) < 0.01 for a, b in zip(
+        lows, (0, 0, 0), strict=True,
+    ))
+    assert all(abs(a - b) < 0.01 for a, b in zip(
+        highs, (outside, coupon_length, base + height), strict=True,
+    ))
+    # At y=0 both inner guide faces flare OUTWARD. Beyond the flare,
+    # each wall must have its original thickness and measured clearance.
+    for y, left_inner in (
+        (0, inner_x - wall - flare),
+        (37, inner_x - wall),
     ):
+        expected = [
+            left_inner,
+            left_inner + wall,
+            outside - left_inner - wall,
+            outside - left_inner,
+        ]
         xs = sorted({
             round(x, 3) for x, yy, z in points
-            if abs(yy - y) < 0.001 and z > 3.001
+            if abs(yy - y) < 0.001 and z > base + 0.001
         })
-        assert xs == expected_x
-    assert 120 - 6 == 114
-    assert 113 - 13 == 100
+        assert len(xs) == 4
+        assert all(abs(a - b) < 0.01 for a, b in zip(
+            xs, expected, strict=True,
+        ))
+        assert abs((xs[2] - xs[1]) - (
+            width + 2 * clearance + (2 * flare if y == 0 else 0)
+        )) < 0.01
