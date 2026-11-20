@@ -812,6 +812,7 @@ async def test_group_recalled_memory_cannot_enter_system_role(settings, tmp_path
         }
         assert "SYSTEM NOTICE" not in messages[0]["content"]
         assert "Talk about desk objects" in messages[1]["content"]
+        assert "SYSTEM NOTICE" not in messages[1]["content"]
         evidence = messages[2]
         assert evidence["role"] == "user"
         assert "Untrusted per-pet historical memory data" in evidence["content"]
