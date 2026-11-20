@@ -146,8 +146,11 @@ REQUIRED_ROOM_PER_STATION = {
     "ld2410c": 1,
     "soil_probe": 1,
     "nfc_game_props": 10,
-    "amg8833": 1,
     "room_controller": 1,
+}
+CONDITIONAL_ROOM_PER_STATION = {
+    # Visible current option, not a default first-unit or fleet purchase.
+    "amg8833": 1,
 }
 
 # Fourteen linked assembly parts or alternatives from the detailed purchasing
@@ -368,6 +371,18 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         ev = room_evidence.get(ident, {})
         if not isinstance(ev, dict):
             raise ValueError(f"Invalid shared station evidence: {ident}")
+        status = module.get("purchase_status", "required")
+        if ident in CONDITIONAL_ROOM_PER_STATION:
+            if status not in ("conditional_optional", "selected_optional"):
+                raise ValueError(
+                    "Conditional room role must declare current status: " + ident
+                )
+        elif status != "required":
+            raise ValueError("Required room role cannot become optional: " + ident)
+        optional_not_selected = (
+            ident in CONDITIONAL_ROOM_PER_STATION
+            and status == "conditional_optional"
+        )
         missing = [name for name in PART_GATES if not _receipt(ev.get(name))]
         selected_carrier = _selected_carrier(ev)
         if selected_carrier is None:
@@ -380,13 +395,21 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                      "reported_owned_not_verified": owned,
                      "estimated_owned_not_verified": estimated,
                      "ordered_unreceived_not_verified": ordered,
-                     "remaining_if_reported_stock_works": remaining,
+                     "remaining_if_reported_stock_works":
+                         0 if optional_not_selected else remaining,
                      "notes": module.get("location", ""),
-                     "shopping_decision": "hold_until_qualified",
+                     "shopping_decision": (
+                         "conditional_optional_not_selected"
+                         if optional_not_selected else "hold_until_qualified"
+                     ),
                      "selected_carrier": selected_carrier,
                      "power_reference": copy.deepcopy(power.get(ident)),
                      "reference_only": None,
-                     "approved_for_fleet_purchase": not missing,
+                     "excluded_from_order_as_optional": optional_not_selected,
+                     "effective_selected_fleet_total":
+                         0 if optional_not_selected else qty,
+                     "approved_for_fleet_purchase":
+                         False if optional_not_selected else not missing,
                      "missing_part_evidence": missing})
     if set(room_evidence) - room_ids:
         raise ValueError("Evidence refers to nonexistent shared station part IDs")
@@ -427,6 +450,16 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     if reduced:
         missing_system.append("missing_or_reduced_full_feature_roles: " +
                               ", ".join(reduced))
+    conditional_drift = [
+        "room:" + ident
+        for ident, minimum in CONDITIONAL_ROOM_PER_STATION.items()
+        if selected_room.get(ident, -1) < minimum
+    ]
+    if conditional_drift:
+        missing_system.append(
+            "missing_or_reduced_conditional_room_roles: "
+            + ", ".join(conditional_drift)
+        )
     # Checking only the shopping row's model name is insufficient: a parallel
     # agent could silently put premium VL53L4CD lanes into the wiring plan.
     # Every actual 0x70 lane must remain the chosen inexpensive VL53L0X at
@@ -540,7 +573,29 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         raise ValueError("Unknown supplemental purchasing decisions: " +
                          ", ".join(sorted(unknown_decisions)))
     approved_decisions = []
+    optional_deferred_parents = {
+        row["id"] for row in room
+        if row.get("excluded_from_order_as_optional")
+    }
     for ident, (parent, units) in SUPPLEMENTAL_DECISIONS.items():
+        plan_detail = linked_plan.get(ident, {})
+        if parent in optional_deferred_parents:
+            current = plan_detail.get("disposition")
+            conflict = ident in decisions
+            valid = current == "deferred_optional" and not conflict
+            approved_decisions.append({
+                "id": ident,
+                "name": plan_detail.get("name", ident),
+                "parent_role": parent,
+                "fleet_quantity": units,
+                "reviewed": valid,
+                "disposition": current,
+            })
+            if not valid:
+                missing_system.append(
+                    "conditional_optional_decision_conflict:" + ident
+                )
+            continue
         declared = decisions.get(ident, {})
         valid = isinstance(declared, dict) and (
             declared.get("parent_role") == parent
@@ -671,9 +726,15 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             _receipt(system_evidence.get(
                 "room_pod_usb_serial_and_five_pet_observers"))):
         first_robot_missing_system.append(FIRST_ROBOT_ROOM_GATE)
-    approved = (not missing_system
-                and all(row["approved_for_fleet_purchase"] for row in rows)
-                and all(row["approved_for_fleet_purchase"] for row in room))
+    approved = (
+        not missing_system
+        and all(row["approved_for_fleet_purchase"] for row in rows)
+        and all(
+            row["approved_for_fleet_purchase"]
+            for row in room
+            if not row.get("excluded_from_order_as_optional")
+        )
+    )
     return {"fleet_robots": fleet, "docks": fleet, "room_stations": 1,
             "physical_motor_variant_in_cart": physical_motor_variant,
             "order_released": approved, "order_release_is_not_an_electrical_guarantee": True,
@@ -733,8 +794,11 @@ def first_robot_projection(report: dict) -> dict:
     qualified_one = (
         motor in {"stepper", "dc"}
         and not report.get("missing_first_robot_system_evidence", ["missing"])
-        and all(not item.get("missing_part_evidence", ["missing"])
-                for item in [*pet_rows, *station_rows])
+        and all(
+            not item.get("missing_part_evidence", ["missing"])
+            for item in [*pet_rows, *station_rows]
+            if not item.get("excluded_from_order_as_optional")
+        )
         and all(item.get("reviewed") is True
                 for item in report.get("supplemental_decisions", []))
         and len(report.get("supplemental_decisions", [])) == 14
@@ -754,6 +818,8 @@ def first_robot_projection(report: dict) -> dict:
                     target = 0
             else:
                 target = _count(part["shared_total"], ident + ".shared_total")
+                if part.get("excluded_from_order_as_optional"):
+                    target = 0
             # A five-robot ownership claim is only a MAXIMUM candidate stock
             # allocation to the first unit, not verified possession.
             available = target
@@ -786,7 +852,9 @@ def first_robot_projection(report: dict) -> dict:
                 ),
                 "missing_part_evidence": part["missing_part_evidence"],
                 "decision": (
-                    "HOLD MOTOR CHOICE" if motor == "unresolved"
+                    "OPTIONAL NOT SELECTED, DO NOT BUY"
+                    if part.get("excluded_from_order_as_optional")
+                    else "HOLD MOTOR CHOICE" if motor == "unresolved"
                     and ident in ("stepper", "uln2003")
                     else "EXCLUDED MOTOR ALTERNATIVE" if target == 0
                     and ident in ("stepper", "uln2003")
@@ -1431,7 +1499,9 @@ def render_markdown(report: dict) -> str:
                          part.get("fleet_total", part.get("shared_total", 0)))
         remaining = part["remaining_if_reported_stock_works"]
         status = "APPROVED" if part["approved_for_fleet_purchase"] else "HOLD"
-        if part.get("excluded_from_order_as_alternative"):
+        if part.get("excluded_from_order_as_optional"):
+            status = "OPTIONAL NOT SELECTED, DO NOT BUY"
+        elif part.get("excluded_from_order_as_alternative"):
             status = "EXCLUDED MOTOR ALTERNATIVE, DO NOT BUY"
         elif part["shopping_decision"].startswith("hold_until_drivetrain"):
             status = "HOLD MOTOR CHOICE"

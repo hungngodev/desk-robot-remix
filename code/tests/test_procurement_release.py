@@ -172,6 +172,43 @@ def test_bona_fide_receipts_are_operator_provided_not_inferred():
 
 
 
+def test_conditional_amg8833_stays_visible_but_is_not_in_default_checkout():
+    import json
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan)
+    thermal = next(row for row in report["room_pod"]
+                   if row["id"] == "amg8833")
+    assert thermal["shared_total"] == 1
+    assert thermal["effective_selected_fleet_total"] == 0
+    assert thermal["excluded_from_order_as_optional"] is True
+    assert thermal["shopping_decision"] == "conditional_optional_not_selected"
+    assert thermal["approved_for_fleet_purchase"] is False
+    assert thermal["missing_part_evidence"]
+    detail = next(item for item in report["supplemental_decisions"]
+                  if item["id"] == "room_amg8833")
+    assert detail["reviewed"] is True
+    assert detail["disposition"] == "deferred_optional"
+    first = mod.first_robot_projection(report)
+    projected = next(row for row in first["roles"]
+                     if row["id"] == "amg8833")
+    assert projected["prototype_target"] == 0
+    assert projected["conditional_remaining"] == 0
+    assert projected["decision"] == "OPTIONAL NOT SELECTED, DO NOT BUY"
+    first_needed, _ = mod.cost_requirements(report, "first_robot")
+    fleet_needed, _ = mod.cost_requirements(report, "fleet")
+    assert first_needed["station:amg8833"] == 0
+    assert fleet_needed["station:amg8833"] == 0
+    shown = mod.render_markdown(report)
+    assert "OPTIONAL NOT SELECTED, DO NOT BUY" in shown
+
+
+def test_required_room_role_cannot_be_relabelled_optional():
+    plan = fixture()
+    plan["room_pod"]["modules"][0]["purchase_status"] = "conditional_optional"
+    with pytest.raises(ValueError, match="Required room role cannot become optional"):
+        mod.generate(plan)
+
+
 def test_room_power_reference_survives_builder_markdown():
     import json
     report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))

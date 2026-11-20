@@ -261,7 +261,7 @@ is a separate historical objective, not a robot dependency.
 | `S039` | DS18B20 waterproof probe | EXPANSION | Tea Buddy/aquarium, isolated sealed waterproof probe and electrical safety |
 | `S040` | MLX90614 noncontact temperature | EXPANSION | Thermal reading at distance, no health diagnosis |
 | `S041` | MLX90640 thermal camera | RESEARCH | Power/processing budget and privacy; thermal silhouettes not identities |
-| `S042` | AMG8833 Grid-EYE thermal array | RESEARCH | Alternative thermal matrix, frame rate/FOV limitations |
+| `S042` | AMG8833 Grid-EYE thermal array | CONDITIONAL SHARED STATION OPTION, NOT SELECTED | Remains visible for later opt-in thermal play, but is excluded from the core first-robot and default fleet checkout until explicitly selected and physically qualified |
 | `S043` | SCD40 real CO2 | EXPANSION | Physical airflow and warm-up; not inferred from equivalent VOC |
 | `S044` | SGP30 VOC | EXPANSION | Air-quality game, baseline/calibration and ventilation |
 | `S045` | BME688 gas/environment | EXPANSION | Gas signatures not medical/food safety diagnosis |
