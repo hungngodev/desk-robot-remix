@@ -1977,3 +1977,65 @@ def test_native_model_speech_text_enters_shared_mac_context_without_disk_storage
     assert not hub.interaction_timeline(ids[1], time.monotonic())
 
 
+
+
+def test_live_interaction_includes_operator_job_without_peer_leak(
+    settings, tokens,
+):
+    """Xiaozhi and Mac read the existing job, not a scripted sensor emotion."""
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    ids = [robot.id for robot in settings.robots]
+    assert len(ids) >= 2
+    active = SimpleNamespace(
+        robot_id=ids[0], kind="exploration", state="running",
+        target="PRIVATE_UNTRUSTED_TEXT_NOT_A_COMMAND",
+    )
+    jobs = {"current": active}
+    hub = CameraFrameHub(ids)
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            jobs=jobs, robot=lambda robot_id: settings.robot(robot_id),
+        ),
+        multimodal=SimpleNamespace(hub=hub),
+        start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{ids[0]}/interaction-context"
+        running = client.get(url, headers=headers)
+        assert running.status_code == 200
+        payload = running.json()
+        activities = [
+            event for event in payload["current_interaction_timeline"]
+            if event["channel"] == "mac_activity"
+        ]
+        assert len(activities) == 1
+        assert activities[0]["job_type"] == "exploration"
+        assert activities[0]["status"] == "running"
+        assert activities[0]["motor_authorized"] is False
+        assert "Mac operator-submitted exploration job is running" in (
+            payload["model_context"]
+        )
+        assert "PRIVATE_UNTRUSTED_TEXT_NOT_A_COMMAND" not in str(payload)
+        assert len(payload["model_context"]) <= 400
+        peer = client.get(
+            f"/v1/pet/{ids[1]}/interaction-context", headers=headers
+        )
+        assert peer.status_code == 200
+        assert "mac_activity" not in str(peer.json())
+        active.state = "succeeded"
+        finished = client.get(url, headers=headers)
+        assert finished.status_code == 200
+        assert "Mac operator-submitted" not in finished.json()["model_context"]
+        settings.voice_vision_tools_enabled = False
+        assert client.get(url, headers=headers).status_code == 403
