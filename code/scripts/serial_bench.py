@@ -80,6 +80,13 @@ def inspect_status(status: dict) -> dict:
     if family == 4 and (gyro != 0x68 or aux != 0):
         raise ValueError("MPU6050 identity must match the official 0x75 response")
     raw_present = any(key in imu for key in ("valid", "acc", "gyro", "age_ms"))
+    identity_keys = ("boot_id", "sample_ms")
+    boot_id = sample_ms = None
+    if any(key in imu for key in identity_keys):
+        boot_id, sample_ms = (imu.get(key) for key in identity_keys)
+        if (type(boot_id) is not int or not 1 <= boot_id <= 0xffffffff
+                or type(sample_ms) is not int or not 0 <= sample_ms <= 0xffffffff):
+            raise ValueError("Malformed IMU boot/acquisition source identity")
     raw_valid = False
     accelerometer = gyroscope = None
     sample_age = None
@@ -194,6 +201,8 @@ def inspect_status(status: dict) -> dict:
             "accelerometer_raw": accelerometer,
             "gyroscope_raw": gyroscope,
             "sample_age_ms": sample_age,
+            "source_boot_id": boot_id,
+            "source_sample_ms": sample_ms,
             "native_low_g": inspect_native_low_g(imu, family, raw_valid),
             "physical_qualification_pass": False,
         },
