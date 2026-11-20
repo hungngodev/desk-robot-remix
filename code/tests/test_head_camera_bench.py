@@ -126,3 +126,57 @@ async def test_live_stream_bench_rejects_end_without_recent_frame(monkeypatch):
     assert result["camera_error_count"] == 1
     assert any("without recent JPEG" in error for error in result["camera_errors"])
     assert result["camera_frames_received"] == 1
+
+
+async def test_live_camera_bench_rejects_sense_capture_gap_masked_by_fast_receipt(monkeypatch):
+    """Fast Mac receipt alone cannot excuse a stalled physical frame producer."""
+    monkeypatch.setattr(bench, "MAX_CAMERA_GAP_S", 0.05)
+
+    class BufferedHead:
+        _last_camera = None
+
+        async def stream_frames(self):
+            self._last_camera = (91, 1, 1_000_000)
+            yield b"\xff\xd8old\xff\xd9", time.monotonic()
+            await asyncio.sleep(0.01)
+            self._last_camera = (91, 2, 1_300_000)
+            yield b"\xff\xd8new\xff\xd9", time.monotonic()
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    result = await bench.measure(
+        BufferedHead(), "robot-01", seconds=0.15,
+        status_period_s=0.05, stream=True,
+    )
+    assert result["camera_frames_received"] == 1
+    assert result["camera_error_count"] == 1
+    assert any("capture stalled" in error for error in result["camera_errors"])
+    assert result["sense_capture_completion_interarrival"]["count"] == 1
+    assert result["sensor_exposure_clock_synchronized"] is False
+
+
+async def test_live_camera_bench_rejects_reboot_even_if_receipts_look_fresh(monkeypatch):
+    """A brownout/new camera boot during a continuity trial is not a pass."""
+    monkeypatch.setattr(bench, "MAX_CAMERA_GAP_S", 0.05)
+
+    class RebootingHead:
+        _last_camera = None
+
+        async def stream_frames(self):
+            self._last_camera = (91, 1, 1_000_000)
+            yield b"\xff\xd8old\xff\xd9", time.monotonic()
+            await asyncio.sleep(0.01)
+            self._last_camera = (92, 1, 50_000)
+            yield b"\xff\xd8new\xff\xd9", time.monotonic()
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    result = await bench.measure(
+        RebootingHead(), "robot-01", seconds=0.15,
+        status_period_s=0.05, stream=True,
+    )
+    assert result["camera_frames_received"] == 1
+    assert result["camera_error_count"] == 1
+    assert any("rebooted" in error for error in result["camera_errors"])
