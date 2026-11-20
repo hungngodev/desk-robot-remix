@@ -29,6 +29,11 @@ struct BerryReading {
   // Read-only MPU6050 TEMP_OUT raw register, not a calibrated temperature.
   // Other IMU families do not supply this value through this adapter.
   std::int16_t temperature_raw = 0;
+  // InvenSense FF_THR/FF_DUR + INT_STATUS read-only low-g interrupt.
+  // No physical fall qualification, motion authority or extra hardware.
+  bool low_g_status_valid = false;
+  bool low_g_irq = false;
+  std::uint32_t low_g_event_seq = 0;  // rises on a new sampled IRQ edge
   std::uint32_t at_ms = 0;
 };
 
@@ -63,6 +68,7 @@ class BerryImu {
   TwoWire* wire_ = nullptr;
   std::uint8_t gyro_address_ = 0;
   std::uint8_t extra_address_ = 0;
+  bool last_low_g_irq_ = false; // suppress repeated IRQ status polls
   bool read_bytes(std::uint8_t address, std::uint8_t reg,
                   std::uint8_t* data, std::uint8_t length);
   bool write_byte(std::uint8_t address, std::uint8_t reg,
