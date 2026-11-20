@@ -1525,10 +1525,12 @@ async def test_group_dialogue_activity_reports_real_transmissions(settings):
     started, release = asyncio.Event(), asyncio.Event()
 
     class HeldSpeaker(SimulatedSpeaker):
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             started.set()
             await release.wait()
-            await super().say(robot, text)
+            await super().say(
+                robot, text, permission_check=permission_check,
+            )
 
     conversation = Conversation(settings, SimulatedChat(), HeldSpeaker())
     task = asyncio.create_task(conversation.run(
@@ -1577,10 +1579,12 @@ async def test_group_dialogue_cancellation_preserves_unplayed_status(settings):
     started, release = asyncio.Event(), asyncio.Event()
 
     class HeldSpeaker(SimulatedSpeaker):
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             started.set()
             await release.wait()
-            await super().say(robot, text)
+            await super().say(
+                robot, text, permission_check=permission_check,
+            )
 
     conversation = Conversation(settings, SimulatedChat(), HeldSpeaker())
     task = asyncio.create_task(conversation.run(
