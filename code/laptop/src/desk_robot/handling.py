@@ -290,9 +290,14 @@ class HandlingGate:
             raw / GYRO_COUNTS_PER_DPS for raw in body["imu"]["gyro"]
         )
         g = math.hypot(*acceleration)
-        if not 0.05 <= g <= 3.5:
-            # Reject implausible acceleration without forgetting the source
-            # conversion. A replay after the fault must not seed calibration.
+        if not 0.5 <= g <= 3.5:
+            # InvenSense's MPU6050 free-fall guidance identifies a sustained
+            # low-acceleration interval as a possible drop. A low-g sample
+            # cannot preserve a trusted upright mount pose through a possible
+            # fall or impact. Revoke relative calibration conservatively;
+            # this is NOT a free-fall event or verified drop detector.
+            # https://cdn.sparkfun.com/datasheets/Components/General%20IC/PS-MPU-6000A.pdf
+            # Keep acquisition identity so a replay cannot seed calibration.
             previous = (self.last_boot_id, self.last_sample_ms)
             self.reset(preserve_shake_cooldown=True)
             self.last_boot_id, self.last_sample_ms = previous
