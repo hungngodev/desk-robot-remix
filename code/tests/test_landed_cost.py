@@ -310,3 +310,30 @@ def test_one_inspection_can_cover_distinct_roles_without_double_counting():
     assert out["errors"] == []
     assert out["payable_now_cents"] == 0
     assert out["prototype_cumulative_cents"] == 1250
+
+
+def test_duplicate_quote_row_cannot_fake_two_sku_units():
+    ev = sample()
+    cliff = dict(ev["lines"][0])
+    ev["lines"].insert(1, cliff)
+    required = {**REQUIRED, "robot:cliff_obstacle": 2}
+    out = mod.account_landed_cost(ev, required, CATEGORIES,
+                                  expected_scope="evaluation")
+    assert not out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] is None
+    assert any("duplicate quoted SKU" in err for err in out["errors"])
+    # Two independently identified supplier quotes may each cover one
+    # package, and the common seller freight is still charged just once.
+    ev["lines"][1]["quote_reference"] = "second-separate-quote"
+    out = mod.account_landed_cost(ev, required, CATEGORIES,
+                                  expected_scope="evaluation")
+    assert out["errors"] == []
+    assert out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] == 831
+
+
+def test_one_quote_can_legitimately_cover_distinct_skus():
+    ev = sample()  # Both quoted items share one supplier quote reference.
+    out = calculate(ev)
+    assert out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] == 655
