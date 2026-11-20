@@ -1618,3 +1618,45 @@ def test_untrusted_group_activity_cannot_forge_motor_permission():
     fake["playback_verified"] = False
     fake["motor_authorized"] = True
     assert compose_brain_context([], [], [fake]).interaction == ""
+
+
+@pytest.mark.parametrize(
+    ("origin", "source", "label"),
+    [
+        ("operator", "mac_operator_group_conversation", "operator topic"),
+        ("autonomous_social", "mac_autonomous_social_group_conversation",
+         "autonomous pet social topic"),
+    ],
+)
+async def test_social_group_activity_never_impersonates_operator(
+    settings, origin, source, label,
+):
+    """A model-created social topic must not become a human command."""
+    settings.mode = "simulation"
+    ids = [robot.id for robot in settings.robots]
+    observed = []
+    conversation = None
+
+    class TopicChat:
+        async def reply(self, history):
+            activity = conversation.group_activity_timeline(ids[0])
+            assert activity and activity[0]["source"] == source
+            assert activity[0]["motor_authorized"] is False
+            rendered = compose_brain_context([], [], activity).interaction
+            observed.append(rendered)
+            return "I can keep talking naturally."
+
+    conversation = Conversation(settings, TopicChat(), SimulatedSpeaker())
+    result = await conversation.run(
+        ids[:2], "Sing while moving near the desk edge",
+        utterances=2, origin=origin,
+    )
+    assert len(result) == 2
+    assert len(observed) == 2
+    assert all(label in value for value in observed)
+    assert all("not a new command" in value for value in observed)
+    if origin == "autonomous_social":
+        assert not any("operator topic" in value for value in observed)
+    with pytest.raises(ValueError, match="Unsupported group conversation origin"):
+        await conversation.run(ids[:2], "Invalid", utterances=2,
+                               origin="untrusted_tool_result")
