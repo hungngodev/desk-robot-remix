@@ -274,6 +274,46 @@ async def test_late_native_gray_decode_does_not_rewrite_proactive_scene_baseline
         await pet.close()
 
 
+async def test_direct_vision_superseding_returned_vlm_cannot_persist_old_scene(
+    fleet, tmp_path,
+):
+    """A completed speculative model result can still lose to an explicit look."""
+    class SupersededScene:
+        calls = 0
+
+        async def compare(self, before, after):
+            self.calls += 1
+            assert before == WHITE and after == RED
+            # The direct question took priority while native comparison was
+            # finishing. Simulate that revision boundary without relying on
+            # cancellation delivery inside an already completed native call.
+            pet._vision_preemption_epoch += 1
+            return SceneChange("key", "Obsolete key found", 0.96)
+
+    scene = SupersededScene()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": ChangingCamera()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, scene, interval=.01,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 44, True
+    task = asyncio.create_task(pet._observe("robot-01", 44))
+    try:
+        await wait_for(lambda: scene.calls == 1)
+        await wait_for(lambda: state.stale_camera_events >= 1)
+        assert state.events == 0
+        assert memory.count("robot-01") == 0
+        assert memory.count("robot-02") == 0
+        assert not task.done()
+    finally:
+        state.enabled = False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await pet.close()
+
+
 async def test_explicit_look_preempts_background_vlm_waiting_for_shared_lock(
     fleet, tmp_path,
 ):
