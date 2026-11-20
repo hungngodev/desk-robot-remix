@@ -617,6 +617,36 @@ static void imu_status_preserves_physical_conversion_and_boot_identity() {
   CHECK(!body.state().armed); // identity is diagnostic and never authorizes motion
 }
 
+static void zero_acceleration_mpu_does_not_authorize_motion() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_imu_for_motion(true);
+  body.set_imu_identity(4, 0x68, 0);
+  desk_robot::BerryReading imu{};
+  imu.model = desk_robot::BerryModel::Mpu6050;
+  imu.valid = true;
+  imu.at_ms = 100;
+  body.set_imu(imu);
+  CHECK(send(body, "rearm", 100, true) == "ERR rearm imu_missing_or_stale");
+  CHECK(!body.imu_fresh(100));
+  imu.accel[2] = 16384; // source-scale synthetic 1g, not physical calibration
+  body.set_imu(imu);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 100).find("OK drive") == 0);
+  CHECK(body.state().servos_attached);
+  imu.accel[2] = 0;
+  imu.at_ms = 101;
+  body.set_imu(imu);
+  fresh(guard, 101);
+  body.tick(101);
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0 && body.state().servos_attached);
+  CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
+}
+
 static void required_imu_is_a_local_freshness_interlock() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -1404,6 +1434,7 @@ int main() {
     five_range_status_reports_real_samples_not_a_permission();
     imu_identity_is_diagnostic_only();
     required_imu_is_a_local_freshness_interlock();
+    zero_acceleration_mpu_does_not_authorize_motion();
     imu_status_preserves_physical_conversion_and_boot_identity();
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
