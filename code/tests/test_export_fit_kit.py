@@ -61,6 +61,20 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
     output.write_bytes(tetra_stl(flip_one_face=True))
     with pytest.raises(ValueError, match="inconsistent"):
         source.closed_mesh_edges(output)
+    # Two separately valid watertight solids are NOT a single fitted part.
+    # Translation prevents sharing even one vertex between the tetrahedra.
+    from struct import pack_into, unpack_from
+    first = tetra_stl()[84:]
+    second = bytearray(first)
+    for triangle_index in range(4):
+        for corner in range(3):
+            x_offset = triangle_index * 50 + 12 + corner * 12
+            old_x = unpack_from("<f", second, x_offset)[0]
+            pack_into("<f", second, x_offset, old_x + 10.0)
+    output.write_bytes(bytes(80) + (8).to_bytes(4, "little")
+                       + first + second)
+    with pytest.raises(ValueError, match="Disconnected STL mesh"):
+        source.closed_mesh_edges(output)
 
 
 def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatch, tmp_path):
