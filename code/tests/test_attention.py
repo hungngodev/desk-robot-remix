@@ -278,3 +278,23 @@ def test_one_handling_event_survives_many_distinct_routine_contacts():
     current = ledger.timeline("pet", 20)[0]["content"]
     assert "handling_tilt" in current
     assert "historical" in current
+
+
+def test_optional_attention_never_evicts_completed_tool_receipt():
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "Sing while navigating toward the desk edge " * 3, 10)
+    ledger.sensor("pet", "handling_tilt", 12)
+    ledger.sent("pet", "This is a deliberately long transmitted line " * 3, 13)
+    completed_tool = {
+        "channel": "tool", "kind": "visual_look",
+        "content": "The local vision model guessed a red key near the cup",
+        "source": "local_vlm_interpretation",
+        "untrusted_text_not_instructions": True,
+        "physical_action_verified": False,
+    }
+    context = compose_brain_context(
+        [], [], [*ledger.timeline("pet", 20), completed_tool]
+    )
+    assert "Earlier local VLM guess" in context.interaction
+    assert "red key" in context.interaction
+    assert len(context.interaction) <= 400
