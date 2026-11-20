@@ -1152,6 +1152,37 @@ static void full_dc_driver_nfault_is_fresh_sticky_and_usb_only() {
   body.set_accessories(readings, 402);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 402) == "ERR arm dc_driver_fault_interlock");
+
+  // The old HIGH nFAULT frame remains young enough to pass an age-only
+  // check, but cannot clear the latch after a failed GPIOB transaction.
+  fault.valid = true;
+  body.set_accessories(readings, 403);
+  CHECK(send(body, "rearm", 403, true) ==
+        "ERR rearm dc_driver_fault_unhealthy");
+  fault.sample_seq = 5;
+  fault.at_ms = 404;
+  body.set_accessories(readings, 404);
+  CHECK(send(body, "rearm", 404, true) == "OK rearm");
+  CHECK(send(body, "arm", 404) == "OK arm");
+
+  // A contradictory LOW pin on the same sequence is a provenance fault.
+  // Replaying HIGH under the same identity must not grant USB rearm.
+  fault.driver_fault_active = true;
+  body.set_accessories(readings, 405);
+  CHECK(!body.state().armed && body.state().left == 0);
+  fault.driver_fault_active = false;
+  body.set_accessories(readings, 406);
+  CHECK(send(body, "rearm", 406, true) ==
+        "ERR rearm dc_driver_fault_unhealthy");
+  fault.sample_seq = 6;
+  fault.at_ms = 407;
+  body.set_accessories(readings, 407);
+  CHECK(send(body, "rearm", 407, true) == "OK rearm");
+  fault.sample_seq = 5;
+  fault.at_ms = 404;
+  body.set_accessories(readings, 408);  // an older but still fresh frame
+  CHECK(send(body, "rearm", 408, true) ==
+        "ERR rearm dc_driver_fault_unhealthy");
 }
 
 

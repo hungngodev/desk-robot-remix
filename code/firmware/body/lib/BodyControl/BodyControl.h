@@ -186,6 +186,11 @@ class BodyControl {
   bool dock_monitor_required_ = false; // full robot build, set at boot only
   bool dc_fault_required_ = false;  // fail closed for DRV8833 full DC profile
   bool dc_fault_latched_ = false;   // only local USB may clear
+  // A replayed or contradictory GPIOB sample cannot clear nFAULT shutdown.
+  bool dc_fault_sample_seen_ = false;
+  bool dc_fault_provenance_bad_ = false;
+  std::uint32_t dc_fault_last_seq_ = 0, dc_fault_last_at_ms_ = 0;
+  bool dc_fault_last_active_ = false;
   bool motor_watchdog_latched_ = false;  // only local USB may clear
   bool dc_driver_fault_bad(std::uint32_t now_ms) const;
   bool dock_telemetry_bad(std::uint32_t now_ms) const;

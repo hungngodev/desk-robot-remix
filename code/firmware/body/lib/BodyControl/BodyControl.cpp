@@ -203,7 +203,8 @@ bool BodyControl::dc_driver_fault_bad(std::uint32_t now_ms) const {
   // A B3 HIGH reading is meaningful only from a fresh MCP23017 GPIOB
   // transaction. No cached I2C value, boot default or malformed read
   // can authorize a moving DC bridge.
-  return !fault.present || !fault.valid || fault.sample_seq == 0U ||
+  return dc_fault_provenance_bad_ ||
+         !fault.present || !fault.valid || fault.sample_seq == 0U ||
          now_ms - fault.at_ms >= 250U || fault.driver_fault_active;
 }
 
@@ -220,6 +221,32 @@ bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
 void BodyControl::set_accessories(const AccessoryReadings& readings,
                                   std::uint32_t now_ms) {
   state_.accessories = readings;
+  if (dc_fault_required_) {
+    const auto& fault = readings.optional_inputs;
+    const bool current = fault.present && fault.valid &&
+        fault.sample_seq != 0U && now_ms - fault.at_ms < 250U;
+    const std::uint32_t seq_delta = fault.sample_seq - dc_fault_last_seq_;
+    const std::uint32_t time_delta = fault.at_ms - dc_fault_last_at_ms_;
+    const bool repeated = current && dc_fault_sample_seen_ &&
+        fault.sample_seq == dc_fault_last_seq_ &&
+        fault.at_ms == dc_fault_last_at_ms_ &&
+        fault.driver_fault_active == dc_fault_last_active_;
+    const bool newer = current &&
+        (!dc_fault_sample_seen_ ||
+         (seq_delta != 0U && seq_delta < 0x80000000U &&
+          time_delta != 0U && time_delta < 0x80000000U));
+    if (newer) {
+      dc_fault_sample_seen_ = true;
+      dc_fault_last_seq_ = fault.sample_seq;
+      dc_fault_last_at_ms_ = fault.at_ms;
+      dc_fault_last_active_ = fault.driver_fault_active;
+      dc_fault_provenance_bad_ = false;
+    } else if (!repeated) {
+      // A failed read or changed GPIOB bits under the same identity may
+      // not be repaired by replaying previously healthy cached data.
+      dc_fault_provenance_bad_ = true;
+    }
+  }
   if (dc_driver_fault_bad(now_ms)) {
     // Missing/stale or asserted nFAULT immediately cancels wheels. Never
     // detach holding servo PWM merely because the driver reported a fault.
