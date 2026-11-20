@@ -25,6 +25,15 @@ dimensions are still **provisional** until real components are measured.
 This is not a printable, integrated production robot.
 
 
+**Manifest quantities are not installation approval.** The generated
+`fit_kit_manifest.json` records provisional `quantity_per_robot` for layout
+only, plus `installed_quantity_per_robot: 0` for every unqualified part.
+`temporary_fit_coupon` identifies trial prints that are never permanently
+installed. The mesh verifier rejects altered installed quantities or coupon
+labels. Final assembly print quantities come only after real parts are fitted,
+licensed, and qualified; this provisional export does not create another
+purchase or production parts list.
+
 Source [one_robot_adapter_kit.scad](one_robot_adapter_kit.scad) is original CC0 parametric geometry. It can produce **seven** separate provisional parts:
 
 | Part | One robot qty | Use |
