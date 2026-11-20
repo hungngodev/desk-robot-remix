@@ -245,15 +245,37 @@ class KokoroHeadSpeaker:
     @asynccontextmanager
     async def session(self, robots):
         ids = [r.device_id for r in robots]
-        if not all(ids):
-            raise RuntimeError(
-                "Configure each robot's Xiaozhi device_id before physical conversation"
-            )
-        await self._bridge("/session", {"device_ids": ids, "enabled": True})
+        if (not 1 <= len(ids) <= 5
+                or any(not isinstance(device, str) or not device for device in ids)
+                or len(set(ids)) != len(ids)):
+            raise RuntimeError("Configure distinct Xiaozhi device identities for the session")
+
+        def matches(receipt, enabled: bool) -> bool:
+            return (isinstance(receipt, dict)
+                    and receipt.get("device_ids") == sorted(ids)
+                    and receipt.get("enabled") is enabled
+                    and type(receipt.get("expires_in_seconds")) is int
+                    and (receipt["expires_in_seconds"] > 0 if enabled
+                         else receipt["expires_in_seconds"] == 0))
+
+        granted = await self._bridge("/session", {"device_ids": ids, "enabled": True})
+        if not matches(granted, True):
+            # A damaged/misdirected response does not prove which heads have
+            # their microphones muted. Ask the same bridge to relinquish any
+            # possible partial lease; never send audio into an unknown floor.
+            try:
+                await self._bridge("/session", {"device_ids": ids, "enabled": False})
+            except Exception:
+                pass
+            raise RuntimeError("Xiaozhi speaker session grant identity unconfirmed")
         try:
             yield
         finally:
-            await self._bridge("/session", {"device_ids": ids, "enabled": False})
+            released = await self._bridge(
+                "/session", {"device_ids": ids, "enabled": False}
+            )
+            if not matches(released, False):
+                raise RuntimeError("Xiaozhi speaker session release unconfirmed")
 
     async def _confirmed_flush_request(
         self, robot: RobotConfig, **intent: bool,
