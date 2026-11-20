@@ -77,14 +77,15 @@ class _MjpegFrames:
         self.buffer = bytearray()
 
     def feed(self, chunk: bytes) -> list[tuple[bytes, tuple[int, int, int]]]:
+        # Retain the bounded batch helper for unit callers.
+        return list(self.iter_feed(chunk))
+
+    def iter_feed(self, chunk: bytes):
+        """Yield verified parts without retaining a whole network batch."""
         if not isinstance(chunk, bytes):
             raise ValueError("Invalid MJPEG network chunk")
-        # A network read may contain many complete JPEG parts. Parse bounded
-        # slices instead of first copying the entire read into RAM.
-        frames = []
         for offset in range(0, len(chunk), 64 * 1024):
-            frames.extend(self._feed_bounded_chunk(chunk[offset:offset + 64 * 1024]))
-        return frames
+            yield from self._feed_bounded_chunk(chunk[offset:offset + 64 * 1024])
 
     def _feed_bounded_chunk(self, chunk: bytes) -> list[tuple[bytes, tuple[int, int, int]]]:
         self.buffer.extend(chunk)
@@ -336,7 +337,7 @@ class HttpHead:
                     self._stream_connected = True
                     self._stream_condition.notify_all()
                 async for chunk in response.aiter_bytes():
-                    for jpeg, identity in reader.feed(chunk):
+                    for jpeg, identity in reader.iter_feed(chunk):
                         received = time.monotonic()
                         async with self._stream_condition:
                             if generation != self._stream_generation:

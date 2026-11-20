@@ -44,3 +44,15 @@ def test_fragmented_mjpeg_header_and_body_complete_once():
     assert reader.feed(raw[78:-1]) == []
     assert reader.feed(raw[-1:]) == [(jpeg, (19, 1, 250000))]
     assert reader.feed(b"") == []
+
+def test_stream_iterator_yields_before_exhausting_large_batch():
+    jpeg = b"\xff\xd8" + b"y" * 180_000 + b"\xff\xd9"
+    combined = b"".join(_part(i, jpeg) for i in range(1, 8))
+    reader = _MjpegFrames()
+    frames = reader.iter_feed(combined)
+    assert next(frames) == (jpeg, (19, 1, 250000))
+    # The iterator is paused after the first useful camera frame. A large
+    # backlog must not be materialized before the consumer can yield.
+    assert len(reader.buffer) < 64 * 1024
+    assert [identity[1] for _, identity in frames] == list(range(2, 8))
+    assert not reader.buffer
