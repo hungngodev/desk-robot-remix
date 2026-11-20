@@ -316,10 +316,14 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             raise ValueError("Missing or duplicate shared station part ID")
         room_ids.add(ident)
         qty = _count(module.get("quantity_per_room"), ident + ".quantity_per_room")
+        owned = _count(module.get("reported_owned_total", 0),
+                       ident + ".reported_owned_total")
         estimated = _count(module.get("estimated_owned_total", 0),
                            ident + ".estimated_owned_total")
-        if estimated > qty:
-            raise ValueError("Room station estimated stock exceeds design slots")
+        ordered = _count(module.get("ordered_unreceived_total", 0),
+                         ident + ".ordered_unreceived_total")
+        if owned + estimated + ordered > qty:
+            raise ValueError("Room station stock exceeds design slots")
         ev = room_evidence.get(ident, {})
         if not isinstance(ev, dict):
             raise ValueError(f"Invalid shared station evidence: {ident}")
@@ -328,14 +332,15 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 and isinstance(ev.get("sku"), str) and ev["sku"].strip()
                 and isinstance(ev.get("pcb_revision"), str) and ev["pcb_revision"].strip()):
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
-        if _ad_fruit_new_hardware(ev, qty - estimated):
+        remaining = qty - owned - estimated - ordered
+        if _ad_fruit_new_hardware(ev, remaining):
             missing.append("no_new_adafruit_hardware")
         room.append({"id": ident, "name": module.get("name"),
                      "shared_total": qty, "per_robot": 0,
-                     "reported_owned_not_verified": 0,
+                     "reported_owned_not_verified": owned,
                      "estimated_owned_not_verified": estimated,
-                     "ordered_unreceived_not_verified": 0,
-                     "remaining_if_reported_stock_works": qty - estimated,
+                     "ordered_unreceived_not_verified": ordered,
+                     "remaining_if_reported_stock_works": remaining,
                      "notes": module.get("location", ""),
                      "shopping_decision": "hold_until_qualified",
                      "reference_only": None,

@@ -479,7 +479,9 @@ def test_entire_shopping_csv_and_two_lists_match_authoritative_source():
 @pytest.mark.parametrize("where,key", [
     ("parts", "estimated_owned_total"),
     ("parts", "ordered_unreceived_total"),
+    ("room", "reported_owned_total"),
     ("room", "estimated_owned_total"),
+    ("room", "ordered_unreceived_total"),
 ])
 def test_fake_or_overcounted_reported_stock_cannot_erase_purchase_quantity(
     where, key
@@ -499,6 +501,29 @@ def test_fake_or_overcounted_reported_stock_cannot_erase_purchase_quantity(
         target[key] = 3
     with pytest.raises(ValueError, match="exceeds"):
         mod.generate(plan)
+
+
+@pytest.mark.parametrize("stock_key,output_key", [
+    ("reported_owned_total", "reported_owned_not_verified"),
+    ("ordered_unreceived_total", "ordered_unreceived_not_verified"),
+])
+def test_room_station_owned_or_ordered_stock_is_not_double_counted(
+    stock_key, output_key
+):
+    plan = fixture()
+    plan["room_pod"]["modules"][0][stock_key] = 1
+    report = mod.generate(plan)
+    room = report["room_pod"][0]
+    assert room[output_key] == 1
+    assert room["remaining_if_reported_stock_works"] == 0
+
+    projected = mod.first_robot_projection(report)
+    room_role = next(
+        row for row in projected["roles"]
+        if row["scope"] == "shared station" and row["id"] == "scd40"
+    )
+    assert room_role[output_key] == 1
+    assert room_role["conditional_remaining"] == 0
 
 
 def test_common_chip_reference_does_not_force_premium_breakout_purchase():
