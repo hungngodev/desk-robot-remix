@@ -583,6 +583,30 @@ def test_docked_lower_sys_voltage_and_efficiency_never_ease_load():
 
 
 
+
+@pytest.mark.parametrize("dock_only", [
+    ["--dock-charger-variant", "BQ24075"],
+    ["--dock-regulator-topology", "buck_boost"],
+    ["--dock-regulator-max-input-v", "22"],
+    ["--dock-charger-input-limit-a", "1.5"],
+    ["--dock-boost-5v-continuous-a", "2"],
+    ["--dock-motors-disarmed"],
+])
+def test_stray_dock_options_never_silently_become_undocked_report(
+    monkeypatch, capsys, dock_only,
+):
+    import sys
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    argv = [
+        str(script), "--peak-5v-a", "1", "--continuous-5v-a", "0.5",
+    ] + dock_only
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(script), run_name="__main__")
+    assert error.value.code == 2
+    assert "Dock mode requires" in capsys.readouterr().err
+
+
 def test_docked_cli_uses_exact_same_fail_closed_preflight(monkeypatch, capsys):
     import json
     import sys

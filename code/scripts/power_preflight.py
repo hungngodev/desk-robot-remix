@@ -539,7 +539,17 @@ def main() -> None:
         args.dock_idle_5v_a, args.dock_requested_charge_a, args.dock_sys_v,
         args.dock_boost_efficiency,
     )
-    if any(v is not None for v in dock_inputs):
+    # Supplying a charger identity or rating is itself a request to screen
+    # the dock. Never silently drop those flags into undocked battery sizing.
+    dock_only_options = (
+        args.dock_charger_variant, args.dock_regulator_topology,
+        args.dock_regulator_min_input_v, args.dock_regulator_max_input_v,
+        args.dock_charger_input_limit_a, args.dock_board_thermal_input_a,
+        args.dock_adapter_continuous_a, args.dock_boost_5v_continuous_a,
+        args.dock_pack_charge_max_a,
+    )
+    if (any(v is not None for v in dock_inputs + dock_only_options)
+            or args.dock_motors_disarmed):
         if args.dock_charger_variant is None:
             parser.error("Dock mode requires the actual BQ24074 or BQ24075 charger variant")
         if any(v is None for v in dock_inputs):
