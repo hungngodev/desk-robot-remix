@@ -1360,3 +1360,37 @@ def test_historical_physical_cue_rejects_bad_source_and_stale_age():
          "historical_not_current": True},
     ]).interaction
     assert summary == ""
+
+
+async def test_group_activity_does_not_require_camera_consent(settings):
+    """Operator job survives vision opt-out without exposing camera history."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = False
+    settings.voice_memory_tools_enabled = False
+    ids = [robot.id for robot in settings.robots]
+    hub = CameraFrameHub(ids)
+    hub.notify(ids[1], "handling_tilt", time.monotonic())
+    jobs = {"active": SimpleNamespace(
+        robot_id=ids[1], kind="exploration", state="running",
+    )}
+    prompts = []
+
+    class CaptureChat:
+        async def reply(self, history):
+            prompts.append(str(history))
+            return "I can continue the song."
+
+    conversation = Conversation(settings, CaptureChat(), SimulatedSpeaker())
+    conversation.multimodal = SimpleNamespace(hub=hub)
+    conversation.coordinator_jobs = jobs
+    await conversation.run(ids[:2], "Keep singing", utterances=2)
+    assert "Mac operator-submitted exploration job is running" in prompts[1]
+    assert "Physical sensor edge: handling_tilt" not in prompts[1]
+    assert "Keep singing" in prompts[1]
+
+    # No cross-pet activity disclosure after sharing consent is revoked.
+    settings.fleet_text_sharing_enabled = False
+    prompts.clear()
+    await conversation.run(ids[:2], "Keep singing", utterances=2)
+    assert "Mac operator-submitted exploration job" not in prompts[1]
