@@ -8146,3 +8146,57 @@ async def test_native_model_worker_ignores_late_old_clear_before_current_audio(
     assert service.outgoing.get_nowait() == ("current", pcm)
     assert service.outgoing.get_nowait() == ("current", None)
     assert service.wire.accept_output is False
+
+
+async def test_native_failed_local_tool_is_explicitly_unavailable_in_compound_facts(native, monkeypatch):
+    """One Mac timeout must not silently disappear beside a valid battery read."""
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+
+    async def call(current, route, payload):
+        assert current is conn
+        if route == "look":
+            raise TimeoutError("camera unavailable")
+        assert route == "power-status"
+        return {
+            "robot_id": "robot-01",
+            "source": "wroom_aux_fuel_gauge_raw_unqualified",
+            "gauge_available": False, "motor_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+
+    facts = await session._run_readonly_batch([
+        ("look", {"question": "Look at my desk"}, 0, 0),
+        ("power-status", {}, 0, 0),
+    ])
+    assert [fact["source"] for fact in facts] == [
+        "mac_tool_execution_unavailable", "wroom_fuel_gauge",
+    ]
+    assert facts[0]["route"] == "look"
+    assert facts[0]["available"] is False
+    assert facts[0]["physical_action_verified"] is False
+    assert session.native_readonly_tools_dropped == 1
+    assert session.native_readonly_tools_completed == 1
+    packed = module.pack_grounded_facts(facts)
+    assert "mac_tool_execution_unavailable" in packed
+    assert "wroom_fuel_gauge" in packed
