@@ -618,7 +618,7 @@ async def test_hardware_group_memory_respects_fleet_sharing_consent(
     assert "private_preference" not in str(agent.histories)
     settings.voice_memory_tools_enabled = True
     await agent.run(ids, "Talk about the sensitive private detail", 2)
-    assert "private_preference" in agent.histories["robot-01"][0]["content"]
+    assert "private_preference" in agent.histories["robot-01"][2]["content"]
 
 
 async def test_group_chat_never_exposes_live_asr_without_fleet_text_consent(settings):
