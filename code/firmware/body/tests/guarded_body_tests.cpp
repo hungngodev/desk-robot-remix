@@ -617,6 +617,40 @@ static void imu_status_preserves_physical_conversion_and_boot_identity() {
   CHECK(!body.state().armed); // identity is diagnostic and never authorizes motion
 }
 
+static void mpu_native_low_g_irq_vetoes_local_wheels() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_imu_for_motion(true);
+  body.set_imu_identity(4, 0x68, 0);
+  desk_robot::BerryReading imu{};
+  imu.model = desk_robot::BerryModel::Mpu6050;
+  imu.valid = true;
+  imu.accel[2] = 16384;
+  imu.at_ms = 100;
+  imu.low_g_status_valid = true;
+  body.set_imu(imu);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 100).find("OK drive") == 0);
+  imu.low_g_irq = true; // native interrupt, not an inferred fall or tilt
+  imu.low_g_event_seq = 1;
+  imu.at_ms = 101;
+  body.set_imu(imu);
+  fresh(guard, 101);
+  body.tick(101);
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0 && body.state().servos_attached);
+  CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
+  imu.low_g_irq = false;
+  imu.at_ms = 102;
+  body.set_imu(imu);
+  fresh(guard, 102);
+  CHECK(!body.state().armed); // no automatic restart on interrupt clearance
+  CHECK(send(body, "arm", 102) == "OK arm"); // separate explicit action
+}
+
 static void zero_acceleration_mpu_does_not_authorize_motion() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -1435,6 +1469,7 @@ int main() {
     imu_identity_is_diagnostic_only();
     required_imu_is_a_local_freshness_interlock();
     zero_acceleration_mpu_does_not_authorize_motion();
+    mpu_native_low_g_irq_vetoes_local_wheels();
     imu_status_preserves_physical_conversion_and_boot_identity();
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();

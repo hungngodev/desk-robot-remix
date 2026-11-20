@@ -157,10 +157,16 @@ class BodyControl {
     const bool mpu_accel_plausible =
         imu_.model != BerryModel::Mpu6050 ||
         imu_.accel[0] != 0 || imu_.accel[1] != 0 || imu_.accel[2] != 0;
+    // The MPU silicon already reports its native low-g interrupt. A
+    // flagged event is a local wheel veto, never proof of a measured fall.
+    // Do not require a Mac callback to notice it, or assume the unqualified
+    // 300mg/40ms silicon settings are calibrated pickup thresholds.
+    const bool low_g_clear = imu_.model != BerryModel::Mpu6050 ||
+        !imu_.low_g_status_valid || !imu_.low_g_irq;
     return state_.imu_family >= 1 && state_.imu_family <= 4 &&
            imu_.model == static_cast<BerryModel>(state_.imu_family) &&
            BerryImu::identify(state_.imu_gyro_id, state_.imu_aux_id) == imu_.model &&
-           imu_.valid && mpu_accel_plausible &&
+           imu_.valid && mpu_accel_plausible && low_g_clear &&
            now_ms - imu_.at_ms <= 200U;
   }
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
