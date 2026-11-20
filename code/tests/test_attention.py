@@ -140,6 +140,10 @@ async def test_real_conversation_feeds_attention_receipts_and_finishes(settings)
     from desk_robot.conversation import Conversation
     from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 
+    # The global fixture has two pets; this test also needs an outsider.
+    settings.robots.append(
+        settings.robots[0].model_copy(update={"id": "robot-03", "name": "Third"})
+    )
     ids = [robot.id for robot in settings.robots]
     ledger = AttentionLedger(ids)
     conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
@@ -314,7 +318,8 @@ async def test_attention_startup_failure_does_not_steal_speech_owner(settings):
             self.started = []
             self.cleared = []
 
-        def begin_topic(self, robot_id, topic, at):
+        def begin_topic(self, robot_id, topic, at, *, origin="operator"):
+            assert origin == "operator"
             if self.started:
                 raise ValueError("Optional attention unavailable")
             self.started.append(robot_id)
@@ -345,7 +350,8 @@ async def test_attention_cleanup_failure_is_not_a_false_audio_failure(settings):
     ids = [robot.id for robot in settings.robots]
 
     class FailingFinish:
-        def begin_topic(self, robot_id, topic, at):
+        def begin_topic(self, robot_id, topic, at, *, origin="operator"):
+            assert origin == "operator"
             return 1
 
         def finish_topic(self, *args, **kwargs):
