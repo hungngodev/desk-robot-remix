@@ -2062,6 +2062,11 @@ class PetController:
                      or self.settings.voice_vision_tools_enabled))
             else []
         )
+        if (self.settings.mode != "hardware"
+                or self.settings.voice_vision_tools_enabled):
+            ongoing = getattr(self.conversation, "group_activity_timeline", None)
+            if callable(ongoing):
+                activity.extend(ongoing(robot_id))
         timeline = []
         # A physical touch can still trigger curiosity after visual opt
         # out; it must not reuse the old opt-in ASR/camera/tool timeline.
