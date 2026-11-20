@@ -393,7 +393,11 @@ class Conversation:
             "status": record["status"], "topic": record["topic"],
             "activity_epoch": record["epoch"],
             "sent_segments": record["sent_segments"],
-            "source": "mac_operator_group_conversation",
+            "source": (
+                "mac_operator_group_conversation"
+                if record.get("origin") == "operator"
+                else "mac_autonomous_social_group_conversation"
+            ),
             "age_ms": round(age * 1000),
             "playback_verified": False, "motor_authorized": False,
             "physical_action_verified": False,
@@ -521,7 +525,10 @@ class Conversation:
     async def run(
         self, robot_ids: list[str], topic: str, utterances: int | None = None,
         *, permission_check: Callable[[], bool] | None = None,
+        origin: str = "operator",
     ) -> list[dict]:
+        if origin not in {"operator", "autonomous_social"}:
+            raise ValueError("Unsupported group conversation origin")
         turns = conversation_turns(robot_ids, utterances)
         if self.active is not None and not self.active.done():
             raise RuntimeError("A conversation is already active")
@@ -563,7 +570,8 @@ class Conversation:
         for robot in robots:
             self._group_activity[robot.id] = {
                 "epoch": epoch, "status": "waiting",
-                "topic": topic_excerpt, "sent_segments": 0,
+                "topic": topic_excerpt, "origin": origin,
+                "sent_segments": 0,
                 "updated_at": time.monotonic(),
             }
         # Mirror authenticated operator topics into the ONE Runtime-owned
