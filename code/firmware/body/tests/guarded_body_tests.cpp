@@ -1233,6 +1233,44 @@ static void full_dc_driver_nfault_is_fresh_sticky_and_usb_only() {
 }
 
 
+static void dc_nfault_acquisition_wrap_preserves_forward_order() {
+  // Hardware GPIOB sequences and uptime wrap, but a previously completed
+  // pre-wrap acquisition must not count as another healthy sensor read.
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0xfffffff0U);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcGuarded, &guard);
+  body.require_dc_driver_fault_monitor(true);
+  desk_robot::AccessoryReadings readings{};
+  auto& fault = readings.optional_inputs;
+  fault.present = fault.valid = true;
+  fault.driver_fault_active = false;
+  fault.sample_seq = 0xffffffffU;
+  fault.at_ms = 0xfffffff0U;
+  body.set_accessories(readings, 0xfffffff0U);
+  CHECK(send(body, "rearm", 0xfffffff0U, true) == "OK rearm");
+  CHECK(send(body, "arm", 0xfffffff0U) == "OK arm");
+  CHECK(send(body, "drive 20 20 100", 0xfffffff0U) ==
+        "OK drive left=20 right=20 ms=100");
+  fault.sample_seq = 1U;
+  fault.at_ms = 5U;
+  body.set_accessories(readings, 5U);
+  fresh(guard, 5U);
+  body.tick(5U);
+  CHECK(body.state().armed && body.state().left == 20);
+  fault.sample_seq = 0xfffffffeU;
+  fault.at_ms = 0xfffffff0U;
+  body.set_accessories(readings, 6U);
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "rearm", 6U, true) ==
+        "ERR rearm dc_driver_fault_unhealthy");
+  fault.sample_seq = 2U;
+  fault.at_ms = 7U;
+  body.set_accessories(readings, 7U);
+  CHECK(send(body, "rearm", 7U, true) == "OK rearm");
+  CHECK(!body.state().armed && body.state().left == 0);
+}
+
 static void status_readiness_matches_local_arm_interlocks() {
   // Read-only HTTP/voice clients see safety.ready. A clear five-range guard
   // must not hide a missing dock GPIO, stale IMU, contact or touch trip.
@@ -1337,6 +1375,7 @@ int main() {
     std::cout << "PASS guarded profile cannot arm without a guard\n";
     guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract();
     full_dc_driver_nfault_is_fresh_sticky_and_usb_only();
+    dc_nfault_acquisition_wrap_preserves_forward_order();
     status_readiness_matches_local_arm_interlocks();
     std::cout << "PASS guarded DC uses same real cliff and USB recovery policy\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
