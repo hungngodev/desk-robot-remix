@@ -2,6 +2,7 @@
 
 These are source contract checks, not physically applied 5V/3.3V tests.
 """
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +36,31 @@ def test_full_soil_adc_is_actual_three_sample_acquisition_not_stub():
     assert "largest - smallest > 256" in helper
 
 
+def test_room_station_power_budget_is_machine_readable_and_fail_closed():
+    plan = json.loads(
+        (ROOT / "docs/hardware/full-feature-plan.json").read_text()
+    )
+    power = plan["room_pod"]["power_reference"]
+    assert power["scd40"]["rail_candidate_v"] == 3.3
+    assert power["scd40"]["peak_ma_at_3v3_max"] == 205
+    assert power["scd40"]["periodic_average_ma_at_3v3_max"] == 18
+    assert power["bme688"]["custom_mode_current_ma_max"] == 12
+    assert power["amg8833"]["reference_current_ma_typ"] == 4.5
+    assert power["ld2410c"]["rail_candidate_v"] == 5.0
+    assert power["ld2410c"]["supply_capacity_ma_must_exceed"] == 200
+    assert power["room_controller"]["regulator_3v3_peak_ma"] == 500
+    assert power["room_controller"][
+        "regulator_500ma_continuous_from_5v_qualified"
+    ] is False
+    for role in ("room_controller", "scd40", "bme688", "amg8833",
+                 "ld2410c", "soil_probe"):
+        assert any(
+            key.endswith("_qualified") and value is False
+            for key, value in power[role].items()
+        )
+    assert power["physical_release"].startswith("HOLD")
+
+
 def test_ci_builds_complete_station_not_just_sensor_disabled_stub():
     ci = (ROOT / ".github/workflows/host-verification.yml").read_text()
     assert "pio run -d code/firmware/room_station -e feather_nrf52840_room_full" in ci
@@ -49,3 +75,8 @@ def test_ci_builds_complete_station_not_just_sensor_disabled_stub():
     assert "nominally 4.5 to 5.2 V" in note
     assert "candidate source, not a qualified" in note
     assert "TX/RX remain 3.3 V logic only" in note
+    assert "205 mA peak" in note
+    assert "500 mA peak" in note
+    assert "not a continuous 3.3 V budget" in note
+    assert "greater than 200 mA" in note
+    assert "run the exact fitted" in note

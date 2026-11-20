@@ -43,6 +43,37 @@ the carrier rating. TX/RX remain 3.3 V logic only.
 Verify sensor board pullups, pin orientation, regulator and connector before
 connecting any module. Do not confuse I2C with 5 V tolerant wiring.
 
+## Station power budget is a qualification gate
+
+The machine-readable plan now records source reference current bounds for every
+powered station role. These are screening values, not permission to wire an
+unknown breakout. At 3.3 V, the SCD40 datasheet allows up to **205 mA peak**
+and 18 mA average in periodic measurement. Bosch lists the BME688 at up to
+**12 mA** for customized pressure, humidity, temperature and gas operation.
+The selected AMG8833 reference is about **4.5 mA typical**. LD2410C is on the
+separate 5 V branch and its protocol documentation requires supply capacity
+**greater than 200 mA**, with about 79 mA reference average current.
+
+The owned Feather documentation rates its 3.3 V regulator at **500 mA peak**
+but explicitly warns that 500 mA is **not a continuous 3.3 V budget from a
+5 V input** because regulator heating matters. Therefore do not approve the
+station by adding typical or average sensor currents. Exact carrier regulators,
+indicator LEDs, pullups, the soil probe and the Feather itself add load that is
+not represented by the bare sensor numbers.
+
+Before station purchase release or enclosure freeze, run the exact fitted
+carriers together: SCD40 periodic conversion, BME688 gas heater activity,
+AMG8833 streaming, LD2410C streaming and the fitted soil probe. Measure the
+minimum 3.3 V at the farthest I2C carrier, minimum 5 V at the radar, USB input
+current, cable drop and regulator temperature while watching for resets, I2C
+errors and USB serial interruption. Keep the room station on HOLD until those
+measurements have margin against the exact carrier ratings.
+
+Primary references: Sensirion SCD40/SCD41 datasheet, Bosch BME688 datasheet,
+Panasonic AMG8833 product data, ncmreynolds LD2410 v0.2.2 protocol notes, and
+the official Feather nRF52840 power management guide. The same URLs are stored
+under `room_pod.power_reference.references` in the canonical hardware plan.
+
 ## Real build and test sequence
 
 1. Use the existing owned Feather alone on USB. Build with

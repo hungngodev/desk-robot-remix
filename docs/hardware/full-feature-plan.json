@@ -667,6 +667,56 @@
   },
   "room_pod": {
     "compute": "Reuse the owned Feather nRF52840 by USB as a stationary room pod if it has a suitable UART and I2C allocation; otherwise one generic ESP32C3 module, not five new MCUs.",
+    "power_reference": {
+      "room_controller": {
+        "candidate": "owned Feather nRF52840 Express",
+        "usb_nominal_v_min": 4.5,
+        "usb_nominal_v_max": 5.2,
+        "regulator_3v3_peak_ma": 500,
+        "regulator_500ma_continuous_from_5v_qualified": false,
+        "exact_board_current_qualified": false
+      },
+      "scd40": {
+        "rail_candidate_v": 3.3,
+        "supply_v_min": 2.4,
+        "supply_v_max": 5.5,
+        "peak_ma_at_3v3_max": 205,
+        "periodic_average_ma_at_3v3_max": 18,
+        "exact_carrier_current_qualified": false
+      },
+      "bme688": {
+        "rail_candidate_v": 3.3,
+        "vdd_min": 1.71,
+        "vdd_max": 3.6,
+        "custom_mode_current_ma_max": 12,
+        "exact_carrier_current_qualified": false
+      },
+      "amg8833": {
+        "rail_candidate_v": 3.3,
+        "reference_current_ma_typ": 4.5,
+        "exact_carrier_current_qualified": false
+      },
+      "ld2410c": {
+        "rail_candidate_v": 5.0,
+        "supply_capacity_ma_must_exceed": 200,
+        "reference_average_current_ma": 79,
+        "io_logic_v": 3.3,
+        "exact_carrier_current_qualified": false
+      },
+      "soil_probe": {
+        "rail_candidate_v": 3.3,
+        "exact_carrier_current_ma": null,
+        "exact_carrier_current_qualified": false
+      },
+      "physical_release": "HOLD until the exact fitted carriers run simultaneously while 3.3 V and 5 V minima, USB input current, cable drop, regulator temperature, resets and serial continuity are measured. Datasheet silicon or reference module currents do not include unknown carrier regulators, LEDs, pullups or the Feather own load.",
+      "references": [
+        "https://sensirion.com/media/documents/48C4B7FB/64E950BF/CD_DS_SCD40_SCD41_Datasheet_D1.pdf",
+        "https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme688-ds000.pdf",
+        "https://industry.panasonic.com/global/en/products/control/sensor/infrared/number/AMG8833",
+        "https://github.com/ncmreynolds/ld2410/tree/v0.2.2",
+        "https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/power-management"
+      ]
+    },
     "modules": [
       {
         "id": "scd40",

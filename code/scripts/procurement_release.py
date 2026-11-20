@@ -319,6 +319,31 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     pod = plan.get("room_pod", {})
     if not isinstance(pod, dict) or not isinstance(pod.get("modules"), list):
         raise ValueError("Missing shared room station inventory")
+    power = pod.get("power_reference")
+    if not isinstance(power, dict):
+        raise ValueError("Missing shared room station power reference")
+    powered_roles = {
+        "room_controller", "scd40", "bme688", "amg8833",
+        "ld2410c", "soil_probe",
+    }
+    for role in powered_roles:
+        entry = power.get(role)
+        if not isinstance(entry, dict):
+            raise ValueError("Missing room station power role: " + role)
+        qualified_fields = [
+            value for key, value in entry.items()
+            if key.endswith("_qualified")
+        ]
+        if not qualified_fields or any(type(value) is not bool
+                                       for value in qualified_fields):
+            raise ValueError(
+                "Room station power qualification flag missing: " + role
+            )
+    references = power.get("references")
+    if (not isinstance(references, list) or not references
+            or any(not isinstance(url, str) or not _evidence_https_url(url)
+                   for url in references)):
+        raise ValueError("Room station power references must be HTTPS sources")
     # The shared station is part of the FULL product. Previously it was
     # always printed as "not_proven" yet was ignored by order_released.
     # That bug could approve a five-robot order with no qualified room pod.

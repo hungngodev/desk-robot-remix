@@ -532,6 +532,20 @@ def test_fake_or_overcounted_reported_stock_cannot_erase_purchase_quantity(
     ("reported_owned_total", "reported_owned_not_verified"),
     ("ordered_unreceived_total", "ordered_unreceived_not_verified"),
 ])
+def test_room_station_power_reference_cannot_disappear_from_buying_ledger():
+    plan = fixture()
+    del plan["room_pod"]["power_reference"]
+    with pytest.raises(ValueError, match="room station power reference"):
+        mod.generate(plan)
+
+
+def test_room_station_power_reference_requires_every_powered_role():
+    plan = fixture()
+    del plan["room_pod"]["power_reference"]["ld2410c"]
+    with pytest.raises(ValueError, match="room station power role: ld2410c"):
+        mod.generate(plan)
+
+
 def test_room_station_owned_or_ordered_stock_is_not_double_counted(
     stock_key, output_key
 ):
