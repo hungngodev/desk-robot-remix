@@ -35,7 +35,48 @@ int main() {
     CHECK(!invalid.begin(invalid_wire, BerryModel::V1Lsm9ds0,
                          0x68, 0x1d));
     CHECK(invalid_wire.writes.empty());
-    std::cout << "PASS LSM9DS0 register BDU, full-scale and fail-closed setup\n";
+    // Real MPU register sequencing, adapted from InvenSense and i2cdevlib.
+    TwoWire mpu_wire;
+    BerryImu mpu;
+    CHECK(mpu.begin(mpu_wire, BerryModel::Mpu6050, 0x68, 0x00));
+    CHECK(mpu.configured());
+    CHECK(mpu_wire.wrote(0x68, 0x1d, 150)); // 300 mg candidate
+    CHECK(mpu_wire.wrote(0x68, 0x1e, 40));  // 40 ms candidate
+    CHECK(mpu_wire.wrote(0x68, 0x37, 0x00)); // status-only clear
+    CHECK(mpu_wire.wrote(0x68, 0x38, 0x80)); // native FF enable
+    mpu.poll(100);
+    CHECK(mpu.reading().valid && mpu.reading().low_g_status_valid);
+    CHECK(!mpu.reading().low_g_irq);
+    CHECK(mpu.reading().low_g_event_seq == 0U);
+    mpu_wire.registers[0x3a] = 0x80;
+    mpu.poll(150);
+    CHECK(mpu.reading().low_g_irq && mpu.reading().low_g_event_seq == 1U);
+    mpu_wire.registers[0x3a] = 0x80;
+    mpu.poll(200);
+    CHECK(mpu.reading().low_g_event_seq == 1U); // no repeated edge
+    mpu.poll(250); // INT_STATUS was cleared on read
+    CHECK(!mpu.reading().low_g_irq);
+    mpu_wire.registers[0x3a] = 0x80;
+    mpu.poll(300);
+    CHECK(mpu.reading().low_g_event_seq == 2U);
+    mpu_wire.reject_read_reg = 0x3a;
+    mpu.poll(350);
+    CHECK(mpu.reading().valid && !mpu.reading().low_g_status_valid);
+    CHECK(!mpu.reading().low_g_irq);
+    CHECK(mpu.reading().low_g_event_seq == 2U);
+    mpu_wire.reject_read_reg = -1;
+    mpu.poll(400);
+    CHECK(mpu.reading().low_g_status_valid && !mpu.reading().low_g_irq);
+    mpu_wire.registers[0x3a] = 0x80;
+    mpu.poll(450);
+    CHECK(mpu.reading().low_g_event_seq == 3U);
+
+    TwoWire bad_readback;
+    bad_readback.reject_read_reg = 0x1d;
+    BerryImu unverified_ff;
+    CHECK(!unverified_ff.begin(bad_readback, BerryModel::Mpu6050, 0x68, 0x00));
+    CHECK(!unverified_ff.configured());
+    std::cout << "PASS IMU register BDU, native low-g IRQ and fail-closed setup\\n";
     return 0;
   } catch (const std::exception& e) {
     std::cerr << "FAIL LSM9DS0 register test: " << e.what() << '\n';
