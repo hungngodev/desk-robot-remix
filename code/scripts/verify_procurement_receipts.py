@@ -17,8 +17,8 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 
 from procurement_release import (
     FIRST_ROBOT_ROOM_GATE,
