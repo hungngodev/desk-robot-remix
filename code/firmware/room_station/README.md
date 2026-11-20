@@ -18,7 +18,7 @@ owned PCB revision and pinned PlatformIO core before wiring.
 | SCD40 | I2C SDA D22/P0.12, SCL D23/P0.11; address 0x62 | Sensirion periodic CO2, humidity, temperature |
 | BME688 | Same 3.3 V compatible I2C bus; 0x77 or 0x76 | Upstream BME68x ambient and raw gas resistance, not VOC ppm |
 | AMG8833 | Same 3.3 V compatible I2C bus; address 0x69 | Checked 64-pixel thermal register reads; no identity recognition |
-| LD2410C | Serial1 RX D1/P0.24 from radar TX, TX D0/P0.25 to radar RX | Upstream LD2410 at 256000 baud, packet freshness bounded |
+| LD2410C | Serial1 RX D1/P0.24 from radar TX, TX D0/P0.25 to radar RX; common GND; VCC from a separately verified 5 V station branch, **never** the Feather 3V pin | Upstream LD2410 at 256000 baud, packet freshness bounded |
 | Capacitive soil | Analog A0/D14/P0.04 from **3.3V powered** capacitive probe, common ground | Three 12-bit ADC acquisitions, median and noise/rail rejection in the dedicated `room_full` profile; `room_bench` leaves it off |
 | Mac | Feather's USB serial at 115200 | Versioned one-line JSON observations, read-only, opt-in |
 
@@ -29,7 +29,17 @@ The nRF52 UART core computes a custom register divisor for 256000 baud, but
 that is **not** proof of correct live LD2410 packets on the physical board.
 
 **No direct 5 V logic is permitted on the Feather signal pins.**
-The exact LD2410C carrier's supply may differ from its TX/RX logic level.
+The pinned [ncmreynolds LD2410 v0.2.2](https://github.com/ncmreynolds/ld2410/tree/v0.2.2)
+documents the module supply as 5 V or higher while the UART I/O is 3.3 V.
+The owned Feather's official pinout documents its USB power pin as only
+nominally 4.5 to 5.2 V, so that pin is a **candidate source, not a qualified
+5 V rail**. Do not connect LD2410C VCC to Feather 3V and do not assume the
+USB pin meets the exact carrier's minimum voltage/current under cable and
+board drop. Before fitting the radar, inspect its exact carrier marking and
+datasheet, power it from the station's separately verified 5 V branch with
+common ground, and measure the voltage at the radar while streaming. Keep
+the station wiring and purchase on HOLD if the measured minimum falls below
+the carrier rating. TX/RX remain 3.3 V logic only.
 Verify sensor board pullups, pin orientation, regulator and connector before
 connecting any module. Do not confuse I2C with 5 V tolerant wiring.
 

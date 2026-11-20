@@ -44,3 +44,8 @@ def test_ci_builds_complete_station_not_just_sensor_disabled_stub():
     assert "3.3V" in note
     assert "room_full" in note
     assert "no 5V output reaches A0" in note
+    assert "LD2410C" in note
+    assert "never** the Feather 3V pin" in note
+    assert "nominally 4.5 to 5.2 V" in note
+    assert "candidate source, not a qualified" in note
+    assert "TX/RX remain 3.3 V logic only" in note
