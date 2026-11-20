@@ -85,6 +85,53 @@ static void recovery_is_local_and_not_an_arm() {
   CHECK(!body.state().armed && body.state().left == 0);
 }
 
+static void usb_rearm_refuses_unsafe_physical_interlocks() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.sample_touch_input(true);
+  CHECK(send(body, "rearm", 100, true) == "ERR rearm touch_active");
+  CHECK(send(body, "arm", 100) == "ERR arm touch_active");
+  body.sample_touch_input(false);
+  body.sample_optional_inputs(1U, true, false, false);
+  CHECK(send(body, "rearm", 100, true) == "ERR rearm bumper_active");
+  body.sample_optional_inputs(1U, false, false, false);
+  body.sample_optional_inputs(1U, false, false, false);
+  body.sample_optional_inputs(1U, false, false, false);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(!body.state().armed);
+
+  desk_robot::CliffGuard dock_guard;
+  CHECK(dock_guard.configure(config()));
+  fresh(dock_guard, 100);
+  desk_robot::BodyControl dock(desk_robot::BodyProfile::StepperGuarded, &dock_guard);
+  dock.require_dock_monitor(true);
+  CHECK(send(dock, "rearm", 100, true) ==
+        "ERR rearm dock_gpio_missing_or_stale");
+  desk_robot::AccessoryReadings readings{};
+  readings.dock.present = readings.dock.valid = true;
+  readings.dock.left_seated = true;
+  readings.dock.sample_seq = 1;
+  readings.dock.at_ms = 100;
+  dock.set_accessories(readings, 100);
+  CHECK(send(dock, "rearm", 100, true) == "ERR rearm dock_power_connected");
+  readings.dock.left_seated = false;
+  readings.dock.sample_seq = 2;
+  readings.dock.at_ms = 101;
+  dock.set_accessories(readings, 101);
+  CHECK(send(dock, "rearm", 101, true) == "OK rearm");
+  CHECK(!dock.state().armed);
+
+  desk_robot::CliffGuard imu_guard;
+  CHECK(imu_guard.configure(config()));
+  fresh(imu_guard, 100);
+  desk_robot::BodyControl imu(desk_robot::BodyProfile::StepperGuarded, &imu_guard);
+  imu.require_imu_for_motion(true);
+  CHECK(send(imu, "rearm", 100, true) == "ERR rearm imu_missing_or_stale");
+  CHECK(send(imu, "arm", 100) == "ERR arm safety_interlock");
+}
+
 static void receiver_recovery_authority_is_not_shared() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -1325,6 +1372,7 @@ int main() {
     cpu_heartbeat_fault_is_sticky_and_holds_gripper();
     std::cout << "PASS CPU heartbeat fault latches drive and holds gripper\n";
     recovery_is_local_and_not_an_arm();
+    usb_rearm_refuses_unsafe_physical_interlocks();
     std::cout << "PASS only local recovery can clear a healthy fault latch\n";
     receiver_recovery_authority_is_not_shared();
     std::cout << "PASS head receiver cannot borrow USB recovery authority\n";

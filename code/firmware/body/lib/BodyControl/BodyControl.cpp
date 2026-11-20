@@ -905,6 +905,31 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR rearm dc_driver_fault_unhealthy");
       return;
     }
+    // Local recovery is an explicit SAFE resume decision, not a preapproval
+    // while the robot is still in contact, docked or without live sensors.
+    // Otherwise an old USB rearm could clear the cliff latch during pickup,
+    // and a later head command could arm immediately after putdown.
+    if (dock_power_lockout_) {
+      std::snprintf(reply, capacity, "ERR rearm dock_power_connected");
+      return;
+    }
+    if (dock_telemetry_bad(now_ms)) {
+      std::snprintf(reply, capacity, "ERR rearm dock_gpio_missing_or_stale");
+      return;
+    }
+    if ((state_.extra_mask & 1U) &&
+        (state_.bumper_raw || state_.bumper_active)) {
+      std::snprintf(reply, capacity, "ERR rearm bumper_active");
+      return;
+    }
+    if (state_.touch_active || state_.touch_raw_active) {
+      std::snprintf(reply, capacity, "ERR rearm touch_active");
+      return;
+    }
+    if (imu_motion_required_ && !imu_fresh(now_ms)) {
+      std::snprintf(reply, capacity, "ERR rearm imu_missing_or_stale");
+      return;
+    }
     if (!guarded_motion_profile() || guard_ == nullptr ||
         !guard_->try_rearm(now_ms)) {
       std::snprintf(reply, capacity, "ERR rearm safety_interlock");
