@@ -173,10 +173,12 @@ async def test_cancelled_conversation_marks_attention_interrupted_not_played(set
     started, release = asyncio.Event(), asyncio.Event()
 
     class BlockedSpeaker(SimulatedSpeaker):
-        async def say(self, robot, text):
+        async def say(self, robot, text, *, permission_check=None):
             started.set()
             await release.wait()
-            await super().say(robot, text)
+            await super().say(
+                robot, text, permission_check=permission_check,
+            )
 
     conversation = Conversation(settings, SimulatedChat(), BlockedSpeaker())
     conversation.attention = ledger
@@ -298,3 +300,63 @@ def test_optional_attention_never_evicts_completed_tool_receipt():
     assert "Earlier local VLM guess" in context.interaction
     assert "red key" in context.interaction
     assert len(context.interaction) <= 400
+
+
+async def test_attention_startup_failure_does_not_steal_speech_owner(settings):
+    """A failed optional topic snapshot cannot strand a Mac conversation."""
+    from desk_robot.conversation import Conversation
+    from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+
+    ids = [robot.id for robot in settings.robots]
+
+    class FailingAttention:
+        def __init__(self):
+            self.started = []
+            self.cleared = []
+
+        def begin_topic(self, robot_id, topic, at):
+            if self.started:
+                raise ValueError("Optional attention unavailable")
+            self.started.append(robot_id)
+            return 1
+
+        def clear(self, robot_id):
+            self.cleared.append(robot_id)
+
+        def finish_topic(self, *args, **kwargs):
+            raise AssertionError("No token may survive failed admission")
+
+    attention = FailingAttention()
+    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    conversation.attention = attention
+    turns = await conversation.run(ids[:2], "Continue the song", utterances=2)
+    assert len(turns) == 2
+    assert attention.cleared == [ids[0]]
+    assert conversation.attention_failures == 1
+    assert conversation.active is None
+    assert conversation.group_activity_timeline(ids[0])[0]["status"] == "completed"
+
+
+async def test_attention_cleanup_failure_is_not_a_false_audio_failure(settings):
+    """Telemetry bookkeeping must not override a completed speech session."""
+    from desk_robot.conversation import Conversation
+    from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+
+    ids = [robot.id for robot in settings.robots]
+
+    class FailingFinish:
+        def begin_topic(self, robot_id, topic, at):
+            return 1
+
+        def finish_topic(self, *args, **kwargs):
+            raise ValueError("Optional ledger was reset")
+
+        def clear(self, robot_id):
+            pass
+
+    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    conversation.attention = FailingFinish()
+    turns = await conversation.run(ids[:2], "Finish our story", utterances=2)
+    assert len(turns) == 2
+    assert conversation.attention_failures == 2
+    assert conversation.active is None
