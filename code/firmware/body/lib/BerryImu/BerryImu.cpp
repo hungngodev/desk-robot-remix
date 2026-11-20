@@ -62,6 +62,7 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
   configured_ = false;
   reading_ = BerryReading{};
   ever_polled_ = false;
+  last_low_g_irq_ = false;
   if (model == BerryModel::Unknown || model == BerryModel::Unsupported320G) return false;
   if (model == BerryModel::Mpu6050) {
     if ((gyro_address != 0x68 && gyro_address != 0x69) || extra_address != 0x00) return false;
@@ -86,7 +87,25 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
          write_byte(gyro_address_, 0x1a, 0x03) &&
          write_byte(gyro_address_, 0x19, 0x09) &&  // output rate 100Hz
          write_byte(gyro_address_, 0x1b, 0x00) &&
-         write_byte(gyro_address_, 0x1c, 0x00);
+         write_byte(gyro_address_, 0x1c, 0x00) &&
+         // Manufacturer MPU-6000/6050 FF_THR 0x1D: 2 mg/LSB;
+         // FF_DUR 0x1E: 1 ms/LSB. These 300 mg / 40 ms values are
+         // diagnostic candidates, NOT device-calibrated fall detection.
+         // Reuse the silicon's 1 kHz FF counter instead of inventing a
+         // second Mac-side gyro/accel filter at 20 Hz.
+         write_byte(gyro_address_, 0x1d, 150) &&
+         write_byte(gyro_address_, 0x1e, 40) &&
+         // Read INT_STATUS (not other registers) to clear the latched FF
+         // event. This board uses no MPU auxiliary I2C bypass or INT wire.
+         write_byte(gyro_address_, 0x37, 0x00) &&
+         write_byte(gyro_address_, 0x38, 0x80);
+    // An I2C write ACK is not proof that a clone honored FF registers.
+    // An unverified configuration cannot claim actual low-g interrupts.
+    std::uint8_t threshold = 0, duration = 0, int_enable = 0;
+    ok = ok && read_bytes(gyro_address_, 0x1d, &threshold, 1) &&
+         read_bytes(gyro_address_, 0x1e, &duration, 1) &&
+         read_bytes(gyro_address_, 0x38, &int_enable, 1) &&
+         threshold == 150 && duration == 40 && int_enable == 0x80;
   } else if (reading_.model == BerryModel::V1Lsm9ds0) {
     // LSM9DS0 CTRL_REG1_XM bit 2 and CTRL_REG4_G bit 7 enable
     // block-data-update on both six-byte reads. Without gyro BDU,
@@ -122,6 +141,20 @@ void BerryImu::poll(std::uint32_t now_ms) {
       return;
     }
     decode_mpu6050(frame, reading_);
+    // Read the MPU's native FF status AFTER the atomic six-axis sample.
+    // The register is latched until read under INT_PIN_CFG=0. Polling an
+    // event bit is independent of whether the current 20 Hz snapshot is
+    // still near zero g. A failed optional status read never invents one.
+    std::uint8_t status = 0;
+    reading_.low_g_status_valid = read_bytes(gyro_address_, 0x3a, &status, 1);
+    reading_.low_g_irq = reading_.low_g_status_valid &&
+                          (status & 0x80U) != 0U;
+    if (reading_.low_g_status_valid) {
+      if (reading_.low_g_irq && !last_low_g_irq_ &&
+          reading_.low_g_event_seq != 0xffffffffU)
+        ++reading_.low_g_event_seq;
+      last_low_g_irq_ = reading_.low_g_irq;
+    }
     reading_.at_ms = now_ms;
     reading_.valid = true;
     return;
