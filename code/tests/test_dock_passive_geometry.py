@@ -14,7 +14,7 @@ SOURCE = (
 def test_dock_rail_preserves_selected_straight_channel_and_entry_flare():
     source = SOURCE.read_text()
     def value(name):
-        match = re.search(r"^" + re.escape(name) + r"\\s*=\\s*([0-9.]+)\\s*;", source, re.M)
+        match = re.search(r"^" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*;", source, re.M)
         assert match is not None, name
         return float(match.group(1))
 
