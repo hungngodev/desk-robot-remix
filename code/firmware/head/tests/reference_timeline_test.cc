@@ -66,6 +66,27 @@ static void decoder_ahead_of_playback_preserves_queued_reference() {
   CHECK(clock.silence_frames(1130000, 16384) == 0);
 }
 
+static void queued_output_is_not_premature_microphone_reference() {
+  PlaybackReferenceClock clock;
+  CHECK(clock.silence_frames(1000000, 16384) == 0);
+  clock.accepted_output_frames(1920);
+  CHECK(clock.future_reference_frames(1000000, 16384) == 960);
+  CHECK(clock.future_reference_frames(1010000, 16384) == 800);
+  clock.silence_frames(1010000, 16384);
+  clock.accepted_output_frames(1920);
+  CHECK(clock.represented_end_us() == 1120000);
+  CHECK(clock.future_reference_frames(1020000, 16384) == 1600);
+  CHECK(clock.future_reference_frames(1080000, 16384) == 640);
+  CHECK(clock.future_reference_frames(1120000, 16384) == 0);
+  CHECK(clock.future_reference_frames(1130000, 16384) == 0);
+  clock.accepted_output_frames(32000);
+  clock.accepted_output_frames(32000);
+  CHECK(clock.future_reference_frames(1120000, 16384) == 16384);
+  CHECK(clock.future_reference_frames(1120000, 10) == 10);
+  clock.reset();
+  CHECK(clock.future_reference_frames(1120000, 16384) == 0);
+}
+
 static void late_opus_chunk_accounts_for_real_gap_once() {
   PlaybackReferenceClock clock;
   CHECK(clock.silence_frames(1000000, 16384) == 0);
@@ -133,6 +154,7 @@ int main() {
     }
     idle_gap_and_interrupt_are_never_double_counted();
     decoder_ahead_of_playback_preserves_queued_reference();
+    queued_output_is_not_premature_microphone_reference();
     late_opus_chunk_accounts_for_real_gap_once();
     huge_idle_gaps_are_bounded();
     irregular_idle_cadence_retains_fractional_reference_samples();

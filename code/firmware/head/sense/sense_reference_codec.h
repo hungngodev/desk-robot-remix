@@ -98,5 +98,5 @@ private:
     void PushLocked(int16_t sample);
     void PublishAcceptedLocked(const int16_t* source, int samples, int volume,
                                int64_t now_us);
-    bool ReadReferenceLocked(int16_t* dest, int frames);
+    bool ReadReferenceLocked(int16_t* dest, int frames, int64_t now_us);
 };

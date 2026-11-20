@@ -71,8 +71,17 @@ void SenseReferenceCodec::PublishAcceptedLocked(
     reference_clock_.accepted_output_frames(samples);
 }
 
-bool SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames) {
-    const uint32_t required = kDelaySamples + static_cast<uint32_t>(frames);
+bool SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames,
+                                              int64_t now_us) {
+    // A fast decoder can publish two accepted 60 ms Opus frames only 10 ms
+    // apart. Reference samples at the ring head may therefore represent
+    // output that the speaker has not played yet. Project the reference
+    // end back onto this microphone capture timestamp BEFORE applying the
+    // per-unit acoustic delay. Hardware acoustic trials remain required.
+    const uint64_t future = reference_clock_.future_reference_frames(
+        now_us, kRingSize);
+    const uint64_t required =
+        static_cast<uint64_t>(kDelaySamples) + frames + future;
     if (required > kRingSize || write_index_ < required) {
         // A missing reference is silence only, not proof that AEC aligned.
         // Count it without logging inside the audio ring mutex.
@@ -128,9 +137,11 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     bool newly_overwritten = false;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
-        FillSilenceLocked(esp_timer_get_time());
+        const int64_t capture_end_us = esp_timer_get_time();
+        FillSilenceLocked(capture_end_us);
         const uint32_t previous_overwrites = reference_overwrite_reads_;
-        reference_ready = ReadReferenceLocked(reference_frame_.data(), frames);
+        reference_ready = ReadReferenceLocked(
+            reference_frame_.data(), frames, capture_end_us);
         consecutive_missing = consecutive_missing_reference_reads_;
         overwrite_count = reference_overwrite_reads_;
         newly_overwritten = overwrite_count != previous_overwrites;

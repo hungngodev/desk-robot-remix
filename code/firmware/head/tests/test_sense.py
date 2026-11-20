@@ -313,7 +313,9 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn("std::lock_guard<std::mutex> input_lock(input_read_mutex_);", read)
         self.assertIn("if (frames > kMaxReadFrames) return 0;", read)
         self.assertIn("NoAudioCodecSimplexPdm::Read(microphone_frame_.data(), frames)", read)
-        self.assertIn("ReadReferenceLocked(reference_frame_.data(), frames)", read)
+        self.assertIn("reference_frame_.data(), frames, capture_end_us)", read)
+        self.assertIn("reference_clock_.future_reference_frames(", read)
+        self.assertIn("now_us, kRingSize", read)
         self.assertNotIn("std::vector<int16_t>", read)
 
 
@@ -321,7 +323,7 @@ class SenseOverlayTests(unittest.TestCase):
         """Source-level diagnostic coverage, not acoustic qualification."""
         header = (HEAD / "sense/sense_reference_codec.h").read_text()
         code = (HEAD / "sense/sense_reference_codec.cc").read_text()
-        self.assertIn("bool ReadReferenceLocked(int16_t* dest, int frames);", header)
+        self.assertIn("bool ReadReferenceLocked(int16_t* dest, int frames, int64_t now_us);", header)
         self.assertIn("uint32_t missing_reference_reads_ = 0;", header)
         self.assertIn("uint32_t consecutive_missing_reference_reads_ = 0;", header)
         self.assertIn("required > kRingSize || write_index_ < required", code)
@@ -784,6 +786,8 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     assert "reference_clock_.silence_frames(now_us, kMaxGapSamples)" in codec
     assert "reference_clock_.accepted_output_frames(samples)" in codec
     assert "reference_clock_.reset()" in codec
+    assert "future_reference_frames(" in (HEAD / "sense/reference_timeline.h").read_text()
+    assert "const uint64_t required =" in codec
     assert '#include "reference_timeline.h"' in header
 
     def accepted_reference_samples(read_period_ms):

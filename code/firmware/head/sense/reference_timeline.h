@@ -54,6 +54,21 @@ class PlaybackReferenceClock {
     }
   }
 
+  // PCM accepted by I2S can represent future playback, not microphone-time
+  // audio. Select the reference window at capture time, not the newest ring
+  // entry, or rapid successive Opus chunks can feed AEC premature speech.
+  // This is a bounded software timing estimate, not physical DAC playback.
+  std::uint64_t future_reference_frames(std::int64_t now_us,
+                                        std::uint64_t cap) const {
+    if (end_us_ <= now_us) return 0;
+    if (now_us < 0) return cap;
+    const auto ahead_us = static_cast<std::uint64_t>(end_us_ - now_us);
+    const auto bounded_us = (cap / kReferenceRate + 1U) * 1000000U;
+    if (ahead_us > bounded_us) return cap;
+    // Round up: never expose a queued PCM sample as already played.
+    return std::min(cap, (ahead_us * kReferenceRate + 999999U) / 1000000U);
+  }
+
   void reset() {
     end_us_ = 0;
     silence_remainder_ = 0;
