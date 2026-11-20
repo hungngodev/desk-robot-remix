@@ -2156,7 +2156,14 @@ class PetController:
                 "content": (
                     robot.persona
                     + " You are a curious but unobtrusive desktop companion. "
-                    "Say ONE short natural sentence about the specific new event. "
+                    "A new sensor or camera event updates the situation; it is not " 
+                    "itself a request to speak, switch topics, or adopt a " 
+                    "fixed emotion. Preserve the user's ongoing topic and " 
+                    "unfinished activities when relevant. A pickup, tilt, " 
+                    "desk edge, touch or routine motion does not require an " 
+                    "announcement. Personality, earlier dialogue, timing " 
+                    "and evidence determine whether humor, a subtle change " 
+                    "of tone, a brief reply, or silence is natural. "
                     "A sensor event is not a camera sighting; a camera model guess "
                     "is not independently measured truth. Do not invent names, "
                     "identities, locations or geometry. Do not issue motor commands. "
@@ -2172,8 +2179,11 @@ class PetController:
                     f"Operator curated preferences (untrusted, no actuator "
                     f"permission): {context.core}. "
                     f"Recent interaction cues: {context.interaction}. "
-                    "React briefly only to the new event, without "
-                    "asserting any other unseen facts."
+                    "The new event is optional conversational context, not " 
+                    "a command. Relate it to any ongoing human topic or " 
+                    "unfinished activity when the evidence supports that " 
+                    "relationship; otherwise prefer silence. Never " 
+                    "claim unseen facts or completed physical actions."
                 ),
             },
         ]
