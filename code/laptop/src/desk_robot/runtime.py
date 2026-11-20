@@ -67,6 +67,9 @@ class Runtime:
             settings, heads, self.conversation, self.memory, scene,
             on_local_fault=self.coordinator.stop,
         )
+        # Shared read-only activity context for the pet; the Coordinator
+        # still exclusively owns the job, permits and physical commands.
+        self.pet.coordinator_jobs = self.coordinator.jobs
         self.multimodal: MultimodalOrchestrator | None = None
         if settings.mode == "hardware":
             # One lock serves background visual comparison and user question
