@@ -1018,3 +1018,40 @@ def test_read_only_mpu_temperature_requires_fresh_attested_stationary_sample():
     frame["motor"]["m0"] = 0
     frame["imu"]["family"] = 1
     assert mpu6050_temperature_raw(frame) is None
+
+
+def test_low_g_revokes_stale_mount_pose_without_arming_or_fake_drop():
+    """Physical low-g evidence invalidates a relative pose, not motor safety."""
+    gate = HandlingGate()
+    calibrated(gate)
+    assert gate.reference == (0, 0, 1)
+    gate.last_shake = 100.8
+    low_g = sample(acc=(0, 0, 4096), sample_ms=102000)
+    assert qualified(gate, low_g, 102.0, new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.gyro_bias_dps is None
+    assert gate.last_sample_ms == 102000
+    assert gate.last_shake == 100.8
+    # Replayed evidence cannot seed even the first stationary sample.
+    assert qualified(gate, low_g, 102.1, new_sample=False) == ()
+    assert gate.startup_samples == []
+    # The next source acquisitions must first establish eight independent
+    # stationary observations before relative tilt can be used again.
+    for i in range(8):
+        assert qualified(gate, sample(), 102.2 + i * 0.1) == ()
+    assert gate.reference == (0, 0, 1)
+
+
+def test_nonzero_low_g_below_pose_invalidation_boundary_revokes_reference():
+    gate = HandlingGate()
+    calibrated(gate)
+    # Old code only revoked <=0.05g, preserving the pose after a credible
+    # low-g interval. A little residual acceleration is not a stable mount.
+    assert qualified(gate, sample(acc=(8191, 0, 0)), 102.0) == ()
+    assert gate.reference is None
+    calibrated(gate, 102.2)
+    # Values at the conservative invalidation boundary are still dynamic,
+    # and cannot be used to generate a static tilt announcement.
+    assert qualified(gate, sample(acc=(8192, 0, 0)), 104.0) == ()
+    assert gate.reference is not None
+    assert gate.tilt_hits == 0
