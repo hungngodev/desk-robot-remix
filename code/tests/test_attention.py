@@ -1,5 +1,6 @@
 """The attention ledger is volatile context, never a second motion or voice owner."""
 from desk_robot.attention import AttentionLedger
+from desk_robot.brain_context import compose_brain_context
 
 
 def test_concurrent_song_and_motion_survive_sensor_events_without_fixed_speech():
@@ -88,3 +89,39 @@ def test_listening_does_not_spuriously_mark_speech_played_or_commanded():
     assert ledger.sent("pet", "The robot said something", 10)
     assert "playback unverified" in ledger.timeline("pet", 15)[0]["content"]
     assert ledger.timeline("pet", 150) == []
+
+
+def test_composer_handles_current_attention_with_old_sensor_and_active_job():
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "Sing while approaching the desk edge", at=10)
+    assert ledger.sensor("pet", "handling_tilt", 20)
+    attention = ledger.timeline("pet", 40)
+    job = {
+        "channel": "mac_activity", "kind": "coordinator_job",
+        "job_type": "exploration", "status": "running",
+        "source": "mac_coordinator_active_job",
+        "physical_action_verified": False, "motor_authorized": False,
+    }
+    composed = compose_brain_context([], [], [job, *attention])
+    assert "Mac operator-submitted exploration" in composed.interaction
+    assert "Ongoing conversation topic" in composed.interaction
+    assert "handling_tilt" in composed.interaction
+    assert len(composed.interaction) <= 400
+    # Source spoofing and model-inferred permission never enter the brain.
+    fake = dict(attention[0], source="model_claim", motor_authorized=True)
+    assert compose_brain_context([], [], [fake]).interaction == ""
+
+
+def test_confirmed_safety_fault_outweighs_optional_attention_in_small_budget():
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "A longer conversation about exploration", 10)
+    ledger.sensor("pet", "handling_tilt", 20)
+    transcript = ledger.timeline("pet", 35)
+    current_fault = {
+        "channel": "sensor", "kind": "safety_fault",
+        "source": "wroom_event", "content": None,
+        "physical_action_verified": False,
+    }
+    context = compose_brain_context([], [], [*transcript, current_fault])
+    assert "WROOM reported latched safety fault" in context.interaction
+    assert "do not drive" in context.interaction
