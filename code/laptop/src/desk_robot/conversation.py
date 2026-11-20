@@ -591,9 +591,12 @@ class Conversation:
                         # treated as an acknowledged transmission.
                         completed_segments: list[str] = []
                         for index in range(turns):
+                            # A revoked next turn must not re-record the
+                            # previous turn's already completed segments.
+                            completed_segments = []
+                            current_robot = None
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
-                            completed_segments = []
                             robot = robots[index % len(robots)]
                             current_robot = robot
                             async with self.speaker_lock:
@@ -673,12 +676,25 @@ class Conversation:
                             except Exception:
                                 pass  # Preserve the original model/transport failure.
                         if current_robot is not None and completed_segments:
-                            # Partial stream must NOT be copied as "heard" to
-                            # peers. Speaker transmission is not acoustic ACK.
-                            # Retain the private first-person history with an
-                            # explicit uncertainty marker for later turns.
+                            # An interrupted song still has real transmitted
+                            # words. Keep that first-person context in the
+                            # EXISTING RAM hub; never claim physical playback
+                            # or copy the fragment into a peer's context.
+                            confirmed_text = " ".join(completed_segments)
+                            hub = getattr(self.multimodal, "hub", None)
+                            remember = getattr(hub, "remember_spoken", None)
+                            if callable(remember):
+                                try:
+                                    remember(
+                                        current_robot.id, confirmed_text[:200],
+                                        time.monotonic(),
+                                    )
+                                except ValueError:
+                                    pass  # Invalid text is not speech evidence.
+                            # Private SQLite is optional, with its existing
+                            # independent consent and cancellation safeguards.
                             prefix = "I started to say (sent, playback unverified): "
-                            partial = prefix + " ".join(completed_segments)
+                            partial = prefix + confirmed_text
                             try:
                                 await asyncio.wait_for(
                                     self._persist_spoken_turn(
