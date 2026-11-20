@@ -390,6 +390,47 @@ async def test_attention_cleanup_failure_is_not_a_false_audio_failure(settings):
     assert conversation.active is None
 
 
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_optional_attention_sent_failure_cannot_cancel_transmitted_group_speech(
+    settings, streaming,
+):
+    """Broken optional telemetry cannot turn successful Xiaozhi sends into failures."""
+    from desk_robot.conversation import Conversation
+    from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+
+    class StreamingChat:
+        async def stream_reply(self, history):
+            yield "A grounded spoken segment."
+
+    class BrokenAttention:
+        def begin_topic(self, robot_id, topic, at, *, origin="operator"):
+            return 1
+
+        def sent(self, robot_id, text, at):
+            raise RuntimeError("optional telemetry failed")
+
+        def finish_topic(self, *args, **kwargs):
+            return True
+
+        def clear(self, robot_id):
+            pass
+
+    speaker = SimulatedSpeaker()
+    dialogue = Conversation(
+        settings, StreamingChat() if streaming else SimulatedChat(), speaker,
+    )
+    dialogue.attention = BrokenAttention()
+    ids = [robot.id for robot in settings.robots][:2]
+    transcript = await dialogue.run(ids, "Continue the story", utterances=2)
+    assert len(transcript) == len(speaker.spoken) == 2
+    assert dialogue.attention_failures == 2
+    assert dialogue.active is None
+    assert all(
+        dialogue.group_activity_timeline(robot_id)[0]["status"] == "completed"
+        for robot_id in ids
+    )
+
+
 def test_autonomous_peer_topic_keeps_its_source_label():
     ledger = AttentionLedger(["pet"])
     ledger.begin_topic(
