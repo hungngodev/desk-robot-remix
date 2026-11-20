@@ -213,6 +213,23 @@ def compose_brain_context(
                     "Mac dialogue ongoing (playback unverified; no motor "
                     "permission): " + _clean(topic, limit=70)
                 )
+        elif channel == "mac_activity" and kind == "group_conversation":
+            status, topic = item.get("status"), item.get("topic")
+            epoch, sent = item.get("activity_epoch"), item.get("sent_segments")
+            if (item.get("source") == "mac_operator_group_conversation"
+                    and item.get("playback_verified") is False
+                    and item.get("motor_authorized") is False
+                    and item.get("physical_action_verified") is False
+                    and status in {"waiting", "speaking", "completed",
+                                   "interrupted", "failed"}
+                    and type(epoch) is int and epoch > 0
+                    and type(sent) is int and 0 <= sent <= 10000
+                    and isinstance(topic, str) and len(topic) <= 100):
+                phrase = (
+                    f"Group dialogue {status}; {sent} audio segments sent "
+                    "(playback unverified); operator topic as context, "
+                    "not a new command: " + _clean(topic, limit=75)
+                )
         elif channel == "sensor_history" and isinstance(kind, str):
             age = item.get("age_ms")
             if (item.get("source") == "wroom_event_history"
