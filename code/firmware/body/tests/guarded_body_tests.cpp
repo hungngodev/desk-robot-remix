@@ -643,6 +643,7 @@ static void mpu_native_low_g_irq_vetoes_local_wheels() {
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0 && body.state().servos_attached);
   CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
+  CHECK(send(body, "status", 101).find("\"fault\":\"imu_low_g_candidate\"") != std::string::npos);
   imu.low_g_irq = false;
   imu.at_ms = 102;
   body.set_imu(imu);
@@ -679,6 +680,7 @@ static void zero_acceleration_mpu_does_not_authorize_motion() {
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0 && body.state().servos_attached);
   CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
+  CHECK(send(body, "status", 101).find("\"fault\":\"imu_zero_accel\"") != std::string::npos);
 }
 
 static void required_imu_is_a_local_freshness_interlock() {

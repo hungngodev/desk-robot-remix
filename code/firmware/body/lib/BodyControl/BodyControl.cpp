@@ -815,6 +815,14 @@ void BodyControl::execute(const char* line, std::size_t length,
         dock_telemetry_bad(now_ms) ? "dock_gpio_missing_or_stale" :
         bumper_hit ? "bumper_active" :
         touch_hit ? "touch_active" :
+        imu_motion_required_ && imu_.valid &&
+            imu_.model == BerryModel::Mpu6050 &&
+            imu_.low_g_status_valid && imu_.low_g_irq ?
+            "imu_low_g_candidate" :
+        imu_motion_required_ && imu_.valid &&
+            imu_.model == BerryModel::Mpu6050 &&
+            imu_.accel[0] == 0 && imu_.accel[1] == 0 &&
+            imu_.accel[2] == 0 ? "imu_zero_accel" :
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
         !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
