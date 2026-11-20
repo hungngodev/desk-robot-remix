@@ -127,9 +127,43 @@ def register_readonly_planner_routes(
                 " and what ", " and check", " also ", " then ",
             ))
         )
+        # A noun in a casual statement is not permission for a model-selected
+        # fuel-gauge read. Permit a question/imperative about a battery, plus
+        # a short coordinated noun phrase ("inspect the desk and battery").
+        # Never turn a historical recall question about a battery into a
+        # request for its CURRENT WROOM battery telemetry.
+        clauses = [
+            piece.strip() for piece in re.split(
+                r",|\b(?:and|then|also)\b", utterance
+            ) if piece.strip()
+        ]
+        request_intro = re.compile(
+            r"^(?:(?:hey [a-z]+[, ]+|please )*)"
+            r"(?:what|where|how|can|could|would|do|does|did|is|are|"
+            r"check|show|tell me|report|read|inspect|look|give me)\b"
+        )
+        recall_intro = re.compile(
+            r"^(?:what did (?:i|we|you) (?:say|tell|talk|discuss)|"
+            r"what do you remember|do you remember|can you recall|"
+            r"tell me what (?:i|we|you) (?:said|told)|remind me)\b"
+        )
+        is_request = [
+            bool(request_intro.match(piece) and not recall_intro.match(piece))
+            for piece in clauses
+        ]
+        battery_cue = re.compile(
+            r"\b(?:battery|charge level|power level|cell voltage)\b"
+        )
+        short_battery_clause = re.compile(
+            r"^(?:(?:my|your|the|a|this) )?"
+            r"(?:battery(?: level| status| charge| percentage| percent)?|"
+            r"charge level|power level|cell voltage)\??$"
+        )
         battery_question = any(
-            key in transcript.casefold()
-            for key in ("battery", "charge level", "power level", "cell voltage")
+            bool(battery_cue.search(piece) and is_request[i])
+            or bool(i > 0 and any(is_request[:i])
+                    and short_battery_clause.fullmatch(piece))
+            for i, piece in enumerate(clauses)
         )
         # A general opt-in allows memory access, but the semantic model
         # cannot silently browse private history for a live camera, status

@@ -2134,3 +2134,53 @@ def test_memory_anecdote_does_not_authorize_private_retrieval(settings, tokens):
             assert result.json()["tools"] == [
                 {"route": "voice-context", "payload": {"question": question}}
             ]
+
+
+def test_battery_statement_and_memory_recall_never_trigger_unsolicited_fuel_gauge(
+    settings, tokens,
+):
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class EagerBatteryModel:
+        async def reply(self, history):
+            return json.dumps({"tools": [{"route": "power-status"}]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=EagerBatteryModel()),
+        multimodal=None, start=noop, close=noop,
+    )
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        for statement in (
+            "I replaced my battery yesterday",
+            "We have a battery on the desk",
+            "The battery story reminds me of my childhood",
+            "What did I tell you about my battery?",
+            "I moved a battery, and can you look at the desk?",
+        ):
+            result = client.post(url, headers=auth, json={"transcript": statement})
+            assert result.status_code == 200
+            assert result.json()["tools"] == []
+        for request in (
+            "What is your battery level?",
+            "Check my battery status",
+            "Could you inspect the desk and battery?",
+            "What is on the desk and my battery level?",
+            "I put a cup down, can you check your battery?",
+            "What did I say earlier and can you check your battery?",
+        ):
+            result = client.post(url, headers=auth, json={"transcript": request})
+            assert result.status_code == 200
+            assert result.json()["tools"] == [
+                {"route": "power-status", "payload": {}}
+            ]
