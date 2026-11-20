@@ -4,7 +4,8 @@ Run commands from the repository’s `code/` folder.
 
 The project now has a compiled XIAO ESP32S3 Sense head target with Xiaozhi
 ESP-SR AFE device AEC and a playback-reference codec, and a compiled
-28BYJ-48/ULN2003 body with five VL53L4CD I2C ranges, local safety fault latch,
+28BYJ-48/ULN2003 body with eight VL53L0X I2C ranges (five safety-critical,
+three side/rear read-only), local safety fault latch,
 touch gestures, bounded stepper control and source-first OLED idle behavior.
 These are **software milestones**. No board has been flashed or physically
 qualified; no real edge, power, audio interruption, touch-through-case,
@@ -28,7 +29,9 @@ PLATFORMIO_CORE_DIR="$PWD/../.tools/platformio" ../.tools/body-pio-venv/bin/pio 
 PLATFORMIO_CORE_DIR="$PWD/../.tools/platformio" ../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32dev
 ```
 
-`esp32_stepper` is now the default. It uses the eight phase pins in
+`esp32_full` is the default eight-VL53L0X profile, with motor power
+intentionally disabled until its independent cutoff is physically qualified.
+The five-channel `esp32_stepper` bench profile uses the eight phase pins in
 [BodyPins.h](../../code/firmware/body/include/BodyPins.h), two positional servo signals
 and existing 115200 UART. `esp32dev` explicitly preserves the earlier DC/DRV8833
 profile with its different four-wire motor allocation. Never connect a binary
@@ -66,8 +69,10 @@ movement disarmed. The head UART, HTTP/MCP parser and laptop transport reject it
 A future physical button or authenticated recovery design can be considered
 separately; no model-controlled recovery was added.
 
-**The current stepper firmware acquires all five ToF channels** with pinned
-Pololu VL53L4CD setup plus checked, bounded I2C results and a TCA9548A bus.
+**The default full firmware acquires eight VL53L0X channels**: four downward
+cliff sensors and one front sensor are safety critical, while three side/rear
+channels are read-only. It uses pinned Pololu VL53L0X initialization plus
+checked, bounded I2C results and a TCA9548A bus.
 Local USB calibration stores a checksummed NVS policy. Missing, stale, invalid
 or bus-fault samples latch the body disarmed until a fresh local USB rearm.
 No fabricated calibration is in firmware, so a fresh unassembled image cannot
