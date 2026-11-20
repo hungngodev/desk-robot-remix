@@ -33,6 +33,11 @@ assert(side_clearance_each_mm >= 0.5 && side_clearance_each_mm < 8);
 assert(base_length_mm > guide_run_mm + backstop_thickness_mm);
 assert(entry_flare_each_mm > 0 && entry_flare_each_mm < inner_wall_x);
 assert(entry_coupon_length_mm > 37 && entry_coupon_length_mm < guide_run_mm);
+// Geometry invariants shared by the full dock and its entry coupon.
+// The nominal channel must be measured between the INNER faces of the rails.
+assert(abs((outside_width_mm - 2 * inner_wall_x) - channel_mm) < 0.001);
+assert(inner_wall_x - guide_wall_mm - entry_flare_each_mm >= 0);
+assert(guide_wall_mm > 0 && guide_run_mm > 37);
 assert(tag_black_side_mm >= 10 && tag_black_side_mm <= 75);
 assert(tag_white_margin_each_mm >= 4 && tag_white_margin_each_mm <= 10);
 assert(tag_paper_slack_each_mm >= 0.25 && tag_paper_slack_each_mm <= 1.5);
@@ -45,7 +50,9 @@ module one_side_rail() {
     // Wider entry mouth is tapered into a measured track width.
     linear_extrude(height = guide_height_mm)
         polygon(points=[
-            [0, 0],
+            // The inner face sets the measured channel width. Both rail
+            // faces flare outward at entry while keeping wall thickness.
+            [inner_wall_x - guide_wall_mm - entry_flare_each_mm, 0],
             [inner_wall_x - entry_flare_each_mm, 0],
             [inner_wall_x, 37],
             [inner_wall_x, guide_run_mm],
