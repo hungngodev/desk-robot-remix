@@ -1089,7 +1089,7 @@ async def test_close_reports_unconfirmed_stop_without_hanging(settings):
     head = HardwareStatusHead("robot-01")
     original = head.command
     async def stuck_stop(command):
-        if command == "stop":
+        if command == "halt":
             await asyncio.sleep(30)
         return await original(command)
     head.command = stuck_stop
@@ -1129,13 +1129,13 @@ async def test_hardware_close_stalled_peer_does_not_starve_other_body(settings):
     original = first.command
 
     async def uncooperative_first(command):
-        if command == "stop":
+        if command == "halt":
             sent.set()
             try:
                 await asyncio.Event().wait()
             except asyncio.CancelledError:
                 await release.wait()
-                return {"ok": True, "reply": "OK stop", "robot_id": "robot-01"}
+                return {"ok": True, "reply": "OK halt", "robot_id": "robot-01"}
         return await original(command)
 
     first.command = uncooperative_first
