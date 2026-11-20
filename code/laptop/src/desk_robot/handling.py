@@ -313,10 +313,11 @@ class HandlingGate:
             )
             if not malformed and valid and not backward:
                 self.last_low_g_seq = seq
-            if malformed or new_irq or backward:
-                # Keep the accepted source identity and event fence. A new
-                # event invalidates the old upright mount pose even when the
-                # current 20 Hz acceleration is back to 1g.
+            if malformed or not valid or new_irq or backward:
+                # A failed FF status read cannot rule out an unseen fall.
+                # Keep acquisition identity and event fence, but revoke
+                # relative pose until eight fresh quiet observations return.
+                # This never initiates motion or reports a verified fall.
                 previous = (self.last_boot_id, self.last_sample_ms)
                 self.reset(preserve_shake_cooldown=True)
                 self.last_boot_id, self.last_sample_ms = previous
