@@ -49,6 +49,20 @@ async def test_malformed_or_unbounded_stream_rejected(frames):
         _ = [s async for s in ollama_speech_segments(chunks(frames))]
 
 
+@pytest.mark.parametrize("frame", [
+    {"message": {"role": "tool", "content": "Private tool receipt"}, "done": True},
+    {"message": {"role": "user", "content": "Human transcript"}, "done": True},
+    {"message": {"role": "system", "content": "System secret"}, "done": True},
+    {"message": {"role": "assistant", "content": "Do it",
+                 "tool_calls": [{"function": {"name": "drive"}}]}, "done": True},
+    {"message": {"role": "assistant", "content": "Hello"}, "done": "true"},
+    {"message": {"role": "assistant", "content": "Hello"}, "done": 1},
+])
+async def test_streamed_speech_never_relabels_tool_or_nonassistant_content(frame):
+    with pytest.raises(RuntimeError, match="non-assistant/tool|completion marker"):
+        _ = [s async for s in ollama_speech_segments(chunks([frame]))]
+
+
 async def test_actual_ollama_http_stream_is_sentence_incremental():
     seen = []
     def respond(request):
