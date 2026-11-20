@@ -29,3 +29,29 @@ def test_remember_accepts_valid_identifiers(tmp_path):
         source_robot="robot-01", witnessed=True,
     )
     assert store.count("robot-01") == 1
+
+
+@pytest.mark.parametrize("bad", [None, [], {}, 123, True])
+def test_correct_episode_rejects_nonstring_event_id_without_mutation(tmp_path, bad):
+    store = MemoryStore(tmp_path / "memory", ["robot-01"])
+    assert store.remember(
+        "robot-01", "evt-1", "Original observation", kind="touch_tap",
+        source_robot="robot-01", witnessed=True,
+    )
+    with pytest.raises(ValueError, match="Invalid memory event ID"):
+        store.correct_episode("robot-01", bad, "Corrected observation")
+    assert store.recent("robot-01")[0].summary == "Original observation"
+
+
+@pytest.mark.parametrize("bad", [
+    None, [], {}, 123, True, "", "   ", "\x00evil", "x" * 301,
+])
+def test_correct_episode_rejects_invalid_summary_without_mutation(tmp_path, bad):
+    store = MemoryStore(tmp_path / "memory", ["robot-01"])
+    assert store.remember(
+        "robot-01", "evt-1", "Original observation", kind="touch_tap",
+        source_robot="robot-01", witnessed=True,
+    )
+    with pytest.raises(ValueError, match="Bounded nonempty description required"):
+        store.correct_episode("robot-01", "evt-1", bad)
+    assert store.recent("robot-01")[0].summary == "Original observation"

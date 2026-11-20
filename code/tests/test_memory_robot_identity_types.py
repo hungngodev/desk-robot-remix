@@ -39,7 +39,7 @@ def test_remember_keeps_firsthand_and_peer_provenance(tmp_path):
 @pytest.mark.parametrize("bad", [[], {}, None, 7, True])
 @pytest.mark.parametrize("operation", [
     "recent", "search", "set_core_fact", "core_facts", "forget_core_fact",
-    "forget_episode", "count",
+    "correct_episode", "forget_episode", "count",
 ])
 def test_memory_operations_reject_malformed_identity(tmp_path, operation, bad):
     store = MemoryStore(tmp_path / "memory", ["robot-01"])
@@ -49,6 +49,9 @@ def test_memory_operations_reject_malformed_identity(tmp_path, operation, bad):
         "set_core_fact": lambda: store.set_core_fact(bad, "favorite_color", "blue"),
         "core_facts": lambda: store.core_facts(bad),
         "forget_core_fact": lambda: store.forget_core_fact(bad, "favorite_color"),
+        "correct_episode": lambda: store.correct_episode(
+            bad, "evt-1", "corrected observation"
+        ),
         "forget_episode": lambda: store.forget_episode(bad, "evt-1"),
         "count": lambda: store.count(bad),
     }
