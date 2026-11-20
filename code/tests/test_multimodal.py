@@ -2522,3 +2522,26 @@ def test_future_asr_receipt_is_rejected_before_dedup_and_turn_context():
             if event["channel"] == "human_transcript"] == [
                 "CURRENT_HUMAN_REQUEST"
             ]
+
+
+def test_future_vad_evidence_cannot_poison_speech_floor_or_later_end():
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    with pytest.raises(ValueError, match="invalid time"):
+        hub.notify("robot-01", "human_voice", now + 3600)
+    assert not hub.user_active("robot-01", now)
+    assert hub.recent_events("robot-01", now) == []
+    # A real current turn must survive forged future end or monitor receipt.
+    hub.notify("robot-01", "human_voice", now)
+    assert hub.user_active("robot-01", now + 0.01)
+    with pytest.raises(ValueError, match="VAD end timestamp"):
+        hub.speech_ended("robot-01", now + 3600)
+    with pytest.raises(ValueError, match="VAD snapshot"):
+        hub.reconcile_speech_snapshot(frozenset(), now + 3600)
+    assert hub.user_active("robot-01", now + 0.02)
+    assert not hub.user_active("robot-02", now + 0.02)
+    # A valid end retains 800 ms of post-human quiet, then releases floor.
+    hub.speech_ended("robot-01", now + 0.03)
+    assert not hub.user_active("robot-01", now + 0.04)
+    assert hub.spontaneous_floor_busy(now + 0.5)
+    assert not hub.spontaneous_floor_busy(now + 0.9)

@@ -43,6 +43,15 @@ def _finite(value: float) -> bool:
         return False  # Huge Python integers cannot represent host timestamps.
 
 
+def _admissible_mac_event_clock(value: float) -> bool:
+    """Accept historical fixture times, never implausible future local receipts.
+
+    A future VAD start could otherwise hold the human floor forever because
+    the next real speech_end would compare older than that bogus start.
+    """
+    return _finite(value) and value <= time.monotonic() + 1
+
+
 def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     """Encode bounded JPEG for the VLM and a tiny grayscale motion fingerprint."""
     if not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000:
@@ -182,7 +191,7 @@ class CameraFrameHub:
 
     def notify(self, robot_id: str, kind: str, now: float) -> None:
         self._check(robot_id)
-        if kind not in TRIGGERS or not _finite(now):
+        if kind not in TRIGGERS or not _admissible_mac_event_clock(now):
             raise ValueError("Unknown physical event or invalid time")
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
@@ -223,7 +232,7 @@ class CameraFrameHub:
     def speech_ended(self, robot_id: str, now: float) -> None:
         """End a VAD-confirmed user utterance without dropping its last images."""
         self._check(robot_id)
-        if not _finite(now):
+        if not _admissible_mac_event_clock(now):
             raise ValueError("Invalid VAD end timestamp")
         # An old speech_end can arrive after a newer authenticated speech_start.
         # Never release the newer human floor on that stale end event.
@@ -253,7 +262,8 @@ class CameraFrameHub:
         their matching speech_end. Only a real authenticated snapshot is a
         permissible source for restoring/releasing explicit idle VAD turns.
         """
-        if not isinstance(active, frozenset) or not active <= self.robots or not _finite(now):
+        if (not isinstance(active, frozenset) or not active <= self.robots
+                or not _admissible_mac_event_clock(now)):
             raise ValueError("Untrusted VAD snapshot or invalid time")
         for robot_id in self.robots:
             if robot_id in active:
