@@ -415,11 +415,27 @@ def compose_brain_context(
     ))
     selected: list[str] = []
     remaining = 400
-    for _, phrase, _, _ in cue_parts:
+    omitted_requested_receipt = False
+    for _, phrase, tool_kind, current_turn in cue_parts:
         cost = len(phrase) + (2 if selected else 0)
         if cost <= remaining:
             selected.append(phrase)
             remaining -= cost
+        elif current_turn and tool_kind in requested_tools:
+            # A complex spoken question can exceed the fixed context
+            # budget. Never silently hide a requested completed result and
+            # let the model pretend it answered every part of the question.
+            omitted_requested_receipt = True
+    if omitted_requested_receipt:
+        limitation = (
+            "Some requested tool results did not fit; do not claim a "
+            "complete factual answer."
+        )
+        # Preserve highest priority safety/turn evidence. Retire the
+        # lowest-priority selected cues to make the limitation explicit.
+        while selected and len("; ".join([*selected, limitation])) > 400:
+            selected.pop()
+        selected.append(limitation)
     interaction = "; ".join(selected)
     return ContextBundle(recent_text, core_text, interaction)
 

@@ -1657,3 +1657,24 @@ async def test_social_group_activity_never_impersonates_operator(
     with pytest.raises(ValueError, match="Unsupported group conversation origin"):
         await conversation.run(ids[:2], "Invalid", utterances=2,
                                origin="untrusted_tool_result")
+
+
+def test_over_capacity_requested_tool_results_must_disclose_omission():
+    # A real compound user question can exceed the fixed 400-character
+    # context when a concurrent WROOM fault and large tool receipts arrive.
+    # Never silently answer as though every requested fact was included.
+    timeline = [
+        {"channel": "tool", "kind": "visual_look",
+         "content": "LOOK_RESULT " + "v" * 150},
+        {"channel": "tool", "kind": "robot_status",
+         "content": "BATTERY_RESULT " + "b" * 150},
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Can you look around and check your battery status?"},
+        {"channel": "sensor", "kind": "safety_fault"},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert "latched safety fault" in result
+    assert "Recent model ASR guess" in result
+    assert "Some requested tool results did not fit" in result
+    assert "do not claim a complete factual answer" in result
+    assert len(result) <= 400
