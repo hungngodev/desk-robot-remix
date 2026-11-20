@@ -384,10 +384,10 @@ async def test_five_robot_conversation_persists_peer_hearsay_without_identity_le
         assert all(o.kind in {"own_utterance", "peer_utterance"} for o in observations)
     again = Conversation(fleet, SimulatedChat(), SimulatedSpeaker(), memory=memory)
     await again.run(IDS[:2], "A follow up", 1)
-    assert "untrusted historical text" in again.histories["robot-01"][0]["content"]
+    assert "Untrusted per-pet historical memory data" in again.histories["robot-01"][2]["content"]
     # A peer transcript is a report, not independent acoustic evidence.
-    assert "robot-02 said (peer report, not my sighting)" in again.histories["robot-01"][0]["content"]
-    assert "I said" in again.histories["robot-01"][0]["content"]
+    assert "robot-02 said (peer report, not my sighting)" in again.histories["robot-01"][2]["content"]
+    assert "I said" in again.histories["robot-01"][2]["content"]
     assert memory.count("robot-03") == 5
 
 
@@ -434,7 +434,7 @@ async def test_all_five_full_system_simulated_integration_and_persistent_motion(
         assert job.state == "cancelled"
         # Stop freezes movement and revokes the Mac permit; WROOM may
         # retain its short control lease until its separate 500ms watchdog.
-        assert runtime.coordinator.heads["robot-01"].commands[-1] == "stop"
+        assert runtime.coordinator.heads["robot-01"].commands[-1] == "halt"
         assert runtime.coordinator.permits.get("robot-01") is None
         assert runtime.memory.count("robot-05") == 10
         assert await runtime.pet.pause("robot-05")
