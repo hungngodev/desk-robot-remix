@@ -136,6 +136,12 @@ def register_readonly_context_routes(
             dialogue = getattr(conversation, "active_dialogue_timeline", None)
             if callable(dialogue):
                 activity.extend(dialogue(robot_id))
+        ongoing = getattr(
+            getattr(app.state.runtime, "conversation", None),
+            "group_activity_timeline", None,
+        )
+        if callable(ongoing):
+            activity.extend(ongoing(robot_id, now=now))
         timeline = visual.hub.interaction_timeline(
             robot_id, now, limit=10 - len(activity)
         )
