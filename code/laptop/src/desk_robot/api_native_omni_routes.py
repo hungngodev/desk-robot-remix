@@ -129,12 +129,13 @@ def register_native_omni_routes(
         if not spoken or "\x00" in spoken:
             raise HTTPException(400, "Invalid model-estimated transcript")
         visual = getattr(app.state.runtime, "multimodal", None)
+        observed_at = time.monotonic()
         ephemeral = False
         if settings.voice_vision_tools_enabled and visual is not None:
             remember = getattr(visual.hub, "remember_heard", None)
             if callable(remember):
                 ephemeral = remember(
-                    robot_id, request.event_id, spoken[:240], time.monotonic()
+                    robot_id, request.event_id, spoken[:240], observed_at
                 )
         memory_opt_in = settings.voice_transcript_memory_enabled
         inserted = False
@@ -191,7 +192,7 @@ def register_native_omni_routes(
         attention = getattr(app.state.runtime, "attention", None)
         if ephemeral and settings.voice_vision_tools_enabled and attention is not None:
             attention.heard(
-                robot_id, request.event_id, spoken[:240], time.monotonic()
+                robot_id, request.event_id, spoken[:240], observed_at
             )
         return {
             "robot_id": robot_id, "stored": inserted,
