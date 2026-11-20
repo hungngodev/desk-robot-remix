@@ -10,8 +10,8 @@ from desk_robot.api import (
     ReadonlyPlanRequest,
     create_app,
 )
-from desk_robot.config import load_settings
 from desk_robot.api_readonly_context import _active_robot_activity
+from desk_robot.config import load_settings
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
