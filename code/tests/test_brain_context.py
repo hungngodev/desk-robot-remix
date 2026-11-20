@@ -1080,3 +1080,53 @@ def test_real_wroom_safety_fault_survives_chat_tool_result_flood():
     # No inferred fall, guaranteed physical stopping or auto recovery.
     assert "saved me from falling" not in prompt
     assert "ready to roam" not in prompt
+
+
+async def test_proactive_brain_treats_pickup_as_optional_context_not_script(
+    settings, tmp_path,
+):
+    """An active conversation must not turn a physical cue into a forced line.
+
+    This checks prompt construction and structured silence, not a claim that
+    the local LLM, sensor hardware or speaker passed a physical acceptance.
+    """
+    ids = [robot.id for robot in settings.robots]
+    memory = MemoryStore(tmp_path, ids)
+
+    class ContextDecision:
+        history = None
+
+        async def proactive_decision(self, history):
+            self.history = history
+            return {"action": "silence", "text": "", "tool": "none"}
+
+    chat = ContextDecision()
+    pet = PetController(
+        settings, {}, Conversation(settings, chat, SimulatedSpeaker()),
+        memory, scene=None,
+    )
+    context = compose_brain_context([], [], [
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": "Sing while we go toward the edge of the desk"},
+        {"channel": "sensor", "kind": "handling_tilt"},
+    ])
+    result = await pet._generate_proactive_line(
+        "robot-01", SceneChange("handling_tilt", "Robot tilted", 0.99),
+        context, offered_at=time.monotonic(),
+        model_context_permitted=lambda: True,
+    )
+    assert result is None
+    assert pet.states["robot-01"].last_initiative_suppression == (
+        "model_chose_silence"
+    )
+    assert chat.history is not None
+    system = chat.history[0]["content"]
+    evidence = chat.history[1]["content"]
+    assert "does not require an announcement" in system
+    assert "unfinished activities" in system
+    assert "fixed emotion" in system
+    assert "physical actions" in evidence
+    assert "Sing while we go toward the edge" in evidence
+    assert "Physical sensor edge: handling_tilt" in evidence
+    assert "not a verified command" in evidence
+    await pet.close()
