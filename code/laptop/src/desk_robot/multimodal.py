@@ -186,7 +186,13 @@ class CameraFrameHub:
             raise ValueError("Unknown physical event or invalid time")
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
-        if kind != "human_voice":
+        # Only situational cues survive a long utterance. Routine contact
+        # and the separately owned WROOM safety-fault event retain their
+        # original short TTL; neither may be resurrected as a new warning.
+        if kind in {
+            "handling_tilt", "handling_shake", "side_object",
+            "nearby_object", "ambient_shift", "nfc_tag",
+        }:
             past = self.situation_edges[robot_id]
             past[kind] = max(now, past.get(kind, -math.inf))
             if len(past) > 12:
