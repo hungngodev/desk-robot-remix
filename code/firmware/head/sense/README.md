@@ -91,7 +91,11 @@ measured performance. Two PSRAM frame buffers with latest-frame acquisition are 
 source configuration, pending real simultaneous camera, microphone, heat,
 JPEG age and WiFi measurements. The stream bench rejects gaps longer than
 1.2 seconds, including a delayed first frame or stale final frame; this is
-transport continuity evidence, not a measured exposure rate.
+transport continuity evidence, not a measured exposure rate. The report also
+checks elapsed camera completion times from the Sense device itself, rejects
+capture gaps and unexpected boot changes during the bench, and reports
+network arrival intervals separately. These per-device intervals do not
+synchronize the camera exposure clock with microphone PCM or the Mac.
 
 ## Continuous microphone is a separate explicit permit
 
