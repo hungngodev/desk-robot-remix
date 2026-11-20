@@ -39,10 +39,23 @@ async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
 
 
 async def _bounded_body_stop(head: Head) -> dict:
-    """Transport receipt only; local WROOM watchdog remains authoritative."""
+    """Terminal user/task STOP must revoke WROOM arming, not just wheel speed.
+
+    Use the existing body 'halt': motor targets zero, armed false, servo PWM
+    retained for a held object. An HTTP ACK is a command receipt, not a
+    physically measured wheel or grasp stop.
+    """
+    return await _bounded_head_reply(
+        head.command("halt"), seconds=1.0,
+        timeout_message="WROOM HALT transport acknowledgement unconfirmed",
+    )
+
+
+async def _bounded_pulse_stop(head: Head) -> dict:
+    """Short supervised drive pulse; the same authorized job may continue."""
     return await _bounded_head_reply(
         head.command("stop"), seconds=1.0,
-        timeout_message="WROOM STOP transport acknowledgement unconfirmed",
+        timeout_message="WROOM pulse STOP transport acknowledgement unconfirmed",
     )
 
 
@@ -604,7 +617,7 @@ class Coordinator:
             await self._assert_armed_health(job.robot_id, require_front_clearance=True)
             await head.command("drive 20 20 100")
             await asyncio.sleep(0.12)
-            await _bounded_body_stop(head)
+            await _bounded_pulse_stop(head)
             steps += 1
             if len(job.events) >= 96:
                 job.events.pop(0)
@@ -798,7 +811,7 @@ class Coordinator:
                 }
             await head.command(command)
             await asyncio.sleep(0.12)
-            await _bounded_body_stop(head)
+            await _bounded_pulse_stop(head)
             await asyncio.sleep(0.05)
         return {
             "phase": "hold",
@@ -874,7 +887,7 @@ class Coordinator:
             await self._assert_armed_health(job.robot_id)
             await head.command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
-            await _bounded_body_stop(head)
+            await _bounded_pulse_stop(head)
             await self._assert_armed_health(job.robot_id)
         if initial is None:
             raise OperationError("Alignment attempt limit reached")
@@ -896,7 +909,7 @@ class Coordinator:
         await asyncio.sleep(c.servo_settle_seconds)
         # Image evidence: same category moves upward into measured raised-jaw region and remains
         # there in two fresh frames while wheels are stopped. A servo ACK alone never passes.
-        await _bounded_body_stop(head)
+        await _bounded_pulse_stop(head)
         a, b, x, y = c.lifted_roi_px
         observed = []
         for sample in range(2):
