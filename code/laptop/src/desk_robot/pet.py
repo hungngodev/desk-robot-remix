@@ -653,6 +653,12 @@ class PetController:
         Sensor polling never awaits a JPEG or VLM. A test shim that exposes
         only the old hub continues to receive the pure priority hint.
         """
+        # Keep time-coincident physical evidence available to an ongoing
+        # dialogue after its short camera timeline expires. No extra poller,
+        # safety authority or mandatory speech response is introduced.
+        attention = getattr(self, "attention", None)
+        if attention is not None:
+            attention.sensor(robot_id, kind, time.monotonic())
         if self.multimodal is None:
             return
         schedule = getattr(self.multimodal, "sensor_event", None)
