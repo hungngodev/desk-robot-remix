@@ -93,6 +93,7 @@ def account_landed_cost(
     seller_category_units = defaultdict(lambda: defaultdict(int))
     charged_sellers = set()
     seller_totals = {}
+    quote_claims: set[tuple[str, str, str, str]] = set()
     lines = evidence.get("lines", [])
     if not isinstance(lines, list):
         errors.append("Quote lines must be a list")
@@ -106,8 +107,8 @@ def account_landed_cost(
             if role not in required_roles or required_roles[role] == 0:
                 raise ValueError("unknown or excluded role")
             seller = _nonempty(line.get("seller"), "seller")
-            _nonempty(line.get("sku"), "sku")
-            _nonempty(line.get("quote_reference"), "quote_reference")
+            sku = _nonempty(line.get("sku"), "sku")
+            quote_ref = _nonempty(line.get("quote_reference"), "quote_reference")
             _nonempty(line.get("quoted_at"), "quoted_at")
             if not _url(line.get("stock_evidence_url")):
                 raise ValueError("missing HTTPS stock evidence")
@@ -117,6 +118,10 @@ def account_landed_cost(
             if category not in buckets:
                 raise ValueError("unknown robot, dock or station cost category")
             total = packages * cents(line.get("package_price_usd"), "package price")
+            claim = (role, seller, sku, quote_ref)
+            if claim in quote_claims:
+                raise ValueError("duplicate quoted SKU under same role and quote reference")
+            quote_claims.add(claim)
             supplied[role] += packages * units
             seller_subtotals[seller] += total
             seller_category_goods[seller][category] += total
