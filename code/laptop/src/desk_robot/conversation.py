@@ -367,6 +367,7 @@ class Conversation:
         self.multimodal = None  # Existing Mac live context, attached in hardware mode.
         self.coordinator_jobs = None  # Existing Coordinator's read-only registry.
         self.attention = None  # Runtime-owned voluntary context, not voice state.
+        self.attention_failures = 0
         # The original speaker task owns this short lived dialogue state.
         self._group_activity_epoch = 0
         self._group_activity: dict[str, dict] = {}
@@ -591,8 +592,12 @@ class Conversation:
                             robot.id, topic_excerpt, time.monotonic()
                         )
                 except (KeyError, ValueError):
+                    self.attention_failures += 1
                     for robot_id in tuple(attention_tokens):
-                        attention.clear(robot_id)
+                        try:
+                            attention.clear(robot_id)
+                        except (KeyError, ValueError):
+                            self.attention_failures += 1
                     attention_tokens.clear()
             # Each physical pet owns a separate SQLite connection. Disk
             # contention cannot block urgent Xiaozhi VAD and speaker abort on
@@ -846,13 +851,18 @@ class Conversation:
                         if revoked:
                             record["topic"] = ""
                         if robot.id in attention_tokens:
-                            if revoked:
-                                attention.clear(robot.id)
-                            else:
-                                attention.finish_topic(
-                                    robot.id, attention_tokens[robot.id],
-                                    time.monotonic(), interrupted=outcome != "completed",
-                                )
+                            try:
+                                if revoked:
+                                    attention.clear(robot.id)
+                                else:
+                                    attention.finish_topic(
+                                        robot.id, attention_tokens[robot.id],
+                                        time.monotonic(), interrupted=outcome != "completed",
+                                    )
+                            except (KeyError, ValueError):
+                                # Optional context failure is not speaker
+                                # delivery failure and must not mask an abort.
+                                self.attention_failures += 1
             finally:
                 self.active = None
 
