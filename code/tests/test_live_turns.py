@@ -383,3 +383,19 @@ def test_quiet_mode_preserves_an_explicit_user_requested_turn():
     assert value.set_quiet(True) is None
     assert value.is_current(turn)
     assert value.pop_audio().pcm == b"\x01\x00"
+
+
+@pytest.mark.parametrize("invalid", [0, 1, "", "false", [], {}])
+def test_busy_and_quiet_flags_reject_nonboolean_values(invalid):
+    value = connected(heartbeat_interval=1)
+    current = value.epoch
+    for field in ("user", "model", "tool"):
+        with pytest.raises(ValueError, match="booleans"):
+            value.set_busy(current, **{field: invalid})
+    with pytest.raises(ValueError, match="boolean"):
+        value.set_quiet(invalid)
+    # Failed validation cannot accidentally suppress an otherwise permitted
+    # spontaneous observation or alter current turn ownership.
+    value.enable_proactivity(now=0)
+    offer(value, b"fresh", captured_at=1)
+    assert value.poll_observation(now=1) is not None

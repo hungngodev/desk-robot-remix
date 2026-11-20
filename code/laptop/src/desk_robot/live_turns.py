@@ -245,12 +245,17 @@ class LiveTurns:
         """Reject old turn completions instead of marking a newer turn idle."""
         if not self.is_current(epoch):
             return False
+        if any(value is not None and type(value) is not bool
+               for value in (user, model, tool)):
+            raise ValueError("Busy ownership flags must be booleans")
         for role, value in (("user", user), ("model", model), ("tool", tool)):
             if value is not None:
                 self._busy[role] = value
         return True
 
     def set_quiet(self, quiet: bool) -> FlushPlayback | None:
+        if type(quiet) is not bool:
+            raise ValueError("Quiet mode must be a boolean")
         self._quiet = quiet
         if quiet and self._spontaneous_epoch is not None:
             return self._invalidate("quiet")
