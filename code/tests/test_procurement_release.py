@@ -172,32 +172,38 @@ def test_bona_fide_receipts_are_operator_provided_not_inferred():
 
 
 
-def test_conditional_amg8833_stays_visible_but_is_not_in_default_checkout():
+@pytest.mark.parametrize("role,linked_id,total", [
+    ("amg8833", "room_amg8833", 1),
+    ("nfc_game_props", "room_nfc_game_tokens", 10),
+])
+def test_conditional_room_options_stay_visible_but_not_in_default_checkout(
+    role, linked_id, total
+):
     import json
     plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
     report = mod.generate(plan)
-    thermal = next(row for row in report["room_pod"]
-                   if row["id"] == "amg8833")
-    assert thermal["shared_total"] == 1
-    assert thermal["effective_selected_fleet_total"] == 0
-    assert thermal["excluded_from_order_as_optional"] is True
-    assert thermal["shopping_decision"] == "conditional_optional_not_selected"
-    assert thermal["approved_for_fleet_purchase"] is False
-    assert thermal["missing_part_evidence"]
+    optional = next(row for row in report["room_pod"]
+                    if row["id"] == role)
+    assert optional["shared_total"] == total
+    assert optional["effective_selected_fleet_total"] == 0
+    assert optional["excluded_from_order_as_optional"] is True
+    assert optional["shopping_decision"] == "conditional_optional_not_selected"
+    assert optional["approved_for_fleet_purchase"] is False
+    assert optional["missing_part_evidence"]
     detail = next(item for item in report["supplemental_decisions"]
-                  if item["id"] == "room_amg8833")
+                  if item["id"] == linked_id)
     assert detail["reviewed"] is True
     assert detail["disposition"] == "deferred_optional"
     first = mod.first_robot_projection(report)
     projected = next(row for row in first["roles"]
-                     if row["id"] == "amg8833")
+                     if row["id"] == role)
     assert projected["prototype_target"] == 0
     assert projected["conditional_remaining"] == 0
     assert projected["decision"] == "OPTIONAL NOT SELECTED, DO NOT BUY"
     first_needed, _ = mod.cost_requirements(report, "first_robot")
     fleet_needed, _ = mod.cost_requirements(report, "fleet")
-    assert first_needed["station:amg8833"] == 0
-    assert fleet_needed["station:amg8833"] == 0
+    assert first_needed["station:" + role] == 0
+    assert fleet_needed["station:" + role] == 0
     shown = mod.render_markdown(report)
     assert "OPTIONAL NOT SELECTED, DO NOT BUY" in shown
 
@@ -999,19 +1005,20 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
                    "decision_receipt": receipt,
                    **dict(approved_part)}
             for name, (parent, qty) in mod.SUPPLEMENTAL_DECISIONS.items()
-            if name != "room_amg8833"
+            if name not in ("room_amg8833", "room_nfc_game_tokens")
         },
     }
-    assert len(evidence["supplemental_decisions"]) == 13
+    assert len(evidence["supplemental_decisions"]) == 12
     complete = mod.generate(plan, evidence)
     assert complete["order_released"]  # test fixture only
     assert len(complete["supplemental_decisions"]) == 14
-    deferred = next(
-        item for item in complete["supplemental_decisions"]
-        if item["id"] == "room_amg8833"
-    )
-    assert deferred["reviewed"] is True
-    assert deferred["disposition"] == "deferred_optional"
+    for linked_id in ("room_amg8833", "room_nfc_game_tokens"):
+        deferred = next(
+            item for item in complete["supplemental_decisions"]
+            if item["id"] == linked_id
+        )
+        assert deferred["reviewed"] is True
+        assert deferred["disposition"] == "deferred_optional"
     # Even a synthetic otherwise fully approved fleet MUST NOT contain a
     # renamed cheap sensor carrier or revert to the unsafe 1W speaker.
     for name, replacement in (
@@ -1131,6 +1138,7 @@ def test_linked_subassembly_plan_is_not_deletable():
     assert set(linked) == set(mod.SUPPLEMENTAL_DECISIONS)
     assert len(linked) == 14
     assert linked["room_amg8833"]["disposition"] == "deferred_optional"
+    assert linked["room_nfc_game_tokens"]["disposition"] == "deferred_optional"
     for ident, (parent, count) in mod.SUPPLEMENTAL_DECISIONS.items():
         assert linked[ident]["parent_role"] == parent
         assert linked[ident]["fleet_quantity"] == count
@@ -1339,7 +1347,9 @@ def test_one_robot_cart_projects_all_linked_quantities_without_order_approval():
     assert pet["uln2003"]["fleet_reported_owned_not_verified"] == 5
     assert pet["stepper"]["reported_owned_not_verified"] == 0
     assert pet["stepper"]["decision"] == "HOLD MOTOR CHOICE"
-    assert room["nfc_game_props"]["prototype_target"] == 10
+    assert room["nfc_game_props"]["prototype_target"] == 0
+    assert room["nfc_game_props"]["conditional_remaining"] == 0
+    assert room["nfc_game_props"]["decision"] == "OPTIONAL NOT SELECTED, DO NOT BUY"
     linked = {item["id"]: item for item in one["linked_decisions"]}
     assert linked["n20_motor_candidate"]["conditional_one_robot_quantity"] == 2
     assert linked["drv8833_driver_candidate"]["conditional_one_robot_quantity"] == 1

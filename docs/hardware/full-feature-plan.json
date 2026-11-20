@@ -746,7 +746,8 @@
         "id": "nfc_game_props",
         "name": "NFC game tags and magnets",
         "quantity_per_room": 10,
-        "location": "shared interactive toys"
+        "purchase_status": "conditional_optional",
+        "location": "conditional optional shared game props; preserve the game feature but do not add loose tags to the default checkout"
       },
       {
         "id": "amg8833",
@@ -766,7 +767,7 @@
     "transport": "Room pod presents timestamped named readings to Mac over USB; no safety or motor control and no assumption that a missing pod means a person is present.",
     "privacy": "BLE heart rate, room presence and desktop app data must be explicit opt-in; don't infer personal identity from PIR/radar."
   },
-  "linked_subassemblies_note": "These 14 entries are motor, battery, charging, dock and station details or alternatives linked to the counted 49 visible roles, not 14 extra automatic purchases. Selected physical subparts require an explicit qualified decision and vendor, fit and electrical receipts. room_amg8833 remains visible as the currently deferred conditional thermal option and is not a default checkout item.",
+  "linked_subassemblies_note": "These 14 entries are motor, battery, charging, dock and station details or alternatives linked to the counted 49 visible roles, not 14 extra automatic purchases. Selected physical subparts require an explicit qualified decision and vendor, fit and electrical receipts. room_amg8833 and room_nfc_game_tokens remain visible as currently deferred conditional options and are not default checkout items.",
   "linked_subassemblies": [
     {"id": "n20_motor_candidate", "parent_role": "stepper", "fleet_quantity": 10, "name": "N20 100:1 MP 6V motor alternative", "disposition": "unresolved"},
     {"id": "drv8833_driver_candidate", "parent_role": "uln2003", "fleet_quantity": 5, "name": "DRV8833 dual H bridge alternative", "disposition": "unresolved"},
@@ -781,7 +782,7 @@
     {"id": "room_ld2410c", "parent_role": "ld2410c", "fleet_quantity": 1, "name": "Shared station LD2410C", "disposition": "unresolved"},
     {"id": "room_amg8833", "parent_role": "amg8833", "fleet_quantity": 1, "name": "Shared station AMG8833", "disposition": "deferred_optional"},
     {"id": "room_soil_probe", "parent_role": "soil_probe", "fleet_quantity": 1, "name": "Shared station soil probe", "disposition": "unresolved"},
-    {"id": "room_nfc_game_tokens", "parent_role": "nfc_game_props", "fleet_quantity": 10, "name": "Shared NFC toy tokens", "disposition": "unresolved"}
+    {"id": "room_nfc_game_tokens", "parent_role": "nfc_game_props", "fleet_quantity": 10, "name": "Shared NFC toy tokens", "disposition": "deferred_optional"}
   ],
   "owned_not_to_rebuy": [
     "BerryIMU spare",

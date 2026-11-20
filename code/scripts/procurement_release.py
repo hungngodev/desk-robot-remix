@@ -145,12 +145,12 @@ REQUIRED_ROOM_PER_STATION = {
     "bme688": 1,
     "ld2410c": 1,
     "soil_probe": 1,
-    "nfc_game_props": 10,
     "room_controller": 1,
 }
 CONDITIONAL_ROOM_PER_STATION = {
-    # Visible current option, not a default first-unit or fleet purchase.
+    # Visible current options, not default first-unit or fleet purchases.
     "amg8833": 1,
+    "nfc_game_props": 10,
 }
 
 # Fourteen linked assembly parts or alternatives from the detailed purchasing
