@@ -579,6 +579,20 @@ class Conversation:
         # volatile attention view. It never authorizes motion or queues speech.
         attention = self.attention
         attention_tokens: dict[str, int] = {}
+
+        def record_sent_attention(robot_id: str, spoken: str) -> None:
+            # Attention is optional telemetry, not part of the audio receipt.
+            # A broken callback must not turn transmitted speech into failure
+            # or cancel the next legitimate group turn.
+            if robot_id not in attention_tokens:
+                return
+            try:
+                sent = getattr(attention, "sent", None)
+                if callable(sent):
+                    sent(robot_id, spoken, time.monotonic())
+            except Exception:
+                self.attention_failures += 1
+
         outcome = "failed"
         transcript = []
         current_robot = None
@@ -763,10 +777,7 @@ class Conversation:
                                         completed_segments.append(segment)
                                         record["sent_segments"] += 1
                                         record["updated_at"] = time.monotonic()
-                                        if robot.id in attention_tokens:
-                                            attention.sent(
-                                                robot.id, segment, time.monotonic()
-                                            )
+                                        record_sent_attention(robot.id, segment)
                                     if not completed_segments:
                                         # A successful HTTP stream with zero
                                         # spoken segments is not a completed
@@ -786,10 +797,7 @@ class Conversation:
                                     await say_group(robot, text)
                                     record["sent_segments"] += 1
                                     record["updated_at"] = time.monotonic()
-                                    if robot.id in attention_tokens:
-                                        attention.sent(
-                                            robot.id, text, time.monotonic()
-                                        )
+                                    record_sent_attention(robot.id, text)
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
                             await self._persist_spoken_turn(robot, text, robots)
