@@ -1273,3 +1273,45 @@ def test_active_job_unhashable_fields_are_not_prompt_authority():
         "physical_action_verified": False, "motor_authorized": False,
     }]
     assert compose_brain_context([], [], forged).interaction == ""
+
+
+async def test_group_dialogue_receives_current_job_with_handling_between_turns(settings):
+    """Current physical activity follows song context, without scripted speech.
+
+    This verifies turn-level prompt input, not simultaneous hardware playback.
+    """
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    ids = [robot.id for robot in settings.robots]
+    assert len(ids) >= 2
+    hub = CameraFrameHub(ids)
+    jobs = {}
+    prompts = []
+
+    class SongChat:
+        async def reply(self, history):
+            prompts.append(history)
+            if len(prompts) == 1:
+                jobs["explore"] = SimpleNamespace(
+                    robot_id=ids[1], kind="exploration", state="running"
+                )
+                hub.notify(ids[1], "handling_tilt", time.monotonic())
+            return "I will keep the song going."
+
+    conversation = Conversation(settings, SongChat(), SimulatedSpeaker())
+    conversation.multimodal = SimpleNamespace(hub=hub)
+    conversation.coordinator_jobs = jobs
+    result = await conversation.run(
+        ids[:2], "Sing as we approach the desk edge", utterances=2
+    )
+    assert len(result) == 2
+    assert "Mac operator-submitted exploration job" not in str(prompts[0])
+    assert "Mac operator-submitted exploration job is running" in str(prompts[1])
+    assert "Physical sensor edge: handling_tilt" in str(prompts[1])
+    assert "Sing as we approach the desk edge" in str(prompts[1])
+    assert not any(
+        "Mac operator-submitted exploration job" in str(message)
+        for messages in conversation.histories.values() for message in messages
+    )

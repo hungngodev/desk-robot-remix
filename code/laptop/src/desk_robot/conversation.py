@@ -10,7 +10,7 @@ from typing import Callable, Protocol
 
 import httpx
 
-from .brain_context import _memory_label, compose_brain_context
+from .brain_context import _memory_label, active_job_timeline, compose_brain_context
 from .config import RobotConfig, Settings, secret
 from .memory import MemoryStore
 from .streamed_ollama import ollama_speech_segments
@@ -364,6 +364,7 @@ class Conversation:
         self.active: asyncio.Task | None = None
         self.histories: dict[str, list[dict]] = {}
         self.multimodal = None  # Existing Mac live context, attached in hardware mode.
+        self.coordinator_jobs = None  # Existing Coordinator's read-only registry.
 
     async def _say_with_permission(
         self, robot: RobotConfig, text: str,
@@ -532,9 +533,18 @@ class Conversation:
                         or not self.settings.voice_vision_tools_enabled
                         or not self.settings.fleet_text_sharing_enabled):
                     return ""
-                timeline = self.multimodal.hub.interaction_timeline(
-                    robot_id, time.monotonic(), limit=10
+                # An active physical job is ongoing context even if bursty
+                # camera and sensor events compete for the fixed cue budget.
+                # This NEVER authorizes the model to issue motion commands.
+                jobs = self.coordinator_jobs
+                activity = (
+                    active_job_timeline(jobs.values(), robot_id)
+                    if isinstance(jobs, dict) else []
                 )
+                timeline = self.multimodal.hub.interaction_timeline(
+                    robot_id, time.monotonic(), limit=10 - len(activity)
+                )
+                timeline.extend(activity)
                 if not self.settings.voice_memory_tools_enabled:
                     timeline = [
                         item for item in timeline
