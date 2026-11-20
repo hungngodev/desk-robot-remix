@@ -2,8 +2,8 @@
 
 These checks do not qualify printed dimensions or powered charging.
 """
-from pathlib import Path
 import re
+from pathlib import Path
 
 SOURCE = (
     Path(__file__).resolve().parents[2]
@@ -30,10 +30,10 @@ def test_dock_rail_preserves_selected_straight_channel_and_entry_flare():
     # Geometric clearance is between opposing rail INNER faces.
     assert abs((outside - 2 * inner_x) - channel) < 1e-6
     # At y=0 both rail faces shift OUTWARD equally, preserving wall thickness.
-    assert f"[inner_wall_x - guide_wall_mm - entry_flare_each_mm, 0]" in source
-    assert f"[inner_wall_x - entry_flare_each_mm, 0]" in source
-    assert f"[inner_wall_x, 37]" in source
-    assert f"[inner_wall_x - guide_wall_mm, 37]" in source
+    assert "[inner_wall_x - guide_wall_mm - entry_flare_each_mm, 0]" in source
+    assert "[inner_wall_x - entry_flare_each_mm, 0]" in source
+    assert "[inner_wall_x, 37]" in source
+    assert "[inner_wall_x - guide_wall_mm, 37]" in source
     assert (outside - 2 * (inner_x - flare)) > channel
     assert "intersection()" in source
     assert "dock_rail_entry_coupon()" in source

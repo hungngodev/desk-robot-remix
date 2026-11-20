@@ -12,8 +12,8 @@ import os
 import shutil
 import subprocess
 import tempfile
-from hashlib import sha256
 from collections import Counter
+from hashlib import sha256
 from math import isfinite
 from pathlib import Path
 from struct import unpack_from
