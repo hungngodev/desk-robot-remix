@@ -366,6 +366,7 @@ class Conversation:
         self.histories: dict[str, list[dict]] = {}
         self.multimodal = None  # Existing Mac live context, attached in hardware mode.
         self.coordinator_jobs = None  # Existing Coordinator's read-only registry.
+        self.attention = None  # Runtime-owned voluntary context, not voice state.
         # The original speaker task owns this short lived dialogue state.
         self._group_activity_epoch = 0
         self._group_activity: dict[str, dict] = {}
@@ -565,6 +566,15 @@ class Conversation:
                 "topic": topic_excerpt, "sent_segments": 0,
                 "updated_at": time.monotonic(),
             }
+        # Mirror authenticated operator topics into the ONE Runtime-owned
+        # volatile attention view. It never authorizes motion or queues speech.
+        attention = self.attention
+        attention_tokens: dict[str, int] = {}
+        if attention is not None and topic_excerpt:
+            for robot in robots:
+                attention_tokens[robot.id] = attention.begin_topic(
+                    robot.id, topic_excerpt, time.monotonic()
+                )
         outcome = "failed"
         transcript = []
         current_robot = None
@@ -713,6 +723,10 @@ class Conversation:
                                         completed_segments.append(segment)
                                         record["sent_segments"] += 1
                                         record["updated_at"] = time.monotonic()
+                                        if robot.id in attention_tokens:
+                                            attention.sent(
+                                                robot.id, segment, time.monotonic()
+                                            )
                                     if not completed_segments:
                                         # A successful HTTP stream with zero
                                         # spoken segments is not a completed
@@ -732,6 +746,10 @@ class Conversation:
                                     await say_group(robot, text)
                                     record["sent_segments"] += 1
                                     record["updated_at"] = time.monotonic()
+                                    if robot.id in attention_tokens:
+                                        attention.sent(
+                                            robot.id, text, time.monotonic()
+                                        )
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
                             await self._persist_spoken_turn(robot, text, robots)
@@ -803,11 +821,22 @@ class Conversation:
                 if record is not None and record["epoch"] == epoch:
                     record["status"] = outcome
                     record["updated_at"] = time.monotonic()
-                    if ((sharing_at_start
+                    revoked = (
+                        (sharing_at_start
                          and not self.settings.fleet_text_sharing_enabled)
-                            or (visual_at_start
-                                and not self.settings.voice_vision_tools_enabled)):
+                        or (visual_at_start
+                            and not self.settings.voice_vision_tools_enabled)
+                    )
+                    if revoked:
                         record["topic"] = ""
+                    if robot.id in attention_tokens:
+                        if revoked:
+                            attention.clear(robot.id)
+                        else:
+                            attention.finish_topic(
+                                robot.id, attention_tokens[robot.id],
+                                time.monotonic(), interrupted=outcome != "completed",
+                            )
             self.active = None
 
     async def say_proactive(
