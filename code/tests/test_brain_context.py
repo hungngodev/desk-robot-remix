@@ -201,18 +201,11 @@ def test_latched_safety_fault_survives_tiny_live_context_and_newer_touch():
     assert "do not drive, reverse, rearm" in prompt
     assert not any(item["kind"] == "safety_fault" for item in
                    hub.interaction_timeline("robot-02", now, limit=4))
-    # Past faults can inform a conversation for 60s, but must not be
-    # represented as fresh WROOM telemetry or a current motor state.
+    # Once the original eight-second context TTL expires, a previously
+    # reported fault must not reappear as a NEW safety announcement. The
+    # physical WROOM latch is independent of this optional prompt history.
     older = hub.interaction_timeline("robot-01", now + 9, limit=10)
-    assert not any(item["channel"] == "sensor"
-                   and item["kind"] == "safety_fault" for item in older)
-    past_fault = next(item for item in older
-                      if item["kind"] == "safety_fault")
-    assert past_fault["channel"] == "sensor_history"
-    assert past_fault["historical_not_current"] is True
-    assert past_fault["source"] == "wroom_event_history"
-    assert "historical, not current status" in compose_brain_context(
-        [], [], [past_fault]).interaction
+    assert not any(item["kind"] == "safety_fault" for item in older)
     assert not any(item["kind"] == "safety_fault" for item in
                    hub.interaction_timeline("robot-01", now + 61))
     hub.clear("robot-01")
