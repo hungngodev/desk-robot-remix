@@ -395,6 +395,31 @@ async def test_group_stream_revocation_stops_next_segment_and_never_shares_parti
         await asyncio.gather(task, return_exceptions=True)
 
 
+async def test_broken_optional_live_speech_context_cannot_mask_human_cancel(settings):
+    """An optional RAM transcript failure must not replace a voice abort."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = False
+
+    class InterruptibleStream:
+        async def stream_reply(self, history):
+            yield "Already transmitted."
+            settings.fleet_text_sharing_enabled = False
+            yield "Never transmit this."
+
+    class BrokenHub:
+        def remember_spoken(self, robot_id, text, sent_at):
+            raise RuntimeError("optional context recorder unavailable")
+
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, InterruptibleStream(), speaker)
+    conversation.multimodal = SimpleNamespace(hub=BrokenHub())
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(["robot-01", "robot-02"], "Continue", 2)
+    assert speaker.spoken == [("robot-01", "Already transmitted.")]
+    assert conversation.active is None
+
+
 async def test_conversation_six_total_alternating_independent_histories(settings):
     speaker = SimulatedSpeaker()
     c = Conversation(settings, SimulatedChat(), speaker)
