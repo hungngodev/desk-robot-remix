@@ -159,7 +159,11 @@ class AttentionLedger:
             return False
         if state.sensor_edges and at < state.sensor_edges[-1][1]:
             return False
-        if state.sensor_edges and state.sensor_edges[-1][0] == kind:
+        if (state.sensor_edges and state.sensor_edges[-1][0] == kind
+                and at - state.sensor_edges[-1][1] < 2.0):
+            # Suppress duplicate callbacks during the same short physical
+            # interaction, not every subsequent authentic touch of that kind.
+            # A later contact remains optional context, never forced speech.
             return False
         # Repeated low-value gestures must not evict the one meaningful
         # handling or local safety cue during a longer conversation.
