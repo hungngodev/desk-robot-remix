@@ -91,9 +91,9 @@ Other reported spares are not interchangeable with chosen modules: BerryIMU, MAX
 | linked detail (not additive) | Shared station SCD40 | 1 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent scd40; disposition unresolved; see the canonical 14-row source register before buying | | |
 | linked detail (not additive) | Shared station BME688 | 1 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent bme688; disposition unresolved; see the canonical 14-row source register before buying | | |
 | linked detail (not additive) | Shared station LD2410C | 1 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent ld2410c; disposition unresolved; see the canonical 14-row source register before buying | | |
-| linked detail (not additive) | Shared station AMG8833 | 1 if selected | not independently counted | REVIEWED DECISION, CHECK DISPOSITION | Linked parent amg8833; disposition deferred_optional; see the canonical 14-row source register before buying | | |
+| linked detail (not additive) | Shared station AMG8833 | 1 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent amg8833; disposition deferred_optional; see the canonical 14-row source register before buying | | |
 | linked detail (not additive) | Shared station soil probe | 1 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent soil_probe; disposition unresolved; see the canonical 14-row source register before buying | | |
-| linked detail (not additive) | Shared NFC toy tokens | 10 if selected | not independently counted | REVIEWED DECISION, CHECK DISPOSITION | Linked parent nfc_game_props; disposition deferred_optional; see the canonical 14-row source register before buying | | |
+| linked detail (not additive) | Shared NFC toy tokens | 10 if selected | not independently counted | HOLD SUBASSEMBLY DECISION | Linked parent nfc_game_props; disposition deferred_optional; see the canonical 14-row source register before buying | | |
 
 A zero remaining quantity can mean a component is estimated owned or ordered, NOT physically counted, delivered or qualified. Recount the estimated ten MG90S and five MAX30102 and verify arrival of the one ordered XIAO Sense before buying duplicates.
 
