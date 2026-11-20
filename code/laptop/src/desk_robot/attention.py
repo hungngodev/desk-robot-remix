@@ -123,6 +123,9 @@ class AttentionLedger:
         """Only *transmitted* model text, never physical playback confirmation."""
         _clock(at)
         state = self._state(robot_id)
+        # Late previous-topic events cannot enter the new generation.
+        if (state.topic_state == "active" and at < state.topic_updated_at):
+            return False
         if at < max(state.sent_at, state.voice_at):
             # Late old speech must not reappear after new human barge.
             return False
@@ -137,6 +140,10 @@ class AttentionLedger:
         _clock(at)
         state = self._state(robot_id)
         if not isinstance(kind, str) or not re.fullmatch(r"[a-z_]{1,40}", kind):
+            return False
+        if (state.topic_state == "active"
+                and at < state.topic_updated_at):
+            # An old queued callback cannot become fresh context for a new goal.
             return False
         if (state.topic_state != "active"
                 and not 0 <= at - max(state.asr_at, state.sent_at) <= 120):
