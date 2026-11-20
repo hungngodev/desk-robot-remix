@@ -176,9 +176,8 @@ class CameraFrameHub:
         self.shared_room: RoomObservation | None = None
 
     def remember_room(self, observation: RoomObservation) -> None:
-        if not isinstance(observation, RoomObservation) or not _finite(
-            observation.received_at
-        ):
+        if (not isinstance(observation, RoomObservation)
+                or not _admissible_mac_event_clock(observation.received_at)):
             raise ValueError("Room provenance must come from validated USB source")
         previous = self.shared_room
         if previous is not None and observation.received_at <= previous.received_at:
@@ -317,7 +316,7 @@ class CameraFrameHub:
         self._check(robot_id)
         if generation is not None and generation != self._generation[robot_id]:
             raise RuntimeError("Old camera generation discarded")
-        if not _finite(received_at) or source not in {
+        if not _admissible_mac_event_clock(received_at) or source not in {
             "proactive", "speech", "voice_question", "sensor"
         }:
             raise ValueError("Unknown image source or invalid time")

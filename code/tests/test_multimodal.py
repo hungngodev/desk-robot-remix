@@ -2545,3 +2545,41 @@ def test_future_vad_evidence_cannot_poison_speech_floor_or_later_end():
     assert not hub.user_active("robot-01", now + 0.04)
     assert hub.spontaneous_floor_busy(now + 0.5)
     assert not hub.spontaneous_floor_busy(now + 0.9)
+
+
+def test_future_camera_and_shared_room_receipts_cannot_block_real_observations():
+    from desk_robot.room_station import RoomObservation
+
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    prepared = _prepare(image())
+    with pytest.raises(ValueError, match="invalid time"):
+        hub.offer_prepared(
+            "robot-01", prepared, now + 3600, source="proactive",
+        )
+    assert not hub.frames["robot-01"]
+    assert hub.due("robot-01", now)
+    legitimate_frame = hub.offer_prepared(
+        "robot-01", prepared, now, source="proactive",
+    )
+    assert hub.selected("robot-01", "What is on the desk?", now) == [legitimate_frame]
+    assert hub.selected("robot-02", "What do you see?", now) == []
+
+    poisoned = RoomObservation(
+        seq=1, at_ms=1, received_at=now + 3600,
+        readings={}, summary="FUTURE_SHARED_STATION",
+    )
+    real = RoomObservation(
+        seq=2, at_ms=2, received_at=now,
+        readings={}, summary="CURRENT_SHARED_STATION",
+    )
+    with pytest.raises(ValueError, match="Room provenance"):
+        hub.remember_room(poisoned)
+    hub.remember_room(real)
+    assert hub.shared_room == real
+    assert "CURRENT_SHARED_STATION" in str(
+        hub.interaction_timeline("robot-02", now)
+    )
+    assert "FUTURE_SHARED_STATION" not in str(
+        hub.interaction_timeline("robot-01", now)
+    )
