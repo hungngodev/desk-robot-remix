@@ -1,7 +1,10 @@
 """Machine check the chosen full-feature five-pet hardware electrical plan."""
 import json
 import re
+import runpy
 from pathlib import Path
+
+import pytest
 
 PLAN = Path(__file__).resolve().parents[2] / "docs/hardware/full-feature-plan.json"
 
@@ -299,3 +302,71 @@ def test_full_fleet_speaker_source_is_exact_2w_and_remains_physical_hold():
     assert "speaker_l=20;" in source
     assert "speaker_w=16;" in source
     assert "speaker_h=4.7;" in source
+
+
+def test_usb_bench_exposes_only_raw_mpu_free_fall_counter():
+    """A physical calibration operator needs IRQ count, not inferred drop."""
+    bench = runpy.run_path(str(
+        Path(__file__).resolve().parents[1] / "scripts/serial_bench.py"
+    ))
+    observe = bench["inspect_native_low_g"]
+    raw = {"low_g_valid": True, "low_g_irq": True, "low_g_seq": 1}
+    result = observe(raw, 4, True)
+    assert result == {
+        "reported": True, "status_valid": True,
+        "interrupt_in_last_sample": True, "event_seq": 1,
+        "physical_qualification_pass": False,
+    }
+    after_irq = {**raw, "low_g_irq": False}
+    assert observe(after_irq, 4, True)["event_seq"] == 1
+    assert not observe(after_irq, 4, True)["interrupt_in_last_sample"]
+    assert not observe({}, 4, True)["reported"]
+    assert observe({
+        "low_g_valid": False, "low_g_irq": False, "low_g_seq": 1,
+    }, 4, False)["event_seq"] == 1
+    assert not observe({
+        "low_g_valid": False, "low_g_irq": False, "low_g_seq": 0,
+    }, 0, False)["status_valid"]
+
+    for invalid, family, valid in (
+        ({"low_g_valid": True}, 4, True),
+        ({**raw, "low_g_valid": 1}, 4, True),
+        ({**raw, "low_g_irq": 1}, 4, True),
+        ({**raw, "low_g_seq": True}, 4, True),
+        ({**raw, "low_g_seq": -1}, 4, True),
+        ({**raw, "low_g_seq": 0}, 4, True),
+        ({**raw, "low_g_seq": 0x100000000}, 4, True),
+        ({**raw, "low_g_valid": False}, 4, True),
+        (raw, 1, True),
+        (raw, 4, False),
+    ):
+        with pytest.raises(ValueError, match="free-fall"):
+            observe(invalid, family, valid)
+
+
+def test_usb_bench_real_body_status_includes_native_low_g_without_release():
+    bench = runpy.run_path(str(
+        Path(__file__).resolve().parents[1] / "scripts/serial_bench.py"
+    ))
+    status = {
+        "backend": "stepper_28byj48", "armed": False,
+        "touch": {"active": False},
+        "safety": {"ready": False, "fault": "not_required"},
+        "ranges": {
+            "present_mask": 0, "valid_mask": 0,
+            "mm": [0] * 5, "age_ms": [0] * 5,
+        },
+        "imu": {
+            "family": 4, "gyro_id": 0x68, "aux_id": 0,
+            "valid": True, "acc": [0, 0, 16384], "gyro": [0, 0, 0],
+            "age_ms": 20,
+            "low_g_valid": True, "low_g_irq": False, "low_g_seq": 3,
+        },
+    }
+    report = bench["inspect_status"](status)
+    assert report["imu"]["native_low_g"]["event_seq"] == 3
+    assert report["imu"]["native_low_g"]["reported"] is True
+    assert report["imu"]["native_low_g"]["physical_qualification_pass"] is False
+    assert report["physical_qualification_pass"] is False
+    assert report["eligible_for_manual_local_rearm"] is False
+
