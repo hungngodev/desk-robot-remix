@@ -1120,7 +1120,7 @@ def test_low_g_status_read_failure_cannot_erase_counter_or_claim_event():
     calibrated(gate)
     assert qualified(gate, _mpu_native_low_g(0), 102.0) == ()
     assert qualified(gate, _mpu_native_low_g(1, valid=False), 102.2) == ()
-    assert gate.reference == (0, 0, 1)  # do not trust unverified status
+    assert gate.reference is None  # unknown FF status cannot preserve upright pose
     assert gate.last_low_g_seq == 0
     assert qualified(gate, _mpu_native_low_g(1), 102.4) == ()
     assert gate.reference is None  # the later valid counter reveals the IRQ
