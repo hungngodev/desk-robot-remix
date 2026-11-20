@@ -340,16 +340,23 @@ class HttpHead:
                     # Record receipt at the network boundary, not later as a
                     # slow consumer iterates several older frames in a batch.
                     received = time.monotonic()
-                    for jpeg, identity in reader.iter_feed(chunk):
-                        async with self._stream_condition:
-                            if generation != self._stream_generation:
-                                raise HeadError("Superseded XIAO camera stream")
+                    # Validate every source identity, but only surface the
+                    # newest image in a coalesced network read. This prevents
+                    # slow vision consumers from working through stale scenes.
+                    latest = None
+                    async with self._stream_condition:
+                        if generation != self._stream_generation:
+                            raise HeadError("Superseded XIAO camera stream")
+                        for jpeg, identity in reader.iter_feed(chunk):
                             self._accept_camera_identity(identity)
-                            self._stream_latest = jpeg
+                            latest = jpeg
+                        if latest is not None:
+                            self._stream_latest = latest
                             self._stream_received_at = received
                             self._stream_version += 1
                             self._stream_condition.notify_all()
-                        yield jpeg, received
+                    if latest is not None:
+                        yield latest, received
         except (httpx.HTTPError, ValueError) as exc:
             raise HeadError("XIAO authenticated camera stream unavailable") from exc
         finally:

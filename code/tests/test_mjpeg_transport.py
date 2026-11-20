@@ -92,6 +92,34 @@ async def test_batched_stream_frames_keep_actual_network_receipt_timestamp(
             SimpleNamespace(monotonic=lambda: next(ticks)),
         )
         received = [when async for _, when in head.stream_frames()]
-    # Both frames arrived in one HTTP read, even if a slow consumer takes
-    # time between yields. The second frame must not get fictitious freshness.
-    assert received == [123.0, 123.0]
+    # The most recent frame wins within one network read. Older identities
+    # are still validated before the scene is handed to the model.
+    assert received == [123.0]
+    assert head._last_camera == (19, 2, 500000)
+
+
+@pytest.mark.asyncio
+async def test_batched_stream_rejects_replayed_identity_before_latest(monkeypatch):
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    jpeg = b"\xff\xd8" + b"x" * 20 + b"\xff\xd9"
+    batch = _part(1, jpeg) + _part(1, jpeg) + _part(2, jpeg)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200, content=batch, headers={
+                    "content-type": "multipart/x-mixed-replace; boundary=deskrobotframe"
+                },
+            )
+        )
+    ) as client:
+        head = HttpHead(
+            RobotConfig(
+                id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+                head_url="http://head.example",
+            ),
+            client,
+        )
+        with pytest.raises(ValueError, match="stale or replayed"):
+            async for _ in head.stream_frames():
+                pass
