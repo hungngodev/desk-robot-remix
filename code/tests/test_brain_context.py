@@ -1315,3 +1315,37 @@ async def test_group_dialogue_receives_current_job_with_handling_between_turns(s
         "Mac operator-submitted exploration job" in str(message)
         for messages in conversation.histories.values() for message in messages
     )
+
+
+
+def test_distinct_historical_physical_events_survive_context_deduplication():
+    """Keep different past physical cues separate without manufacturing a reply."""
+    entries = [
+        {"channel": "sensor_history", "kind": "handling_tilt",
+         "age_ms": 12000, "source": "wroom_event_history",
+         "historical_not_current": True},
+        {"channel": "sensor_history", "kind": "touch_tap",
+         "age_ms": 10000, "source": "wroom_event_history",
+         "historical_not_current": True},
+        {"channel": "sensor_history", "kind": "touch_tap",
+         "age_ms": 9000, "source": "wroom_event_history",
+         "historical_not_current": True},
+    ]
+    summary = compose_brain_context([], [], entries).interaction
+    assert "handling_tilt" in summary
+    assert summary.count("touch_tap") == 1
+    assert "12s ago; historical" in summary
+    assert "9s ago; historical" in summary
+    assert len(summary) <= 400
+
+
+def test_historical_physical_cue_rejects_bad_source_and_stale_age():
+    summary = compose_brain_context([], [], [
+        {"channel": "sensor_history", "kind": "handling_tilt",
+         "age_ms": 9000, "source": "untrusted_tool_text",
+         "historical_not_current": True},
+        {"channel": "sensor_history", "kind": "touch_tap",
+         "age_ms": 61000, "source": "wroom_event_history",
+         "historical_not_current": True},
+    ]).interaction
+    assert summary == ""
