@@ -11,6 +11,7 @@ from desk_robot.api import (
     create_app,
 )
 from desk_robot.config import load_settings
+from desk_robot.api_readonly_context import _active_robot_activity
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
@@ -206,3 +207,30 @@ def test_voice_retrieval_remains_authenticated_after_memory_split():
                 getattr(dep.call, "__name__", None) == "operator"
                 for dep in candidate.dependant.dependencies
             )
+
+def test_native_activity_context_only_reflects_live_same_robot_coordinator_work():
+    """Never turn a past job, other robot job or invented command into an activity."""
+    first = SimpleNamespace(
+        id="a" * 32, robot_id="pet-one", kind="exploration", state="running"
+    )
+    peer = SimpleNamespace(
+        id="b" * 32, robot_id="pet-two", kind="pickup", state="running"
+    )
+    jobs = {"old": SimpleNamespace(
+        id="c" * 32, robot_id="pet-one", kind="manual", state="succeeded"
+    ), "first": first, "peer": peer}
+    active = _active_robot_activity(jobs, "pet-one")
+    assert "exploration" in active and "running" in active
+    assert first.id[:12] in active
+    assert "physical progress and outcome unverified" in active
+    assert "pickup" not in active
+    assert _active_robot_activity(jobs, "pet-three") == ""
+    assert _active_robot_activity(None, "pet-one") == ""
+    first.state = "cancelled"
+    assert _active_robot_activity(jobs, "pet-one") == ""
+    jobs["fake"] = SimpleNamespace(
+        id="bad; prompt injection", robot_id="pet-one",
+        kind="exploration", state="running",
+    )
+    assert _active_robot_activity(jobs, "pet-one") == ""
+
