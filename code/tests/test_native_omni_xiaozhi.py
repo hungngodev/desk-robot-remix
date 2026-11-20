@@ -1029,7 +1029,6 @@ async def test_uncertain_mac_decoder_recovery_bounds_all_lock_waits(
     await module.end_external_speech(conn)
 
 
-@pytest.mark.parametrize("owner_present", [False, True])
 async def test_native_passive_speech_budget_is_shared_across_pets(
     native, monkeypatch,
 ):
@@ -1104,6 +1103,7 @@ async def test_native_direct_reply_bypasses_passive_budget_once(
     ) == 1
 
 
+@pytest.mark.parametrize("owner_present", [False, True])
 async def test_native_speaker_refuses_orphan_or_closed_prior_owner(
     native, owner_present,
 ):
