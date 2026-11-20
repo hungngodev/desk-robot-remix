@@ -589,7 +589,7 @@ class Conversation:
                 try:
                     for robot in robots:
                         attention_tokens[robot.id] = attention.begin_topic(
-                            robot.id, topic_excerpt, time.monotonic()
+                            robot.id, topic_excerpt, time.monotonic(), origin=origin
                         )
                 except (KeyError, ValueError):
                     self.attention_failures += 1
