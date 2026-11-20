@@ -25,7 +25,7 @@ async def test_permit_is_operator_only_one_use_per_robot(settings):
         job = c.manual("robot-01", "drive 20 20 100")
         await c.tasks[job.id]
         assert job.state == "succeeded"
-        assert head.commands[0] == "arm" and head.commands[-1] == "stop"
+        assert head.commands[0] == "arm" and head.commands[-1] == "halt"
         assert head.commands.count("drive 20 20 100") == 1
         with pytest.raises(OperationError, match="permit"):
             c.manual("robot-01", "drive 20 20 100")
@@ -41,7 +41,7 @@ async def test_two_argument_drive_uses_firmware_default_duration(settings):
         await c.tasks[job.id]
         assert job.state == "succeeded", job.error
         assert head.commands.count("drive 20 20") == 1
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         # This was once a post-command IndexError in the Mac coordinator.
         assert not any("IndexError" in event for event in job.events)
     finally:
@@ -72,7 +72,7 @@ async def test_uncertain_commands_not_retried_and_stop_finally(settings, failure
         job = c.manual("robot-01", "drive 20 20 100")
         await c.tasks[job.id]
         assert job.state == "failed"
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         assert head.commands.count("drive 20 20 100") <= 1
     finally:
         await c.close()
@@ -100,7 +100,7 @@ async def test_deadline_cancels_work_and_stop(settings):
         await c.operator_arm("robot-01")
         job = c.manual("robot-01", "lift 110")
         await c.tasks[job.id]
-        assert job.state == "failed" and head.commands[-1] == "stop"
+        assert job.state == "failed" and head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -119,7 +119,7 @@ async def test_simulated_closed_loop_pickup_is_not_acceptance(settings):
         assert head.commands.count("grip 60") == 2  # initial opening and final release
         assert head.commands.count("lift 110") == 2  # held object, then jaw withdrawal
         assert head.commands.index("grip 110") < head.commands.index("lift 110")
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -144,7 +144,7 @@ async def test_pickup_failures_stop(settings, fault):
         await c.operator_arm("robot-01")
         job = c.pickup("robot-01", "candy")
         await c.tasks[job.id]
-        assert job.state == "failed" and head.commands[-1] == "stop"
+        assert job.state == "failed" and head.commands[-1] == "halt"
         assert job.result is None
     finally:
         await c.close()
@@ -175,7 +175,7 @@ async def test_pickup_does_not_report_success_without_verified_placement(setting
         assert openings == 2
         assert job.state == "failed"
         assert job.result is None
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -212,7 +212,7 @@ async def test_emergency_stop_reaches_body_before_blocking_job_cleanup(settings)
 
     class ObservedHead(SimulatedHead):
         async def command(self, command):
-            if command == "stop":
+            if command == "halt":
                 stop_sent.set()
             return await super().command(command)
 
@@ -360,7 +360,7 @@ async def test_hardware_motion_requires_new_safety_status_at_execution(settings)
         assert "Hardware preflight" in job.error
         assert "arm" not in head.commands
         assert not any(cmd.startswith("drive") for cmd in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         assert "robot-01" not in coordinator.permits
     finally:
         await coordinator.close()
@@ -376,7 +376,7 @@ async def test_hardware_motion_permitted_only_when_all_status_fields_clear(setti
         await coordinator.tasks[job.id]
         assert job.state == "succeeded", job.error
         assert head.commands[0] == "arm"
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         assert head.commands.count("drive 0 0 10") == 1
     finally:
         await coordinator.close()
@@ -402,7 +402,7 @@ async def test_exploration_persists_under_one_permit_until_explicit_stop(setting
         assert c.tasks[job.id].done() is False
         await c.stop("robot-01")
         assert job.state == "cancelled"
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         assert c.permits.get("robot-01") is None
     finally:
         await c.close()
@@ -420,7 +420,7 @@ async def test_authenticated_human_preempts_running_exploration_without_rearming
         assert stopped == ("robot-01",)
         assert job.state in {"cancelled", "failed"}
         assert c.permits.get("robot-01") is None
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         assert any("preempted by live human" in event for event in job.events)
         before = head.commands.count("drive 20 20 100")
         await asyncio.sleep(0.2)
@@ -458,7 +458,7 @@ async def test_voice_roaming_stop_fault_remains_unconfirmed(settings):
         async with asyncio.timeout(3):
             while head.commands.count("drive 20 20 100") == 0:
                 await asyncio.sleep(0.01)
-        head.fail_command = "stop"
+        head.fail_command = "halt"
         with pytest.raises(OperationError, match="STOP unconfirmed"):
             await c.stop_active_exploration()
         assert any("preempted by live human" in event for event in job.events)
@@ -487,7 +487,7 @@ async def test_exploration_drops_on_body_disarm_and_never_rearms(settings):
         assert job.state == "failed"
         assert "disarmed" in job.error
         assert head.commands.count("arm") == 1
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -510,7 +510,7 @@ async def test_exploration_rechecks_body_after_slow_camera_before_drive(settings
         assert job.state == "failed"
         assert "disarmed" in job.error
         assert not any(cmd.startswith("drive ") for cmd in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -529,7 +529,7 @@ async def test_exploration_camera_hang_expires_before_any_drive(settings):
         assert job.state == "failed"
         assert "timeout" in (job.error or "").lower()
         assert not any(cmd.startswith("drive ") for cmd in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -563,7 +563,7 @@ async def test_pickup_cancels_before_grip_when_body_loses_arm_mid_alignment(sett
         await asyncio.wait_for(c.tasks[job.id], 5)
         assert job.state == "failed" and "disarmed" in job.error
         assert "grip 110" not in head.commands
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         assert head.commands.count("arm") == 1
     finally:
         await c.close()
@@ -621,7 +621,7 @@ async def test_pickup_never_drives_using_safety_from_before_slow_vision(settings
         assert job.state == "failed"
         assert job.result is None
         assert all(not command.startswith("drive ") for command in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await coordinator.close()
 
@@ -644,7 +644,7 @@ async def test_pickup_never_drives_if_wroom_faults_during_object_detector(settin
         assert job.state == "failed"
         assert job.result is None
         assert all(not line.startswith("drive ") for line in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -669,7 +669,7 @@ async def test_exploration_refuses_invalid_camera_before_any_drive(settings, bad
         assert job.state == "failed"
         assert "invalid JPEG" in (job.error or "")
         assert not any(cmd.startswith("drive ") for cmd in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -692,7 +692,7 @@ async def test_exploration_stops_after_corrupted_post_drive_camera(settings):
         assert job.state == "failed"
         assert "invalid JPEG" in (job.error or "")
         assert head.commands.count("drive 20 20 100") == 1
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -737,7 +737,7 @@ async def test_exploration_rejects_valid_jpeg_with_unusable_dimensions(settings)
         assert job.state == "failed"
         assert "invalid JPEG dimensions" in (job.error or "")
         assert not any(cmd.startswith("drive ") for cmd in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -757,7 +757,7 @@ async def test_exploration_stalled_body_health_times_out_before_motion(settings)
         assert job.state == "failed"
         assert "timeout" in (job.error or "").lower()
         assert not any(cmd.startswith("drive ") for cmd in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         await c.close()
 
@@ -766,7 +766,7 @@ async def test_unresponsive_body_stop_is_bounded(settings):
     """An operator STOP must not await a hung alternate head forever."""
     c, head = make(settings)
     async def hung_stop(command):
-        if command == "stop":
+        if command == "halt":
             await asyncio.sleep(30)
         return await original(command)
 
@@ -785,7 +785,7 @@ async def test_job_cleanup_stop_timeout_fails_without_false_ack(settings):
     c, head = make(settings)
     original = head.command
     async def hung_stop(command):
-        if command == "stop":
+        if command == "halt":
             await asyncio.sleep(30)
         return await original(command)
 
@@ -810,14 +810,14 @@ async def test_cancellation_resistant_stop_returns_before_transport_finishes(set
     original = head.command
 
     async def stubborn_stop(command):
-        if command != "stop":
+        if command != "halt":
             return await original(command)
         reached.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             await release.wait()
-            return {"ok": True, "reply": "stop", "robot_id": "robot-01"}
+            return {"ok": True, "reply": "OK halt", "robot_id": "robot-01"}
 
     head.command = stubborn_stop
     try:
@@ -839,14 +839,14 @@ async def test_cleanup_cannot_claim_late_uncertain_stop_ack(settings):
     original = head.command
 
     async def stubborn_stop(command):
-        if command != "stop":
+        if command != "halt":
             return await original(command)
         reached.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             await release.wait()
-            return {"ok": True, "reply": "stop", "robot_id": "robot-01"}
+            return {"ok": True, "reply": "OK halt", "robot_id": "robot-01"}
 
     head.command = stubborn_stop
     try:
@@ -897,7 +897,7 @@ async def test_exploration_inflight_stop_timeout_aborts_before_second_drive(sett
         assert job.state == "failed"
         assert "STOP transport acknowledgement unconfirmed" in (job.error or "")
         assert head.commands.count("drive 20 20 100") == 1
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         release.set()
         await asyncio.sleep(0)
         assert job.state == "failed"
@@ -1027,7 +1027,7 @@ async def test_exploration_uncooperative_status_timeout_stops_motion(settings):
         assert job.state == "failed"
         assert "active health status timeout" in (job.error or "")
         assert not any(command.startswith("drive ") for command in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
         release.set()
         await asyncio.sleep(0)
         assert job.state == "failed"
@@ -1054,7 +1054,7 @@ async def test_close_revokes_permits_and_stops_active_hardware_job(settings):
     assert c.closed is True
     assert c.permits == {}
     assert task.cancelled()
-    assert head.commands == ["stop"]
+    assert head.commands == ["halt"]
 
 
 async def test_close_reports_unconfirmed_stop_without_hanging(settings):
@@ -1092,8 +1092,8 @@ async def test_hardware_close_stops_idle_registered_bodies_concurrently(settings
     )
     await asyncio.wait_for(c.close(), timeout=1)
     assert c.closed and not c.permits
-    assert first.commands == ["stop"]
-    assert second.commands == ["stop"]
+    assert first.commands == ["halt"]
+    assert second.commands == ["halt"]
 
 
 async def test_hardware_close_stalled_peer_does_not_starve_other_body(settings):
@@ -1123,7 +1123,7 @@ async def test_hardware_close_stalled_peer_does_not_starve_other_body(settings):
         await asyncio.wait_for(c.close(), timeout=1.8)
         assert sent.is_set()
         assert c.closed
-        assert second.commands == ["stop"]
+        assert second.commands == ["halt"]
         assert c.shutdown_stop_failures["robot-01"] == "TimeoutError"
         assert not release.is_set()
     finally:
@@ -1154,7 +1154,7 @@ async def test_exploration_uncooperative_camera_cannot_hold_motion_job_open(sett
         assert job.state == "failed"
         assert "Camera snapshot timeout" in (job.error or "")
         assert not any(command.startswith("drive ") for command in head.commands)
-        assert head.commands[-1] == "stop"
+        assert head.commands[-1] == "halt"
     finally:
         release.set()
         await asyncio.sleep(0)
