@@ -386,4 +386,19 @@ def test_usb_bench_real_body_status_includes_native_low_g_without_release():
     del bad["imu"]["sample_ms"]
     with pytest.raises(ValueError, match="source identity"):
         bench["inspect_status"](bad)
-
+    # DC may use the same selected MPU for bench INSPECTION. This helper
+    # must never infer DC rearm eligibility from five healthy optical beams,
+    # because independent nFAULT/dock/watchdog hardware is not qualified.
+    dc = {
+        **status, "backend": "dc_pwm_guarded",
+        "ranges": {
+            "present_mask": 31, "valid_mask": 31,
+            "mm": [500] * 5, "age_ms": [20] * 5,
+        },
+    }
+    dc_report = bench["inspect_status"](dc)
+    assert dc_report["imu"]["native_low_g"]["event_seq"] == 3
+    assert dc_report["eligible_for_manual_local_rearm"] is False
+    for unguarded in ("dc_pwm", "simulator", "unknown"):
+        with pytest.raises(ValueError, match="guarded"):
+            bench["inspect_status"]({**dc, "backend": unguarded})
