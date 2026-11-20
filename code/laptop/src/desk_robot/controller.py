@@ -47,7 +47,7 @@ async def _bounded_body_stop(head: Head) -> dict:
     """
     return await _bounded_head_reply(
         head.command("halt"), seconds=1.0,
-        timeout_message="WROOM HALT transport acknowledgement unconfirmed",
+        timeout_message="WROOM STOP transport acknowledgement unconfirmed",
     )
 
 
