@@ -290,6 +290,13 @@ def assess_docked_load(
         raise ValueError("Invalid docked load, cell, SYS or reserve measurement")
     if type(motors_confirmed_disarmed) is not bool:
         raise ValueError("Motor disarm state must be an explicit physical boolean")
+    # BQ24074 and BQ24075 do not support >1.5 A input or cell
+    # charging. Keep this bound in the reusable dock screen too, not
+    # only in the whole-stack wrapper, where direct callers can bypass it.
+    if requested_cell_charge_a > 1.5:
+        raise ValueError("BQ2407x cell charge request cannot exceed 1.5A")
+    if charger_input_limit_a is not None and charger_input_limit_a > 1.5:
+        raise ValueError("BQ2407x charger input limit cannot exceed 1.5A")
     ratings = (charger_input_limit_a, charger_board_thermal_input_a,
                dock_adapter_continuous_a, rated_5v_boost_continuous_a,
                protected_pack_max_charge_a)

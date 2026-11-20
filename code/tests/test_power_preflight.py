@@ -494,6 +494,21 @@ def _qualified_dock_ratings():
     }
 
 
+@pytest.mark.parametrize("variant", ["BQ24074", "BQ24075"])
+def test_direct_docked_load_rejects_fictional_bq2407x_two_amp_rating(variant):
+    """The standalone API cannot evade the BQ2407x's 1.5A silicon limits."""
+    ratings = _qualified_dock_ratings()
+    ratings["charger_input_limit_a"] = 2.0
+    with pytest.raises(ValueError, match="input limit cannot exceed 1.5A"):
+        docked(.5, .25, charger_variant=variant, **ratings)
+    ratings["charger_input_limit_a"] = 1.5
+    with pytest.raises(ValueError, match="charge request cannot exceed 1.5A"):
+        docked(.5, 2.0, charger_variant=variant, **ratings)
+    assert docked(.5, .25, charger_variant=variant, **ratings)[
+        "candidate_docked_load_on_paper"
+    ] in (True, False)
+
+
 def test_docked_idle_current_plus_real_charge_target_must_both_fit():
     small = docked(.5, .25, **_qualified_dock_ratings())
     assert small["candidate_docked_load_on_paper"] is True
