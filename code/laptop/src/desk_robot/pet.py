@@ -2173,7 +2173,7 @@ class PetController:
         turns = await asyncio.wait_for(
             self.conversation.run(
                 [robot_id, social_peer_id], topic, utterances=2,
-                permission_check=social_permission,
+                permission_check=social_permission, origin="autonomous_social",
             ), timeout=75.0
         )
         if len(turns) == 2:
