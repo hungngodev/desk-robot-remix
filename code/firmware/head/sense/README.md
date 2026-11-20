@@ -35,8 +35,8 @@ hardware trial. Sense audio, native JPEG and OLED still own their own pins.
 ## Native JPEG for natural live video
 
 The selected Sense firmware now asks the pinned `Esp32Camera` for
-`PIXFORMAT_JPEG` at VGA, with one PSRAM frame buffer and
-`CAMERA_GRAB_WHEN_EMPTY`. The upstream pinned
+`PIXFORMAT_JPEG` at VGA, with two PSRAM frame buffers and
+`CAMERA_GRAB_LATEST`. The upstream pinned
 [`Esp32Camera::Capture`](https://github.com/78/xiaozhi-esp32/blob/c435f99a88066029ec2dbd2d758c8cc9d051565b/main/boards/common/esp32_camera.cc)
 handles sensor JPEG without copying VGA RGB565 and reencoding it in software.
 The existing `modular_snapshot.inc` passes through the already compressed JPEG
@@ -52,7 +52,7 @@ a real Xiaozhi device identity, and private hardware TOML configured:
 cd code
 uv run --no-sync python scripts/bench_head_camera.py \
   --config config/local.toml --robot robot-01 --seconds 60 \
-  --camera-period 1.0 --status-period 0.2 \
+  --stream --status-period 0.2 \
   --report ../docs/records/reports/sense-camera-bench-local.json
 ```
 
@@ -82,8 +82,11 @@ visual mode reports the outage and refuses a silent fallback to
 non-stream camera bench tools may still use the original snapshot endpoint
 when no stream is active. Mic AEC, Opus and emergency speech interruption
 remain with pinned Xiaozhi. Four FPS is a software ceiling, NOT physically
-measured performance. One PSRAM frame buffer is deliberate pending real
-simultaneous camera, microphone, heat, JPEG age and WiFi measurements.
+measured performance. Two PSRAM frame buffers with latest-frame acquisition are the current
+source configuration, pending real simultaneous camera, microphone, heat,
+JPEG age and WiFi measurements. The stream bench rejects gaps longer than
+1.2 seconds, including a delayed first frame or stale final frame; this is
+transport continuity evidence, not a measured exposure rate.
 
 ## Continuous microphone is a separate explicit permit
 

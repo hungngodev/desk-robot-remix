@@ -18,6 +18,10 @@ from desk_robot.transport import HttpHead
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# A stream that delivers a new JPEG after a prolonged blackout is not continuous.
+# This is a generous transport probe threshold, not a hardware FPS qualification.
+MAX_CAMERA_GAP_S = 1.2
+
 
 def summarize(values: list[float]) -> dict:
     if not values:
@@ -101,10 +105,18 @@ async def measure(
                             or not jpeg.startswith(b"\xff\xd8")
                             or not jpeg.endswith(b"\xff\xd9")):
                         raise ValueError("Incomplete JPEG in continuous stream")
-                    if last_frame_at is not None:
+                    if last_frame_at is None:
+                        if received - started > MAX_CAMERA_GAP_S:
+                            raise RuntimeError("Continuous camera stalled before first JPEG")
+                    else:
                         if received <= last_frame_at:
                             raise ValueError("Camera stream receipt clock regressed")
-                        stream_intervals.append(received - last_frame_at)
+                        gap = received - last_frame_at
+                        stream_intervals.append(gap)
+                        if gap > MAX_CAMERA_GAP_S:
+                            raise RuntimeError(
+                                f"Continuous camera stalled for {gap:.2f}s between JPEGs"
+                            )
                     last_frame_at = received
                     identity = getattr(head, "_last_camera", None)
                     if identity is None:
@@ -113,6 +125,11 @@ async def measure(
                         raise ValueError("Duplicate live camera frame identity")
                     seen_camera_identities.add(identity)
                     camera_sizes.append(len(jpeg))
+                # A feed can end exactly at the requested deadline after
+                # sending only one early JPEG. Ending on time is not proof
+                # that frames kept arriving throughout the bench.
+                if last_frame_at is None or deadline - last_frame_at > MAX_CAMERA_GAP_S:
+                    raise RuntimeError("Continuous camera ended without recent JPEG")
                 if time.monotonic() < deadline - 0.15:
                     raise RuntimeError("Continuous camera stream ended early")
         except TimeoutError:

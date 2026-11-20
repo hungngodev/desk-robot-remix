@@ -1,6 +1,7 @@
 """Read-only XIAO camera bench contract; mocks never establish physical AEC."""
 import asyncio
 import importlib.util
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,3 +75,54 @@ async def test_bench_records_stale_jpeg_and_wrong_head_identity_as_failures():
     assert result["camera_latency"]["count"] == 0
     assert result["status_latency"]["count"] == 0
     assert result["sensor_exposure_clock_synchronized"] is False
+
+
+async def test_live_stream_bench_rejects_gap_even_when_new_jpeg_arrives(monkeypatch):
+    """A recovered camera feed is not a continuously healthy one."""
+    monkeypatch.setattr(bench, "MAX_CAMERA_GAP_S", 0.05)
+
+    class InterruptedHead:
+        _last_camera = None
+
+        async def stream_frames(self):
+            self._last_camera = (99, 1, 100)
+            yield b"\xff\xd8first\xff\xd9", time.monotonic()
+            await asyncio.sleep(0.08)
+            self._last_camera = (99, 2, 200)
+            yield b"\xff\xd8second\xff\xd9", time.monotonic()
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    result = await bench.measure(
+        InterruptedHead(), "robot-01", seconds=0.14,
+        status_period_s=0.05, stream=True,
+    )
+    assert result["camera_error_count"] == 1
+    assert any("stalled" in error for error in result["camera_errors"])
+    assert result["camera_frames_received"] == 1
+    assert result["speaker_silence_verified"] is False
+
+
+async def test_live_stream_bench_rejects_end_without_recent_frame(monkeypatch):
+    """Ending near the deadline does not conceal a stale last frame."""
+    monkeypatch.setattr(bench, "MAX_CAMERA_GAP_S", 0.05)
+
+    class StaleHead:
+        _last_camera = None
+
+        async def stream_frames(self):
+            self._last_camera = (101, 1, 100)
+            yield b"\xff\xd8first\xff\xd9", time.monotonic()
+            await asyncio.sleep(0.09)
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    result = await bench.measure(
+        StaleHead(), "robot-01", seconds=0.09,
+        status_period_s=0.05, stream=True,
+    )
+    assert result["camera_error_count"] == 1
+    assert any("without recent JPEG" in error for error in result["camera_errors"])
+    assert result["camera_frames_received"] == 1
