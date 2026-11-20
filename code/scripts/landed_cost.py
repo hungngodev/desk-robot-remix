@@ -66,8 +66,9 @@ def account_landed_cost(
     paid_orders. Every quote has role_key, seller, sku, quantity_packages,
     units_per_package, package_price_usd, quote_reference, quoted_at,
     stock_evidence_url. A seller charge has explicit shipping_usd, tax_usd,
-    duties_usd, discount_usd. Inventory needs an inspection_receipt_url and
-    paid in-flight quantities need a matching order_reference.
+    duties_usd, discount_usd. Inventory needs an inspection_receipt_url.
+    Any paid in-flight quantity must be explicitly allocated to the same role
+    by its matching paid order reference; a paid total alone proves no item.
     """
     if not isinstance(evidence, dict):
         evidence = {}
@@ -130,6 +131,7 @@ def account_landed_cost(
         except (ValueError, KeyError) as exc:
             errors.append(f"quote {index}: {exc}")
     paid_orders = {}
+    paid_order_allocations: dict[str, dict[str, int]] = {}
     if evidence.get("paid_orders_complete") is not True:
         errors.append("Prior paid spending not verified as complete")
     # A missing register is UNKNOWN, even if somebody marked it complete.
@@ -144,9 +146,26 @@ def account_landed_cost(
         try:
             reference = _nonempty(order.get("order_reference"), "paid reference")
             amount = cents(order.get("total_paid_usd"), "paid total")
-            if reference in paid_orders and paid_orders[reference] != amount:
+            raw_allocations = order.get("allocations", [])
+            if not isinstance(raw_allocations, list):
+                raise ValueError("paid allocations must be a list")
+            allocations: dict[str, int] = {}
+            for item in raw_allocations:
+                if not isinstance(item, dict):
+                    raise ValueError("invalid paid allocation")
+                role = _nonempty(item.get("role_key"), "paid allocation role")
+                quantity = positive_count(
+                    item.get("quantity"), "paid allocation units"
+                )
+                if role in allocations:
+                    raise ValueError("duplicate role in paid order allocations")
+                allocations[role] = quantity
+            if reference in paid_orders and (
+                    paid_orders[reference] != amount
+                    or paid_order_allocations[reference] != allocations):
                 raise ValueError("conflicting duplicate paid reference")
             paid_orders[reference] = amount
+            paid_order_allocations[reference] = allocations
         except (AttributeError, ValueError) as exc:
             errors.append(f"paid order {index}: {exc}")
     inventory_claims: set[tuple[str, str]] = set()
@@ -184,6 +203,10 @@ def account_landed_cost(
             ref = _nonempty(incoming.get("order_reference"), "in-flight order")
             if ref not in paid_orders:
                 raise ValueError("in-flight order lacks a paid record")
+            if paid_order_allocations.get(ref, {}).get(role, 0) < quantity:
+                raise ValueError(
+                    "in-flight order does not allocate claimed role and quantity"
+                )
             claim = (role, ref)
             if claim in incoming_claims:
                 raise ValueError("duplicate in-flight order allocation for same role")

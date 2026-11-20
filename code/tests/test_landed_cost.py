@@ -86,6 +86,9 @@ def test_explicit_inventory_and_in_flight_are_distinct():
     assert out["calculation_complete_not_physical_approval"]
     assert out["payable_now_cents"] == 608
     ev["inventory"] = []
+    ev["paid_orders"][0]["allocations"] = [
+        {"role_key": "robot:i2c_mux", "quantity": 1}
+    ]
     ev["paid_in_flight"] = [{"role_key": "robot:i2c_mux",
                             "quantity": 1, "order_reference": "already-paid"}]
     out = calculate(ev)
@@ -279,6 +282,9 @@ def test_one_paid_order_cannot_be_counted_twice_for_one_role():
         "role_key": "robot:cliff_obstacle", "quantity": 1,
         "order_reference": "already-paid",
     }
+    ev["paid_orders"][0]["allocations"] = [
+        {"role_key": "robot:cliff_obstacle", "quantity": 1}
+    ]
     ev["paid_in_flight"] = [claim.copy(), claim.copy()]
     requirements = {**REQUIRED, "robot:cliff_obstacle": 2}
     out = mod.account_landed_cost(ev, requirements, CATEGORIES,
@@ -288,12 +294,51 @@ def test_one_paid_order_cannot_be_counted_twice_for_one_role():
                for err in out["errors"])
     ev["paid_orders"].append({
         "order_reference": "second-paid", "total_paid_usd": "2.00",
+        "allocations": [{"role_key": "robot:cliff_obstacle", "quantity": 1}],
     })
     ev["paid_in_flight"][1]["order_reference"] = "second-paid"
     out = mod.account_landed_cost(ev, requirements, CATEGORIES,
                                   expected_scope="evaluation")
     assert out["errors"] == []
     assert out["awaiting_arrival_roles"] == ["robot:cliff_obstacle"]
+
+
+def test_paid_reference_cannot_cover_an_unrelated_in_flight_role():
+    ev = sample()
+    ev["lines"].pop()
+    ev["paid_orders"][0]["allocations"] = [
+        {"role_key": "robot:cliff_obstacle", "quantity": 1}
+    ]
+    ev["paid_in_flight"] = [{
+        "role_key": "robot:i2c_mux", "quantity": 1,
+        "order_reference": "already-paid",
+    }]
+    out = calculate(ev)
+    assert not out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] is None
+    assert "robot:i2c_mux" in out["unaccounted_roles"]
+    assert any(
+        "does not allocate claimed role and quantity" in err
+        for err in out["errors"]
+    )
+
+
+def test_paid_order_allocation_cannot_be_overclaimed():
+    ev = sample()
+    ev["lines"].pop()
+    ev["paid_orders"][0]["allocations"] = [
+        {"role_key": "robot:i2c_mux", "quantity": 1}
+    ]
+    ev["paid_in_flight"] = [{
+        "role_key": "robot:i2c_mux", "quantity": 2,
+        "order_reference": "already-paid",
+    }]
+    out = calculate(ev)
+    assert not out["calculation_complete_not_physical_approval"]
+    assert any(
+        "does not allocate claimed role and quantity" in err
+        for err in out["errors"]
+    )
 
 
 def test_one_inspection_can_cover_distinct_roles_without_double_counting():
