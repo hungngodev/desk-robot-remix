@@ -359,14 +359,31 @@ def test_usb_bench_real_body_status_includes_native_low_g_without_release():
         "imu": {
             "family": 4, "gyro_id": 0x68, "aux_id": 0,
             "valid": True, "acc": [0, 0, 16384], "gyro": [0, 0, 0],
-            "age_ms": 20,
+            "age_ms": 20, "boot_id": 19, "sample_ms": 123456,
             "low_g_valid": True, "low_g_irq": False, "low_g_seq": 3,
         },
     }
     report = bench["inspect_status"](status)
     assert report["imu"]["native_low_g"]["event_seq"] == 3
+    assert report["imu"]["source_boot_id"] == 19
+    assert report["imu"]["source_sample_ms"] == 123456
     assert report["imu"]["native_low_g"]["reported"] is True
     assert report["imu"]["native_low_g"]["physical_qualification_pass"] is False
     assert report["physical_qualification_pass"] is False
     assert report["eligible_for_manual_local_rearm"] is False
+    for corrupt in (
+        {"boot_id": 0},
+        {"boot_id": True},
+        {"boot_id": "19"},
+        {"sample_ms": -1},
+        {"sample_ms": True},
+        {"sample_ms": 0x100000000},
+    ):
+        bad = {**status, "imu": {**status["imu"], **corrupt}}
+        with pytest.raises(ValueError, match="source identity"):
+            bench["inspect_status"](bad)
+    bad = {**status, "imu": {**status["imu"]}}
+    del bad["imu"]["sample_ms"]
+    with pytest.raises(ValueError, match="source identity"):
+        bench["inspect_status"](bad)
 
