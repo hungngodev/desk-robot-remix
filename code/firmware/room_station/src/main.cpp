@@ -94,6 +94,11 @@ void bme_step(uint32_t now) {
     if (bme_last_start_ms != 0 && now - bme_last_start_ms < kReportMs)
       return;
     bme_last_start_ms = now;
+    // Pinned Adafruit_BME680 2.0.5 endReading() returns true even when
+    // n_fields == 0; in that case its public values remain unchanged.
+    // Clear the source's zero-gas sentinel before EVERY acquisition so
+    // empty conversions cannot refresh a previous valid gas sample.
+    bme.gas_resistance = 0;
     bme_pending = bme.beginReading() != 0U;
     if (!bme_pending) bme_valid = false;
     return;

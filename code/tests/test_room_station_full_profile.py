@@ -62,6 +62,18 @@ def test_room_station_power_budget_is_machine_readable_and_fail_closed():
 
 
 
+def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
+    code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    # Upstream Adafruit_BME680 2.0.5 endReading() returns true on
+    # n_fields=0 without updating public sensor values. Invalidate the
+    # last gas value before initiating the next conversion.
+    start = code.split("void bme_step(", 1)[1].split("void bme_observation(", 1)[0]
+    assert "bme.gas_resistance = 0;" in start
+    assert start.index("bme.gas_resistance = 0;") < start.index("bme.beginReading()")
+    assert "bme.gas_resistance > 0" in start
+    assert "if (bme_valid) bme_sample_ms = now;" in start
+
+
 def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
     code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
     assert "isfinite(bme.gas_resistance) && bme.gas_resistance > 0" in code
