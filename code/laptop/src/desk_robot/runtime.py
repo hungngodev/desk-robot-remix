@@ -7,6 +7,7 @@ import time
 
 import httpx
 
+from .attention import AttentionLedger
 from .config import Settings, secret
 from .controller import Coordinator
 from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
@@ -61,9 +62,11 @@ class Runtime:
             speaker = KokoroHeadSpeaker(settings, self.client)
             scene = OllamaScene(self.client, url=settings.ollama_url, model=settings.vision_model)
         self.memory = MemoryStore(settings.memory_dir, [r.id for r in settings.robots])
+        self.attention = AttentionLedger([r.id for r in settings.robots])
         self.coordinator = Coordinator(settings, heads, vision)
         self.conversation = Conversation(settings, chat, speaker, memory=self.memory)
         self.conversation.coordinator_jobs = self.coordinator.jobs
+        self.conversation.attention = self.attention
         self.pet = PetController(
             settings, heads, self.conversation, self.memory, scene,
             on_local_fault=self.coordinator.stop,
@@ -71,6 +74,7 @@ class Runtime:
         # Shared read-only activity context for the pet; the Coordinator
         # still exclusively owns the job, permits and physical commands.
         self.pet.coordinator_jobs = self.coordinator.jobs
+        self.pet.attention = self.attention
         self.multimodal: MultimodalOrchestrator | None = None
         if settings.mode == "hardware":
             # One lock serves background visual comparison and user question
