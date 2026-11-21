@@ -106,11 +106,13 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('bool last_rendered_fault = false;', source)
         self.assertIn('static void BodyPollTask(void* context)', source)
         self.assertIn('board->body_fault_active_.store(true, std::memory_order_release);', source)
-        self.assertIn('body_unhealthy ? "sad" :', source)
-        self.assertIn('person_cue_active ? "surprised" : "neutral"', source)
+        self.assertIn('board->display_->SetStatus("Body safety stop");', source)
+        self.assertNotIn('body_unhealthy ? "sad" :', source)
+        self.assertIn('Event(EventType::kPersonDetected)', source)
         self.assertIn('last_was_idle = idle;', source)
-        self.assertIn('body_unhealthy ? "sad" :', source)
-        self.assertIn('person_cue_active ? "surprised" : "neutral"', source)
+        self.assertIn('board->display_->SetStatus("Body safety stop");', source)
+        self.assertNotIn('body_unhealthy ? "sad" :', source)
+        self.assertIn('Event(EventType::kPersonDetected)', source)
         bridge = (board / 'robot_bridge.cc').read_text()
         self.assertIn('BodyInteraction Bridge::PollInteraction()', bridge)
         self.assertIn('Transact("status", false)', bridge)
@@ -745,8 +747,10 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'bool TakePersonCue();' in header
     assert 'body_bridge_->TakePersonCue()' in board
     assert 'Event(EventType::kPersonDetected)' in board
-    assert 'person_cue_active ? "surprised" : "neutral"' in board
-    assert 'body_unhealthy ? "sad" :' in board
+    assert 'board->display_->SetStatus("Body safety stop");' in board
+    assert 'Event(EventType::kPersonDetected)' in board
+    assert 'body_unhealthy ? "sad" :' not in board
+    assert 'person_cue_active ? "surprised" :' not in board
     assert 'Transact(event' not in bridge  # never send cue to WROOM
 
 
