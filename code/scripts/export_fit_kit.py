@@ -75,6 +75,18 @@ def closed_mesh_edges(path: Path) -> int:
             isfinite(value) for point in points for value in point
         ):
             raise ValueError(f"Degenerate or nonfinite STL triangle: {path.name}")
+        # Three different coordinates can still lie on one line. Such a
+        # triangle has zero printable surface and is never a valid facet.
+        a, b, c = points
+        ab = tuple(b[k] - a[k] for k in range(3))
+        ac = tuple(c[k] - a[k] for k in range(3))
+        normal = (
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0],
+        )
+        if not all(isfinite(v) for v in normal) or not any(normal):
+            raise ValueError(f"Degenerate or nonfinite STL triangle: {path.name}")
         for corner in range(3):
             a, b = points[corner], points[(corner + 1) % 3]
             edge = (a, b) if a < b else (b, a)
