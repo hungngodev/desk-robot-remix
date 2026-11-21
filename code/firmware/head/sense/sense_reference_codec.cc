@@ -4,6 +4,10 @@
 #include <cmath>
 #include <esp_timer.h>
 #include <esp_log.h>
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+#include <esp_heap_caps.h>
+#include <cstddef>
+#endif
 
 SenseReferenceCodec::SenseReferenceCodec(
     int microphone_rate, int speaker_rate, gpio_num_t speaker_bclk,
@@ -168,6 +172,16 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         dest[2 * i] = microphone_frame_[i];
         dest[2 * i + 1] = reference_frame_[i];
     }
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+    {
+        // One optional RAM-only calibration listener of ALREADY sampled mic
+        // and reference. No second PDM/I2S reader or audio network service.
+        std::lock_guard<std::mutex> lock(bench_mutex_);
+        bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
+                            static_cast<uint32_t>(frames), esp_timer_get_time(),
+                            reference_ready);
+    }
+#endif
     return samples;
 }
 
@@ -230,6 +244,11 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
 }
 
 void SenseReferenceCodec::ClearReference() {
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+    // The operator's mute, barge-in or playback reset invalidates the
+    // calibration trial and securely erases any retained microphone PCM.
+    AbortBenchPcmCapture();
+#endif
     std::lock_guard<std::mutex> lock(reference_mutex_);
     // Invalidate writes that entered the inherited blocking I2S path before
     // this reset. Never reset this generation with the ring write index.
@@ -265,3 +284,90 @@ void SenseReferenceCodec::EnableOutput(bool enable) {
     }
     NoAudioCodec::EnableOutput(enable);
 }
+
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+void SenseReferenceCodec::ReleaseBenchPcmCapture(int16_t* data) {
+    if (!data) return;
+    // Volatile wipe cannot be optimized away before returning PSRAM to the
+    // allocator. The data never survives this private diagnostic session.
+    volatile uint8_t* bytes = reinterpret_cast<volatile uint8_t*>(data);
+    for (std::size_t i = 0; i < desk_robot::SensePcmWindow::kBytes; ++i)
+        bytes[i] = 0;
+    heap_caps_free(data);
+}
+
+void SenseReferenceCodec::BenchPcmExpiry(void* context) {
+    auto* codec = static_cast<SenseReferenceCodec*>(context);
+    int16_t* expired = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(codec->bench_mutex_);
+        // Check expiry and transfer ownership in ONE critical section.
+        // A delayed old callback must not erase a new capture afterward.
+        if (codec->bench_started_us_ == 0 ||
+            esp_timer_get_time() - codec->bench_started_us_ < 12'000'000)
+            return;
+        expired = codec->bench_window_.discard();
+        codec->bench_started_us_ = 0;
+    }
+    ReleaseBenchPcmCapture(expired);
+}
+
+bool SenseReferenceCodec::BeginBenchPcmCapture() {
+    std::lock_guard<std::mutex> lock(bench_mutex_);
+    if (bench_window_.occupied()) return false;
+    if (!bench_expiry_timer_) {
+        esp_timer_create_args_t args = {};
+        args.callback = &SenseReferenceCodec::BenchPcmExpiry;
+        args.arg = this;
+        args.name = "sense_pcm_bench";
+        if (esp_timer_create(&args, &bench_expiry_timer_) != ESP_OK) return false;
+    }
+    // Private opt-in build only. Never allocate a large audio buffer
+    // during normal Xiaozhi operation or fall back to internal DMA RAM.
+    auto* data = static_cast<int16_t*>(heap_caps_malloc(
+        desk_robot::SensePcmWindow::kBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!data) return false;
+    // No stale heap data may be delivered if a partial callback occurs.
+    std::fill_n(data, desk_robot::SensePcmWindow::kFrames * 2, 0);
+    const int64_t now = esp_timer_get_time();
+    if (!bench_window_.begin(data, now)) {
+        ReleaseBenchPcmCapture(data);
+        return false;
+    }
+    (void)esp_timer_stop(bench_expiry_timer_); // harmless if not active
+    if (esp_timer_start_once(bench_expiry_timer_, 12'000'000) != ESP_OK) {
+        ReleaseBenchPcmCapture(bench_window_.discard());
+        return false;
+    }
+    bench_started_us_ = now;
+    return true;
+}
+
+SenseReferenceCodec::BenchCaptureProgress
+SenseReferenceCodec::GetBenchPcmProgress() {
+    std::lock_guard<std::mutex> lock(bench_mutex_);
+    return {
+        bench_window_.occupied() && !bench_window_.ready() && !bench_window_.failed(),
+        bench_window_.ready(),
+        bench_window_.failed(),
+        bench_window_.frames_received(),
+    };
+}
+
+desk_robot::SensePcmWindow::Complete SenseReferenceCodec::TakeBenchPcmCapture() {
+    std::lock_guard<std::mutex> lock(bench_mutex_);
+    // Transfer ownership to one authenticated HTTP worker. Timer expiry
+    // cannot wipe the same pointer after this move.
+    return bench_window_.take();
+}
+
+void SenseReferenceCodec::AbortBenchPcmCapture() {
+    int16_t* data = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(bench_mutex_);
+        data = bench_window_.discard();
+        bench_started_us_ = 0;
+    }
+    ReleaseBenchPcmCapture(data);
+}
+#endif
