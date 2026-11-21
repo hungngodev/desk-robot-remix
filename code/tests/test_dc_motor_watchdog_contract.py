@@ -67,7 +67,8 @@ def test_gpio23_is_cpu_only_and_cannot_share_stepper_phase_or_ledc():
     assert main.index("digitalWrite(body_pins::kDcHeartbeatPin, LOW);") < (
         main.index("pinMode(body_pins::kDcHeartbeatPin, OUTPUT);"))
     assert "kToggleIntervalMs = 15" in heartbeat
-    assert "if (!local_motion_authorized)" in heartbeat
+    # Firmware latches a missed CPU edge until deliberate local USB recovery.
+    assert "if (!local_motion_authorized || missed_deadline_)" in heartbeat
     assert "reset();" in heartbeat
 
 
@@ -95,3 +96,32 @@ def test_procurement_requires_real_independent_motor_shutdown_receipt():
     assert '"effective_selected_fleet_total"' in release
     assert '"physical_motor_variant_in_cart"' in release
     assert '"do_not_buy_legacy_stepper_when_dc_selected"' in release
+
+
+def test_raw_contact_inhibition_precedes_optional_event_debounce():
+    """Both raw GPIO paths must inhibit wheels before gesture timing."""
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    control = (BODY / "lib/BodyControl/BodyControl.cpp").read_text(
+        encoding="utf-8"
+    )
+    for function, raw, delayed in (
+        (
+            "poll_touch",
+            "control.sample_touch_input(active);",
+            "if (now_ms - touch_last_sample_ms < 25) return;",
+        ),
+        (
+            "poll_optional",
+            "control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);",
+            "if (now_ms - last_extra_sample_ms < 25) return;",
+        ),
+    ):
+        signature = f"void {function}(std::uint32_t now_ms) {{"
+        assert main.count(signature) == 1
+        section = main.split(signature, 1)[1].split("\n}", 1)[0]
+        assert section.index(raw) < section.index(delayed)
+
+    assert "sample_bumper_input((enabled_mask & 1U) != 0U && bumper);" in control
+    # Raw HIGH remains an interlock even before the first debounce mask.
+    assert "const bool bumper_hit = state_.bumper_raw ||" in control
+    assert "if (state_.bumper_raw ||" in control
