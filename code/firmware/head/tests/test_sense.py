@@ -87,6 +87,38 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn("lv_label_set_text(status_label_, status);", status)
         self.assertNotIn("emotion_label_", status)
 
+    def test_server_audio_failure_uses_real_xiaozhi_epoch_not_idle_poll(self):
+        """Reconnect is triggered by transport loss, never arbitrary Idle."""
+        overlay.apply(self.root, "sense")
+        application = (self.root / "main/application.cc").read_text()
+        header = (self.root / "main/application.h").read_text()
+        board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+        face = board.split("static void FaceTask(void* context)", 1)[1].split(
+            "void InitializeDisplay()", 1
+        )[0]
+        closed = application.split("protocol_->OnAudioChannelClosed(", 1)[1].split(
+            "protocol_->OnIncomingJson(", 1
+        )[0]
+        opener = application.split(
+            "void Application::ContinueOpenAudioChannel(", 1
+        )[1].split("void Application::HandleStartListeningEvent()", 1)[0]
+        assert "sense_audio_failure_epoch_.fetch_add(1" in closed
+        assert "sense_audio_failure_epoch_.fetch_add(1" in opener
+        assert "sense_microphone_privacy_muted_.load" in closed
+        assert "sense_microphone_privacy_muted_.load" in opener
+        assert "GetSenseAudioFailureEpoch() const" in header
+        assert "std::atomic<uint32_t> sense_audio_failure_epoch_{0};" in header
+        assert "const uint32_t failure_epoch = app.GetSenseAudioFailureEpoch();" in face
+        assert "failure_epoch != board->last_audio_failure_epoch_seen_" in face
+        assert "failed_since_attempt &&" in face
+        assert "now_ms - board->last_audio_listen_attempt_ms_ >= 5000U" in face
+        assert "board->last_audio_failure_epoch_seen_ = failure_epoch;" in face
+        assert "!board->audio_operator_touched_.load()" in face
+        assert "device_state == kDeviceStateIdle" in face
+        assert "app.ToggleChatState();" in face
+        assert "app.StartListening();" not in face
+        assert "app.StopListening();" not in face
+
     def test_sense_camera_pdm_pin_budget_and_eight_mb_layout(self):
         overlay.apply(self.root, 'sense')
         board = self.root / overlay.BOARDS['sense']

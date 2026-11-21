@@ -53,6 +53,7 @@ private:
     std::atomic<bool> audio_operator_muted_{false};
     bool continuous_audio_started_ = false;
     uint32_t last_audio_listen_attempt_ms_ = 0;
+    uint32_t last_audio_failure_epoch_seen_ = 0;
 #endif
 
     static const char* MoodName(stackchan::behavior::Mood mood) {
@@ -148,12 +149,20 @@ private:
             if (!wifi_connected) {
                 board->continuous_audio_started_ = false;
             }
+            const uint32_t failure_epoch = app.GetSenseAudioFailureEpoch();
+            // Initial launch or a proved channel closure/open failure ONLY.
+            // A healthy intentional Idle transition must not force a new
+            // session. One 5s retry ceiling also prevents a 100ms storm.
+            const bool failed_since_attempt =
+                failure_epoch != board->last_audio_failure_epoch_seen_;
             if (!board->continuous_audio_started_ ||
-                    now_ms - board->last_audio_listen_attempt_ms_ >= 5000U) {
+                    (failed_since_attempt &&
+                     now_ms - board->last_audio_listen_attempt_ms_ >= 5000U)) {
                 if (!board->audio_operator_touched_.load()
                         && wifi_connected && now_ms >= 10000
                         && device_state == kDeviceStateIdle
                         && app.GetAecMode() == kAecOnDeviceSide) {
+                    board->last_audio_failure_epoch_seen_ = failure_epoch;
                     board->continuous_audio_started_ = true;
                     board->last_audio_listen_attempt_ms_ = now_ms;
                     app.ToggleChatState();  // existing Xiaozhi realtime listen

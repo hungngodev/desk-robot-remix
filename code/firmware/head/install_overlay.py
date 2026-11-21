@@ -615,6 +615,31 @@ void Application::HandleStartListeningEvent() {""",
 #endif
     SetListeningMode(mode);""",
         )
+        # A server transport failure is independent of WiFi association.
+        # Report it from the ONE Xiaozhi audio owner rather than interpreting
+        # every ordinary Idle state as a socket loss. No new microphone task.
+        text = replace_once(
+            text,
+            """    protocol_->OnAudioChannelClosed([this, &board]() {
+        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);""",
+            """    protocol_->OnAudioChannelClosed([this, &board]() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+        if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire))
+            sense_audio_failure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+#endif
+        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);""",
+        )
+        text = replace_once(
+            text,
+            """        if (!protocol_->OpenAudioChannel()) {
+            // Return to idle so the device is not stuck in the connecting""",
+            """        if (!protocol_->OpenAudioChannel()) {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire))
+                sense_audio_failure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+#endif
+            // Return to idle so the device is not stuck in the connecting""",
+        )
         files[path] = text.encode()
         # Only the disposable Sense clone changes upstream Application
         # declarations, so every other Xiaozhi board retains original code.
@@ -638,6 +663,9 @@ void Application::HandleStartListeningEvent() {""",
     void SetSenseMicrophonePrivacyMuted(bool muted) {
         sense_microphone_privacy_muted_.store(muted, std::memory_order_release);
     }
+    uint32_t GetSenseAudioFailureEpoch() const {
+        return sense_audio_failure_epoch_.load(std::memory_order_acquire);
+    }
 #endif
 
     /**""",
@@ -649,6 +677,7 @@ void Application::HandleStartListeningEvent() {""",
             """    AudioService audio_service_;
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
     std::atomic<bool> sense_microphone_privacy_muted_{false};
+    std::atomic<uint32_t> sense_audio_failure_epoch_{0};
 #endif
     NotifyPlayer notify_player_;""",
         )
