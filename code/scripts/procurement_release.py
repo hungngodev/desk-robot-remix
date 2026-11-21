@@ -1223,6 +1223,84 @@ def pilot_supplier_cart(report: dict) -> dict:
     }
 
 
+
+def pilot_landed_cost(report: dict, evidence: dict) -> dict:
+    """Price ALL exact pilot samples, not the separate ToF evaluation scope.
+
+    This quote worksheet never grants permission to buy, move or charge a
+    complete robot. Its current stock/price evidence and seller charges are
+    required before displaying a payable total. Sample ownership remains
+    controlled by the canonical plan and cannot be inferred from a receipt.
+    """
+    cart = pilot_supplier_cart(report)
+    items = {"pilot:" + item["id"]: item for item in cart["items"]}
+    required = {key: item["quantity"] for key, item in items.items()}
+    categories = {
+        key: ("dock" if item["id"] in DOCK_COST_ROLES else "robot")
+        for key, item in items.items()
+    }
+    claimed = evidence.get("pilot_costs", {}) if isinstance(evidence, dict) else {}
+    claimed = claimed if isinstance(claimed, dict) else {}
+    # Use the accountant's CURRENT first-unit quote freshness and $50 cap
+    # policy, but report this as a distinct subset of sample roles.
+    inputs = {**claimed, "scope": "first_robot"}
+    cost = account_landed_cost(
+        inputs, required, categories, expected_scope="first_robot",
+    )
+    cost["scope"] = "pilot_samples"
+    cost["exact_sample_skus"] = len(items)
+    cost["sample_component_quantity"] = cart["component_quantity"]
+    cost["full_first_robot_purchase_approved"] = False
+    cost["motor_or_lithium_charge_authorized"] = False
+    problems = []
+    if claimed.get("scope") != "pilot_samples":
+        problems.append("Missing distinct pilot_samples quote scope")
+    lines = claimed.get("lines")
+    if not isinstance(lines, list) or len(lines) != len(items):
+        problems.append("Every exact pilot sample SKU requires its own quote line")
+    else:
+        seen = set()
+        for item in lines:
+            if not isinstance(item, dict):
+                problems.append("Pilot sample quote must be an object")
+                continue
+            role = item.get("role_key")
+            selected = items.get(role) if isinstance(role, str) else None
+            if selected is None or role in seen:
+                problems.append("Unselected or duplicate pilot sample role")
+                continue
+            seen.add(role)
+            stock_url = item.get("stock_evidence_url")
+            try:
+                stock_host = (urlsplit(stock_url).hostname
+                              if isinstance(stock_url, str) else None)
+            except ValueError:
+                stock_host = None
+            if (item.get("sku") != selected["sku"]
+                    or item.get("seller") != selected["checkout_seller_candidate"]
+                    or stock_host != urlsplit(selected["product_url"]).hostname):
+                problems.append("Pilot quoted SKU, seller or stock source differs "
+                                "from the selected sample: " + role)
+        if seen != set(items):
+            problems.append("Not every exact pilot sample has a matching quote")
+    # Remaining quantities already account for user-reported stock at the
+    # generator boundary. Do not deduct it again without a signed inspection.
+    if claimed.get("inventory") or claimed.get("paid_in_flight"):
+        problems.append("Pilot quote cannot deduct unverified inventory or incoming units")
+    if problems:
+        cost["errors"].extend(problems)
+        cost["calculation_complete_not_physical_approval"] = False
+        for field in (
+            "payable_now_cents", "prototype_cumulative_cents",
+            "remaining_under_cap_cents", "allocated_landed_subtotals_cents",
+        ):
+            cost[field] = None
+        cost["seller_payable_cents"] = {}
+        cost["within_prototype_cap"] = False
+    return cost
+
+
+
 def render_pilot_supplier_cart(report: dict) -> str:
     """A single copyable purchase worksheet for bench samples."""
     cart = pilot_supplier_cart(report)
@@ -2031,6 +2109,7 @@ def main() -> int:
         "json", "csv", "markdown", "first-robot-json", "first-robot-markdown",
         "pilot-samples-json", "pilot-samples-markdown",
         "pilot-cart-json", "pilot-cart-markdown",
+        "pilot-landed-cost-json", "pilot-landed-cost-markdown",
         "landed-cost-json", "landed-cost-markdown"
     ), default="json", help="Project the canonical ledger without buying permits")
     args = parser.parse_args()
@@ -2216,6 +2295,11 @@ def main() -> int:
         print(json.dumps(pilot_supplier_cart(report), indent=2))
     elif args.format == "pilot-cart-markdown":
         print(render_pilot_supplier_cart(report), end="")
+    elif args.format == "pilot-landed-cost-json":
+        print(json.dumps(pilot_landed_cost(report, evidence), indent=2))
+    elif args.format == "pilot-landed-cost-markdown":
+        print("# First-unit samples only: current delivered quote")
+        print(cost_quote_markdown(pilot_landed_cost(report, evidence)), end="")
     else:
         print(json.dumps(report, indent=2))
     return 2 if args.require_release and not report["order_released"] else 0
