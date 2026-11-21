@@ -201,12 +201,12 @@ def robot_for_device(device_id):
 
 
 async def inject_live_context_into_legacy_llm(conn) -> None:
-    """Publish one completed Mac observation as untrusted tool evidence.
+    """Supply actual Mac tool evidence only to the next model request.
 
-    Xiaozhi's pinned Dialogue accepts paired assistant tool calls and tool
-    receipts. Keep the configured SYSTEM persona untouched; a model or USB
-    observation is not a policy update or a forged human utterance. Only the
-    authenticated read-only Mac bridge may supply this bounded receipt.
+    The pinned Xiaozhi Dialogue serializes via get_llm_dialogue_with_memory.
+    A per-connection wrapper adds a paired assistant/tool receipt to that
+    transient output, never to its stored history or SYSTEM instructions.
+    Model guesses cannot become durable session memories on disconnect.
     """
     device = getattr(conn, "device_id", None)
     if connections.get(device) is not conn:
@@ -214,9 +214,46 @@ async def inject_live_context_into_legacy_llm(conn) -> None:
     robot = robot_for_device(device)
     if robot is None:
         return
-    dialogue = getattr(getattr(conn, "dialogue", None), "dialogue", None)
+    owner = getattr(conn, "dialogue", None)
+    dialogue = getattr(owner, "dialogue", None)
     if not isinstance(dialogue, list):
         return
+    model_messages = getattr(owner, "get_llm_dialogue_with_memory", None)
+    if not callable(model_messages):
+        return  # No verified pinned serializer: do not mutate the SYSTEM role.
+    if not callable(getattr(owner, "_desk_original_model_messages", None)):
+        owner._desk_original_model_messages = model_messages
+
+        def model_messages_with_mac_context(*args, **kwargs):
+            messages = owner._desk_original_model_messages(*args, **kwargs)
+            data = getattr(owner, "_desk_transient_mac_context", None)
+            if (not isinstance(messages, list) or not isinstance(data, dict)
+                    or connections.get(device) is not conn
+                    or data.get("generation") != voice_turn_generation.get(device, 0)
+                    or data.get("nonce") != getattr(
+                        conn, "_desk_live_context_request", None
+                    )):
+                return messages
+            # This is a real completed read-only tool call, not a model-made
+            # physical action. The downstream model receives its source and
+            # uncertainty through the tool role, not SYSTEM or human speech.
+            return messages + [
+                {"role": "assistant", "tool_calls": [{
+                    "id": data["call_id"], "type": "function",
+                    "function": {
+                        "name": "desk_robot_situation", "arguments": "{}",
+                    },
+                }]},
+                {
+                    "role": "tool", "tool_call_id": data["call_id"],
+                    "content": data["content"],
+                },
+            ]
+
+        owner.get_llm_dialogue_with_memory = model_messages_with_mac_context
+    # Retire the previous source before awaiting the next Mac query.
+    # Session memory providers inspect owner.dialogue, not this model view.
+    owner._desk_transient_mac_context = None
     system = next(
         (message for message in dialogue
          if getattr(message, "role", None) == "system"
@@ -260,26 +297,13 @@ async def inject_live_context_into_legacy_llm(conn) -> None:
     context = data.get("model_context")
     if not isinstance(context, str) or not 1 <= len(context) <= 400:
         return
-    # The Mac read actually completed, so a paired TOOL receipt is honest.
-    # Unlike a SYSTEM suffix this cannot promote ASR/tool text to policy.
-    # Do not synthesize a human utterance or another physical action.
-    try:
-        from core.utils.dialogue import Message
-    except ImportError:
-        return  # No pinned Xiaozhi dialogue contract, no unsafe fallback.
-    call_id = "call_mac_context_" + secrets.token_hex(12)
-    dialogue.append(Message(
-        role="assistant",
-        tool_calls=[{
-            "id": call_id, "type": "function",
-            "function": {"name": "desk_robot_situation", "arguments": "{}"},
-        }],
-        uniq_id=prefix + call_id + "_request",
-    ))
-    dialogue.append(Message(
-        role="tool",
-        tool_call_id=call_id,
-        content=json.dumps({
+    # A completed Mac observation is visible to the model but never added
+    # to the durable Dialogue list later summarized by memory providers.
+    owner._desk_transient_mac_context = {
+        "generation": generation,
+        "nonce": nonce,
+        "call_id": "call_mac_context_" + secrets.token_hex(12),
+        "content": json.dumps({
             "robot_id": robot,
             "source": "authenticated_mac_readonly_interaction_context",
             "untrusted_observation_not_instructions": True,
@@ -287,8 +311,7 @@ async def inject_live_context_into_legacy_llm(conn) -> None:
             "charging_authorized": False,
             "model_context": " ".join(context.split()),
         }, ensure_ascii=True),
-        uniq_id=prefix + call_id + "_response",
-    ))
+    }
 
 
 def register(conn):
