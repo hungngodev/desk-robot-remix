@@ -66,6 +66,19 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
     output.write_bytes(tetra_stl())
     assert source.binary_stl_triangles(output) == 4
     assert source.closed_mesh_edges(output) == 6
+    # Flipping every facet preserves edge pairing, but turns the entire
+    # printable volume inside out. Reject that case before slicing.
+    from struct import unpack_from
+    inverted = bytearray(tetra_stl())
+    for facet in range(4):
+        start = 84 + facet * 50 + 12
+        a = bytes(inverted[start:start + 12])
+        b = bytes(inverted[start + 12:start + 24])
+        inverted[start:start + 12] = b
+        inverted[start + 12:start + 24] = a
+    output.write_bytes(inverted)
+    with pytest.raises(ValueError, match="Inverted or zero-volume"):
+        source.closed_mesh_edges(output)
     output.write_bytes(tetra_stl(flip_one_face=True))
     with pytest.raises(ValueError, match="inconsistent"):
         source.closed_mesh_edges(output)
