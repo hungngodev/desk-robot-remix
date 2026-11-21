@@ -1153,6 +1153,76 @@ def test_private_sense_pcm_bench_requires_explicit_fresh_consent():
         assert "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y" not in disabled
         assert json.loads((board / "config.json").read_text()) == original
 
+def test_private_sense_settings_reject_symlink_without_leaking_device_token():
+    """Never follow an attacker-selected output symlink when writing secrets."""
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        config = root / "fleet.toml"
+        config.write_text(
+            '[[robots]]\\nid="robot-01"\\ntoken_env="BENCH_SENSE_TOKEN"\\n'
+        )
+        board = (
+            root / "firmware/head/build/xiaozhi-sense/main/boards/"
+            "desk-robot/desk-robot-sense-s3"
+        )
+        board.mkdir(parents=True)
+        (board / "config.json").write_text(json.dumps({
+            "builds": [{"sdkconfig_append": ["CONFIG_UNRELATED=y"]}]
+        }))
+        protected = root / "must-not-receive-token.txt"
+        protected.write_text("safe")
+        target = board / "config.private.json"
+        target.symlink_to(protected)
+        args = [
+            "private_config.py", "--board", "sense", "--robot", "robot-01",
+            "--server-ip", "192.168.1.15", "--config", str(config),
+            "--secrets", str(root / "missing.env"),
+        ]
+        with patch.object(private, "ROOT", root), (
+            patch.object(sys, "argv", args)
+        ), patch.dict(os.environ, BENCH_SENSE_TOKEN="x" * 40):
+            with unittest.TestCase().assertRaises(SystemExit):
+                private.main()
+        assert target.is_symlink()
+        assert protected.read_text() == "safe"
+        assert list(board.glob(".config.private.*.tmp")) == []
+
+
+def test_private_sense_settings_write_failure_keeps_previous_secret_file():
+    """A failed atomic swap must preserve the last complete private config."""
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        config = root / "fleet.toml"
+        config.write_text(
+            '[[robots]]\\nid="robot-01"\\ntoken_env="BENCH_SENSE_TOKEN"\\n'
+        )
+        board = (
+            root / "firmware/head/build/xiaozhi-sense/main/boards/"
+            "desk-robot/desk-robot-sense-s3"
+        )
+        board.mkdir(parents=True)
+        (board / "config.json").write_text(json.dumps({
+            "builds": [{"sdkconfig_append": ["CONFIG_UNRELATED=y"]}]
+        }))
+        target = board / "config.private.json"
+        target.write_text('{"previous":"valid"}')
+        target.chmod(0o600)
+        args = [
+            "private_config.py", "--board", "sense", "--robot", "robot-01",
+            "--server-ip", "192.168.1.15", "--config", str(config),
+            "--secrets", str(root / "missing.env"),
+        ]
+        with patch.object(private, "ROOT", root), (
+            patch.object(sys, "argv", args)
+        ), patch.dict(os.environ, BENCH_SENSE_TOKEN="x" * 40), (
+            patch.object(private.os, "replace", side_effect=OSError("disk failed"))
+        ):
+            with unittest.TestCase().assertRaisesRegex(OSError, "disk failed"):
+                private.main()
+        assert target.read_text() == '{"previous":"valid"}'
+        assert list(board.glob(".config.private.*.tmp")) == []
+
+
 def test_private_aec_capture_returns_true_http_accept_and_conflict_codes():
     """Successful START and already-active trials cannot masquerade as 500s."""
     bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
