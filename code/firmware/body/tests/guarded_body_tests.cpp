@@ -1221,6 +1221,33 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   CHECK(send(startup, "arm", 0) == "ERR arm bumper_active");
 }
 
+static void accessory_reconnect_does_not_invent_petting_events() {
+  // A reed hat switch or PIR can stay HIGH while its MCP23017 transport
+  // disappears. Recovered data is an initial state, not a new physical tap.
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.sample_optional_inputs(6U, false, true, true); // high at boot
+  CHECK(body.state().reed_events == 0 && body.state().pir_events == 0);
+  for (int i = 0; i < 3; ++i)
+    body.sample_optional_inputs(6U, false, false, false);
+  for (int i = 0; i < 3; ++i)
+    body.sample_optional_inputs(6U, false, true, true);
+  CHECK(body.state().reed_events == 1 && body.state().pir_events == 1);
+  body.sample_optional_inputs(0U, false, false, false); // expander read expired
+  CHECK(body.state().extra_mask == 0U);
+  body.sample_optional_inputs(6U, false, true, true); // same physical HIGH
+  CHECK(body.state().reed_active && body.state().pir_active);
+  CHECK(body.state().reed_events == 1 && body.state().pir_events == 1);
+  for (int i = 0; i < 3; ++i)
+    body.sample_optional_inputs(6U, false, true, true);
+  CHECK(body.state().reed_events == 1 && body.state().pir_events == 1);
+  for (int i = 0; i < 3; ++i)
+    body.sample_optional_inputs(6U, false, false, false);
+  for (int i = 0; i < 3; ++i)
+    body.sample_optional_inputs(6U, false, true, true);
+  CHECK(body.state().reed_events == 2 && body.state().pir_events == 2);
+  CHECK(!body.state().armed); // neither source has motor authority
+}
+
 static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   using desk_robot::BodyControl;
   BodyControl body(desk_robot::BodyProfile::DcPwm);
@@ -1542,6 +1569,7 @@ int main() {
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
+    accessory_reconnect_does_not_invent_petting_events();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     independent_pack_sensor_freshness_never_crosses_devices();
