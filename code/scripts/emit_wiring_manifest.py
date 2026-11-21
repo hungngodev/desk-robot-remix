@@ -65,6 +65,15 @@ def verify(plan: dict, body: str, head: str) -> None:
             raise ValueError(f"Invalid {owner} GPIO")
         if len(pins) != len(set(pins)):
             raise ValueError(f"Double-booked {owner} GPIO")
+    for label, symbol in BODY_SINGLE.items():
+        actual = _pin(rf"constexpr int {symbol} = (\d+);", body, symbol)
+        if actual != bus["body_gpio"][label]:
+            raise ValueError(f"Firmware body pin drift: {label}")
+    for label, symbol in (("left_stepper", "kLeftStepperPins"),
+                          ("right_stepper", "kRightStepperPins")):
+        match = re.findall(rf"constexpr int {symbol}\[\] = \{{([\d, ]+)\}};", body)
+        if len(match) != 1 or [int(x) for x in match[0].split(",")] != bus["body_gpio"][label]:
+            raise ValueError(f"Stepper phase pin drift: {label}")
     body_pins = bus["body_gpio"]
     for role, value in body_pins.items():
         pins = value if isinstance(value, list) else [value]
@@ -76,15 +85,6 @@ def verify(plan: dict, body: str, head: str) -> None:
             raise ValueError(
                 f"WROOM32 output GPIO input-only or boot reserved: {role}"
             )
-    for label, symbol in BODY_SINGLE.items():
-        actual = _pin(rf"constexpr int {symbol} = (\d+);", body, symbol)
-        if actual != bus["body_gpio"][label]:
-            raise ValueError(f"Firmware body pin drift: {label}")
-    for label, symbol in (("left_stepper", "kLeftStepperPins"),
-                          ("right_stepper", "kRightStepperPins")):
-        match = re.findall(rf"constexpr int {symbol}\[\] = \{{([\d, ]+)\}};", body)
-        if len(match) != 1 or [int(x) for x in match[0].split(",")] != bus["body_gpio"][label]:
-            raise ValueError(f"Stepper phase pin drift: {label}")
     # Both motor backends are build-time alternatives and share GPIO pins.
     # Verify the guarded DC firmware pins as well as the older stepper map.
     for symbol, expected in (("kLeftIn1", 25), ("kLeftIn2", 26),
