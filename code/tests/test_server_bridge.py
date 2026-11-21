@@ -166,9 +166,15 @@ async def test_bridge_auth_identity_and_lease_cleanup(bridge):
 
 
 async def test_bridge_rejects_human_vad_during_deliberate_and_group_grants(
-    bridge,
+    bridge, monkeypatch,
 ):
     """Nonpassive does not imply permission to speak over a human."""
+    # Real selected native adapter accepts passive requests with an idle
+    # model. Without this stub, a passive 409 could be from missing native
+    # support rather than the authenticated human VAD gate under test.
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        active=lambda _device: False, passive_speech_allowed=lambda: True,
+    ))
     bridge.register(conn("mac-01"))
     headers = {"Authorization": "Bearer " + "s" * 40}
     async with TestClient(TestServer(bridge.create_app())) as client:
@@ -180,6 +186,7 @@ async def test_bridge_rejects_human_vad_during_deliberate_and_group_grants(
                       "passive": passive},
             )
             assert attempt.status == 409
+            assert "human turn" in (await attempt.text()).lower()
             assert not bridge.muted("mac-01")
         bridge.human_vad_until["mac-01"] = time.monotonic() - 1
         accepted = await client.post(
