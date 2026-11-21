@@ -78,6 +78,7 @@ struct ForceRaw {
   bool present = false, valid = false;
   std::uint8_t valid_mask = 0; // both ADC channels need independent fresh samples
   std::uint32_t jaw_sample_seq = 0; // only increments on fresh ADC channel 1 conversion
+  std::uint32_t jaw_at_ms = 0; // independent of belly conversion timestamp
   std::int16_t adc[2]{};
   std::uint32_t at_ms = 0;
 };

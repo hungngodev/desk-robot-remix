@@ -694,8 +694,11 @@ void BodyControl::execute(const char* line, std::size_t length,
       if (a.angle[i].present && a.angle[i].valid &&
           now_ms - a.angle[i].at_ms < 350U) angle_valid |= 1U << i;
     }
-    const bool force_fresh = a.force.valid &&
-                             now_ms - a.force.at_ms < 500U;
+    // A completed belly ADC conversion must never refresh an old jaw
+    // sample or certify a current grasp contact.
+    const bool force_fresh = a.force.valid && a.force.jaw_sample_seq != 0U &&
+                             now_ms - a.force.at_ms < 500U &&
+                             now_ms - a.force.jaw_at_ms < 500U;
     const bool climate_fresh = a.climate.valid &&
                                now_ms - a.climate.at_ms < 1000U;
     const bool bmp_fresh = a.barometer.present && a.barometer.valid &&
@@ -722,7 +725,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"bpm\":null,\"medical\":false},"
         "\"angles\":{\"raw\":[%u,%u,%u],\"present_mask\":%u,"
         "\"valid_mask\":%u,\"magnet\":[%u,%u,%u]},"
-        "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"boot_id\":%lu,\"valid\":%s,\"calibrated\":false},"
+        "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"boot_id\":%lu,\"jaw_age_ms\":%lu,\"valid\":%s,\"calibrated\":false},"
         "\"climate\":{\"temp_centi\":%d,\"rh_centi\":%d,\"valid\":%s,\"seq\":%lu,\"age_ms\":%lu},"
         "\"bmp280\":{\"present\":%s,\"valid\":%s,\"chip_id\":%u,"
         "\"temp_centi\":%d,\"pressure_pa\":%u,\"seq\":%lu,\"age_ms\":%lu,"
@@ -754,6 +757,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<int>(a.force.adc[1]),
         static_cast<unsigned long>(a.force.jaw_sample_seq),
         static_cast<unsigned long>(boot_epoch_),
+        static_cast<unsigned long>(a.force.jaw_sample_seq != 0U ?
+            now_ms - a.force.jaw_at_ms : 0U),
         force_fresh ? "true" : "false",
         a.climate.temp_centi, a.climate.humidity_centi,
         climate_fresh ? "true" : "false",

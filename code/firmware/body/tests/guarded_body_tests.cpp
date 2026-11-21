@@ -1146,6 +1146,34 @@ static void dual_ir_evidence_never_authorizes_body_motion_or_charging() {
   CHECK(send(body, "ir", 103).find("\"match\":false") != std::string::npos);
 }
 
+static void belly_adc_does_not_refresh_stale_jaw_sample() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.set_boot_epoch(123U);
+  desk_robot::AccessoryReadings readings{};
+  readings.force.present = readings.force.valid = true;
+  readings.force.valid_mask = 3U;
+  readings.force.adc[0] = 111;
+  readings.force.adc[1] = 555;
+  readings.force.jaw_sample_seq = 4U;
+  readings.force.jaw_at_ms = readings.force.at_ms = 100U;
+  body.set_accessories(readings, 100U);
+  CHECK(send(body, "aux", 120U).find(
+      "\"jaw_seq\":4,\"boot_id\":123,\"jaw_age_ms\":20,\"valid\":true")
+        != std::string::npos);
+  readings.force.at_ms = 700U;  // only the belly conversion advanced
+  body.set_accessories(readings, 700U);
+  CHECK(send(body, "aux", 700U).find(
+      "\"jaw_seq\":4,\"boot_id\":123,\"jaw_age_ms\":600,\"valid\":false")
+        != std::string::npos);
+  readings.force.jaw_sample_seq = 5U;
+  readings.force.jaw_at_ms = 701U;
+  body.set_accessories(readings, 701U);
+  CHECK(send(body, "aux", 702U).find(
+      "\"jaw_seq\":5,\"boot_id\":123,\"jaw_age_ms\":1,\"valid\":true")
+        != std::string::npos);
+  CHECK(!body.state().armed);
+}
+
 static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   desk_robot::AccessoryReadings readings{};
@@ -1574,6 +1602,7 @@ int main() {
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
+    belly_adc_does_not_refresh_stale_jaw_sample();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
