@@ -19,17 +19,17 @@ jobs:
   mac-fast:
     name: Mac conversation and memory regression
     concurrency:
-      group: host-verification-mac-fast-\${{ github.event.pull_request.number || github.ref }}
+      group: host-verification-mac-fast-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: \${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify exact source commit under test
         shell: bash
         run: |
-          expected="\${{ github.event.pull_request.head.sha || github.sha }}"
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
           actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
           test "$actual" = "$expected"
       - uses: astral-sh/setup-uv@v6
