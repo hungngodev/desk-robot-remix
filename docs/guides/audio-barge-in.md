@@ -202,6 +202,30 @@ contention. Higher-rate video is a later measured
 capability. Cloud usage charges are separate from hardware and remain unquoted;
 no Gemini or other paid API was used for this review.
 
+### Sense camera completion and Mac receipt evidence
+
+The authenticated Sense MJPEG part includes a boot nonce, monotonic frame
+sequence, and device-local capture completion counter in microseconds.
+The Mac stream parser verifies the source identity and the same-frame ordering,
+then keeps a separate Mac monotonic network receipt timestamp. The bounded
+`CameraFrameHub` now preserves these original source values in its camera
+timeline as `source_boot`, `source_frame_sequence`, and
+`source_capture_complete_us`, alongside the normal Mac-receipt `age_ms`.
+The device clock has **not** been synchronized to the Mac. Do not subtract
+these two clocks, report sensor exposure age from them, or claim an
+optical capture-to-speech latency pass. The timeline explicitly retains
+`exposure_timestamp_verified=false` and
+`source_clock_not_aligned_to_mac=true` for source-tagged streaming frames.
+When testing a non-Sense/fake head without device metadata, these source fields
+are omitted instead of invented.
+
+For actual A9 acceptance, record the same authenticated source boot, frame
+sequence and completion timestamp together with a Mac receive clock,
+camera scene event, voice turn and external synchronized visual stimulus.
+Measure camera acquisition and network delay with an independent timed
+fixture on the final assembled head before claiming source freshness or
+synchronized perception. No extra camera capture service is introduced.
+
 ## Optional fallback, not a purchase requirement
 
 The initial audit proposed **Waveshare ESP32-S3-CAM-OV5640, SKU33699** before the
