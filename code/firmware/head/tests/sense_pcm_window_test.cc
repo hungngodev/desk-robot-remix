@@ -37,6 +37,22 @@ int main() {
   capture.offer(mic.data(), ref.data(), 320, 1020000, true);
   assert(capture.failed());
   assert(capture.discard() == data.data());
+  // A blocking microphone callback could start before the operator
+  // enabled private capture, then return after START. Its preceding PCM
+  // must never be saved in the authenticated recording.
+  SensePcmWindow consent_edge;
+  assert(consent_edge.begin(data.data(), 1000000));
+  consent_edge.offer(mic.data(), ref.data(), 320, 1001000, true);
+  assert(consent_edge.frames_received() == 0);
+  assert(!consent_edge.failed() && !consent_edge.ready());
+  for (int i = 1; i <= 200; ++i)
+    consent_edge.offer(mic.data(), ref.data(), 320,
+                       1001000 + i * 20000, true);
+  assert(consent_edge.ready());
+  auto after_consent = consent_edge.take();
+  assert(after_consent.frames == 64000);
+  assert(after_consent.first_sample_us == 1001000);
+  assert(after_consent.last_sample_us == 5001000);
   // A final PDM read can overrun a four-second window. The last
   // timestamp must describe the last RECORDED sample, not the later
   // unrecorded samples in the tail of that same hardware read.
