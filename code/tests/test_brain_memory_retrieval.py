@@ -531,3 +531,37 @@ def test_stale_episode_trimmed_on_insert_is_not_reported_as_remembered(tmp_path)
     assert store.search("robot-01", "newest scene")[0].event_id == "newest_one"
     assert store.count("robot-01") == 250
     assert store.count("robot-02") == 0
+
+
+def test_exact_episode_lookup_reaches_beyond_recent_fifty_without_peer_leak(tmp_path):
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    assert store.remember(
+        "robot-01", "older_seen", "I saw a green paperclip",
+        kind="object", source_robot="robot-01", witnessed=True,
+        observed_at=100,
+    )
+    for index in range(75):
+        assert store.remember(
+            "robot-01", f"recent{index:03}", f"New event number {index}",
+            kind="object", source_robot="robot-01", witnessed=True,
+            observed_at=101 + index,
+        )
+    assert "older_seen" not in {
+        memory.event_id for memory in store.recent("robot-01", limit=50)
+    }
+    event = store.get_episode("robot-01", "older_seen")
+    assert event is not None
+    assert event.event_id == "older_seen"
+    assert event.witnessed and event.source_robot == "robot-01"
+    assert store.get_episode("robot-02", "older_seen") is None
+    with pytest.raises(ValueError, match="Unknown robot"):
+        store.get_episode("unknown", "older_seen")
+    with pytest.raises(ValueError, match="Invalid memory event ID"):
+        store.get_episode("robot-01", "bad/id")
+    assert store.forget_episode("robot-01", "older_seen")
+    assert store.get_episode("robot-01", "older_seen") is None
+    assert not store.remember(
+        "robot-01", "older_seen", "Stale callback",
+        kind="object", source_robot="robot-01", witnessed=True,
+    )
+    assert store.get_episode("robot-01", "older_seen") is None

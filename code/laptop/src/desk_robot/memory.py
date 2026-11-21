@@ -292,6 +292,28 @@ class MemoryStore:
                 "SELECT 1 FROM memories WHERE event_id=?", (event_id,),
             ).fetchone() is not None
 
+    def get_episode(self, robot_id: str, event_id: str) -> Memory | None:
+        """Look up one retained episode by ID without leaking peer history.
+
+        An event can be older than the 50-row recent-view cap while still
+        present in the complete 250-row per-pet store. This read does not
+        resurrect deleted or trimmed episodes.
+        """
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        with self._connect(robot_id) as db:
+            row = db.execute(
+                """SELECT event_id,source_robot,witnessed,kind,summary,
+                          observed_at,confidence FROM memories
+                   WHERE event_id=?""",
+                (event_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        event, source, witnessed, kind, summary, at, score = row
+        return Memory(robot_id, event, source, bool(witnessed),
+                      kind, summary, at, score)
+
     def recent(self, robot_id: str, *, limit: int = 12) -> list[Memory]:
         if type(limit) is not int or not 1 <= limit <= 50:
             raise ValueError("Limit must be 1..50")

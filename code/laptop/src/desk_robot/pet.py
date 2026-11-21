@@ -634,14 +634,10 @@ class PetController:
         if not isinstance(event_id, str) or not 1 <= len(event_id) <= 96:
             raise ValueError("Invalid memory event ID")
 
-        source = next(
-            (
-                entry for entry in await asyncio.to_thread(
-                    self.memory.recent, from_robot, limit=50
-                )
-                if entry.event_id == event_id
-            ),
-            None,
+        # Operator-selected sharing addresses an exact retained event, not
+        # just the last 50 of the pet's 250 locally stored episodes.
+        source = await asyncio.to_thread(
+            self.memory.get_episode, from_robot, event_id,
         )
         if source is None:
             raise ValueError("Unknown or expired source event")

@@ -5607,3 +5607,51 @@ async def test_hardware_wroom_sensed_event_survives_camera_privacy(
         assert "Secret image" not in context.interaction
     finally:
         await pet.close()
+
+
+async def test_operator_peer_share_older_retained_eyewitness_outside_recent_fifty(
+    fleet, tmp_path,
+):
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    assert memory.remember(
+        "robot-01", "older_witness", "I saw a silver screw yesterday",
+        kind="object", source_robot="robot-01", witnessed=True,
+        observed_at=100,
+    )
+    for index in range(75):
+        assert memory.remember(
+            "robot-01", f"later_{index:03}", f"New desk observation {index}",
+            kind="object", source_robot="robot-01", witnessed=True,
+            observed_at=101 + index,
+        )
+    assert all(
+        event.event_id != "older_witness"
+        for event in memory.recent("robot-01", limit=50)
+    )
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    try:
+        shared = await pet.share_with_peer(
+            "robot-01", "robot-02", "older_witness",
+        )
+        assert shared["stored"] is True
+        assert shared["witnessed"] is False
+        received = memory.get_episode("robot-02", "older_witness")
+        assert received is not None
+        assert received.source_robot == "robot-01"
+        assert not received.witnessed
+        with pytest.raises(ValueError, match="eyewitness"):
+            await pet.share_with_peer("robot-02", "robot-03", "older_witness")
+        assert memory.forget_episode("robot-01", "older_witness")
+        with pytest.raises(ValueError, match="Unknown or expired"):
+            await pet.share_with_peer("robot-01", "robot-03", "older_witness")
+        fleet.fleet_text_sharing_enabled = False
+        with pytest.raises(ValueError, match="explicit local"):
+            await pet.share_with_peer("robot-01", "robot-03", "later_074")
+        assert memory.count("robot-03") == 0
+    finally:
+        await pet.close()
