@@ -64,6 +64,12 @@ module dock_contact_recess_gauge() {
     // mounting bore at either end. This is a printable nonenergized gauge,
     // not a safe or selected electrical contact holder.
     contact_radius_mm = (contact_outer_d_mm + fit_xy) / 2;
+    minimum_pocket_floor_mm = 2;
+    minimum_side_wall_mm = 2;
+    assert(contact_carrier_h - contact_pocket_depth_mm >= minimum_pocket_floor_mm,
+           "Contact recess leaves insufficient insulated floor");
+    assert(contact_carrier_w / 2 - contact_radius_mm >= minimum_side_wall_mm,
+           "Contact recess breaches side wall");
     bolt_radius_mm = m3_clearance / 2;
     bolt_center_x_mm = contact_carrier_l / 2 - 5;
     contact_center_x_mm = contact_centers_mm / 2;
