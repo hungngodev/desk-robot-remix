@@ -827,3 +827,33 @@ def test_original_dock_receipt_time_is_not_replaced_after_waiting():
     )
     assert result.phase == "hold"
     assert "stale" in result.reason.lower()
+
+
+async def test_dock_detector_delay_expires_original_receipt_without_motion(
+    tmp_path, monkeypatch,
+):
+    import time
+
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+
+    class DelayedFrame(Head):
+        async def snapshot_for_dock(self):
+            return b"\xff\xd8\xff\xd9", time.monotonic() - 0.15
+
+    def slow_detector(jpeg, cal, *, captured_at):
+        time.sleep(0.08)
+        return DockPose(0, 0, 450, 0.5, captured_at)
+
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", slow_detector)
+    head = DelayedFrame()
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=calibration)
+    )
+    assert result["phase"] == "hold"
+    assert "stale" in result["reason"].lower()
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert head.commands == []
