@@ -484,6 +484,8 @@ class PetController:
         self, robot_id: str, change: SceneChange, *,
         camera_derived: bool = False, camera_generation: int | None = None,
         preemption_epoch: int | None = None,
+        camera_received_at: float | None = None,
+        camera_source_identity: tuple[int, int, int] | None = None,
     ) -> None:
         """Same text/event ID, different eyewitness provenance per local DB.
 
@@ -509,7 +511,37 @@ class PetController:
                 or (camera_derived and self.settings.mode == "hardware"
                     and not self.settings.voice_vision_tools_enabled)):
             return
+        # Camera evidence retains the original authenticated Mac receive
+        # chronology, not the later, variably delayed semantic completion.
+        # Device capture-completion ticks cannot be converted to Mac time
+        # without a calibrated clock offset, so preserve them as identity.
         event_id, observed_at = uuid.uuid4().hex, time.time()
+        if camera_received_at is not None or camera_source_identity is not None:
+            if not camera_derived or camera_received_at is None:
+                raise ValueError("Camera receipt provenance requires a camera observation")
+            now_mono = time.monotonic()
+            if (type(camera_received_at) not in (int, float)
+                    or not math.isfinite(camera_received_at)
+                    or not 0 <= now_mono - camera_received_at
+                    <= self.max_observation_age):
+                return  # Stale or impossible Mac receipt cannot enter memory
+            observed_at -= now_mono - camera_received_at
+            if camera_source_identity is not None:
+                identity = camera_source_identity
+                if (type(identity) is not tuple or len(identity) != 3
+                        or any(type(value) is not int for value in identity)
+                        or not 0 <= identity[0] <= 0xffffffff
+                        or not 1 <= identity[1] <= 0xffffffff
+                        or not 1 <= identity[2] <= 0xffffffffffffffff):
+                    raise ValueError("Invalid device camera completion identity")
+                # This source key survives SQLite restart and distinguishes
+                # same-frame retry from a new device observation. It also
+                # carries original unaligned device receipt ticks without
+                # implying they represent exposure or Mac wall clock time.
+                event_id = (
+                    f"camera_{robot_id}_{identity[0]:08x}_"
+                    f"{identity[1]:08x}_{identity[2]:x}"
+                )
         def persist_eyewitness() -> bool:
             # Cancelling an await never cancels the SQLite worker. Retraction
             # must be owned by that worker if visual consent was withdrawn.
@@ -1581,13 +1613,16 @@ class PetController:
                     await asyncio.sleep(self.interval)
                     continue
 
-                candidates: list[tuple[bytes, float]] = []
+                candidates: list[tuple[
+                    bytes, float, tuple[int, int, int] | None
+                ]] = []
                 if self.multimodal is not None:
                     hub = self.multimodal.hub
                     # Camera captures have exactly one per-robot source owner,
                     # already identity checked and chronologically ordered.
                     candidates = [
-                        (frame.jpeg, frame.received_at)
+                        (frame.jpeg, frame.received_at,
+                         getattr(frame, "source_identity", None))
                         for frame in tuple(hub.frames[robot_id])
                         if frame.source in ("sensor", "proactive")
                         and (state.last_scene_frame_at is None
@@ -1640,7 +1675,10 @@ class PetController:
                                 # the transient JPEG, not this observer.
                                 await asyncio.sleep(self.interval)
                                 continue
-                            candidates = [(evidence.jpeg, evidence.received_at)]
+                            candidates = [(
+                                evidence.jpeg, evidence.received_at,
+                                getattr(evidence, "source_identity", None),
+                            )]
                         else:
                             # Lightweight test adaptors without a real
                             # orchestrator retain the original head path.
@@ -1651,15 +1689,15 @@ class PetController:
                                 offer = getattr(self.multimodal, "offer_proactive", None)
                                 if callable(offer):
                                     await offer(robot_id, jpeg, received)
-                                candidates = [(jpeg, received)]
+                                candidates = [(jpeg, received, None)]
                 else:
                     started = time.monotonic()
                     jpeg = await self.heads[robot_id].snapshot()
                     received = time.monotonic()
                     if received - started <= 2.0:
-                        candidates = [(jpeg, received)]
+                        candidates = [(jpeg, received, None)]
 
-                for jpeg, received in candidates:
+                for jpeg, received, camera_identity in candidates:
                     if (not state.enabled or state.generation != generation
                             or self._closed):
                         break
@@ -1786,6 +1824,8 @@ class PetController:
                             robot_id, change, camera_derived=True,
                             camera_generation=hub_generation,
                             preemption_epoch=preemption_epoch,
+                            camera_received_at=received,
+                            camera_source_identity=camera_identity,
                         )
                         if (hub_generation is not None and
                                 self.multimodal.hub._generation[robot_id] != hub_generation):

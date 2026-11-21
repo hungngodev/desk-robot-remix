@@ -1448,6 +1448,76 @@ async def test_local_wroom_safety_transitions_are_firsthand_not_replayed(fleet, 
         await pet.close()
 
 
+
+async def test_camera_source_receipt_keeps_order_and_identity_across_restart(
+    fleet, tmp_path,
+):
+    """Slow semantic completions retain device identity and Mac receive age."""
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    ids = [robot.id for robot in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    received = time.monotonic()
+    try:
+        # The older scene may finish its semantic interpretation LAST.
+        await pet._store_observation(
+            "robot-01", SceneChange("key", "Later brown key", 0.95),
+            camera_derived=True, camera_received_at=received - 1,
+            camera_source_identity=(7, 102, 6000000),
+        )
+        await pet._store_observation(
+            "robot-01", SceneChange("key", "Earlier brass key", 0.96),
+            camera_derived=True, camera_received_at=received - 3,
+            camera_source_identity=(7, 101, 4000000),
+        )
+        originals = memory.recent("robot-01")
+        assert [row.summary for row in originals] == [
+            "Later brown key", "Earlier brass key",
+        ]
+        assert originals[0].observed_at - originals[1].observed_at > 1.9
+        assert originals[0].event_id.startswith("camera_robot-01_00000007_")
+        assert originals[1].event_id != originals[0].event_id
+        copies = memory.recent("robot-02")
+        assert [(row.event_id, row.observed_at, row.witnessed)
+                for row in copies] == [
+            (row.event_id, row.observed_at, False) for row in originals
+        ]
+        assert all(row.source_robot == "robot-01" for row in copies)
+
+        # A retried authenticated frame must never create a new story or
+        # rewrite existing provenance, even if reasoning ran much later.
+        await pet._store_observation(
+            "robot-01", SceneChange("key", "Contradictory stale retry", 0.90),
+            camera_derived=True, camera_received_at=received - 1,
+            camera_source_identity=(7, 102, 6000000),
+        )
+        assert memory.count("robot-01") == 2
+        assert memory.count("robot-02") == 2
+        reopened = MemoryStore(tmp_path, ids)
+        assert reopened.recent("robot-01") == originals
+        assert reopened.recent("robot-02") == copies
+
+        await pet._store_observation(
+            "robot-01", SceneChange("key", "Expired observation", 0.99),
+            camera_derived=True,
+            camera_received_at=time.monotonic() - pet.max_observation_age - 2,
+            camera_source_identity=(7, 103, 7000000),
+        )
+        assert reopened.count("robot-01") == 2
+        with pytest.raises(ValueError, match="Invalid device camera"):
+            await pet._store_observation(
+                "robot-01", SceneChange("key", "Invalid frame ID", 0.99),
+                camera_derived=True, camera_received_at=time.monotonic(),
+                camera_source_identity=(7, 0, 7000000),
+            )
+    finally:
+        await pet.close()
+
+
 async def test_auto_fanout_revocation_during_peer_sqlite_commit_retracts_only_copy(
     fleet, tmp_path, monkeypatch,
 ):
