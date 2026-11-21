@@ -128,8 +128,15 @@ def evaluate(records: list[dict]) -> dict:
             )
     duration = _number(control.get("duration_seconds"), "robot-only duration")
     echoes = control.get("self_interruptions")
-    if duration < 600 or type(echoes) is not int or echoes < 0:
-        raise ValueError("Need 600s real robot-only control and self-interrupt count")
+    speech_seconds = _number(control.get("robot_speech_seconds"), "robot speech seconds")
+    if (duration < 600 or type(echoes) is not int or echoes < 0
+            or not 0 < speech_seconds <= duration
+            or control.get("audible_robot_speech_observed") is not True):
+        raise ValueError(
+            "Need 600s robot-only observation with actual audible robot speech"
+        )
+    if quiet[0].get("quiet_mode_enabled") is not True:
+        raise ValueError("Quiet-mode control must confirm enabled quiet mode")
     quiet_duration = _number(quiet[0].get("duration_seconds"), "quiet duration")
     unsolicited_speech = quiet[0].get("unsolicited_speech_events")
     unsolicited_motion = quiet[0].get("unsolicited_motion_events")
@@ -149,6 +156,9 @@ def evaluate(records: list[dict]) -> dict:
         "new_intents_understood": understood,
         "robot_only_seconds": duration,
         "self_interruptions": echoes,
+        "robot_speech_seconds": speech_seconds,
+        "audible_robot_speech_observed": True,
+        "quiet_mode_enabled": True,
         "quiet_mode_seconds": quiet_duration,
         "quiet_unsolicited_speech_events": unsolicited_speech,
         "quiet_unsolicited_motion_events": unsolicited_motion,
