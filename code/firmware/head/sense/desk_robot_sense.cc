@@ -96,8 +96,6 @@ private:
         using namespace stackchan::behavior;
         bool last_rendered_fault = false;
         bool last_was_idle = false;
-        bool last_person_cue_active = false;
-        uint32_t person_cue_until_ms = 0;
         while (true) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
             const uint32_t valid_at =
@@ -112,16 +110,11 @@ private:
                 for (int i = 0; i < real_pets; ++i)
                     board->face_behavior_.pushEvent(Event(EventType::kTouched));
             }
-            // A WROOM fault or expired status revokes prior cosmetic visual
-            // evidence. It cannot reappear as a fresh sighting on recovery.
-            if (body_unhealthy) person_cue_until_ms = 0;
-            // Consume an authenticated Mac visual cue on the face task:
-            // no HSM cross-thread push, no movement and no extra AI stack.
+            // Consume a visual cue even during a fault so it cannot
+            // replay as a fresh sighting on recovery. The existing
+            // Stackchan HSM owns optional idle expression, not motion.
             if (board->body_bridge_ && board->body_bridge_->TakePersonCue() &&
                 !body_unhealthy) {
-                // Do not replay a sighting received during a fault after
-                // the body reconnects: it is already stale visual evidence.
-                person_cue_until_ms = now_ms + 1500U;
                 board->face_behavior_.pushEvent(
                     Event(EventType::kPersonDetected));
             }
@@ -155,27 +148,24 @@ private:
             // Stackchan idle picker may update the existing OLED only when
             // the device is idle; never write its motion actions to the body.
             const bool idle = device_state == kDeviceStateIdle;
-            const bool person_cue_active =
-                person_cue_until_ms != 0U &&
-                static_cast<int32_t>(person_cue_until_ms - now_ms) > 0 &&
-                !body_unhealthy;
             if (idle && board->display_ != nullptr) {
-                // Update only on a change or return from conversation, not
-                // through 10 redundant LVGL/I2C writes every second.
-                if (body_unhealthy != last_rendered_fault ||
-                    person_cue_active != last_person_cue_active ||
-                    !last_was_idle) {
+                // Show independent WROOM safety as factual OLED status,
+                // not a compulsory emotional reaction or a speech request.
+                if (body_unhealthy && (!last_rendered_fault || !last_was_idle))
+                    board->display_->SetStatus("Body safety stop");
+                else if (last_rendered_fault && !body_unhealthy)
+                    board->display_->SetStatus("");
+                last_rendered_fault = body_unhealthy;
+                // Reuse pinned Stackchan expression selection without
+                // mapping a fault, touch, or sighting to a fixed emotion.
+                if (!last_was_idle) {
                     board->display_->SetEmotion(
-                        body_unhealthy ? "sad" :
-                        person_cue_active ? "surprised" : "neutral");
-                    last_rendered_fault = body_unhealthy;
-                } else if (!body_unhealthy && !person_cue_active &&
-                           action.set_mood) {
+                        action.set_mood ? MoodName(action.mood) : "neutral");
+                } else if (action.set_mood) {
                     board->display_->SetEmotion(MoodName(action.mood));
                 }
             }
             last_was_idle = idle;
-            last_person_cue_active = person_cue_active;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
