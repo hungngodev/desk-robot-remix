@@ -98,7 +98,12 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
                       "--evidence", str(evidence),
                       "--require-first-robot", "--format", "first-robot-markdown"],
     )
-    monkeypatch.setattr(release, "generate", lambda *args: {})
+    # The strict gate now always requires the canonical optional-station
+    # decision map before CI or source checkout. This synthetic checkout has
+    # no selected options, not an absent or unverified decision map.
+    monkeypatch.setattr(
+        release, "generate", lambda *args: {"supplemental_decisions": []},
+    )
     monkeypatch.setattr(
         release, "first_robot_projection",
         lambda *_: {"purchase_approved": True},
@@ -109,6 +114,11 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
                     "within_prototype_cap": True, "awaiting_arrival_roles": []},
     )
     monkeypatch.setattr(verifier, "audit_release", lambda *args, **kwargs: [])
+    # Isolate the head-moving race: successful job receipts are tested
+    # separately and do not involve a live Actions request in this fixture.
+    monkeypatch.setattr(
+        verifier, "verified_required_ci_jobs", lambda *args, **kwargs: True,
+    )
     monkeypatch.setattr(release, "attach_verified_checkout_evidence",
                         lambda report, *args: report)
     monkeypatch.setattr(release, "public_purchase_view",
