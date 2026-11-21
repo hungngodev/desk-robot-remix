@@ -1,4 +1,5 @@
 """Regression for authenticated one-shot Sense codec PCM capture, not playback."""
+import email.message
 import importlib.util
 import io
 import json
@@ -152,11 +153,13 @@ def test_private_capture_opener_does_not_follow_redirect_with_bearer():
     class RedirectingHead(urllib.request.HTTPHandler):
         def http_open(self, request):
             seen.append((request.full_url, request.get_header("Authorization")))
-            return urllib.response.addinfourl(
-                io.BytesIO(b""),
-                {"Location": "https://example.invalid/steal-bearer"},
-                request.full_url, code=302,
+            headers = email.message.Message()
+            headers["Location"] = "https://example.invalid/steal-bearer"
+            response = urllib.response.addinfourl(
+                io.BytesIO(b""), headers, request.full_url, code=302,
             )
+            response.msg = "Found"
+            return response
 
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}), capture.NoRedirect(), RedirectingHead(),
