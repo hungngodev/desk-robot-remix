@@ -279,10 +279,28 @@ def export_kit(
     return report
 
 
+def strict_fit_kit_manifest_object(pairs: list[tuple[str, object]]) -> dict:
+    """Reject duplicated JSON keys that conceal contradictory CAD evidence."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate fit kit manifest key")
+        result[key] = value
+    return result
+
+
+def reject_nonfinite_fit_kit_number(token: str) -> None:
+    raise ValueError("Nonfinite fit kit manifest number: " + token)
+
+
 def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict:
     """Reject stale or changed print files; does not certify fit or power."""
     output = output_dir or root / "docs/cad/remixes"
-    report = json.loads((output / "fit_kit_manifest.json").read_text(encoding="utf-8"))
+    report = json.loads(
+        (output / "fit_kit_manifest.json").read_text(encoding="utf-8"),
+        object_pairs_hook=strict_fit_kit_manifest_object,
+        parse_constant=reject_nonfinite_fit_kit_number,
+    )
     # Generated STLs are only reversible coupons. A hand-edited manifest
     # cannot turn any missing physical, assembly or licensing evidence into
     # a passing release claim without invalidating source verification.
@@ -326,6 +344,14 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         coupon = name in (*GAUGES, *SPEAKER_FITS, *RANGER_FITS, *MG90S_FITS,
                           "dock_rail_entry_coupon",
                           "dock_ir_pair_position_coupon")
+        # Sources and mesh bytes cannot validate a hand-edited label, unit
+        # system or quoted build quantity. Keep source-first prototypes
+        # from being mistaken for final install or procurement instructions.
+        quantity = 8 if name == "tof_adjustable" else 1
+        if (item.get("part") != name or item.get("units") != "mm"
+                or type(item.get("quantity_per_robot")) is not int
+                or item["quantity_per_robot"] != quantity):
+            raise ValueError(f"Altered CAD part identity/quantity/units: {location}")
         if (item.get("installed_quantity_per_robot") != 0
                 or type(item.get("installed_quantity_per_robot")) is not int
                 or item.get("temporary_fit_coupon") is not coupon):

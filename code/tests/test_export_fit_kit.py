@@ -237,6 +237,30 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         with pytest.raises(ValueError, match="Unqualified installed CAD part"):
             source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
+    for field, forged in (
+        ("part", "qualified_chassis"),
+        ("quantity_per_robot", 0),
+        ("quantity_per_robot", True),
+        ("quantity_per_robot", 20),
+        ("units", "inches"),
+    ):
+        changed = json.loads(original)
+        changed["parts"][0][field] = forged
+        manifest.write_text(json.dumps(changed))
+        with pytest.raises(ValueError, match="Altered CAD part identity"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
+    duplicate = original.replace(
+        '"hardware_fit_verified": false',
+        '"hardware_fit_verified": true, "hardware_fit_verified": false', 1,
+    )
+    manifest.write_text(duplicate)
+    with pytest.raises(ValueError, match="Duplicate fit kit manifest key"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original.replace('"quantity_per_robot": 1',
+                                         '"quantity_per_robot": NaN', 1))
+    with pytest.raises(ValueError, match="Nonfinite fit kit manifest number"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
     assert all(item["units"] == "mm" for item in report["parts"])
     assert all(len(item["source_sha256"]) == 64 for item in report["parts"])
     assert all(len(item["mesh_sha256"]) == 64 for item in report["parts"])
