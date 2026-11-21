@@ -4,8 +4,7 @@ import runpy
 from pathlib import Path
 
 import pytest
-
-from desk_robot.room_station import RoomStationDecoder, SENSORS
+from desk_robot.room_station import SENSORS, RoomStationDecoder
 
 BENCH = runpy.run_path(
     str(Path(__file__).resolve().parents[1] / "scripts/bench_room_station.py")
