@@ -1,3 +1,34 @@
+## 21 November 2026: 5/5 green CI run 44878519184, overlay anchor uniqueness, fleet simulation settings, and NC bumper contracts
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `1e76df531b7cec2f4743a07abe0a4ba873d8b44a`.
+This source and test batch does not close physical or commercial gates.
+Completed GitHub Actions CI run 44878519184 passed 100% across all 5 jobs on exact commit `1e76df53`:
+Python and head host tests (3,201 passed), Body C++ host tests with sanitizers (38 passed),
+ESP32 WROOM firmware compile (all 17 targets), Mac conversation and memory regression (69 passed),
+and XIAO Sense ESP-IDF 6.1 firmware compile (both real Sense image and opt-in PCM bench variant).
+
+* `6d47ae25`: `fix(sense): make ContinueOpenAudioChannel overlay anchor unique`
+  In `code/firmware/head/install_overlay.py:465-475`, added unique function signature anchor
+  `void Application::ContinueOpenAudioChannel(ListeningMode mode)` to prevent duplicate patch
+  anchor collision in `main/application.cc` across `ContinueOpenAudioChannel` and `ContinueWakeWordInvoke`.
+  Restored 14 unit tests in `test_sense.py` to passing.
+* `09954ff5`: `fix(test): use fleet settings in unrelated pet memory revision test`
+  In `code/tests/test_api_conversation.py:1658-1665`, explicitly loaded 5-robot `config/fleet.simulation.toml`
+  in `test_unrelated_pet_memory_revision_does_not_cancel_group` instead of default 2-robot `simulation.toml`,
+  preventing `IndexError: list index out of range` on `ids[2]`.
+* `1e76df53`: `test(body): align full bumper contracts with required NC wiring`
+  In `code/tests/test_integration_contracts.py:44-65`, updated bumper assertions to enforce real fail-closed
+  GPIO35 NC bumper wiring in full body profiles, and clarified GPIO35 normally-closed pullup wiring in
+  `docs/hardware/wiring.md:377`.
+* Review threads audit:
+  - 89 total threads; 86 resolved.
+  - Exactly 3 open review threads intentionally tracking physical bench trials (`PRRT_kwDOVlmnQ864qJJP`
+    for Gate A11 IMU thresholds, `PRRT_kwDOVlmnQ864uHdb` for Gate A2 acoustic AEC delay, and
+    `PRRT_kwDOVlmnQ864uSaV` for Gate A2 speaker playback ACK).
+* Safety HOLD:
+  - PR #17 remains draft; physical hardware purchasing, charging, and motor actuation remain on strict HOLD.
+
 ## 21 November 2026: multi-area safety audit, zero-voltage interlock, and CI test suite recovery
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
