@@ -45,7 +45,9 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
               frames=64000, ready=True, delay_ms=0, mic_muted=False,
               last_us=5000000, privacy_epoch=3, final_epoch=None,
               start_generation="1", status_generation="1", raw_generation="1",
-              final_muted=False, final_boot=None):
+              final_muted=False, final_boot=None,
+              initial_mic=100, final_mic=64100,
+              initial_speaker=200, final_speaker=8400):
     if raw is None:
         raw = struct.pack("<hh", 123, -456) * capture.FRAMES
     header = {
@@ -64,6 +66,8 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
             "aec_delay_config_ms": delay_ms,
             "microphone_privacy_muted": mic_muted,
             "microphone_privacy_epoch": privacy_epoch,
+            "microphone_frames_read": initial_mic,
+            "speaker_frames_accepted": initial_speaker,
             "speaker_playback_verified": False,
             "aec_physically_qualified": False,
         }),
@@ -85,9 +89,33 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
                 privacy_epoch if final_epoch is None else final_epoch
             ),
             "microphone_privacy_muted": final_muted,
+            "microphone_frames_read": final_mic,
+            "speaker_frames_accepted": final_speaker,
             "reference_integrity_failed": False,
         }),
     ])
+
+
+@pytest.mark.parametrize("changed", [
+    {"final_speaker": 200},  # No accepted I2S frames during recording.
+    {"final_mic": 64099},    # Nominal WAV length is not device read evidence.
+    {"final_mic": 99},       # Counter regression/reboot during the trial.
+    {"final_speaker": 199},
+    {"initial_mic": 0xffffffff},
+    {"initial_speaker": 0xffffffff},
+])
+def test_private_aec_capture_requires_live_audio_activity(changed):
+    http = fake_read(**changed)
+    with pytest.raises((RuntimeError, ValueError), match="activity|saturated"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+    # A failure before START never requests raw audio. A failed completed
+    # recording is aborted by the normal generation-scoped cleanup path.
+    assert not any(call[0].endswith("/api/audio.capture.raw")
+                   for call in http.calls if changed.get("initial_mic") == 0xffffffff
+                   or changed.get("initial_speaker") == 0xffffffff)
 
 
 def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
@@ -107,6 +135,9 @@ def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
     assert all(header == "Bearer " + "x" * 32 for _, _, header, _ in http.calls)
     assert report["frames"] == 64000 and report["boot"] == 7
     assert report["capture_generation"] == 1
+    assert report["microphone_frames_read_delta"] == 64000
+    assert report["speaker_frames_accepted_delta"] == 8200
+    assert report["speaker_activity_not_acoustic_playback"] is True
     for value in ("physical_speaker_playback_verified",
                   "aec_physically_qualified",
                   "source_device_physically_authenticated"):
