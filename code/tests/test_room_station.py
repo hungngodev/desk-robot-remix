@@ -949,3 +949,52 @@ def test_feather_wrong_nonce_crlf_does_not_unlock_buffered_json(monkeypatch):
     feed._read_port(lambda: not opened or opened[0].reads < 5)
     assert observed == [2]
     assert feed.received == 1
+
+@pytest.mark.parametrize(
+    ("late_ack_number", "accepted"),
+    [(1, []), (2, [1])],
+)
+def test_room_station_rejects_nonce_ack_after_read_deadline(
+    monkeypatch, late_ack_number, accepted
+):
+    """An exact nonce returned after the deadline is not a fresh handshake."""
+    import sys
+    from types import SimpleNamespace
+
+    import desk_robot.room_station as module
+
+    clock = {"now": 100.0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["now"])
+    opened, observed = [], []
+
+    class Port(SynchronizedFakePort):
+        def __init__(self, *args, **kwargs):
+            self.sync_count = 0
+            self.samples = 0
+            opened.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def write(self, request):
+            self.sync_count += 1
+            return super().write(request)
+
+        def readline(self, size):
+            ack = self._read_session_reply()
+            if ack is not None:
+                if self.sync_count == late_ack_number:
+                    clock["now"] += module.USB_SYNC_TIMEOUT_S + 0.1
+                return ack
+            self.samples += 1
+            return json.dumps(frame(self.samples, self.samples * 1000)).encode() + b"\n"
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda obs: observed.append(obs.seq))
+    with pytest.raises(RuntimeError, match="post-connect SYNC unacknowledged"):
+        feed._read_port(lambda: not opened or opened[0].samples < 2)
+    assert observed == accepted
+    assert feed.received == len(accepted)

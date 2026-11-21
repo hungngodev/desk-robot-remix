@@ -336,6 +336,10 @@ class RoomSerialFeed:
                 if not running():
                     break
                 now = time.monotonic()
+                if not synchronized and now >= deadline:
+                    # readline may return an exact nonce ACK after the timeout.
+                    # Never turn that overdue response into fresh USB evidence.
+                    raise RuntimeError("Room station post-connect SYNC unacknowledged")
                 if synchronized and now >= frame_deadline:
                     # An old line may finish readline after a USB stall.
                     # Discard it rather than assigning a new host timestamp.
