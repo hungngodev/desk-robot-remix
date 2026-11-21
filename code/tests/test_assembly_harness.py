@@ -167,3 +167,21 @@ def test_current_builder_guide_keeps_selected_sense_and_motor_profiles():
     assert "historical Freenove modular and CoreS3 sections" in builder
     assert "default build is now `esp32_stepper`" not in builder
     assert "It has no ToF I/O/calibration supplied" not in builder
+    assert builder.startswith("# One robot build and firmware guide")
+    assert "## Complete first robot route" in builder
+    for path in (
+        "../hardware/one-robot-inventory-and-shopping.md",
+        "../cad/FUSION_MEASUREMENT_SHEET.md",
+        "../cad/remixes/one_robot_adapter_kit_README.md",
+        "../cad/FUSION_ONE_ROBOT_ASSEMBLY.md",
+        "../hardware/one-robot-signal-harness.generated.md",
+        "../hardware/wiring.md",
+        "../hardware/one-robot-power-gate.md",
+        "imu-handling.md",
+        "jaw-calibration-helper.md",
+        "first-gripper-test.md",
+        "../records/verification.md",
+    ):
+        assert path in builder
+    assert "A1 through A12" in builder
+    assert "Release the final print set only after qualification" in builder
