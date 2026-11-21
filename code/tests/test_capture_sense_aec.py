@@ -43,7 +43,8 @@ class HeadHTTP:
 
 def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
               frames=64000, ready=True, delay_ms=0, mic_muted=False,
-              last_us=5000000):
+              last_us=5000000, privacy_epoch=3, final_epoch=None,
+              final_muted=False, final_boot=None):
     if raw is None:
         raw = struct.pack("<hh", 123, -456) * capture.FRAMES
     header = {
@@ -60,6 +61,7 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
             "reference_integrity_failed": False,
             "aec_delay_config_ms": delay_ms,
             "microphone_privacy_muted": mic_muted,
+            "microphone_privacy_epoch": privacy_epoch,
             "speaker_playback_verified": False,
             "aec_physically_qualified": False,
         }),
@@ -70,6 +72,15 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
             "physical_aec_qualified": False,
         }),
         Response(raw, headers=header),
+        Response({
+            "robot_id": robot,
+            "boot": boot if final_boot is None else final_boot,
+            "microphone_privacy_epoch": (
+                privacy_epoch if final_epoch is None else final_epoch
+            ),
+            "microphone_privacy_muted": final_muted,
+            "reference_integrity_failed": False,
+        }),
     ])
 
 
@@ -82,10 +93,10 @@ def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
     assert len(raw) == capture.BYTES == 256000
     assert [path.split("/")[-1] for path, *_ in http.calls] == [
         "audio.reference", "audio.capture.start",
-        "audio.capture.status", "audio.capture.raw",
+        "audio.capture.status", "audio.capture.raw", "audio.reference",
     ]
     assert [method for _, method, *_ in http.calls] == [
-        "GET", "POST", "GET", "GET",
+        "GET", "POST", "GET", "GET", "GET",
     ]
     assert all(header == "Bearer " + "x" * 32 for _, _, header, _ in http.calls)
     assert report["frames"] == 64000 and report["boot"] == 7
@@ -108,6 +119,22 @@ def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
             assert wav.readframes(64000) == channel
     with pytest.raises(FileExistsError):
         capture.save_wavs(folder, raw, report)
+
+
+@pytest.mark.parametrize("changes", [
+    {"final_epoch": 4},
+    {"final_muted": True},
+    {"final_boot": 8},
+])
+def test_capture_rejects_boot_privacy_switch_during_download(changes):
+    """The final HTTP privacy receipt must fence raw WAV persistence."""
+    http = fake_read(**changes)
+    with pytest.raises(RuntimeError, match="privacy or boot changed"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+    assert http.calls[-1][0].endswith("/api/audio.reference")
 
 
 @pytest.mark.parametrize("address", [
