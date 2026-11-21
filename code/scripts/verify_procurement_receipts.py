@@ -38,6 +38,8 @@ from verify_playbook_receipts import (
     strict_receipt_object,
     verified_actions_run,
     verified_raw_record,
+    source_unchanged_since_test,
+    evidence_digest_matches,
 )
 from verify_system import source_snapshot
 
@@ -334,6 +336,15 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
         raw = base64.b64decode("".join(file["content"].split()), validate=True)
         if len(raw) != file["size"]:
             return False
+        source_revision = receipt.get("source_sha")
+        digest = receipt.get("artifact_sha256")
+        if digest is not None and not evidence_digest_matches(raw, digest):
+            return False
+        if source_revision != sha and (
+            not evidence_digest_matches(raw, digest)
+            or not source_unchanged_since_test(source_revision, sha, lookup)
+        ):
+            return False
         document = json.loads(
             raw.decode("utf-8"), object_pairs_hook=strict_receipt_object,
             parse_constant=reject_nonfinite_receipt_value,
@@ -415,7 +426,15 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
             errors.append(f"{scope}.{gate}: missing receipt")
             continue
         if (receipt.get("result") != "pass"
-                or receipt.get("source_sha") != sha
+                or not (
+                    receipt.get("source_sha") == sha
+                    or (
+                        isinstance(receipt.get("artifact_sha256"), str)
+                        and source_unchanged_since_test(
+                            receipt.get("source_sha"), sha, cached_lookup
+                        )
+                    )
+                )
                 or receipt.get("scope") != scope
                 or receipt.get("gate") != gate
                 or not isinstance(receipt.get("reviewer"), str)

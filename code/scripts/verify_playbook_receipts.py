@@ -12,6 +12,7 @@ import argparse
 import base64
 import binascii
 import csv
+import hashlib
 import io
 import json
 import math
@@ -91,6 +92,68 @@ def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
 
 
 
+EVIDENCE_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+
+
+def source_unchanged_since_test(
+    source_sha: object, evidence_sha: object, lookup=github_json,
+) -> bool:
+    """Allow a later immutable evidence commit without relabeling test inputs.
+
+    This keeps tested source/build identity separate from the record's commit.
+    All intervening changes must be physical evidence under docs/records or
+    the procedure ledger. New code, tests, firmware, wiring or config need
+    another actual successful test run, not a fresh signoff on older source.
+    """
+    if (type(source_sha) is not str or type(evidence_sha) is not str
+            or not SHA.fullmatch(source_sha) or not SHA.fullmatch(evidence_sha)):
+        return False
+    if source_sha == evidence_sha:
+        return True
+    try:
+        result = lookup(
+            f"https://api.github.com/repos/{REPO}/compare/"
+            f"{source_sha}...{evidence_sha}"
+        )
+        files = result.get("files")
+        commits = result.get("commits")
+        merge_base = result.get("merge_base_commit")
+        return bool(
+            result.get("status") == "ahead"
+            and type(result.get("ahead_by")) is int
+            and result["ahead_by"] >= 1
+            and type(result.get("total_commits")) is int
+            and result["total_commits"] == result["ahead_by"]
+            and type(commits) is list
+            and len(commits) == result["total_commits"] <= 250
+            and isinstance(commits[-1], dict)
+            and commits[-1].get("sha") == evidence_sha
+            and isinstance(merge_base, dict)
+            and merge_base.get("sha") == source_sha
+            and type(files) is list
+            and 1 <= len(files) <= 300
+            and all(
+                type(item) is dict
+                and item.get("status") in {"added", "modified"}
+                and type(item.get("filename")) is str
+                and (
+                    item["filename"].startswith("docs/records/")
+                    or item["filename"]
+                    == "docs/reviews/100_page_procedure_trace.json"
+                )
+                for item in files
+            )
+        )
+    except (AttributeError, TypeError, ValueError, IndexError, KeyError,
+            HTTPError, URLError, OSError, TimeoutError):
+        return False
+
+
+def evidence_digest_matches(raw: bytes, digest: object) -> bool:
+    return (type(digest) is str and EVIDENCE_DIGEST.fullmatch(digest) is not None
+            and hashlib.sha256(raw).hexdigest() == digest)
+
+
 def strict_receipt_object(pairs: list[tuple[str, object]]) -> dict:
     """Reject ambiguous duplicate keys at any JSON receipt nesting depth."""
     result = {}
@@ -150,6 +213,15 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
         raw = base64.b64decode("".join(file["content"].split()), validate=True)
         if len(raw) != file["size"]:
             return False
+        source_revision = signoff.get("source_sha", sha)
+        digest = signoff.get("artifact_sha256")
+        if digest is not None and not evidence_digest_matches(raw, digest):
+            return False
+        if source_revision != sha and (
+            not evidence_digest_matches(raw, digest)
+            or not source_unchanged_since_test(source_revision, sha, lookup)
+        ):
+            return False
         content = raw.decode("utf-8-sig")
         if urlsplit(url).path.lower().endswith(".csv"):
             reader = csv.DictReader(io.StringIO(content), strict=True)
@@ -196,7 +268,7 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
     except ValueError:
         valid_date = False
     return bool(
-        record.get("source_sha") == sha
+        record.get("source_sha") == source_revision
         and record.get("gate") == row.get("gate")
         and record.get("result") == "pass"
         and record.get("operator") == signoff.get("operator")
