@@ -1005,6 +1005,26 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'Transact(event' not in bridge  # never send cue to WROOM
 
 
+def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
+    """The local OLED cannot smile through a current WROOM safety fault."""
+    board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    face = board.split("static void FaceTask(void* context)", 1)[1].split(
+        "void InitializeDisplay()", 1
+    )[0]
+    assert 'if (body_unhealthy) {' in face
+    fault = face.split('if (body_unhealthy) {', 2)[-1].split(
+        '} else if (requested_mood', 1
+    )[0]
+    assert 'SetEmotion("sad")' in fault
+    assert '!last_idle_face_fault || !last_was_idle' in fault
+    assert 'model_mood_active = false;' in fault
+    # Recovery must force a neutral/local HSM face refresh even if its
+    # idle picker emitted no new mood. No 100 ms continuous OLED spam.
+    assert 'if (last_idle_face_fault || model_mood_active ||' in face
+    assert 'last_idle_face_fault = body_unhealthy;' in face
+    assert 'SetStatus("Body safety stop")' in face
+
+
 def test_playback_reference_clock_native_cpp_regression():
     """Compile the same pure C++ clock the Sense firmware uses, not a Python model."""
     compiler = shutil.which("c++")
