@@ -26,6 +26,45 @@ def image(color="gray", square=False):
     return out.getvalue()
 
 
+def test_mac_camera_timeline_keeps_device_clock_separate_from_receipt():
+    """The Sense completion clock is provenance, not an exposure age."""
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    jpg = image()
+    valid = (jpg, bytes(64 * 48), 0.5)
+    frame = hub.offer_prepared(
+        "robot-01", valid, now, source="proactive",
+        source_identity=(19, 42, 2000000),
+    )
+    assert frame.source_identity == (19, 42, 2000000)
+    timeline = hub.interaction_timeline("robot-01", now + 0.2)
+    camera = next(event for event in timeline if event["channel"] == "camera")
+    assert camera["source_boot"] == 19
+    assert camera["source_frame_sequence"] == 42
+    assert camera["source_capture_complete_us"] == 2000000
+    assert camera["source_clock_not_aligned_to_mac"] is True
+    assert camera["exposure_timestamp_verified"] is False
+    assert 0 <= camera["age_ms"] <= 250
+    with pytest.raises(ValueError, match="completion identity"):
+        hub.offer_prepared(
+            "robot-01", valid, now + 1, source="proactive",
+            source_identity=(19, True, 2000100),
+        )
+
+
+def test_legacy_camera_source_has_no_invented_device_timestamp():
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    hub.offer_prepared(
+        "robot-01", (image(), bytes(64 * 48), 0.5), now,
+        source="proactive",
+    )
+    timeline = hub.interaction_timeline("robot-01", now + 0.1)
+    camera = next(event for event in timeline if event["channel"] == "camera")
+    assert "source_capture_complete_us" not in camera
+    assert camera["exposure_timestamp_verified"] is False
+
+
 def test_oversized_jpeg_header_rejected_before_pixel_decompression():
     """A JPEG may advertise huge dimensions in a tiny source byte stream."""
     frame = bytearray(image())
