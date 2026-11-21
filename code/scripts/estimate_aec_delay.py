@@ -23,7 +23,7 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
         if (file.getnchannels() != 1 or file.getsampwidth() != 2
                 or rate not in (16000, 24000, 32000)
                 or not rate // 50 <= count <= 10 * rate):
-            raise ValueError("Need mono PCM16, 16 or 24 kHz, up to ten seconds")
+            raise ValueError("WAV needs mono PCM16 at 16, 24 or 32 kHz, from 20 ms to ten seconds")
         samples = np.frombuffer(file.readframes(count), dtype="<i2").astype(np.float64)
     return samples / 32768, rate
 
