@@ -2274,7 +2274,7 @@ class PetController:
                         timeline = [
                             item for item in raw
                             if (item.get("channel") == "sensor"
-                                and item.get("source") == "wroom_event")
+                                and item.get("source") in {"wroom_event", "wroom_sensed_event"})
                             or (item.get("channel") == "sensor_history"
                                 and item.get("source") == "wroom_event_history")
                             or (item.get("channel") == "room_station"

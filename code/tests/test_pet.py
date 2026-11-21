@@ -5370,3 +5370,50 @@ async def test_hardware_attention_continuity_preserved_when_vision_disabled(
         assert "WROOM touch edge" in context.interaction
     finally:
         await pet.close()
+
+
+async def test_hardware_wroom_sensed_event_survives_camera_privacy(
+    fleet, tmp_path,
+):
+    """WROOM sensed event from recent events survives camera privacy fence."""
+    from types import SimpleNamespace
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = False
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+
+    class Hub:
+        def discard_video(self, robot_id):
+            pass
+
+        def interaction_timeline(self, robot_id, now, *, limit=10):
+            return [
+                {
+                    "channel": "sensor",
+                    "kind": "handling_shake",
+                    "source": "wroom_sensed_event",
+                    "age_ms": 150,
+                },
+                {
+                    "channel": "camera",
+                    "kind": "visual_observation",
+                    "source": "sense_camera_receipt",
+                    "content": "Secret image",
+                },
+            ]
+
+    pet.multimodal = SimpleNamespace(hub=Hub())
+    try:
+        result = await pet._load_proactive_context(
+            "robot-01", SceneChange("handling_shake", "Robot shaken", 1.0),
+        )
+        assert result is not None
+        _, context, _, _, _ = result
+        assert "handling_shake" in context.interaction
+        assert "Secret image" not in context.interaction
+    finally:
+        await pet.close()
