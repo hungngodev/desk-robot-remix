@@ -272,7 +272,7 @@ async def inject_live_context_into_legacy_llm(conn) -> None:
         role="assistant",
         tool_calls=[{
             "id": call_id, "type": "function",
-            "function": {"name": "interaction-context", "arguments": "{}"},
+            "function": {"name": "desk_robot_situation", "arguments": "{}"},
         }],
         uniq_id=prefix + call_id + "_request",
     ))
