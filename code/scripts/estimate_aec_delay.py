@@ -24,7 +24,10 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
                 or rate not in (16000, 24000, 32000)
                 or not rate // 50 <= count <= 10 * rate):
             raise ValueError("WAV needs mono PCM16 at 16, 24 or 32 kHz, from 20 ms to ten seconds")
-        samples = np.frombuffer(file.readframes(count), dtype="<i2").astype(np.float64)
+        pcm = file.readframes(count)
+        if len(pcm) != 2 * count:
+            raise ValueError("WAV file truncated: header frame count exceeds PCM data")
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float64)
     return samples / 32768, rate
 
 
