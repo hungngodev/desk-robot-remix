@@ -1,3 +1,56 @@
+## 21 November 2026: 5/5 green CI run 44932709818, battery preflight thread resolution, fleet STOP leases, eyewitness memory preservation, and native speech capacity bounds
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `62455e0dbc38c71d8f48d3a874a3558aaf6a1d02`.
+This source and test batch does not close physical or commercial gates.
+Completed GitHub Actions CI run 44932709818 passed 100% across all 5 jobs on exact commit `b5f3d64c`:
+Python and head host tests (3,205 passed), Body C++ host tests with sanitizers (38 passed),
+ESP32 WROOM firmware compile (all 17 targets), Mac conversation and memory regression (1,011 passed),
+and XIAO Sense ESP-IDF 6.1 firmware compile (both real Sense image and opt-in PCM bench variant).
+Active run 44933938039 is underway on exact head `62455e0d` (4/5 jobs already completed green).
+
+* `78358420`: `fix(voice): require physical ACK for fallback per-pet audio interruptions`
+  In `code/laptop/src/desk_robot/live_voice_events.py`, added task cancellation detection
+  `if any(task in done and task.cancelled() for task in tasks): raise TimeoutError("Fleet interruption cancelled without ACK")`,
+  preventing cancelled per-pet abort tasks from masquerading as physical acoustic decoder flushes.
+  Added unit test `test_cancelled_per_pet_audio_abort_raises_timeout_error` in `code/tests/test_live_voice_events.py`.
+* `1506c65e` & review thread resolution `PRRT_kwDOVlmnQ866aA7T`:
+  In `code/laptop/src/desk_robot/controller.py`, implemented shared strict fuel sample validator
+  `_require_safe_fuel_sample` for both `_hardware_preflight` and `_assert_armed_health`. Rejects malformed,
+  string, boolean, missing, and out-of-physical-range (2500..4500 mV, 0..10000 centi-percent) fuel readings
+  when `fuel_valid` is true, while preserving optional gauge absence (`fuel_valid: false`) and legitimate
+  critical operating limits (3350/500 preflight and 3300/300 running). Tested via 102 cases in
+  `code/tests/test_control.py`. Review thread `PRRT_kwDOVlmnQ866aA7T` resolved with confirmed 5/5 green CI run.
+* `9c69b5ab`: `fix(voice): preserve Mac tool completion telemetry for ungrounded HTTP receipts`
+  In `code/laptop/server/overlay/desk_robot_native_omni.py`, preserved `native_readonly_tools_completed`
+  increment and context wakeup on authenticated Mac HTTP 200 responses even when minimal payloads yield no
+  grounded spoken facts, resolving timeout regressions in `test_native_omni_xiaozhi.py`.
+* `863d56bb`, `d98ce9d0`, `1bf6e04e`: `fix(voice): disclose capacity loss and preamble bounds for read-only routes`
+  In `code/laptop/server/overlay/desk_robot_voice_intents.py` and `desk_robot_native_omni.py`, added explicit
+  overcapacity detection (`native_readonly_requests_with_capacity`), marking answers incomplete via
+  `_readonly_capacity_exceeded` when human requests exceed the 3-tool queue budget or semantic planner routes
+  overflow, and flagging explicit read intents hidden by long preambles (>280 chars).
+* `a0188208` & `6628dec9`: `fix(voice): recheck native private memory revision before speaking`
+  In `code/laptop/server/overlay/desk_robot_native_omni.py`, verified per-pet private memory revision immediately
+  prior to speech generation, preventing stale recalled facts from being voiced if an operator corrected
+  or deleted an episode during slow reasoning or TTS synthesis.
+* `31093022`, `ce32280b`, `62455e0d`: `fix(fleet): hold sole moving pet lease until acknowledged body STOP`
+  In `code/laptop/src/desk_robot/controller.py`, enforced strict single moving pet ownership in the fleet
+  by holding the motion owner lease until confirmed physical STOP acknowledgment, latched failed STOP states,
+  and ensured emergency STOP remains functional even without an initialized motion lease. Added fast-lane CI
+  verification in `.github/workflows/host-verification.yml` and `code/tests/test_ci_lane_concurrency.py`.
+* `3b21b876` & `e57d4f0e`: `fix(memory): reject peer copies of deleted or conflicting eyewitness episodes`
+  In `code/laptop/src/desk_robot/pet.py`, verified eyewitness memory source integrity before and during peer
+  copy insertion, retracting pending secondhand copies if the original episode was deleted or corrected
+  during cross-thread SQLite persistence, and distinguishing deleted from duplicate memories.
+* Review threads audit:
+  - 90 total threads; 87 resolved.
+  - Exactly 3 open review threads intentionally tracking physical bench trials (`PRRT_kwDOVlmnQ864qJJP`
+    for Gate A11 IMU thresholds, `PRRT_kwDOVlmnQ864uHdb` for Gate A2 acoustic AEC delay, and
+    `PRRT_kwDOVlmnQ864uSaV` for Gate A2 speaker playback ACK).
+* Safety HOLD:
+  - PR #17 remains draft; physical hardware purchasing, battery charging, and motor actuation remain on strict HOLD.
+
 ## 21 November 2026: 5/5 green CI run 44878519184, overlay anchor uniqueness, fleet simulation settings, and NC bumper contracts
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
