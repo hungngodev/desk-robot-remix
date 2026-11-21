@@ -1727,8 +1727,14 @@ static void status_readiness_matches_local_arm_interlocks() {
   body.sample_optional_inputs(1U, true, false, false);
   CHECK(send(body, "status", 2).find("\"fault\":\"bumper_active\"") !=
         std::string::npos);
-  CHECK(send(body, "arm", 2) == "ERR arm bumper_active");
+  CHECK(send(body, "arm", 2) == "ERR arm bumper_latched");
   body.sample_optional_inputs(0U, false, false, false);
+  // The collision stop survives release; only a new local USB decision
+  // clears it before subsequent independent IMU fault checks.
+  CHECK(send(body, "status", 2).find("\"fault\":\"bumper_latched\"") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 2) == "ERR arm bumper_latched");
+  CHECK(send(body, "rearm", 2, true) == "OK rearm");
 
   body.require_imu_for_motion(true);
   CHECK(send(body, "status", 3).find("\"fault\":\"imu_missing_or_stale\"") !=
