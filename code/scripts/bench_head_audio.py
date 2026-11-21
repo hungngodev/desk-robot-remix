@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 
 import httpx
-
 from desk_robot.config import load_settings
 from desk_robot.transport import HttpHead
 
