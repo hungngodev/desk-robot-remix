@@ -120,7 +120,14 @@ store them outside the local protected trial directory.
    variable already configured for this robot. Start the existing audio
    session before capturing; this is a recorder of active codec samples,
    not permission to wake the microphone without consent.
-2. Capture a four-second source-tagged device window:
+2. Begin the ordinary consented Xiaozhi speaker test stimulus **before**
+   starting the four-second capture and keep it playing throughout the
+   window. The codec's calibration window rejects a missing speaker
+   reference on its first recorded microphone frame, so starting the
+   sound afterward produces a failed trial rather than useful WAVs.
+   Use a repeatable broadband signal and keep the head's ordinary
+   microphone/AFE task active. Do not substitute synthetic reference PCM.
+3. Capture the four-second source-tagged device window:
 
    ```sh
    cd code
@@ -139,9 +146,7 @@ store them outside the local protected trial directory.
    retry** of a possibly already-started capture. The output is private
    mode 0600 `microphone.wav`, `speaker_reference.wav`, and
    `capture.json`, in a mode 0700 directory with no overwrite.
-3. Have the real head emit a distinctive test stimulus on its canonical
-   Xiaozhi speaker while its ordinary microphone/AFE task is active.
-   Read these real source frames with the existing offline estimator:
+4. Read these real source frames with the existing offline estimator:
 
    ```sh
    cd code
@@ -150,7 +155,7 @@ store them outside the local protected trial directory.
      --speaker data/private/aec_lab_trial/speaker_reference.wav
    ```
 
-4. Repeat bench trials with and without playback, double talk, VAD
+5. Repeat bench trials with and without playback, double talk, VAD
    interruption, WiFi/camera/servo load and head reboot. Retain a
    source-qualified local verification receipt with the tested board
    revision, actual output volume, delay estimates, clock drift and
