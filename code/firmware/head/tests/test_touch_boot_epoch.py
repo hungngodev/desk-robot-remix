@@ -15,6 +15,69 @@ import pytest
 HEAD = Path(__file__).resolve().parents[1]
 
 
+def _compile_checked(compiler: str, cpp: Path, exe: Path, *,
+                     toolchain_probe: bool) -> None:
+    command = [
+        compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+    ]
+    if not toolchain_probe:
+        command.extend(["-I", str(HEAD / "overlay")])
+    command.extend([str(cpp), "-o", str(exe)])
+    result = subprocess.run(
+        command, check=False, capture_output=True, text=True, timeout=25,
+    )
+    if result.returncode:
+        label = ("C++17 host toolchain preflight failed"
+                 if toolchain_probe else
+                 "Touch boot epoch product test compile failed")
+        pytest.fail(
+            f"{label} (exit {result.returncode})\n"
+            f"compiler: {compiler}\ncommand: {' '.join(command)}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            pytrace=False,
+        )
+
+
+def _check_cpp17_host(compiler: str, directory: Path) -> None:
+    """Separate missing Xcode/SDK C++ headers from product source failures."""
+    cpp = directory / "host_cxx17_probe.cc"
+    exe = directory / "host_cxx17_probe"
+    cpp.write_text(
+        "#include <array>\n#include <cstdint>\n"
+        "int main() { std::array<std::uint32_t, 2> a{1, 2};"
+        " return a[0] != 1 || a[1] != 2; }\n",
+        encoding="utf-8",
+    )
+    _compile_checked(compiler, cpp, exe, toolchain_probe=True)
+    result = subprocess.run(
+        [str(exe)], capture_output=True, text=True, timeout=5, check=False,
+    )
+    if result.returncode:
+        pytest.fail(
+            "C++17 host toolchain executable failed before product test "
+            f"(exit {result.returncode}): {result.stderr}",
+            pytrace=False,
+        )
+
+
+def test_missing_standard_array_header_identifies_toolchain_not_touch_source(
+    tmp_path,
+):
+    """Regression: captured compiler stderr must be visible for a bad SDK."""
+    fake = tmp_path / "fake-cxx"
+    fake.write_text(
+        "#!/bin/sh\necho 'fatal error: array file not found' >&2\nexit 1\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    with pytest.raises(pytest.fail.Exception) as error:
+        _check_cpp17_host(str(fake), tmp_path)
+    message = str(error.value)
+    assert "C++17 host toolchain preflight failed" in message
+    assert "array file not found" in message
+    assert str(fake) in message
+
+
 def test_body_boot_isolates_dedicated_and_cap_touch_counters():
     compiler = shutil.which("c++")
     if not compiler:
@@ -41,15 +104,21 @@ int main() {
 }
 """
     with tempfile.TemporaryDirectory() as directory:
+        _check_cpp17_host(compiler, Path(directory))
         cpp = Path(directory) / "body_boot.cc"
         exe = Path(directory) / "body_boot"
-        cpp.write_text(source)
-        subprocess.run(
-            [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
-             "-I", str(HEAD / "overlay"), str(cpp), "-o", str(exe)],
-            check=True, capture_output=True, text=True,
+        cpp.write_text(source, encoding="utf-8")
+        _compile_checked(compiler, cpp, exe, toolchain_probe=False)
+        result = subprocess.run(
+            [str(exe)], check=False, capture_output=True, text=True,
+            timeout=5,
         )
-        subprocess.run([str(exe)], check=True, timeout=5)
+        if result.returncode:
+            pytest.fail(
+                f"Touch boot epoch product assertion failed "
+                f"(exit {result.returncode}): {result.stderr}",
+                pytrace=False,
+            )
 
 
 def test_bridge_checks_matching_per_boot_status_before_face_events():
