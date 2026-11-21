@@ -49,14 +49,24 @@ def analyze(records: list[dict]) -> dict:
         if decoded is None:
             raise ValueError("Each frame needs fresh stationary WROOM MPU6050 evidence")
         imu = body["imu"]
-        stamp = imu["sample_ms"]
-        if last_time is not None and (observed <= last_time or stamp <= last_sample):
-            raise ValueError("No repeated, reversed or stale IMU conversions")
-        last_time, last_sample = observed, stamp
         if boot_id is None:
             boot_id = imu["boot_id"]
         if imu["boot_id"] != boot_id:
             raise ValueError("Do not mix WROOM boot identities")
+        stamp = imu["sample_ms"]
+        if last_time is not None:
+            if observed <= last_time or stamp == last_sample:
+                raise ValueError("No repeated, reversed or stale IMU conversions")
+            if stamp < last_sample:
+                # Legitimate near-0xffffffff rollover in same boot context
+                is_rollover = (last_sample >= 0xffff0000 and stamp <= 0xffff
+                               and ((stamp - last_sample) & 0xffffffff) < 0x7fffffff)
+                if not is_rollover:
+                    raise ValueError("No repeated, reversed or stale IMU conversions")
+            elif stamp - last_sample > 0x7fffffff:
+                # Replay of a pre-wrap packet arriving after rollover
+                raise ValueError("No repeated, reversed or stale IMU conversions")
+        last_time, last_sample = observed, stamp
         for name, old in (("firmware_commit", firmware), ("mount_id", mount)):
             value = record.get(name)
             if not isinstance(value, str) or not 1 <= len(value.strip()) <= 128:

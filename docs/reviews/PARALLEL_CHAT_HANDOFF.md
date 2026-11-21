@@ -1,3 +1,15 @@
+## 21 November 2026: 32-bit sample_ms rollover handling in handling calibration
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `c9044aca1897f25aa262bf64a66a70e7a2b97dc3`.
+This source and test batch does not close physical or commercial gates.
+
+* IMU sample timestamp uint32 rollover support (Review PRRT_kwDOVlmnQ866b6d-):
+  - In `code/scripts/calibrate_handling.py`, updated `analyze()` to evaluate forward acquisition progress on the WROOM 32-bit `sample_ms` clock.
+  - Permits legitimate near-`0xffffffff` rollover in same-boot context (`last_sample >= 0xffff0000 and stamp <= 0xffff` with forward distance `(stamp - last_sample) & 0xffffffff < 0x7fffffff`).
+  - Rejects duplicate timestamps (`stamp == last_sample`), backward timestamps without rollover condition (`stamp < last_sample`), and pre-wrap delayed packets arriving after rollover (`stamp - last_sample > 0x7fffffff`).
+  - Added unit regression tests in `code/tests/test_calibrate_handling.py`: `test_handling_calibration_accepts_same_boot_uint32_rollover`, `test_handling_calibration_rejects_delayed_pre_wrap_replay_after_rollover`, and `test_handling_calibration_rejects_backward_sample_without_wrap`.
+
 ## 21 November 2026: ADS1115 belly and jaw ADC channel validity decoupling
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.

@@ -92,3 +92,40 @@ def test_weak_shake_does_not_invent_a_threshold():
         row["body"]["imu"]["acc"] = [0, 0, 17000]
     with pytest.raises(ValueError, match="do not separate"):
         analyze(rows)
+
+
+def test_handling_calibration_accepts_same_boot_uint32_rollover():
+    rows = trials()
+    rollover_stamps = [
+        0xfffffff8, 0xfffffff9, 0xfffffffa, 0xfffffffb,
+        0xfffffffc, 0xfffffffd, 0xfffffffe, 0xffffffff,
+        0, 1, 2, 3, 4, 5, 6, 7,
+    ]
+    for row, stamp in zip(rows, rollover_stamps, strict=True):
+        row["body"]["imu"]["sample_ms"] = stamp
+    report = analyze(rows)
+    assert report["gyro_bias_dps"] == [1.0, 0.0, 0.0]
+    assert 25 <= report["tilt_threshold_deg_candidate"] <= 50
+    assert 300 <= report["shake_delta_mg_candidate"] < 600
+    assert report["thresholds_physically_qualified"] is False
+    assert report["motor_authorization"] is False
+
+
+def test_handling_calibration_rejects_delayed_pre_wrap_replay_after_rollover():
+    rows = trials()
+    rollover_stamps = [
+        0xfffffff8, 0xfffffff9, 0xfffffffa, 0xfffffffb,
+        0xfffffffc, 0xfffffffd, 0xfffffffe, 0xffffffff,
+        0, 1, 0xffffffff, 3, 4, 5, 6, 7,
+    ]
+    for row, stamp in zip(rows, rollover_stamps, strict=True):
+        row["body"]["imu"]["sample_ms"] = stamp
+    with pytest.raises(ValueError, match="No repeated, reversed or stale IMU conversions"):
+        analyze(rows)
+
+
+def test_handling_calibration_rejects_backward_sample_without_wrap():
+    rows = trials()
+    rows[9]["body"]["imu"]["sample_ms"] = rows[8]["body"]["imu"]["sample_ms"] - 50
+    with pytest.raises(ValueError, match="No repeated, reversed or stale IMU conversions"):
+        analyze(rows)
