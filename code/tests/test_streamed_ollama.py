@@ -436,7 +436,8 @@ async def test_kokoro_speech_receipt_must_match_exact_head_and_not_claim_acousti
 
 
 @pytest.mark.parametrize("corrupt_grant", [
-    None, "wrong_head", "missing_ids", "false_grant", "fake_lease", "duplicate_head",
+    None, "wrong_head", "missing_ids", "false_grant", "fake_lease",
+    "duplicate_head", "missing_lease_id", "wrong_lease_id",
 ])
 async def test_kokoro_session_grant_and_release_bind_exact_device_set(
     monkeypatch, corrupt_grant,
@@ -468,6 +469,10 @@ async def test_kokoro_session_grant_and_release_bind_exact_device_set(
                 permitted["expires_in_seconds"] = True
             elif corrupt_grant == "duplicate_head":
                 permitted["device_ids"] = ["head-01", "head-01"]
+            elif corrupt_grant == "missing_lease_id":
+                permitted.pop("lease_id")
+            elif corrupt_grant == "wrong_lease_id":
+                permitted["lease_id"] = "different-lease"
         return httpx.Response(200, json=permitted)
 
     settings = SimpleNamespace(
@@ -493,6 +498,41 @@ async def test_kokoro_session_grant_and_release_bind_exact_device_set(
     assert [request["enabled"] for request in requests] == [True, False]
     assert requests[0]["lease_id"] == requests[1]["lease_id"]
     assert len(requests[0]["lease_id"]) == 32
+
+
+@pytest.mark.parametrize("receipt_lease_id", [None, "different-lease"])
+async def test_kokoro_session_requires_release_lease_receipt(monkeypatch, receipt_lease_id):
+    monkeypatch.setenv("DESK_SESSION_PROOF_TOKEN", "s" * 40)
+    requests = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        response = {
+            "device_ids": body["device_ids"],
+            "enabled": body["enabled"],
+            "expires_in_seconds": 305 if body["enabled"] else 0,
+            "lease_id": body["lease_id"],
+        }
+        if not body["enabled"]:
+            if receipt_lease_id is None:
+                response.pop("lease_id")
+            else:
+                response["lease_id"] = receipt_lease_id
+        return httpx.Response(200, json=response)
+
+    settings = SimpleNamespace(
+        speech_bridge_url="http://xiaozhi.local",
+        speech_bridge_token_env="DESK_SESSION_PROOF_TOKEN",
+    )
+    robot = SimpleNamespace(device_id="head-01")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        speaker = KokoroHeadSpeaker(settings, client)
+        with pytest.raises(RuntimeError, match="release unconfirmed"):
+            async with speaker.session([robot]):
+                pass
+    assert [request["enabled"] for request in requests] == [True, False]
+
 
 
 async def test_kokoro_session_rejects_unconfirmed_release_and_duplicate_devices(

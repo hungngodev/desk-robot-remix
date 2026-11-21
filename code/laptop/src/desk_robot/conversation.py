@@ -316,7 +316,7 @@ class KokoroHeadSpeaker:
                 except Exception:
                     pass
             raise
-        if not matches(granted, True) or granted.get("lease_id", lease_id) != lease_id:
+        if not matches(granted, True) or granted.get("lease_id") != lease_id:
             # A damaged or misdirected receipt cannot prove lease authority.
             try:
                 await self._bridge("/session", release_request)
@@ -330,7 +330,7 @@ class KokoroHeadSpeaker:
             try:
                 released = await self._bridge("/session", release_request)
                 if (not matches(released, False)
-                        or released.get("lease_id", lease_id) != lease_id):
+                        or released.get("lease_id") != lease_id):
                     raise RuntimeError("Xiaozhi speaker session release unconfirmed")
             finally:
                 self._lease_context.reset(context_token)
