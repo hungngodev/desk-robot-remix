@@ -109,6 +109,7 @@ private:
         // but never flood the shared I2C display every 100 ms.
         uint32_t last_fault_status_refresh_ms = 0;
         bool last_was_idle = false;
+        bool last_idle_face_fault = false;
         bool model_mood_active = false;
         uint32_t model_mood_started_ms = 0;
         while (true) {
@@ -206,18 +207,25 @@ private:
                 // Only the Mac's CURRENT context decision may request a
                 // transient mood. The local idle HSM takes over afterward.
                 // These bytes never reach WROOM, motors, Opus or microphones.
-                if (!body_unhealthy &&
-                    requested_mood != desk_robot::CosmeticMood::kNone) {
+                if (body_unhealthy) {
+                    // Fault evidence outranks idle smiles and model moods.
+                    // Draw only on a fault/idle transition, not every 100 ms.
+                    if (!last_idle_face_fault || !last_was_idle)
+                        board->display_->SetEmotion("sad");
+                    model_mood_active = false;
+                } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
                     board->display_->SetEmotion(CosmeticMoodName(requested_mood));
                     model_mood_active = true;
                     model_mood_started_ms = now_ms;
                 } else if (!model_mood_active ||
                            now_ms - model_mood_started_ms >= 1600U) {
-                    if (model_mood_active || !last_was_idle || action.set_mood)
+                    if (last_idle_face_fault || model_mood_active ||
+                        !last_was_idle || action.set_mood)
                         board->display_->SetEmotion(
                             action.set_mood ? MoodName(action.mood) : "neutral");
                     model_mood_active = false;
                 }
+                last_idle_face_fault = body_unhealthy;
             }
             last_was_idle = idle;
             vTaskDelay(pdMS_TO_TICKS(100));
