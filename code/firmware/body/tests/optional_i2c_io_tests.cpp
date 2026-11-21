@@ -248,17 +248,21 @@ int main() {
     CHECK(rejected_mcp.readings().dock.sample_seq > old_seq);
         // A busy ADS1115 must not turn a cached old register into new jaw data.
     const auto prior_jaw_seq = accessories.readings().force.jaw_sample_seq;
+    const auto prior_jaw_at_ms = accessories.readings().force.jaw_at_ms;
     CHECK(prior_jaw_seq > 0U);
+    CHECK(prior_jaw_at_ms > 0U); // genuinely completed channel 1 conversion
     Wire.ads_conversion_ready = false;
     for (std::uint32_t ms = 1608; ms < 3200; ms += 12)
       accessories.poll(ms);
     CHECK(accessories.readings().force.jaw_sample_seq == prior_jaw_seq);
+    CHECK(accessories.readings().force.jaw_at_ms == prior_jaw_at_ms);
     CHECK(!accessories.readings().force.valid);
     Wire.ads_conversion_ready = true;
     for (std::uint32_t ms = 3204; ms < 4700; ms += 12)
       accessories.poll(ms);
     CHECK(accessories.readings().force.valid);
     CHECK(accessories.readings().force.jaw_sample_seq > prior_jaw_seq);
+    CHECK(accessories.readings().force.jaw_at_ms > prior_jaw_at_ms);
     CHECK(bits == 0xA5);
     CHECK(pulse.sample().present);
     // The FIFO has been drained by the repeated polls above. The last
