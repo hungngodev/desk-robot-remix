@@ -192,6 +192,25 @@ class SenseOverlayTests(unittest.TestCase):
         )
 
 
+    def test_sense_pdm_mic_read_timeout_is_bounded(self):
+        """A PDM DMA stall must yield to the existing Xiaozhi audio task.
+
+        The installed Sense upstream build is the test target, not a mock.
+        """
+        overlay.apply(self.root, 'sense')
+        codec = (self.root / 'main/audio/codecs/no_audio_codec.cc').read_text()
+        reader = codec.split('int NoAudioCodecSimplexPdm::Read(', 1)[1]
+        self.assertIn('#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3', reader)
+        self.assertIn('pdMS_TO_TICKS(120)', reader)
+        self.assertIn('read_status != ESP_OK', reader)
+        self.assertIn('read_status != ESP_ERR_TIMEOUT', reader)
+        self.assertIn('return 0;', reader)
+        self.assertIn('portMAX_DELAY', reader)  # Other boards unchanged.
+        self.assertNotIn(
+            'i2s_channel_read(rx_handle_, dest, samples * sizeof(int16_t), '
+            '&bytes_read, portMAX_DELAY) != ESP_OK', reader,
+        )
+
     def test_invalid_32khz_opus_offer_does_not_destroy_decoder(self):
         """The 32 kHz DAC clock is not an Opus decode rate (source gate)."""
         overlay.apply(self.root, 'sense')
