@@ -121,10 +121,12 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
     started = _json_response(
         opener, base + "/api/audio.capture.start", token, method="POST",
     )
-    if started.get("ok") is not True or started.get("robot_id") != robot_id:
+    if (started.get("ok") is not True or started.get("robot_id") != robot_id
+            or started.get("boot") != boot):
         # The current Envelope returns robot_id for the authenticated head.
         # Do not retry: the first START may already own the private buffer.
         raise RuntimeError("Sense PCM START identity unconfirmed")
+    generation = _generation(started.get("capture_generation"))
     end_by = clock() + 8.0
     previous = 0
     while clock() < end_by:
@@ -132,6 +134,7 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         count = _number(data.get("frames"), 0, FRAMES, "frame count")
         if (data.get("robot_id") != robot_id
                 or _number(data.get("boot"), 0, 0xffffffff, "boot ID") != boot
+                or _generation(data.get("capture_generation")) != generation
                 or type(data.get("active")) is not bool
                 or type(data.get("ready")) is not bool
                 or type(data.get("failed")) is not bool
@@ -161,13 +164,17 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
                 or response.headers.get("X-Desk-Audio-Robot-Id") != robot_id):
             raise ValueError("Wrong raw PCM content type or robot identity")
         reported_boot = _number_header(response, "X-Desk-Audio-Boot", 0, 0xffffffff)
+        reported_generation = _number_header(
+            response, "X-Desk-Audio-Generation", 1, 2**64 - 1,
+        )
         frames = _number_header(response, "X-Desk-Audio-Frames", FRAMES, FRAMES)
         first = _number_header(response, "X-Desk-Audio-First-Us", 1, 2**63 - 1)
         last = _number_header(response, "X-Desk-Audio-Last-Us", 1, 2**63 - 1)
         # A correctly counted PCM window with a large clock gap still
         # corrupts absolute acoustic lag. Match the Sense window's bounded
         # 80 ms accumulated timing tolerance, including older bench builds.
-        if reported_boot != boot or not 3_920_000 <= last - first <= 4_080_000:
+        if (reported_boot != boot or reported_generation != generation
+                or not 3_920_000 <= last - first <= 4_080_000):
             raise RuntimeError("Sense PCM boot or capture timestamps inconsistent")
         raw = response.read(BYTES + 1)
     if len(raw) != BYTES:
@@ -188,6 +195,7 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         "capture_source": "authenticated_sense_codec_private_pcm_window",
         "robot_id": robot_id,
         "boot": boot,
+        "capture_generation": generation,
         "frames": frames,
         "sample_rate_hz": RATE,
         "first_sample_us": first,
@@ -199,6 +207,13 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         "acoustic_delay_measured": False,
     }
     return raw, report
+
+
+def _generation(value: object) -> int:
+    """Reject stale or ambiguous capture IDs before saving private audio."""
+    if type(value) is not str or re.fullmatch(r"[1-9][0-9]{0,19}", value) is None:
+        raise ValueError("Invalid Sense PCM capture generation")
+    return _number(int(value), 1, 2**64 - 1, "capture generation")
 
 
 def _number_header(response, name: str, low: int, high: int) -> int:
