@@ -154,10 +154,14 @@ store them outside the local protected trial directory.
    device timestamp span within 80 ms, and rejects truncated/oversized
    replies. It additionally checks that the authenticated codec's PDM read
    counter advanced by at least 64000 frames and that accepted speaker I2S
-   frames increased during this capture. A silent or inactive speaker trial
-   is rejected before saving WAV files, but I2S acceptance remains strictly
-   software activity evidence, not actual audible playback. Saturated
-   counters require a fresh, safely restarted bench session.
+   frames increased during this capture. The firmware additionally
+   latches `speaker_activity_in_window` when the final microphone callback
+   completes the private four-second recording. A speaker write occurring
+   afterward cannot qualify an otherwise silent recording merely by changing
+   the cumulative counters before the Mac's final status request. A silent
+   or inactive speaker trial is rejected before WAV persistence. These
+   receipts are strictly software activity evidence, not actual audible
+   playback. Saturated counters require a fresh, safely restarted bench session.
    The Sense buffer also rejects individual microphone callback
    gaps larger than the frame duration plus 40 ms. These conservative
    limits protect software timestamp validity, not physical AEC quality.
