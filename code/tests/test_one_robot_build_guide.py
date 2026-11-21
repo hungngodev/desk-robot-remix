@@ -2,8 +2,8 @@
 
 This verifies navigation and critical release language, not electrical fit.
 """
-from pathlib import Path
 import re
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 GUIDE = ROOT / "docs/guides/one-complete-robot.md"
