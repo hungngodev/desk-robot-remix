@@ -858,6 +858,10 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
                 }
                 for ident, (parent, count)
                 in mod.SUPPLEMENTAL_DECISIONS.items()
+                # Explicitly deferred optional thermal and NFC parts must
+                # not appear as selected receipts in an otherwise complete
+                # synthetic cart. The generator preserves both decisions.
+                if ident not in ("room_amg8833", "room_nfc_game_tokens")
             },
         }
 
