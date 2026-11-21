@@ -1,0 +1,356 @@
+name: Host verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - codex/initial-remix
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+# Per-job lanes keep one active and one newest pending automatic PR revision.
+# An explicit rerun uses its run ID as a separate lane group so it can finish
+# even while other workers push, without queueing every intermediate commit.
+# Never combine the lanes into one workflow-level concurrency group.
+jobs:
+  mac-fast:
+    name: Mac conversation and memory regression
+    concurrency:
+      group: host-verification-mac-fast-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
+          test "$actual" = "$expected"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install locked Mac test dependencies
+        working-directory: code
+        run: |
+          uv python install 3.11
+          uv sync --extra dev --python 3.11 --locked
+      - name: Verify bounded Mac voice, memory and fleet ownership
+        working-directory: code
+        run: |
+          uv run --no-sync pytest -q -ra \
+            tests/test_attention.py \
+            tests/test_live_turns.py \
+            tests/test_runtime_voice_priority.py \
+            tests/test_brain_context.py \
+            tests/test_brain_core_memory.py \
+            tests/test_brain_memory_retrieval.py \
+            tests/test_memory_duplicate_identity.py \
+            tests/test_api_conversation.py \
+            tests/test_api_readonly_context_split.py \
+            tests/test_realtime_omni_protocol.py \
+            tests/test_native_omni_xiaozhi.py \
+            tests/test_voice_memory_reuse.py \
+            tests/test_pet.py \
+            tests/test_vision_worker.py::test_scene_comparator_unhashable_model_kind_is_rejected_without_crash \
+            tests/test_multimodal.py::test_unhashable_multimodal_cues_are_rejected_without_mutation \
+            tests/test_multimodal_api.py::test_mac_semantic_planner_rejects_late_plan_after_new_human_vad \
+            tests/test_server_bridge.py::test_legacy_brain_blends_live_mac_evidence_per_pet_without_history_bloat \
+            tests/test_server_bridge.py::test_legacy_brain_clears_old_context_when_mac_revokes_permission \
+            tests/test_server_bridge.py::test_legacy_brain_drops_old_mac_reply_after_new_voice_turn \
+            tests/test_server_bridge.py::test_legacy_mac_context_remains_tool_data_never_system_or_human \
+            tests/test_server_bridge.py::test_legacy_mac_context_rejects_older_overlapping_tool_result \
+            tests/test_server_bridge.py::test_legacy_mac_context_expires_without_persisting_to_session_memory \
+            tests/test_ci_lane_concurrency.py
+
+  python-and-head-host:
+    concurrency:
+      group: host-verification-python-and-head-host-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    name: Python and head host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PR CI must verify the reviewed branch source, not GitHub's
+          # synthetic merge SHA. For push/manual jobs use the event SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
+          test "$actual" = "$expected" || {
+            echo "::error::Wrong checkout: expected $expected, got $actual"
+            exit 1
+          }
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Prevent partial repository trees
+        run: |
+          # Include hidden root entries: a truncated Git Database tree may
+          # retain a few visible source files but drop shared agent assets,
+          # workflow configuration, or repository license metadata.
+          for directory in .agent3d .github code docs; do
+            if [ ! -d "$directory" ]; then
+              echo "::error::Missing expected repository root directory: $directory"
+              exit 1
+            fi
+          done
+          for file in .gitignore AGENTS.md LICENSE README.md; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing expected repository root file: $file"
+              exit 1
+            fi
+          done
+          test -f code/firmware/body/include/BodyPins.h
+          test -f code/firmware/head/sense/config.h
+          test -f docs/hardware/full-feature-plan.json
+          test -f docs/records/verification.md
+          test -f code/laptop/src/desk_robot/handling.py
+          # A partial Git tree can retain root sentinels while deleting an
+          # entire test, firmware or documentation subtree. 457 tracked files
+          # were present at the reviewed November 18 baseline; the deliberately
+          # conservative floor blocks a large accidental deletion.
+          tracked_count=$(git ls-files | wc -l)
+          if [ "$tracked_count" -lt 400 ]; then
+            echo "::error::Partial repository tree: only $tracked_count tracked files"
+            exit 1
+          fi
+          # git ls-files counts sparse-checkout entries even when an entire
+          # non-sentinel subtree is absent from the actual worktree. A green
+          # source test requires every tracked path to exist on disk.
+          while IFS= read -r -d '' tracked_path; do
+            if [ ! -e "$tracked_path" ] && [ ! -L "$tracked_path" ]; then
+              echo "::error::Missing tracked worktree path: $tracked_path"
+              exit 1
+            fi
+          done < <(git ls-files -z)
+      - name: Compile head test Python before expensive toolchain setup
+        run: python3 -m compileall -q code/firmware/head/tests
+      - name: Install Python and locked dependencies
+        working-directory: code
+        run: |
+          uv python install 3.11
+          uv sync --extra dev --python 3.11 --locked
+      - name: Python lint
+        working-directory: code
+        run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
+
+      - name: Install pinned headless OpenCV for dock geometry tests
+        working-directory: code
+        run: uv pip install --python .venv/bin/python opencv-python-headless==4.13.0.92
+      - name: Enforce one generated fleet purchase ledger
+        working-directory: code
+        run: |
+          uv run --no-sync python scripts/procurement_release.py --format csv | diff -u ../docs/hardware/fleet-components.csv -
+          uv run --no-sync python scripts/procurement_release.py --format markdown | diff -u ../docs/hardware/complete-shopping-checklist.md -
+
+      - name: Test real OpenCV calibration and dock perception
+        working-directory: code
+        run: uv run --no-sync pytest -q tests/test_calibrate_dock_camera.py tests/test_dock_vision.py
+      - name: Restore pinned Xiaozhi server fixture
+        working-directory: code
+        run: |
+          git init upstream/xiaozhi-esp32-server
+          git -C upstream/xiaozhi-esp32-server remote add origin https://github.com/xinnan-tech/xiaozhi-esp32-server.git
+          git -C upstream/xiaozhi-esp32-server fetch --depth=1 origin d9c2e8c5d92627b670dec57d72a07a4226a410a3
+          git -C upstream/xiaozhi-esp32-server checkout --detach FETCH_HEAD
+          test "$(git -C upstream/xiaozhi-esp32-server rev-parse HEAD)" = "d9c2e8c5d92627b670dec57d72a07a4226a410a3"
+      - name: Restore pinned Xiaozhi device firmware fixture
+        working-directory: code
+        run: |
+          git init upstream/xiaozhi-esp32
+          git -C upstream/xiaozhi-esp32 remote add origin https://github.com/78/xiaozhi-esp32.git
+          git -C upstream/xiaozhi-esp32 fetch --depth=1 origin c435f99a88066029ec2dbd2d758c8cc9d051565b
+          git -C upstream/xiaozhi-esp32 checkout --detach FETCH_HEAD
+          test "$(git -C upstream/xiaozhi-esp32 rev-parse HEAD)" = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
+      - name: Install OpenSCAD for real CAD source rendering
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq openscad
+      - name: Host tests
+        working-directory: code
+        run: uv run --no-sync pytest -q -ra tests firmware/head/tests
+      - name: Verify any promoted playbook evidence against GitHub
+        working-directory: code
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run --no-sync python scripts/verify_playbook_receipts.py
+
+  body-platformio:
+    concurrency:
+      group: host-verification-body-platformio-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    name: ESP32 WROOM firmware compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PR CI must verify the reviewed branch source, not GitHub's
+          # synthetic merge SHA. For push/manual jobs use the event SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
+          test "$actual" = "$expected" || {
+            echo "::error::Wrong checkout: expected $expected, got $actual"
+            exit 1
+          }
+      - uses: astral-sh/setup-uv@v6
+      - name: Compile guarded stepper firmware
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
+      - name: Compile full eight low-cost VL53L0X robot firmware
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full
+      - name: Compile generic MAX30102 reversed FIFO lab (motor power disabled)
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full_pulse_reversed_lab
+      - name: Compile optional bumper and PIR interaction lab
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full_interaction_lab
+      - name: Compile opt-in haptic MCP23017 lab firmware
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_full_haptic_lab
+      - name: Compile full guarded DRV8833 DC drivetrain firmware
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_full
+      - name: Compile DC only GPIO23 external watchdog lab firmware
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_watchdog_lab
+      - name: Compile entire guarded DC plus haptic plus independent watchdog together
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_dc_integrated_lab
+      - name: Compile isolated low-cost VL53L0X sample bench without motors
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_vl53l0x_bench
+      - name: Compile one shared Feather room station with pinned upstream drivers
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_bench
+      - name: Compile full Feather room station including soil analog ADC
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_full
+      - name: Compile preserved DC reference
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32dev
+      - name: Compile five source-reused classic NEC bench dock beacons
+        run: |
+          for id in 01 02 03 04 05; do
+            uvx --from platformio==6.1.18 pio run -d code/firmware/dock -e "bench_nano_dock_$id"
+          done
+
+  body-host:
+    concurrency:
+      group: host-verification-body-host-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    name: Body C++ host tests with sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PR CI must verify the reviewed branch source, not GitHub's
+          # synthetic merge SHA. For push/manual jobs use the event SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
+          test "$actual" = "$expected" || {
+            echo "::error::Wrong checkout: expected $expected, got $actual"
+            exit 1
+          }
+      - name: Configure portable C++ tests
+        run: cmake -S code/firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build /tmp/desk-robot-body-host --parallel 2
+      - name: Run tests
+        run: ctest --test-dir /tmp/desk-robot-body-host --output-on-failure
+      - name: Verify complete room thermal pixel decoding with sanitizers
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/thermal_pixels_tests.cpp -o /tmp/desk-room-thermal-test
+          /tmp/desk-room-thermal-test
+      - name: Verify optional soil ADC samples fail closed under faults
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/soil_sample_tests.cpp -o /tmp/desk-room-soil-test
+          /tmp/desk-room-soil-test
+      - name: Verify room radar evidence keeps its acquisition timestamp
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/radar_sample_clock_tests.cpp -o /tmp/desk-room-radar-clock-test
+          /tmp/desk-room-radar-clock-test
+
+      - name: Verify room SCD40 cached samples fail closed on readiness errors
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/scd_sample_freshness_tests.cpp -o /tmp/desk-room-scd-test
+          /tmp/desk-room-scd-test
+
+  sense-idf:
+    concurrency:
+      group: host-verification-sense-idf-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    name: XIAO Sense ESP-IDF 6.1 firmware compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    container:
+      image: espressif/idf:v6.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PR CI must verify the reviewed branch source, not GitHub's
+          # synthetic merge SHA. For push/manual jobs use the event SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
+          test "$actual" = "$expected" || {
+            echo "::error::Wrong checkout: expected $expected, got $actual"
+            exit 1
+          }
+      - name: Restore pinned device source and generate isolated Sense overlay
+        working-directory: code
+        shell: bash
+        run: |
+          git init upstream/xiaozhi-esp32
+          git -C upstream/xiaozhi-esp32 remote add origin https://github.com/78/xiaozhi-esp32.git
+          git -C upstream/xiaozhi-esp32 fetch --depth=1 origin c435f99a88066029ec2dbd2d758c8cc9d051565b
+          git -C upstream/xiaozhi-esp32 checkout --detach FETCH_HEAD
+          test "$(git -C upstream/xiaozhi-esp32 rev-parse HEAD)" = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
+          python3 firmware/head/install_overlay.py --board sense --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi-sense
+          cp firmware/head/dependencies.lock firmware/head/build/xiaozhi-sense/dependencies.lock
+      - name: Compile real Sense board image with local AEC
+        working-directory: code/firmware/head/build/xiaozhi-sense
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          python scripts/build.py desk-robot/desk-robot-sense-s3 --name desk-robot-sense-s3 --language en-US --wake-word disabled
+      - name: Ensure real head firmware and asset fit
+        working-directory: code/firmware/head/build/xiaozhi-sense
+        shell: bash
+        run: |
+          test -f build/desk-robot-sense-s3.bin || test -f build/merged-binary.bin
+          test -f build/partition_table/partition-table.bin
+
+      - name: Prepare private opt-in Sense PCM compiler coverage
+        working-directory: code
+        shell: bash
+        run: |
+          cat > /tmp/desk-sense-bench-fleet.toml <<'FLEET'
+          [[robots]]
+          id = "robot-01"
+          token_env = "DESK_SENSE_CI_ONLY_TOKEN"
+          FLEET
+          # A CI-only synthetic credential. Neither a release image nor a
+          # flashed robot. Normal firmware above remains default capture OFF.
+          DESK_SENSE_CI_ONLY_TOKEN=CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC             python3 firmware/head/private_config.py               --board sense --robot robot-01               --config /tmp/desk-sense-bench-fleet.toml               --secrets /tmp/desk-sense-ci-no-secrets               --server-ip 192.168.1.200               --continuous-audio --aec-delay-ms 0 --bench-aec-capture
+          test "$(stat -c %a firmware/head/build/xiaozhi-sense/main/boards/desk-robot/desk-robot-sense-s3/config.private.json)" = "600"
+      - name: Compile disabled-by-default authenticated PCM bench variant
+        working-directory: code/firmware/head/build/xiaozhi-sense
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          python scripts/build.py desk-robot/desk-robot-sense-s3             --name desk-robot-sense-s3 --config config.private.json             --language en-US --wake-word disabled
+          # The second build must truly compile the private guarded paths:
+          # a passing default build with capture OFF is insufficient.
+          grep -qx 'CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y' sdkconfig
+          grep -qx 'CONFIG_DESK_ROBOT_AEC_DELAY_MS=0' sdkconfig
+          grep -qx 'CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=y' sdkconfig
+          test -f build/desk-robot-sense-s3.bin || test -f build/merged-binary.bin
+
+# This compiles the real ESP-IDF Sense target and both WROOM profiles but DOES
+# NOT flash hardware or verify physical AEC, cliff sensors, pickup or power.
+# Python/head tests are host checks only.

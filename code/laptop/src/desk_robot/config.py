@@ -17,13 +17,45 @@ class RobotConfig(BaseModel):
     token_env: str
     device_id: str = ""
     motion_enabled: bool = False
+    exploration_qualified: bool = False  # Explicit real swept-path trial gate; not a simulation claim.
+    # Optional physical sensor-triggered interactions. None means NOT calibrated.
+    nose_twist_threshold_counts: int | None = Field(default=None, ge=80, le=1800)
+    squeeze_raw_threshold: int | None = Field(default=None, ge=100, le=30000)
+    proximity_near_raw_threshold: int | None = Field(default=None, ge=25, le=245)
+    battery_low_percent: int = Field(default=20, ge=5, le=40)
+    # An actual measured optical contact threshold, NOT a heart-rate model.
+    paw_contact_ir_raw_threshold: int | None = Field(default=None, ge=1000, le=250000)
+    paw_contact_interactions_qualified: bool = False
+    # Ambient change thresholds use actual SHT41 readings, never guessed room conditions.
+    ambient_interactions_qualified: bool = False
+    nfc_interactions_qualified: bool = False  # toy tags only, never access control
+    ambient_temp_change_centi: int | None = Field(default=None, ge=100, le=2000)
+    ambient_humidity_change_centi: int | None = Field(default=None, ge=500, le=3000)
+    # Only opt-in after observing repeatable BMP280 readings in the actual shell.
+    bmp280_interactions_qualified: bool = False
+    bmp280_pressure_change_pa: int | None = Field(default=None, ge=100, le=5000)
+    gesture_interactions_qualified: bool = False  # measured hardware gate
+    handling_interactions_qualified: bool = False  # measured MPU6050 mount and stationary baseline
+    handling_tilt_threshold_deg: int = Field(default=38, ge=25, le=75)
+    handling_shake_delta_mg: int = Field(default=550, ge=300, le=1400)
+    side_near_threshold_mm: int | None = Field(default=None, ge=35, le=1000)
+    side_interactions_qualified: bool = False  # measured 3-direction geometry, no motor permit
     calibration: Path | None = None
+    dock_calibration: Path | None = None
+    dock_motion_qualified: bool = False
+    # Actual AVR dock beacon is flashed per physical station. Never infer
+    # an assigned dock from a pet name or from one matching IR observation.
+    dock_beacon_id: int | None = Field(default=None, ge=1, le=5)
+    dock_turn_sign: int | None = Field(default=None, ge=-1, le=1)
+    dock_forward_sign: int | None = Field(default=None, ge=-1, le=1)
     voice: str = "af_heart"
 
     @model_validator(mode="after")
     def local_http(self):
         from urllib.parse import urlparse
 
+        if self.dock_turn_sign == 0 or self.dock_forward_sign == 0:
+            raise ValueError("Dock movement polarity cannot be zero")
         u = urlparse(self.head_url)
         if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
             raise ValueError("head_url must be an http(s) URL without embedded credentials")
@@ -42,17 +74,80 @@ class Settings(BaseModel):
     speech_bridge_url: str = "http://127.0.0.1:8766"
     speech_bridge_token_env: str = "DESK_ROBOT_SPEECH_TOKEN"
     vision_weights: Path | None = None
+    vision_model: str = ""  # Explicit local Ollama VLM; never silently use a cloud model.
+    voice_memory_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi to read own episodic text.
+    voice_transcript_memory_enabled: bool = False  # Separate consent to retain model-estimated spoken words as text.
+    voice_vision_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi camera questions/voice frame selection.
+    pet_autostart_enabled: bool = False  # Explicit hardware opt-in for idle camera and sensor observation.
+    pet_activity_min_interval_seconds: float = Field(default=30.0, ge=5.0, le=600.0)
+    pet_activity_max_interval_seconds: float = Field(default=90.0, ge=5.0, le=600.0)
+    fleet_text_sharing_enabled: bool = False  # Opt-in local, provenance-tagged text only.
+    fleet_social_autonomy_enabled: bool = False  # Bounded pet-to-pet talk, explicit opt-in.
+    fleet_social_min_interval_seconds: int = Field(default=300, ge=30, le=3600)
+    room_station_enabled: bool = False  # One explicit USB source, never an extra robot
+    room_station_port: str | None = None  # Actual local /dev/tty.* device
+    room_station_context_enabled: bool = False  # Consent for all pets to read room facts
+    # Optional actual ADC endpoints for one physical probe, never fake defaults.
+    room_station_soil_dry_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
+    room_station_soil_wet_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
+    fleet_text_auto_fanout_enabled: bool = True  # Keep existing broadcast behavior unless selective-only chosen.
     max_job_seconds: float = Field(default=45, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
+    memory_dir: Path = Path("../data/private/memory")
 
     @model_validator(mode="after")
     def unique_ids(self):
+        if self.pet_activity_min_interval_seconds > self.pet_activity_max_interval_seconds:
+            raise ValueError(
+                "Pet activity minimum interval cannot exceed maximum"
+            )
+        if self.voice_transcript_memory_enabled and (
+            self.mode != "hardware" or not self.voice_memory_tools_enabled
+        ):
+            raise ValueError(
+                "Spoken transcript retention needs hardware and separate voice memory consent"
+            )
+        if self.pet_autostart_enabled and (
+            self.mode != "hardware"
+            or not self.voice_vision_tools_enabled
+            or not self.vision_model
+        ):
+            raise ValueError(
+                "Proactive camera autostart requires hardware, explicit camera consent and a local VLM"
+            )
+        if self.fleet_social_autonomy_enabled and not self.fleet_text_sharing_enabled:
+            raise ValueError("Automatic peer dialogue requires explicit local text sharing consent")
+        if self.room_station_enabled and (
+            self.mode != "hardware" or not isinstance(self.room_station_port, str)
+            or not self.room_station_port.startswith("/dev/")
+            or len(self.room_station_port) > 255
+        ):
+            raise ValueError("Room station requires a real explicit local USB serial port")
+        if self.room_station_context_enabled and not self.room_station_enabled:
+            raise ValueError("Room station context needs explicit source enable and consent")
+        soil_dry = self.room_station_soil_dry_adc
+        soil_wet = self.room_station_soil_wet_adc
+        if (soil_dry is None) != (soil_wet is None):
+            raise ValueError("Soil calibration needs both measured dry and wet ADC values")
+        if soil_dry is not None:
+            if not self.room_station_enabled:
+                raise ValueError("Soil calibration requires a real enabled room station")
+            from .soil_calibration import SoilCalibration
+            SoilCalibration(soil_dry, soil_wet)
         ids = [r.id for r in self.robots]
         if not ids or len(set(ids)) != len(ids):
             raise ValueError("At least one robot and unique robot IDs are required")
         device_ids = [r.device_id for r in self.robots if r.device_id]
         if len(set(device_ids)) != len(device_ids):
             raise ValueError("device_id must uniquely identify a robot")
+        docks = [r.dock_beacon_id for r in self.robots if r.dock_beacon_id is not None]
+        if len(set(docks)) != len(docks):
+            raise ValueError("Each physical dock beacon may be assigned to only one robot")
+        if self.mode == "hardware" and any(
+            r.dock_motion_qualified and r.dock_beacon_id is None
+            for r in self.robots
+        ):
+            raise ValueError("Qualified dock approach requires assigned beacon ID")
         return self
 
     def robot(self, robot_id: str) -> RobotConfig:
@@ -76,8 +171,13 @@ def load_settings(path: str | Path) -> Settings:
     for robot in settings.robots:
         if robot.calibration and not robot.calibration.is_absolute():
             robot.calibration = (path.parent / robot.calibration).resolve()
+    for robot in settings.robots:
+        if robot.dock_calibration and not robot.dock_calibration.is_absolute():
+            robot.dock_calibration = (path.parent / robot.dock_calibration).resolve()
     if settings.vision_weights and not settings.vision_weights.is_absolute():
         settings.vision_weights = (path.parent / settings.vision_weights).resolve()
     if not settings.trials_file.is_absolute():
         settings.trials_file = (path.parent / settings.trials_file).resolve()
+    if not settings.memory_dir.is_absolute():
+        settings.memory_dir = (path.parent / settings.memory_dir).resolve()
     return settings

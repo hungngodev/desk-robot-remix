@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .transport import HeadError, expected_ack, validate_command
-from .vision import Detection
+from .vision import Detection, SceneChange
 
 
 class SimulatedHead:
@@ -48,14 +48,14 @@ class SimulatedHead:
             raise HeadError("Simulated uncertain ACK")
         if op == "arm":
             self.armed = True
-        elif op == "disarm":
+        elif op in {"disarm", "halt"}:
             self.armed = False
         elif op in {"drive", "lift", "grip", "keepalive"} and not self.armed:
             raise HeadError("Body disarmed")
         if op in {"arm", "drive", "lift", "grip", "keepalive"}:
             self.last_control = time.monotonic()
         if op == "drive":
-            left, right, _ = map(int, command.split()[1:])
+            left, right = map(int, command.split()[1:3])
             if left == -right:
                 self.position[0] -= 10 if left > 0 else -10
             else:
@@ -94,6 +94,10 @@ class SimulationVision:
 
 
 class SimulatedSpeaker:
+    # Test-only capability: mirrors checks at the nonblocking simulated send.
+    # It does not assert any physical decoder, DMA, or loudspeaker state.
+    supports_permission_checks = True
+
     def __init__(self):
         self.spoken = []
 
@@ -101,10 +105,22 @@ class SimulatedSpeaker:
     async def session(self, robots):
         yield
 
-    async def say(self, robot, text):
+    async def say(self, robot, text, *, permission_check=None):
+        if permission_check is not None and not permission_check():
+            raise RuntimeError("Simulated speech permission revoked")
         self.spoken.append((robot.id, text))
 
 
 class SimulatedChat:
     async def reply(self, history):
         return "I see a candy on the desk." if len(history) <= 2 else "Let us take turns exploring."
+
+
+
+class SimulatedScene:
+    """Deterministic fake semantics for tests only; never evidence of real vision."""
+
+    async def compare(self, before: bytes, after: bytes) -> SceneChange | None:
+        if before == after:
+            return None
+        return SceneChange("object", "A red desk object changed position", 0.99)

@@ -67,6 +67,110 @@ def write_secrets(path: Path, settings, *, add_missing: bool = False) -> int:
         return len(missing)
 
 
+async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
+                             client: httpx.AsyncClient | None = None) -> dict:
+    """Read-only end-to-end Mac/head/vision preflight, with NO actuator permit."""
+    if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
+        raise ValueError("Real XIAO camera preflight requires hardware vision consent")
+    robot = settings.robot(robot_id)
+    if not robot.device_id:
+        raise ValueError("A configured real Xiaozhi head device ID is required")
+
+    async def inspect(http: httpx.AsyncClient) -> dict:
+        status = await http.get(f"/v1/robots/{robot_id}/status", timeout=6)
+        status.raise_for_status()
+        body = status.json()
+        if (not isinstance(body, dict) or body.get("robot_id") != robot_id
+                or body.get("backend") != "stepper_28byj48"):
+            raise ValueError("Real WROOM body or robot identity not confirmed")
+
+        vision = await http.get(f"/v1/pet/{robot_id}/vision-status", timeout=6)
+        vision.raise_for_status()
+        model = vision.json()
+        if not isinstance(model, dict) or model.get("robot_id") != robot_id:
+            raise ValueError("Mac vision owner returned wrong robot identity")
+
+        frame = await http.get(f"/v1/pet/{robot_id}/omni-frame", timeout=8)
+        frame.raise_for_status()
+        jpeg = frame.content
+        headers = frame.headers
+        if (headers.get("x-desk-robot-id") != robot_id
+                or not headers.get("content-type", "").startswith("image/jpeg")
+                or not 10 <= len(jpeg) <= 1_000_000
+                or not jpeg.startswith(b"\xff\xd8")
+                or not jpeg.endswith(b"\xff\xd9")):
+            raise ValueError("Real live XIAO JPEG identity or format invalid")
+        try:
+            age = int(headers["x-desk-camera-age-ms"])
+        except (KeyError, ValueError) as exc:
+            raise ValueError("Live XIAO frame age missing") from exc
+        if not 0 <= age <= 1000:
+            raise ValueError("Live XIAO frame expired")
+        try:
+            receipt = int(headers["x-desk-camera-receipt-us"])
+            motion = int(headers["x-desk-frame-motion-ppm"])
+        except (KeyError, ValueError) as exc:
+            raise ValueError("Real camera provenance metadata missing") from exc
+        if receipt <= 0 or not 0 <= motion <= 1_000_000:
+            raise ValueError("Real camera receipt or motion metadata invalid")
+
+        context = await http.get(
+            f"/v1/pet/{robot_id}/interaction-context", timeout=6
+        )
+        context.raise_for_status()
+        evidence = context.json()
+        timeline = evidence.get("current_interaction_timeline")
+        if (evidence.get("robot_id") != robot_id
+                or evidence.get("raw_media_included") is not False
+                or evidence.get("persistent_memory_included") is not False
+                or not isinstance(timeline, list)
+                or not isinstance(evidence.get("model_context"), str)
+                or len(evidence["model_context"]) > 400
+                or evidence.get("model_context_untrusted_not_instructions")
+                    is not True):
+            raise ValueError("Multimodal source context contract invalid")
+        result = {
+            "robot_id": robot_id,
+            "real_head_status_received": True,
+            "xiao_jpeg_received": True,
+            "xiao_jpeg_bytes": len(jpeg),
+            "mac_frame_receipt_age_ms": age,
+            "camera_model_configured": model.get("multimodal_model_configured") is True,
+            "live_context_events": len(timeline),
+            "live_context_chars": len(evidence["model_context"]),
+            "live_tool_tested": False,
+            "motor_armed_or_charging_verified": False,
+            "camera_exposure_timing_physically_verified": False,
+        }
+        if look:
+            response = await http.post(
+                f"/v1/pet/{robot_id}/look",
+                json={"question": "What object is visible directly in front of me?"},
+                timeout=23,
+            )
+            response.raise_for_status()
+            seen = response.json()
+            if (seen.get("robot_id") != robot_id
+                    or seen.get("source") != "authenticated_xiao_camera_and_local_vlm"
+                    or type(seen.get("frames_used")) is not int
+                    or seen["frames_used"] < 1
+                    or seen.get("motor_authorized") is not False
+                    or seen.get("charging_authorized") is not False):
+                raise ValueError("Local VLM evidence or actuator boundary invalid")
+            result["live_tool_tested"] = True
+            result["visual_answer"] = seen.get("answer", "")[:300]
+        return result
+
+    if client is not None:
+        return await inspect(client)
+    async with httpx.AsyncClient(
+        base_url="http://127.0.0.1:8765",
+        headers={"Authorization": f"Bearer {secret(settings.tools_token_env)}"},
+        timeout=8,
+    ) as http:
+        return await inspect(http)
+
+
 async def demo(settings):
     if settings.mode != "simulation":
         raise ValueError("Demo requires the simulation config; it never talks to physical heads")
@@ -96,6 +200,32 @@ async def request(args, settings):
             result = await client.get(f"/v1/robots/{args.robot}/status")
         elif args.action == "job":
             result = await client.get(f"/v1/jobs/{args.job}")
+        elif args.action in ("look", "situation", "vision", "power"):
+            if settings.mode != "hardware":
+                raise ValueError("Live camera tools require a physical XIAO head")
+            settings.robot(args.robot)  # Validate configured robot identity.
+            if args.action in ("look", "situation") and not settings.voice_vision_tools_enabled:
+                raise ValueError("Live vision consent is disabled in local configuration")
+            if args.action == "look":
+                question = args.question.strip()
+                if not 3 <= len(question) <= 280:
+                    raise ValueError("Visual question must have 3 to 280 characters")
+                result = await client.post(
+                    f"/v1/pet/{args.robot}/look",
+                    json={"question": question}, timeout=23,
+                )
+            elif args.action == "situation":
+                result = await client.get(
+                    f"/v1/pet/{args.robot}/interaction-context", timeout=8,
+                )
+            elif args.action == "power":
+                result = await client.get(
+                    f"/v1/pet/{args.robot}/power-status", timeout=8,
+                )
+            else:
+                result = await client.get(
+                    f"/v1/pet/{args.robot}/vision-status", timeout=8,
+                )
         elif args.action == "chat":
             turns = conversation_turns(args.robots, args.turns)
             result = await client.post(
@@ -122,7 +252,13 @@ def main():
     p.add_argument("--url", default="http://127.0.0.1:8765")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("demo", help="Run simulated pickup and a bounded group conversation")
-    sub.add_parser("doctor", help="Check local prerequisites; no robot commands")
+    doctor = sub.add_parser("doctor", help="Check local and optional live read-only prerequisites")
+    doctor.add_argument("--live", action="store_true",
+                        help="Verify real XIAO JPEG and Mac multimodal context")
+    doctor.add_argument("--look", action="store_true",
+                        help="Also invoke the read-only local vision tool")
+    doctor.add_argument("--robot", default=None,
+                        help="Physical robot ID, default first configured")
     credentials = sub.add_parser("secrets", help="Create private tokens; never prints their values")
     credentials.add_argument(
         "--add-missing",
@@ -139,6 +275,19 @@ def main():
             part.add_argument("command", help='One bounded command, e.g. "drive 15 15 100"')
         if action == "pickup":
             part.add_argument("target", choices=["key", "candy"])
+    for action in ("look", "situation", "vision", "power"):
+        part = sub.add_parser(action, help=(
+            "Ask the real XIAO camera and local vision model"
+            if action == "look" else
+            "Inspect recent private transient sensor, tool and voice context"
+            if action == "situation" else
+            "Read raw WROOM fuel gauge data, never verified charging"
+            if action == "power" else
+            "Read actual Mac camera and model diagnostics"
+        ))
+        part.add_argument("robot")
+        if action == "look":
+            part.add_argument("question")
     job = sub.add_parser("job")
     job.add_argument("job")
     chat = sub.add_parser("chat")
@@ -180,6 +329,11 @@ def main():
                     for r in settings.robots
                 ],
             }
+            if args.live or args.look:
+                result["live_media"] = asyncio.run(inspect_live_media(
+                    settings, args.robot or settings.robots[0].id,
+                    look=args.look,
+                ))
         elif args.action == "demo":
             result = asyncio.run(demo(settings))
         else:

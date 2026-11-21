@@ -19,7 +19,7 @@ Sources and reuse boundaries: [source-map.md](source-map.md).
 | Local compute | Shared M1Max/64GB Mac supplies speech/vision/reasoning; no new Pi/Pico/Uno. Local-first remains active; Google optional cloud is not silently enabled |
 | Initiative | Notice camera events and choose activities without a voice prompt. Face/sound reflexes, visual attention, activity memory and task execution need separate timing/ownership |
 | Motion session | Enable until user pauses/stops; supersedes recurring120/300s renewal proposal. Short per-drive deadlines/watchdog and fault/disconnect/restart cancellation remain |
-| Edge sensing | Compact candidate4VL6180X down+1L0X front+mux replaces old5L0X. Concealed boards/open optical windows; local measured stops and surface qualification required |
+| Edge sensing (historical proposal, superseded) | The November 11 proposal for eight costly VL53L4CDs and the still earlier VL6180X layout are **obsolete and not current purchasing selections**. The current source and machine plan select **8 generic VL53L0X GY-530 sensors per robot**: four downward cliff sensors, one forward guarded sensor and three left/right/rear diagnostic sensors, routed through **2 TCA9548A multiplexers** per robot. The exact 3.3 V carrier, range at the chosen mounting height, loaded stopping distance and mechanical fit still require physical qualification. See `docs/product-definition.md` and `docs/hardware/full-feature-plan.json` |
 | Power/budget | Matched rechargeable1S kit replaces required consumer-bank direction. Exact cell/charge/protection/5V output remains unselected. $50delivered prototype cap includes money already spent; no updated complete quote |
 |2026-11-04 source audit | Preserve full supplied-source mapping, not just six chosen repos. Concrete stronger candidates: Google robotics agent observation/event components, HF local voice/vision engine, Reachy activity arbitration, Stackchan-agent reaction controller. These are reviewed candidates, not integrated features |
 |2026-11-04 interaction request | Add head touch and six-axis tilt/shake/handling awareness. TTP223+LSM6DS3TR-C is proposed new baseline; evaluate owned equivalents when simpler. RGB/bumper/Hall/light extras remain optional; no visible laser selected |
@@ -29,12 +29,85 @@ Sources and reuse boundaries: [source-map.md](source-map.md).
 | 2026-11-06 project layout | Keep the living handbook in `docs/` and implementation in `code/`. Keep automated tests with the implementation and physical trial sheets and past reports in `docs/records/`. The two [entry points](../README.md) replace the earlier scattered top-level folders. |
 | Evidence boundary | No complete robot assembled/flashed/physically accepted. Current runtime foundations compile historically; actual ToF I/O/calibration and many behaviors remain unfinished. New notes do not change those evidence states |
 
+## 2026-11-09 complete scope / linear integration request
+
+The user explicitly requested a single **day-zero full-feature** plan and a forward-only build rather than first making a reduced talking robot and later rewriting hardware, AI, memory, autonomy or enclosure. This does not mean physically running every sensor simultaneously before testing, nor does it authorize changing the unchanged $50 delivered cap. [Complete scope](README.md#full-final-project-contract-and-scope) maps the 41-section HTML, 200 individually named requirements/ideas and 131 unique external URLs, and records each unresolved conflict before permanent work. Hard requirements are full pushed context-grounded proactive conversations, natural first-build interruption, persistent independent identity/memory, peer social experience, body local safety, real key/candy pickup and operator-enabled continuing activity. Experimental odd sensors, optional games and advanced docking remain traceable and interface-reserved, not claimed installed; their cost, voltage, geometry and source license must be approved separately. Build one fully representative core and duplicate four after acceptance; no throwaway head/body migration.
+
+This is a **planning commitment**, not approval of an exact untested IP5306 board, VL53L4CD module, Mac provider or GPL face engine. No physical test status changes.
+
 ## Continuing recording rule
 
 Record meaningful decisions, rationale, source/terms and superseded choices in
-these canonical documents; update inventory only from actual reports. Store
-small, self-contained durable project knowledge in Cognee dataset
-`desk-robot-remix`, with links back here. Source code symbols belong in the code
-graph and personal cross-project preferences belong in authenticated Mem0, not
-in a copied chat transcript. Never store credentials/raw captures or every
-one-off status update. Verify memory writes and retrieval before claiming saved.
+these canonical GitHub documents and the repository [parallel chat handoff](reviews/PARALLEL_CHAT_HANDOFF.md);
+update inventory only from actual reports. GitHub remains the common source
+of truth for separate coding agents and chats. External memory systems such as
+Cognee, Mem0, Notion or Obsidian are **optional**, never a prerequisite to
+reading or updating the project. Do not copy credentials, raw microphone/video
+captures or every one-off status update. Verify the GitHub commit and current
+source after a write; confirm any optional memory write by retrieval before
+claiming it was saved.
+
+
+---
+
+## Open conflicts requiring decisions before construction
+
+*Additional planned verification and unresolved blockers; no new physical trials were conducted.*
+
+
+The user requests a **linear path to the complete feature rich robot**, not a quick cheap prototype followed by a controller or chassis rebuild. Therefore settle foundational uncertainty *before* final assembly, using small reusable tests, technical sources and explicit decisions. If a requirement and a cap conflict, disclose the conflict rather than pretending one can be met by a product listing.
+
+For the original HTML's precise power, motor, voice, Mac fleet, camera, AprilTag, docking and timing values, see the [quantitative proposal appendix](research/2026-11-03-active-pet-sources.md). This file is a **decision queue**, not a record that these choices were already approved. Record chosen part, exact upstream commit or supplier variant, data sheet, physical evidence, unit price/shipping/tax, accepted risk and effect on all five robots. Failed gate means pause final assembly, not secretly drop the requirement.
+
+## Red blockers
+
+| ID | What is in conflict / unknown now | Recommendation and evidence required before lock |
+| --- | --- | --- |
+| D01 **full spec vs $50 delivered** | Reported Sense listing `$18.87` and HTML power estimate `$34` already total **$52.87**, excluding sensors and electronics. HTML core shopping `$19.38` brings naive distinct sum to **$72.25**; check overlap before counting. No complete dated delivered cart, no confirmed quantity/cell/charger. | Fix exact owned items and line items with quantity/variant/currency/delivery. Preserve **hard experience requirements** and **all experimental idea records**. Do not authorize cap increase, change user requirements or buy an unsafe power alternative without an explicit choice. If simultaneous installation of *all* experimental modules is intended, document a separately costed/space-qualified expanded configuration; it is not the $50 base. |
+| D02 **Power architecture** | HTML IP5306 Architecture A is proposed; exact module version, output under load, battery protection/charge and wiring unknown. "3000mAh" says capacity, not allowed discharge. A 1000µF cap does not create a sustained 2A supply. | Require exact 1S cell + charger/protection/5V board and rated datasheets, fuse/switch, safe harness, load overlap and bench measurements. No downgrade to untested owned power bank just to pass cap. Document brownout effect on servo holding and payload containment. |
+| D03 **four corner floor sensor parts** | Current docs name four VL6180X but ST marks it obsolete. VL53L4CD is supported but typical reputable breakouts may consume the cap alone; cheap clones vary. VL53L0X low-end distance may not suit the illustrated 14mm standoff. | Select final type after one genuine near-floor surface sample in the intended mount, compare datasheets/drivers/price/field-of-view; preserve **four floor roles plus one front obstacle**. Freeze enclosure optical apertures once physical envelope known. |
+| D04 **actual GPIO/I2C design** | HTML optional MAX30102 claims Sense 41/42 but they belong to its PDM microphone. WROOM GPIO21/22 used for body I2C, mux 0–4 allocated. Other extras compete for limited pins and addresses. | Reject 41/42 heartbeat wiring. Name exact I2C/regulator and breakouts, count mux channels 5–7 remaining, design optional isolated auxiliary carrier for additional sensors. Check 1.8V/3.3V MAX30102 rails and every module pullup/current. Don't assume all 100 experimental sensors can plug in simultaneously. |
+| D05 **physical geometry** | Original SMARS 28BYJ and Bluino lift/fork require actual mating; Cozmars first comparison and Sparky fallback have different OLED/camera/servo envelopes. Sparky v0.1 explicitly not test-printed; no assembled fit. | Compare native Cozmars CAD with actual possessed Sense, SSD1306, MG90S and battery; print servo/sensor/window coupons. Keep fixed head + 2 servos for lift/grip. Reserve expansion and acoustic/optical access. Full shell/5 copies wait for dimensioned interference check. |
+| D06 **real first-build AEC** | Sense Xiaozhi profile currently uses simplex PDM without synchronized playback reference; RIO's correct-hardware AEC code uses different amp pins and Arduino. HTML 18/20, median 700ms is weaker than official A2. | Choose one actual port design to existing ESP-IDF AFE and `LiveTurns`, preserve current GPIO4/7/8, test audio reference and actual audible DMA flush. Required gate 19/20 ≤500ms and 18/20 correct new requests, zero echo-only interruptions 10min. |
+| D07 **head face engine and license** | HTML declares RoboEyes decided but compiled code uses stock Xiaozhi UI. RoboEyes GPLv3 changes distribution obligations if copied; alternate MIT 128×64 face candidate exists. | Decide which licensed eyes before complete UI, port once to single display owner. Must support local idle/offline animations with no head tilt servo or dropped claw. |
+| D08 **local Mac stack single owner** | HTML proposes per-robot Pipecat processes, shared MLX Whisper, MQTT, SmolVLM2, Qwen, Kokoro sentence streaming; repo actually has Xiaozhi server and Ollama/Kokoro adapters, tested offline `LiveTurns` but no integrated live vision/proactivity. Claimed 13–16GB fleet capacity and subsecond latencies unmeasured. | Benchmark local provider choices on actual M1 Max with one/two/five active robots and contention before implementing a second voice runtime. Pick a **single audio/turn owner** and provider interface up front. Retain ability to switch provider behind interface, not rewire boards or rewrite controller. |
+| D09 **true proactive behavior** | Repo has no live pet/memory/motion state machine yet. HTML's detailed utility scoring, 3-confirm/12-release image gate, 5min cooldown, sound whistles and five-feed clustering are proposals, not measured. | Treat A8/A9 as **hard from first feature complete robot**. Reuse Google camera event, Stackchan HSM, Reachy idle arbitration and Xiaozhi Desk Robot reaction code; select one activity owner by tested scenarios and license. No LLM-controlled motor tools or generic greeting substitute. |
+| D10 **group identity and memory** | Current static robot-01…05 IDs and in-memory histories are not persistent unique observed memory. HTML eFuse MAC identity/MQTT/SQLite one writer not integrated. | Keep stable configurable robot IDs now; optional efuse provisioning must be shown correct and mapped. Add private per-robot durable storage with direct-vs-peer provenance, speaker lease and identity isolation before five devices. |
+| D11 **servo and actual pick-up** | About ten MG90S reported, grades A-X and 30min protocol are unrun; no force sensor/IN219 in physical BOM; 3D jaw tolerance and keys/candy not tested. | Grade/count real units. Measure lift torque, closure, jaw key bow and candy lip geometry, register calibration, run 8/10 true key and 8/10 candy placements. Reserve optional force sensor mounts before final head/chassis assembly but do not require unquoted add-ons. |
+| D12 **full source licensing and pin provenance** | Multiple CAD sources carry CC BY-NC-SA 4, Sparky CC BY-SA, Tiny Engineer CERN-OHL-S, RoboEyes GPL3, software projects MIT/Apache/BSD; original reports sometimes infer rights from public visibility. | Select exact sources/commits and preserve source-chain/asset licenses; fork only permitted bits. Avoid copying incompatible code into MIT-only project. Reuse candidate implementation only after passing existing system contracts. |
+| D13 **physical independent safety** | No actual sensor sampling driver/calibration in guarded profile, so boot refuses arm. HTML degrades reverse behavior; old JS simulator auto-reverses. | Never weaken current fault latch. Body must have real fresh sensor status and local stop/rearm before any table drive. The obsolete JS sample cannot instruct firmware motion. |
+| D14 **five-unit equality vs progressive proof** | User wants five equally functional core units and eventual independent pet interaction; a one-moving-first test is sometimes mistaken for reducing final goal. | Preserve full function/identical core for every eventual robot. Qualify one to avoid five repeats of a defect. Constrain motion to one robot initially only as a **safety staging mode**; higher concurrency requires separate collision and localization proof, not a false done claim. |
+| D15 **privacy/safety for ambient sensors** | Experimental MAX30102, EDA, BLE, mmWave, room radio, thermal, sound, camera, Geiger and mains pickup may gather sensitive data or require unsafe circuits. | Opt-in per sensor/event, raw capture retention off by default, consent and actual legal/electrical review. Reject loose mains antenna. No medical, person identity or precise distance claim without qualified evidence. |
+
+## No silent replacement matrix
+
+| Source proposal or historical choice | Selected or current baseline | Rule |
+| --- | --- | --- |
+| Freenove/CoreS3/Waveshare head alternative | Purchased XIAO Sense, exact Sense build profile | Do not buy replacement head for voice without proving Sense cannot meet A2 |
+| N20/TT chassis | Owned 28BYJ/ULN2003 with SMARS stepper remix | Do not switch motors merely because a tutorial does; compare actual fitted torque/power if incompatibility found |
+| Servo head tilt | Two MG90S used for **lift + grip**, fixed camera | Extra pan/tilt is a separately approved hardware variant, never steal required closing gripper |
+| Five older VL53L0X downward | Four qualified short floor sensors plus forward VL53L0X | Update driver/mount only after near-field proof; never trade four-corner edge coverage for one cheaper IR |
+| VL6180X after obsolescence | Sensor selection **open**; evaluate VL53L4CD or suitable qualified module | Do not assert one vendor is both cheapest and physically compatible without current quote |
+| IP5306 power guessed from article | Real 1S qualified source **open** | Do not infer rating from charge current or mAh |
+| RoboEyes claimed active | Stock Xiaozhi UI in existing build, final face selection open | No false integrated claim; choose legal expressive renderer once |
+| 700 steps/s and 4076 rev truth | 160 steps/s effective firmware ceiling and no measured scale | HTML values are experiments, not current speed/current sensor results |
+| 18/20 interruption within 700ms | A2 >=19/20 audible stop ≤500ms, >=18/20 new request | No lowering hard gate |
+| Automatic reverse on cliff or sensor degraded | WROOM fail-closed latch and USB rearm, remain disarmed | Rejected permanently as described |
+| Five Pipecat workers, MQTT or Google paid Live | Xiaozhi/local Mac path + adapter reserve | Optional if measured, not an independent competing voice/activity owner |
+| Automatic camera latest + 2 frame buffers | Current `GRAB_WHEN_EMPTY`, 1 buffer | Measure and change only if safe for mic/PSRAM under load |
+| Owning five MAX30102 or two vibration boards | Claimed in HTML, not verified inventory | No free BOM entry before physical stock/variant evidence |
+
+## Stage 0 final sign-off checklist
+
+* [ ] Every required product goal from A1–A12 appears in the full build and tests.
+* [ ] Each of the **200** named features/ideas has an owner/category and no unsafe deprecated wire instruction is active.
+* [ ] All **131 distinct external HTML URLs** preserved in source index; selected ones have pinned code/licensing evidence.
+* [ ] Actual component inventory counted, board revisions and source geometry measured, battery pack/cell/charger variant identified.
+* [ ] Final prototype BOM (including shipping, tax, already paid Sense and wire/fasteners) either meets the unchanged $50 cap **or** records an explicit authorized new cap/scope with no silent feature loss.
+* [ ] One final wiring and mechanically viable enclosure drawing with head mic/speaker, OLED/camera, four floor plus forward optics, 2 servos, cell, USB, sensor expansion and costume clearances.
+* [ ] One chosen local Mac speech/VLM architecture and stable event, voice, memory and motion interface, no two turn owners or privileged LLM.
+* [ ] Actual acceptance scripts designed for ordinary user speech interrupt, pushed visual event, relevant memory, five-persona peer speech and fall protection.
+* [ ] Each unresolved safety/compatibility decision has a named reversible bench test and cannot be bypassed for a polished demo.
+* [ ] No raw user media, credentials, file or sensor data is inadvertently put in public/Git repository.
+
+**Lock state now:** ALL unresolved physical and purchase gates remain **OPEN**. This documentation is enough to avoid forgetting requirements; it is not enough to order/final-print with certainty. A 'linear build' means eliminate avoidable redesigns by front-loading system decisions, not claiming that physical research never requires correcting a failed assumption.

@@ -1,0 +1,143 @@
+"""Use the actual procurement CLI to distinguish quotes from purchase approval."""
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "code/scripts/procurement_release.py"
+
+
+def run_cost(*args):
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+
+
+def sample_quote():
+    """Self-contained quoted two-piece fixture for CLI subprocess tests."""
+    lines = []
+    for role, sku, price in (
+        ("robot:cliff_obstacle", "SEN-19-006", "1.76"),
+        ("robot:i2c_mux", "COM-05-067", "0.47"),
+    ):
+        lines.append({
+            "role_key": role,
+            "seller": "ElectroPeak",
+            "sku": sku,
+            "quantity_packages": 1,
+            "units_per_package": 1,
+            "package_price_usd": price,
+            "quote_reference": "fixture-quote",
+            "quoted_at": "2026-11-18",
+            "stock_evidence_url": "https://electropeak.com/quoted-fixture",
+        })
+    return {"costs": {
+        "scope": "evaluation",
+        "currency": "USD",
+        "paid_orders_complete": True,
+        "lines": lines,
+        "seller_charges": [{
+            "seller": "ElectroPeak",
+            "shipping_usd": "4.00",
+            "tax_usd": "0.32",
+            "duties_usd": "0.00",
+            "discount_usd": "0.00",
+        }],
+        "paid_orders": [{
+            "order_reference": "already-paid",
+            "total_paid_usd": "12.50",
+        }],
+    }}
+
+
+def test_cli_without_supplier_quotation_shows_unknown_not_zero():
+    result = run_cost("--format", "landed-cost-json")
+    assert result.returncode == 0
+    data = json.loads(result.stdout)
+    assert data["scope"] == "first_robot"
+    assert not data["calculation_complete_not_physical_approval"]
+    assert data["payable_now_cents"] is None
+    assert data["prototype_cumulative_cents"] is None
+    assert data["unaccounted_roles"]
+    assert not data["within_prototype_cap"]
+
+
+def test_cli_reports_only_evaluation_cart_delivered_amount(tmp_path):
+    path = tmp_path / "operator_quote.json"
+    path.write_text(json.dumps(sample_quote()), encoding="utf-8")
+    result = run_cost("--evidence", str(path),
+                      "--format", "landed-cost-json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["scope"] == "evaluation"
+    assert data["payable_now_cents"] == 655
+    assert data["prototype_cumulative_cents"] == 1905
+    assert not data["landed_price_is_a_verified_supplier_checkout"]
+    assert data["material_subtotals_cents"]["robot"] == 223
+
+
+def test_cli_keeps_supplier_quote_distinct_from_irreversible_cart(tmp_path):
+    path = tmp_path / "quote.json"
+    path.write_text(json.dumps(sample_quote()), encoding="utf-8")
+    result = run_cost("--evidence", str(path),
+                      "--require-first-robot",
+                      "--format", "first-robot-markdown")
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "HOLD" in result.stderr
+
+
+def test_markdown_missing_quotes_never_claims_zero_material_totals():
+    result = run_cost("--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Payable now: unknown" in result.stdout
+    for category in ("Robot", "Dock", "Station"):
+        assert f"{category} materials: unknown (incomplete quote)" in result.stdout
+        assert f"{category} materials: $0.00" not in result.stdout
+
+
+def test_markdown_budget_overrun_is_explicit_hold(tmp_path):
+    quote = sample_quote()
+    quote["costs"]["paid_orders"][0]["total_paid_usd"] = "49.00"
+    path = tmp_path / "over_budget_quote.json"
+    path.write_text(json.dumps(quote), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Cumulative prototype spending: $55.55" in result.stdout
+    assert "HOLD: cumulative prototype spending exceeds the $50.00 cap" in result.stdout
+
+
+def test_landed_cost_markdown_reports_delivered_category_allocation(tmp_path):
+    path = tmp_path / "quote_with_delivery.json"
+    path.write_text(json.dumps(sample_quote()), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Payable now: $6.55" in result.stdout
+    assert "Robot materials: $2.23" in result.stdout
+    assert "Robot allocated landed cost: $6.55" in result.stdout
+    assert "Dock allocated landed cost: $0.00" in result.stdout
+    assert "Station allocated landed cost: $0.00" in result.stdout
+    assert "not individual supplier checkout prices" in result.stdout
+
+
+def test_incomplete_quote_never_displays_fake_delivered_allocation():
+    result = run_cost("--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Allocated landed category costs: unknown (incomplete quote)" in result.stdout
+    assert "Robot allocated landed cost: $0.00" not in result.stdout
+
+
+def test_partial_supplier_total_is_explicitly_not_full_cart(tmp_path):
+    quote = sample_quote()
+    quote["costs"]["lines"].pop()
+    path = tmp_path / "partial_seller_quote.json"
+    path.write_text(json.dumps(quote), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-markdown")
+    assert result.returncode == 0, result.stderr
+    assert "Payable now: unknown" in result.stdout
+    assert "Partial supplier quote ElectroPeak:" in result.stdout
+    assert "Supplier ElectroPeak:" not in result.stdout
+    assert "Allocated landed category costs: unknown (incomplete quote)" in result.stdout

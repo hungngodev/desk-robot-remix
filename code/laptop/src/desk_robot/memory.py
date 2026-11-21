@@ -1,0 +1,447 @@
+"""Durable, provenance-aware memories for five independently identified desk pets.
+
+This is a local, text-only SQLite store, not a vector search system and not
+camera history. A peer telling a story must never be reclassified as something
+the receiver saw. There are no motion permits, commands, images or secrets in
+the schema. All calls are synchronous; callers should serialize writes and
+offload blocking I/O from their asyncio event loop.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import re
+import sqlite3
+import time
+import unicodedata
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+
+_ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
+_EVENT_ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
+_EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
+
+
+_CORE_SLOT = re.compile(r"[a-z][a-z0-9_]{1,39}\Z")
+_WORDS = re.compile(r"(?u)[^\W_]{2,}")
+_QUERY_FILLER = frozenset({
+    "a", "an", "and", "are", "at", "be", "can", "did", "do", "for", "from",
+    "have", "i", "in", "is", "it", "me", "my", "of", "on", "our", "that",
+    "the", "there", "this", "to", "was", "we", "were", "what", "when",
+    "where", "which", "who", "with", "you", "your",
+})
+
+
+def _fts_query(text: str) -> str:
+    """Safely quote bounded Unicode query tokens for SQLite FTS5 MATCH.
+
+    Porter stemming and tokenization belong to SQLite, not custom Python
+    suffix rules. Quoted individual tokens also prevent FTS5 operators or
+    user hyphens from becoming query syntax.
+    """
+    # Streaming ASR and clients can send canonically equivalent NFD text.
+    # Combining marks otherwise split a Vietnamese word before FTS tokenization.
+    normalized = unicodedata.normalize("NFC", text.casefold())
+    terms = [
+        term for term in _WORDS.findall(normalized)[:96]
+        if term not in _QUERY_FILLER
+    ]
+    # FTS5 unicode61 does not always index an already-stored NFD word
+    # identically to its NFC spelling (for example Vietnamese "điện").
+    # Query both canonical forms rather than rewriting private episodes.
+    variants = dict.fromkeys(
+        form for term in terms
+        for form in (term, unicodedata.normalize("NFD", term))
+    )
+    return " OR ".join('"' + term + '"' for term in variants)
+
+
+@dataclass(frozen=True)
+class Memory:
+    robot_id: str
+    event_id: str
+    source_robot: str
+    witnessed: bool
+    kind: str
+    summary: str
+    observed_at: float
+    confidence: float
+
+
+@dataclass(frozen=True)
+class CoreFact:
+    robot_id: str
+    slot: str
+    value: str
+    updated_at: float
+
+
+class MemoryStore:
+    """One local SQLite database per robot; explicit observed vs told provenance."""
+
+    def __init__(self, root: Path, robot_ids: list[str] | tuple[str, ...]):
+        self.root = Path(root)
+        if (not isinstance(robot_ids, (list, tuple)) or not robot_ids
+                or not all(isinstance(i, str) and _ROBOT_ID.fullmatch(i)
+                           for i in robot_ids)):
+            raise ValueError("Every robot ID must be a safe nonempty identifier")
+        self.robot_ids = frozenset(robot_ids)
+        # The Mac's APFS volume may be case insensitive. Different Python
+        # identifiers must not silently share one physical SQLite filename.
+        if (len(self.robot_ids) != len(robot_ids)
+                or len({robot.casefold() for robot in robot_ids}) != len(robot_ids)):
+            raise ValueError("Duplicate robot memory identities are not allowed")
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.root.is_symlink():
+            raise ValueError("Memory root must not be a symlink")
+        try:
+            os.chmod(self.root, 0o700)
+        except OSError as exc:
+            # A readable shared directory defeats per-pet SQLite isolation.
+            # Do not initialize durable private memories if the filesystem
+            # refuses the local permission boundary.
+            raise PermissionError("Cannot protect private robot memory root") from exc
+        if self.root.stat().st_mode & 0o077:
+            raise PermissionError("Robot memory root is accessible to other users")
+        for robot in sorted(self.robot_ids):
+            with self._connect(robot) as db:
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS memories (
+                         event_id TEXT PRIMARY KEY,
+                         source_robot TEXT NOT NULL,
+                         witnessed INTEGER NOT NULL CHECK(witnessed IN (0,1)),
+                         kind TEXT NOT NULL,
+                         summary TEXT NOT NULL,
+                         observed_at REAL NOT NULL,
+                         confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1)
+                       )"""
+                )
+                # A deletion tombstone contains only the random event ID,
+                # never private episode text. Retain it across reconnects so
+                # an old delayed audio/vision callback cannot resurrect a
+                # fact after an operator forget or consent revocation.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS deleted_episode_ids (
+                         event_id TEXT PRIMARY KEY
+                       )"""
+                )
+                # Operator-curated core identity/preferences are distinct
+                # from automatic sensor episodes. Like Letta core memory,
+                # a tiny stable block survives the 250-event rolling buffer.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS core_facts (
+                         slot TEXT PRIMARY KEY,
+                         value TEXT NOT NULL,
+                         updated_at REAL NOT NULL
+                       )"""
+                )
+                # SQLite FTS5 is built in and zero-dependency. An external
+                # content index avoids storing a second copy of text and
+                # preserves the existing per-pet provenance source of truth.
+                db.execute(
+                    """CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+                       USING fts5(summary, kind, content='memories',
+                                  content_rowid='rowid',
+                                  tokenize='porter unicode61')"""
+                )
+                db.executescript(
+                    """CREATE TRIGGER IF NOT EXISTS memories_fts_insert
+                       AFTER INSERT ON memories BEGIN
+                         INSERT INTO memories_fts(rowid,summary,kind)
+                         VALUES (new.rowid,new.summary,new.kind);
+                       END;
+                       CREATE TRIGGER IF NOT EXISTS memories_fts_delete
+                       AFTER DELETE ON memories BEGIN
+                         INSERT INTO memories_fts(memories_fts,rowid,summary,kind)
+                         VALUES ('delete',old.rowid,old.summary,old.kind);
+                       END;
+                       CREATE TRIGGER IF NOT EXISTS memories_fts_update
+                       AFTER UPDATE ON memories BEGIN
+                         INSERT INTO memories_fts(memories_fts,rowid,summary,kind)
+                         VALUES ('delete',old.rowid,old.summary,old.kind);
+                         INSERT INTO memories_fts(rowid,summary,kind)
+                         VALUES (new.rowid,new.summary,new.kind);
+                       END;"""
+                )
+                # At most 250 rows per robot. Rebuild once per store start
+                # so an interrupted migration cannot leave a present but
+                # incomplete index, without touching original episode rows.
+                db.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
+
+    @contextmanager
+    def _connect(self, robot_id: str):
+        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+            raise ValueError("Unknown robot memory identity")
+        path = self.root / (robot_id + ".sqlite3")
+        if path.is_symlink():
+            raise ValueError("Refusing symlinked memory database")
+        db = sqlite3.connect(path, timeout=3)
+        try:
+            # A private root is necessary but insufficient if an older
+            # database file was created with group/world read bits. Restrict
+            # both new and legacy pet files before any episode is accessed.
+            try:
+                os.chmod(path, 0o600)
+            except OSError as exc:
+                raise PermissionError(
+                    "Cannot protect private robot memory database"
+                ) from exc
+            if path.stat().st_mode & 0o077:
+                raise PermissionError(
+                    "Robot memory database is accessible to other users"
+                )
+            db.execute("PRAGMA busy_timeout=3000")
+            # SQLite ordinarily leaves deleted row bytes in free pages.
+            # Restore secure_delete on every connection, including legacy
+            # databases, before correction, retention trimming or forgetting.
+            # This is NOT a claim to erase backups or FTS5 historical pages.
+            db.execute("PRAGMA secure_delete=ON")
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def remember(
+        self,
+        robot_id: str,
+        event_id: str,
+        summary: str,
+        *,
+        kind: str,
+        source_robot: str,
+        witnessed: bool,
+        observed_at: float | None = None,
+        confidence: float = 1.0,
+    ) -> bool:
+        """Idempotently store one fact; duplicates do not rewrite earlier evidence."""
+        if (not isinstance(robot_id, str) or not isinstance(source_robot, str)
+                or robot_id not in self.robot_ids or source_robot not in self.robot_ids):
+            raise ValueError("Unknown robot identity")
+        if (not isinstance(event_id, str) or not isinstance(kind, str)
+                or not _EVENT_ID.fullmatch(event_id) or not _EVENT_KIND.fullmatch(kind)):
+            raise ValueError("Invalid event ID or kind")
+        if witnessed is not True and witnessed is not False:
+            raise ValueError("witnessed must be a boolean")
+        if witnessed != (source_robot == robot_id):
+            raise ValueError("Only this robot's own sensor observations are witnessed")
+        if not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300:
+            raise ValueError("Bounded nonempty description required")
+        if "\x00" in summary:
+            raise ValueError("Invalid description")
+        when = time.time() if observed_at is None else observed_at
+        if not isinstance(when, (int, float)) or isinstance(when, bool) or not 0 <= when < 1e12:
+            raise ValueError("Invalid observation clock")
+        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+            raise ValueError("Confidence outside [0,1]")
+        # NaN does not compare within any numeric interval. Report it as
+        # nonfinite before the finite [0,1] range check so invalid data
+        # cannot masquerade as an ordinary low-confidence observation.
+        # A massive integer can OverflowError when passed to math.isfinite.
+        # Reject nonfinite floats explicitly, bound ints before conversion,
+        # and preserve the distinct nonfinite diagnostic for NaN and Infinity.
+        if isinstance(confidence, float) and not math.isfinite(confidence):
+            raise ValueError("Nonfinite timestamp or confidence")
+        if not 0 <= confidence <= 1:
+            raise ValueError("Confidence outside [0,1]")
+        if not math.isfinite(when):
+            raise ValueError("Nonfinite timestamp or confidence")
+        # A bad device clock or replayed future event must not outrank genuine
+        # observations forever or evict them from the bounded 250-row store.
+        # Historical events remain importable; only impossible future times
+        # beyond a small clock-skew allowance are rejected.
+        if when > time.time() + 60:
+            raise ValueError("Observation timestamp exceeds local clock")
+        with self._connect(robot_id) as db:
+            # Begin before checking the tombstone: the competing operator
+            # DELETE and a delayed remembered event must have ONE order.
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "SELECT 1 FROM deleted_episode_ids WHERE event_id=?",
+                (event_id,),
+            ).fetchone() is not None:
+                return False
+            cursor = db.execute(
+                """INSERT OR IGNORE INTO memories
+                   (event_id,source_robot,witnessed,kind,summary,observed_at,confidence)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (
+                    event_id, source_robot, int(witnessed), kind, summary.strip(),
+                    float(when), float(confidence),
+                ),
+            )
+            # Keep a bounded episodic store; rich long term semantic memory can
+            # be layered later without changing the per-robot provenance contract.
+            db.execute(
+                """DELETE FROM memories WHERE event_id IN (
+                     SELECT event_id FROM memories
+                     ORDER BY observed_at DESC, event_id DESC LIMIT -1 OFFSET 250
+                   )"""
+            )
+            if cursor.rowcount != 1:
+                return False
+            # An old but previously unseen episode can be inserted and
+            # immediately evicted by the 250-row retention policy. Report
+            # persisted evidence, not merely a successful INSERT, so callers
+            # cannot share a fact the eyewitness pet no longer remembers.
+            return db.execute(
+                "SELECT 1 FROM memories WHERE event_id=?", (event_id,),
+            ).fetchone() is not None
+
+    def recent(self, robot_id: str, *, limit: int = 12) -> list[Memory]:
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("Limit must be 1..50")
+        with self._connect(robot_id) as db:
+            rows = db.execute(
+                """SELECT event_id,source_robot,witnessed,kind,summary,observed_at,confidence
+                   FROM memories ORDER BY observed_at DESC,event_id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [
+            Memory(robot_id, event_id, source, bool(witnessed), kind, summary, at, score)
+            for event_id, source, witnessed, kind, summary, at, score in rows
+        ]
+
+    def search(self, robot_id: str, query: str, *, limit: int = 6) -> list[Memory]:
+        """Search only this pet's SQLite FTS5 index; never mix peer memories.
+
+        Porter unicode61 and BM25 are the proven local SQLite implementation.
+        Stored confidence, witnessed/secondhand provenance and event age
+        remain secondary ranking signals. Empty matches invent nothing.
+        """
+        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+            raise ValueError("Unknown robot memory identity")
+        if (not isinstance(query, str) or not 1 <= len(query.strip()) <= 240
+                or "\x00" in query or type(limit) is not int
+                or not 1 <= limit <= 12):
+            raise ValueError("Bounded memory question and limit required")
+        expression = _fts_query(query)
+        if not expression:
+            return []
+        with self._connect(robot_id) as db:
+            rows = db.execute(
+                """SELECT m.event_id,m.source_robot,m.witnessed,m.kind,m.summary,
+                          m.observed_at,m.confidence,bm25(memories_fts,1.0,0.5)
+                   FROM memories_fts
+                   JOIN memories AS m ON m.rowid = memories_fts.rowid
+                   WHERE memories_fts MATCH ? LIMIT 250""",
+                (expression,),
+            ).fetchall()
+        now = time.time()
+        ranked = []
+        for event_id, source, witnessed, kind, summary, at, confidence, relevance in rows:
+            age_days = max(0.0, now - at) / 86400
+            # BM25 scores are lower for better matches. Quantize tiny
+            # floating noise so confidence, firsthand source and recency
+            # fairly break equal-ranking topical results.
+            rank = (
+                round(-float(relevance), 6),
+                float(confidence) + (0.25 if witnessed else 0)
+                + 0.25 / (1 + age_days / 14),
+                at, event_id,
+            )
+            ranked.append((
+                rank, Memory(robot_id, event_id, source, bool(witnessed),
+                             kind, summary, at, confidence),
+            ))
+        ranked.sort(key=lambda entry: entry[0], reverse=True)
+        return [memory for _, memory in ranked[:limit]]
+
+    def set_core_fact(self, robot_id: str, slot: str, value: str) -> bool:
+        """Curate one long-lived preference; ONLY operator API may invoke.
+
+        No model/tool automatically edits identity, user preferences or safety
+        policy. This bounded core is separate from ephemeral episodes.
+        """
+        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+            raise ValueError("Unknown robot memory identity")
+        if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
+            raise ValueError("Invalid core memory slot")
+        if (not isinstance(value, str) or not 1 <= len(value.strip()) <= 200
+                or "\x00" in value):
+            raise ValueError("Invalid bounded core memory value")
+        clean = " ".join(value.split())
+        with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute(
+                "SELECT value FROM core_facts WHERE slot=?", (slot,)
+            ).fetchone()
+            if old is None and db.execute(
+                "SELECT count(*) FROM core_facts"
+            ).fetchone()[0] >= 24:
+                raise ValueError("Robot core memory limited to 24 slots")
+            if old is not None and old[0] == clean:
+                return False
+            db.execute(
+                """INSERT INTO core_facts (slot,value,updated_at)
+                   VALUES (?,?,?)
+                   ON CONFLICT(slot) DO UPDATE SET
+                       value=excluded.value,updated_at=excluded.updated_at""",
+                (slot, clean, time.time()),
+            )
+            return True
+
+    def core_facts(self, robot_id: str, *, limit: int = 12) -> list[CoreFact]:
+        if type(limit) is not int or not 1 <= limit <= 24:
+            raise ValueError("Core memory limit must be 1..24")
+        with self._connect(robot_id) as db:
+            rows = db.execute(
+                """SELECT slot,value,updated_at FROM core_facts
+                   ORDER BY updated_at DESC,slot ASC LIMIT ?""", (limit,)
+            ).fetchall()
+        return [CoreFact(robot_id, slot, value, at)
+                for slot, value, at in rows]
+
+    def forget_core_fact(self, robot_id: str, slot: str) -> bool:
+        if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
+            raise ValueError("Invalid core memory slot")
+        with self._connect(robot_id) as db:
+            return db.execute(
+                "DELETE FROM core_facts WHERE slot=?", (slot,)
+            ).rowcount == 1
+
+    def correct_episode(self, robot_id: str, event_id: str, summary: str) -> bool:
+        """Correct local episode text without rewriting its evidence provenance."""
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        if (not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300
+                or "\x00" in summary):
+            raise ValueError("Bounded nonempty description required")
+        clean = summary.strip()
+        with self._connect(robot_id) as db:
+            current = db.execute(
+                "SELECT summary FROM memories WHERE event_id=?", (event_id,)
+            ).fetchone()
+            if current is None or current[0] == clean:
+                return False
+            # Only the operator-correctable description changes. Event identity,
+            # source, firsthand/peer attribution, kind, time and confidence stay
+            # immutable, and the existing FTS UPDATE trigger refreshes search.
+            return db.execute(
+                "UPDATE memories SET summary=? WHERE event_id=?",
+                (clean, event_id),
+            ).rowcount == 1
+
+    def forget_episode(self, robot_id: str, event_id: str) -> bool:
+        """Explicit per-pet deletion; does not silently mutate peer memories."""
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            # Even a deletion arriving before a slow SQLite writer creates a
+            # durable fence. Never copy a peer's deletion to this pet's DB.
+            db.execute(
+                "INSERT OR IGNORE INTO deleted_episode_ids(event_id) VALUES (?)",
+                (event_id,),
+            )
+            return db.execute(
+                "DELETE FROM memories WHERE event_id=?", (event_id,)
+            ).rowcount == 1
+
+    def count(self, robot_id: str) -> int:
+        with self._connect(robot_id) as db:
+            return int(db.execute("SELECT count(*) FROM memories").fetchone()[0])

@@ -3,17 +3,88 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
-from typing import Awaitable, Callable
+from dataclasses import asdict, dataclass, field, replace
+from typing import Awaitable, Callable, TypeVar
 
 from .calibration import Calibration
 from .config import Settings
+from .dock_ir import validate_ir
+from .dock_runtime import detect_bounded, load_real_dock_calibration, unpack_dock_frame
+from .dock_vision import assess_dock
+from .grasp_feedback import guarded_grasp
 from .transport import Head, validate_command
 from .vision import Detection, Vision, image_size
+
+_T = TypeVar("_T")
+
+
+async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
+                              timeout_message: str) -> _T:
+    """Bound even adapters that suppress task cancellation; ignore late replies."""
+    # Callers may already own a cancellable snapshot task for VAD preemption.
+    task = asyncio.ensure_future(coro)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=seconds)
+        if not done:
+            raise TimeoutError(timeout_message)
+        return await task
+    finally:
+        if not task.done():
+            task.cancel()
+            # A late transport failure must be observed, never accepted as a
+            # delayed body STOP or as an authorization from a stale status.
+            task.add_done_callback(
+                lambda done: None if done.cancelled() else done.exception()
+            )
+
+
+async def _bounded_body_stop(head: Head) -> dict:
+    """Terminal user/task STOP must revoke WROOM arming, not just wheel speed.
+
+    Use the existing body 'halt': motor targets zero, armed false, servo PWM
+    retained for a held object. An HTTP ACK is a command receipt, not a
+    physically measured wheel or grasp stop.
+    """
+    return await _bounded_head_reply(
+        head.command("halt"), seconds=1.0,
+        timeout_message="WROOM STOP transport acknowledgement unconfirmed",
+    )
+
+
+async def _bounded_pulse_stop(head: Head) -> dict:
+    """Short supervised drive pulse; the same authorized job may continue."""
+    return await _bounded_head_reply(
+        head.command("stop"), seconds=1.0,
+        timeout_message="WROOM pulse STOP transport acknowledgement unconfirmed",
+    )
 
 
 class OperationError(RuntimeError):
     pass
+
+
+def _require_safe_fuel_sample(
+    power: object, *, min_cell_mv: int, min_soc_centi: int,
+    context: str, depleted_message: str,
+) -> None:
+    """Reject malformed claimed-valid fuel evidence before motion decisions.
+
+    A missing optional power section or an explicit fuel_valid:false is not
+    a current measurement. The independent WROOM still owns motor cutoffs.
+    """
+    if power is None:
+        return
+    if not isinstance(power, dict) or type(power.get("fuel_valid")) is not bool:
+        raise OperationError(f"{context}: malformed battery telemetry")
+    if power["fuel_valid"] is False:
+        return
+    cell_mv = power.get("cell_mv")
+    soc_centi = power.get("soc_centi")
+    if (type(cell_mv) is not int or not 2500 <= cell_mv <= 4500
+            or type(soc_centi) is not int or not 0 <= soc_centi <= 10000):
+        raise OperationError(f"{context}: malformed battery telemetry")
+    if cell_mv < min_cell_mv or soc_centi < min_soc_centi:
+        raise OperationError(depleted_message)
 
 
 @dataclass
@@ -35,17 +106,96 @@ class Coordinator:
         self.settings = settings
         self.heads = heads
         self.vision = vision
+        # Runtime injects its EXISTING continuous camera owner. Never create
+        # an independent physical video client for exploration.
+        self.multimodal = None
         self.locks = {r.id: asyncio.Lock() for r in settings.robots}
         self.jobs: dict[str, Job] = {}
         self.tasks: dict[str, asyncio.Task] = {}
         self.closed = False
         self.permits: dict[str, float] = {}
+        self.shutdown_stop_failures: dict[str, str] = {}
+        self._permit_epoch = {r.id: 0 for r in settings.robots}
 
     def robot(self, robot_id):
         try:
             return self.settings.robot(robot_id)
         except KeyError as exc:
             raise OperationError("Unknown robot") from exc
+
+    async def _hardware_preflight(self, robot_id: str) -> None:
+        """Read the actual WROOM safety state, never infer safety from a permit.
+
+        The head transports this status from the body UART. This is an extra
+        software refusal gate, not a substitute for the WROOM's independent
+        fail-closed cliff, touch and watchdog enforcement.
+        """
+        if self.settings.mode != "hardware":
+            return
+        status = await _bounded_head_reply(
+            self.heads[robot_id].status(), seconds=2.5,
+            timeout_message="WROOM preflight status timeout",
+        )
+        if not isinstance(status, dict) or status.get("robot_id") != robot_id:
+            raise OperationError("Hardware preflight: body identity missing or mismatched")
+        if (status.get("backend") not in ("stepper_28byj48", "dc_pwm_guarded")
+                or status.get("armed") is not False):
+            raise OperationError("Hardware preflight: guarded body must be present and disarmed")
+        touch = status.get("touch")
+        if not isinstance(touch, dict) or touch.get("active") is not False:
+            raise OperationError("Hardware preflight: touch input unavailable or pressed")
+        safety = status.get("safety")
+        if (
+            not isinstance(safety, dict)
+            or safety.get("required") is not True
+            or safety.get("ready") is not True
+            or safety.get("fault") != "none"
+        ):
+            raise OperationError("Hardware preflight: five-channel local safety not clear")
+        # Fresh six-axis identity and data are compulsory in the actual WROOM
+        # motion profile. This is only a presence/freshness gate; no unmeasured
+        # tilt angle or handheld state is inferred from raw sensor units.
+        imu = status.get("imu")
+        if (
+            not isinstance(imu, dict)
+            or type(imu.get("family")) is not int
+            or imu["family"] not in (1, 2, 3, 4)
+            or imu.get("valid") is not True
+            or type(imu.get("age_ms")) is not int
+            or not 0 <= imu["age_ms"] <= 200
+            or any(
+                not isinstance(imu.get(axis), list)
+                or len(imu[axis]) != 3
+                or any(type(v) is not int or not -32768 <= v <= 32767
+                       for v in imu[axis])
+                for axis in ("acc", "gyro")
+            )
+        ):
+            raise OperationError("Hardware preflight: six-axis IMU missing or stale")
+        ranges = status.get("ranges")
+        if not isinstance(ranges, dict):
+            raise OperationError("Hardware preflight: range diagnostics unavailable")
+        if (
+            type(ranges.get("present_mask")) is not int
+            or ranges["present_mask"] != 31
+            or type(ranges.get("valid_mask")) is not int
+            or ranges["valid_mask"] != 31
+        ):
+            raise OperationError("Hardware preflight: missing or invalid ToF channels")
+        ages = ranges.get("age_ms")
+        readings = ranges.get("mm")
+        if (
+            not isinstance(ages, list) or len(ages) != 5
+            or not isinstance(readings, list) or len(readings) != 5
+            or any(type(age) is not int or not 0 <= age < 200 for age in ages)
+            or any(type(mm) is not int or not 1 <= mm <= 1300 for mm in readings)
+        ):
+            raise OperationError("Hardware preflight: stale or malformed ranging telemetry")
+        _require_safe_fuel_sample(
+            status.get("power"), min_cell_mv=3350, min_soc_centi=500,
+            context="Hardware preflight",
+            depleted_message="Hardware preflight: battery voltage critical (<3350 mV)",
+        )
 
     async def operator_arm(self, robot_id: str):
         robot = self.robot(robot_id)
@@ -57,6 +207,16 @@ class Coordinator:
             j.robot_id == robot_id and j.state in {"queued", "running"} for j in self.jobs.values()
         ):
             raise OperationError("Robot busy")
+        # Retire any older in-flight preflight before awaiting the head.
+        self._permit_epoch[robot_id] += 1
+        owner_epoch = self._permit_epoch[robot_id]
+        self.permits.pop(robot_id, None)
+        await self._hardware_preflight(robot_id)
+        if (self.closed or self._permit_epoch[robot_id] != owner_epoch
+                or self.locks[robot_id].locked()
+                or any(j.robot_id == robot_id and j.state in {"queued", "running"}
+                       for j in self.jobs.values())):
+            raise OperationError("Operator arm superseded or robot became busy")
         self.permits[robot_id] = time.monotonic() + 30
         return {
             "robot_id": robot_id,
@@ -68,28 +228,141 @@ class Coordinator:
 
     async def stop(self, robot_id: str):
         self.robot(robot_id)
+        self._permit_epoch[robot_id] += 1
         self.permits.pop(robot_id, None)
         running = [
             task
             for jid, task in self.tasks.items()
             if self.jobs[jid].robot_id == robot_id and not task.done()
         ]
+        # Revoke the software operation immediately, even if a cancelled
+        # third-party task catches CancelledError and refuses to finish.
+        # The UI must not display "running" during an urgent STOP request.
+        active_job_ids = [
+            jid for jid, task in self.tasks.items()
+            if self.jobs[jid].robot_id == robot_id and not task.done()
+        ]
+        for jid in active_job_ids:
+            if self.jobs[jid].state in {"queued", "running"}:
+                self.jobs[jid].state = "cancelled"
+                self.jobs[jid].error = "STOP requested; WROOM acknowledgement pending"
         for task in running:
             task.cancel()
-        if running:
-            await asyncio.gather(*running, return_exceptions=True)
+        # Stop physical wheels FIRST. A canceled job can be stuck in camera,
+        # network or model cleanup; waiting for it would delay the real WROOM
+        # stop command despite an urgent operator or human request.
+        stop_acknowledged = False
+        try:
+            acknowledgement = await _bounded_body_stop(self.heads[robot_id])
+            stop_acknowledged = True
+        except BaseException:
+            # A transport failure is not physical evidence of stopped wheels,
+            # regardless of whether the cancelled job's Python task exited.
+            for jid in active_job_ids:
+                self.jobs[jid].state = "failed"
+                self.jobs[jid].error = (
+                    "WROOM physical STOP unconfirmed; rely on local watchdog"
+                )
+            raise
+        finally:
+            if running:
+                # asyncio.wait_for(gather(...)) is NOT bounded if a task
+                # catches cancellation. A wait() set timeout returns even
+                # when an uncooperative child refuses to finish.
+                done, pending = await asyncio.wait(running, timeout=2.0)
+                for task in done:
+                    if not task.cancelled():
+                        task.exception()  # observe any failure
+                if pending:
+                    for jid, task in self.tasks.items():
+                        if (self.jobs[jid].robot_id == robot_id
+                                and task in pending):
+                            self.jobs[jid].state = "failed"
+                            if stop_acknowledged:
+                                self.jobs[jid].error = "Cancelled job ignored timeout; WROOM stop dispatched"
         for jid, task in self.tasks.items():
-            if self.jobs[jid].robot_id == robot_id and task.cancelled():
+            if (self.jobs[jid].robot_id == robot_id and task.cancelled()
+                    and self.jobs[jid].state != "failed"):
+                # A task cancelled before its first instruction must not
+                # overwrite an unconfirmed physical STOP receipt.
                 self.jobs[jid].state = "cancelled"
                 self.jobs[jid].error = "Operator cancelled before job started"
-        return await self.heads[robot_id].command("stop")
+        return acknowledgement
+
+    async def stop_active_exploration(self) -> tuple[str, ...]:
+        """A real human voice or lost VAD monitor preempts optional roaming.
+
+        Only autonomously exploring bodies are stopped. Do not cancel a
+        manually initiated pickup, dock or other operator-approved job merely
+        because another pet heard a voice. Reuse stop(), so outstanding WROOM
+        permits are revoked and physical STOP is sent BEFORE job cleanup.
+        Never automatically resume after speech_end or transport recovery.
+        """
+        active = tuple(sorted({
+            job.robot_id for jid, job in self.jobs.items()
+            if job.kind == "exploration"
+            and job.state in {"queued", "running"}
+            and jid in self.tasks
+            and not self.tasks[jid].done()
+        }))
+        if not active:
+            return ()
+        for job in self.jobs.values():
+            if job.robot_id in active and job.kind == "exploration":
+                job.events.append("Autonomous roaming preempted by live human or monitor loss")
+        results = await asyncio.gather(
+            *(self.stop(robot_id) for robot_id in active),
+            return_exceptions=True,
+        )
+        errors = [
+            result for result in results if isinstance(result, BaseException)
+        ]
+        if errors:
+            # A failed STOP is NOT proof the motors stopped. The WROOM local
+            # watchdog is still required, and the monitoring caller sees the
+            # unresolved physical abort rather than a fabricated success.
+            raise OperationError(
+                "Voice preemption of roaming: WROOM STOP unconfirmed"
+            ) from errors[0]
+        return active
 
     async def close(self):
+        """Revoke permits and send bounded physical STOP before slow cleanup."""
         self.closed = True
-        for task in self.tasks.values():
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*self.tasks.values(), return_exceptions=True)
+        self.shutdown_stop_failures.clear()  # Each close attempt owns fresh evidence.
+        self.permits.clear()
+        for robot_id in self._permit_epoch:
+            self._permit_epoch[robot_id] += 1
+        running = [task for task in self.tasks.values() if not task.done()]
+        for task in running:
+            task.cancel()
+        # Every configured hardware body needs a STOP on shutdown, not just
+        # active jobs: a previously uncertain command can leave motors armed.
+        # One disconnected head cannot delay STOP on the other four.
+        if self.settings.mode == "hardware":
+            ids = sorted(self.heads)
+            receipts = await asyncio.gather(
+                *(_bounded_body_stop(self.heads[robot_id]) for robot_id in ids),
+                return_exceptions=True,
+            )
+            for robot_id, result in zip(ids, receipts, strict=True):
+                if isinstance(result, BaseException):
+                    self.shutdown_stop_failures[robot_id] = type(result).__name__
+                    for job in self.jobs.values():
+                        if job.robot_id == robot_id and job.state in {"queued", "running"}:
+                            job.state = "failed"
+                            job.error = "Shutdown STOP unconfirmed; rely on WROOM watchdog"
+        if running:
+            done, pending = await asyncio.wait(running, timeout=2.0)
+            for task in done:
+                if not task.cancelled():
+                    task.exception()
+            for jid, task in self.tasks.items():
+                if task in pending:
+                    self.jobs[jid].state = "failed"
+                    self.jobs[jid].error = (
+                        "Shutdown task ignored cancellation; WROOM watchdog required"
+                    )
 
     def _submit(self, robot_id: str, kind: str, work: Callable[[Job], Awaitable[dict]]) -> Job:
         self.robot(robot_id)
@@ -112,6 +385,7 @@ class Coordinator:
                     del self.jobs[jid]
                     del self.tasks[jid]
                     break
+        self._permit_epoch[robot_id] += 1
         self.permits.pop(robot_id, None)  # consume once, even if ACK/job later fails
         job = Job(uuid.uuid4().hex, robot_id, kind)
         self.jobs[job.id] = job
@@ -129,13 +403,22 @@ class Coordinator:
             keeper = None
             operation = None
             try:
+                # A head can disconnect, touch can be pressed and a floor
+                # sample can expire after the operator granted the permit.
+                # Recheck the real body immediately before requesting arm.
+                await self._hardware_preflight(job.robot_id)
                 await self.heads[job.robot_id].command(
                     "arm"
                 )  # only after consuming operator permit
                 keeper = asyncio.create_task(self._keepalive(job.robot_id))
                 operation = asyncio.create_task(work(job))
                 # A failed keepalive cancels the operation immediately; do not continue blindly.
-                async with asyncio.timeout(self.settings.max_job_seconds):
+                # Exploration is a single persistent operator-approved job;
+                # never require another two-minute token while it is safely
+                # running. Body pulses still expire in <=250ms and the local
+                # 500ms watchdog remains independent of the Mac.
+                timeout = None if job.kind == "exploration" else self.settings.max_job_seconds
+                async with asyncio.timeout(timeout):
                     done, _ = await asyncio.wait(
                         {keeper, operation}, return_when=asyncio.FIRST_COMPLETED
                     )
@@ -145,8 +428,12 @@ class Coordinator:
                     job.result = await operation
                 job.state = "succeeded"
             except asyncio.CancelledError:
-                job.state = "cancelled"
-                job.error = "Operator cancelled"
+                # An operator STOP can already have failed at the transport.
+                # Cancellation of this Python task must never erase that
+                # stronger physical failure or claim the WROOM stopped.
+                if job.state != "failed":
+                    job.state = "cancelled"
+                    job.error = "Operator cancelled"
             except Exception as exc:
                 job.state = "failed"
                 job.error = str(exc) or type(exc).__name__
@@ -154,15 +441,29 @@ class Coordinator:
                 for task in (operation, keeper):
                     if task is not None and not task.done():
                         task.cancel()
-                await asyncio.gather(*(t for t in (operation, keeper) if t), return_exceptions=True)
+                # Dispatch WROOM stop before potentially slow canceled camera
+                # or model cleanup. No second actor may treat this as charging.
                 try:
-                    await self.heads[job.robot_id].command("stop")
+                    await _bounded_body_stop(self.heads[job.robot_id])
                     job.events.append(
                         "stop acknowledged; servo positions are commanded, not measured"
                     )
                 except Exception as exc:
                     job.error = f"{job.error or ''}; STOP failed: {exc}; rely on body watchdog"
                     job.state = "failed"
+                pending = [t for t in (operation, keeper) if t is not None]
+                if pending:
+                    done, unresponsive = await asyncio.wait(
+                        pending, timeout=2.0
+                    )
+                    for task in done:
+                        if not task.cancelled():
+                            task.exception()
+                    if unresponsive:
+                        job.error = (
+                            f"{job.error or ''}; cancellation cleanup timed out"
+                        )
+                        job.state = "failed"
 
     def manual(self, robot_id: str, command: str) -> Job:
         robot = self.robot(robot_id)
@@ -175,12 +476,382 @@ class Coordinator:
         async def work(job):
             result = await self.heads[robot_id].command(command)
             if op == "drive":
-                await asyncio.sleep(int(command.split()[3]) / 1000)
+                parts = command.split()
+                duration_ms = int(parts[3]) if len(parts) == 4 else 250
+                await asyncio.sleep(duration_ms / 1000)
             else:
                 await asyncio.sleep(2)  # bounded ramp/settling; does not claim measured position
             return result
 
         return self._submit(robot_id, "manual", work)
+
+    async def _assert_armed_health(
+        self, robot_id: str, *, require_front_clearance: bool = False
+    ) -> dict:
+        """Recheck WROOM local sensor verdict before every physical movement.
+
+        This is shared by sustained exploration and each pickup phase.
+        A remote status never clears a local fault or creates a new permit.
+        """
+        # Exploration has no overall job deadline. An alternate head adapter
+        # holding this status request must not keep the WROOM armed forever.
+        body = await _bounded_head_reply(
+            self.heads[robot_id].status(), seconds=2.5,
+            timeout_message="WROOM active health status timeout",
+        )
+        if not isinstance(body, dict) or body.get("armed") is not True:
+            raise OperationError("Operation stopped: body disarmed or unavailable")
+        if self.settings.mode != "hardware":
+            return body
+        # Preflight identity alone is insufficient. Every subsequent motion
+        # health read must still belong to this WROOM, including after a
+        # head reconnect or reassignment of an alternate transport adapter.
+        if body.get("robot_id") != robot_id:
+            raise OperationError("Operation blocked: body identity mismatch")
+        safety = body.get("safety")
+        ranges = body.get("ranges")
+        imu = body.get("imu")
+        touch = body.get("touch")
+        if (
+            not isinstance(safety, dict)
+            or safety.get("required") is not True
+            or safety.get("ready") is not True
+            or safety.get("fault") != "none"
+            or not isinstance(ranges, dict)
+            or type(ranges.get("present_mask")) is not int
+            or ranges["present_mask"] != 31
+            or type(ranges.get("valid_mask")) is not int
+            or ranges["valid_mask"] != 31
+            or not isinstance(ranges.get("mm"), list)
+            or len(ranges["mm"]) != 5
+            or not isinstance(ranges.get("age_ms"), list)
+            or len(ranges["age_ms"]) != 5
+            or any(type(n) is not int or not 1 <= n <= 1300 for n in ranges["mm"])
+            or any(type(age) is not int or not 0 <= age <= 150
+                   for age in ranges["age_ms"])
+            or (require_front_clearance and ranges["mm"][4] <= 250)
+            or not isinstance(imu, dict)
+            or imu.get("valid") is not True
+            or type(imu.get("age_ms")) is not int
+            or not 0 <= imu["age_ms"] <= 200
+            or not isinstance(touch, dict)
+            or touch.get("active") is not False
+        ):
+            raise OperationError("Operation blocked by local sensor or corridor")
+        _require_safe_fuel_sample(
+            body.get("power"), min_cell_mv=3300, min_soc_centi=300,
+            context="Operation blocked",
+            depleted_message=(
+                "Operation blocked: battery depleted below motor operating limit"
+            ),
+        )
+        return body
+
+    def explore(self, robot_id: str) -> Job:
+        """Start operator enabled, persistent but locally guarded exploration.
+
+        Movement always uses the same Coordinator._run session and WROOM local
+        cliff/watchdog authority as pickup. No model free-text can choose speed
+        or send bypass commands. Firmware and physical swept-space qualification
+        are necessary before enabling this on an assembled desk.
+        """
+        robot = self.robot(robot_id)
+        if not robot.motion_enabled:
+            raise OperationError("Exploration requires motion_enabled=true")
+        if self.settings.mode == "hardware" and not robot.exploration_qualified:
+            raise OperationError(
+                "Hardware exploration needs measured swept-path qualification"
+            )
+        return self._submit(robot_id, "exploration", self._explore)
+
+    async def _explore(self, job: Job) -> dict:
+        head = self.heads[job.robot_id]
+        last_live_frame_at = float("-inf")
+
+        async def observe_camera() -> None:
+            nonlocal last_live_frame_at
+            if self.settings.mode == "hardware":
+                # Hardware exploration MUST consume a genuinely NEW
+                # authenticated XIAO frame from the one Mac MJPEG owner.
+                # A successful but stale snapshot is not motion evidence.
+                media = self.multimodal
+                if (media is None
+                        or not media.settings.voice_vision_tools_enabled
+                        or not media.stream_owns_camera(job.robot_id)
+                        or not media.status(job.robot_id)["camera_stream_connected"]):
+                    # A reconnecting worker is NOT a live camera socket,
+                    # even if its asyncio task has not exited.
+                    raise OperationError(
+                        "Hardware exploration requires connected live XIAO camera stream"
+                    )
+
+                def newest():
+                    return next((
+                        frame for frame in reversed(media.hub.frames[job.robot_id])
+                        if frame.source == "proactive"
+                        and frame.received_at > last_live_frame_at
+                        and 0 <= time.monotonic() - frame.received_at <= 1.0
+                    ), None)
+
+                frame = newest()
+                if frame is None:
+                    received = await _bounded_head_reply(
+                        media.wait_for_proactive_frame(
+                            job.robot_id, last_live_frame_at, timeout_s=2.0
+                        ), seconds=2.5,
+                        timeout_message="Live exploration camera stalled",
+                    )
+                    if not received:
+                        raise OperationError("Live exploration camera stalled")
+                    frame = newest()
+                if (frame is None or not media.stream_owns_camera(job.robot_id)
+                        or not media.settings.voice_vision_tools_enabled
+                        or not media.status(job.robot_id)["camera_stream_connected"]):
+                    # Connection can drop during frame preparation. A
+                    # recently cached receipt cannot certify a live stream.
+                    raise OperationError(
+                        "Hardware exploration camera frame expired or disconnected"
+                    )
+                last_live_frame_at = frame.received_at
+                jpeg = frame.jpeg
+            else:
+                # Simulation retains its historical synthetic snapshot.
+                jpeg = await _bounded_head_reply(
+                    head.snapshot(), seconds=2.0,
+                    timeout_message="Camera snapshot timeout",
+                )
+            # An HTTP success with an empty, partial or non-JPEG response
+            # is not evidence of a functioning XIAO camera stream.
+            if (not isinstance(jpeg, bytes) or not 4 <= len(jpeg) <= 512000
+                    or not jpeg.startswith(b"\xff\xd8")
+                    or not jpeg.endswith(b"\xff\xd9")):
+                raise OperationError("Exploration camera returned invalid JPEG")
+            try:
+                width, height = image_size(jpeg)
+            except (OSError, ValueError, SyntaxError) as exc:
+                raise OperationError("Exploration camera returned invalid JPEG") from exc
+            if not 80 <= width <= 2048 or not 80 <= height <= 1536:
+                raise OperationError("Exploration camera returned invalid JPEG dimensions")
+
+        steps = 0
+        # This loop persists until a stop, quiet mode, failure, or disconnect.
+        # There is no unbounded drive: every track movement expires after 100ms.
+        while True:
+            await self._assert_armed_health(job.robot_id, require_front_clearance=True)
+            # The reused Sense camera source must be alive before and after
+            # each short pulse; an image does not by itself prove a clear path.
+            await observe_camera()
+            # A camera request can hang while a local cliff, touch or IMU
+            # fault disarms WROOM. Never drive from a pre-camera verdict.
+            await self._assert_armed_health(job.robot_id, require_front_clearance=True)
+            await head.command("drive 20 20 100")
+            await asyncio.sleep(0.12)
+            await _bounded_pulse_stop(head)
+            steps += 1
+            if len(job.events) >= 96:
+                job.events.pop(0)
+            job.events.append(f"bounded exploration pulse {steps}, stopped for reobservation")
+            await observe_camera()
+            # No blind reverse/turn when only one forward beam exists. Swept
+            # turns need real footprint and obstacle qualification.
+            await asyncio.sleep(0.35)
+
+    def dock(self, robot_id: str) -> Job:
+        """Permit-gated camera approach ending BEFORE unqualified charge contacts."""
+        robot = self.robot(robot_id)
+        if not robot.motion_enabled or not robot.dock_motion_qualified:
+            raise OperationError("Dock motion requires measured physical qualification")
+        if self.settings.mode != "hardware":
+            raise OperationError("Dock approach requires physically qualified hardware")
+        if robot.dock_turn_sign not in (-1, 1) or robot.dock_forward_sign not in (-1, 1):
+            raise OperationError("Dock turn and forward motor polarity are not measured")
+        try:
+            camera, target_mm = load_real_dock_calibration(robot.dock_calibration)
+        except (OSError, ValueError, TypeError) as exc:
+            raise OperationError(f"Dock calibration required: {exc}") from exc
+        # Read-only AprilTag diagnostics may retain legacy zero-distortion
+        # assumptions. Physically permitted docking must not assume that
+        # an unmeasured XIAO lens has zero distortion.
+        if camera.distortion_coeffs is None:
+            raise OperationError(
+                "Dock motion requires measured camera lens distortion"
+            )
+        if camera.image_width_px is None or camera.image_height_px is None:
+            raise OperationError(
+                "Dock motion requires calibrated camera frame resolution"
+            )
+        if (camera.mount_lateral_offset_mm is None
+                or camera.mount_yaw_deg is None):
+            raise OperationError(
+                "Dock motion requires measured camera to chassis mounting geometry"
+            )
+        if camera.camera_sensor_pid not in ("OV3660", "OV5640"):
+            raise OperationError(
+                "Dock motion requires recorded actual camera sensor PID"
+            )
+        if robot.dock_beacon_id is None:
+            raise OperationError("Dock approach needs the assigned physical NEC beacon")
+        return self._submit(
+            robot_id, "dock_approach",
+            lambda job: self._dock_approach(
+                job, camera, target_mm, robot.dock_turn_sign, robot.dock_forward_sign
+            ),
+        )
+
+    async def _dock_approach(
+        self, job: Job, camera, target_mm: float,
+        turn_sign: int, forward_sign: int
+    ) -> dict:
+        """Camera plus fresh assigned dock IR plus local guard; NEVER charge."""
+        head = self.heads[job.robot_id]
+        expected_dock = self.robot(job.robot_id).dock_beacon_id
+        previous_ir: tuple[int, int] | None = None
+        for attempt in range(16):
+            # Check before vision and AGAIN afterwards: camera and PnP may
+            # pause for seconds while the hardware floor/front state changes.
+            await self._assert_armed_health(
+                job.robot_id, require_front_clearance=True
+            )
+            # Camera receipt time is NOT equivalent to image exposure time.
+            # Local WROOM cliff stop remains mandatory for every short pulse.
+            # Real docking reuses a strictly fresh MJPEG frame.
+            capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
+            observation = await _bounded_head_reply(
+                capture_dock(), seconds=2.0,
+                timeout_message="Camera snapshot timeout",
+            )
+            try:
+                jpeg, received_at = unpack_dock_frame(observation)
+            except ValueError as exc:
+                raise OperationError("Stale or invalid dock camera receipt") from exc
+            if camera.camera_sensor_pid is not None:
+                # This method checks Espressif's live sensor PID AND the
+                # accepted JPEG boot nonce; a JSON calibration alone cannot
+                # authorize steering an OV5640 with OV3660 intrinsics.
+                read_identity = getattr(head, "camera_identity", None)
+                if not callable(read_identity):
+                    raise OperationError(
+                        "Dock camera live sensor identity unavailable"
+                    )
+                observed_pid = await _bounded_head_reply(
+                    read_identity(), seconds=2.0,
+                    timeout_message="Dock camera live sensor identity timeout",
+                )
+                if observed_pid != camera.camera_sensor_pid:
+                    raise OperationError(
+                        "Dock camera sensor PID differs from measured calibration"
+                    )
+            # The shared bounded native detector also owns all read-only
+            # AprilTag observations. A cancelled/expired C detector cannot
+            # escape the single-worker budget or overlap another robot.
+            pose = await detect_bounded(
+                jpeg, camera, captured_at=received_at
+            )
+            # A centered AprilTag in the camera frame is not necessarily
+            # centered on the wheel chassis. Apply measured camera yaw and
+            # lateral lens offset before choosing a left/right/forward pulse.
+            aligned = (
+                replace(pose, x_mm=camera.chassis_lateral_mm(pose))
+                if pose is not None else None
+            )
+            decision = assess_dock(
+                aligned, now=time.monotonic(), target_distance_mm=target_mm
+            )
+            job.events.append(f"dock observation {attempt}: {decision.phase}")
+            if decision.phase == "hold":
+                return {
+                    "phase": "hold", "reason": decision.reason,
+                    "charging_authorized": False, "physical_acceptance_pass": False,
+                }
+            # A healthy pre-camera response is NEVER reused as movement
+            # authority after a slow snapshot or AprilTag inference.
+            body = await self._assert_armed_health(
+                job.robot_id, require_front_clearance=True
+            )
+            if decision.phase == "align":
+                side = body.get("side_ranges")
+                if (not isinstance(side, dict)
+                        or type(side.get("present_mask")) is not int
+                        or side["present_mask"] != 7
+                        or type(side.get("valid_mask")) is not int
+                        or side["valid_mask"] != 7
+                        or not isinstance(side.get("age_ms"), list)
+                        or len(side["age_ms"]) != 3
+                        or any(type(n) is not int or not 0 <= n <= 350
+                               for n in side["age_ms"])
+                        or not isinstance(side.get("mm"), list)
+                        or len(side["mm"]) != 3
+                        or any(type(n) is not int or not 300 <= n <= 1300
+                               for n in side["mm"])):
+                    raise OperationError(
+                        "Dock turn refused: side and rear clearance unqualified"
+                    )
+                direction = turn_sign if aligned.x_mm > 0 else -turn_sign
+                command = f"drive {20 * direction} {-20 * direction} 100"
+            else:
+                # Stopping at least 300mm away from a detected frontal surface
+                # is intentional. The final cm and charging contacts need a
+                # separate physical state machine with actual contact sensing.
+                if body["ranges"]["mm"][4] < 350:
+                    return {
+                        "phase": "hold", "reason": "Front clearance stop",
+                        "charging_authorized": False, "physical_acceptance_pass": False,
+                    }
+                command = f"drive {20 * forward_sign} {20 * forward_sign} 100"
+            # Actual hardware docking requires BOTH independent IR receivers
+            # to see the code flashed on THIS pet's assigned station. A valid
+            # foreign dock NEC frame never justifies a turn/forward pulse.
+            # This does not grant any movement or charging authorization:
+            # the five local WROOM ranging and dock-contact interlocks still
+            # own the physical STOP verdict.
+            if expected_dock is not None:
+                getter = getattr(head, "ir_status", None)
+                if not callable(getter):
+                    raise OperationError("Assigned dock IR receiver unavailable")
+                reading = await _bounded_head_reply(
+                    getter(), seconds=1.0,
+                    timeout_message="Assigned dock IR status timeout",
+                )
+                try:
+                    beacon = validate_ir(
+                        reading, job.robot_id, expected_dock_id=expected_dock,
+                    )
+                except ValueError as exc:
+                    raise OperationError(f"Assigned dock IR rejected: {exc}") from exc
+                if not beacon["match"]:
+                    return {
+                        "phase": "hold", "reason": "Assigned dock IR not jointly visible",
+                        "charging_authorized": False, "physical_acceptance_pass": False,
+                    }
+                current_ir = (beacon["left_seq"], beacon["right_seq"])
+                if previous_ir is not None and any(
+                    (new - old) & 0xffffffff not in range(1, 0x80000000)
+                    for new, old in zip(current_ir, previous_ir, strict=True)
+                ):
+                    return {
+                        "phase": "hold", "reason": "Assigned dock IR replay or stale conversion",
+                        "charging_authorized": False, "physical_acceptance_pass": False,
+                    }
+                previous_ir = current_ir
+            # IR and the second fresh WROOM status can each delay movement.
+            # Never use an old camera frame simply because the NEC code matched.
+            latest = assess_dock(
+                aligned, now=time.monotonic(), target_distance_mm=target_mm
+            )
+            if latest.phase != decision.phase:
+                return {
+                    "phase": "hold", "reason": latest.reason,
+                    "charging_authorized": False, "physical_acceptance_pass": False,
+                }
+            await head.command(command)
+            await asyncio.sleep(0.12)
+            await _bounded_pulse_stop(head)
+            await asyncio.sleep(0.05)
+        return {
+            "phase": "hold",
+            "reason": "Maximum guarded approach pulses reached",
+            "charging_authorized": False, "physical_acceptance_pass": False,
+        }
 
     def pickup(self, robot_id: str, target: str) -> Job:
         robot = self.robot(robot_id)
@@ -192,15 +863,70 @@ class Coordinator:
         calibration.verify_ready()
         if calibration.simulation_only and self.settings.mode != "simulation":
             raise OperationError("Simulation calibration cannot be used on hardware")
+        if self.settings.mode == "hardware" and calibration.hold_seconds < 3:
+            raise OperationError("Real pickup requires at least three seconds of verified hold")
+        if self.settings.mode == "hardware" and calibration.grip_force_delta_raw is None:
+            raise OperationError("Real pickup requires measured ADS1115 gripper contact threshold")
+        if self.settings.mode == "hardware":
+            self._pickup_live_media(robot_id)
         return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
 
-    async def _observe(self, robot_id: str, target: str, c: Calibration) -> Detection:
-        jpeg = await self.heads[robot_id].snapshot()
+    def _pickup_live_media(self, robot_id: str):
+        """Never let hardware grasp use a stale or privately disabled camera."""
+        media = self.multimodal
+        if (media is None or not self.settings.voice_vision_tools_enabled
+                or not media.stream_owns_camera(robot_id)
+                or not media.status(robot_id)["camera_stream_connected"]):
+            raise OperationError("Hardware pickup requires connected live XIAO camera stream")
+        return media
+
+    async def _observe(
+        self, robot_id: str, target: str, c: Calibration,
+        *, after: float = float("-inf"),
+    ) -> tuple[Detection, float]:
+        if self.settings.mode == "hardware":
+            # Grasp must share the SAME authenticated pushed XIAO MJPEG feed
+            # as exploration and voice, never fall back to /api/camera.jpg.
+            media = self._pickup_live_media(robot_id)
+
+            def newest():
+                return next((
+                    frame for frame in reversed(media.hub.frames[robot_id])
+                    if frame.source in ("proactive", "speech")
+                    and frame.received_at > after
+                    and 0 <= time.monotonic() - frame.received_at <= 1.0
+                ), None)
+
+            frame = newest()
+            if frame is None:
+                await _bounded_head_reply(
+                    media.wait_for_proactive_frame(
+                        robot_id, after, timeout_s=2.0
+                    ), seconds=2.5,
+                    timeout_message="Live pickup camera stalled",
+                )
+                frame = newest()
+            self._pickup_live_media(robot_id)
+            if frame is None:
+                raise OperationError("Live pickup camera stalled")
+            jpeg = frame.jpeg
+            jpeg_received_at = frame.received_at
+        else:
+            jpeg = await _bounded_head_reply(
+                self.heads[robot_id].snapshot(), seconds=3.0,
+                timeout_message="Pickup camera snapshot timeout",
+            )
+            jpeg_received_at = time.monotonic()
+        # A Mac receipt is NOT actual exposure time; a newer physical
+        # stream frame is required for every successive grasp observation.
         if image_size(jpeg) != (c.image_width, c.image_height):
             raise OperationError("Camera resolution differs from measured calibration")
         objects = [
             d
-            for d in await self.vision.detect(jpeg, target)
+            for d in await _bounded_head_reply(
+                self.vision.detect(jpeg, target), seconds=15.0,
+                timeout_message="Pickup vision inference timeout",
+            )
             if d.label == target
             and d.confidence >= c.min_confidence
             and 0 <= d.box[0] < d.box[2] <= c.image_width
@@ -208,16 +934,36 @@ class Coordinator:
         ]
         if len(objects) != 1:
             raise OperationError("Lost or ambiguous target; stop and request operator intervention")
-        return objects[0]
+        if self.settings.mode == "hardware":
+            self._pickup_live_media(robot_id)
+            if time.monotonic() - jpeg_received_at > 2.0:
+                raise OperationError("Pickup visual evidence expired during inference")
+        return objects[0], jpeg_received_at
 
     async def _pickup(self, job: Job, target: str, c: Calibration) -> dict:
         head = self.heads[job.robot_id]
+        if self.settings.mode == "hardware":
+            # A missing camera must stop BEFORE jaw or lift preposition.
+            self._pickup_live_media(job.robot_id)
+        last_live_frame_at = float("-inf")
+
+        async def observe() -> tuple[Detection, float]:
+            nonlocal last_live_frame_at
+            result = await self._observe(
+                job.robot_id, target, c, after=last_live_frame_at
+            )
+            last_live_frame_at = result[1]
+            return result
+
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"grip {c.grip_open}")
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
         initial = None
         for attempt in range(24):
-            detection = await self._observe(job.robot_id, target, c)
+            await self._assert_armed_health(job.robot_id)
+            detection, visual_received_at = await observe()
             point = c.ground(detection.center)
             if not c.within(point):
                 raise OperationError("Target outside calibrated work area")
@@ -232,24 +978,44 @@ class Coordinator:
             else:
                 direction = (1 if dy > 0 else -1) * c.forward_sign
                 command = f"drive {direction * 20} {direction * 20} 100"
+            # Vision and geometry may have taken seconds. Never re-use the
+            # pre-camera WROOM fault/IMU/cliff/bumper verdict for a drive.
+            await self._assert_armed_health(job.robot_id)
+            if (self.settings.mode == "hardware"
+                    and time.monotonic() - visual_received_at > 2.0):
+                raise OperationError("Pickup visual evidence expired before movement")
             await head.command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
-            await head.command("stop")
+            await _bounded_pulse_stop(head)
+            await self._assert_armed_health(job.robot_id)
         if initial is None:
             raise OperationError("Alignment attempt limit reached")
-        await head.command(f"grip {c.grip_closed}")
-        await asyncio.sleep(c.servo_settle_seconds)
+        await self._assert_armed_health(job.robot_id)
+        if self.settings.mode == "hardware":
+            tactile = await guarded_grasp(
+                head, c, robot_id=job.robot_id,
+                health=lambda: self._assert_armed_health(job.robot_id)
+            )
+            job.events.append(
+                f"tactile contact delta={tactile['contact_delta_raw']} "
+                f"commanded_angle={tactile['commanded_angle']}; not physical acceptance"
+            )
+        else:
+            await head.command(f"grip {c.grip_closed}")
+            await asyncio.sleep(c.servo_settle_seconds)
+        await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
         # Image evidence: same category moves upward into measured raised-jaw region and remains
         # there in two fresh frames while wheels are stopped. A servo ACK alone never passes.
-        await head.command("stop")
+        await _bounded_pulse_stop(head)
         a, b, x, y = c.lifted_roi_px
         observed = []
         for sample in range(2):
             if sample:
                 await asyncio.sleep(c.hold_seconds)
-            detection = await self._observe(job.robot_id, target, c)
+            await self._assert_armed_health(job.robot_id)
+            detection, _ = await observe()
             px, py = detection.center
             if not (a <= px <= x and b <= py <= y):
                 raise OperationError(
@@ -266,10 +1032,57 @@ class Coordinator:
             raise OperationError(
                 "Pickup unverified: target did not remain stable in raised-jaw region"
             )
+        # The existing pickup ended after a hold, leaving a real key or candy
+        # suspended in the claw. Placement is a separate, observed phase: do
+        # not open the jaws unless the object is visibly back over the
+        # calibrated ground area. No blind wheel movement or drop command.
+        job.events.append("lift and hold visually verified; begin supervised placement")
+        await self._assert_armed_health(job.robot_id)
+        await head.command(f"lift {c.lift_down}")
+        await asyncio.sleep(c.servo_settle_seconds)
+        lowered, _ = await observe()
+        lowered_ground = c.ground(lowered.center)
+        if (
+            not c.within(lowered_ground)
+            or max(abs(lowered_ground[i] - c.grip_ground_mm[i]) for i in (0, 1))
+            > c.alignment_tolerance_mm * 2
+        ):
+            raise OperationError("Placement unverified: object not over calibrated release area")
+
+        await self._assert_armed_health(job.robot_id)
+        # Release only after observing the object near the table, then raise
+        # the empty jaws to distinguish a placed object from one stuck in them.
+        await head.command(f"grip {c.grip_open}")
+        await asyncio.sleep(c.servo_settle_seconds)
+        await self._assert_armed_health(job.robot_id)
+        await head.command(f"lift {c.lift_up}")
+        await asyncio.sleep(c.servo_settle_seconds)
+        placed_positions = []
+        for sample in range(2):
+            if sample:
+                await asyncio.sleep(0.15)
+            await self._assert_armed_health(job.robot_id)
+            placed, _ = await observe()
+            ground = c.ground(placed.center)
+            if (
+                not c.within(ground)
+                or max(abs(ground[i] - lowered_ground[i]) for i in (0, 1))
+                > c.alignment_tolerance_mm * 2
+            ):
+                raise OperationError(
+                    "Placement unverified: object not stable on calibrated ground"
+                )
+            placed_positions.append(ground)
+        if max(
+            abs(placed_positions[0][i] - placed_positions[1][i]) for i in (0, 1)
+        ) > c.alignment_tolerance_mm:
+            raise OperationError("Placement unverified: object moved after jaw withdrawal")
+        job.events.append("two frames support placement after jaw withdrawal")
         return {
             "visually_verified": True,
-            "criterion": "two fresh raised-jaw frames, upward displacement, outside floor region",
+            "placed_visually_verified": True,
+            "criterion": "raised-jaw lift and hold followed by observed lower, release and stable placement",
             "physical_acceptance_pass": False,
             "target": target,
-            "note": "Visual evidence is experimental, not force sensing or a physical acceptance trial",
+            "note": "Image evidence is experimental; no physical 10 mm lift or loaded object acceptance is claimed",
         }

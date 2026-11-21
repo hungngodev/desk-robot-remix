@@ -17,6 +17,208 @@ def once(source, old, new):
     return source.replace(old, new, 1)
 
 
+def patch_plugin_executor(source: str) -> str:
+    """Backport upstream's dedicated worker pool without upgrading custom hooks.
+
+    Sync Xiaozhi plugin functions must not monopolize the live audio/VAD
+    event loop. Async plugins still run as coroutines on that loop.
+    Derived from upstream xinnan-tech/xiaozhi-esp32-server (MIT).
+    """
+    source = once(
+        source, "import asyncio\n",
+        "import asyncio\nimport functools\nimport threading\n"
+        "from concurrent.futures import ThreadPoolExecutor\n",
+    )
+    source = once(
+        source, "\n\nclass ServerPluginExecutor(ToolExecutor):",
+        '\n\n_PLUGIN_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="plugin")'
+        '\n_PLUGIN_SLOTS = threading.BoundedSemaphore(8)'
+        "\n\nclass ServerPluginExecutor(ToolExecutor):",
+    )
+    old = (
+        "            # 根据工具类型决定如何调用\n"
+        '            if hasattr(func_item, "type"):\n'
+        "                func_type = func_item.type\n"
+        "                if func_type.code in [4, 5]:  # SYSTEM_CTL, IOT_CTL (需要conn参数)\n"
+        "                    result = func_item.func(conn, **arguments)\n"
+        "                elif func_type.code == 2:  # WAIT\n"
+        "                    result = func_item.func(**arguments)\n"
+        "                elif func_type.code == 3:  # CHANGE_SYS_PROMPT\n"
+        "                    result = func_item.func(conn, **arguments)\n"
+        "                else:\n"
+        "                    result = func_item.func(**arguments)\n"
+        "            else:\n"
+        "                # 默认不传conn参数\n"
+        "                result = func_item.func(**arguments)\n"
+        "\n"
+        "            # 兼容 async def 工具函数\n"
+        "            if asyncio.iscoroutine(result):\n"
+        "                result = await result"
+    )
+    new = (
+        '            func_type = getattr(func_item, "type", None)\n'
+        "            if func_type is not None and func_type.code in [3, 4, 5]:\n"
+        "                call = functools.partial(func_item.func, conn, **arguments)\n"
+        "            else:\n"
+        "                call = functools.partial(func_item.func, **arguments)\n"
+        "\n"
+        "            if asyncio.iscoroutinefunction(func_item.func):\n"
+        "                result = await call()\n"
+        "            else:\n"
+        "                # Strictly bound native work, even if asyncio cancels the awaiter.\n"
+        "                if not _PLUGIN_SLOTS.acquire(blocking=False):\n"
+        '                    raise RuntimeError("Synchronous plugin capacity exhausted")\n'
+        "                try:\n"
+        "                    native = _PLUGIN_POOL.submit(call)\n"
+        "                except (RuntimeError, OSError):\n"
+        "                    _PLUGIN_SLOTS.release()\n"
+        "                    raise\n"
+        "                def finished(completed):\n"
+        "                    try:\n"
+        "                        if not completed.cancelled():\n"
+        "                            completed.exception()\n"
+        "                    finally:\n"
+        "                        _PLUGIN_SLOTS.release()\n"
+        "                native.add_done_callback(finished)\n"
+        "                result = await asyncio.wrap_future(native)\n"
+        "                if asyncio.iscoroutine(result):\n"
+        "                    result = await result"
+    )
+    return once(source, old, new)
+
+
+def patch_unified_tool_handler(source: str) -> str:
+    """Backport the pinned multi-tool ActionResponse result contract.
+
+    The upstream _combine_responses reads response.content, but its actual
+    ActionResponse defines result, response and action only. Preserve data
+    from each valid tool call while dropping silent cancelled tool results.
+    Do not change upstream tool actions or replay old audio.
+    """
+    old = (
+        "            if response.content:\n"
+        "                contents.append(response.content)\n"
+    )
+    new = (
+        "            # The pinned ActionResponse has .result, not .content.\n"
+        "            # Action.NONE with no payload must remain truly silent.\n"
+        "            value = getattr(response, 'result', None)\n"
+        "            if response.action != Action.NONE and value is not None:\n"
+        "                contents.append(value if isinstance(value, str)\n"
+        "                                else json.dumps(value, ensure_ascii=False, default=str))\n"
+    )
+    return once(source, old, new)
+
+
+def patch_intent_speech_guard(source: str) -> str:
+    """Fence late pinned intent/tool results to the original desk-robot VAD turn.
+
+    The upstream process_function_call worker may outlive a later human speech
+    event. The existing tool HTTP generation guard alone cannot fence the
+    intent model's replyResult or the final synchronous speak_txt enqueue.
+    Only registered desk robot heads are changed.
+    """
+    source = once(
+        source,
+        'async def handle_user_intent(conn: "ConnectionHandler", text):\n',
+        'async def handle_user_intent(conn: "ConnectionHandler", text):\n'
+        '    import desk_robot_bridge as _desk_turn\n'
+        '    _desk_device = getattr(conn, "device_id", None)\n'
+        '    _desk_registered = _desk_turn.robot_for_device(_desk_device) is not None\n'
+        '    _desk_generation = (\n'
+        '        _desk_turn.voice_turn_generation.get(_desk_device, 0)\n'
+        '        if _desk_registered else None\n'
+        '    )\n',
+    )
+    source = once(
+        source,
+        '    if conn.intent_type == "function_call":\n',
+        '    if _desk_registered:\n'
+        '        await _desk_turn.inject_live_context_into_legacy_llm(conn)\n'
+        '        # Live context HTTP must not delay a now-obsolete human turn.\n'
+        '        if (_desk_turn.connections.get(_desk_device) is not conn\n'
+        '                or _desk_turn.voice_turn_generation.get(_desk_device, 0)\n'
+        '                    != _desk_generation):\n'
+        '            return True\n'
+        '    if conn.intent_type == "function_call":\n',
+    )
+    source = once(
+        source, "    return await process_intent_result(conn, intent_result, text)\n",
+        "    return await process_intent_result(\n"
+        "        conn, intent_result, text, expected_generation=_desk_generation\n"
+        "    )\n",
+    )
+    source = once(
+        source,
+        'async def process_intent_result(\n'
+        '    conn: "ConnectionHandler", intent_result, original_text\n'
+        '):\n'
+        '    """处理意图识别结果"""\n',
+        'async def process_intent_result(\n'
+        '    conn: "ConnectionHandler", intent_result, original_text,\n'
+        '    expected_generation=None,\n'
+        '):\n'
+        '    """处理意图识别结果"""\n'
+        '    import desk_robot_bridge as _desk_turn\n'
+        '    def current_utterance():\n'
+        '        return expected_generation is None or (\n'
+        '            _desk_turn.connections.get(conn.device_id) is conn\n'
+        '            and _desk_turn.voice_turn_generation.get(conn.device_id, 0)\n'
+        '                == expected_generation\n'
+        '        )\n'
+        '    if not current_utterance():\n'
+        '        return True  # A newer human turn already owns audio.\n',
+    )
+    source = once(
+        source,
+        '                def process_context_result():\n'
+        '                    conn.dialogue.put(Message(role="user", content=original_text))',
+        '                def process_context_result():\n'
+        '                    if not current_utterance():\n'
+        '                        return\n'
+        '                    conn.dialogue.put(Message(role="user", content=original_text))',
+    )
+    source = once(
+        source,
+        '                    if response:\n'
+        '                        speak_txt(conn, response)\n',
+        '                    if response and current_utterance():\n'
+        '                        speak_txt(conn, response)\n',
+    )
+    source = once(
+        source,
+        '            def process_function_call():\n'
+        '                conn.dialogue.put(Message(role="user", content=original_text))',
+        '            def process_function_call():\n'
+        '                if not current_utterance():\n'
+        '                    return\n'
+        '                if expected_generation is None:\n'
+        '                    conn.dialogue.put(Message(role="user", content=original_text))',
+    )
+    source = once(
+        source,
+        '                # 上报工具调用结果\n'
+        '                if result:\n',
+        '                # The new voice owner must not receive an old tool result,\n'
+        '                # TTS or dialogue history even if replyResult is still busy.\n'
+        '                if not current_utterance():\n'
+        '                    return\n'
+        '                if expected_generation is not None:\n'
+        '                    conn.dialogue.put(Message(role="user", content=original_text))\n'
+        '                # 上报工具调用结果\n'
+        '                if result:\n',
+    )
+    source = once(
+        source,
+        '                        speak_txt(conn, llm_result)\n',
+        '                        if current_utterance():\n'
+        '                            speak_txt(conn, llm_result)\n',
+    )
+    # Synchronous result branches have no await once the turn is checked;
+    # only the possibly slow nested replyResult requires a second fence.
+    return source
+
+
 def files(root):
     changes = {}
     path = "core/connection.py"
@@ -44,8 +246,24 @@ def files(root):
     source = (root / path).read_text()
     source = once(
         source,
+        "    # 服务端AEC功能需要实时触发打断",
+        "    import desk_robot_bridge\n"
+        "    await desk_robot_bridge.interrupt_for_user_voice(conn, have_voice)\n"
+        "    await desk_robot_bridge.interrupt_for_normal_voice(conn, have_voice)\n"
+        "    desk_robot_bridge.observe_idle_human_voice(conn, have_voice)\n"
+        "    import desk_robot_native_omni\n"
+        "    if desk_robot_native_omni.route_audio(conn, pcm_frame, have_voice):\n"
+        "        return\n"
+        "    # 服务端AEC功能需要实时触发打断",
+    )
+    source = once(
+        source,
         'async def startToChat(conn: "ConnectionHandler", text):',
-        'async def startToChat(conn: "ConnectionHandler", text):\n    import desk_robot_bridge\n    if desk_robot_bridge.muted(conn.device_id):\n        return',
+        'async def startToChat(conn: "ConnectionHandler", text):\n'
+        '    import desk_robot_bridge\n'
+        '    if (desk_robot_bridge.muted(conn.device_id)\n'
+        '            and not desk_robot_bridge.was_interrupted_by_human(conn.device_id)):\n'
+        '        return',
     )
     changes[path] = source
     path = "app.py"
@@ -62,9 +280,25 @@ def files(root):
     )
     changes[path] = source
     changes["desk_robot_bridge.py"] = (HERE / "overlay/desk_robot_bridge.py").read_text()
+    changes["desk_robot_native_omni.py"] = (
+        HERE / "overlay/desk_robot_native_omni.py"
+    ).read_text()
+    changes["desk_robot_voice_intents.py"] = (
+        HERE / "overlay/desk_robot_voice_intents.py"
+    ).read_text()
+    # Reuse the same vLLM Omni protocol from the Mac package.
+    changes["desk_robot_omni_wire.py"] = (
+        HERE.parent / "src/desk_robot/realtime_omni_protocol.py"
+    ).read_text()
     changes["plugins_func/functions/desk_robot_tools.py"] = (
         HERE / "overlay/desk_robot_tools.py"
     ).read_text()
+    path = "core/providers/tools/server_plugins/plugin_executor.py"
+    changes[path] = patch_plugin_executor((root / path).read_text())
+    path = "core/providers/tools/unified_tool_handler.py"
+    changes[path] = patch_unified_tool_handler((root / path).read_text())
+    path = "core/handle/intentHandler.py"
+    changes[path] = patch_intent_speech_guard((root / path).read_text())
     # Verify syntax before modifying any build source.
     for name, source in changes.items():
         compile(source, name, "exec")

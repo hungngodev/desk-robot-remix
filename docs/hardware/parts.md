@@ -1,3 +1,9 @@
+> **Procurement consolidation November 16:** All purchase quantities and remaining counts now come only from [full-feature-plan.json](full-feature-plan.json), with [generated two shopping lists](complete-shopping-checklist.md) and [generated fleet CSV](fleet-components.csv). This page preserves historical ownership notes and supplier research, not a production purchase list. Do not use the old L0X or one-multiplexer estimates.
+
+> **Current selected five robot shopping and wiring design:** [Complete full feature plan](full-feature-wiring-and-shopping.md) and [exact per-robot quantities](full-feature-plan.json). This file is an older combined ownership/prototype audit, not the purchase basket for all advanced add-ons. The $50 historical cap is not established for this selected full design.
+
+> 2026-11-10 inventory correction: user reports using the popular **MPU6050**. The matching existing WROOM driver, Mac preflight, USB diagnostics and test family are now implemented. The old BerryIMU first choice references later in this document are superseded. Count/measure the user's MPU6050 before any replacement order.
+
 # Combined electronics inventory and build gaps
 
 Reconciled 2026-11-06 against the earlier ownership reports, the reported
@@ -26,7 +32,8 @@ keep known subtotal separate from an incomplete total.
 |ULN2003 driver |2 /10 |5 | **5 additional drivers for the fleet** |
 |MG90S positional servo |2 /10 | About10, user estimate | Count/type/condition, pocket/horn and loaded lift/grip fit |
 | Adafruit AT42QT1010 momentary touch #1374 | 1 / 5 | At least 1 by package label | Bench-test the pad through the shell. Four more touch inputs if only one is owned |
-|BerryIMU motion board |1 /5 | At least1 photographed, likely older V1 | Exact revision/chips/pins, working condition and mount. Four further equivalents unconfirmed if only one is owned |
+| MPU6050 motion board | 1 / 5 | User reports using one; quantity, voltage breakout and working state unconfirmed | Preferred six axis IMU; exact module and available quantity to check before ordering four fleet equivalents |
+| BerryIMU motion board | 0 required | At least one photographed, likely older V1 | Retained alternative/spare; no need to buy additional BerryIMUs when MPU6050 route works |
 |Filament / DuPont ribbons | As needed | Filament and10 ribbons | Print mass/stock; DuPont is signal wiring, not main actuator power |
 
 ## Other reported and photographed stock
@@ -45,15 +52,17 @@ quantity and hardware revision remain open.
 
 ## Missing for one complete core
 
+**Sensor purchase hold, 2026-11-09:** The old 4× VL6180X shopping recommendation is withdrawn from the active purchase basket because the manufacturer marks that part out of production. The role remains **four downward plus one front obstacle sensor**. The pinned Pololu VL53L0X library and critical safety firmware now select low-cost GY-530-compatible carriers for every role; verify actual carrier, cost, optics and physical stop before editing final print geometry and calculating final delivered cost. Historical listings remain in the research audit, **not** an approved order.
+
 Unless newly reported as owned, plan to acquire these. Counts are per one / five
 finished robots; quote and validate robot one before ordering the remaining sets.
 
 | Part | One / five | Purpose / selection status |
 | --- | ---: | --- |
 |[MAX98357A I2S amplifier](https://electropeak.com/max98357-i2s-audio-amplifier-module)|1 /5 | Default speaker output; check the HiLetgo reuse option below before ordering |
-|[Mini speaker](https://electropeak.com/8-ohm-1w-20mm-diameter-speaker)|1 /5 |20mm8ohm1W is the existing candidate; cavity/acoustics unqualified |
-|[VL6180X breakout](https://electropeak.com/vl6180x-proximity-and-ambient-light-sensor-module)|4 /20 | Concealed downward floor views; exact breakout voltage, geometry and stops pending |
-|[VL53L0X breakout](https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole)|1 /5 | Separate forward obstacle view, not gripper feedback or all-direction collision protection |
+| [Challenge CS20-02P110-04-1X 8 Ω 2 W rectangular speaker](https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069) | 1 / 5 | Active fixed candidate, 20 × 16 × 4.7 mm; the old 20 mm round 1 W part is retired. Match the rectangular front grille and measure output temperature, enclosure and double talk before buying. |
+| Four VL53L0X compatible downward carriers, final exact breakout UNQUALIFIED | 4 / 20 | Software driver chosen and integrated, hardware not approved for purchase. Inspect 3.3V carrier and actual optical height on every surface before buying all five. ST lists previous VL6180X obsolete. |
+| Fifth VL53L0X compatible forward obstacle carrier, exact physical breakout UNQUALIFIED | 1 /5 | Software uses a fifth VL53L0X through TCA9548A channel 4. Buy cheap generic VL53L0X only after exact 3.3V logic and floor optical test. |
 |[TCA9548A mux](https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board)|1 /5 | Isolates the equal-address ToFs |
 |Matched rechargeable1S kit|1 set /5 sets | Cell+holder/pack, charging, protection, regulated5V output; integrated module may combine functions. Current capability/thermal/fit/quote not selected |
 |Rated power wire, switch, connectors/fuse, fasteners, decoupling|1 set /5 sets | Exact sizes/ratings depend on selected power system and loaded tests |
@@ -102,8 +111,12 @@ shipping/tax and inventory before declaring the basket ready. Additional sensor
 features do not silently raise the cap. All fit, audio interruption, power,
 local edge/attitude stopping and physical pickup trials remain open.
 
-`python3 scripts/check_budget.py` reports unknown totals explicitly.
-`python3 scripts/check_budget.py --shipping 0 --tax 0 --require-ready` must still
-reject the current incomplete basket; those zeros demonstrate the gate, not
-free delivery. [Historical Amazon and supplier observations](archive/supplier-comparison.md)
+`python3 scripts/check_budget.py` now uses the canonical first-unit plan
+and source-locked evaluation cart, reports unknown landed costs, and keeps
+purchase approval on HOLD. The strict release path is
+`python3 scripts/procurement_release.py --require-first-robot --format first-robot-markdown --evidence ACTUAL_RECEIPTS.json`.
+The superseded budget remains inspectable only with
+`python3 scripts/check_budget.py --bom ../docs/hardware/bom.json`; this historical
+view is not a buying authorization. Shipping and tax guesses never release the
+current cart. [Historical Amazon and supplier observations](archive/supplier-comparison.md)
 record the earlier baskets.

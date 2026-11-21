@@ -1,3 +1,5 @@
+> 2026-11-10: New user-reported MPU6050 is not one of these established photograph identities. Treat stock as reported, exact GY-521 model and quantities unverified. This photo audit continues to prove only what those pictures showed, not an MPU6050 image.
+
 # Owned electronics — photo audit
 
 Recorded 2026-11-04 from the user's 18 photographs. This identifies **10 module
@@ -9,7 +11,7 @@ remain unknown. The images establish appearance/ownership, not electrical tests.
 
 | Photos (IMG_ prefix, .JPG suffix) | Identification and confidence | Use in this robot |
 | --- | --- | --- |
-|3893 /3892 | **OzzMaker BerryIMU**, high confidence in family; silkscreen appears1.0, likely V1, chips not verified | First choice for prototype tilt/shake/rotation/handling input. **Hold the additional IMU purchase** until chip-ID, readout and mounting checks. Do not copy current V3 wiring onto an older board |
+|3893 /3892 | **OzzMaker BerryIMU**, high confidence in family; silkscreen appears1.0, likely V1, chips not verified | Optional photographed spare now that the user reports using an MPU6050. Keep compatible software support, but do not presume both boards can be installed together |
 |3891 /3890 | **Adafruit BMP280 pressure/temperature breakout**, high; front/back of STEMMA QT board | Optional ambient sensing. Not a gyroscope or cliff sensor; no requirement to install it |
 |3889 | **Reflective infrared obstacle module**, high in function, exact Keyes/KY model unverified | Optional bench obstacle experiments. Not millimetre ToF and not a qualified substitute for the four downward sensors |
 |3888 /3887 /3886 | **PIR motion detector**, high; board marked SB00622A-2-V1.3, exact vendor specifications unverified | Optional stationary desk/dock trigger. Its changing thermal view when the rover moves can trigger it; omit from the compact core |

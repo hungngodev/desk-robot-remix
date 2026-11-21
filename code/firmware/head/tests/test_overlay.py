@@ -17,13 +17,67 @@ overlay = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(overlay)
 UPSTREAM = Path(os.environ.get("DESK_ROBOT_UPSTREAM", HEAD.parents[1] / "upstream/xiaozhi-esp32"))
 
+
+def native_cpp_env() -> dict[str, str]:
+    """Use Apple's actual SDK libc++ includes for the C++ harness on macOS.
+
+    Never override a developer's explicit include path or mutate the shell.
+    On non-Apple runners use the compiler's normal header discovery.
+    """
+    env = dict(os.environ)
+    if sys.platform != "darwin" or env.get("CPLUS_INCLUDE_PATH"):
+        return env
+    xcrun = shutil.which("xcrun")
+    if not xcrun:
+        return env
+    try:
+        sdk = subprocess.run(
+            [xcrun, "--show-sdk-path"], capture_output=True, text=True,
+            check=False,
+        )
+    except OSError:
+        return env
+    if sdk.returncode == 0 and sdk.stdout.strip():
+        headers = Path(sdk.stdout.strip()) / "usr/include/c++/v1"
+        if headers.is_dir():
+            env["CPLUS_INCLUDE_PATH"] = str(headers)
+    return env
+
+
 class ProtocolTests(unittest.TestCase):
+    def test_native_cpp_env_preserves_user_configuration(self):
+        with patch.object(sys, "platform", "darwin"), patch.dict(
+            os.environ, {"CPLUS_INCLUDE_PATH": "/already/configured"}
+        ):
+            with patch.object(shutil, "which") as lookup:
+                self.assertEqual(
+                    native_cpp_env()["CPLUS_INCLUDE_PATH"],
+                    "/already/configured",
+                )
+                lookup.assert_not_called()
+
+    def test_native_cpp_env_resolves_macos_sdk_only_when_needed(self):
+        with patch.object(sys, "platform", "darwin"), patch.dict(
+            os.environ, {"CPLUS_INCLUDE_PATH": ""}
+        ), patch.object(shutil, "which", return_value="/usr/bin/xcrun"), patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="/fake/MacOSX.sdk\n",
+            ),
+        ) as probe, patch.object(Path, "is_dir", return_value=True):
+            env = native_cpp_env()
+            self.assertEqual(
+                env["CPLUS_INCLUDE_PATH"],
+                "/fake/MacOSX.sdk/usr/include/c++/v1",
+            )
+            probe.assert_called_once()
+
     def test_native_protocol_and_ack_regressions(self):
         compiler = shutil.which("c++")
         self.assertIsNotNone(compiler, "A native C++20 compiler is required")
         with tempfile.TemporaryDirectory() as d:
             exe = Path(d) / "protocol-test"
-            subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD / "overlay"), str(HEAD / "tests/protocol_test.cc"), "-o", str(exe)], check=True)
+            subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD / "overlay"), str(HEAD / "tests/protocol_test.cc"), "-o", str(exe)], check=True, env=native_cpp_env())
             subprocess.run([str(exe)], check=True)
 
 
@@ -74,7 +128,7 @@ class BuildSelectionTests(unittest.TestCase):
         self.assertIsNotNone(compiler, "A native C++23 compiler is required")
         with tempfile.TemporaryDirectory() as d:
             exe = Path(d) / "snapshot-test"
-            subprocess.run([compiler, "-std=c++23", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD), str(HEAD / "tests/snapshot_test.cc"), "-o", str(exe)], check=True)
+            subprocess.run([compiler, "-std=c++23", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD), str(HEAD / "tests/snapshot_test.cc"), "-o", str(exe)], check=True, env=native_cpp_env())
             subprocess.run([str(exe)], check=True)
 
 @unittest.skipUnless((UPSTREAM / "main/boards/common/esp_video.cc").is_file(), "Pinned upstream fixture unavailable")
@@ -83,6 +137,9 @@ class OverlayTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         paths = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc", "main/boards/common/camera.h", "main/boards/common/esp_video.h", "main/boards/common/esp_video.cc"]
+        # Sense overlays urgent-stop and the pinned Xiaozhi I2S writer; no
+        # shortcut synthetic codec is installed in the firmware clone.
+        paths += ["main/application.cc", "main/application.h", "main/audio/audio_service.cc", "main/audio/codecs/no_audio_codec.cc"]
         paths += ["main/boards/common/esp32_camera.h", "main/boards/common/esp32_camera.cc"]
         paths += [p.relative_to(UPSTREAM).as_posix() for p in (UPSTREAM / "main/boards/m5stack/core-s3").iterdir() if p.is_file()]
         self.original = {}
@@ -145,12 +202,157 @@ class OverlayTests(unittest.TestCase):
         self.assertFalse((self.root / overlay.BOARD).exists())
         self.assertFalse((self.root / overlay.MARKER).exists())
 
+    def test_interrupted_overlay_write_has_no_success_marker(self):
+        """An interrupted source patch must not be mistaken for an install."""
+        atomic_write = overlay.atomic_replace_bytes
+        attempts = 0
+
+        def interrupted_write(path, data):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                raise OSError("simulated interrupted overlay write")
+            return atomic_write(path, data)
+
+        # Journal publication now uses atomic_replace_bytes, not
+        # Path.write_bytes. Inject failure in the real transaction seam.
+        with patch.object(overlay, "atomic_replace_bytes",
+                          side_effect=interrupted_write):
+            with self.assertRaisesRegex(OSError, "simulated interrupted"):
+                overlay.apply(self.root)
+        self.assertGreaterEqual(attempts, 2)
+        self.assertFalse((self.root / overlay.MARKER).exists())
+        self.assertFalse((self.root / (overlay.MARKER + ".tmp")).exists())
+        self.assertFalse((self.root / overlay.BOARD).exists())
+        for name, original in self.original.items():
+            self.assertEqual((self.root / name).read_bytes(), original)
+
     def test_wrong_commit_refused(self):
         self.git.stop()
         with patch.object(overlay.subprocess, "check_output", return_value="wrong-commit"):
             with self.assertRaisesRegex(ValueError, "Requires Xiaozhi commit"):
                 overlay.apply(self.root)
         self.git.start()
+
+    def test_sense_reuses_upstream_i2s_writer_with_finite_stop_bound(self):
+        overlay.apply(self.root, "sense")
+        codec_path = "main/audio/codecs/no_audio_codec.cc"
+        source = (self.root / codec_path).read_text()
+        original = self.original[codec_path].decode()
+        self.assertIn("portMAX_DELAY", original)
+        self.assertIn("data_if_mutex_", original)
+        self.assertIn("#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3", source)
+        self.assertIn("pdMS_TO_TICKS(120)", source)
+        self.assertIn("size_t bytes_written = 0", source)
+        self.assertIn("const int safe_volume = std::clamp(output_volume_, 0, 100);", source)
+        self.assertIn("pow(double(safe_volume) / 100.0, 2) * 65536", source)
+        # Only the opt-in Sense build changes gain. Upstream remains byte exact.
+        self.assertNotIn("safe_volume", original)
+        self.assertIn("if (err != ESP_OK)", source)
+        self.assertIn("bytes_written = 0;", source)
+        self.assertIn("bytes_written > static_cast<size_t>(samples)", source)
+        self.assertIn("bytes_written % sizeof(int32_t) != 0", source)
+        self.assertIn("return static_cast<int>(bytes_written / sizeof(int32_t))", source)
+        self.assertIn("#else", source)
+        self.assertIn("portMAX_DELAY", source)
+        self.assertNotIn("pdMS_TO_TICKS(120)", original)
+        service = (self.root / "main/audio/audio_service.cc").read_text()
+        self.assertIn("constexpr int initial_decoder_rate = 24000;", service)
+        self.assertIn("esp_ae_rate_cvt_open(&cfg, &output_resampler_)", service)
+        # Scope the assertion to Sense's STARTUP converter. The upstream
+        # decoder also closes output_resampler_ in Destroy and rate changes,
+        # which must not mask a missing startup close.
+        startup = service.split("constexpr int initial_decoder_rate = 24000;", 1)[1]
+        startup = startup.split("esp_opus_enc_config_t opus_enc_cfg", 1)[0]
+        self.assertIn("esp_ae_rate_cvt_close(output_resampler_)", startup)
+        self.assertLess(
+            startup.index("esp_ae_rate_cvt_close(output_resampler_)"),
+            startup.index("esp_ae_rate_cvt_open(&cfg, &output_resampler_)"),
+        )
+        self.assertIn("output_resampler_ = nullptr;", startup)
+        self.assertIn("Sense speaker resampler unavailable: discarding mismatched PCM", service)
+        self.assertIn("decoded = !task.pcm.empty();", service)
+        decoder = service.split("void AudioService::SetDecodeSampleRate(", 1)[1]
+        decoder = decoder.split("void AudioService::PushTaskToEncodeQueue(", 1)[0]
+        # Invalid formats cannot close the current decoder. Failed opens
+        # retain its handle; successful opens swap under decoder_mutex_.
+        self.assertIn("Rejecting unsupported Sense Opus rate", decoder)
+        self.assertIn("Rejecting unsupported Sense Opus frame duration", decoder)
+        self.assertIn("void* proposed_decoder = nullptr;", decoder)
+        self.assertIn("void* previous_decoder = opus_decoder_;", decoder)
+        self.assertLess(
+            decoder.index("Rejecting unsupported Sense Opus frame duration"),
+            decoder.index("esp_opus_dec_open(&opus_dec_cfg"),
+        )
+        self.assertLess(
+            decoder.index("esp_opus_dec_open(&opus_dec_cfg"),
+            decoder.index("void* previous_decoder = opus_decoder_;"),
+        )
+        self.assertLess(
+            decoder.index("if (proposed_decoder == nullptr)"),
+            decoder.index("void* previous_decoder = opus_decoder_;"),
+        )
+        self.assertLess(
+            decoder.index("void* previous_decoder = opus_decoder_;"),
+            decoder.index("esp_opus_dec_close(previous_decoder)"),
+        )
+        app = (self.root / "main/application.cc").read_text()
+        self.assertIn("urgent_flush", app)
+        self.assertIn("audio_service_.ResetDecoder()", app)
+        self.assertIn("GetAudioCodec()->EnableOutput(false)", app)
+        # The original single Xiaozhi Opus owner discards buffered voice
+        # packets before any further send when physical BOOT has muted PDM.
+        header = (self.root / "main/application.h").read_text()
+        self.assertIn("void SetSenseMicrophonePrivacyMuted(bool muted)", header)
+        self.assertIn("std::atomic<bool> sense_microphone_privacy_muted_{false};", header)
+        pending_send = app.split("if (bits & MAIN_EVENT_SEND_AUDIO)", 1)[1].split(
+            "if (bits & MAIN_EVENT_WAKE_WORD_DETECTED)", 1
+        )[0]
+        self.assertIn("sense_microphone_privacy_muted_.load(", pending_send)
+        self.assertIn("while (audio_service_.PopPacketFromSendQueue()) {}", pending_send)
+        self.assertLess(
+            pending_send.index("sense_microphone_privacy_muted_.load("),
+            pending_send.index("protocol_->SendAudio("),
+        )
+        stop = app.split("void Application::HandleStopListeningEvent()", 1)[1].split(
+            "void Application::HandleWakeWordDetectedEvent()", 1
+        )[0]
+        self.assertIn("sense_microphone_privacy_muted_.load(", stop)
+        self.assertIn("protocol_->CloseAudioChannel();", stop)
+        self.assertIn("audio_service_.ResetDecoder();", stop)
+        self.assertIn("while (audio_service_.PopPacketFromSendQueue()) {}", stop)
+        toggle = app.split("void Application::HandleToggleChatEvent()", 1)[1].split(
+            "void Application::ContinueOpenAudioChannel(", 1
+        )[0]
+        self.assertIn("sense_microphone_privacy_muted_.load(", toggle)
+        start = app.split("void Application::HandleStartListeningEvent()", 1)[1].split(
+            "void Application::HandleStopListeningEvent()", 1
+        )[0]
+        self.assertIn("sense_microphone_privacy_muted_.load(", start)
+        self.assertIn(
+            "sense_microphone_privacy_muted_.load(",
+            app.split("void Application::StartListeningAudio()", 1)[1].split(
+                "void Application::ConfigureWakeWordForListening()", 1
+            )[0],
+        )
+        # A pending network open must check again before enabling listening.
+        network_open = app.split("void Application::ContinueOpenAudioChannel(", 1)[1].split(
+            "void Application::HandleStartListeningEvent()", 1
+        )[0]
+        self.assertIn("BOOT privacy may have cancelled while OpenAudioChannel blocked",
+                      network_open)
+        self.assertIn("GetDeviceState() != kDeviceStateConnecting", network_open)
+        self.assertIn("protocol_->CloseAudioChannel();", network_open)
+        self.assertLess(network_open.index("protocol_->OpenAudioChannel()"),
+                        network_open.index("BOOT privacy may have cancelled"))
+        self.assertLess(network_open.index("BOOT privacy may have cancelled"),
+                        network_open.rindex("SetListeningMode(mode);"))
+        self.assertIn('SenseReferenceCodec', (
+            self.root / overlay.BOARDS["sense"] / "desk_robot_sense.cc").read_text())
+        # The source checkout remains exact and the patch is reversible.
+        overlay.remove(self.root)
+        self.assertEqual((self.root / codec_path).read_bytes(),
+                         self.original[codec_path])
 
     def test_modular_variant_pins_camera_lock_and_independent_identity(self):
         overlay.apply(self.root, "modular")

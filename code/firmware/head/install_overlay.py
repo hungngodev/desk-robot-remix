@@ -7,7 +7,10 @@ import argparse
 import base64
 import hashlib
 import json
+import os
+import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 PIN = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
@@ -54,7 +57,7 @@ def cores3_files(target: Path) -> dict[str, bytes]:
     )
     files[f"{BOARD}/desk_robot_core_s3.cc"] = source.encode()
     for path in (HERE / "overlay").iterdir():
-        if path.suffix in (".h", ".cc"):
+        if path.suffix in (".h", ".cc", ".hpp"):
             files[f"{BOARD}/{path.name}"] = path.read_bytes()
     config = json.loads((stock / "config.json").read_text())
     config["manufacturer"] = "desk-robot"
@@ -204,7 +207,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         }
         for folder in (HERE / "waveshare", HERE / "overlay"):
             for path in folder.iterdir():
-                if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+                if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
                     files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
         path = "main/Kconfig.projbuild"
         files[path] = replace_once(
@@ -229,8 +232,476 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         }
         for folder in (HERE / "sense", HERE / "overlay"):
             for path in folder.iterdir():
-                if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+                if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
                     files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+        # Only Sense has a real playback reference. Permit Xiaozhi's existing
+        # ESP-SR AFE device AEC for this exact board, without enabling it for
+        # any other profile or modifying the pristine upstream clone.
+        path = "main/Kconfig.projbuild"
+        files[path] = replace_once(
+            files[path].decode(),
+            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP32_S3_BOX_3",
+            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_SENSE_S3 || BOARD_TYPE_ESP32_S3_BOX_3",
+        ).encode()
+        # Add only to the selected Sense menu. The upstream remains untouched.
+        files[path] = replace_once(
+            files[path].decode(),
+            'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nendmenu\n',
+            'config DESK_ROBOT_DIRECT_MOTION_TOOLS\n    bool "Expose low-level drive/lift/grip MCP tools (bench debugging only)"\n    default n\nconfig DESK_ROBOT_AEC_DELAY_MS\n    int "Sense playback reference delay in milliseconds (measure physically)"\n    range 0 250\n    default 90\nconfig DESK_ROBOT_RGB_HEART_ENABLED\n    bool "Enable GPIO9 RGB heart only after physical SD J3 isolation and logic/power approval"\n    default n\nconfig DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED\n    bool "Opt in: start continuous Xiaozhi realtime microphone listening on boot"\n    depends on USE_AUDIO_PROCESSOR && USE_DEVICE_AEC\n    default n\nconfig DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED\n    bool "Private one-shot PCM bench capture of microphone and AEC reference"\n    depends on DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED && USE_DEVICE_AEC\n    default n\nendmenu\n',
+        ).encode()
+        # The PINNED Xiaozhi NoAudioCodec::Write holds data_if_mutex_
+        # during i2s_channel_write(... portMAX_DELAY). An urgent flush then
+        # waits for that mutex indefinitely if the I2S driver wedges.
+        # Modify ONLY the disposable Sense build copy, preserving the
+        # upstream codec and its accepted-sample return contract. A failed
+        # or partial write returns the actual accepted frames, so the
+        # Sense MIC+REFERENCE bridge never invents unheard PCM samples.
+        path = "main/audio/codecs/no_audio_codec.cc"
+        codec_source = (target / path).read_text()
+        codec_source = replace_once(
+            codec_source,
+            '#include "no_audio_codec.h"',
+            '#include "no_audio_codec.h"\\n#include <algorithm>\\n#include "sdkconfig.h"'.replace('\\n', '\n'),
+        )
+        codec_source = replace_once(
+            codec_source,
+            '    size_t bytes_written;\\n'
+            '    ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));\\n'
+            '    return bytes_written / sizeof(int32_t);'.replace('\\n', '\n'),
+            '''    size_t bytes_written = 0;
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Bound urgent-stop latency when the underlying TX channel does not
+    // drain. A 120 ms ceiling reserves time for VAD, bridge dispatch and
+    // decoder flush within the 500 ms acoustic interruption budget.
+    // Physical trials must still measure underruns and audible STOP.
+    // Do not ESP_ERROR_CHECK(timeout): a transient stalled TX must not
+    // reboot the face or erase evidence from the microphone task.
+    const esp_err_t err = i2s_channel_write(
+        tx_handle_, buffer.data(), samples * sizeof(int32_t),
+        &bytes_written, pdMS_TO_TICKS(120));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Sense speaker I2S write timeout/error (%d), %u bytes uncertain",
+                 static_cast<int>(err), static_cast<unsigned>(bytes_written));
+        // The driver may have queued a partial frame before its error.
+        // Do not publish uncertain PCM as a confirmed AEC reference.
+        bytes_written = 0;
+    }
+    if (bytes_written > static_cast<size_t>(samples) * sizeof(int32_t) ||
+        bytes_written % sizeof(int32_t) != 0) {
+        ESP_LOGE(TAG, "Sense I2S reported invalid output byte count");
+        bytes_written = 0;
+    }
+#else
+    ESP_ERROR_CHECK(i2s_channel_write(
+        tx_handle_, buffer.data(), samples * sizeof(int32_t),
+        &bytes_written, portMAX_DELAY));
+#endif
+    return static_cast<int>(bytes_written / sizeof(int32_t));''',
+        )
+        # Only the selected Sense amplifier may accept bounded volume.
+        # NVS and upstream SetOutputVolume do not cap values above 100;
+        # the unbounded squared gain can overflow its int32 PCM factor.
+        codec_source = replace_once(
+            codec_source,
+            '    int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;',
+            '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    const int safe_volume = std::clamp(output_volume_, 0, 100);
+    int32_t volume_factor = pow(double(safe_volume) / 100.0, 2) * 65536;
+#else
+    int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
+#endif''',
+        )
+        # Sense PDM is the SAME existing Xiaozhi microphone reader, not a
+        # new capture task. A disconnected or wedged I2S DMA channel must
+        # not hold the input task indefinitely after STOP or opt-out.
+        # Keep the original unbounded behavior in all other build profiles.
+        codec_source = replace_once(
+            codec_source,
+            '    if (i2s_channel_read(rx_handle_, dest, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY) != ESP_OK) {',
+            '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Sense PDM read timeout: bound a missing microphone DMA period while
+    // retaining the stock 16 kHz PDM capture and AEC ownership. This is
+    // a software fault fence, not a measured acoustic interruption time.
+    const esp_err_t read_status = i2s_channel_read(
+        rx_handle_, dest, samples * sizeof(int16_t), &bytes_read,
+        pdMS_TO_TICKS(120));
+#else
+    const esp_err_t read_status = i2s_channel_read(
+        rx_handle_, dest, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY);
+#endif
+    if (read_status != ESP_OK) {''',
+        )
+        codec_source = replace_once(
+            codec_source,
+            '        ESP_LOGE(TAG, "Read Failed!");\\n        return 0;'.replace('\\n', '\n'),
+            '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+        // A stalled microphone returns no fabricated samples. Repeated
+        // expected timeouts must not flood the realtime task's UART logs.
+        if (read_status != ESP_ERR_TIMEOUT) ESP_LOGE(TAG, "Read Failed!");
+#else
+        ESP_LOGE(TAG, "Read Failed!");
+#endif
+        return 0;''',
+        )
+        files[path] = codec_source.encode()
+        # An I2S DAC at 32 kHz must not force an invalid 32 kHz Opus
+        # decoder. Reuse Xiaozhi's existing Opus and ESP-AE rate converter
+        # on the isolated Sense build; do not modify the pinned upstream.
+        path = "main/audio/audio_service.cc"
+        service = (target / path).read_text()
+        service = replace_once(
+            service,
+            "    esp_opus_dec_cfg_t opus_dec_cfg =\n        OPUS_DEC_CFG(codec->output_sample_rate(), OPUS_FRAME_DURATION_MS);",
+            "#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3\n    // MAX98357A accepts 32 kHz LRCLK, but Opus has no 32 kHz decoder mode.\n    // Open a valid 24 kHz decoder and resample to the 32 kHz I2S speaker.\n    constexpr int initial_decoder_rate = 24000;\n#else\n    const int initial_decoder_rate = codec->output_sample_rate();\n#endif\n    esp_opus_dec_cfg_t opus_dec_cfg =\n        OPUS_DEC_CFG(initial_decoder_rate, OPUS_FRAME_DURATION_MS);",
+        )
+        service = replace_once(
+            service,
+            "        decoder_sample_rate_ = codec->output_sample_rate();",
+            "        decoder_sample_rate_ = initial_decoder_rate;",
+        )
+        service = replace_once(
+            service,
+            "    }\n    esp_opus_enc_config_t opus_enc_cfg = AS_OPUS_ENC_CONFIG();",
+            "    }\n#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3\n    // The first packet may use the same Opus rate. Initialize the output\n    // converter NOW so SetDecodeSampleRate's equal-rate fast path cannot\n    // accidentally send 24 kHz PCM to the 32 kHz MAX98357A output.\n    if (opus_decoder_ && decoder_sample_rate_ != codec->output_sample_rate()) {\n        if (output_resampler_ != nullptr) {\n            esp_ae_rate_cvt_close(output_resampler_);\n            output_resampler_ = nullptr;\n        }\n        esp_ae_rate_cvt_cfg_t cfg = RATE_CVT_CFG(\n            decoder_sample_rate_, codec->output_sample_rate(), ESP_AUDIO_MONO);\n        auto resampler_ret = esp_ae_rate_cvt_open(&cfg, &output_resampler_);\n        if (output_resampler_ == nullptr) {\n            ESP_LOGE(TAG, \"Sense Opus output resampler startup failed: %d\",\n                     resampler_ret);\n        }\n    }\n#endif\n    esp_opus_enc_config_t opus_enc_cfg = AS_OPUS_ENC_CONFIG();",
+        )
+        # Never play at the wrong speed when the output rate converter
+        # could not be created. The original Xiaozhi code silently forwarded
+        # 24 kHz PCM to the 32 kHz I2S DAC when output_resampler_ was null.
+        service = replace_once(
+            service,
+            '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ != nullptr) {''',
+            '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ == nullptr) {
+                        ESP_LOGE(TAG, "Sense speaker resampler unavailable: discarding mismatched PCM");
+                        task.pcm.clear();
+                    } else if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ != nullptr) {''',
+        )
+        service = replace_once(
+            service,
+            '''                    decoded = true;
+                } else {
+                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
+            '''                    decoded = !task.pcm.empty();
+                } else {
+                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
+        )
+        # Reject a backend's unsupported Opus rate BEFORE closing the live
+        # decoder. 32 kHz is a valid MAX98357A DAC clock but not an Opus
+        # decoder rate; a malformed TTS event must not permanently silence
+        # subsequent conforming 24 kHz replies. The decoder can also be
+        # reopened after a genuine failed open even when the last rate matches.
+        service = replace_once(
+            service,
+            """void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
+    if (decoder_sample_rate_ == sample_rate && decoder_duration_ms_ == frame_duration) {""",
+            """void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Valid Opus PCM decode rates: 8, 12, 16, 24 or 48 kHz. Reject a bad
+    // remote format without closing the functioning device decoder.
+    if (sample_rate != 8000 && sample_rate != 12000 &&
+        sample_rate != 16000 && sample_rate != 24000 &&
+        sample_rate != 48000) {
+        ESP_LOGE(TAG, "Rejecting unsupported Sense Opus rate %d", sample_rate);
+        return;
+    }
+    // The ESP32 decoder API takes whole milliseconds. Reject an invalid
+    // Opus frame duration BEFORE replacing a working decoder.
+    if (frame_duration != 5 && frame_duration != 10 &&
+        frame_duration != 20 && frame_duration != 40 &&
+        frame_duration != 60) {
+        ESP_LOGE(TAG, "Rejecting unsupported Sense Opus frame duration %d", frame_duration);
+        return;
+    }
+#endif
+    if (decoder_sample_rate_ == sample_rate &&
+        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {""",
+        )
+        # Replace the pinned upstream's close-then-open decoder transition
+        # only in the selected disposable Sense overlay. A malformed packet
+        # or failed replacement allocation must not destroy a working decoder.
+        # The decode thread and ResetDecoder use decoder_mutex_ for this swap.
+        service = replace_once(
+            service,
+            """    std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
+    if (opus_decoder_ != nullptr) {
+        esp_opus_dec_close(opus_decoder_);
+        opus_decoder_ = nullptr;
+    }
+    decoder_lock.unlock();
+    esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
+    auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &opus_decoder_);
+    if (opus_decoder_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to create audio decoder, error code: %d", ret);
+        return;
+    }
+    decoder_sample_rate_ = sample_rate;""",
+            """    esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
+    void* proposed_decoder = nullptr;
+    auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &proposed_decoder);
+    if (proposed_decoder == nullptr) {
+        ESP_LOGE(TAG, "Failed to create replacement decoder, keeping prior decoder: %d", ret);
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> decoder_lock(decoder_mutex_);
+        void* previous_decoder = opus_decoder_;
+        opus_decoder_ = proposed_decoder;
+        if (previous_decoder != nullptr) {
+            esp_opus_dec_close(previous_decoder);
+        }
+    }
+    decoder_sample_rate_ = sample_rate;""",
+        )
+        files[path] = service.encode()
+        # Urgent stop is an extension to the existing Xiaozhi TTS state event,
+        # not a second decoder or audio transport. Normal TTS stops retain the
+        # upstream behavior; flush=true explicitly discards queued decoder PCM
+        # and disables I2S TX so its DMA no longer plays obsolete audio.
+        path = "main/application.cc"
+        text = (target / path).read_text()
+        text = replace_once(
+            text,
+            """} else if (strcmp(state->valuestring, "stop") == 0) {
+                Schedule([this]() {
+                    if (GetDeviceState() == kDeviceStateSpeaking) {""",
+            """} else if (strcmp(state->valuestring, "stop") == 0) {
+                const bool urgent_flush = cJSON_IsTrue(cJSON_GetObjectItem(root, "flush"));
+                Schedule([this, urgent_flush]() {
+                    if (urgent_flush) {
+                        audio_service_.ResetDecoder();
+                        Board::GetInstance().GetAudioCodec()->EnableOutput(false);
+                    }
+                    if (GetDeviceState() == kDeviceStateSpeaking) {""",
+        )
+        # BOOT privacy stop must also work while Xiaozhi is speaking.
+        # Its stock StopListening() handles only the Listening state, which
+        # would leave realtime microphone upload alive after a spoken reply.
+        # Patch only the selected Sense board and only with explicit opt in.
+        text = replace_once(
+            text,
+            """        SetDeviceState(kDeviceStateIdle);
+    }
+}
+
+void Application::HandleWakeWordDetectedEvent() {""",
+            """        SetDeviceState(kDeviceStateIdle);
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    } else if (state == kDeviceStateSpeaking) {
+        AbortSpeaking(kAbortReasonNone);
+        audio_service_.ResetDecoder();
+        Board::GetInstance().GetAudioCodec()->EnableOutput(false);
+        if (protocol_) {
+            protocol_->CloseAudioChannel();
+        }
+        SetDeviceState(kDeviceStateIdle);
+#endif
+    }
+}
+
+void Application::HandleWakeWordDetectedEvent() {""",
+        )
+        # A physical BOOT mute can cancel an in-flight channel open.
+        # The upstream helper only checks state BEFORE blocking on network.
+        # Recheck it after transport open so a stale callback cannot start
+        # the microphone once BOOT has changed the device to idle.
+        text = replace_once(
+            text,
+            """    SetListeningMode(mode);
+}
+
+void Application::HandleStartListeningEvent() {""",
+            """#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    // BOOT privacy may have cancelled while OpenAudioChannel blocked.
+    if (GetDeviceState() != kDeviceStateConnecting) {
+        protocol_->CloseAudioChannel();
+        return;
+    }
+#endif
+    SetListeningMode(mode);
+}
+
+void Application::HandleStartListeningEvent() {""",
+        )
+        # Physical BOOT privacy is an APPLICATION audio-send fence as well as
+        # a codec PDM fence. Never send already-queued Opus after opt out.
+        text = replace_once(
+            text,
+            """        if (bits & MAIN_EVENT_SEND_AUDIO) {
+            while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                if (protocol_ && !protocol_->SendAudio(std::move(packet))) {""",
+            """        if (bits & MAIN_EVENT_SEND_AUDIO) {
+            while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+                if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) {
+                    while (audio_service_.PopPacketFromSendQueue()) {}
+                    break;
+                }
+#endif
+                if (protocol_ && !protocol_->SendAudio(std::move(packet))) {""",
+        )
+        text = replace_once(
+            text,
+            """void Application::HandleToggleChatEvent() {
+    auto state = GetDeviceState();""",
+            """void Application::HandleToggleChatEvent() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) return;
+#endif
+    auto state = GetDeviceState();""",
+        )
+        text = replace_once(
+            text,
+            """void Application::HandleStartListeningEvent() {
+    auto state = GetDeviceState();""",
+            """void Application::HandleStartListeningEvent() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) return;
+#endif
+    auto state = GetDeviceState();""",
+        )
+        text = replace_once(
+            text,
+            """void Application::HandleStopListeningEvent() {
+    auto state = GetDeviceState();""",
+            """void Application::HandleStopListeningEvent() {
+    auto state = GetDeviceState();
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) {
+        // Physical BOOT has already gated PDM. Drop encoded packets that
+        // were in the original Xiaozhi queue before the button event.
+        while (audio_service_.PopPacketFromSendQueue()) {}
+        if (state == kDeviceStateSpeaking) {
+            AbortSpeaking(kAbortReasonNone);
+            audio_service_.ResetDecoder();
+            Board::GetInstance().GetAudioCodec()->EnableOutput(false);
+        }
+        if (protocol_ && protocol_->IsAudioChannelOpened())
+            protocol_->CloseAudioChannel();
+        if (GetDeviceState() == kDeviceStateConnecting ||
+            GetDeviceState() == kDeviceStateListening ||
+            GetDeviceState() == kDeviceStateSpeaking)
+            SetDeviceState(kDeviceStateIdle);
+        return;
+    }
+#endif""",
+        )
+        text = replace_once(
+            text,
+            """void Application::StartListeningAudio() {
+    // Runs in the main loop, either directly from HandleStateChangedEvent or""",
+            """void Application::StartListeningAudio() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) return;
+#endif
+    // Runs in the main loop, either directly from HandleStateChangedEvent or""",
+        )
+        # After a blocked audio channel open, BOOT may have set Idle or
+        # explicitly muted even when the old state still appears Connecting.
+        text = replace_once(
+            text,
+            """if (GetDeviceState() != kDeviceStateConnecting) {
+        protocol_->CloseAudioChannel();
+        return;
+    }
+#endif
+    SetListeningMode(mode);""",
+            """if (GetDeviceState() != kDeviceStateConnecting ||
+        sense_microphone_privacy_muted_.load(std::memory_order_acquire)) {
+        protocol_->CloseAudioChannel();
+        return;
+    }
+#endif
+    SetListeningMode(mode);""",
+        )
+        # A server transport failure is independent of WiFi association.
+        # Report it from the ONE Xiaozhi audio owner rather than interpreting
+        # every ordinary Idle state as a socket loss. No new microphone task.
+        text = replace_once(
+            text,
+            """    protocol_->OnAudioChannelClosed([this, &board]() {
+        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);""",
+            """    protocol_->OnAudioChannelClosed([this, &board]() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+        if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire))
+            sense_audio_failure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+#endif
+        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);""",
+        )
+        text = replace_once(
+            text,
+            """void Application::ContinueOpenAudioChannel(ListeningMode mode) {
+    // Check state again in case it was changed during scheduling
+    if (GetDeviceState() != kDeviceStateConnecting) {
+        return;
+    }
+
+    // Switch to performance mode before connecting to reduce latency
+    auto& board = Board::GetInstance();
+    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+
+    if (!protocol_->IsAudioChannelOpened()) {
+        if (!protocol_->OpenAudioChannel()) {""",
+            """void Application::ContinueOpenAudioChannel(ListeningMode mode) {
+    // Check state again in case it was changed during scheduling
+    if (GetDeviceState() != kDeviceStateConnecting) {
+        return;
+    }
+
+    // Switch to performance mode before connecting to reduce latency
+    auto& board = Board::GetInstance();
+    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+
+    if (!protocol_->IsAudioChannelOpened()) {
+        if (!protocol_->OpenAudioChannel()) {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire))
+                sense_audio_failure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+#endif""",
+        )
+        files[path] = text.encode()
+        # Only the disposable Sense clone changes upstream Application
+        # declarations, so every other Xiaozhi board retains original code.
+        header_path = "main/application.h"
+        header = (target / header_path).read_text()
+        header = replace_once(
+            header,
+            """#include <functional>
+#include <cstdint>""",
+            """#include <functional>
+#include <atomic>
+#include <cstdint>""",
+        )
+        header = replace_once(
+            header,
+            """    void ToggleChatState();
+
+    /**""",
+            """    void ToggleChatState();
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    void SetSenseMicrophonePrivacyMuted(bool muted) {
+        sense_microphone_privacy_muted_.store(muted, std::memory_order_release);
+    }
+    uint32_t GetSenseAudioFailureEpoch() const {
+        return sense_audio_failure_epoch_.load(std::memory_order_acquire);
+    }
+#endif
+
+    /**""",
+        )
+        header = replace_once(
+            header,
+            """    AudioService audio_service_;
+    NotifyPlayer notify_player_;""",
+            """    AudioService audio_service_;
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    std::atomic<bool> sense_microphone_privacy_muted_{false};
+    std::atomic<uint32_t> sense_audio_failure_epoch_{0};
+#endif
+    NotifyPlayer notify_player_;""",
+        )
+        files[header_path] = header.encode()
         return files
     files = cores3_files(target)
     if board == "cores3":
@@ -259,10 +730,10 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     )
     files["main/CMakeLists.txt"] = cmake.encode()
     for path in (HERE / "modular").iterdir():
-        if path.is_file() and path.suffix in (".cc", ".h", ".json", ".md"):
+        if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
             files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
     for path in (HERE / "overlay").iterdir():
-        if path.suffix in (".h", ".cc"):
+        if path.suffix in (".h", ".cc", ".hpp"):
             files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
 
     guard = "#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3"
@@ -294,21 +765,100 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def atomic_replace_bytes(path: Path, contents: bytes) -> None:
+    """Replace one source atomically so interrupted writes retain old/new bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="wb", prefix=f".{path.name}.desk-overlay-", dir=path.parent,
+        delete=False,
+    ) as stream:
+        staged = Path(stream.name)
+        try:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            staged.unlink(missing_ok=True)
+            raise
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+        staged.chmod(mode)
+        staged.replace(path)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def read_overlay_journal(target: Path, marker: Path) -> dict:
+    """Reject malformed or escaping recovery journals before any file IO."""
+    if not marker.is_file() or marker.is_symlink() or marker.stat().st_size > 16_000_000:
+        raise ValueError("Invalid head overlay journal")
+    state = json.loads(marker.read_text())
+    if not isinstance(state, dict) or not state:
+        raise ValueError("Invalid head overlay journal")
+    root = target.resolve()
+    for name, info in state.items():
+        if (not isinstance(name, str) or not name.startswith("main/")
+                or "\\" in name or any(part in ("", ".", "..") for part in name.split("/"))
+                or not isinstance(info, dict)
+                or set(info) != {"sha256", "original"}
+                or type(info["sha256"]) is not str
+                or len(info["sha256"]) != 64
+                or any(ch not in "0123456789abcdef" for ch in info["sha256"])
+                or (info["original"] is not None and
+                    type(info["original"]) is not str)):
+            raise ValueError("Invalid head overlay journal entry")
+        path = target / name
+        if path.is_symlink() or not path.parent.resolve().is_relative_to(root):
+            raise ValueError("Overlay journal path escapes pinned checkout")
+        if info["original"] is not None:
+            try:
+                base64.b64decode(info["original"], validate=True)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise ValueError("Invalid original bytes in overlay journal") from exc
+    return state
+
+
 def remove(target: Path) -> None:
     marker = target / MARKER
     if not marker.exists():
         return
-    state = json.loads(marker.read_text())
+    state = read_overlay_journal(target, marker)
+    # The marker is committed before the overlaid files. A killed installer
+    # can leave any file at its pinned original bytes, its overlaid bytes,
+    # or (for a new board file) not yet created. Those are recoverable.
+    # Reject all other content before changing even one file, so an actual
+    # user edit is never destroyed by a partial-install recovery.
     for name, info in state.items():
         path = target / name
-        if not path.is_file() or digest(path.read_bytes()) != info["sha256"]:
+        original = info["original"]
+        if not path.is_file():
+            if original is None and not path.exists():
+                continue
+            raise ValueError(f"Refusing removal: overlaid file was changed: {name}")
+        current = digest(path.read_bytes())
+        original_digest = digest(base64.b64decode(original)) if original is not None else None
+        if current != info["sha256"] and current != original_digest:
             raise ValueError(f"Refusing removal: overlaid file was changed: {name}")
     for name, info in state.items():
         path = target / name
         if info["original"] is None:
-            path.unlink()
+            if path.is_file():
+                path.unlink()
         else:
-            path.write_bytes(base64.b64decode(info["original"]))
+            atomic_replace_bytes(path, base64.b64decode(info["original"]))
+    # A force-killed atomic write can leave its hidden staging file in the
+    # newly created board directory. Only our namespaced temporary source
+    # files belonging to entries in this verified journal are disposable.
+    # Remove them before dropping the journal so --remove stays repeatable.
+    for name in state:
+        path = target / name
+        prefix = f".{path.name}.desk-overlay-"
+        if path.parent.is_dir():
+            for staged in path.parent.iterdir():
+                if staged.name.startswith(prefix) and (
+                    staged.is_file() or staged.is_symlink()
+                ):
+                    staged.unlink()
     marker.unlink()
     for name in BOARDS.values():
         board = target / name
@@ -324,7 +874,7 @@ def apply(target: Path, board: str = "cores3") -> None:
         raise ValueError(f"Requires Xiaozhi commit {PIN}, found {head}")
     marker = target / MARKER
     if marker.exists():
-        state = json.loads(marker.read_text())
+        state = read_overlay_journal(target, marker)
         if not any(name.startswith(BOARDS[board] + "/") for name in state):
             raise ValueError("A different board overlay is installed; use a separate build copy")
         for name, info in state.items():
@@ -350,11 +900,38 @@ def apply(target: Path, board: str = "cores3") -> None:
             "sha256": digest(data),
             "original": base64.b64encode(path.read_bytes()).decode() if path.exists() else None,
         }
-    marker.write_text(json.dumps(state, indent=2) + "\n")
-    for name, data in files.items():
-        path = target / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+    # Journal FIRST, then atomically replace each file. If SIGKILL stops
+    # this transaction, every published path is either its original bytes
+    # or its complete overlay bytes, and --remove can recover using the
+    # still-present marker. A marker written only after file replacements
+    # would strand a force-killed build with no rollback information.
+    atomic_replace_bytes(marker, (json.dumps(state, indent=2) + "\n").encode())
+    attempted = []
+    try:
+        for name, data in files.items():
+            attempted.append(name)
+            atomic_replace_bytes(target / name, data)
+    except BaseException:
+        # Ordinary Python exceptions also roll back immediately. If disk
+        # failure prevents one restore, KEEP the journal for a later --remove.
+        rollback_failed = False
+        for name in reversed(attempted):
+            original = state[name]["original"]
+            path = target / name
+            try:
+                if original is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    atomic_replace_bytes(path, base64.b64decode(original))
+            except BaseException:
+                rollback_failed = True
+        if not rollback_failed:
+            marker.unlink(missing_ok=True)
+            for board_name in BOARDS.values():
+                directory = target / board_name
+                if directory.is_dir() and not any(directory.iterdir()):
+                    directory.rmdir()
+        raise
     print(f"Installed {len(files)} overlay files into {target}")
 
 

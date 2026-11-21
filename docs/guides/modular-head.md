@@ -52,18 +52,59 @@ a separate ignored `xiaozhi-sense` copy.
 
 ## Face and interaction
 
-The OLED is monochrome, not a color LCD. Begin with original blink/gaze/listening/
-speaking/rest/blocked expressions. [RoboEyes](https://github.com/FluxGarage/RoboEyes)
-is a strong **GPL-3.0** candidate, with an Arduino/GFX graphics layer; a small
-ESP-IDF drawing/timing adapter is needed. Tech Talkies' custom-face fork is also
-GPL-3.0. Neither is integrated; resolve dependency/notices/source obligations
-before copying. Do not mark a combined GPL firmware MIT-only.
+The OLED is monochrome, not a color LCD. The selected Sense firmware
+already integrates the **MIT-licensed Stackchan-agent hierarchical behavior
+machine**, pinned at `bfb98fb8bdb4f8ecc4b7c1c4f9bc90ee5227e613`,
+into `overlay/stackchan_behavior.hpp` and the existing local
+`DeskRobotSenseBoard::FaceTask`. Preserve its source license notice.
+It handles blink, gaze, listening/speaking transitions, idle/rest and
+bounded contextual face cues. Its motion suggestions are **never** sent
+to the WROOM motor or gripper. The Mac may request cosmetic mood cues,
+but cannot override deterministic body safety; body faults display a
+local safety status and neutral face before ordinary idle expressions.
+[RoboEyes](https://github.com/FluxGarage/RoboEyes) and the Tech Talkies
+face fork remain **GPL-3.0 research options, not integrated dependencies**.
+Do not copy their code into this MIT source without a separate license review.
 
-One task should own OLED updates; animation must yield and never delay audio,
-UART stop or camera handling. Blink/idle behavior can continue locally while the
-Mac provides higher-level character state. Prototype head touch uses the owned
-Adafruit #1374, pending mounting and response checks.
-Head patting does not locate the user or navigate back to them.
+Only the existing local face task owns OLED updates. The WROOM status poll
+uses a separate task so an interrupted UART read cannot stall blink timing,
+Xiaozhi audio or emergency STOP. The OLED remains available during
+continuous listening as well as idle; status and mood owners are separate.
+The selected inexpensive generic AT42QT1010 head-touch input needs actual
+through-case placement and bounce tests. Reuse any genuinely owned compatible
+sensor rather than ordering a new Adafruit module. Head patting does not
+locate the user or navigate back to them.
+
+The consented camera is **one authenticated continuous MJPEG producer** on
+`/api/camera.mjpg`, not a recurring snapshot request. The Mac
+`HttpHead.stream_frames()` verifies each JPEG's per-robot boot, sequence
+and device capture-completion receipt and selects the newest frame in
+coalesced network reads. It rejects same-boot backlog when
+the relative Mac arrival interval exceeds the device capture-completion
+interval by more than 500 ms, about two ordinary 4 FPS frame periods.
+Delayed frames are not relabeled as fresh simply because the network
+reader woke up later. This is a
+**relative backlog check**, not clock synchronization or proof of image
+exposure latency. Mac and ESP32 clocks cannot be compared absolutely.
+A real A9 trial still needs measured camera-to-Mac latency, object freshness,
+concurrent voice and consent/offline recovery. A physical camera bench can no
+longer pass through legacy snapshot polling. With explicit video consent,
+run this read-only test against the actual provisioned head, with its motors
+disconnected or safely on a stand:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_camera.py \
+  --config config/local.toml --robot robot-01 --seconds 60 \
+  --stream --score-motion \
+  --report data/private/head_camera_trial.json
+```
+
+The report measures persistent stream interarrival, device capture-completion
+deltas and concurrent WROOM status request timing. It does **not** qualify
+true optical exposure timing, image interpretation, gripper reach, audible
+playback, motor safety or A9 physical behavior. No motor command or still
+snapshot is sent by this bench command.
 
 ## Existing case and small changes
 
@@ -93,9 +134,12 @@ and active design before touching geometry.
 ## Power/audio and staged bring-up
 
 - Logic stays 3.3 V. Verify amplifier variant/pins and supply per its documentation.
-  Speaker connects **SPK+ to SPK−**, neither output to GND. Limit output for the
-  8 Ω / 1 W speaker; check acoustic port and cavity fit.
-- Use a qualified power bank and separate rated actuator branches. Do not route
+  Speaker connects **SPK+ to SPK−**, neither output to GND. The selected
+  Challenge CS20-02P110-04-1X is an **8 Ω, 2 W** rectangular speaker
+  candidate, not the superseded 1 W round speaker. Limit output to its
+  measured installed acoustic/thermal rating and check enclosure port,
+  MAX98357A gain, distortion and cavity fit.
+- Use the final **qualified matched rechargeable 1S cell, charger/protection and regulated 5V distribution system**, with separately rated actuator branches. An unidentified owned power bank may only be used for isolated bench testing after verifying its output; it is not the selected permanent power architecture. Do not route
   motor current through head/body regulators or laptop USB.
 - On USB with motors absent, verify screen, fresh camera capture, PDM recording,
   speaker/listening transition and head identity before joining UART TX/RX/GND.

@@ -1,7 +1,7 @@
 {
   "robot_count": 5,
   "identical_core": true,
-  "inventory_corrected_at": "2026-11-06",
+  "inventory_corrected_at": "2026-11-10",
   "controller_model": "ESP32-WROOM-32",
   "controller_owned_count": null,
   "s3_owned_count": null,
@@ -12,7 +12,8 @@
     "ssd1306_oled": 1,
     "mg90s_positional_servo": 1,
     "berryimu": 1,
-    "at42qt1010": 1
+    "at42qt1010": 1,
+    "mpu6050_reported": 1
   },
   "components": [
     {
@@ -142,10 +143,10 @@
       "minimum_reported": 1,
       "ownership_status": "user_photo_report",
       "functionality_tested": false,
-      "needed_per_robot": 1,
-      "needed_for_five": 5,
+      "needed_per_robot": 0,
+      "needed_for_five": 0,
       "photo_audit_id": "berryimu",
-      "note": "Reuse first for prototype motion sensing; likely V1, exact chips/voltage/pins/fit and driver pending. Do not order replacement before checking. Four additional equivalents unconfirmed if only one works.",
+      "note": "User's new preferred MPU6050 supersedes BerryIMU as required sensor. Photographed BerryIMU kept as spare, chip revision and functionality still unverified.",
       "additional_units_unconfirmed_if_only_one": 4
     },
     {
@@ -290,9 +291,20 @@
         "IMG_3906.JPG"
       ],
       "note": "Optional haptics. Requires a switched motor supply within its specified voltage and checks for false shake events and microphone noise."
+    },
+    {
+      "component": "MPU6050 six-axis breakout (reported in use, exact GY-521/revision unverified)",
+      "owned_count": null,
+      "minimum_reported": 1,
+      "ownership_status": "user_statement_not_photo_verified",
+      "functionality_tested": false,
+      "needed_per_robot": 1,
+      "needed_for_five": 5,
+      "additional_units_unconfirmed_if_only_one": 4,
+      "note": "Preferred active IMU; original supplier part and breakout voltage/pullups must be checked before wiring. Firm MCU probes 0x68 WHO_AM_I at 0x75. Existing BerryIMU remains optional spare."
     }
   ],
-  "note": "At least one XIAO ESP32S3 Sense is reported purchased; exact quantity, arrival and hardware revision are not confirmed. WROOM, bank and OLED counts remain unknown; MG90S count is now estimated by the user at about 10, not confirmed. Power bank is unidentified and user reports no readable rating label; do not infer 2 A/3 A or usable whole-robot power. All five use the same full core with removable cosmetics. Latest quoted plan is not new inventory evidence. Touch and motion sensing are required. The owned AT42QT1010 is the prototype touch choice. RGB and haptics are optional. Matched1S kit replaces required bank purchase. Photo audit now establishes at least one BerryIMU and nine other module types; paired photos are not extra units. BerryIMU replaces new IMU procurement for prototype pending checks; optional spares do not replace required floor sensing, speaker output or power parts.",
+  "note": "At least one XIAO ESP32S3 Sense is reported purchased; exact quantity, arrival and hardware revision are not confirmed. WROOM, bank and OLED counts remain unknown; MG90S count is now estimated by the user at about 10, not confirmed. Power bank is unidentified and user reports no readable rating label; do not infer 2 A/3 A or usable whole-robot power. All five use the same full core with removable cosmetics. Latest quoted plan is not new inventory evidence. Touch and motion sensing are required. The owned AT42QT1010 is the prototype touch choice. RGB and haptics are optional. Matched1S kit replaces required bank purchase. Photo audit now establishes at least one BerryIMU and nine other module types; paired photos are not extra units. BerryIMU replaces new IMU procurement for prototype pending checks; optional spares do not replace required floor sensing, speaker output or power parts.\n2026-11-10: User reports using MPU6050 as motion sensor, superseding BerryIMU first choice; quantity not yet counted.\nExtra sensor stock: photo-identified PIR, reed module, BMP280, reflective IR, old Berry, GY61 and possible vibration switch; no quantities or electrical tests established. Optional bumper not inventoried as owned.",
   "voice_interruption_required_first_build": true,
   "s3_purchase": {
     "model": "XIAO ESP32S3 Sense complete camera/microphone kit as listed",

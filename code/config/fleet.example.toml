@@ -2,7 +2,18 @@
 # Enter each head's actual LAN address, unique device ID and measured calibration.
 # Hats/costumes are removable cosmetics; every unit keeps its camera and gripper.
 mode = "hardware"
+# Default OFF. Opt in only if sharing each pet's observed scene/touch text with
+# all five separate local memories is acceptable for room privacy. No JPEG,
+# microphone PCM, video, or motion authority is shared.
+fleet_text_sharing_enabled = false
+# Keep true for the earlier automatic witness-to-all-peers fanout.
+# Set false *and* fleet_text_sharing_enabled=true for operator-selected
+# single-event copies using the existing /v1/pet/{id}/share endpoint.
+fleet_text_auto_fanout_enabled = true
 ollama_model = "qwen3:8b"
+# Choose and separately install a locally compatible multimodal Ollama model.
+# This name is a candidate; no model download, five-feed benchmark or accuracy claim is implied.
+vision_model = "qwen3-vl:4b"
 trials_file = "../data/physical-trials.jsonl"
 vision_weights = "../models/yolov8s-worldv2.pt"
 
@@ -13,6 +24,8 @@ head_url = "http://192.168.1.101:8081"
 token_env = "DESK_ROBOT_HEAD_01_TOKEN"
 device_id = ""
 motion_enabled = false
+# Do not enable exploration until real sensor, stopping and swept-space trials pass.
+exploration_qualified = false
 calibration = "calibration.example.json"
 voice = "af_heart"
 persona = "You are Pip, a curious desk robot. Speak one short sentence and take turns with the group."

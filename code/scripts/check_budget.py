@@ -51,12 +51,49 @@ def budget(data, shipping=None, tax=None):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--bom", type=Path, default=ROOT.parent / "docs/hardware/bom.json")
+    p.add_argument("--bom", type=Path, help="Explicit historical/custom budget only")
     p.add_argument("--shipping", type=Decimal)
     p.add_argument("--tax", type=Decimal)
     p.add_argument("--require-ready", action="store_true")
     args = p.parse_args()
-    result = budget(json.loads(args.bom.read_text()), args.shipping, args.tax)
-    print(json.dumps(result, indent=2))
-    if args.require_ready and not result["purchase_ready"]:
-        p.exit(1, "Complete quotes and fit checks are still needed before ordering.\n")
+    if args.bom is None:
+        # Never let the superseded bom.json drive the default shopping path.
+        # Current parts, motor alternatives and unquoted physical roles come
+        # from the one canonical source used by procurement_release.py.
+        from procurement_release import (
+            PLAN,
+            first_robot_projection,
+            generate,
+            pilot_supplier_cart,
+        )
+
+        if args.shipping is not None or args.tax is not None:
+            p.error("Current first-unit landed prices require verified receipts; "
+                    "--shipping/--tax are only valid with an explicit --bom")
+        report = generate(json.loads(PLAN.read_text(encoding="utf-8")))
+        first = first_robot_projection(report)
+        cart = pilot_supplier_cart(report)
+        print(json.dumps({
+            "source": "canonical full-feature-plan.json",
+            "first_robot": first,
+            "evaluation_cart": cart,
+            "purchase_ready": False,
+            "landed_total_usd": None,
+            "note": "Evaluation quotes are not delivered prices. Use "
+                    "procurement_release.py --require-first-robot with "
+                    "verified physical evidence for a purchase release.",
+        }, indent=2))
+        if args.require_ready:
+            p.exit(2, "HOLD: use the strict first-robot receipt verifier; "
+                      "historical quotes cannot authorize an order.\n")
+    else:
+        result = budget(json.loads(args.bom.read_text()), args.shipping, args.tax)
+        # Explicit historical math is useful for comparison, but even an
+        # entirely green synthetic legacy file has no purchase authority.
+        result["historical_math_ready"] = result["purchase_ready"]
+        result["purchase_ready"] = False
+        result["source"] = "explicit_legacy_bom_not_release_authority"
+        print(json.dumps(result, indent=2))
+        if args.require_ready:
+            p.exit(2, "HOLD: legacy BOM cannot approve a purchase. Use "
+                      "the strict canonical first-robot receipt verifier.\n")

@@ -1,5 +1,7 @@
+import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -101,3 +103,258 @@ def test_empty_records_and_assisted_or_propped_keys_do_not_pass():
     rows.append(rows[-1].copy())
     with pytest.raises(ValueError, match="distinct"):
         summarize(rows, "robot-01")
+
+
+# Original source and full-feature plan consistency checks belong with existing
+# records and budget tests. These are documentation checks, NOT hardware tests.
+DOCS = ROOT.parent / "docs"
+
+
+def test_source_map_keeps_every_originally_registered_feature():
+    text = (DOCS / "source-map.md").read_text(encoding="utf-8")
+    feature_ids = re.findall(r"^\| \`([FBSGH]\d{3})\` \|", text, re.MULTILINE)
+    expected = {
+        *(f"F{n:03d}" for n in range(1, 40)),
+        *(f"B{n:03d}" for n in range(1, 31)),
+        *(f"S{n:03d}" for n in range(1, 76)),
+        *(f"G{n:03d}" for n in range(1, 47)),
+        *(f"H{n:03d}" for n in range(1, 11)),
+    }
+    assert len(feature_ids) == len(set(feature_ids)), "Duplicate feature ID"
+    assert set(feature_ids) >= expected, sorted(expected - set(feature_ids))
+
+
+def test_original_html_link_index_matches_the_uploaded_document():
+    """Frozen against all 131 unique URL href values in the uploaded HTML."""
+    text = (DOCS / "source-map.md").read_text(encoding="utf-8")
+    matches = re.findall(
+        r"^\| \`(L\d{3})\` \| <(https?://[^>\s]+)> \|$",
+        text,
+        re.MULTILINE,
+    )
+    assert len(matches) == 131
+    assert {key for key, _ in matches} == {f"L{n:03d}" for n in range(1, 132)}
+    values = [url for _, url in matches]
+    assert len(set(values)) == 131
+    digest = hashlib.sha256("\n".join(sorted(values)).encode("utf-8")).hexdigest()
+    assert digest == "6a40d539546f30bb5739b1919b99f069b22e6d31aa0a212efe35dac928916986"
+
+
+def test_full_behavioral_acceptance_keeps_original_gates():
+    product = (DOCS / "product-definition.md").read_text(encoding="utf-8")
+    evidence = (DOCS / "records/verification.md").read_text(encoding="utf-8")
+    for number in range(1, 13):
+        assert f"| A{number} " in product, f"Canonical A{number} removed"
+        assert f"| **A{number} " in evidence, f"Expanded A{number} removed"
+    for scenario in range(1, 11):
+        assert f"E{scenario:02d}" in evidence
+    assert "19/20" in evidence and "18/20" in evidence
+    assert "8/10" in evidence
+    assert "120s" in evidence
+    assert "zero false" in evidence.lower()
+    assert "proactive" in product.lower()
+    assert "quiet" in product.lower()
+
+
+@pytest.mark.parametrize(
+    "doc, heading",
+    [
+        ("README.md", "## Full final project contract and scope"),
+        ("product-definition.md", "## Full five robot system and proactive conversation contract"),
+        ("PLAN.md", "## Complete linear build and permanent verification stages"),
+        ("PLAN.md", "## Concrete code and integration ownership plan"),
+        ("source-map.md", "## Original HTML feature and sensor idea register"),
+        ("source-map.md", "## Complete original HTML research link index"),
+        ("decision-log.md", "## Open conflicts requiring decisions before construction"),
+        ("records/verification.md", "## Expanded full robot and five peer acceptance cases"),
+        ("research/2026-11-03-active-pet-sources.md", "## Inspected upstream source selection and reuse boundaries"),
+        ("research/2026-11-03-active-pet-sources.md", "## Detailed unverified HTML numerical proposals"),
+    ],
+)
+def test_full_feature_sections_live_in_their_existing_canonical_files(doc, heading):
+    body = (DOCS / doc).read_text(encoding="utf-8")
+    assert heading in body
+    assert "docs/blueprint/" not in body
+
+
+def test_new_canonical_document_links_are_local_and_resolvable():
+    """Check document paths; external URL validity and GitHub anchors are separate."""
+    checked = [
+        ROOT.parent / "README.md",
+        ROOT.parent / "AGENTS.md",
+        *(DOCS / file for file in (
+            "README.md", "PLAN.md", "product-definition.md", "source-map.md",
+            "decision-log.md", "records/verification.md",
+            "research/2026-11-03-active-pet-sources.md",
+        )),
+    ]
+    for file in checked:
+        text = file.read_text(encoding="utf-8")
+        for link in re.findall(r"\]\(([^)\n]+)\)", text):
+            if link.startswith(("https://", "http://", "mailto:", "#")):
+                continue
+            rel = link.split("#", 1)[0]
+            if rel and not rel.startswith("/"):
+                target = (file.parent / rel).resolve()
+                assert target.exists(), f"Broken link in {file}: {link}"
+
+
+def test_source_crosswalk_matches_41_original_html_section_ids():
+    """Exact ordered identifiers from the original, independently parsed HTML."""
+    text = (DOCS / "source-map.md").read_text(encoding="utf-8")
+    table = text.split("## Original HTML DOM section crosswalk, verified 2026-11-09", 1)[1]
+    ids = re.findall(r"^\| \d+ \| \`([a-z0-9_-]+)\` \|", table, re.MULTILINE)
+    assert len(ids) == len(set(ids)) == 41
+    digest = hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()
+    assert digest == "1128952b6b42f42eb0a5650714c541b7916b3f07b91856cf9ae82e3a9a3d43be"
+
+
+def test_only_canonical_generated_file_keeps_static_shopping_tables():
+    canonical = (
+        DOCS / "hardware/complete-shopping-checklist.md"
+    ).read_text(encoding="utf-8")
+    wiring = (
+        DOCS / "hardware/full-feature-wiring-and-shopping.md"
+    ).read_text(encoding="utf-8")
+    one = (
+        DOCS / "hardware/one-robot-inventory-and-shopping.md"
+    ).read_text(encoding="utf-8")
+
+    assert "## 1. Owned or ordered, as reported" in canonical
+    assert "## 2. Remaining components or unqualified roles" in canonical
+
+    assert "## What you already have" not in wiring
+    assert "## Buy and allocate per finished robot" not in wiring
+    assert "| Component | Per robot | Five robots |" not in wiring
+    assert "complete-shopping-checklist.md" in wiring
+    assert "--format first-robot-markdown" in wiring
+    assert "## Fixed pin wiring" in wiring
+
+    assert "| Component | Have or buy |" not in one
+    assert "| SCD40 CO2 module |" not in one
+    assert "| AMG8833 thermal grid sensor |" not in one
+    assert "complete-shopping-checklist.md" in one
+    assert "--format first-robot-markdown" in one
+
+
+def test_historical_bom_tracks_selected_vl53l0x_without_authorizing_bulk_buy():
+    data = json.loads((DOCS / "hardware/bom.json").read_text(encoding="utf-8"))
+    ranging = [
+        item for item in data["items"]
+        if "VL53L0X GY-530 generic" in item["item"]
+    ]
+    assert len(ranging) == 3
+    assert sum(item["quantity"] for item in ranging) == 8
+    assert sorted(item["quantity"] for item in ranging) == [1, 3, 4]
+    assert all(item["unit_usd"] is None for item in ranging)
+    assert all(item["price_status"] == "sample_quote_only" for item in ranging)
+    assert all(item["reference_unit_usd"] == 1.75 for item in ranging)
+    assert all(item["reference_price_date"] == "2026-11-20" for item in ranging)
+    assert all("one sample" in item["fit"].lower() for item in ranging)
+    assert not any(
+        "VL53L4CD compatible" in item["item"] for item in data["items"]
+    )
+    replacement = next(
+        item for item in data["optional_items"]
+        if item["item"].startswith("Conditional generic MPU6050")
+    )
+    assert replacement["price_status"] == "not_selected"
+    assert "adafruit.com" not in replacement["url"].lower()
+    assert data["quote_status"] == "incomplete_eight_vl53l0x_breakouts_and_1s_power"
+    parts = (DOCS / "hardware/parts.md").read_text(encoding="utf-8")
+    assert "Sensor purchase hold" in parts
+    wiring = (DOCS / "hardware/wiring.md").read_text(encoding="utf-8")
+    assert "CH0 front-left floor VL53L0X 0x29" in wiring
+    assert "front-left downward VL53L4CD candidate" not in wiring
+    assert "downward VL6180X" not in wiring
+    assert not module("check_budget").budget(data)["purchase_ready"]
+
+
+def test_actual_wroom_stepper_wiring_has_unique_boot_safe_pins():
+    """Prevent a future firmware pin change from silently corrupting the harness.
+
+    This checks source pin ownership, not voltage, current, continuity or a
+    physically fitted board. The DC reference is a different binary/profile.
+    """
+    pins = (ROOT / "firmware/body/include/BodyPins.h").read_text()
+    stepper = pins.split("#if DESK_ROBOT_STEPPER", 1)[1].split("#else", 1)[0]
+
+    def values(name, source):
+        found = re.search(rf"constexpr int {name}\[\] = \{{([^}}]+)\}};", source)
+        assert found, f"Missing {name} pin array"
+        return [int(x.strip()) for x in found.group(1).split(",")]
+
+    def one(name, source):
+        found = re.search(rf"constexpr int {name} = (-?\d+);", source)
+        assert found, f"Missing {name} pin"
+        return int(found.group(1))
+
+    wheels = values("kLeftStepperPins", stepper) + values("kRightStepperPins", stepper)
+    phases = values("kMotorPins", stepper)
+    assert len(wheels) == len(phases) == 8
+    assert wheels == phases
+    assert one("kMuxReset", stepper) == -1  # passive 3.3 V pullup, no GPIO4
+    external = [
+        *wheels,
+        one("kUartRx", pins), one("kUartTx", pins),
+        one("kSensorSda", stepper), one("kSensorScl", stepper),
+        one("kLiftServo", pins), one("kGripServo", pins),
+        one("kTouchOutput", stepper),
+    ]
+    assert len(external) == len(set(external)) == 15
+    assert one("kTouchOutput", stepper) == 34  # input only, no internal pullup
+    motor_outputs = set(external) - {34}
+    forbidden = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 34, 35, 36, 39}
+    assert motor_outputs.isdisjoint(forbidden)
+    assert one("kSensorSda", stepper) == 21
+    assert one("kSensorScl", stepper) == 22
+    assert (one("kUartRx", pins), one("kUartTx", pins)) == (16, 17)
+
+
+def test_default_budget_cli_uses_canonical_first_unit_not_historical_bom():
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, str(ROOT / "scripts/check_budget.py")]
+    completed = subprocess.run(cmd, capture_output=True, text=True,
+                               check=True, timeout=15)
+    current = json.loads(completed.stdout)
+    assert current["source"] == "canonical full-feature-plan.json"
+    assert current["purchase_ready"] is False
+    assert current["landed_total_usd"] is None
+    assert current["first_robot"]["purchase_approved"] is False
+    assert len(current["first_robot"]["linked_decisions"]) == 14
+    assert current["evaluation_cart"]["exact_sku_count"] == 13
+    assert current["evaluation_cart"]["component_quantity"] == 17
+    assert current["evaluation_cart"]["historical_priced_partial_subtotal_usd"] == 40.41
+    assert all("VL53L4CD" not in item["name"]
+               for item in current["evaluation_cart"]["items"])
+    denied = subprocess.run([*cmd, "--require-ready"],
+                            capture_output=True, text=True, timeout=15)
+    assert denied.returncode == 2
+    assert "HOLD" in denied.stderr
+
+
+def test_legacy_complete_bom_cannot_approve_purchase_cli(tmp_path):
+    import subprocess
+    import sys
+
+    fabricated = {
+        "cap_usd": 50, "fit_confirmed": True,
+        "readiness_checks": {"power": True},
+        "items": [{"item": "fictional approved part", "quantity": 1,
+                   "unit_usd": 1, "price_status": "verified"}],
+    }
+    path = tmp_path / "historical.json"
+    path.write_text(json.dumps(fabricated), encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_budget.py"),
+         "--bom", str(path), "--shipping", "0", "--tax", "0",
+         "--require-ready"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert completed.returncode == 2
+    output = json.loads(completed.stdout)
+    assert output["historical_math_ready"] is True
+    assert output["purchase_ready"] is False
+    assert "legacy BOM cannot approve" in completed.stderr

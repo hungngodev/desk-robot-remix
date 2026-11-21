@@ -1,0 +1,187 @@
+"""Strict read-only source validation for one robot's optional sensor telemetry.
+
+Raw samples are never evidence of medical data, a real grasp force, charging,
+calibrated locomotion, or authorization to move motors.
+"""
+from __future__ import annotations
+
+
+def _uint(value, upper: int) -> bool:
+    return type(value) is int and 0 <= value <= upper
+
+
+def _sint(value, low: int, high: int) -> bool:
+    return type(value) is int and low <= value <= high
+
+
+def _bool(value) -> bool:
+    return type(value) is bool
+
+
+def _array(value, length: int, predicate) -> bool:
+    return isinstance(value, list) and len(value) == length and all(
+        predicate(v) for v in value
+    )
+
+
+def validate_aux(data: dict, robot_id: str) -> dict:
+    if not isinstance(data, dict) or data.get("robot_id") != robot_id:
+        raise ValueError("Aux sensor identity mismatch")
+    pulse, angles = data.get("pulse"), data.get("angles")
+    force, climate = data.get("force"), data.get("climate")
+    power, proximity = data.get("power"), data.get("proximity")
+    if not all(isinstance(group, dict) for group in (
+        pulse, angles, force, climate, power, proximity,
+    )):
+        raise ValueError("Incomplete auxiliary sensor payload")
+
+    if (not _bool(pulse.get("present")) or not _bool(pulse.get("valid"))
+            or not _uint(pulse.get("part_id"), 255)
+            or not _uint(pulse.get("red"), 262143)
+            or not _uint(pulse.get("ir"), 262143)
+            or not _uint(pulse.get("age_ms"), 0xffffffff)
+            or (pulse.get("seq") is not None and (
+                not _uint(pulse["seq"], 0xffffffff)
+                or (pulse["valid"] and pulse["seq"] == 0)
+            ))
+            or pulse.get("bpm", "missing") is not None
+            or pulse.get("medical") is not False
+            or (pulse["valid"] and not pulse["present"])):
+        raise ValueError("Invalid raw MAX30102 paw source")
+
+    present, valid = angles.get("present_mask"), angles.get("valid_mask")
+    if (not _uint(present, 7) or not _uint(valid, 7)
+            or valid & ~present
+            or not _array(angles.get("raw"), 3, lambda n: _uint(n, 4095))
+            or not _array(angles.get("magnet"), 3, lambda n: _uint(n, 0x38))
+            or any(valid & (1 << i) and angles["magnet"][i] != 0x20
+                   for i in range(3))):
+        raise ValueError("Invalid AS5600 magnetic angle source")
+
+    if (not _array(force.get("adc"), 2, lambda n: _sint(n, -32768, 32767))
+            # The actual WROOM explicitly marks clipped jaw ADC values
+            # invalid. Keep diagnostic endpoint codes when valid=False, but
+            # never trust valid=True with saturated force source evidence.
+            or (force.get("valid") is True and
+                force["adc"][1] in (-32768, 32767))
+            or not _uint(force.get("jaw_seq"), 0xffffffff)
+            or ("jaw_age_ms" in force and (
+                not _uint(force["jaw_age_ms"], 0xffffffff)
+                # The real WROOM marks a jaw conversion invalid after 500ms.
+                # Never accept contradictory stale-but-valid source claims.
+                or (force.get("valid") is True and
+                    force["jaw_age_ms"] >= 500)))
+            # Optional for old bench captures; the real WROOM now reports
+            # its boot identity so a new ADC counter after reboot is not
+            # mistaken for unsigned wrap within one grasp.
+            or ("boot_id" in force and not _uint(force["boot_id"], 0xffffffff))
+            or not _bool(force.get("valid"))
+            or force.get("calibrated") is not False):
+        raise ValueError("Invalid uncalibrated FSR sample")
+
+    if (not _sint(climate.get("temp_centi"), -4500, 13000)
+            or not _uint(climate.get("rh_centi"), 10000)
+            or not _bool(climate.get("valid"))
+            or (climate.get("seq") is not None and (
+                not _uint(climate["seq"], 0xffffffff)
+                or (climate["valid"] and climate["seq"] == 0)
+            ))
+            or (climate.get("age_ms") is not None and (
+                not _uint(climate["age_ms"], 0xffffffff)
+                or (climate["valid"] and climate["age_ms"] >= 1000)
+            ))):
+        raise ValueError("Invalid SHT41 climate sample")
+
+    if (not _uint(power.get("cell_mv"), 4500)
+            or not _uint(power.get("soc_centi"), 10000)
+            or not _uint(power.get("bus_mv"), 40959)
+            or not _sint(power.get("shunt_uv"), -81920, 81920)
+            or not _bool(power.get("fuel_valid"))
+            or not _bool(power.get("monitor_valid"))
+            or power.get("current_calibrated") is not False):
+        raise ValueError("Invalid uncalibrated battery or shunt source")
+    # Missing sequence is accepted for old read-only firmware, but cannot
+    # trigger proactive low-battery speech on the Mac.
+    fuel_seq = power.get("fuel_seq")
+    if fuel_seq is not None and (
+        not _uint(fuel_seq, 0xffffffff)
+        or (power["fuel_valid"] and fuel_seq == 0)
+    ):
+        raise ValueError("Invalid MAX17048 fuel acquisition provenance")
+    # Optional until an inspected 5mOhm Kelvin sensor and matching WROOM
+    # firmware actually exist. Raw calculated milliamp telemetry is not a
+    # calibrated battery ammeter or charging authorization.
+    current_fields = ("pack_ma", "pack_valid", "pack_seq")
+    if any(key in power for key in current_fields):
+        if (not all(key in power for key in current_fields)
+                or not _sint(power["pack_ma"], -16384, 16384)
+                or not _bool(power["pack_valid"])
+                or not _uint(power["pack_seq"], 0xffffffff)
+                or (power["pack_valid"] and (
+                    not power["monitor_valid"] or power["pack_seq"] == 0
+                    or not -81920 < power["shunt_uv"] < 81920
+                    or power["pack_ma"] != int(power["shunt_uv"] / 5)))
+                or (not power["pack_valid"] and power["pack_ma"] != 0)):
+            raise ValueError("Invalid INA226 pack-line current provenance")
+
+    if (not _uint(proximity.get("raw"), 255)
+            or not _bool(proximity.get("valid"))
+            or not _uint(proximity.get("gesture"), 4)
+            or not _uint(proximity.get("gesture_events"), 0xffffffff)
+            or proximity.get("physically_qualified") is not False):
+        raise ValueError("Invalid APDS9960 source")
+    bmp = data.get("bmp280")
+    if bmp is not None:
+        if (not isinstance(bmp, dict)
+                or not _bool(bmp.get("present"))
+                or not _bool(bmp.get("valid"))
+                or not _uint(bmp.get("chip_id"), 255)
+                or not _sint(bmp.get("temp_centi"), -4000, 8500)
+                or not _uint(bmp.get("pressure_pa"), 120000)
+                or bmp.get("physically_verified") is not False
+                or (bmp.get("seq") is not None and (
+                    not _uint(bmp["seq"], 0xffffffff)
+                    or (bmp["valid"] and bmp["seq"] == 0)
+                ))
+                or (bmp.get("age_ms") is not None and (
+                    not _uint(bmp["age_ms"], 0xffffffff)
+                    or (bmp["valid"] and bmp["age_ms"] >= 2000)
+                ))
+                or (bmp["valid"] and (not bmp["present"]
+                    or bmp["chip_id"] != 0x58
+                    or not 30000 <= bmp["pressure_pa"] <= 120000))
+                or (not bmp["valid"] and (
+                    bmp["pressure_pa"] != 0 or bmp["temp_centi"] != 0))):
+            raise ValueError("Invalid optional BMP280 ambient sample")
+    dock = data.get("dock")
+    if dock is not None:
+        if (not isinstance(dock, dict)
+                or any(not _bool(dock.get(key)) for key in (
+                    "present", "valid", "left_seated", "right_seated",
+                    "input_good", "charge_indicated",
+                ))
+                or dock.get("charging_verified") is not False
+                or not _uint(dock.get("seq"), 0xffffffff)
+                or not _uint(dock.get("age_ms"), 0xffffffff)
+                or (dock["valid"] and (
+                    not dock["present"] or dock["seq"] == 0
+                    or dock["age_ms"] >= 500))
+                # Independent CHG-low / PGOOD-high is a real electrical
+                # contradiction to report, not a malformed JSON frame.
+                # The read-only dock classifier labels it a fault and no
+                # physical or charging privilege can come from this telemetry.
+                or (not dock["valid"] and any(dock[key] for key in (
+                    "left_seated", "right_seated", "input_good",
+                    "charge_indicated",
+                )))):
+            raise ValueError("Invalid optional read only dock pin status")
+    nfc = data.get("nfc")
+    if nfc is not None:
+        if (not isinstance(nfc, dict) or type(nfc.get("v")) is not bool
+                or not _uint(nfc.get("t"), 0xffffffff)
+                or not _uint(nfc.get("e"), 0xffffffff)
+                or not _uint(nfc.get("s"), 0xffffffff)
+                or (nfc["v"] and nfc["s"] == 0)
+                or (nfc["t"] != 0 and not nfc["v"])):
+            raise ValueError("Invalid read only PN532 toy tag evidence")
+    return data

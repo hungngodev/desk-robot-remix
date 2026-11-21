@@ -28,11 +28,90 @@ digitally to all the other histories. One transmission at a time, with all
 participating microphones suppressed during coordinated speech. Stop/disconnect
 paths are tested; measured sound/playback timing still needs physical tests.
 
-Try a bounded word game with the local models after real speech setup, e.g.
-“Take turns naming a new animal; do not repeat a previous animal.” This is a
-conversation prompt, not a deterministic game referee. Autonomous chasing,
-collision avoidance, object handoff and camera-grounded group chat are not
-implemented. Pickup remains a separate supervised, camera-guided job.
+## Optional witnessed versus told peer memories
+
+The existing Mac `PetController` can now propagate **text-only** camera scene
+changes and touch events to each of the five private local SQLite databases.
+Every observation has one event ID and one source robot. The observing pet keeps
+`witnessed=true`; the other four store `witnessed=false` with
+`source_robot` identifying the reporting pet. The existing conversational
+memory builder tells a pet whether it witnessed a fact or was told by a peer.
+This does not pretend five cameras saw the exact same thing.
+
+To enable sharing explicitly, set `fleet_text_sharing_enabled = true` at the
+top of a private `config/local.toml`, not inside an individual robot section.
+The default and the public example are `false` to protect room privacy.
+The separate `fleet_text_auto_fanout_enabled` switch defaults to `true`,
+preserving automatic sharing **only after** the operator enables text sharing.
+For strictly selective memory transfer, set `fleet_text_sharing_enabled = true`
+and `fleet_text_auto_fanout_enabled = false`: new observations stay on their
+witness robot until an operator copies a particular event to a named peer.
+This still never grants any motion authority.
+Neither images, audio, video files, raw model prompts nor motor permissions are
+propagated between heads; the shared Mac only persists a bounded observation
+description. Only a separately enabled robot's camera or touch produces its
+own firsthand observation. If five cameras see a change at once, they still
+have individually witnessed events, while the existing global speech owner
+serializes responses and applies spontaneous cooldown.
+
+### Operator selected one event relay, recovered from historical PR #4
+
+With `fleet_text_sharing_enabled = true`, an operator may copy **one already
+witnessed text memory** to one named peer rather than relying only on the
+automatic fleet fanout. Reuse the existing Mac authenticated API; do not add
+another peer database, network bus, camera stream or speech worker.
+
+```sh
+# List robot 01's recent private text memories to obtain an event ID.
+curl http://127.0.0.1:8765/v1/pet/robot-01/memories?limit=12 \
+  -H "Authorization: Bearer $DESK_ROBOT_API_TOKEN"
+
+# Copy one already witnessed event to robot 03.
+curl -X POST http://127.0.0.1:8765/v1/pet/robot-01/share \
+  -H "Authorization: Bearer $DESK_ROBOT_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"to_robot":"robot-03","event_id":"<existing-event-id>"}'
+```
+
+Supply an actual `event_id` from the operator-only read-only memories endpoint.
+It exposes bounded text and original source/witness tags, not JPEG or audio. An operator credential is mandatory; a model/tool
+token alone cannot share. Repeating the same event to that peer is idempotent:
+`stored=false` means no new copy was created. Each original local observation
+remains `witnessed=true` only for its own camera or touch; the recipient stores
+the same text, origin and observation timestamp with `witnessed=false`.
+When auto fanout has already delivered that event, a manual share does not
+duplicate it.
+
+The former PR #4 could reforward secondhand stories with an explicit teller
+chain. Our current schema preserves **origin identity** but does not store
+intermediate tellers; to avoid falsified provenance, manual relay only accepts
+firsthand source records until teller-chain support is properly designed.
+Sharing does not speak, move, rearm or make recipients claim they saw a scene.
+
+This is implemented host software with provenance tests, not measured five-head
+optical overlap, physical Wi-Fi load or acoustics. `fleet_text_sharing_enabled`
+should be enabled only when the user explicitly chooses local peer memory
+sharing and understands these memories persist in the Mac private directory.
+
+
+The Mac now supports **explicitly consented, event-triggered two-pet social
+dialogue** as well as manually requested two-to-five-pet conversation. Set
+`fleet_text_sharing_enabled = true` and
+`fleet_social_autonomy_enabled = true` together in the private hardware config
+after confirming that every participating head can be interrupted by real
+Xiaozhi VAD. The source selects a quiet, enabled peer for a recent witnessed
+key, candy, object, hand-wave, petting or NFC event, rotates eligible partners,
+uses the existing exclusive speaker lease, and limits the exchange to two turns.
+The listening pet is told explicitly which peer witnessed the event and must
+not pretend it saw that scene. A separate cooldown suppresses repetitive
+invitations. Default consent stays false; see
+[the authoritative multimedia and social contract](multimodal-voice-video-orchestration.md).
+
+A word game such as “Take turns naming an animal without repetition” is still
+only a prompted language activity, **not** a deterministic scored game referee.
+The software does not currently prove autonomous collision-safe chasing,
+coordinated physical object handoff, visually verified joint manipulation or
+a physical five-head acoustic trial. Pickup remains separately supervised.
 
 ## Identities and setup after one passes
 
@@ -60,7 +139,7 @@ uv run desk-robot --config config/local.toml secrets --add-missing
 ```
 
 Values stay in ignored `config/local.env`, permissions 0600, hidden from output.
-**Sense now compiles, but physical peripheral/fit tests remain.** After it is
+**The Sense source build target exists, but the latest GitHub Actions run never reached the compiler, and physical peripheral/fit tests remain open.** After it is
 qualified, prepare each head using its own configured identity,
 rebuilding one private binary at a time; see [firmware builds](build.md):
 
@@ -107,10 +186,35 @@ Exact owned board/bank counts and five-unit delivered costs are unresolved. Use
 
 ## Planned initiative, not only replies
 
-The [active-pet plan](../plans/2026-11-03-active-desk-pet.md) adds local idle eyes
-and a Mac event scheduler: curiosity, rest, attention requests, bounded exploration
-and peer invitations. Distinct per-ID persistent memories and cooldowns avoid
-identity mixups and endless peer chatter. Start stationary, then human-enabled
-short motion; stops/faults/lease expiry cancel queued activity with no auto-resume.
-RoboEyes is GPL3 and needs an ESP-IDF adapter. No new face/pet/cliff code is
-implemented by the documentation update.
+The [original active-pet plan](../plans/2026-11-03-active-desk-pet.md) is
+historical design context. The present implementation has the Mac witnessed
+event and bounded social initiation gate, sensor-triggered camera capture, five
+independent memories and the pinned Stackchan OLED state machine. It is **not**
+an unconditionally awake or physically qualified animal-like robot: spontaneous
+speech requires live authenticated Xiaozhi human-turn monitoring, opt-in,
+fresh source evidence, available speech floor and cooldown. A model must never
+command autonomous movement based on a social prompt. RoboEyes GPL3 is not
+bundled or imported. The unbuilt power path and mechanical assembly still
+prevent a claim of assembly-only readiness.
+
+
+## Persistent operator-enabled exploration using the existing body controller
+
+The Mac `POST /v1/robots/{robot_id}/explore` endpoint now starts an explicitly
+operator approved, persistent exploration job after the normal one-use permit.
+It never renews a two-minute operator token. It reuses the existing Coordinator
+one-runner-per-robot, head camera snapshot, WROOM 100ms pulse, 500ms watchdog,
+local five-channel cliff stop, touch interlock and IMU heartbeat; it stops to
+reobserve after each pulse. A disarm, status failure, missing forward clearance,
+pressed touch, local stop, quiet mode or network loss cancels the job. `/stop`
+remains callable with the authenticated tool token, so voice stop can preempt
+exploration. Only one hardware moving job is admitted across the fleet.
+
+For actual hardware, `exploration_qualified` defaults to false and physical
+operation is refused until swept-path, side-obstacle, wheel-slip and stopping
+trials support enabling it. The initial compiled navigation uses short forward
+segments only. Reverse and turns are not silently inferred safe from a single
+forward optical beam. Full autonomous route choice remains part of the complete
+product requirement and needs verified swept-space coverage and state estimation
+before enabling unrestricted traversals. The simulation tests persistent
+start/stop and recovery logic; they do not establish that desk navigation is safe.

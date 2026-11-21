@@ -13,6 +13,17 @@ struct FloorInterval {
   std::uint16_t max_mm = 0;
 };
 
+// Read-only measurement diagnostics, never a motor permission or calibration.
+// Missing readings have present=false. Invalid or stale readings retain raw
+// distance and age for diagnosis; valid means fresh under the active local
+// policy, never physical motor permission.
+struct RangeDiagnostic {
+  bool present = false;
+  bool valid = false;
+  std::uint16_t distance_mm = 0;
+  std::uint32_t age_ms = 0;
+};
+
 // Values are per-robot measured qualification inputs, not universal thresholds.
 // No calibrated configuration or sample is supplied by default.
 struct CliffConfig {
@@ -48,8 +59,10 @@ class CliffGuard {
   bool evaluate(std::uint32_t now_ms);
   bool try_rearm(std::uint32_t now_ms);
   bool configured() const { return configured_; }
+  const CliffConfig& configuration() const { return config_; }
   CliffFault fault() const { return fault_; }
   std::uint8_t fault_sensor() const { return fault_sensor_; }
+  RangeDiagnostic diagnostic(std::uint8_t channel, std::uint32_t now_ms) const;
   static const char* fault_name(CliffFault fault);
 
  private:

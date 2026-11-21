@@ -21,6 +21,13 @@ class Calibration(BaseModel):
     lifted_roi_px: tuple[float, float, float, float]
     grip_open: int = Field(default=60, ge=60, le=120)
     grip_closed: int = Field(default=110, ge=60, le=120)
+    # Configure measured FSR on ADS1115 channel 1 before a real grip.
+    grip_force_delta_raw: int | None = Field(default=None, ge=50, le=20000)
+    grip_force_limit_raw: int | None = Field(default=None, ge=100, le=30000)
+    grip_force_sign: int = Field(default=1)
+    # WROOM permits at most four servo degrees per completed jaw conversion.
+    # Do not let the Mac assume a larger physical angle than firmware moved.
+    grip_step_deg: int = Field(default=4, ge=1, le=4)
     lift_down: int = Field(default=60, ge=60, le=120)
     lift_up: int = Field(default=110, ge=60, le=120)
     alignment_tolerance_mm: float = Field(default=8, gt=0, le=30)
@@ -48,6 +55,15 @@ class Calibration(BaseModel):
             or not (0 <= a < c <= self.image_width and 0 <= b < d <= self.image_height)
         ):
             raise ValueError("Work area and lifted ROI must be valid rectangles")
+        if self.grip_force_sign not in {-1, 1}:
+            raise ValueError("FSR polarity must be 1 or -1")
+        if (self.grip_force_delta_raw is None) != (self.grip_force_limit_raw is None):
+            raise ValueError("Measured gripper contact and upper limit must both be set")
+        if (self.grip_force_delta_raw is not None
+                and self.grip_force_limit_raw <= self.grip_force_delta_raw):
+            raise ValueError("Gripper force ceiling must exceed contact threshold")
+        if self.grip_open == self.grip_closed:
+            raise ValueError("Gripper open and close cannot be identical")
         if self.turn_sign not in {-1, 1} or self.forward_sign not in {-1, 1}:
             raise ValueError("Motor polarity signs must be -1 or 1")
         if not self.within(self.grip_ground_mm):

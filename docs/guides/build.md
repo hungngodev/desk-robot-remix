@@ -2,22 +2,33 @@
 
 These commands build files. **Nothing in setup automatically flashes hardware.**
 
-Updated 2026-11-03: this guide preserves earlier tested targets. Sense and stepper build selectors now exist; portable fault policy is tested,
-but ToF I/O/calibration and pet mode remain unfinished. See
-[firmware progress](firmware-foundation.md). Follow
-the [new implementation plan](../plans/2026-11-03-active-desk-pet.md) for that work.
-The body target is classic ESP32-WROOM-32. The compiled head reference is **Freenove N16R8 with separate OLED/audio
-modules**; select it explicitly with `--board modular`. The proposed XIAO ESP32S3 Sense is not compatible with this pin map or binary;
-its PDM microphone, SSD1306 and 8 MB target are separately implemented.
-CoreS3 is an earlier reference with its own build copy. See the
-[modular-head guide](modular-head.md) for parts/case and hardware checks. Do not
-flash CoreS3 images onto Freenove, or S3 images onto WROOM.
+**Current hardware source, November 21, 2026:** This guide retains the
+historical Freenove modular and CoreS3 sections below as references only.
+The selected first robot uses **XIAO ESP32S3 Sense** for Xiaozhi audio,
+streaming camera and OLED, and the **ESP32 WROOM** for independent local
+motion safety. The default body build is now `esp32_full`, not the old
+`esp32_stepper` bench profile. The eight cheap VL53L0X channels have
+source drivers, but real optics, 3.3 V carriers, calibration, braking and
+hardware motor cutoff are unqualified. Firmware compilation is **not**
+permission to move, flash with motors connected, print the final chassis
+or energize dock contacts.
 
-## Body — guarded stepper default and explicit legacy DC
+For printable parts, initial physical measurements and the known protected
+battery/chassis mismatch, begin at [Fusion one robot assembly](../cad/FUSION_ONE_ROBOT_ASSEMBLY.md).
+For actual signal assignments use [generated one robot harness](../hardware/one-robot-signal-harness.generated.md),
+and for full operating restrictions use [firmware progress](firmware-foundation.md).
+Do not use historical Freenove/CoreS3 configurations for the selected Sense head.
 
-The default build is now `esp32_stepper`, with eight phase outputs and guarded
-control. It has no ToF I/O/calibration supplied, so it refuses arming. Use explicit
-`-e esp32dev` only for the legacy DC allocation; never connect it to stepper wiring.
+## Current WROOM builds, with motion disabled until physical qualification
+
+`code/firmware/body/platformio.ini` defaults to `esp32_full`, the full eight
+VL53L0X sensor and 28BYJ48/ULN2003 guarded profile with independent
+motor-power cutoff **unqualified and disabled**. `-e esp32_dc_full` is a separate
+full sensor alternative for N20/DRV8833, requiring the independent
+CD74HC123 cutoff and actual electrical, thermal and braking tests. Do not
+substitute either motor/harness on the other profile. `-e esp32_stepper` is a
+historical five critical sensor bench profile; `-e esp32dev` is an old DC
+reference. Neither alternative is automatically the selected final drivetrain.
 
 From the repository root, enter `code/` before running the build commands.
 
@@ -69,7 +80,7 @@ ctest --test-dir ../.tools/body-host --output-on-failure
 ```
 
 On this Mac, the installed compiler needed its existing SDK C++ include path:
-`export CPLUS_INCLUDE_PATH="$(xcrun --show-sdk-path)/usr/include/c++/v1"`.
+`export CPLUS_INCLUDE_PATH="$(xcrun --show-sdk-path)/usr/include/c++/v1"`. The head native test harness now probes this SDK include path automatically on macOS when no explicit `CPLUS_INCLUDE_PATH` was supplied; the manual setting remains useful for other direct compiler commands.
 This is a per-terminal workaround, not a global configuration change.
 
 ## Shared head build environment
@@ -88,6 +99,26 @@ Do not substitute IDF5.
 The build helper seeds and verifies `firmware/head/dependencies.lock` in each
 build copy. It rejects a changed dependency lock. Keep the two board copies
 separate so that overlay changes and binaries retain their actual board identity.
+
+## Selected XIAO ESP32S3 Sense head
+
+These existing commands configure and compile only the selected XIAO Sense
+overlay. From `code/`, after pinning and restoring its supported ESP-IDF 6.1
+SDK and project local toolchain described above:
+
+```sh
+python3 scripts/restore_upstreams.py
+python3 firmware/head/install_overlay.py --board sense --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi-sense
+bash scripts/build_head.sh --board sense
+```
+
+This default verification build has no private head credential and is not
+a functional consented speech or camera deployment. The operator must first
+qualify actual USB board identity, 3.3 V pin levels, camera, PDM mic,
+MAX98357A speaker wiring, OLED and local WiFi. Keep motor and charger
+power physically disconnected during that head bench test. No robot was
+flashed or qualified by writing these commands. See
+[Sense board connections](../../code/firmware/head/sense/README.md).
 
 ## Modular S3 head — historical Freenove reference
 

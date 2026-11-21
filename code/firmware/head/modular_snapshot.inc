@@ -5,9 +5,16 @@ std::expected<std::vector<uint8_t>, std::string> Esp32Camera::SnapshotJpeg() {
     if (!Capture() || !current_fb_ || !current_fb_->buf || !current_fb_->len)
         return std::unexpected("Fresh camera capture failed");
     if (current_fb_->format == PIXFORMAT_JPEG) {
-        if (current_fb_->len < 4 || current_fb_->len > 512 * 1024)
-            return std::unexpected("Invalid camera JPEG size");
-        return std::vector<uint8_t>(current_fb_->buf, current_fb_->buf + current_fb_->len);
+        // Native sensor JPEG is already compressed. Copy its bounded bytes
+        // while Capture owns the frame buffer; never run an RGB565 encoder
+        // on the microphone-sensitive Sense path. Reject truncated JPEGs.
+        const size_t len = current_fb_->len;
+        const uint8_t* buf = current_fb_->buf;
+        if (len < 4 || len > 512 * 1024 ||
+            buf[0] != 0xff || buf[1] != 0xd8 ||
+            buf[len - 2] != 0xff || buf[len - 1] != 0xd9)
+            return std::unexpected("Invalid camera JPEG frame");
+        return std::vector<uint8_t>(buf, buf + len);
     }
     // The board uses RGB565. Capture prepares the same byte-swapped buffer
     // used by the upstream Explain encoder, preserving camera color handling.

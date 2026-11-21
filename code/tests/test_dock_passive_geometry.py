@@ -1,0 +1,247 @@
+"""Source-level invariants for the unpowered passive docking fit coupon.
+
+These checks do not qualify printed dimensions or powered charging.
+"""
+import re
+from pathlib import Path
+
+SOURCE = (
+    Path(__file__).resolve().parents[2]
+    / "docs/cad/remixes/dock/dock_passive_fit.scad"
+)
+
+
+def test_dock_rail_preserves_selected_straight_channel_and_entry_flare():
+    source = SOURCE.read_text()
+    def value(name):
+        match = re.search(r"^" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*;", source, re.M)
+        assert match is not None, name
+        return float(match.group(1))
+
+    track = value("track_outer_width_mm")
+    clearance = value("side_clearance_each_mm")
+    wall = value("guide_wall_mm")
+    margin = value("wall_outside_margin_mm")
+    flare = value("entry_flare_each_mm")
+    assert wall > 0 and margin >= flare
+    channel = track + 2 * clearance
+    inner_x = wall + margin
+    outside = channel + 2 * inner_x
+    # Geometric clearance is between opposing rail INNER faces.
+    assert abs((outside - 2 * inner_x) - channel) < 1e-6
+    # At y=0 both rail faces shift OUTWARD equally, preserving wall thickness.
+    assert "[inner_wall_x - guide_wall_mm - entry_flare_each_mm, 0]" in source
+    assert "[inner_wall_x - entry_flare_each_mm, 0]" in source
+    assert "[inner_wall_x, 37]" in source
+    assert "[inner_wall_x - guide_wall_mm, 37]" in source
+    assert (outside - 2 * (inner_x - flare)) > channel
+    assert "intersection()" in source
+    assert "dock_rail_entry_coupon()" in source
+
+
+def test_dock_geometry_remains_explicitly_passive():
+    source = SOURCE.read_text()
+    assert "never an energized charging cradle" in source
+    assert "Nominal dimensions are an example, not measured robot fit" in source
+    assert "no AprilTag, stop or charging contacts" in source
+
+
+def test_dock_mesh_clearances_with_openscad(tmp_path):
+    """Measure actual exported triangles, not only matching SCAD expressions."""
+    import shutil
+    import struct
+    import subprocess
+
+    import pytest
+
+    openscad = shutil.which("openscad")
+    if not openscad:
+        pytest.skip("OpenSCAD not installed on this runner")
+    target = tmp_path / "entry.stl"
+    subprocess.run(
+        [openscad, "--export-format", "binstl", "-o", str(target),
+         "-D", 'part="dock_rail_entry_coupon"', str(SOURCE)],
+        check=True, capture_output=True, text=True, timeout=180,
+    )
+    data = target.read_bytes()
+    count = struct.unpack_from("<I", data, 80)[0]
+    assert count > 0 and len(data) == 84 + 50 * count
+    points = [
+        struct.unpack_from("<fff", data, 84 + 50 * i + 12 + 12 * corner)
+        for i in range(count)
+        for corner in range(3)
+    ]
+    lows = [min(vertex[axis] for vertex in points) for axis in range(3)]
+    highs = [max(vertex[axis] for vertex in points) for axis in range(3)]
+    # Do not lock the fit check to the provisional 96 mm track example.
+    # Measured robot widths must be able to change without disabling tests.
+    source = SOURCE.read_text()
+    def parameter(name):
+        match = re.search(
+            r"^" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*;",
+            source, re.M,
+        )
+        assert match is not None, name
+        return float(match.group(1))
+
+    width = parameter("track_outer_width_mm")
+    clearance = parameter("side_clearance_each_mm")
+    wall = parameter("guide_wall_mm")
+    margin = parameter("wall_outside_margin_mm")
+    flare = parameter("entry_flare_each_mm")
+    base = parameter("base_thickness_mm")
+    height = parameter("guide_height_mm")
+    coupon_length = parameter("entry_coupon_length_mm")
+    inner_x = wall + margin
+    outside = width + 2 * clearance + 2 * inner_x
+    assert all(abs(a - b) < 0.01 for a, b in zip(
+        lows, (0, 0, 0), strict=True,
+    ))
+    assert all(abs(a - b) < 0.01 for a, b in zip(
+        highs, (outside, coupon_length, base + height), strict=True,
+    ))
+    # At y=0 both inner guide faces flare OUTWARD. Beyond the flare,
+    # each wall must have its original thickness and measured clearance.
+    for y, left_inner in (
+        (0, inner_x - wall - flare),
+        (37, inner_x - wall),
+    ):
+        expected = [
+            left_inner,
+            left_inner + wall,
+            outside - left_inner - wall,
+            outside - left_inner,
+        ]
+        xs = sorted({
+            round(x, 3) for x, yy, z in points
+            if abs(yy - y) < 0.001 and z > base + 0.001
+        })
+        assert len(xs) == 4
+        assert all(abs(a - b) < 0.01 for a, b in zip(
+            xs, expected, strict=True,
+        ))
+        assert abs((xs[2] - xs[1]) - (
+            width + 2 * clearance + (2 * flare if y == 0 else 0)
+        )) < 0.01
+
+
+def test_real_track_measurement_override_preserves_rail_clearance(tmp_path):
+    """A custom measured track width changes the guide, not rail thickness."""
+    import shutil
+    import struct
+    import subprocess
+
+    import pytest
+
+    executable = shutil.which("openscad")
+    if executable is None:
+        pytest.skip("OpenSCAD not installed")
+    output = tmp_path / "measured_track_entry.stl"
+    subprocess.run([
+        executable, "--export-format", "binstl", "-o", str(output),
+        "-D", 'part="dock_rail_entry_coupon"',
+        "-D", "track_outer_width_mm=112", str(SOURCE),
+    ], check=True, capture_output=True, text=True, timeout=180)
+    blob = output.read_bytes()
+    faces = struct.unpack_from("<I", blob, 80)[0]
+    assert len(blob) == 84 + faces * 50
+    points = [
+        struct.unpack_from("<fff", blob, 84 + i * 50 + 12 + j * 12)
+        for i in range(faces) for j in range(3)
+    ]
+    assert max(p[0] for p in points) == 142
+    for y, expected in ((0, (1, 6, 136, 141)),
+                        (37, (8, 13, 129, 134))):
+        xs = sorted({
+            round(x, 3) for x, yy, z in points
+            if abs(yy - y) < .001 and z > 3.001
+        })
+        assert xs == list(expected)
+    # Measured 112 mm tracks + 2 mm each side gives 116 mm straight opening.
+    assert 129 - 13 == 116
+
+
+def test_passive_dock_beacon_pair_coupon_preserves_tag_quiet_zone(tmp_path):
+    """Real STL triangles prove two open, symmetric unpowered trial holes."""
+    import shutil
+    import struct
+    import subprocess
+
+    import pytest
+
+    openscad = shutil.which("openscad")
+    if openscad is None:
+        pytest.skip("OpenSCAD not installed")
+    output = tmp_path / "ir_pair.stl"
+    subprocess.run([
+        openscad, "--export-format", "binstl", "-o", str(output),
+        "-D", 'part="dock_ir_pair_position_coupon"', str(SOURCE),
+    ], check=True, capture_output=True, text=True, timeout=120)
+    data = output.read_bytes()
+    n = struct.unpack_from("<I", data, 80)[0]
+    assert n > 0 and len(data) == 84 + 50*n
+    faces = [
+        tuple(struct.unpack_from("<fff", data, 84+50*i+12+12*j)
+              for j in range(3)) for i in range(n)
+    ]
+    vertices = [p for face in faces for p in face]
+    assert tuple(min(p[k] for p in vertices) for k in range(3)) == (0, 0, 0)
+    assert tuple(max(p[k] for p in vertices) for k in range(3)) == (
+        126, 16, 3
+    )
+    # The full CSG top surface should not bridge over either opening.
+    def top_face_covers(x, y, triangle):
+        a, b, c = triangle
+        if not all(abs(p[2]-3) < .001 for p in triangle):
+            return False
+        denominator = ((b[1]-c[1])*(a[0]-c[0])
+                       + (c[0]-b[0])*(a[1]-c[1]))
+        if abs(denominator) < 1e-8:
+            return False
+        u = ((b[1]-c[1])*(x-c[0]) + (c[0]-b[0])*(y-c[1]))/denominator
+        v = ((c[1]-a[1])*(x-c[0]) + (a[0]-c[0])*(y-c[1]))/denominator
+        return min(u, v, 1-u-v) > 1e-6
+    for x in (14, 112):
+        assert not any(top_face_covers(x, 8, face) for face in faces)
+    # A too-close transmitter spacing would carve into the tag white margin.
+    invalid = subprocess.run([
+        openscad, "--export-format", "binstl", "-o",
+        str(tmp_path / "bad.stl"), "-D",
+        'part="dock_ir_pair_position_coupon"', "-D",
+        "ir_pair_spacing_mm=65", str(SOURCE),
+    ], capture_output=True, text=True, timeout=120)
+    assert "IR aperture overlaps AprilTag quiet paper margin" in (
+        invalid.stderr + invalid.stdout
+    )
+
+
+def test_dock_shell_print_commands_use_one_continuation_escape():
+    """Copying each two-line OpenSCAD command must pass the -D argument."""
+    guide = SOURCE.parent / "README.md"
+    commands = [
+        line for line in guide.read_text(encoding="utf-8").splitlines()
+        if line.startswith("openscad --export-format")
+    ]
+    assert len(commands) == 2
+    assert all(line.endswith(chr(92)) and
+               not line.endswith(chr(92) * 2) for line in commands)
+    assert 'part="dock_rail_entry_coupon"' in guide.read_text()
+    assert 'part="dock_ir_pair_position_coupon"' in guide.read_text()
+
+
+def test_dock_assembly_requires_independent_seating_and_ir_measurements():
+    """Optical beacon placement must not silently imply dock electrical seating."""
+    root = Path(__file__).resolve().parents[2]
+    sheet = (root / "docs/cad/FUSION_MEASUREMENT_SHEET.md").read_text(
+        encoding="utf-8"
+    )
+    guide = (root / "docs/cad/FUSION_ONE_ROBOT_ASSEMBLY.md").read_text(
+        encoding="utf-8"
+    )
+    assert "dock_ir_spacing" in sheet and "ir_left_z" in sheet
+    assert "ir_right_z" in sheet and "ir_yaw" in sheet
+    assert "dock_seat_left" in sheet and "dock_seat_right" in sheet
+    assert "dock_seat_overtravel" in sheet
+    assert "dock_ir_pair_position_coupon" in guide
+    assert "two electrically independent fail-closed seat switches" in guide
+    assert "decoded IR are not seat" in guide

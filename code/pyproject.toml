@@ -12,6 +12,7 @@ dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "httpx>=0.27,<1", "nump
 [project.optional-dependencies]
 vision = ["ultralytics>=8.3,<9", "opencv-python>=4.10,<5"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "ruff>=0.11,<1", "aiohttp>=3.12,<4", "pyserial>=3.5,<4"]
+room = ["pyserial>=3.5,<4"]
 
 [project.scripts]
 desk-robot = "desk_robot.cli:main"

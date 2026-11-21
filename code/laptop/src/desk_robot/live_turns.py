@@ -68,9 +68,18 @@ class ObservationRequest:
 
 
 def _seconds(value: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("Use finite monotonic seconds")
-    return float(value)
+    # A huge Python int can OverflowError during float/isfinite conversion.
+    # Untrusted capture timestamps must fail as validation, not crash the
+    # owning event loop while a newer frame is waiting.
+    try:
+        seconds = float(value)
+    except OverflowError as exc:
+        raise ValueError("Use finite monotonic seconds") from exc
+    if not math.isfinite(seconds):
+        raise ValueError("Use finite monotonic seconds")
+    return seconds
 
 
 class LiveTurns:
@@ -136,11 +145,12 @@ class LiveTurns:
 
     def is_connection_current(self, connection_epoch: int) -> bool:
         """Recheck popped frames before sending to an external video transport."""
-        return self._connected and connection_epoch == self._connection_epoch
+        return (self._connected and type(connection_epoch) is int
+                and connection_epoch == self._connection_epoch)
 
     def is_current(self, epoch: int) -> bool:
         """Recheck popped chunks before sending; a device flush is still required."""
-        return self._connected and epoch == self._epoch
+        return self._connected and type(epoch) is int and epoch == self._epoch
 
     def _invalidate(self, reason: str) -> FlushPlayback:
         discarded = self._audio_bytes
@@ -152,6 +162,8 @@ class LiveTurns:
         return FlushPlayback(self._epoch, reason, discarded)
 
     def set_connected(self, connected: bool) -> FlushPlayback | None:
+        if type(connected) is not bool:
+            raise ValueError("Connection state must be a boolean")
         if connected == self._connected:
             return None
         self._connected = connected
@@ -245,12 +257,17 @@ class LiveTurns:
         """Reject old turn completions instead of marking a newer turn idle."""
         if not self.is_current(epoch):
             return False
+        if any(value is not None and type(value) is not bool
+               for value in (user, model, tool)):
+            raise ValueError("Busy ownership flags must be booleans")
         for role, value in (("user", user), ("model", model), ("tool", tool)):
             if value is not None:
                 self._busy[role] = value
         return True
 
     def set_quiet(self, quiet: bool) -> FlushPlayback | None:
+        if type(quiet) is not bool:
+            raise ValueError("Quiet mode must be a boolean")
         self._quiet = quiet
         if quiet and self._spontaneous_epoch is not None:
             return self._invalidate("quiet")
@@ -302,7 +319,9 @@ class LiveTurns:
         The adapter must keep model busy until playback is complete. This method
         alone does not mark generation or device playback idle.
         """
-        if epoch != self._pending_observation:
+        if (type(epoch) is not int or self._pending_observation is None
+                or not self.is_current(epoch)
+                or epoch != self._pending_observation):
             return False
         self._pending_observation = None
         return True

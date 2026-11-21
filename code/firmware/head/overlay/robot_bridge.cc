@@ -1,26 +1,44 @@
 #include "robot_bridge.h"
 
 #include <algorithm>
+#include <cstdio>
+#include "esp_random.h"
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string_view>
 #include <vector>
 
 #include "cJSON.h"
+#include "esp_camera.h"  // Existing esp32-camera sensor identity, no new capture owner.
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "mcp_server.h"
 #include "sdkconfig.h"
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)
+#include "sense_reference_codec.h"
+#endif
 
 namespace desk_robot {
 namespace {
 constexpr uart_port_t kUart = UART_NUM_1;
 constexpr int kTimeoutMs = 350;
-constexpr size_t kMaxReply = 768;
+constexpr size_t kMaxReply = 1920;  // WROOM 1800-byte JSON and worst-case 1726-byte status fit inside the 2048-byte UART RX ring
 constexpr size_t kMaxBody = 160;
 const char* kTag = "DeskRobotHead";
 using JsonPtr = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+struct BenchPcmTransfer {
+    httpd_req_t* req;
+    desk_robot::SensePcmWindow::Complete pcm;
+    uint32_t boot;
+    SenseReferenceCodec* codec;
+    uint64_t generation;
+};
+#endif
 JsonPtr Parse(const std::string& value) {
     return JsonPtr(cJSON_ParseWithLengthOpts(value.c_str(), value.size() + 1, nullptr, true), cJSON_Delete);
 }
@@ -32,22 +50,236 @@ std::string Encode(cJSON* value) {
     return result;
 }
 bool StatusValid(cJSON* json) {
-    if (!cJSON_IsObject(json) || !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(json, "armed"))) return false;
-    auto motor = cJSON_GetObjectItemCaseSensitive(json, "motor");
-    auto servo = cJSON_GetObjectItemCaseSensitive(json, "servo");
-    if (!cJSON_IsObject(motor) || !cJSON_IsObject(servo)) return false;
-    for (const char* name : {"m0", "m1"}) {
-        auto n = cJSON_GetObjectItemCaseSensitive(motor, name);
-        if (!cJSON_IsNumber(n) || n->valuedouble != n->valueint || n->valueint < -40 || n->valueint > 40) return false;
+    // A partial status can contain plausible motor numbers but omit local
+    // safety evidence. Reject it before forwarding sensory MCP observations.
+    const auto get = [](cJSON* parent, const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(parent, key);
+    };
+    const auto integer = [](cJSON* item, double low, double high) {
+        return cJSON_IsNumber(item) && std::isfinite(item->valuedouble) &&
+               item->valuedouble == std::floor(item->valuedouble) &&
+               item->valuedouble >= low && item->valuedouble <= high;
+    };
+    const auto array_of = [get, integer](
+        cJSON* obj, const char* key, int count, double low, double high) {
+        auto array = get(obj, key);
+        if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != count) return false;
+        for (int i = 0; i < count; ++i)
+            if (!integer(cJSON_GetArrayItem(array, i), low, high)) return false;
+        return true;
+    };
+    if (!cJSON_IsObject(json) || !cJSON_IsBool(get(json, "armed")) ||
+        !integer(get(json, "watchdog_ms"), 0, 500) ||
+        !integer(get(json, "protocol"), 2, 2)) return false;
+    auto motor = get(json, "motor");
+    auto servo = get(json, "servo");
+    auto safety = get(json, "safety");
+    auto ranges = get(json, "ranges");
+    auto touch = get(json, "touch");
+    auto imu = get(json, "imu");
+    auto side_ranges = get(json, "side_ranges");
+    if (!cJSON_IsObject(motor) || !cJSON_IsObject(servo) ||
+        !cJSON_IsObject(safety) || !cJSON_IsObject(ranges) ||
+        !cJSON_IsObject(touch) || !cJSON_IsObject(imu) ||
+        !cJSON_IsObject(side_ranges)) return false;
+    // Two independent status sections MUST agree on their source boot.
+    auto imu_boot = get(imu, "boot_id");
+    auto side_boot = get(side_ranges, "boot_id");
+    if (!integer(imu_boot, 0, 4294967295.0) ||
+        !integer(side_boot, 0, 4294967295.0) ||
+        imu_boot->valuedouble != side_boot->valuedouble) return false;
+    for (const char* name : {"m0", "m1"})
+        if (!integer(get(motor, name), -40, 40)) return false;
+    for (const char* name : {"lift", "grip", "lift_target", "grip_target"})
+        if (!integer(get(servo, name), 0, 180)) return false;
+    if (!cJSON_IsBool(get(servo, "attached"))) return false;
+    auto position_source = get(servo, "position_source");
+    if (!cJSON_IsString(position_source) || !position_source->valuestring ||
+        std::strcmp(position_source->valuestring, "commanded") != 0) return false;
+    auto fault = get(safety, "fault");
+    if (!cJSON_IsBool(get(safety, "required")) ||
+        !cJSON_IsBool(get(safety, "ready")) ||
+        !integer(get(safety, "sensor"), 0, 255) ||
+        !cJSON_IsString(fault) || !fault->valuestring ||
+        std::strlen(fault->valuestring) == 0 ||
+        std::strlen(fault->valuestring) > 48) return false;
+    auto present_mask = get(ranges, "present_mask");
+    auto valid_mask = get(ranges, "valid_mask");
+    if (!integer(present_mask, 0, 31) || !integer(valid_mask, 0, 31) ||
+        (valid_mask->valueint & ~present_mask->valueint) != 0 ||
+        !array_of(ranges, "mm", 5, 0, 65535) ||
+        !array_of(ranges, "age_ms", 5, 0, 4294967295.0)) return false;
+    for (int i = 0; i < 5; ++i) {
+        if ((valid_mask->valueint & (1 << i)) == 0) continue;
+        const double mm = cJSON_GetArrayItem(get(ranges, "mm"), i)->valuedouble;
+        const double age = cJSON_GetArrayItem(get(ranges, "age_ms"), i)->valuedouble;
+        if (mm < 30 || mm > 1300 || age >= 200) return false;
     }
-    for (const char* name : {"lift", "grip"}) {
-        auto n = cJSON_GetObjectItemCaseSensitive(servo, name);
-        if (!cJSON_IsNumber(n) || n->valuedouble != n->valueint || n->valueint < 0 || n->valueint > 180) return false;
-    }
-    auto watchdog = cJSON_GetObjectItemCaseSensitive(json, "watchdog_ms");
-    return cJSON_IsNumber(watchdog) && watchdog->valuedouble == watchdog->valueint &&
-           watchdog->valueint >= 0 && watchdog->valueint <= 500;
+    if (!cJSON_IsBool(get(touch, "active")) ||
+        !integer(get(touch, "count"), 0, 4294967295.0) ||
+        !cJSON_IsBool(get(imu, "valid")) ||
+        !integer(get(imu, "family"), 0, 4) ||
+        !array_of(imu, "acc", 3, -32768, 32767) ||
+        !array_of(imu, "gyro", 3, -32768, 32767) ||
+        !integer(get(imu, "age_ms"), 0, 4294967295.0))
+        return false;
+    // Validation is read-only; local WROOM latching remains authoritative.
+    return true;
 }
+
+bool OpticsValid(cJSON* json) {
+    // Same WROOM sample, not a second ToF driver or a motor permission.
+    const auto payload = cJSON_GetObjectItemCaseSensitive(json, "optics");
+    if (!cJSON_IsObject(payload)) return false;
+    const auto get = [payload](const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(payload, key);
+    };
+    const auto integer = [](cJSON* item, double max) {
+        return cJSON_IsNumber(item) && std::isfinite(item->valuedouble) &&
+               item->valuedouble == std::floor(item->valuedouble) &&
+               item->valuedouble >= 0 && item->valuedouble <= max;
+    };
+    const auto present = get("present_mask"), valid = get("valid_mask");
+    if (!integer(present, 255) || !integer(valid, 255) ||
+        (valid->valueint & ~present->valueint) != 0 ||
+        !cJSON_IsFalse(get("motor_authorized")) ||
+        !cJSON_IsFalse(get("physical_qualified"))) return false;
+    cJSON* amb = get("ambient_97");
+    cJSON* signal = get("signal_97");
+    cJSON* ages = get("age_ms");
+    if (!cJSON_IsArray(amb) || !cJSON_IsArray(signal) ||
+        !cJSON_IsArray(ages) || cJSON_GetArraySize(amb) != 8 ||
+        cJSON_GetArraySize(signal) != 8 || cJSON_GetArraySize(ages) != 8)
+        return false;
+    for (int i = 0; i < 8; ++i) {
+        auto age = cJSON_GetArrayItem(ages, i);
+        if (!integer(cJSON_GetArrayItem(amb, i), 65535) ||
+            !integer(cJSON_GetArrayItem(signal, i), 65535) ||
+            !integer(age, 4294967295.0)) return false;
+        if ((valid->valueint & (1 << i)) != 0 &&
+            (i < 5 ? age->valuedouble >= 200 :
+                     age->valuedouble > 350)) return false;
+    }
+    return true;
+}
+
+bool IrValid(cJSON* json) {
+    // Explicit read-only RMT evidence; a matching carrier is not enough to
+    // infer a bearing, permit a motor, or certify net cell charging.
+    if (!cJSON_IsObject(json)) return false;
+    const auto get = [json](const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(json, key);
+    };
+    const auto uint32 = [](cJSON* n) {
+        return cJSON_IsNumber(n) && std::isfinite(n->valuedouble) &&
+               n->valuedouble == std::floor(n->valuedouble) &&
+               n->valuedouble >= 0 && n->valuedouble <= 4294967295.0;
+    };
+    const auto left = get("left_valid");
+    const auto right = get("right_valid");
+    const auto matched = get("match");
+    const auto ls = get("left_seq"), rs = get("right_seq");
+    const auto la = get("left_age_ms"), ra = get("right_age_ms");
+    const auto code = get("code");
+    if (!cJSON_IsBool(left) || !cJSON_IsBool(right) ||
+        !cJSON_IsBool(matched) || !uint32(ls) || !uint32(rs) ||
+        !uint32(la) || !uint32(ra) || !uint32(code) ||
+        !cJSON_IsFalse(get("motor_authorized")) ||
+        !cJSON_IsFalse(get("charging_authorized")) ||
+        !cJSON_IsFalse(get("physical_qualified"))) return false;
+    if ((cJSON_IsTrue(left) && (ls->valuedouble == 0 || la->valuedouble > 200)) ||
+        (cJSON_IsTrue(right) && (rs->valuedouble == 0 || ra->valuedouble > 200)))
+        return false;
+    return !cJSON_IsTrue(matched) ||
+           (cJSON_IsTrue(left) && cJSON_IsTrue(right) &&
+            code->valuedouble > 0);
+}
+
+bool AuxValid(cJSON* json) {
+    if (!cJSON_IsObject(json)) return false;
+    auto group = [json](const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(json, key);
+    };
+    auto get = [](cJSON* parent, const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(parent, key);
+    };
+    auto bounded = [](cJSON* n, double low, double high) {
+        return cJSON_IsNumber(n) && std::isfinite(n->valuedouble) &&
+               n->valuedouble == std::floor(n->valuedouble) &&
+               n->valuedouble >= low && n->valuedouble <= high;
+    };
+    auto bounded_array = [get, bounded](cJSON* parent, const char* key,
+                                       int expected, double low, double high) {
+        auto array = get(parent, key);
+        if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != expected) return false;
+        for (int i = 0; i < expected; ++i)
+            if (!bounded(cJSON_GetArrayItem(array, i), low, high)) return false;
+        return true;
+    };
+    auto pulse = group("pulse");
+    auto angles = group("angles");
+    auto force = group("force");
+    auto climate = group("climate");
+    auto power = group("power");
+    auto proximity = group("proximity");
+    auto dock = group("dock");
+    if (!cJSON_IsObject(pulse) || !cJSON_IsObject(angles) ||
+        !cJSON_IsObject(force) || !cJSON_IsObject(climate) ||
+        !cJSON_IsObject(power) || !cJSON_IsObject(proximity)) return false;
+    if (!cJSON_IsBool(get(pulse, "present")) || !cJSON_IsBool(get(pulse, "valid")) ||
+        !cJSON_IsNull(get(pulse, "bpm")) || !cJSON_IsFalse(get(pulse, "medical")) ||
+        !bounded(get(pulse, "part_id"), 0, 255) ||
+        !bounded(get(pulse, "red"), 0, 262143) ||
+        !bounded(get(pulse, "ir"), 0, 262143) ||
+        !bounded(get(pulse, "age_ms"), 0, 4294967295.0) ||
+        (cJSON_IsTrue(get(pulse, "valid")) && !cJSON_IsTrue(get(pulse, "present"))))
+        return false;
+    auto present = get(angles, "present_mask");
+    auto valid = get(angles, "valid_mask");
+    if (!bounded(present, 0, 7) || !bounded(valid, 0, 7) ||
+        ((valid->valueint & ~present->valueint) != 0) ||
+        !bounded_array(angles, "raw", 3, 0, 4095) ||
+        !bounded_array(angles, "magnet", 3, 0, 56)) return false;
+    for (int i = 0; i < 3; ++i)
+        if ((valid->valueint & (1 << i)) &&
+            cJSON_GetArrayItem(get(angles, "magnet"), i)->valueint != 32)
+            return false;
+    if (!bounded_array(force, "adc", 2, -32768, 32767) ||
+        !bounded(get(force, "jaw_seq"), 0, 4294967295.0) ||
+        !cJSON_IsBool(get(force, "valid")) ||
+        !cJSON_IsFalse(get(force, "calibrated"))) return false;
+    if (!bounded(get(climate, "temp_centi"), -4500, 13000) ||
+        !bounded(get(climate, "rh_centi"), 0, 10000) ||
+        !cJSON_IsBool(get(climate, "valid"))) return false;
+    if (!bounded(get(power, "cell_mv"), 0, 4500) ||
+        !bounded(get(power, "soc_centi"), 0, 10000) ||
+        !bounded(get(power, "bus_mv"), 0, 40959) ||
+        !bounded(get(power, "shunt_uv"), -81920, 81920) ||
+        !cJSON_IsBool(get(power, "fuel_valid")) ||
+        !cJSON_IsBool(get(power, "monitor_valid")) ||
+        !cJSON_IsFalse(get(power, "current_calibrated"))) return false;
+    // Present only on new head/body builds. Previous versions stay read only.
+    if (dock) {
+        if (!cJSON_IsObject(dock) ||
+            !cJSON_IsBool(get(dock, "present")) ||
+            !cJSON_IsBool(get(dock, "valid")) ||
+            !cJSON_IsBool(get(dock, "left_seated")) ||
+            !cJSON_IsBool(get(dock, "right_seated")) ||
+            !cJSON_IsBool(get(dock, "input_good")) ||
+            !cJSON_IsBool(get(dock, "charge_indicated")) ||
+            !cJSON_IsFalse(get(dock, "charging_verified")) ||
+            (cJSON_IsTrue(get(dock, "charge_indicated")) &&
+             !cJSON_IsTrue(get(dock, "input_good"))))
+            return false;
+    }
+    if (!bounded(get(proximity, "raw"), 0, 255) ||
+        !cJSON_IsBool(get(proximity, "valid")) ||
+        !bounded(get(proximity, "gesture"), 0, 4) ||
+        !bounded(get(proximity, "gesture_events"), 0, 4294967295.0) ||
+        !cJSON_IsFalse(get(proximity, "physically_qualified"))) return false;
+    return true;
+}
+
 std::string Envelope(bool ok, const std::string& reply) {
     auto json = JsonPtr(cJSON_CreateObject(), cJSON_Delete);
     cJSON_AddBoolToObject(json.get(), "ok", ok);
@@ -67,10 +299,12 @@ bool ValidConfiguration() {
 }
 }  // namespace
 
-Bridge::Bridge(Camera* camera) : camera_(camera) {}
+Bridge::Bridge(Camera* camera, AudioCodec* audio_codec)
+    : camera_(camera), audio_codec_(audio_codec) {}
 
 void Bridge::Start() {
     enabled_ = ValidConfiguration();
+    boot_nonce_ = esp_random();
     if (!enabled_) {
         ESP_LOGW(kTag, "Robot API and movement tools disabled: configure unique ID and private token (32..128 characters)");
         return;
@@ -90,7 +324,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 3;
+    config.max_uri_handlers = 14;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -98,7 +332,20 @@ void Bridge::Start() {
         return;
     }
     for (const auto& entry : std::vector<std::pair<const char*, httpd_method_t>>{
-             {"/api/status", HTTP_GET}, {"/api/command", HTTP_POST}, {"/api/camera.jpg", HTTP_GET}}) {
+             {"/api/status", HTTP_GET}, {"/api/aux", HTTP_GET},
+             {"/api/ir", HTTP_GET}, {"/api/optics", HTTP_GET},
+             {"/api/command", HTTP_POST}, {"/api/face", HTTP_POST},
+             {"/api/camera.jpg", HTTP_GET},
+             {"/api/camera.mjpg", HTTP_GET},
+             {"/api/camera.identity", HTTP_GET},
+             {"/api/audio.reference", HTTP_GET}
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+             ,{"/api/audio.capture.start", HTTP_POST},
+             {"/api/audio.capture.abort", HTTP_POST},
+             {"/api/audio.capture.status", HTTP_GET},
+             {"/api/audio.capture.raw", HTTP_GET}
+#endif
+             }) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
         uri.method = entry.second;
@@ -114,11 +361,26 @@ void Bridge::Start() {
     AddTools();
 }
 
+bool Bridge::TakePersonCue() {
+    return person_cue_.take(
+        static_cast<std::uint32_t>(esp_timer_get_time() / 1000));
+}
+
+CosmeticMood Bridge::TakeCosmeticMoodCue() {
+    return cosmetic_mood_.take(
+        static_cast<std::uint32_t>(esp_timer_get_time() / 1000));
+}
+
 Reply Bridge::Transact(const std::string& text, bool operator_control) {
     Command command;
     if (!enabled_) return {503, false, "control disabled"};
     if (!ParseCommand(text, operator_control, command)) return {400, false, "invalid or unauthorized command"};
+    const bool urgent = command.verb == "stop" || command.verb == "halt";
+    // Announce urgent STOP before waiting for the body UART lock.
+    UrgentStopGate::Request urgency(urgent_stop_gate_, urgent);
     std::lock_guard<std::mutex> lock(uart_mutex_);
+    if (urgent_stop_gate_.preempts(urgent))
+        return {503, false, "body read superseded by urgent stop"};
     if (!uart_ready_) return {503, false, "body UART unavailable"};
     // No retries: an uncertain ACK may still mean that physical movement happened.
     uart_flush_input(kUart);
@@ -128,14 +390,21 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     const auto deadline = esp_timer_get_time() + kTimeoutMs * 1000;
     std::string line;
     while (esp_timer_get_time() < deadline) {
+        if (urgent_stop_gate_.preempts(urgent))
+            return {503, false, "body response superseded by urgent stop"};
         uint8_t c = 0;
         if (uart_read_bytes(kUart, &c, 1, pdMS_TO_TICKS(10)) != 1) continue;
         if (c == '\r') continue;
         if (c == '\n') {
             if (MatchingError(line, command)) return {400, false, line};
-            if (command.verb == "status") {
+            if (command.verb == "status" || command.verb == "aux" ||
+                command.verb == "ir" || command.verb == "optics") {
                 auto json = Parse(line);
-                if (json && StatusValid(json.get())) return {200, true, line};
+                if (json && (command.verb == "status" ?
+                             StatusValid(json.get()) : command.verb == "aux" ?
+                             AuxValid(json.get()) : command.verb == "ir" ?
+                              IrValid(json.get()) : OpticsValid(json.get())))
+                    return {200, true, line};
             } else if (line == ExpectedAck(command)) return {200, true, line};
             line.clear();  // EVT, startup output, and unrelated ACKs are never success.
         } else {
@@ -144,6 +413,81 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         }
     }
     return {504, false, "body ACK timeout; command outcome uncertain"};
+}
+
+BodyInteraction Bridge::PollInteraction() {
+    BodyInteraction observation;
+    const Reply reply = Transact("status", false);
+    if (!reply.ok) {
+        head_touch_edges_.Reset();
+        body_cap_edges_.Reset();
+        return observation;
+    }
+    auto json = Parse(reply.text);
+    if (!json) {
+        head_touch_edges_.Reset();
+        body_cap_edges_.Reset();
+        return observation;
+    }
+    auto touch = cJSON_GetObjectItemCaseSensitive(json.get(), "touch");
+    auto count = cJSON_GetObjectItemCaseSensitive(touch, "count");
+    auto safety = cJSON_GetObjectItemCaseSensitive(json.get(), "safety");
+    auto fault = cJSON_GetObjectItemCaseSensitive(safety, "fault");
+    auto required = cJSON_GetObjectItemCaseSensitive(safety, "required");
+    auto ready = cJSON_GetObjectItemCaseSensitive(safety, "ready");
+    if (!cJSON_IsObject(touch) || !cJSON_IsNumber(count) ||
+        !std::isfinite(count->valuedouble) ||
+        count->valuedouble < 0 || count->valuedouble > 4294967295.0 ||
+        std::floor(count->valuedouble) != count->valuedouble ||
+        !cJSON_IsObject(safety) || !cJSON_IsString(fault) ||
+        !cJSON_IsBool(required) || !cJSON_IsBool(ready)) {
+        head_touch_edges_.Reset();
+        body_cap_edges_.Reset();
+        return observation;
+    }
+    const auto current = static_cast<std::uint32_t>(count->valuedouble);
+    // Transact validated the WROOM boot in both source sections. The
+    // first sampled nonzero post-reboot counter must not fabricate contact.
+    auto imu = cJSON_GetObjectItemCaseSensitive(json.get(), "imu");
+    auto boot = cJSON_GetObjectItemCaseSensitive(imu, "boot_id");
+    if (!cJSON_IsNumber(boot) || !std::isfinite(boot->valuedouble) ||
+        boot->valuedouble < 0 || boot->valuedouble > 4294967295.0 ||
+        !head_touch_edges_.AcceptBoot(
+            static_cast<std::uint32_t>(boot->valuedouble)))
+        return observation;
+    const auto body_boot_id = static_cast<std::uint32_t>(boot->valuedouble);
+    observation.touch_events = head_touch_edges_.Observe(current);
+
+    // CAP1188 is optional and never replaces the dedicated WROOM touch stop.
+    // Explicit device-valid flag, range-checked zone mask and bounded counter
+    // avoid producing synthetic petting when wiring is unplugged or rebooted.
+    auto extras = cJSON_GetObjectItemCaseSensitive(json.get(), "extras");
+    auto cap_ok = cJSON_GetObjectItemCaseSensitive(extras, "cap_ok");
+    auto cap_mask = cJSON_GetObjectItemCaseSensitive(extras, "cap");
+    auto cap_events = cJSON_GetObjectItemCaseSensitive(extras, "cap_events");
+    if (cJSON_IsObject(extras) && cJSON_IsTrue(cap_ok) &&
+        cJSON_IsNumber(cap_mask) &&
+        std::isfinite(cap_mask->valuedouble) &&
+        std::floor(cap_mask->valuedouble) == cap_mask->valuedouble &&
+        cap_mask->valuedouble >= 0 && cap_mask->valuedouble <= 255 &&
+        cJSON_IsNumber(cap_events) &&
+        std::isfinite(cap_events->valuedouble) &&
+        std::floor(cap_events->valuedouble) == cap_events->valuedouble &&
+        cap_events->valuedouble >= 0 && cap_events->valuedouble <= 4294967295.0) {
+        // The optional CAP1188 count shares the same WROOM boot identity.
+        if (!body_cap_edges_.AcceptBoot(body_boot_id)) return observation;
+        observation.cap_touch_events = body_cap_edges_.Observe(
+            static_cast<std::uint32_t>(cap_events->valuedouble));
+    } else {
+        body_cap_edges_.Reset();
+    }
+    // A valid status without a REQUIRED and READY WROOM safety profile
+    // cannot justify a happy/normal OLED face. Keep sensory events intact,
+    // and let the physical body continue to own its independent motor stop.
+    observation.fault = BodySafetyUnhealthy(
+        cJSON_IsTrue(required), cJSON_IsTrue(ready), fault->valuestring);
+    observation.valid = true;
+    return observation;
 }
 
 bool Bridge::Authorize(httpd_req_t* req) {
@@ -162,7 +506,9 @@ esp_err_t Bridge::Json(httpd_req_t* req, int status, const std::string& body) {
     const char* status_text = "500 Internal Server Error";
     switch (status) {
         case 200: status_text = "200 OK"; break;
+        case 202: status_text = "202 Accepted"; break;
         case 400: status_text = "400 Bad Request"; break;
+        case 409: status_text = "409 Conflict"; break;
         case 401: status_text = "401 Unauthorized"; break;
         case 413: status_text = "413 Content Too Large"; break;
         case 415: status_text = "415 Unsupported Media Type"; break;
@@ -177,6 +523,34 @@ esp_err_t Bridge::Json(httpd_req_t* req, int status, const std::string& body) {
 
 esp_err_t Bridge::Dispatch(httpd_req_t* req) { return static_cast<Bridge*>(req->user_ctx)->Handle(req); }
 
+void Bridge::BodyReadTask(void* context) {
+    // The synchronous HTTP handler must remain free to receive urgent STOP
+    // even when a body status reply occupies the UART for hundreds of ms.
+    auto* req = static_cast<httpd_req_t*>(context);
+    auto* bridge = static_cast<Bridge*>(req->user_ctx);
+    {
+        const bool aux = strcmp(req->uri, "/api/aux") == 0;
+        const bool ir = strcmp(req->uri, "/api/ir") == 0;
+        const bool optics = strcmp(req->uri, "/api/optics") == 0;
+        const auto reply = bridge->Transact(
+            optics ? "optics" : ir ? "ir" : aux ? "aux" : "status", false);
+        if (!reply.ok) {
+            bridge->Json(req, reply.status, Envelope(false, reply.text));
+        } else {
+            auto body = Parse(reply.text);
+            if (!body) {
+                bridge->Json(req, 503, Envelope(false, "invalid body JSON"));
+            } else {
+                cJSON_AddStringToObject(body.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+                bridge->Json(req, 200, Encode(body.get()));
+            }
+        }
+    }
+    bridge->body_read_busy_.store(false, std::memory_order_release);
+    httpd_req_async_handler_complete(req);
+    vTaskDelete(nullptr);
+}
+
 void Bridge::CameraTask(void* context) {
     auto* req = static_cast<httpd_req_t*>(context);
     auto* bridge = static_cast<Bridge*>(req->user_ctx);
@@ -184,9 +558,20 @@ void Bridge::CameraTask(void* context) {
         auto jpeg = bridge->camera_->SnapshotJpeg();
         if (!jpeg) {
             bridge->Json(req, 503, Envelope(false, jpeg.error()));
+        } else if (!CompleteJpeg(jpeg->data(), jpeg->size())) {
+            bridge->Json(req, 503, Envelope(false, "incomplete JPEG capture"));
         } else {
+            // Completion, not guessed exposure time. The Mac can reject old
+            // frames from the same boot without synchronizing ESP32/Mac clocks.
+            const std::string nonce = std::to_string(bridge->boot_nonce_);
+            const std::string sequence = std::to_string(++bridge->camera_sequence_);
+            const std::string completed_us = std::to_string(esp_timer_get_time());
             httpd_resp_set_type(req, "image/jpeg");
             httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            httpd_resp_set_hdr(req, "X-Desk-Camera-Robot-Id", CONFIG_DESK_ROBOT_ID);
+            httpd_resp_set_hdr(req, "X-Desk-Camera-Boot", nonce.c_str());
+            httpd_resp_set_hdr(req, "X-Desk-Camera-Sequence", sequence.c_str());
+            httpd_resp_set_hdr(req, "X-Desk-Camera-Complete-Us", completed_us.c_str());
             httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
         }
     }  // Destroy JPEG storage before vTaskDelete (which does not unwind C++ locals).
@@ -195,8 +580,302 @@ void Bridge::CameraTask(void* context) {
     vTaskDelete(nullptr);
 }
 
+
+void Bridge::CameraStreamTask(void* context) {
+    // Adapted from Espressif esp32-camera's official multipart MJPEG example.
+    // One authenticated long-lived client owns the same native JPEG camera
+    // used by /api/camera.jpg. Never allocate an RGB intermediary or block
+    // the HTTP server's command/UART handler while waiting for camera frames.
+    auto* req = static_cast<httpd_req_t*>(context);
+    auto* bridge = static_cast<Bridge*>(req->user_ctx);
+    constexpr char kBoundary[] = "--deskrobotframe\r\n";
+    esp_err_t status = httpd_resp_set_type(
+        req, "multipart/x-mixed-replace; boundary=deskrobotframe");
+    if (status == ESP_OK)
+        status = httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    if (status == ESP_OK)
+        status = httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    while (status == ESP_OK) {
+        {
+            auto jpeg = bridge->camera_->SnapshotJpeg();
+            if (!jpeg || !CompleteJpeg(jpeg->data(), jpeg->size())) {
+                status = ESP_FAIL; // Never stream a partial camera frame.
+            } else {
+                // Per-part provenance is the same trusted monotonic camera
+                // completion metadata as the established snapshot endpoint.
+                const auto seq = ++bridge->camera_sequence_;
+                const auto completed = esp_timer_get_time();
+                // Longest legal ID and 64-bit timestamp must fit together.
+                char headers[320] = {};
+                const int n = snprintf(
+                    headers, sizeof(headers),
+                    "Content-Type: image/jpeg\r\n"
+                    "Content-Length: %zu\r\n"
+                    "X-Desk-Camera-Robot-Id: %s\r\n"
+                    "X-Desk-Camera-Boot: %u\r\n"
+                    "X-Desk-Camera-Sequence: %u\r\n"
+                    "X-Desk-Camera-Complete-Us: %lld\r\n\r\n",
+                    jpeg->size(), CONFIG_DESK_ROBOT_ID,
+                    static_cast<unsigned>(bridge->boot_nonce_),
+                    static_cast<unsigned>(seq), static_cast<long long>(completed));
+                if (n < 0 || static_cast<std::size_t>(n) >= sizeof(headers)) {
+                    status = ESP_FAIL;
+                } else {
+                    status = httpd_resp_send_chunk(
+                        req, kBoundary, sizeof(kBoundary) - 1);
+                    if (status == ESP_OK)
+                        status = httpd_resp_send_chunk(req, headers, n);
+                    if (status == ESP_OK)
+                        status = httpd_resp_send_chunk(
+                            req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
+                    if (status == ESP_OK)
+                        status = httpd_resp_send_chunk(req, "\r\n", 2);
+                }
+            }
+        } // Release the pinned Xiaozhi JPEG before yielding to audio/other tasks.
+        if (status != ESP_OK) break; // Client disconnect closes stream.
+        vTaskDelay(pdMS_TO_TICKS(250)); // Max 4 FPS, not 4 VLM inferences/s.
+    }
+    bridge->camera_busy_.store(false);
+    httpd_req_async_handler_complete(req);
+    vTaskDelete(nullptr);
+}
+
+
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+void Bridge::BenchPcmTask(void* context) {
+    // Asynchronous HTTP response so 256 KiB raw PCM can never block status,
+    // emergency STOP or watchdog requests on the head HTTP dispatcher.
+    std::unique_ptr<BenchPcmTransfer> transfer(
+        static_cast<BenchPcmTransfer*>(context));
+    auto* req = transfer->req;
+    const auto& pcm = transfer->pcm;
+    const auto source = reinterpret_cast<const char*>(pcm.interleaved);
+    const auto still_authorized = [&]() {
+        return transfer->codec->BenchPcmGeneration() == transfer->generation;
+    };
+    char first[32], last[32], boot[24], frames[20], generation[24];
+    snprintf(first, sizeof(first), "%lld",
+             static_cast<long long>(pcm.first_sample_us));
+    snprintf(last, sizeof(last), "%lld",
+             static_cast<long long>(pcm.last_sample_us));
+    snprintf(boot, sizeof(boot), "%u", static_cast<unsigned>(transfer->boot));
+    snprintf(frames, sizeof(frames), "%u", static_cast<unsigned>(pcm.frames));
+    snprintf(generation, sizeof(generation), "%llu",
+             static_cast<unsigned long long>(transfer->generation));
+    esp_err_t status = httpd_resp_set_type(req, "application/octet-stream");
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Robot-Id", CONFIG_DESK_ROBOT_ID);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Boot", boot);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Frames", frames);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Generation", generation);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-First-Us", first);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Last-Us", last);
+    const int64_t deadline_us = esp_timer_get_time() + 5'000'000;
+    for (std::size_t offset = 0;
+         status == ESP_OK && offset < desk_robot::SensePcmWindow::kBytes;
+         offset += 4096) {
+        if (esp_timer_get_time() >= deadline_us || !still_authorized()) {
+            status = ESP_FAIL;  // Physical mute or reset revoked this buffer.
+            break;
+        }
+        const auto count = std::min<std::size_t>(
+            4096, desk_robot::SensePcmWindow::kBytes - offset);
+        status = httpd_resp_send_chunk(req, source + offset, count);
+    }
+    if (status == ESP_OK && esp_timer_get_time() < deadline_us &&
+        still_authorized())
+        (void)httpd_resp_send_chunk(req, nullptr, 0);
+    // Wipe even after physical BOOT, barge-in, client disconnect or timeout.
+    SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+    transfer->codec->EndBenchPcmTransfer();
+    httpd_req_async_handler_complete(req);
+    transfer.reset();
+    vTaskDelete(nullptr);
+}
+#endif
+
 esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
+
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+    if (strcmp(req->uri, "/api/audio.capture.start") == 0) {
+        if (req->content_len != 0)
+            return Json(req, 400, Envelope(false, "Bench capture request must be empty"));
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
+        auto* codec = static_cast<SenseReferenceCodec*>(audio_codec_);
+        JsonPtr started(cJSON_CreateObject(), cJSON_Delete);
+        if (!started) return Json(req, 503, Envelope(false, "Bench start reply unavailable"));
+        if (!codec->BeginBenchPcmCapture())
+            return Json(req, 409, Envelope(false, "Bench PCM unavailable or already active"));
+        char generation[24];
+        snprintf(generation, sizeof(generation), "%llu",
+                 static_cast<unsigned long long>(codec->BenchPcmGeneration()));
+        cJSON_AddBoolToObject(started.get(), "ok", true);
+        cJSON_AddStringToObject(started.get(), "reply", "Private bench PCM capture started");
+        cJSON_AddStringToObject(started.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddNumberToObject(started.get(), "boot", boot_nonce_);
+        cJSON_AddStringToObject(started.get(), "capture_generation", generation);
+        return Json(req, 202, Encode(started.get()));
+    }
+    if (strcmp(req->uri, "/api/audio.capture.abort") == 0) {
+        if (req->content_len != 0)
+            return Json(req, 400, Envelope(false, "Bench abort request must be empty"));
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
+        auto* codec = static_cast<SenseReferenceCodec*>(audio_codec_);
+        // Check the exact decimal generation, not a model-provided command.
+        // Handler serialization prevents another HTTP START between this
+        // comparison and the abort. BOOT can still independently invalidate
+        // the source, but never grants authority to restore it.
+        char expected[24] = {};
+        char supplied[24] = {};
+        snprintf(expected, sizeof(expected), "%llu",
+                 static_cast<unsigned long long>(codec->BenchPcmGeneration()));
+        if (httpd_req_get_hdr_value_str(
+                req, "X-Desk-Audio-Generation", supplied,
+                sizeof(supplied)) != ESP_OK ||
+            strcmp(expected, supplied) != 0)
+            return Json(req, 409, Envelope(false, "Bench capture generation mismatch"));
+        codec->AbortBenchPcmCapture(); // Wipe pending PCM; fence HTTP worker.
+        return Json(req, 200, Envelope(true, "Private bench PCM capture aborted"));
+    }
+    if (strcmp(req->uri, "/api/audio.capture.status") == 0) {
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
+        const auto progress =
+            static_cast<SenseReferenceCodec*>(audio_codec_)->GetBenchPcmProgress();
+        JsonPtr data(cJSON_CreateObject(), cJSON_Delete);
+        if (!data) return Json(req, 503, Envelope(false, "Bench status unavailable"));
+        cJSON_AddStringToObject(data.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddNumberToObject(data.get(), "boot", boot_nonce_);
+        cJSON_AddBoolToObject(data.get(), "active", progress.active);
+        cJSON_AddBoolToObject(data.get(), "ready", progress.ready);
+        cJSON_AddBoolToObject(data.get(), "failed", progress.failed);
+        cJSON_AddNumberToObject(data.get(), "frames", progress.frames);
+        // Latched inside the final microphone callback, not guessed from
+        // cumulative I2S counters after the private recording ended.
+        cJSON_AddBoolToObject(data.get(), "speaker_activity_in_window",
+                              progress.speaker_activity_in_window);
+        char generation[24];
+        snprintf(generation, sizeof(generation), "%llu",
+                 static_cast<unsigned long long>(progress.generation));
+        cJSON_AddStringToObject(data.get(), "capture_generation", generation);
+        cJSON_AddBoolToObject(data.get(), "physical_aec_qualified", false);
+        return Json(req, 200, Encode(data.get()));
+    }
+    if (strcmp(req->uri, "/api/audio.capture.raw") == 0) {
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
+        auto* codec = static_cast<SenseReferenceCodec*>(audio_codec_);
+        const uint64_t generation = codec->BenchPcmGeneration();
+        const auto pcm = codec->TakeBenchPcmCapture();
+        if (!pcm.interleaved || pcm.frames != desk_robot::SensePcmWindow::kFrames)
+            return Json(req, 409, Envelope(false, "Bench PCM not complete"));
+        httpd_req_t* async_req = nullptr;
+        if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+            SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            codec->EndBenchPcmTransfer();
+            return Json(req, 503, Envelope(false, "Bench PCM worker unavailable"));
+        }
+        auto* transfer = new(std::nothrow) BenchPcmTransfer{
+            async_req, pcm, boot_nonce_, codec, generation};
+        if (!transfer) {
+            SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            codec->EndBenchPcmTransfer();
+            Json(async_req, 503, Envelope(false, "Bench PCM allocation unavailable"));
+            httpd_req_async_handler_complete(async_req);
+            return ESP_OK;
+        }
+        if (xTaskCreate(BenchPcmTask, "sense_pcm_once", 6144,
+                        transfer, 2, nullptr) != pdPASS) {
+            SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            codec->EndBenchPcmTransfer();
+            delete transfer;
+            Json(async_req, 503, Envelope(false, "Bench PCM worker failed"));
+            httpd_req_async_handler_complete(async_req);
+        }
+        return ESP_OK;
+    }
+#endif
+    if (strcmp(req->uri, "/api/audio.reference") == 0) {
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense audio unavailable"));
+        // The Sense board supplies the actual single Xiaozhi audio codec.
+        // These are software-integrity counters, NEVER proof of heard TTS.
+        const auto d = static_cast<SenseReferenceCodec*>(audio_codec_)
+                           ->GetReferenceDiagnostics();
+        JsonPtr result(cJSON_CreateObject(), cJSON_Delete);
+        if (!result) return Json(req, 503, Envelope(false, "audio status unavailable"));
+        cJSON_AddStringToObject(result.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddNumberToObject(result.get(), "boot", boot_nonce_);
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+        // A speaker reset can invalidate the capture AFTER the raw response.
+        // Bind the final authenticated receipt to the same PCM generation.
+        char capture_generation[24] = {};
+        snprintf(capture_generation, sizeof(capture_generation), "%llu",
+                 static_cast<unsigned long long>(
+                     static_cast<SenseReferenceCodec*>(audio_codec_)
+                         ->BenchPcmGeneration()));
+        cJSON_AddStringToObject(result.get(), "capture_generation",
+                                capture_generation);
+#endif
+        cJSON_AddNumberToObject(result.get(), "reference_underflow_reads", d.underflow_reads);
+        cJSON_AddNumberToObject(result.get(), "reference_overwrite_reads", d.overwrite_reads);
+        cJSON_AddNumberToObject(result.get(), "discarded_stale_writes", d.discarded_stale_writes);
+        cJSON_AddNumberToObject(result.get(), "short_output_writes", d.short_output_writes);
+        cJSON_AddNumberToObject(result.get(), "microphone_frames_read", d.microphone_frames_read);
+        cJSON_AddNumberToObject(result.get(), "speaker_frames_accepted", d.speaker_frames_accepted);
+        cJSON_AddBoolToObject(result.get(), "microphone_privacy_muted", d.microphone_privacy_muted);
+        cJSON_AddNumberToObject(result.get(), "microphone_privacy_epoch", d.microphone_privacy_epoch);
+        // Report the actual flashed AEC offset, not the bench command-line
+        // intent. Raw acoustic capture requires zero to avoid measuring only
+        // the residual lag after the firmware already shifted the reference.
+        cJSON_AddNumberToObject(result.get(), "aec_delay_config_ms",
+                                CONFIG_DESK_ROBOT_AEC_DELAY_MS);
+        cJSON_AddBoolToObject(result.get(), "reference_integrity_failed", d.integrity_failed);
+        cJSON_AddBoolToObject(result.get(), "speaker_playback_verified", false);
+        cJSON_AddBoolToObject(result.get(), "aec_physically_qualified", false);
+        return Json(req, 200, Encode(result.get()));
+#else
+        return Json(req, 503, Envelope(false, "No Sense reference codec on this board"));
+#endif
+    }
+    if (strcmp(req->uri, "/api/camera.identity") == 0) {
+        // Read only the actual sensor ID from Espressif's initialized
+        // upstream camera driver. No new camera task, JPEG or UART owner.
+        // This authenticated identity is checked against the frame boot
+        // nonce and the measured offline calibration before dock movement.
+        if (!camera_) return Json(req, 503, Envelope(false, "camera unavailable"));
+        const sensor_t* sensor = esp_camera_sensor_get();
+        if (!sensor) return Json(req, 503, Envelope(false, "camera sensor unavailable"));
+        const auto pid = sensor->id.PID;
+        const char* model = pid == OV3660_PID ? "OV3660" :
+                            pid == OV5640_PID ? "OV5640" : nullptr;
+        if (!model) return Json(req, 503, Envelope(false, "unsupported camera PID"));
+        JsonPtr identity(cJSON_CreateObject(), cJSON_Delete);
+        if (!identity) return Json(req, 503, Envelope(false, "camera metadata unavailable"));
+        cJSON_AddStringToObject(identity.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddStringToObject(identity.get(), "camera_sensor_pid", model);
+        cJSON_AddNumberToObject(identity.get(), "camera_pid_raw", pid);
+        cJSON_AddNumberToObject(identity.get(), "boot", boot_nonce_);
+        return Json(req, 200, Encode(identity.get()));
+    }
+    if (strcmp(req->uri, "/api/camera.mjpg") == 0) {
+        if (!camera_) return Json(req, 503, Envelope(false, "camera unavailable"));
+        if (camera_busy_.exchange(true))
+            return Json(req, 503, Envelope(false, "camera busy"));
+        httpd_req_t* async_req = nullptr;
+        if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+            camera_busy_.store(false);
+            return Json(req, 503, Envelope(false, "stream worker unavailable"));
+        }
+        if (xTaskCreate(CameraStreamTask, "robot_stream", 8192, async_req,
+                        3, nullptr) != pdPASS) {
+            Json(async_req, 503, Envelope(false, "stream task unavailable"));
+            httpd_req_async_handler_complete(async_req);
+            camera_busy_.store(false);
+        }
+        return ESP_OK;
+    }
     if (strcmp(req->uri, "/api/camera.jpg") == 0) {
         if (!camera_) return Json(req, 503, Envelope(false, "camera unavailable"));
         if (camera_busy_.exchange(true)) return Json(req, 503, Envelope(false, "camera busy"));
@@ -213,12 +892,24 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         }
         return ESP_OK;
     }
-    if (strcmp(req->uri, "/api/status") == 0) {
-        auto reply = Transact("status", false);
-        if (!reply.ok) return Json(req, reply.status, Envelope(false, reply.text));
-        auto json = Parse(reply.text);
-        cJSON_AddStringToObject(json.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
-        return Json(req, 200, Encode(json.get()));
+    if (strcmp(req->uri, "/api/status") == 0 ||
+        strcmp(req->uri, "/api/aux") == 0 ||
+        strcmp(req->uri, "/api/ir") == 0 ||
+        strcmp(req->uri, "/api/optics") == 0) {
+        if (body_read_busy_.exchange(true, std::memory_order_acq_rel))
+            return Json(req, 503, Envelope(false, "body telemetry busy"));
+        httpd_req_t* async_req = nullptr;
+        if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+            body_read_busy_.store(false, std::memory_order_release);
+            return Json(req, 503, Envelope(false, "body read worker unavailable"));
+        }
+        if (xTaskCreate(BodyReadTask, "robot_body_read", 8192,
+                        async_req, 3, nullptr) != pdPASS) {
+            Json(async_req, 503, Envelope(false, "body read task unavailable"));
+            httpd_req_async_handler_complete(async_req);
+            body_read_busy_.store(false, std::memory_order_release);
+        }
+        return ESP_OK;
     }
     if (req->content_len == 0 || req->content_len > kMaxBody) {
         httpd_resp_set_hdr(req, "Connection", "close");
@@ -239,7 +930,28 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (body.find('\0') != std::string::npos || body.find("\\u0000") != std::string::npos) return Json(req, 400, Envelope(false, "embedded null"));
     auto json = Parse(body);
     if (!json || !cJSON_IsObject(json.get()) || cJSON_GetArraySize(json.get()) != 1)
-        return Json(req, 400, Envelope(false, "expected one command field"));
+        return Json(req, 400, Envelope(false, "expected one event or command field"));
+    if (strcmp(req->uri, "/api/face") == 0) {
+        // The authenticated Mac can offer a bounded *visual* cue only. A
+        // language model, OCR frame or tool response cannot send motor text
+        // through this route. Latest event wins; no unbounded HTTP queue.
+        auto event = cJSON_GetObjectItemCaseSensitive(json.get(), "event");
+        if (!cJSON_IsString(event) || !event->valuestring)
+            return Json(req, 400, Envelope(false, "unsupported face event"));
+        if (strcmp(event->valuestring, "person_detected") != 0) {
+            // Only a tiny, allowlisted OLED mood. Never pass untrusted
+            // expression text to a motor, TTS, wake or speaker endpoint.
+            const CosmeticMood mood = ParseCosmeticMood(event->valuestring);
+            if (mood == CosmeticMood::kNone)
+                return Json(req, 400, Envelope(false, "unsupported face event"));
+            cosmetic_mood_.offer(
+                mood, static_cast<std::uint32_t>(esp_timer_get_time() / 1000));
+            return Json(req, 200, Envelope(true, "mood cue queued"));
+        }
+        person_cue_.offer(
+            static_cast<std::uint32_t>(esp_timer_get_time() / 1000));
+        return Json(req, 200, Envelope(true, "person cue queued"));
+    }
     auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "command");
     if (!cJSON_IsString(item) || !item->valuestring)
         return Json(req, 400, Envelope(false, "command must be a string"));
@@ -254,6 +966,19 @@ void Bridge::AddTools() {
         if (!reply.ok) return std::unexpected(reply.text);
         return reply.text;
     };
+    // Reuse the existing authenticated WROOM status transaction for the
+    // upstream-inspired self.pet sensory MCP schema. This is deliberately a
+    // read-only alias, NOT a second UART owner, a cached guessed sensation,
+    // a motion permit or a trigger to wake Xiaozhi. The body owns cliff
+    // latches and marks unqualified physical measurements in its JSON.
+    mcp.AddTool(
+        "self.pet.get_sensory_state",
+        "Read the current WROOM cliff safety, front and floor ranges, touch, "
+        "IMU, battery and accessory observations. Values may be unavailable "
+        "or physically unqualified. Never interpret status as motor permission, "
+        "charging proof or proof of a camera sighting.",
+        PropertyList(),
+        [call](const PropertyList&) -> ToolResult { return call("status"); });
 #ifdef CONFIG_DESK_ROBOT_DIRECT_MOTION_TOOLS
     mcp.AddTool("self.robot.drive", "One wheel pulse, maximum 250 ms; requires operator arm, never auto-arms.",
         PropertyList({Property("left", kPropertyTypeInteger, -100, 100), Property("right", kPropertyTypeInteger, -100, 100),
