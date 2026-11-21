@@ -1243,6 +1243,53 @@ static void belly_adc_does_not_refresh_stale_jaw_sample() {
   CHECK(!body.state().armed);
 }
 
+static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_grip_feedback(true);
+  CHECK(send(body, "arm", 100) == "OK arm");
+  desk_robot::AccessoryReadings r{};
+  r.force.present = r.force.valid = true;
+  r.force.valid_mask = 2U; // only channel 1 is a jaw sample
+  r.force.adc[1] = 1000;
+  r.force.jaw_sample_seq = 1U;
+  r.force.at_ms = r.force.jaw_at_ms = 100U;
+  body.set_accessories(r, 100U);
+  CHECK(send(body, "grip 120", 100) == "OK grip angle=120");
+  body.tick(180); // nine timer intervals cannot consume nine jaw degrees
+  CHECK(body.state().grip == 94 && body.state().grip_target == 120);
+  body.tick(260);
+  CHECK(body.state().grip == 94 && body.state().servos_attached);
+
+  // A duplicate jaw sequence with a forged recent timestamp cannot buy
+  // another step. A new belly conversion cannot buy one either.
+  r.force.at_ms = r.force.jaw_at_ms = 261U;
+  body.set_accessories(r, 261U);
+  body.tick(280);
+  CHECK(body.state().grip == 94);
+  r.force.jaw_sample_seq = 2U;
+  r.force.at_ms = r.force.jaw_at_ms = 281U;
+  body.set_accessories(r, 281U);
+  body.tick(300);
+  CHECK(body.state().grip == 98);
+  r.force.jaw_sample_seq = 1U; // backwards replay is rejected
+  r.force.at_ms = r.force.jaw_at_ms = 301U;
+  body.set_accessories(r, 301U);
+  body.tick(320);
+  CHECK(body.state().grip == 98);
+  r.force.jaw_sample_seq = 3U;
+  r.force.at_ms = r.force.jaw_at_ms = 321U;
+  body.set_accessories(r, 321U);
+  body.tick(340);
+  CHECK(body.state().grip == 102 && body.state().grip_target == 120);
+
+  // A failed jaw conversion freezes the commanded target and retains PWM.
+  r.force.valid = false;
+  body.set_accessories(r, 341U);
+  body.tick(360);
+  CHECK(body.state().grip == 102 && body.state().grip_target == 102);
+  CHECK(body.state().servos_attached);
+}
+
 static void physical_gripper_stops_ramping_when_adc_is_not_trustworthy() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_grip_feedback(true);
@@ -1878,6 +1925,7 @@ int main() {
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     belly_adc_does_not_refresh_stale_jaw_sample();
     physical_gripper_stops_ramping_when_adc_is_not_trustworthy();
+    gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();

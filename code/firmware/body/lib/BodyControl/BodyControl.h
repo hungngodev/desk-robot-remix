@@ -209,6 +209,10 @@ class BodyControl {
   std::uint32_t boot_epoch_ = 0;
   bool imu_motion_required_ = false;
   bool grip_feedback_required_ = false;
+  // Maximum four commanded degrees of jaw travel per distinct ADS1115
+  // channel-1 conversion. Belly conversions never renew this movement grant.
+  std::uint32_t jaw_servo_sample_seq_ = 0;
+  std::uint8_t jaw_sample_motion_budget_ = 0;
   bool fuel_monitor_required_ = false;
   bool motor_cutoff_unqualified_ = false;
   std::uint32_t last_control_ms_ = 0;

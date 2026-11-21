@@ -60,6 +60,7 @@ void BodyControl::stop_motion() {
   drive_duration_ms_ = 0;
   state_.lift_target = state_.lift;
   state_.grip_target = state_.grip;
+  jaw_sample_motion_budget_ = 0; // canceled commands cannot reuse jaw credit
 }
 
 void BodyControl::touch_trip() {
@@ -502,12 +503,37 @@ void BodyControl::tick(std::uint32_t now_ms) {
   if (grip_feedback_required_ && state_.grip != state_.grip_target &&
       !grip_feedback_fresh(now_ms)) {
     state_.grip_target = state_.grip;
+    jaw_sample_motion_budget_ = 0; // invalid/expired jaw evidence ends move
   }
   const std::uint32_t steps = (now_ms - last_servo_step_ms_) / kServoStepMs;
   if (steps != 0) {
     last_servo_step_ms_ += steps * kServoStepMs;
     move_toward(state_.lift, state_.lift_target, steps);
-    move_toward(state_.grip, state_.grip_target, steps);
+    std::uint32_t jaw_steps = steps;
+    if (grip_feedback_required_) {
+      jaw_steps = 0;
+      if (state_.grip != state_.grip_target && grip_feedback_fresh(now_ms)) {
+        const auto seq = state_.accessories.force.jaw_sample_seq;
+        const std::uint32_t delta = seq - jaw_servo_sample_seq_;
+        // Sequence 0 is never a valid conversion; permit UINT32 rollover
+        // but reject duplicates, backwards reads and stale HTTP replay.
+        if (jaw_sample_motion_budget_ == 0 &&
+            (jaw_servo_sample_seq_ == 0 ||
+             (delta != 0U && delta < 0x80000000U))) {
+          jaw_servo_sample_seq_ = seq;
+          jaw_sample_motion_budget_ = 4;
+        }
+        jaw_steps = steps < jaw_sample_motion_budget_ ?
+            steps : jaw_sample_motion_budget_;
+      }
+    }
+    const int previous_grip = state_.grip;
+    move_toward(state_.grip, state_.grip_target, jaw_steps);
+    if (grip_feedback_required_) {
+      const int delta = state_.grip > previous_grip ?
+          state_.grip - previous_grip : previous_grip - state_.grip;
+      jaw_sample_motion_budget_ -= static_cast<std::uint8_t>(delta);
+    }
   }
 }
 
@@ -1222,6 +1248,11 @@ void BodyControl::execute(const char* line, std::size_t length,
       if (grip && grip_feedback_required_ && !grip_feedback_fresh(now_ms)) {
         std::snprintf(reply, capacity, "ERR grip force_missing_or_stale");
         return;
+      }
+      if (grip && grip_feedback_required_) {
+        // Every newly accepted command needs a distinct hardware conversion
+        // before it can advance again, including repeated/retried commands.
+        jaw_sample_motion_budget_ = 0;
       }
       (lift ? state_.lift_target : state_.grip_target) = first;
       std::snprintf(reply, capacity, "OK %s angle=%d", command, first);
