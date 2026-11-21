@@ -437,7 +437,11 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
                 "untrusted_summary": " ".join(summary.split())[:350]}
     if route == "voice-context":
         records = result.get("memories")
-        if not isinstance(records, list):
+        revision = result.get("private_memory_generation")
+        if (not isinstance(records, list)
+                or type(revision) is not int or not 0 <= revision < 2**63):
+            # An unversioned private fact cannot be compared with later
+            # operator edits immediately before physical speech.
             return None
         recollections = []
         for item in records[:2]:
@@ -459,6 +463,7 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
                 "historical_untrusted_text": True,
             })
         return {"source": "private_opt_in_memory_not_current_sight",
+                "private_memory_generation": revision,
                 "recollections": recollections}
     return None
 

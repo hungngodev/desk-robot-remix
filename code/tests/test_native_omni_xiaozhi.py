@@ -3044,7 +3044,8 @@ async def test_native_barge_drops_old_queued_tools_without_physical_retry(native
         ("interaction-context", {"persistent_memory_included": True,
                                  "raw_media_included": False,
                                  "model_context": "private information"}, None),
-        ("voice-context", {"memories": [{"summary": "A red key yesterday"}]},
+        ("voice-context", {"private_memory_generation": 0,
+                           "memories": [{"summary": "A red key yesterday"}]},
          "private_opt_in_memory_not_current_sight"),
     ],
 )
@@ -3215,10 +3216,23 @@ def test_native_grounded_tool_discards_unbounded_status_and_pickup_strings(nativ
 
 
 
+
+@pytest.mark.parametrize("bad_revision", [None, True, -1, "7"])
+def test_native_memory_recall_refuses_unversioned_or_invalid_private_fact(
+    native, bad_revision,
+):
+    module, _ = native
+    assert module.native_grounded_fact("voice-context", {
+        "memories": [{"summary": "stale operator fact"}],
+        "private_memory_generation": bad_revision,
+    }) is None
+
+
 def test_native_memory_tool_preserves_eyewitness_and_peer_provenance(native):
     module, _ = native
     fact = module.native_grounded_fact("voice-context", {
         "robot_id": "robot-01",
+        "private_memory_generation": 7,
         "memories": [
             {"summary": "A key was next to the mug", "kind": "key",
              "source_robot": "robot-01", "witnessed": True},
@@ -3227,6 +3241,7 @@ def test_native_memory_tool_preserves_eyewitness_and_peer_provenance(native):
         ],
     })
     assert fact["source"] == "private_opt_in_memory_not_current_sight"
+    assert fact["private_memory_generation"] == 7
     assert fact["recollections"] == [
         {"summary": "A key was next to the mug", "kind": "key",
          "source_robot": "robot-01", "witnessed": True,
@@ -3238,6 +3253,7 @@ def test_native_memory_tool_preserves_eyewitness_and_peer_provenance(native):
     # Legacy or malformed records may still be read, but MUST NOT become
     # invented local eyewitness events or carry arbitrary origin labels.
     unknown = module.native_grounded_fact("voice-context", {
+        "private_memory_generation": 7,
         "memories": [{"summary": "  uncertain   speech  ",
                       "kind": "evil:move", "source_robot": "a/b",
                       "witnessed": 1}],
