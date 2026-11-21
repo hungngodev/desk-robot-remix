@@ -889,3 +889,22 @@ def test_sense_face_discards_person_cues_received_during_body_fault():
     assert "person_cue_until_ms != 0U" in board
     assert "Event(EventType::kPersonDetected)" in board
     assert "Transact(event" not in (HEAD / "overlay/robot_bridge.cc").read_text()
+
+def test_body_status_is_async_and_urgent_stop_preempts_uart_telemetry():
+    """A body read cannot monopolize the HTTP handler or STOP priority."""
+    source = (HEAD / "overlay/robot_bridge.cc").read_text()
+    header = (HEAD / "overlay/robot_bridge.h").read_text()
+    protocol = (HEAD / "overlay/robot_protocol.h").read_text()
+    assert "UrgentStopGate urgent_stop_gate_" in header
+    assert "std::atomic<bool> body_read_busy_" in header
+    assert "UrgentStopGate::Request urgency(urgent_stop_gate_, urgent);" in source
+    assert source.index("UrgentStopGate::Request urgency") < source.index(
+        "std::lock_guard<std::mutex> lock(uart_mutex_)"
+    )
+    assert "if (urgent_stop_gate_.preempts(urgent))" in source
+    assert "void Bridge::BodyReadTask(void* context)" in source
+    assert 'xTaskCreate(BodyReadTask, "robot_body_read"' in source
+    assert "httpd_req_async_handler_begin(req, &async_req)" in source
+    assert "httpd_req_async_handler_complete(req);" in source
+    assert "class UrgentStopGate" in protocol
+    assert "Request(const Request&) = delete;" in protocol
