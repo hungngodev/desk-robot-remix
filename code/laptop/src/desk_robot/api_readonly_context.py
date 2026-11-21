@@ -75,7 +75,7 @@ def register_readonly_context_routes(
                  and type(fuel_seq) is int and 0 < fuel_seq <= 0xffffffff)
         cell = power.get("cell_mv")
         soc = power.get("soc_centi")
-        if (valid and (type(cell) is not int or not 0 <= cell <= 4500
+        if (valid and (type(cell) is not int or not 2500 <= cell <= 4500
                        or type(soc) is not int or not 0 <= soc <= 10000)):
             raise OperationError("Malformed WROOM auxiliary fuel gauge values")
         result = {
