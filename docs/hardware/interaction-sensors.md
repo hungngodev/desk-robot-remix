@@ -1,4 +1,4 @@
-> 2026-11-10 correction: the MPU6050 is the preferred six-axis sensor. The user reports using it; whether the photographed older BerryIMU is electrically correct remains unconfirmed. Existing prose referring to mandatory BerryIMU is historical. A valid MPU raw sample is **not** a tested tilt, shaking or held-state interlock. See the current WROOM driver and [official register map](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Register-Map.pdf).
+> Current selected six-axis IMU: **MPU6050 / GY-521** for the first robot and future four. BerryIMU is an optional legacy spare, not the fleet baseline. The WROOM reads actual six-axis data and has a local software attitude inhibit, but neither mounting nor pickup, shake and tilt behavior has been physically qualified. See the [MPU6050 register map](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Register-Map.pdf).
 
 # Touch, handling and expressive interactions
 
@@ -7,35 +7,39 @@ six-axis motion sensor per robot. RGB lighting is optional. This specifies
 integration and tests. The owned AT42QT1010 now has WROOM input polling,
 debounced status and a local stop interlock in firmware, but no physical
 wiring, shell test, flashing or qualifying trial has been completed.
-The [photo inventory](photo-inventory-2026-11-04.md) now identifies an owned
-BerryIMU and other spares. A new WROOM boot-time WHO_AM_I probe now
-reports likely V1/V2/V3 chip identity in `status.imu` using the existing
-upstream I2C bus. This does not read actual acceleration/gyro data, implement
-tilt interlocks or prove a mounted working sensor. Hold additional IMU purchases
-until the owned unit is identified and tested. The follow-up photo identifies an owned
-Adafruit #1374 AT42QT1010 for robot one's head touch.
+The [photo inventory](photo-inventory-2026-11-04.md) identifies a reported
+BerryIMU spare and other parts; the exact MPU6050 carrier, installed orientation
+and available quantity still need confirmation. The selected WROOM path probes
+MPU6050 WHO_AM_I on the upstream I2C bus, reads actual raw accelerometer
+and gyro samples, and includes a local software attitude inhibit.
+Neither physical sensor readings nor loaded tilt, shake, pickup and safe-resume
+trials have been qualified. Do not substitute the spare without a documented
+engineering decision. The follow-up photo identifies an owned Adafruit
+#1374 AT42QT1010 head-touch board; no new Adafruit board is required.
 
 ## Minimal hardware and current pin feasibility
 
 | Part | Quantity per core | Proposed connection | Decision |
 | --- | ---: | --- | --- |
 | Owned AT42QT1010 touch breakout #1374 | 1 | WROOM GPIO34, powered at 3.3 V, common ground and momentary active-high OUT | One concealed head pad. Bench-test response through the shell and costume. TTP223 is a possible fleet equivalent |
-| MPU6050 / likely GY-521 module (user reported) | 1 | WROOM GPIO21 SDA / GPIO22 SCL upstream of TCA9548A; verify 3.3 V logic and actual breakout power path | **Preferred prototype IMU**, family 4. Boot WHO_AM_I register 0x75 must return 0x68 at bus address 0x68 or 0x69. Six-axis signed samples via register 0x3B. Physical mounting and handling classification still unqualified. Stock count unknown | 
+| MPU6050 / likely GY-521 module (user reported) | 1 | WROOM GPIO21 SDA / GPIO22 SCL upstream of TCA9548A; verify 3.3 V logic and actual breakout power path | **Selected first robot and fleet IMU**, family 4. Boot WHO_AM_I register 0x75 must return 0x68 at bus address 0x68 or 0x69. Six-axis signed samples via register 0x3B. Physical mounting and handling classification still unqualified. Stock count unknown | 
 | Photographed BerryIMU (optional compatible alternative) | 0 required | Same upstream I2C only if MPU6050 removed | Preserve V1/V2/V3 support; never join two unqualified IMUs or assume this photographed chip revision |
 | Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not use body GPIO4 for the mux reset: it is a boot strapping pin and
 the TCA9548A RESET must be pulled high to 3.3 V |
 | Mechanical bumper switch | 0 required;1 optional | BodyGPIO35 with external3.3V pullup | Useful cheap collision reflex after a small mount; not a substitute for floor sensors |
 
-BerryIMU supplies the required acceleration and gyro functions without requiring
-use of its magnetometer/barometer. Do not use a compass as track odometry;
+BerryIMU remains an optional spare with accelerometer and gyro support;
+it is not the selected source for the required handling IMU.
+Do not use a compass as track odometry;
 actuator magnets/current can disturb it. The GY-61 in the photos is consistent
 with ADXL335 analog acceleration, not MPU6050 and not a gyro. Its three ADC lines
 are less convenient than the existing I2C route. The mechanical tilt switch is
 only a binary input. See the photo audit for revision and electrical checks.
 
-MPU6050/GY-521 can be evaluated if separately owned and functioning. It is an older,
-discontinued part, not the new five-unit baseline. Do not buy a9-axis compass for
-these interactions: a six-axis accelerometer+gyro is sufficient. A LIS3DH-only
+MPU6050/GY-521 is the selected baseline for the first pet and five-unit fleet;
+its carrier revision, 3.3 V electrical compatibility, mounting and calibration
+must still be measured. Do not buy a nine-axis compass for these interactions:
+a six-axis accelerometer and gyro are sufficient. A LIS3DH-only
 alternative measures acceleration/tilt but has no gyro; it is not an equivalent
 six-axis substitution.
 
@@ -100,14 +104,16 @@ these are not existing supported wire commands.
 - Reachy supplies speech/listening arbitration and orientation reporting;
   Google's agent supplies camera-event handling. Neither automatically supplies
   our held-state fusion. See [complete source map](../source-map.md).
-- WROOM driver route: identify the owned BerryIMU version first; use the maker's
-  version-detection/register examples as a reviewed reference, not an assumed
-  drop-in LSM6 driver. LSM6DS/BusIO/Unified Sensor applies only to that conditional
-  replacement. The AT42QT1010 needs a digital event adapter rather than a special
-  library. The existing WROOM now compiles a bounded raw six-axis BerryIMU
-  reader for the identified V1/V2/V3 chip, reusing the existing TofBus identity
-  and upstream Wire bus. Actual voltage, identity and response remain physically
-  untested. No calibrated safety reaction is enabled.
+- Selected WROOM driver route: use `BerryImu::decode_mpu6050` and the shared
+  upstream `Wire` bus for bounded MPU6050 raw six-axis acquisitions.
+  `BodyControl` has a local software attitude guard in the guarded full
+  firmware profile; it stays motion-inert until real calibration is installed.
+  BerryIMU V1/V2/V3 register mappings and maker examples remain supported
+  only for an explicitly chosen spare/legacy alternative, not the first-pet
+  baseline. Do not load a competing LSM6 or BusIO stack without a documented
+  board decision. AT42QT1010 uses a digital event adapter, not a sensor library.
+  Actual carrier voltage, axes, sensor ages, vibration and stops remain untested
+  on the assembled robot; host tests are not physical qualification.
 
 ## Optional later ideas, without a sensor shopping spree
 
@@ -156,7 +162,7 @@ Primary electrical references include
 [LED driver](https://components.espressif.com/components/espressif/led_strip),
 [TI level buffer](https://www.ti.com/product/SN74AHCT1G125).
 
-## Read-only BerryIMU identity gate before any motion driver
+## Historical and optional BerryIMU identity path (not selected for the first pet)
 
 The WROOM firmware now uses the **already initialized body Wire bus** to check
 WHO_AM_I register 0x0F at the maker's known BerryIMU address candidates.
@@ -176,9 +182,10 @@ The `status.imu` object retains the three original identity fields and adds
 `valid`, `acc`, `gyro` and `age_ms`. Samples older than 200ms become invalid.
 The same read-only fields appear in the existing local USB serial bench tool,
 which reports `raw_six_axis_available=true` only for a currently
-valid raw sample, while `attitude_interlock_active=false` and
-`physical_qualification_pass=false` remain explicit. The readings do not
-mean tilt is safe or calibrated.
+valid raw sample. This optional BerryIMU inspection does not qualify the
+selected MPU6050 software attitude guard, and
+`physical_qualification_pass=false` remains explicit. Raw counts alone
+do not mean tilt is safe or calibrated.
 Nothing grants movement, changes the five-sensor cliff decisions or clears
 the locally latched faults.
 
@@ -222,7 +229,7 @@ test alone does not authorize motion.
 
 ## Required raw IMU heartbeat before local arm
 
-The physical ESP32 WROOM firmware now requires an identified fresh BerryIMU
+The selected ESP32 WROOM full firmware requires an identified fresh MPU6050
 six-axis sample before accepting `arm`; a missing, invalid or older than
 200ms sensor sample rejects arming. If it becomes missing or stale during an
 armed movement, WROOM freezes servo targets, zeros both tracks and disarms

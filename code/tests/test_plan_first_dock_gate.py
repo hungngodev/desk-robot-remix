@@ -84,6 +84,29 @@ def test_builder_plan_consistently_selects_mpu6050_with_berryimu_as_spare():
     # 6. No unannotated "version-confirmed BerryIMU handling/tilt/shake" remains
     assert "version-confirmed BerryIMU handling/tilt/shake" not in plan_text
 
+    # 7. The linked assembly/interaction guide must match the selected IMU.
+    guide = (ROOT / "docs/hardware/interaction-sensors.md").read_text(
+        encoding="utf-8",
+    )
+    body = (ROOT / "code/firmware/body/src/main.cpp").read_text(
+        encoding="utf-8",
+    )
+    assert "MPU6050 GY521 compatible six axis breakout" in feature_plan_json
+    assert "**Selected first robot and fleet IMU**" in guide
+    assert "BerryIMU remains an optional spare" in guide
+    assert "BerryImu::decode_mpu6050" in guide
+    assert "local software attitude guard" in guide
+    assert "physical_qualification_pass=false" in guide
+    assert "require_imu_attitude_guard(true)" in body
+    for outdated in (
+        "not the new five-unit baseline",
+        "identify the owned BerryIMU version first",
+        "requires an identified fresh BerryIMU",
+        "does not read actual acceleration/gyro data",
+        "No calibrated safety reaction is enabled",
+    ):
+        assert outdated not in guide
+
 
 def test_product_acceptance_requires_first_dock_charge_not_expansion():
     """Do not silently defer the actual first robot's mandatory own dock."""
