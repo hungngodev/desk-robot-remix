@@ -243,7 +243,9 @@ python3 code/scripts/screen_assembly_stability.py --measurements robot01_stabili
 The input body frame is X forward, Y left, Z upward, with millimeters
 and grams. The tool computes a DISTINCT convex support footprint per pose,
 weighted source center of mass and worst signed distance to its own boundary
-under the supplied maximum positive and negative tilts. It rejects
+under the supplied maximum positive and negative tilts. Simultaneous
+roll and pitch use a conservative coupled gravity-line envelope that bounds
+both rigid-body rotation orders, not independent tangent offsets. It rejects
 missing key or candy payload masses, stale or partial component roles,
 degenerate support contacts, malformed numbers and unsupported tilt.
 It deliberately does not infer a mass or support position from raw STLs.

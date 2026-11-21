@@ -132,6 +132,43 @@ def test_pose_specific_supports_never_borrow_docked_footprint():
     assert report["assembly_print_or_purchase_approved"] is False
 
 
+
+def test_simultaneous_pitch_and_roll_uses_coupled_conservative_tilt_bound():
+    """Tall centered COM must fail the real two-axis 25 degree static reserve."""
+    data = complete()
+    data["max_roll_deg"] = 25
+    data["max_pitch_deg"] = 25
+    data["required_static_edge_margin_mm"] = 10
+    for pose in data["poses"]:
+        pose["support_contacts_mm"] = [
+            [-50, -50], [50, -50], [50, 50], [-50, 50],
+        ]
+        for part in pose["components"]:
+            part["com_mm"] = [0, 0, 80]
+    coupled = load().screen(data)
+    assert not coupled["necessary_stability_on_paper"]
+    assert all(pose["worst_tilt_static_margin_mm"] < 10
+               for pose in coupled["poses"])
+    # With roll zero, there is no 1/cos coupling; the prior one-axis
+    # result (50 - 80*tan(25 deg) > 10 mm) must still pass.
+    data["max_roll_deg"] = 0
+    single_axis = load().screen(data)
+    assert single_axis["necessary_stability_on_paper"]
+    assert all(pose["worst_tilt_static_margin_mm"] > 10
+               for pose in single_axis["poses"])
+    # Measured horizontal COM offset must worsen the closest edge reserve.
+    for pose in data["poses"]:
+        for part in pose["components"]:
+            part["com_mm"] = [5, 0, 80]
+    offset = load().screen(data)
+    assert all(
+        later["worst_tilt_static_margin_mm"]
+        < earlier["worst_tilt_static_margin_mm"]
+        for earlier, later in zip(single_axis["poses"], offset["poses"], strict=True)
+    )
+    assert offset["assembly_print_or_purchase_approved"] is False
+
+
 def test_blank_source_template_is_not_a_qualified_measurement():
     tool = load()
     template = tool.blank_template()

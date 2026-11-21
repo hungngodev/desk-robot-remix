@@ -161,17 +161,29 @@ def screen(measurement: object) -> dict:
             sum(m * xyz[axis] for m, xyz in masses.values()) / total
             for axis in range(3)
         )
-        margins = []
-        # Check all independent worst tilt signs. This intentionally
-        # overbounds the projection rather than predicting body dynamics.
-        for roll_sign in (-1, 1):
-            for pitch_sign in (-1, 1):
-                projected = (
-                    com[0] + com[2] * math.tan(math.radians(pitch_sign * pitch)),
-                    com[1] + com[2] * math.tan(math.radians(roll_sign * roll)),
-                )
-                margins.append(minimum_signed_edge_margin(projected, hull))
-        worst_margin = min(margins)
+        # For Ry(pitch) Rx(roll), gravity-line projection contributes
+        # dx = z*tan(pitch)/cos(roll), dy = z*tan(roll).
+        # Reversing the rotation order transfers the 1/cos coupling to dy.
+        # A rectangle bounding BOTH conventions, all angle signs and every
+        # angle within the configured maxima is deliberately conservative.
+        # An affine signed edge distance reaches its minimum over that box
+        # at a corner. Independent tan terms alone underbound simultaneous
+        # tilt and can falsely certify tall loads.
+        x_reach = (
+            abs(com[2]) * math.tan(math.radians(pitch))
+            / math.cos(math.radians(roll))
+        )
+        y_reach = (
+            abs(com[2]) * math.tan(math.radians(roll))
+            / math.cos(math.radians(pitch))
+        )
+        worst_margin = min(
+            minimum_signed_edge_margin(
+                (com[0] + x_sign * x_reach, com[1] + y_sign * y_reach),
+                hull,
+            )
+            for x_sign in (-1, 1) for y_sign in (-1, 1)
+        )
         results.append({
             "name": case["name"],
             "support_hull_mm": [list(p) for p in hull],
