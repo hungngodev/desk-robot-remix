@@ -257,7 +257,15 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertNotIn('pending_face_touches_', face)
         self.assertNotIn('Event(EventType::kTouched)', face)
         self.assertIn('TakeCosmeticMoodCue()', face)
-        self.assertIn('if (!body_unhealthy &&', face)
+        # A body fault now shows a factual status and neutral OLED mood.
+        # Model-selected moods are considered only on the healthy branch.
+        self.assertIn('if (body_unhealthy) {', face)
+        self.assertIn('board->display_->SetEmotion("neutral");', face)
+        self.assertIn('else if (requested_mood != desk_robot::CosmeticMood::kNone)', face)
+        self.assertLess(
+            face.index('if (body_unhealthy) {'),
+            face.index('else if (requested_mood != desk_robot::CosmeticMood::kNone)'),
+        )
         self.assertIn('vTaskDelay(pdMS_TO_TICKS(100));', face)
         self.assertIn('xTaskCreate(BodyPollTask, "sense_body_poll"', source)
 
