@@ -203,7 +203,7 @@ class RoomStationDecoder:
         try:
             payload = json.loads(line, object_pairs_hook=_pairs,
                                  parse_constant=_reject_constant)
-        except (json.JSONDecodeError, UnicodeError) as exc:
+        except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
             raise ValueError("Malformed room station JSON") from exc
         if not isinstance(payload, dict) or set(payload) != {
             "v", "station", "seq", "at_ms", "readings"
