@@ -24,6 +24,8 @@ def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
         "reference_overwrite_reads": 0,
         "discarded_stale_writes": 0,
         "short_output_writes": 0,
+        "microphone_frames_read": n * 160,
+        "speaker_frames_accepted": n * 320,
         "reference_integrity_failed": failure,
         "speaker_playback_verified": False,
         "aec_physically_qualified": False,
@@ -87,6 +89,27 @@ async def test_audio_bench_rejects_fresh_reference_underflows():
     )
     assert result["samples"] >= 2
     assert result["reference_counter_delta"]["reference_underflow_reads"] > 0
+    assert result["reference_software_integrity_observed"] is False
+    assert result["physical_aec_delay_measured"] is False
+
+
+@pytest.mark.parametrize("missing", [
+    "microphone_frames_read", "speaker_frames_accepted",
+])
+async def test_audio_bench_cannot_pass_with_idle_microphone_or_speaker(missing):
+    class SilentPathHead:
+        def __init__(self):
+            self.calls = 0
+
+        async def audio_reference_status(self):
+            self.calls += 1
+            return dict(_sample(self.calls), **{missing: 0})
+
+    result = await bench.measure(
+        SilentPathHead(), "robot-01", seconds=0.17, poll_period_s=0.05,
+    )
+    assert result["samples"] >= 2
+    assert result["reference_counter_delta"][missing] == 0
     assert result["reference_software_integrity_observed"] is False
     assert result["physical_aec_delay_measured"] is False
 
