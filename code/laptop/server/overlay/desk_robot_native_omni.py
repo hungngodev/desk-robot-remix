@@ -304,6 +304,9 @@ class NativeOmniSession:
         # Distinct upstream ASR item IDs can carry the SAME completed
         # question. One human turn gets one Mac request per spoken intent.
         self._readonly_requests: set[tuple[str, str]] = set()
+        # A full three-route queue cannot silently omit the next independent
+        # user question while the model speaks only the first results.
+        self._readonly_capacity_exceeded: tuple[int, int] | None = None
         self._readonly_inflight: asyncio.Task | None = None
         self.native_readonly_tools_completed = 0
         self.native_readonly_tools_dropped = 0
@@ -886,6 +889,7 @@ class NativeOmniSession:
         """Forget superseded turn work without changing committed dialogue."""
         self._readonly_requests.clear()
         self._discard_queued_readonly()
+        self._readonly_capacity_exceeded = None
         self._tool_speech_turn = None
         self._tool_answer_started_turn = None
         self._tool_audio_response_id = None
@@ -917,6 +921,12 @@ class NativeOmniSession:
             return
         old = (self._generation, self._readonly_turn)
         self._generation += 1  # invalidates already queued native PCM
+        if self._readonly_capacity_exceeded == old:
+            # Preserve the truthful incomplete-request receipt when the
+            # native model is interrupted to reserve real tool-result audio.
+            self._readonly_capacity_exceeded = (
+                self._generation, self._readonly_turn,
+            )
         self._tool_speech_turn = (self._generation, self._readonly_turn)
         self._tool_answer_started_turn = None
         self._tool_audio_response_id = None
@@ -1328,6 +1338,14 @@ class NativeOmniSession:
                 )
             except asyncio.QueueFull:
                 self.native_readonly_tools_dropped += 1
+                # This was a genuinely requested but unexecuted route.
+                # Mark the entire current answer incomplete instead of
+                # speaking a partial result with no disclosure.
+                self._readonly_capacity_exceeded = (
+                    self._generation, self._readonly_turn,
+                )
+                self._readonly_requests.add(signature)
+                queued = True
                 continue
             self._readonly_requests.add(signature)
             queued = True
@@ -1540,6 +1558,17 @@ class NativeOmniSession:
                 if first[2:] != (epoch, request_turn):
                     carry = first
                     break
+            if (self._readonly_capacity_exceeded == (epoch, request_turn)
+                    and self._tool_speech_turn == (epoch, request_turn)):
+                # Never treat three admitted tools as a complete answer
+                # when another explicitly requested read was never run.
+                # Give the model an explicit limitation, not partial facts.
+                collected = [{
+                    "source": "complete_tool_results_over_capacity",
+                    "complete_answer_available": False,
+                    "tool_measurements_included": False,
+                }]
+                self._readonly_capacity_exceeded = None
             if (collected and self.connected and not self.closed
                     and self._tool_speech_turn == (epoch, request_turn)):
                 async with aiohttp.ClientSession() as chat_http:

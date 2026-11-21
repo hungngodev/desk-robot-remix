@@ -8365,3 +8365,56 @@ async def test_native_compound_rejected_camera_is_an_unavailable_clause(
     assert "wroom_fuel_gauge" in packed
     assert invalid_camera["answer"] not in packed
     assert invalid_camera["robot_id"] not in packed if invalid_camera["robot_id"] != "robot-01" else True
+
+
+async def test_native_readonly_queue_overflow_speaks_limitation_not_partial_answer(native):
+    """An admitted partial batch cannot hide a fourth unexecuted tool."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._tool_speech_turn = (0, 0)
+    session._tool_question = "Look, check my status, sensors and battery"
+    for route in ("look", "status", "aux-status"):
+        session._readonly_queue.put_nowait((route, {}, 0, 0))
+    assert session._queue_readonly_tool({
+        "item_id": "overbooked_tool_clause",
+        "transcript": "Check your battery",
+    })
+    assert session._readonly_capacity_exceeded == (0, 0)
+    assert session.native_readonly_tools_dropped == 1
+
+    spoken = []
+    finished = asyncio.Event()
+
+    async def fake_read(entries):
+        assert len(entries) == 3
+        return [{"source": "legitimate_first_tool", "available": True}]
+
+    async def fake_speak(http, question, facts, epoch, request_turn):
+        spoken.extend(facts)
+        finished.set()
+
+    session._run_readonly_batch = fake_read
+    session._speak_tool_results = fake_speak
+    worker = asyncio.create_task(session._readonly_tool_worker())
+    try:
+        await asyncio.wait_for(finished.wait(), timeout=2)
+        assert spoken == [{
+            "source": "complete_tool_results_over_capacity",
+            "complete_answer_available": False,
+            "tool_measurements_included": False,
+        }]
+        assert session._readonly_capacity_exceeded is None
+        session._readonly_capacity_exceeded = (0, 0)
+        session._clear_obsolete_tool_turn()
+        assert session._readonly_capacity_exceeded is None
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
