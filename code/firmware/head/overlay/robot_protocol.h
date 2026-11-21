@@ -93,6 +93,27 @@ private:
     std::atomic<std::uint32_t> pending_{0U};
 };
 
+// A person detection is not permission for indefinite future OLED
+// animation. Keep one bounded, rollover safe, latest-only visual cue.
+class TimedPersonCue {
+public:
+    void offer(std::uint32_t now_ms) {
+        // One event bit and 31 two-millisecond ticks preserve the full
+        // uint32_t uptime wrap without needing another clock or task.
+        pending_.store((now_ms & ~1U) | 1U, std::memory_order_release);
+    }
+    bool take(std::uint32_t now_ms) {
+        const auto receipt = pending_.exchange(
+            0U, std::memory_order_acq_rel);
+        if ((receipt & 1U) == 0U) return false;
+        const auto age_ticks = ((now_ms >> 1U) -
+            (receipt >> 1U)) & 0x7fffffffU;
+        return age_ticks <= 500U;
+    }
+private:
+    std::atomic<std::uint32_t> pending_{0U};
+};
+
 struct Command {
     std::string verb;
     std::vector<int> args;

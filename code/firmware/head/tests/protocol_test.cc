@@ -57,6 +57,20 @@ int main() {
     assert(mood.take(0U) == CosmeticMood::kNeutral);
     assert(mood.take(1U) == CosmeticMood::kNone);
 
+    // Face processing cannot replay an aged person observation after stalls
+    // or when the uint32_t millisecond timer wraps.
+    TimedPersonCue person;
+    assert(!person.take(0));
+    person.offer(1100);
+    assert(person.take(1200));
+    assert(!person.take(1201));
+    person.offer(1100);
+    assert(!person.take(2105));
+    person.offer(0xfffffffeU);
+    assert(person.take(4U));
+    person.offer(0xfffffffeU);
+    assert(!person.take(1100U));
+
     // Urgent requests must win over telemetry without fabricating ACKs.
     UrgentStopGate gate;
     assert(!gate.preempts(false));

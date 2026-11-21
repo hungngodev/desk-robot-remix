@@ -362,7 +362,8 @@ void Bridge::Start() {
 }
 
 bool Bridge::TakePersonCue() {
-    return person_cue_pending_.exchange(false, std::memory_order_acq_rel);
+    return person_cue_.take(
+        static_cast<std::uint32_t>(esp_timer_get_time() / 1000));
 }
 
 CosmeticMood Bridge::TakeCosmeticMoodCue() {
@@ -926,7 +927,8 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
                 mood, static_cast<std::uint32_t>(esp_timer_get_time() / 1000));
             return Json(req, 200, Envelope(true, "mood cue queued"));
         }
-        person_cue_pending_.store(true, std::memory_order_release);
+        person_cue_.offer(
+            static_cast<std::uint32_t>(esp_timer_get_time() / 1000));
         return Json(req, 200, Envelope(true, "person cue queued"));
     }
     auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "command");

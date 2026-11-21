@@ -46,7 +46,7 @@ private:
     bool uart_ready_ = false;
     bool enabled_ = false;
     std::atomic<bool> camera_busy_{false};
-    std::atomic<bool> person_cue_pending_{false};
+    TimedPersonCue person_cue_{};
     CosmeticMoodCue cosmetic_mood_{};
     std::uint32_t camera_sequence_ = 0; // camera_busy ensures one producer
     std::uint32_t boot_nonce_ = 0; // changes across physical Sense reboots
