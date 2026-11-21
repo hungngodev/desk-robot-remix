@@ -188,6 +188,38 @@ Arbitrary server-side session closure while WiFi stays connected does
 not automatically reopen the microphone; verify recovery and consent
 in the real network loss and manual mute trials before qualification.
 
+## Physical BOOT microphone privacy verification
+
+With the real flashed Sense head, an operator-approved listening session,
+and the normal authenticated Mac head transport configured, run:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_privacy.py \
+  --config config/local.toml --robot robot-01 --seconds 15 \
+  --report ../docs/records/reports/sense-boot-privacy-local.json
+```
+
+The bench first waits for successful microphone reads, then prompts for the
+**actual BOOT button**. Press once to mute, hold for at least one second, and
+press again only when prompted to unmute. The source-backed `/api/audio.reference`
+receipt must show the same boot identity, a new BOOT privacy epoch, no further
+PDM reads after a short in-flight grace period, a second epoch after unmute,
+and resumed microphone reads. The report uses an exclusively created private
+0600 JSON file and never stores speech, images, audio buffers or tokens.
+The existing audio integrity bench also now **fails** if BOOT mute was observed
+during a supposedly continuous full-duplex trial.
+
+This verifies observable **software microphone gate behavior**, not network
+packet cutoff, physical speaker playback, or acoustic AEC quality. A real
+packet capture or Xiaozhi server transmit trace must separately demonstrate
+that no stale Opus packets can follow the physical mute beyond the measured
+in-flight send. Repeat the BOOT trial during a delayed WiFi connect, active
+speech, an optional private AEC capture, and a reconnect. Verify the second
+physical tap is required to unmute and that the first tap destroys the private
+PCM capture. Record actual hardware measurements before acceptance; no
+automatic voice restart is allowed after operator BOOT intervention this boot.
+
 ## Live AEC reference integrity bench
 
 After flashing the selected Sense build and enabling the existing authenticated
