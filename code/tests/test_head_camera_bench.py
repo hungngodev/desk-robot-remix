@@ -221,3 +221,35 @@ async def test_camera_bench_collects_actual_sense_aec_reference_counters():
     assert result["aec_reference_probe_error"] is None
     assert result["physical_aec_latency_measured"] is False
     assert result["speaker_silence_verified"] is False
+
+async def test_slow_audio_reference_diagnostic_does_not_reduce_camera_fps():
+    """The optional AEC read runs after, not inside, the camera FPS window."""
+    class Head:
+        _last_camera = None
+
+        def __init__(self):
+            self.frames = 0
+
+        async def snapshot(self):
+            self.frames += 1
+            self._last_camera = (19, self.frames, self.frames * 1000)
+            return b"\xff\xd8jpeg\xff\xd9"
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+        async def audio_reference_status(self):
+            await asyncio.sleep(0.25)
+            return {"robot_id": "robot-01", "speaker_playback_verified": False}
+
+    start = time.monotonic()
+    report = await bench.measure(
+        Head(), "robot-01", seconds=0.12,
+        camera_period_s=0.05, status_period_s=0.05,
+    )
+    total = time.monotonic() - start
+    assert report["camera_frames_received"] >= 2
+    assert total - report["elapsed_s"] >= 0.2
+    assert report["successful_camera_fps"] >= 5
+    assert report["physical_aec_latency_measured"] is False
+    assert report["speaker_silence_verified"] is False
