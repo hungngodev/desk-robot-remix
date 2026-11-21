@@ -213,7 +213,7 @@ async def test_cancelled_stop_caller_cannot_interrupt_session_cleanup(fleet):
 
 
 def test_fleet_api_bounded_inputs_and_default_ten(fleet, tokens):
-    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
     with TestClient(create_app(fleet)) as client:
         for ids, turns in [
             (IDS[:1], None),

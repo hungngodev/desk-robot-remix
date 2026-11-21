@@ -277,7 +277,9 @@ def test_native_context_and_ollama_planner_exclude_revoked_visual_tool_text(
         assert plan_off.status_code == 200
         assert [tool["route"] for tool in plan_off.json()["tools"]] == ["status"]
         assert "PRIVATE_RED_KEY_BESIDE_MUG" not in model.prompts[-1]
-        assert "safety_fault" in model.prompts[-1]
+        # Preserve the bounded WROOM safety warning even after camera opt-out.
+        assert "WROOM reported latched safety fault" in model.prompts[-1]
+        assert "do not drive" in model.prompts[-1]
 
 
 @pytest.mark.parametrize("revocation", ["live", "memory", "derived_live"])
