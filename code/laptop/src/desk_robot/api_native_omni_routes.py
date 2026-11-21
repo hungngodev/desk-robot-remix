@@ -74,7 +74,7 @@ def register_native_omni_routes(
             revisions = getattr(owner, "_private_memory_generation", None)
             if not isinstance(revisions, dict):
                 raise HTTPException(409, "Native private memory revision unavailable")
-            generation = revisions.get(robot_id, 0)
+            generation = revisions.get(robot_id)
             if type(generation) is not int or generation < 0:
                 raise HTTPException(409, "Native private memory revision unavailable")
             core, records = await asyncio.wait_for(
@@ -101,8 +101,12 @@ def register_native_omni_routes(
                 getattr(app.state.runtime, "conversation", None),
                 "_private_memory_generation", None,
             )
+            # The owner and its exact per-pet integer lease must still
+            # exist after SQLite yields. Never allow a missing key to
+            # masquerade as generation zero or bool True as integer one.
             if (not isinstance(current, dict)
-                    or current.get(robot_id, 0) != generation):
+                    or type(current.get(robot_id)) is not int
+                    or current[robot_id] != generation):
                 raise HTTPException(409, "Private memory changed during native startup")
             # Match proactive speech's single authoritative provenance
             # formatter. A sent line is NOT a visual observation and no

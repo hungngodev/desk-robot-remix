@@ -11,13 +11,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 
 
-@pytest.mark.parametrize("changed_pet", ["self_delete", "self_edit", "other_pet"])
+@pytest.mark.parametrize(
+    "changed_pet", ["self_delete", "self_edit", "other_pet", "bool_alias"]
+)
 async def test_paused_native_startup_read_is_revision_fenced(settings, changed_pet):
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
     settings.voice_memory_tools_enabled = True
     robot, peer = settings.robots[0].id, settings.robots[1].id
-    generations = {robot: 3, peer: 8}
+    generations = {robot: 1 if changed_pet == "bool_alias" else 3, peer: 8}
     entered, release = threading.Event(), threading.Event()
 
     class Memory:
@@ -49,7 +51,10 @@ async def test_paused_native_startup_read_is_revision_fenced(settings, changed_p
     task = asyncio.create_task(endpoint(robot))
     try:
         assert await asyncio.to_thread(entered.wait, 1.0)
-        generations[peer if changed_pet == "other_pet" else robot] += 1
+        if changed_pet == "bool_alias":
+            generations[robot] = True
+        else:
+            generations[peer if changed_pet == "other_pet" else robot] += 1
     finally:
         release.set()
     if changed_pet == "other_pet":
@@ -91,3 +96,44 @@ async def test_missing_native_memory_generation_owner_fails_closed(settings):
     with pytest.raises(HTTPException) as exc:
         await endpoint(settings.robots[0].id)
     assert exc.value.status_code == 409
+
+
+@pytest.mark.parametrize("revisions", [
+    {},
+    {"robot-02": 0},
+    {"robot-01": True},
+    {"robot-01": -1},
+])
+async def test_native_startup_requires_exact_pet_integer_revision_owner(
+    settings, revisions,
+):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+
+    class NeverRead:
+        def core_facts(self, *args, **kwargs):
+            raise AssertionError("No private SQLite read without owned revision")
+
+        def recent(self, *args, **kwargs):
+            raise AssertionError("No private SQLite read without owned revision")
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=NeverRead(),
+        conversation=SimpleNamespace(_private_memory_generation=revisions),
+    )
+    register_native_omni_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: SimpleNamespace(robot=settings.robot),
+        native_pet_speech_policy=lambda _: {},
+    )
+    endpoint = next(
+        route.endpoint for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/v1/pet/{robot_id}/omni-context"
+    )
+    with pytest.raises(HTTPException) as exc:
+        await endpoint(settings.robots[0].id)
+    assert exc.value.status_code == 409
+    assert "revision unavailable" in exc.value.detail
