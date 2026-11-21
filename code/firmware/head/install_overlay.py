@@ -631,14 +631,34 @@ void Application::HandleStartListeningEvent() {""",
         )
         text = replace_once(
             text,
-            """        if (!protocol_->OpenAudioChannel()) {
-            // Return to idle so the device is not stuck in the connecting""",
-            """        if (!protocol_->OpenAudioChannel()) {
+            """void Application::ContinueOpenAudioChannel(ListeningMode mode) {
+    // Check state again in case it was changed during scheduling
+    if (GetDeviceState() != kDeviceStateConnecting) {
+        return;
+    }
+
+    // Switch to performance mode before connecting to reduce latency
+    auto& board = Board::GetInstance();
+    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+
+    if (!protocol_->IsAudioChannelOpened()) {
+        if (!protocol_->OpenAudioChannel()) {""",
+            """void Application::ContinueOpenAudioChannel(ListeningMode mode) {
+    // Check state again in case it was changed during scheduling
+    if (GetDeviceState() != kDeviceStateConnecting) {
+        return;
+    }
+
+    // Switch to performance mode before connecting to reduce latency
+    auto& board = Board::GetInstance();
+    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+
+    if (!protocol_->IsAudioChannelOpened()) {
+        if (!protocol_->OpenAudioChannel()) {
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
             if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire))
                 sense_audio_failure_epoch_.fetch_add(1, std::memory_order_acq_rel);
-#endif
-            // Return to idle so the device is not stuck in the connecting""",
+#endif""",
         )
         files[path] = text.encode()
         # Only the disposable Sense clone changes upstream Application
