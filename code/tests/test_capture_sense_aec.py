@@ -2,7 +2,6 @@
 import importlib.util
 import io
 import json
-import os
 import stat
 import struct
 import wave
