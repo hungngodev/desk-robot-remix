@@ -74,6 +74,21 @@ Panasonic AMG8833 product data, ncmreynolds LD2410 v0.2.2 protocol notes, and
 the official Feather nRF52840 power management guide. The same URLs are stored
 under `room_pod.power_reference.references` in the canonical hardware plan.
 
+## Fault recovery and temporal provenance
+
+The station gives each read-only I2C module an independent bounded five-second
+re-probe after startup failure, I2C transport loss, or a stalled acquisition.
+It performs at most one peripheral probe per loop pass so healthy UART radar
+and USB telemetry continue running. SCD40 reinitialization sends the documented 0x3F86 stop command through a
+bounded Wire transfer, then starts periodic measurement after the required
+500 ms settle interval without a blocking sleep. The pinned Sensirion
+v1.1.0 stopPeriodicMeasurement() method contains delay(500), so only that
+stop command is issued directly; periodic start and readings still use the
+pinned library. Previously cached CO2, BME gas values, and thermal
+pixels stay invalid until new successful conversions. This is a software
+recovery contract and **not** a physical hot-unplug or supply integrity pass.
+Bench test all fitted carrier revisions, bus pullups and actual reconnect time.
+
 ## Nonblocking shared radar and BME688 sampling
 
 The pinned Adafruit BME680 2.0.5 source uses `beginReading()` and

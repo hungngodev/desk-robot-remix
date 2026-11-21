@@ -18,6 +18,7 @@
 #include "scd_sample_freshness.h"
 #include "bme_completed_sample.h"
 #include "usb_epoch_sync.h"
+#include "sensor_recovery.h"
 
 #ifndef ROOM_SOIL_FITTED
 #define ROOM_SOIL_FITTED 0
@@ -30,6 +31,7 @@ constexpr uint32_t kBmeStaleMs = 3000;
 constexpr uint32_t kThermalStaleMs = 3000;
 constexpr uint32_t kThermalScanMaxMs = 250;
 constexpr uint32_t kBootWaitMs = 1200;
+constexpr uint32_t kScdNoSampleMs = 15000;
 constexpr uint8_t kBmePrimary = 0x77;
 constexpr uint8_t kBmeAlternate = 0x76;
 constexpr uint8_t kAmgAddress = 0x69;
@@ -42,8 +44,12 @@ Adafruit_AMG88xx amg;
 ld2410 radar;
 desk_robot_room::RadarSampleClock radar_sample_clock;
 desk_robot_room::UsbEpochSync usb_epoch_sync;
+desk_robot_room::SensorRecoverySchedule sensor_recovery;
 bool scd_started = false;
+bool scd_stop_pending = false;
 bool scd_valid = false;
+uint32_t scd_stop_ms = 0;
+uint32_t scd_started_ms = 0;
 bool bme_started = false;
 bool bme_pending = false;
 uint32_t bme_last_start_ms = 0;
@@ -88,12 +94,18 @@ void scd_observation(uint32_t now) {
         last_scd_ms = now;
       }
     }
-    // A bus error invalidates the old sample now, not after kScdStaleMs.
-    // A healthy not-ready poll retains it only until that age limit.
+    // A read/transport failure or missing conversions after a sensor reset
+    // retires this SCD generation. Do not publish cached pre-reset CO2.
     scd_valid = desk_robot_room::scd_sample_valid_after_poll(
         scd_valid, readiness_status, ready, measurement_valid);
+    if (readiness_status != 0 || (ready && !measurement_valid) ||
+        (now - scd_started_ms >= kScdNoSampleMs &&
+         (!scd_valid || now - last_scd_ms >= kScdNoSampleMs))) {
+      scd_started = false;
+      scd_valid = false;
+    }
   }
-  const bool fresh = scd_valid && now - last_scd_ms <= kScdStaleMs;
+  const bool fresh = scd_started && scd_valid && now - last_scd_ms <= kScdStaleMs;
   Serial.print(F("\"scd40\":{\"valid\":")); jsbool(fresh);
   if (fresh) {
     Serial.print(F(",\"sample_ms\":")); Serial.print(last_scd_ms);
@@ -119,7 +131,10 @@ void bme_step(uint32_t now) {
     // empty conversions cannot refresh a previous valid gas sample.
     bme.gas_resistance = 0;
     bme_pending = bme.beginReading() != 0U;
-    if (!bme_pending) bme_completed.invalidate();
+    if (!bme_pending) {
+      bme_completed.invalidate();
+      bme_started = false;
+    }
     return;
   }
   const int remaining = bme.remainingReadingMillis();
@@ -127,6 +142,7 @@ void bme_step(uint32_t now) {
   bme_pending = false;
   if (remaining != Adafruit_BME680::reading_complete || !bme.endReading()) {
     bme_completed.invalidate();
+    bme_started = false;
     return;
   }
   const bool complete = finite_temperature(bme.temperature)
@@ -144,6 +160,7 @@ void bme_step(uint32_t now) {
                           bme.gas_resistance, now);
   } else {
     bme_completed.invalidate();
+    bme_started = false;
   }
 }
 void bme_observation(uint32_t now) {
@@ -223,6 +240,7 @@ void thermal_step(uint32_t now) {
           thermal_staging + 8U * thermal_next_chunk)) {
     thermal_scan_active = false;
     thermal_valid = false;
+    amg_started = false;
     return;
   }
   if (++thermal_next_chunk == AMG88xx_PIXEL_ARRAY_SIZE / 8U) {
@@ -248,6 +266,58 @@ void thermal_observation(uint32_t now) {
   }
   Serial.print('}');
 }
+// Retry only one missing I2C peripheral in each main-loop pass. Each
+// attempt is spaced by the same monotonic millis() gate, including rollover.
+// A healthy radar, USB handshake, or unrelated sensor never waits on recovery.
+bool begin_bme() {
+  if (!bme.begin(kBmePrimary) && !bme.begin(kBmeAlternate))
+    return false;
+  bme.setTemperatureOversampling(BME680_OS_8X);
+  bme.setHumidityOversampling(BME680_OS_2X);
+  bme.setPressureOversampling(BME680_OS_4X);
+  bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
+  bme.setGasHeater(320, 150);
+  bme_pending = false;
+  bme_last_start_ms = 0;
+  bme_completed.invalidate();
+  return true;
+}
+void recover_sensors(uint32_t now) {
+  // Sensirion requires 500 ms after stopPeriodicMeasurement before start.
+  // Split the two I2C commands across loop passes instead of delay(500).
+  if (scd_stop_pending && desk_robot_room::scd_stop_settled(now, scd_stop_ms)) {
+    scd_stop_pending = false;
+    scd_started = scd.startPeriodicMeasurement() == 0;
+    scd_started_ms = now;
+    return;
+  }
+  const bool active[] = {scd_started || scd_stop_pending,
+                         bme_started, amg_started};
+  const int sensor = sensor_recovery.next(now, active);
+  if (sensor == desk_robot_room::SensorRecoverySchedule::kScd) {
+    scd_valid = false;
+    last_scd_ms = 0;
+    scd.begin(Wire, SCD41_I2C_ADDR_62);
+    // The pinned Sensirion stopPeriodicMeasurement() internally delay(500).
+    // Send that same documented command as one bounded I2C transaction;
+    // start only after 500 ms in a different main-loop pass.
+    Wire.beginTransmission(SCD41_I2C_ADDR_62);
+    Wire.write(0x3f);
+    Wire.write(0x86);
+    if (Wire.endTransmission() == 0) {
+      scd_stop_ms = now;
+      scd_stop_pending = true;
+    }
+  } else if (sensor == desk_robot_room::SensorRecoverySchedule::kBme) {
+    bme_started = begin_bme();
+    if (!bme_started) bme_completed.invalidate();
+  } else if (sensor == desk_robot_room::SensorRecoverySchedule::kAmg) {
+    thermal_scan_active = false;
+    thermal_valid = false;
+    amg_started = amg.begin(kAmgAddress);
+    thermal_ever_requested = false;
+  }
+}
 void report(uint32_t now) {
   // One bounded, newline-delimited source-of-observation frame each second.
   // Mac owns reconnect epochs, replay rejection, user consent and five pet
@@ -271,19 +341,8 @@ void setup() {
   while (!Serial && millis() - start < kBootWaitMs) delay(5);
   Wire.begin();
   Wire.setClock(100000);
-  scd.begin(Wire, SCD41_I2C_ADDR_62);  // 0x62, same address for SCD40
-  // Sensirion's upstream example explicitly stops old measurement state.
-  scd.stopPeriodicMeasurement();
-  scd_started = scd.startPeriodicMeasurement() == 0;
-  bme_started = bme.begin(kBmePrimary) || bme.begin(kBmeAlternate);
-  if (bme_started) {
-    bme.setTemperatureOversampling(BME680_OS_8X);
-    bme.setHumidityOversampling(BME680_OS_2X);
-    bme.setPressureOversampling(BME680_OS_4X);
-    bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
-    bme.setGasHeater(320, 150);
-  }
-  amg_started = amg.begin(kAmgAddress);
+  // Probes now run through recover_sensors() so a missing module at boot
+  // is retried without rebooting the Feather or blocking radar/USB service.
   Serial1.begin(256000);  // LD2410C, different UART from USB CDC Serial
   // Pinned ld2410 v0.2.2 otherwise blocks probing the optional radar
   // firmware for up to one second when the board is missing. Keep the
@@ -311,6 +370,7 @@ void loop() {
   // valid packet. Preserve when UART activity was actually observed instead
   // of stamping cached target data with the later one-second report time.
   radar_sample_clock.observe(radar_activity, radar.isConnected(), now);
+  recover_sensors(now);
   bme_step(now); // no heater-time sleep; preserve 256000 baud radar service
   thermal_step(now); // one I2C chunk per loop, complete frame only
   if (now - last_report_ms >= kReportMs) {
