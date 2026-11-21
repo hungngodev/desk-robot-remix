@@ -85,6 +85,22 @@ any actual regulator PCB or battery order. The existing
 reject a boost-only path for BQ24075. An on-paper pass does not close
 the protected-cell, NTC, connector, charge-current or heat gates.
 
+**New November 21 candidate-specific low-cell idle gate:** Pololu's
+[manufacturer page for S13V30F5 #4082](https://www.pololu.com/product/4082)
+states that no-load quiescent current is typically 10 to 20 mA, but some
+actual boards near 3.0 to 3.3 V VIN can approach **100 mA**. Pololu notes
+that shorter connections and local tens-of-microfarad input capacitance can
+reduce this behavior. Its advertised 3 A output also depends on low-cell VIN,
+thermal dissipation and airflow. A nominal efficiency percentage or 3 A
+label is not evidence that a fitted pet stays in its idle power and thermal
+budget. Record measured VIN and input current at 3.0 V and 3.3 V in rest,
+quiet, streaming and simultaneous audio/motion modes, with the actual
+wiring/capacitor layout, and qualify EN-off sleep separately. Compare the
+manufacturer's derating curves against actual load peaks. Until that
+measurement exists, #4082 remains a **candidate, not an approved battery
+regulator or a justified purchase**. The existing 1S preflight equations
+and physical HOLD remain unchanged.
+
 ## Required physical acceptance before purchasing five sets or energizing contacts
 
 * Confirm the actual cell/pack chemistry, connector polarity, PCM/protection board, allowable charge/discharge C-rates, NTC wiring, low-cell cutout, dimensions and verified manufacturer datasheet. No bare lithium cell or floating dock terminal.
