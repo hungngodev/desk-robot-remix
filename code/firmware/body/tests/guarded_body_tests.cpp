@@ -2198,9 +2198,12 @@ static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
   body.tick(300);
   CHECK(body.state().armed);
 
-  // Static tilt with no FF_INT must still locally disarm on new data.
-  imu.accel[0] = 14000;
-  imu.accel[2] = 8000;
+  // Tilted and accelerated inside the configured norm envelope: the old
+  // baseline-squared projection check incorrectly accepted this vector
+  // (15100/16384 > 0.8), while its true cosine is < 0.8.
+  // No MPU low-g interrupt is present.
+  imu.accel[0] = 12500;
+  imu.accel[2] = 15100;
   imu.at_ms = 350;
   body.set_imu(imu);
   fresh(guard, 350);

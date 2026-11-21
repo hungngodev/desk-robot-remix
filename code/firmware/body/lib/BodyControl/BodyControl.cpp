@@ -127,6 +127,26 @@ bool BodyControl::configure_imu_attitude_limits(const ImuAttitudeLimits& limits)
   return true;
 }
 
+// Floor integer square root, using the classical base-four bit method.
+// Each accelerometer vector is bounded to three signed 16-bit axes; this
+// preserves deterministic WROOM behavior without floating-point sensor
+// authorization or an intermediate squared-product overflow.
+static std::uint32_t attitude_norm_root(std::uint64_t value) {
+  std::uint64_t root = 0;
+  std::uint64_t bit = static_cast<std::uint64_t>(1) << 62;
+  while (bit > value) bit >>= 2;
+  while (bit != 0) {
+    if (value >= root + bit) {
+      value -= root + bit;
+      root = (root >> 1) + bit;
+    } else {
+      root >>= 1;
+    }
+    bit >>= 2;
+  }
+  return static_cast<std::uint32_t>(root);
+}
+
 bool BodyControl::attitude_sample_unsafe(const BerryReading& reading) const {
   if (!imu_attitude_configured_ || reading.model != BerryModel::Mpu6050 ||
       !reading.valid || !reading.low_g_status_valid || reading.low_g_irq)
@@ -141,10 +161,20 @@ bool BodyControl::attitude_sample_unsafe(const BerryReading& reading) const {
   }
   const auto low = static_cast<std::int64_t>(imu_attitude_limits_.min_accel_norm_raw);
   const auto high = static_cast<std::int64_t>(imu_attitude_limits_.max_accel_norm_raw);
-  // No trigonometric floating point in the local motor safety loop.
-  // A measured acceleration norm envelope rejects high-g false upright.
-  return norm_sq < low * low || norm_sq > high * high ||
-         projection * 1000 < upright_sq * imu_attitude_limits_.min_projection_permille;
+  if (norm_sq < low * low || norm_sq > high * high) return true;
+  // Normalize the dot product by BOTH magnitudes. Using upright_sq alone
+  // would admit a tilted but accelerated vector inside a wide norm envelope.
+  // Round roots upward to avoid a weak (unsafe) boundary from truncation.
+  auto measured_norm = attitude_norm_root(static_cast<std::uint64_t>(norm_sq));
+  auto upright_norm = attitude_norm_root(static_cast<std::uint64_t>(upright_sq));
+  if (static_cast<std::int64_t>(measured_norm) * measured_norm < norm_sq)
+    ++measured_norm;
+  if (static_cast<std::int64_t>(upright_norm) * upright_norm < upright_sq)
+    ++upright_norm;
+  const auto minimum_projection =
+      static_cast<std::int64_t>(upright_norm) * measured_norm *
+      imu_attitude_limits_.min_projection_permille;
+  return projection * 1000 < minimum_projection;
 }
 
 bool BodyControl::attitude_recovery_ready(std::uint32_t now_ms) const {
