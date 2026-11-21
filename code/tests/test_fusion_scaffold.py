@@ -52,9 +52,13 @@ def test_fusion_source_manifest_is_complete_and_not_a_fake_assembly():
     assert "MillimeterMeshUnit" in implementation
     assert "DirectDesignType" in implementation
     assert "occurrences.addNewComponent" in implementation
-    assert "Inspect > Interference" in (
+    # The guide wraps this Fusion command across Markdown source lines.
+    # Normalize whitespace instead of treating ordinary formatting as a
+    # missing physical interference check.
+    assembly = (
         ROOT / "docs/cad/FUSION_ONE_ROBOT_ASSEMBLY.md"
     ).read_text(encoding="utf-8")
+    assert "Inspect > Interference" in " ".join(assembly.split())
 
 
 def test_mechanical_sheet_never_approves_premium_ranger_or_mismatched_pack():
