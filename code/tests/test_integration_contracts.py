@@ -690,3 +690,25 @@ def test_pinned_sense_sensor_tool_alias_is_only_readonly_live_wroom():
     assert "WakeWordInvoke(" not in bridge
     assert "SendWakeWordDetected(" not in bridge
     assert "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED" in sense
+
+
+def test_legacy_esp32dev_firmware_is_actuator_inert_without_full_safety():
+    """Historical compatibility flashing must never drive wheels or servos."""
+    ini = (ROOT / "code/firmware/body/platformio.ini").read_text()
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    control = (ROOT / "code/firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    legacy = ini.split("[env:esp32dev]", 1)[1].split("[env:", 1)[0]
+    assert "-DDESK_ROBOT_STEPPER=0 -DDESK_ROBOT_FULL_SENSORS=0" in legacy
+
+    # The same early guard applies to any future unguarded compatibility env.
+    outputs = main.split("void apply_outputs() {", 1)[1].split("void process_input(", 1)[0]
+    inert = outputs.split("#if !DESK_ROBOT_FULL_SENSORS", 1)[1].split("#endif", 1)[0]
+    assert "control.force_disarm();" in inert
+    assert "zero_motor_pwm();" in inert
+    assert "return;" in inert
+    assert outputs.index("#if !DESK_ROBOT_FULL_SENSORS") < outputs.index(
+        "if (state.servos_attached"
+    )
+    assert "#if !DESK_ROBOT_FULL_SENSORS ||" in main
+    assert "control.inhibit_unqualified_motor_cutoff();" in main
+    assert '"ERR arm motor_cutoff_unqualified"' in control

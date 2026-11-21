@@ -259,6 +259,14 @@ void apply_outputs() {
   // All output paths, including commands received on either UART, recheck the
   // local interlock/timers immediately before writing the physical pins.
   control.tick(millis());
+#if !DESK_ROBOT_FULL_SENSORS
+  // Historical unguarded DC profiles are diagnostic-only. Even a valid
+  // remote/local ARM must never drive the H-bridge or attach a servo here.
+  // A physical actuator can be enabled only through a qualified full guard.
+  control.force_disarm();
+  zero_motor_pwm();
+  return;
+#endif
   if (!pwm_ready) {
     control.force_disarm();
     zero_motor_pwm();
@@ -383,12 +391,13 @@ void setup() {
   // This is observation identity only, not cryptographic authentication.
   // New WROOM boots must not reuse the last IMU observation session.
   control.set_boot_epoch(esp_random() | 1U);
-#if (DESK_ROBOT_STEPPER && !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED) || \
+#if !DESK_ROBOT_FULL_SENSORS || \
+    (DESK_ROBOT_STEPPER && !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED) || \
     (!DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && \
      !DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED)
-  // Neither a software heartbeat nor simulated guard readings qualify an
-  // actual motor rail. Both guarded physical backends refuse movement until
-  // their external cutoff is independently verified on the assembled board.
+  // Neither a legacy DC bench, a software heartbeat nor simulated guard
+  // readings qualify motor power. Unguarded images are actuator-inert;
+  // guarded images require an independently measured external cutoff.
   control.inhibit_unqualified_motor_cutoff();
 #endif
 #if DESK_ROBOT_FULL_SENSORS
