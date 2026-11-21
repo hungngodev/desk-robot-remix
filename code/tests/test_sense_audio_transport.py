@@ -22,6 +22,7 @@ def receipt() -> dict:
         "speaker_frames_accepted": 64000,
         "microphone_privacy_muted": False,
         "microphone_privacy_epoch": 0,
+        "aec_delay_config_ms": 90,
         "reference_integrity_failed": False,
         "speaker_playback_verified": False,
         "aec_physically_qualified": False,
@@ -50,6 +51,7 @@ async def test_real_sense_audio_status_is_read_only_and_not_playback_ack(monkeyp
     assert data["speaker_frames_accepted"] == 64000
     assert data["microphone_privacy_muted"] is False
     assert data["microphone_privacy_epoch"] == 0
+    assert data["aec_delay_config_ms"] == 90
     assert data["speaker_playback_verified"] is False
     assert data["aec_physically_qualified"] is False
 
@@ -72,6 +74,9 @@ async def test_real_sense_audio_status_is_read_only_and_not_playback_ack(monkeyp
     {"microphone_privacy_epoch": True},
     {"microphone_privacy_epoch": -1},
     {"microphone_privacy_epoch": 0x100000000},
+    {"aec_delay_config_ms": None},
+    {"aec_delay_config_ms": True},
+    {"aec_delay_config_ms": 251},
     {"speaker_playback_verified": True},
     {"aec_physically_qualified": True},
     {"reference_integrity_failed": "false"},
