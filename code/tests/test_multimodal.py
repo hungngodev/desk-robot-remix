@@ -146,6 +146,34 @@ async def test_synthetic_camera_observer_keeps_simulation_without_weakening_hard
         await hw.close()
 
 
+async def test_authenticated_stream_propagates_device_clock_without_snapshot():
+    class SourceClockHead(Head):
+        async def stream_frames(self):
+            self._last_camera = (71, 4, 1234567)
+            yield image(square=True), time.monotonic()
+            await asyncio.Event().wait()
+
+    head = SourceClockHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        async with asyncio.timeout(3):
+            while not visual.hub.frames["robot-01"]:
+                await asyncio.sleep(0.02)
+        frame = visual.hub.frames["robot-01"][-1]
+        assert frame.source_identity == (71, 4, 1234567)
+        latest = visual.hub.interaction_timeline("robot-01", time.monotonic())
+        camera = next(item for item in latest if item["channel"] == "camera")
+        assert camera["source_capture_complete_us"] == 1234567
+        assert camera["exposure_timestamp_verified"] is False
+        assert head.captures == 0
+    finally:
+        await visual.close()
+
+
 async def test_invalid_live_frame_receipts_cannot_poison_sampling_cursor():
     """Future, stale, NaN, and duplicate receipts never starve fresh frames."""
     class BadClockHead(Head):
