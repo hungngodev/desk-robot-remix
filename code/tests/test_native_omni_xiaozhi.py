@@ -1813,6 +1813,19 @@ async def test_native_voice_sends_one_video_frame_per_camera_receipt(native):
         assert base64.b64decode(image_events[0]["video_frames"][0]) == jpeg
         assert service.wire.frames_sent == 1
         assert service._last_video_sent_receipt_us == 125_678
+        # Fake send_json observes the third quiet append before _send_mic
+        # resumes from its awaited send, performs the final audio commit,
+        # and retires the active human turn. Require that completed transition,
+        # not the earlier enqueue/send event, without an arbitrary sleep.
+        async with asyncio.timeout(1):
+            while (service._user_was_talking or not any(
+                packet.get("type") == "input_audio_buffer.commit"
+                and packet.get("final") is True for packet in observed
+            )):
+                await asyncio.sleep(.001)
+        commits = [packet for packet in observed
+                   if packet.get("type") == "input_audio_buffer.commit"]
+        assert len(commits) == 1
         assert service._user_was_talking is False
         assert service.latest_jpeg is None
         # Another spoken turn cannot inherit that now-expired visual context.
