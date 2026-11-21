@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from desk_robot.room_station import RoomObservation, RoomSerialFeed, SENSORS, STATION
+from desk_robot.room_station import SENSORS, STATION, RoomObservation, RoomSerialFeed
 
 
 def _git_sha() -> str | None:
@@ -74,11 +74,11 @@ def capture(
         error = type(exc).__name__
 
     elapsed = max(0.0, clock() - start)
-    gaps = [b - a for a, b in zip(received_at, received_at[1:])]
+    gaps = [b - a for a, b in zip(received_at[:-1], received_at[1:], strict=True)]
     # Preserve observed station sequence gaps independently of HTTP/USB
     # receipt cadence. Do not interpret any gap as a motor safety measurement.
     missing = sum(max(0, ((b - a) & 0xffffffff) - 1)
-                  for a, b in zip(sequence, sequence[1:]))
+                  for a, b in zip(sequence[:-1], sequence[1:], strict=True))
     return {
         "station": STATION,
         "source_commit": _git_sha(),
