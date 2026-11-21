@@ -22,10 +22,19 @@ Run python code/scripts/check_barge_in_trials.py /private/trials.jsonl
 using actual manually measured observations. Never commit the raw voices.
 The code cannot establish that supplied records really came from a robot.
 
-The separate code/scripts/estimate_aec_delay.py estimates lag from
-synchronized actual playback and microphone PCM WAV files and helps tune
-CONFIG_DESK_ROBOT_AEC_DELAY_MS from its provisional 90ms. A synthetic
-test passing is not human double-talk qualification.
+The historical 90 ms AEC reference offset was a provisional software
+baseline, **not** a verified measurement. The selected Sense private bench
+image now must report `CONFIG_DESK_ROBOT_AEC_DELAY_MS=0` to avoid
+subtracting an unknown offset before measuring actual acoustic lag.
+Use the consent gated, authenticated `code/scripts/capture_sense_aec.py`
+to record 4 seconds of real 16 kHz microphone and digital speaker
+reference samples from the existing Sense codec, following
+`docs/guides/sense-aec-port.md`. Then run
+`code/scripts/estimate_aec_delay.py` on the locally protected WAVs.
+No script, digital reference counter, synthetic test, or HTTP WAV transfer
+establishes human double talk, analog audible playback position, or A2
+physical acceptance. Reflash the normal image with PCM capture disabled
+after the trials.
 
 Moshi MLX from https://github.com/kyutai-labs/moshi is a genuine Mac
 full-duplex speech-to-speech model option, but it is NOT a compatible
