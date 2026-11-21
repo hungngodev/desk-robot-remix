@@ -68,7 +68,6 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
     assert source.closed_mesh_edges(output) == 6
     # Flipping every facet preserves edge pairing, but turns the entire
     # printable volume inside out. Reject that case before slicing.
-    from struct import unpack_from
     inverted = bytearray(tetra_stl())
     for facet in range(4):
         start = 84 + facet * 50 + 12
