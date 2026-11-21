@@ -208,10 +208,12 @@ private:
                 // transient mood. The local idle HSM takes over afterward.
                 // These bytes never reach WROOM, motors, Opus or microphones.
                 if (body_unhealthy) {
-                    // Fault evidence outranks idle smiles and model moods.
-                    // Draw only on a fault/idle transition, not every 100 ms.
+                    // Keep a nonemotional neutral safety face instead of
+                    // prescribing sadness for every independent WROOM fault.
+                    // The factual STOP status above remains visible, and
+                    // optional HSM/LLM moods cannot override the safety cue.
                     if (!last_idle_face_fault || !last_was_idle)
-                        board->display_->SetEmotion("sad");
+                        board->display_->SetEmotion("neutral");
                     model_mood_active = false;
                 } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
                     board->display_->SetEmotion(CosmeticMoodName(requested_mood));
