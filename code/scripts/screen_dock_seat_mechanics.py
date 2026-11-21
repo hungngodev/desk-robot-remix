@@ -36,7 +36,8 @@ def dock_constants(source: Path = CAD) -> dict:
     names = (
         "track_outer_width_mm", "side_clearance_each_mm",
         "guide_wall_mm", "wall_outside_margin_mm",
-        "guide_run_mm", "entry_flare_each_mm", "entry_coupon_length_mm",
+        "guide_run_mm", "guide_height_mm", "entry_flare_each_mm",
+        "entry_coupon_length_mm",
         "base_length_mm", "backstop_thickness_mm",
         "backstop_height_mm", "base_thickness_mm", "tag_black_side_mm",
         "tag_white_margin_each_mm", "tag_paper_slack_each_mm",
@@ -60,6 +61,7 @@ def dock_constants(source: Path = CAD) -> dict:
     inner_wall = values["guide_wall_mm"] + values["wall_outside_margin_mm"]
     if (not 40 < values["track_outer_width_mm"] < 200
             or not 0.5 <= values["side_clearance_each_mm"] < 8
+            or not values["guide_height_mm"] > 0
             or not values["guide_run_mm"] > 37
             or not 37 < values["entry_coupon_length_mm"] < values["guide_run_mm"]
             or not values["base_length_mm"] >
@@ -143,11 +145,15 @@ def contact_constants(source: Path = CONTACT_CAD) -> dict:
     """Original NONCONDUCTIVE contact fit gauge, never a selected connector."""
     text = source.read_text(encoding="utf-8")
     values = {}
-    for name in ("contact_carrier_l", "contact_carrier_w",
-                 "contact_carrier_h", "contact_centers_mm",
-                 "contact_outer_d_mm"):
+    for name in (
+        "contact_carrier_l", "contact_carrier_w", "contact_carrier_h",
+        "contact_centers_mm", "contact_outer_d_mm",
+        "contact_pocket_depth_mm", "fit_xy", "m3_clearance",
+        "minimum_pocket_floor_mm", "minimum_side_wall_mm",
+        "minimum_bridge_mm",
+    ):
         matches = re.findall(
-            rf"^{name}\s*=\s*(\d+(?:\.\d+)?)\s*;",
+            rf"^\s*{name}\s*=\s*(\d+(?:\.\d+)?)\s*;",
             text, re.M,
         )
         if len(matches) != 1:
@@ -159,6 +165,25 @@ def contact_constants(source: Path = CONTACT_CAD) -> dict:
         values["contact_carrier_l"] - values["contact_outer_d_mm"]
     ):
         raise ValueError("Invalid contact coupon pocket separation")
+    # Mirror the nonconductive SCAD coupon's own print constraints. The
+    # mounting bores must leave a real insulating bridge to both pockets.
+    pocket_radius = (values["contact_outer_d_mm"] + values["fit_xy"]) / 2
+    bolt_radius = values["m3_clearance"] / 2
+    bolt_center = values["contact_carrier_l"] / 2 - 5
+    contact_center = values["contact_centers_mm"] / 2
+    if (not 8 < values["contact_centers_mm"] <
+            values["contact_carrier_l"] - 14
+            or not 1 < values["contact_outer_d_mm"] < 10
+            or not 1 < values["contact_pocket_depth_mm"] <
+                values["contact_carrier_h"]
+            or (values["contact_carrier_h"] -
+                values["contact_pocket_depth_mm"] <
+                values["minimum_pocket_floor_mm"])
+            or values["contact_carrier_w"] / 2 - pocket_radius <
+                values["minimum_side_wall_mm"]
+            or bolt_center - contact_center <
+                bolt_radius + pocket_radius + values["minimum_bridge_mm"]):
+        raise ValueError("Invalid unpowered contact carrier printable web")
     return {
         "carrier_length_mm": values["contact_carrier_l"],
         "carrier_depth_mm": values["contact_carrier_w"],

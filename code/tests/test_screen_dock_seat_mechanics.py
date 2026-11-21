@@ -134,13 +134,16 @@ def test_stale_source_revision_and_unexpected_measurement_rejected(tmp_path):
 
 
 
-@pytest.mark.parametrize("original,replacement", [
-    ("track_outer_width_mm = 96;", "track_outer_width_mm = 60;"),
-    ("tag_bottom_z_mm = 16;", "tag_bottom_z_mm = 7;"),
-    ("tag_bottom_z_mm = 16;", "tag_bottom_z_mm = 70;"),
+@pytest.mark.parametrize("original,replacement,reason", [
+    ("track_outer_width_mm = 96;", "track_outer_width_mm = 60;",
+     "Dock tag/IR source geometry is inconsistent"),
+    ("tag_bottom_z_mm = 16;", "tag_bottom_z_mm = 7;",
+     "tag pocket exceeds printable CAD"),
+    ("tag_bottom_z_mm = 16;", "tag_bottom_z_mm = 70;",
+     "tag pocket exceeds printable CAD"),
 ])
 def test_screen_rejects_tag_pockets_that_openscad_refuses_to_render(
-    tmp_path, original, replacement,
+    tmp_path, original, replacement, reason,
 ):
     """A positive paper screen cannot be based on nonrenderable dock CAD."""
     tool = load()
@@ -148,7 +151,7 @@ def test_screen_rejects_tag_pockets_that_openscad_refuses_to_render(
     assert source.count(original) == 1
     changed = tmp_path / "impossible_dock.scad"
     changed.write_text(source.replace(original, replacement), encoding="utf-8")
-    with pytest.raises(ValueError, match="tag pocket exceeds printable CAD"):
+    with pytest.raises(ValueError, match=reason):
         tool.dock_constants(changed)
 
 
@@ -181,6 +184,7 @@ def test_screen_rejects_ir_pair_coupons_breaching_paper_or_outer_web(
     ("entry_coupon_length_mm = 48;", "entry_coupon_length_mm = 36;"),
     ("tag_recess_depth_mm = 0.8;", "tag_recess_depth_mm = 3.5;"),
     ("ir_coupon_height_mm = 16;", "ir_coupon_height_mm = 8;"),
+    ("guide_height_mm = 12;", "guide_height_mm = 0;"),
 ])
 def test_screen_rejects_nonrenderable_dock_source_dimensions(
     tmp_path, original, replacement,
@@ -278,6 +282,24 @@ def test_contact_carrier_source_revision_or_dimensions_cannot_drift(tmp_path):
     )
     with pytest.raises(ValueError, match="Invalid unpowered contact"):
         source.contact_constants(fake)
+
+
+@pytest.mark.parametrize("original,replacement", [
+    ("contact_carrier_w = 25;", "contact_carrier_w = 3;"),
+    ("contact_carrier_h = 9;", "contact_carrier_h = 4;"),
+    ("contact_carrier_l = 54;", "contact_carrier_l = 40;"),
+    ("contact_pocket_depth_mm = 5;", "contact_pocket_depth_mm = 8;"),
+])
+def test_contact_gauge_violating_printable_web_is_rejected(
+    tmp_path, original, replacement,
+):
+    source = load()
+    raw = source.CONTACT_CAD.read_text(encoding="utf-8")
+    assert raw.count(original) == 1
+    modified = tmp_path / "invalid_contact_coupon.scad"
+    modified.write_text(raw.replace(original, replacement), encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid unpowered contact"):
+        source.contact_constants(modified)
 
 
 def test_unpowered_contact_coupon_datum_parser_reads_current_source():
