@@ -196,6 +196,15 @@ def register_voice_context_route(
         # after that independent opt-out.
         if not settings.voice_vision_tools_enabled:
             sensor_cues, tool_cues, timeline = [], [], []
+        # A SQLite worker may complete after a NEW authenticated voice turn.
+        # Discard the entire private response, not merely its Mac timeline
+        # receipt; the superseded caller has no authority to reuse these facts.
+        if owner is not None:
+            turn_owner, turn_generation = owner
+            current_epochs = getattr(turn_owner, "_turn_epoch", None)
+            if (not isinstance(current_epochs, dict)
+                    or current_epochs.get(robot_id) != turn_generation):
+                raise HTTPException(409, "Voice tool turn superseded during memory retrieval")
         # Voice memory consent is independent from the vision opt-in.
         # Only a marked, still-current voice tool turn may publish a short
         # memory receipt; ordinary operator/dashboard reads cannot.

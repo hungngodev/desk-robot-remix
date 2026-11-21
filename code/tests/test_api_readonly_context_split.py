@@ -342,3 +342,55 @@ def test_native_startup_memory_is_exposed_as_data_not_instructions(settings):
         assert marker in payload["untrusted_historical_evidence"]["recent"]
         assert payload["untrusted_historical_evidence"]["core"] == ""
         assert payload["model_can_arm_motors"] is False
+
+
+def test_voice_memory_lookup_rejects_payload_after_turn_is_superseded(settings):
+    """Old voice tools cannot reuse the private payload after a newer VAD."""
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = False
+    turn_owner = SimpleNamespace(_turn_epoch={"robot-01": 3})
+    receipts = []
+
+    class Memory:
+        advance = False
+
+        def recent(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 6
+            if self.advance:
+                turn_owner._turn_epoch[robot_id] += 1
+            return [SimpleNamespace(
+                summary="Private historical cobalt key", witnessed=True,
+                source_robot=robot_id, kind="key",
+            )]
+
+        def core_facts(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 8
+            return []
+
+    memory = Memory()
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(memory=memory, multimodal=None)
+    register_voice_context_route(
+        app, settings,
+        authorize=lambda: None,
+        requested_tool_context=lambda request, robot_id: (
+            turn_owner, turn_owner._turn_epoch[robot_id],
+        ),
+        remember_tool_context=lambda *args: receipts.append(args),
+    )
+    with TestClient(app) as client:
+        good = client.get("/v1/pet/robot-01/voice-context")
+        assert good.status_code == 200
+        assert "Private historical cobalt key" in str(good.json())
+        assert len(receipts) == 1
+
+        memory.advance = True
+        stale = client.get("/v1/pet/robot-01/voice-context")
+        assert stale.status_code == 409
+        assert "superseded" in stale.json()["detail"]
+        assert "Private historical cobalt key" not in str(stale.json())
+        assert len(receipts) == 1
