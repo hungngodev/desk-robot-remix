@@ -126,6 +126,9 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     }
     const int frames = samples / 2;
     if (frames > kMaxReadFrames) return 0;
+    const uint32_t privacy_epoch = microphone_privacy_epoch_.load(
+        std::memory_order_acquire);
+    if (microphone_privacy_muted_.load(std::memory_order_acquire)) return 0;
     // The head owns one realtime capture reader. A bounded mutex also
     // prevents concurrent callbacks from corrupting shared frame scratch.
     std::lock_guard<std::mutex> input_lock(input_read_mutex_);
@@ -134,6 +137,12 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     const int mic_read = NoAudioCodecSimplexPdm::Read(microphone_frame_.data(), frames);
     if (mic_read != frames) {
         return 0; // AudioCodec::InputData is boolean; reject partial frames.
+    }
+    // Discard a PDM read that crossed a physical BOOT mute/unmute epoch.
+    if (microphone_privacy_muted_.load(std::memory_order_acquire) ||
+        privacy_epoch != microphone_privacy_epoch_.load(std::memory_order_acquire)) {
+        std::fill_n(microphone_frame_.begin(), frames, 0);
+        return 0;
     }
     bool reference_ready = false;
     uint32_t consecutive_missing = 0;
@@ -172,16 +181,34 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         dest[2 * i] = microphone_frame_[i];
         dest[2 * i + 1] = reference_frame_[i];
     }
+    // Check again after mixing AEC channels, before any raw PCM capture.
+    if (microphone_privacy_muted_.load(std::memory_order_acquire) ||
+        privacy_epoch != microphone_privacy_epoch_.load(std::memory_order_acquire)) {
+        std::fill_n(dest, samples, 0);
+        std::fill_n(microphone_frame_.begin(), frames, 0);
+        return 0;
+    }
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
     {
         // One optional RAM-only calibration listener of ALREADY sampled mic
         // and reference. No second PDM/I2S reader or audio network service.
         std::lock_guard<std::mutex> lock(bench_mutex_);
-        bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
-                            static_cast<uint32_t>(frames), esp_timer_get_time(),
-                            reference_ready);
+        if (!microphone_privacy_muted_.load(std::memory_order_acquire) &&
+            privacy_epoch == microphone_privacy_epoch_.load(std::memory_order_acquire)) {
+            bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
+                                static_cast<uint32_t>(frames), esp_timer_get_time(),
+                                reference_ready);
+        }
     }
 #endif
+    // BOOT may arrive during a bounded private capture copy. The mute
+    // setter invalidates the buffer and these samples never reach Opus.
+    if (microphone_privacy_muted_.load(std::memory_order_acquire) ||
+        privacy_epoch != microphone_privacy_epoch_.load(std::memory_order_acquire)) {
+        std::fill_n(dest, samples, 0);
+        std::fill_n(microphone_frame_.begin(), frames, 0);
+        return 0;
+    }
     return samples;
 }
 
