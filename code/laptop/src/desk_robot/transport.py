@@ -188,6 +188,8 @@ class HttpHead:
         self.config = config
         self.client = client
         self.lock = asyncio.Lock()
+        self.command_lock = asyncio.Lock()
+        self._command_generation = 0
         self.capture_lock = asyncio.Lock()
         self.strict_capture = strict_capture
         self._last_camera: tuple[int, int, int] | None = None
@@ -222,25 +224,38 @@ class HttpHead:
         except (httpx.HTTPError, ValueError) as exc:
             raise HeadError(f"{self.config.id}: head request failed; no retry: {exc}") from exc
 
-    async def command(self, command: str) -> dict:
-        expected = expected_ack(command)
-        if command == "halt":
-            # Urgent WROOM disarm must not queue behind a stalled telemetry
-            # read. WROOM owns the independent physical STOP latch; a reply
-            # is only a command receipt, never proof that wheels have stopped.
+    async def _ordered_command(
+        self, command: str, expected: str, generation: int
+    ) -> dict:
+        # All physical commands retain order even when HALT bypasses a GET.
+        # A queued command from before terminal HALT must never dispatch later.
+        async with self.command_lock:
+            if generation != self._command_generation:
+                raise HeadError("Command superseded by terminal WROOM HALT")
             response = await self._request(
                 "POST", "/api/command", json={"command": command}
             )
-        else:
-            async with self.lock:
-                response = await self._request(
-                    "POST", "/api/command", json={"command": command}
-                )
-        data = _response_object(response)
-        reply = data.get("reply", "")
-        if data.get("ok") is not True or data.get("robot_id") != self.config.id or reply != expected:
-            raise HeadError("Unmatched or failed command ACK; movement not retried")
-        return data
+            data = _response_object(response)
+            reply = data.get("reply", "")
+            if data.get("ok") is not True or data.get("robot_id") != self.config.id or reply != expected:
+                raise HeadError("Unmatched or failed command ACK; movement not retried")
+            if generation != self._command_generation:
+                raise HeadError("Command receipt superseded by terminal WROOM HALT")
+            return data
+
+    async def command(self, command: str) -> dict:
+        expected = expected_ack(command)
+        if command == "halt":
+            # Retire already queued commands immediately. An in-flight POST
+            # must finish before HALT so its late ARM cannot undo the disarm.
+            # HALT never waits for a stalled status GET or camera request.
+            self._command_generation += 1
+            return await self._ordered_command(
+                command, expected, self._command_generation
+            )
+        generation = self._command_generation
+        async with self.lock:
+            return await self._ordered_command(command, expected, generation)
 
     async def face_event(self, event: str) -> None:
         """Send an explicitly bounded cosmetic face cue to THIS robot's head.

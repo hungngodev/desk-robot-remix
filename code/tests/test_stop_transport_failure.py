@@ -198,5 +198,58 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.wait_for(stalled_get, timeout=1.0)
 
 
+    async def test_halt_fences_queued_commands_without_overtaking_arm_post(self):
+        """HALT may beat GET, never overtake a prior physical command POST."""
+        import httpx
+        from desk_robot.transport import HeadError, HttpHead
+
+        first_post = asyncio.Event()
+        release_first = asyncio.Event()
+        sent = []
+
+        async def handler(request):
+            command = json.loads(request.content)["command"]
+            sent.append(command)
+            if command == "arm":
+                first_post.set()
+                await release_first.wait()
+            return httpx.Response(
+                200, json={
+                    "ok": True, "robot_id": "robot-01", "reply": f"OK {command}"
+                }
+            )
+
+        config = SimpleNamespace(
+            id="robot-01", head_url="http://robot.invalid", token_env="HEAD_TOKEN"
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            head = HttpHead(config, client)
+            with patch("desk_robot.transport.secret", return_value="fixture-token"):
+                first = asyncio.create_task(head.command("arm"))
+                queued = None
+                halted = None
+                try:
+                    await asyncio.wait_for(first_post.wait(), timeout=1.0)
+                    queued = asyncio.create_task(head.command("arm"))
+                    await asyncio.sleep(0)
+                    halted = asyncio.create_task(head.command("halt"))
+                    await asyncio.sleep(0)
+                    self.assertEqual(sent, ["arm"])
+                    release_first.set()
+                    with self.assertRaisesRegex(HeadError, "superseded"):
+                        await asyncio.wait_for(first, timeout=1.0)
+                    with self.assertRaisesRegex(HeadError, "superseded"):
+                        await asyncio.wait_for(queued, timeout=1.0)
+                    acknowledgement = await asyncio.wait_for(halted, timeout=1.0)
+                    self.assertEqual(acknowledgement["reply"], "OK halt")
+                    self.assertEqual(sent, ["arm", "halt"])
+                finally:
+                    release_first.set()
+                    await asyncio.gather(
+                        *(task for task in (first, queued, halted) if task is not None),
+                        return_exceptions=True,
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()
