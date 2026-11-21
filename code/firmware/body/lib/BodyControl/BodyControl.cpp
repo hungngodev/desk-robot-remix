@@ -130,6 +130,7 @@ void BodyControl::sample_bumper_input(bool active) {
 void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
                                          bool reed, bool pir) {
   enabled_mask &= 0x07U;
+  const std::uint8_t previously_enabled = state_.extra_mask;
   state_.extra_mask = enabled_mask;
   sample_bumper_input((enabled_mask & 1U) != 0U && bumper);
   const bool levels[3] = {bool((enabled_mask & 1U) && bumper),
@@ -147,6 +148,17 @@ void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
     return; // boot baseline, not a real new event
   }
   for (int i = 0; i < 3; ++i) {
+    const auto bit = static_cast<std::uint8_t>(1U << i);
+    if (!(enabled_mask & bit) || !(previously_enabled & bit)) {
+      // A missing/expired expander reading is NOT a new low contact, and a
+      // subsequently recovered high value is NOT a fresh rising event.
+      // Rebaseline only the affected input without touching unrelated
+      // bumper, reed, or PIR history. Raw bumper still trips immediately.
+      *stable[i] = levels[i];
+      extra_candidates_[i] = levels[i];
+      extra_streaks_[i] = 1;
+      continue;
+    }
     if (levels[i] != extra_candidates_[i]) {
       extra_candidates_[i] = levels[i];
       extra_streaks_[i] = 1;
