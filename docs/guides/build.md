@@ -1,4 +1,4 @@
-# Firmware builds
+# One robot build and firmware guide
 
 These commands build files. **Nothing in setup automatically flashes hardware.**
 
@@ -18,6 +18,64 @@ battery/chassis mismatch, begin at [Fusion one robot assembly](../cad/FUSION_ONE
 For actual signal assignments use [generated one robot harness](../hardware/one-robot-signal-harness.generated.md),
 and for full operating restrictions use [firmware progress](firmware-foundation.md).
 Do not use historical Freenove/CoreS3 configurations for the selected Sense head.
+
+## Complete first robot route
+
+Use this file as the single entry point for the first complete pet. The linked
+records remain canonical for measurements and generated wiring, so do not copy
+them into a second shopping list or hand-edit generated pin tables.
+
+1. **Buy and inventory.** Start with
+   [the first complete robot procurement entry point](../hardware/one-robot-inventory-and-shopping.md).
+   Keep reported or ordered stock separate from still-to-buy items. A HOLD item
+   stays out of checkout until its listed release evidence exists.
+2. **Measure before final CAD.** Fill
+   [the Fusion measurement sheet](../cad/FUSION_MEASUREMENT_SHEET.md) from the
+   actual delivered parts. Protected pack body, leads and connector, charger,
+   boost, fuse, switch, service path, track width, two dock seat switches,
+   MG90S geometry, GY-530 optics and head interfaces remain separate inputs.
+3. **Print reversible fit pieces first.** Generate and verify the provisional
+   kit with `python3 code/scripts/export_fit_kit.py` and then
+   `python3 code/scripts/export_fit_kit.py --verify`. Follow
+   [the adapter kit instructions](../cad/remixes/one_robot_adapter_kit_README.md).
+   These parts are fit references, not the final installed print set.
+4. **Assemble and inspect mechanically.** Follow
+   [the one robot Fusion assembly](../cad/FUSION_ONE_ROBOT_ASSEMBLY.md).
+   Check track and servo swept spaces, camera and ToF visibility, battery
+   removal, wire bends, USB access, speaker cavity, center of gravity and dock
+   seating before exporting final installed parts.
+5. **Wire connector to connector.** Use the
+   [generated signal harness](../hardware/one-robot-signal-harness.generated.md)
+   together with [the wiring and power guide](../hardware/wiring.md). Do not
+   infer a pin from a concept render and do not energize dock contacts.
+6. **First power.** Apply the
+   [protected single cell power gate](../hardware/one-robot-power-gate.md).
+   Bring up logic with motors and charger power disconnected first. The power
+   gate, actual regulator behavior, pack temperature path and protected dock
+   circuit must pass before actuator or charging qualification.
+7. **Build and flash.** Use the exact WROOM and XIAO Sense commands later in
+   this guide. Confirm the physical USB device before any upload. The selected
+   body profile is `esp32_full`; the selected head is `sense`.
+8. **Calibrate physical behavior.** Use
+   [IMU handling](imu-handling.md),
+   [the jaw calibration helper](jaw-calibration-helper.md), and
+   [the first gripper test](first-gripper-test.md), plus the camera, ToF,
+   dock and acoustic procedures referenced by the live verification record.
+9. **Operate, STOP and recover.** Start disarmed. Use the STOP and rearm rules
+   in [the wiring guide](../hardware/wiring.md) and never treat reconnect,
+   putdown or a recovered Mac session as permission to resume motion.
+10. **Diagnose faults.** Keep the robot disarmed when a required sensor,
+    dock monitor, charger state, current sample or safety receipt is missing,
+    stale or contradictory. Trace the relevant source and physical measurement
+    before replacing a guard with a bypass.
+11. **Run acceptance.** Record exact build and calibration identity, then run
+    the applicable A1 through A12 cases in
+    [the verification record](../records/verification.md). Software checks,
+    printed fit and physical qualification are distinct evidence.
+12. **Release the final print set only after qualification.** The current
+    repository intentionally does not call the source meshes and fit coupons a
+    production robot. Final installed quantities and dock charging remain
+    blocked until the required measurements and physical trials pass.
 
 ## Current WROOM builds, with motion disabled until physical qualification
 
