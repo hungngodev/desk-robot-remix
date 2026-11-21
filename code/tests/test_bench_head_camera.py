@@ -89,6 +89,38 @@ async def test_replayed_xiao_frame_identity_rejected_by_camera_bench():
     assert "duplicate camera identity" in report["camera_errors"][0]
 
 
+async def test_snapshot_camera_bench_rejects_reboot_without_hiding_status():
+    class RebootedHead:
+        def __init__(self):
+            self.sequence = 0
+            self._last_camera = None
+            self.status_calls = 0
+
+        async def snapshot(self):
+            self.sequence += 1
+            boot = 17 if self.sequence < 3 else 18
+            self._last_camera = (boot, self.sequence, self.sequence * 1000)
+            return JPEG
+
+        async def status(self):
+            self.status_calls += 1
+            return {"robot_id": "robot-01"}
+
+    head = RebootedHead()
+    result = await bench.measure(
+        head, "robot-01", seconds=0.22,
+        camera_period_s=0.05, status_period_s=0.05,
+    )
+    assert result["camera_acquisition_mode"] == "legacy_snapshot"
+    assert result["camera_frames_received"] == 2
+    assert result["camera_error_count"] >= 1
+    assert "Sense camera rebooted during snapshot bench" in result["camera_errors"][0]
+    assert result["distinct_source_camera_identities"] == 2
+    assert result["status_error_count"] == 0
+    assert head.status_calls >= 2
+    assert result["assembly_ready"] is False
+
+
 async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http():
     import time
 

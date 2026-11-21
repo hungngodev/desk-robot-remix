@@ -62,11 +62,12 @@ async def measure(
     status_errors: list[str] = []
     camera_error_count = status_error_count = 0
     seen_camera_identities: set[tuple[int, int, int]] = set()
+    snapshot_boot: int | None = None
     started = time.monotonic()
     deadline = started + seconds
 
     async def poll_camera():
-        nonlocal camera_error_count
+        nonlocal camera_error_count, snapshot_boot
         due = started
         while time.monotonic() < deadline:
             begin = time.monotonic()
@@ -81,8 +82,13 @@ async def measure(
                     raise ValueError("Head returned truncated or non-JPEG data")
                 identity = getattr(head, "_last_camera", None)
                 if identity is not None:
+                    # A fresh boot is allowed by HttpHead transport recovery,
+                    # but it invalidates a single uninterrupted camera bench.
+                    if snapshot_boot is not None and identity[0] != snapshot_boot:
+                        raise RuntimeError("Sense camera rebooted during snapshot bench")
                     if identity in seen_camera_identities:
                         raise ValueError("Head returned duplicate camera identity")
+                    snapshot_boot = identity[0]
                     seen_camera_identities.add(identity)
                 camera_sizes.append(len(jpeg))
                 camera_times.append(time.monotonic() - begin)
