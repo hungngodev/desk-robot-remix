@@ -1,0 +1,88 @@
+"""Read-only room station bench report never claims physical qualification."""
+import json
+import runpy
+from pathlib import Path
+
+import pytest
+
+from desk_robot.room_station import RoomStationDecoder, SENSORS
+
+BENCH = runpy.run_path(
+    str(Path(__file__).resolve().parents[1] / "scripts/bench_room_station.py")
+)
+capture = BENCH["capture"]
+
+
+def _packet(seq: int, station_ms: int) -> bytes:
+    readings = {name: {"valid": False} for name in SENSORS}
+    readings["scd40"] = {
+        "valid": True, "sample_ms": station_ms,
+        "co2_ppm": 630, "temp_c": 23.5, "humidity_pct": 48.0,
+    }
+    return json.dumps({
+        "v": 1, "station": "room-pod-01",
+        "seq": seq, "at_ms": station_ms, "readings": readings,
+    }).encode()
+
+
+def test_room_bench_counts_real_decoder_receipts_without_sensor_person_claim():
+    decoder = RoomStationDecoder()
+    first = decoder.accept(_packet(7, 1000), now=1.0)
+    second = decoder.accept(_packet(9, 2000), now=1.5)
+
+    class Feed:
+        def __init__(self, port, on_observation):
+            assert port == "/dev/cu.room"
+            self.on_observation = on_observation
+            self.rejected = 1
+            self.callback_failures = 0
+
+        def _read_port(self, running):
+            self.on_observation(first)
+            self.on_observation(second)
+
+    result = capture("/dev/cu.room", seconds=1, feed_factory=Feed, clock=lambda: 0.0)
+    assert result["accepted_frames"] == 2
+    assert result["rejected_frames"] == 1
+    assert result["missing_station_sequences"] == 1
+    assert result["first_station_sequence"] == 7
+    assert result["last_station_sequence"] == 9
+    assert result["largest_mac_receive_gap_ms"] == 500.0
+    assert result["valid_sensor_frames"]["scd40"] == 2
+    assert all(result["valid_sensor_frames"][name] == 0
+               for name in SENSORS if name != "scd40")
+    assert result["read_only_usb_sample_captured"] is True
+    for key in ("device_identity_authenticated", "sensor_accuracy_physically_qualified",
+                "station_power_physically_qualified", "charging_verified",
+                "motion_authorized"):
+        assert result[key] is False
+    assert "rail voltage" in result["notes"]
+
+
+def test_room_bench_transport_failure_does_not_promote_any_physical_gate():
+    class Broken:
+        rejected = 0
+        callback_failures = 0
+
+        def __init__(self, port, on_observation):
+            pass
+
+        def _read_port(self, running):
+            raise OSError("USB serial unplugged")
+
+    result = capture("/dev/cu.absent", seconds=1, feed_factory=Broken, clock=lambda: 0)
+    assert result["serial_error_type"] == "OSError"
+    assert result["accepted_frames"] == 0
+    assert result["read_only_usb_sample_captured"] is False
+    assert result["station_power_physically_qualified"] is False
+    assert result["charging_verified"] is False
+
+
+@pytest.mark.parametrize("port,seconds", [
+    ("ttyUSB0", 60), ("/dev/cu.test", 0), ("/dev/cu.test", True),
+    ("/dev/cu.test", float("nan")), ("/dev/cu.test", float("inf")),
+    ("/dev/cu.test", 3601),
+])
+def test_room_bench_requires_explicit_local_port_and_bounded_capture(port, seconds):
+    with pytest.raises(ValueError):
+        capture(port, seconds=seconds)
