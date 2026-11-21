@@ -9,6 +9,8 @@ import argparse
 import asyncio
 import json
 import math
+import os
+import stat
 import time
 from contextlib import aclosing
 from pathlib import Path
@@ -23,6 +25,27 @@ ROOT = Path(__file__).resolve().parents[1]
 # A stream that delivers a new JPEG after a prolonged blackout is not continuous.
 # This is a generous transport probe threshold, not a hardware FPS qualification.
 MAX_CAMERA_GAP_S = 1.2
+
+
+def preflight_private_report(path: Path) -> None:
+    """Reject public or existing measurement paths before touching the head."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if (path.parent.is_symlink()
+            or stat.S_IMODE(path.parent.stat().st_mode) & 0o077):
+        raise ValueError("Camera bench report directory must be private mode 0700")
+    if path.exists() or path.is_symlink():
+        raise FileExistsError("Camera bench trial report already exists")
+
+
+def save_private_report(path: Path, report: dict) -> None:
+    preflight_private_report(path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    with os.fdopen(os.open(path, flags, 0o600), "w", encoding="utf-8") as out:
+        json.dump(report, out, indent=2)
+        out.write("\n")
+
 
 
 def summarize(values: list[float]) -> dict:
@@ -313,6 +336,7 @@ async def main() -> int:
     robot = settings.robot(args.robot)
     if not robot.device_id:
         parser.error("Robot requires a uniquely configured Xiaozhi head identity")
+    preflight_private_report(args.report)
     async with httpx.AsyncClient() as client:
         head = HttpHead(robot, client, strict_capture=True)
         result = await measure(
@@ -321,8 +345,7 @@ async def main() -> int:
             status_period_s=args.status_period,
             stream=args.stream, score_motion=args.score_motion,
         )
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    save_private_report(args.report, result)
     print(json.dumps(result, indent=2))
     return 0 if (result["camera_frames_received"] > 0
                  and result["status_latency"]["count"] > 0
