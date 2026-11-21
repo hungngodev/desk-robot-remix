@@ -374,6 +374,11 @@ class HttpHead:
             self._stream_connected = False
             self._stream_latest = None
             self._stream_condition.notify_all()
+        # Source completion and Mac arrival run on different monotonic
+        # clocks. Only compare DELTAS within this one connected stream;
+        # never interpret an absolute ESP32 timestamp as Mac wall time.
+        last_source_identity = None
+        last_received = None
         try:
             async with self.client.stream(
                 "GET", url, headers=headers,
@@ -404,13 +409,32 @@ class HttpHead:
                     # newest image in a coalesced network read. This prevents
                     # slow vision consumers from working through stale scenes.
                     latest = None
+                    latest_identity = None
                     async with self._stream_condition:
                         if generation != self._stream_generation:
                             raise HeadError("Superseded XIAO camera stream")
                         for jpeg, identity in reader.iter_feed(chunk):
                             self._accept_camera_identity(identity)
                             latest = jpeg
+                            latest_identity = identity
                         if latest is not None:
+                            if (last_source_identity is not None
+                                    and last_source_identity[0] == latest_identity[0]
+                                    and last_received is not None):
+                                network_elapsed = received - last_received
+                                source_elapsed = (
+                                    latest_identity[2] - last_source_identity[2]
+                                ) / 1_000_000
+                                # A delayed chunk whose camera timestamp
+                                # barely moved cannot become a fresh scene
+                                # just because the consumer resumed later.
+                                if (network_elapsed > 1.5
+                                        and network_elapsed - source_elapsed > 1.0):
+                                    raise HeadError(
+                                        "Buffered stale camera frame after stream backlog"
+                                    )
+                            last_source_identity = latest_identity
+                            last_received = received
                             self._stream_latest = latest
                             self._stream_received_at = received
                             self._stream_version += 1
