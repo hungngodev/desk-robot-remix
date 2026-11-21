@@ -573,3 +573,44 @@ async def test_gripper_disarm_response_after_jaw_close_never_reopens_unsafely(
         )
     assert calls >= 3
     assert head.commands == ["grip 65"]
+
+
+class BootEpochHead(FakeHead):
+    """Two genuine conversion sequence values can belong to different boots."""
+
+    def __init__(self, samples, boots):
+        super().__init__(samples)
+        self.boots = iter(boots)
+
+    async def aux_status(self):
+        reply = await super().aux_status()
+        reply["force"]["boot_id"] = next(self.boots)
+        return reply
+
+
+async def test_reboot_near_uint32_wrap_never_authorizes_first_jaw_pulse(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = BootEpochHead(
+        [(100, 0xfffffffe), (101, 1)], boots=[8100, 8101],
+    )
+    with pytest.raises(OperationError, match="Fresh force feedback required"):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    assert head.commands == []
+
+
+async def test_reboot_after_jaw_close_never_commands_second_pulse_or_relief(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = BootEpochHead(
+        [(100, 1), (101, 2), (240, 3)], boots=[9001, 9001, 9002],
+    )
+    with pytest.raises(OperationError, match="Lost fresh force sensor"):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    # The previous command could have actuated. A boot change invalidates
+    # the old task, including any attempted relief on a different boot.
+    assert head.commands == ["grip 65"]
