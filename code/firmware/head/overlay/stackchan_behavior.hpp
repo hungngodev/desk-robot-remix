@@ -325,7 +325,9 @@ class HsmBehavior {
         break;
 
       case EventType::kPersonDetected:
-        if (state_ == State::kIdle) {
+        // A fresh authenticated Mac vision cue can restore OLED attention
+        // after idle sleep. It neither starts audio nor authorizes motion.
+        if (state_ == State::kIdle || state_ == State::kSleeping) {
           transition(State::kAttentive, "person detected");
         } else if (state_ == State::kAttentive) {
           entered_ms_ = now_;  // keep attentive
