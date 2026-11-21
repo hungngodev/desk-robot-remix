@@ -37,5 +37,23 @@ int main() {
   capture.offer(mic.data(), ref.data(), 320, 1020000, true);
   assert(capture.failed());
   assert(capture.discard() == data.data());
+  // A final PDM read can overrun a four-second window. The last
+  // timestamp must describe the last RECORDED sample, not the later
+  // unrecorded samples in the tail of that same hardware read.
+  SensePcmWindow partial;
+  assert(partial.begin(data.data(), 1000000));
+  for (int i = 1; i <= 199; ++i)
+    partial.offer(mic.data(), ref.data(), 320, 1000000 + i * 20000, true);
+  partial.offer(mic.data(), ref.data(), 220, 4993750, true);
+  assert(partial.frames_received() == 63900 && !partial.ready());
+  partial.offer(mic.data(), ref.data(), 320, 5013750, true);
+  assert(partial.ready());
+  const auto clipped = partial.take();
+  assert(clipped.frames == 64000);
+  assert(clipped.first_sample_us == 1000000);
+  assert(clipped.last_sample_us == 5000000);
+  assert(clipped.last_sample_us - clipped.first_sample_us == 4000000);
+  assert(clipped.interleaved[127999] == -5678);
+  assert(!partial.occupied());
   return 0;
 }
