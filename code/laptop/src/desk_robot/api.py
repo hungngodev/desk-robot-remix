@@ -199,9 +199,17 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.get("/v1/robots/{robot_id}/dock/observe", dependencies=[Depends(authorize)])
     async def dock_observe(robot_id: str):
-        """Passive marker detection only, no motor or charger authority."""
+        """Passive marker detection only, bounded by the original camera grant."""
         robot = coordinator().robot(robot_id)
-        return await observe_actual_dock(coordinator().heads[robot_id], robot)
+        if not settings.voice_vision_tools_enabled:
+            raise HTTPException(403, "Camera consent required for dock observation")
+        camera_grant = settings.camera_consent_generation
+        result = await observe_actual_dock(coordinator().heads[robot_id], robot)
+        if not settings.voice_vision_tools_enabled:
+            raise HTTPException(403, "Camera consent revoked during dock observation")
+        if settings.camera_consent_generation != camera_grant:
+            raise HTTPException(409, "Camera grant changed during dock observation")
+        return result
 
     @app.get("/v1/robots/{robot_id}/dock/ir",
              dependencies=[Depends(authorize)])
