@@ -212,3 +212,17 @@ def test_passive_dock_beacon_pair_coupon_preserves_tag_quiet_zone(tmp_path):
     assert "IR aperture overlaps AprilTag quiet paper margin" in (
         invalid.stderr + invalid.stdout
     )
+
+
+def test_dock_shell_print_commands_use_one_continuation_escape():
+    """Copying each two-line OpenSCAD command must pass the -D argument."""
+    guide = SOURCE.parent / "README.md"
+    commands = [
+        line for line in guide.read_text(encoding="utf-8").splitlines()
+        if line.startswith("openscad --export-format")
+    ]
+    assert len(commands) == 2
+    assert all(line.endswith(chr(92)) and
+               not line.endswith(chr(92) * 2) for line in commands)
+    assert 'part="dock_rail_entry_coupon"' in guide.read_text()
+    assert 'part="dock_ir_pair_position_coupon"' in guide.read_text()

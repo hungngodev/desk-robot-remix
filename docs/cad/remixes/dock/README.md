@@ -5,7 +5,7 @@ This is an example **fit tester**, not the final charging dock.
 Before the full cradle, render and print the smaller rail entry coupon:
 
 ```sh
-openscad --export-format binstl -o dock_rail_entry_coupon.stl \\
+openscad --export-format binstl -o dock_rail_entry_coupon.stl \
   -D 'part="dock_rail_entry_coupon"' dock_passive_fit.scad
 ```
 
@@ -55,7 +55,7 @@ and beam overlap are not mechanically qualified. To check a **trial**
 left/right separation without modifying or powering the full cradle, export:
 
 ```sh
-openscad --export-format binstl -o dock_ir_pair_position_coupon.stl \\
+openscad --export-format binstl -o dock_ir_pair_position_coupon.stl \
   -D 'part="dock_ir_pair_position_coupon"' dock_passive_fit.scad
 ```
 
