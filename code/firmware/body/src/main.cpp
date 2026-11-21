@@ -71,6 +71,7 @@ std::uint32_t touch_last_sample_ms = 0;
 std::uint32_t last_extra_sample_ms = 0;
 void poll_optional(std::uint32_t now_ms) {
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
+  // NC series to GND; open or unplugged -> HIGH trip
   // Read the normally closed safety contact every loop. The 25 ms cadence
   // below is only for debounced event counters, not motor inhibition.
   control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);
@@ -81,7 +82,7 @@ void poll_optional(std::uint32_t now_ms) {
   bool bumper = false, reed = false, pir = false;
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
   mask |= 1U;
-  bumper = control.state().bumper_raw; // already sampled this loop; open circuit trips
+  bumper = digitalRead(body_pins::kBumperInput) == HIGH; // NC series to GND; open or unplugged -> HIGH trip
 #endif
   // Slow magnetic/PIR inputs arrive from MCP23017 GPIOB on the existing
   // accessory mux. The required dock seat/PGOOD remains independent GPIOA.

@@ -69,7 +69,8 @@ def test_gpio23_is_cpu_only_and_cannot_share_stepper_phase_or_ledc():
     assert "kToggleIntervalMs = 15" in heartbeat
     # Firmware latches a missed CPU edge until deliberate local USB recovery.
     assert "if (!local_motion_authorized || missed_deadline_)" in heartbeat
-    assert "reset();" in heartbeat
+    assert "void reset()" in heartbeat
+    assert "motor_heartbeat.reset();" in main
 
 
 def test_codegen_assembly_harness_and_hardware_note_agree_on_exclusion():
