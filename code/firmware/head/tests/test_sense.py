@@ -385,6 +385,10 @@ class SenseOverlayTests(unittest.TestCase):
         )[0]
         self.assertIn("uint32_t short_output_writes;", header)
         self.assertIn("uint32_t short_output_writes_ = 0;", header)
+        self.assertIn("uint32_t microphone_frames_read_ = 0;", header)
+        self.assertIn("uint32_t speaker_frames_accepted_ = 0;", header)
+        self.assertIn("microphone_frames_read_ += std::min(", code)
+        self.assertIn("speaker_frames_accepted_ += std::min(", writer)
         self.assertIn("if (accepted != samples)", writer)
         self.assertLess(
             writer.index("if (accepted != samples)"),
@@ -833,6 +837,8 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert '"speaker_playback_verified", false' in bridge
     assert '"aec_physically_qualified", false' in bridge
     assert '"short_output_writes", d.short_output_writes' in bridge
+    assert '"microphone_frames_read", d.microphone_frames_read' in bridge
+    assert '"speaker_frames_accepted", d.speaker_frames_accepted' in bridge
     assert '"boot", boot_nonce_' in bridge
     assert 'Bridge robot_bridge(camera_, GetAudioCodec())' in board
     assert '"/api/camera.identity", HTTP_GET' in bridge
