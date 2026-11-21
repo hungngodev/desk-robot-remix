@@ -412,7 +412,12 @@ class Conversation:
         # The original speaker task owns this short lived dialogue state.
         self._group_activity_epoch = 0
         self._group_activity: dict[str, dict] = {}
-        self._private_memory_generation: dict[str, int] = {}
+        # A missing entry is NOT a valid revision lease for a configured
+        # pet. Initialize per-pet owners before any authenticated read-only
+        # voice tool is allowed to inspect private memory.
+        self._private_memory_generation: dict[str, int] = {
+            robot.id: 0 for robot in settings.robots
+        }
         self._active_private_memory_ids: frozenset[str] = frozenset()
 
     def invalidate_private_memory(self, robot_id: str) -> None:

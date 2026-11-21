@@ -349,3 +349,16 @@ def test_model_voice_memory_requires_revision_owner_before_any_read(
             assert response.status_code == 409
             assert "Private memory revision unavailable" in response.json()["detail"]
             assert "private fact" not in response.text
+
+
+
+def test_live_runtime_registers_per_pet_memory_revision_owners(settings):
+    """Production create_app must pass the strict privacy gate on first read."""
+    from desk_robot.api import create_app
+    from fastapi.testclient import TestClient
+
+    with TestClient(create_app(settings)) as client:
+        conversation = client.app.state.runtime.conversation
+        assert conversation._private_memory_generation == {
+            robot.id: 0 for robot in settings.robots
+        }
