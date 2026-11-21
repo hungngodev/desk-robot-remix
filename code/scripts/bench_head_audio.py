@@ -23,6 +23,7 @@ COUNTERS = (
     "reference_underflow_reads",
     "reference_overwrite_reads",
     "discarded_stale_writes",
+    "short_output_writes",
 )
 
 
@@ -101,6 +102,7 @@ async def measure(head, robot_id: str, *, seconds: float,
             and deltas["reference_underflow_reads"] == 0
             and deltas["reference_overwrite_reads"] == 0
             and deltas["discarded_stale_writes"] == 0
+            and deltas["short_output_writes"] == 0
         ),
         "raw_pcm_captured": False,
         "physical_aec_delay_measured": False,
