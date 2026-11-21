@@ -511,7 +511,7 @@ async def test_missing_vad_start_reuses_real_multimodal_camera_preemption():
     slow = SlowHead()
     settings = SimpleNamespace(
         robots=[SimpleNamespace(id="robot-01"), SimpleNamespace(id="robot-02")],
-        voice_vision_tools_enabled=False,
+        voice_vision_tools_enabled=True,
         vision_model="",
     )
     visual = MultimodalOrchestrator(
