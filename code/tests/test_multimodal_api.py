@@ -160,6 +160,60 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
     assert "revoked during planning" in response.json()["detail"]
 
 
+def test_mac_semantic_planner_rejects_late_plan_after_new_human_vad(
+    settings, tokens,
+):
+    """A delayed Ollama selection cannot cross the live Mac turn epoch."""
+    import asyncio
+    import json
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+    ids = [item.id for item in settings.robots]
+    visual = SimpleNamespace(
+        hub=CameraFrameHub(ids), _turn_epoch={rid: 5 for rid in ids},
+    )
+
+    class Model:
+        calls = 0
+
+        async def reply(self, history):
+            self.calls += 1
+            await asyncio.sleep(0)
+            if self.calls == 1:
+                # New authenticated VAD on another pet also advances the
+                # fleet turn epoch of this robot in the real orchestrator.
+                visual._turn_epoch[robot] += 1
+            return json.dumps({"tools": [{"route": "look"}]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=visual, start=noop, close=noop,
+    )
+    headers = {
+        "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
+    }
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        body = {"transcript": "What do you see on my desk?"}
+        stale = client.post(url, headers=headers, json=body)
+        assert stale.status_code == 409
+        assert "superseded" in stale.json()["detail"]
+        current = client.post(url, headers=headers, json=body)
+        assert current.status_code == 200
+        assert current.json()["tools"] == [{
+            "route": "look", "payload": {"question": body["transcript"]},
+        }]
+        assert current.json()["motor_authorized"] is False
+
+
 def test_mac_semantic_planner_ignores_nonstring_tool_names_without_500(
     settings, tokens,
 ):

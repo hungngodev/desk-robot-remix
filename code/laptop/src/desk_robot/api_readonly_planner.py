@@ -56,6 +56,14 @@ def register_readonly_planner_routes(
             raise OperationError("Existing Mac language model unavailable")
         # One robot's source-tagged, bounded live context, never raw media.
         visual = getattr(app.state.runtime, "multimodal", None)
+        # Bind Ollama's optional route selection to the human turn that
+        # requested it. Consent alone does not keep an old model plan current
+        # after a new authenticated VAD, including speech on another pet.
+        turn_epochs = getattr(visual, "_turn_epoch", None)
+        turn_at_request = (
+            turn_epochs.get(robot_id) if isinstance(turn_epochs, dict)
+            else None
+        )
         timeline = []
         if visual is not None:
             timeline = visual.hub.interaction_timeline(
@@ -107,6 +115,10 @@ def register_readonly_planner_routes(
             # An unavailable or malformed optional Ollama plan must never
             # become a guessed physical action or stall live microphone I/O.
             parsed = {}
+        if (type(turn_at_request) is int
+                and (not isinstance(getattr(visual, "_turn_epoch", None), dict)
+                     or visual._turn_epoch.get(robot_id) != turn_at_request)):
+            raise HTTPException(409, "Read-only plan superseded by a newer human turn")
         # Slow Ollama planning may finish after live consent is withdrawn.
         # Do not return executable selections from an obsolete private prompt.
         if not settings.voice_vision_tools_enabled:
