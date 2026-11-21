@@ -166,7 +166,10 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('age >= 200', bridge)
         self.assertIn('!cJSON_IsBool(get(safety, "ready"))', bridge)
         self.assertIn('device_state == kDeviceStateIdle', source)
-        self.assertIn('board->display_->SetEmotion(MoodName(action.mood))', source)
+        # The contextual Mac cue has priority; local Stackchan remains an
+        # idle fallback rather than directly overwriting the model's mood.
+        self.assertIn('SetEmotion(CosmeticMoodName(requested_mood))', source)
+        self.assertIn('action.set_mood ? MoodName(action.mood) : "neutral"', source)
         self.assertIn('Stackchan', (board / 'stackchan_behavior.hpp').read_text())
         self.assertIn('MIT License', (board / 'stackchan_behavior.hpp').read_text())
         self.assertIn('NoAudioCodecSimplexPdm::Read', (board / 'sense_reference_codec.cc').read_text())
