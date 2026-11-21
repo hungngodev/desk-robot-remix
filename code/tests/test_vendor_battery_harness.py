@@ -185,11 +185,13 @@ def test_default_battery_fit_screen_reads_current_cad_tray_not_stale_constants(
 ):
     screen = module("screen_vendor_battery_harness")
     demand = module("power_preflight").size_5v_supply(1.0, 0.6)
-    assert screen.cad_tray_mm() == (68.0, 35.0, 14.0)
+    # CAD now excludes a cavity shorter than the 86mm candidate pack body.
+    # Even this cavity is NOT enough for the pack and lead bend relief.
+    assert screen.cad_tray_mm() == (86.0, 35.0, 14.0)
     original = screen._TRAY_CAD.read_text(encoding="utf-8")
     revised_cad = tmp_path / "remaining_fit_gauges.scad"
     revised_cad.write_text(
-        original.replace("power_l = 68;", "power_l = 100;")
+        original.replace("power_l = 86;", "power_l = 100;")
                 .replace("power_w = 35;", "power_w = 38;")
                 .replace("power_h = 14;", "power_h = 15;"),
         encoding="utf-8",
