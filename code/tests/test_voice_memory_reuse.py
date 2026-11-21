@@ -1,6 +1,7 @@
 """Explicit privacy gate for native Xiaozhi access to Mac memories."""
 from pathlib import Path
 
+import pytest
 from desk_robot.config import Settings, load_settings
 
 
