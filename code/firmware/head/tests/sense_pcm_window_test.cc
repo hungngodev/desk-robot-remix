@@ -55,5 +55,25 @@ int main() {
   assert(clipped.last_sample_us - clipped.first_sample_us == 4000000);
   assert(clipped.interleaved[127999] == -5678);
   assert(!partial.occupied());
+  // A 180 ms stall between 20 ms microphone callbacks is not continuous
+  // source timing, although the older 250 ms permissive gap accepted it.
+  SensePcmWindow missing;
+  assert(missing.begin(data.data(), 1000000));
+  missing.offer(mic.data(), ref.data(), 320, 1020000, true);
+  missing.offer(mic.data(), ref.data(), 320, 1200000, true);
+  assert(missing.failed());
+  assert(!missing.ready());
+  assert(missing.discard() == data.data());
+  // Small irregular gaps can accumulate and invalidate a full 64,000-frame
+  // window without exceeding the callback-level jitter threshold.
+  SensePcmWindow drifted;
+  assert(drifted.begin(data.data(), 1000000));
+  for (int i = 1; i <= 200; ++i)
+    drifted.offer(mic.data(), ref.data(), 320,
+                  1000000 + i * 20500, true);
+  assert(drifted.frames_received() == SensePcmWindow::kFrames);
+  assert(drifted.failed() && !drifted.ready());
+  assert(drifted.take().interleaved == nullptr);
+  assert(drifted.discard() == data.data());
   return 0;
 }
