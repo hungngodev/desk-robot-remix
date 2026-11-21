@@ -39,7 +39,13 @@ def capture(
     """Take one serial epoch. A timeout or failure never promotes hardware."""
     if not isinstance(port, str) or not port.startswith("/dev/"):
         raise ValueError("Explicit /dev/ room station USB port required")
-    if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0.5 <= seconds <= 3600:
+    # Huge integers can raise OverflowError during math.isfinite().
+    # Treat impossible durations as rejected input, not a crashed bench.
+    try:
+        finite_duration = type(seconds) in (int, float) and math.isfinite(seconds)
+    except OverflowError:
+        finite_duration = False
+    if not finite_duration or not 0.5 <= seconds <= 3600:
         raise ValueError("Bounded live station trial must last 0.5 to 3600 seconds")
 
     received_at: list[float] = []
