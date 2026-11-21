@@ -18,8 +18,10 @@ def evaluate(records: list[dict]) -> dict:
         raise ValueError("Trial log must contain objects")
     human = [r for r in records if r.get("kind") == "human"]
     alone = [r for r in records if r.get("kind") == "robot_only"]
-    if len(human) != 20 or len(alone) != 1 or len(records) != 21:
-        raise ValueError("Need exactly 20 human interruptions and one robot-only trial")
+    quiet = [r for r in records if r.get("kind") == "quiet"]
+    if (len(human) != 20 or len(alone) != 1
+            or len(quiet) != 1 or len(records) != 22):
+        raise ValueError("Need 20 human, one robot-only, and one quiet-mode trial")
     ids = [r.get("id") for r in human]
     if (any(type(x) is not str or not 1 <= len(x) <= 64 for x in ids)
             or len(set(ids)) != 20):
@@ -120,10 +122,21 @@ def evaluate(records: list[dict]) -> dict:
             raise ValueError(
                 "Robot-only control must use the same robot and setup as human trials"
             )
+        if quiet[0].get(field) != human[0][field]:
+            raise ValueError(
+                "Quiet-mode control must use the same robot and setup as human trials"
+            )
     duration = _number(control.get("duration_seconds"), "robot-only duration")
     echoes = control.get("self_interruptions")
     if duration < 600 or type(echoes) is not int or echoes < 0:
         raise ValueError("Need 600s real robot-only control and self-interrupt count")
+    quiet_duration = _number(quiet[0].get("duration_seconds"), "quiet duration")
+    unsolicited_speech = quiet[0].get("unsolicited_speech_events")
+    unsolicited_motion = quiet[0].get("unsolicited_motion_events")
+    if (quiet_duration < 600 or type(unsolicited_speech) is not int
+            or type(unsolicited_motion) is not int
+            or unsolicited_speech < 0 or unsolicited_motion < 0):
+        raise ValueError("Need 600s real quiet-mode speech and motion counts")
     return {
         # Bind the result to the one measured assembly; never present a
         # twenty-trial pass as a generic fleet or firmware certification.
@@ -136,6 +149,9 @@ def evaluate(records: list[dict]) -> dict:
         "new_intents_understood": understood,
         "robot_only_seconds": duration,
         "self_interruptions": echoes,
+        "quiet_mode_seconds": quiet_duration,
+        "quiet_unsolicited_speech_events": unsolicited_speech,
+        "quiet_unsolicited_motion_events": unsolicited_motion,
         "coverage": {
             "speaker_volumes": sorted(volumes),
             "interruption_positions": sorted(positions),
@@ -145,6 +161,7 @@ def evaluate(records: list[dict]) -> dict:
         },
         "meets_proposed_gate": (
             on_time >= 19 and understood >= 18 and echoes == 0
+            and unsolicited_speech == 0 and unsolicited_motion == 0
             and all(r["obsolete_audio_never_resumed"] for r in human)
         ),
         "records_are_operator_supplied_not_independently_attested": True,

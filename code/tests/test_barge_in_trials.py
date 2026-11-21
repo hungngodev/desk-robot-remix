@@ -43,6 +43,13 @@ def fake_rows():
         "firmware_commit": "sha-of-physically-flashed-build",
         "audio_config_id": "bench-config-1",
         "mic_speaker_placement_id": "prototype-enclosure-a",
+    }, {
+        "kind": "quiet", "duration_seconds": 600,
+        "unsolicited_speech_events": 0, "unsolicited_motion_events": 0,
+        "robot_id": "robot-01",
+        "firmware_commit": "sha-of-physically-flashed-build",
+        "audio_config_id": "bench-config-1",
+        "mic_speaker_placement_id": "prototype-enclosure-a",
     }]
 
 
@@ -54,6 +61,9 @@ def test_well_formed_synthetic_rows_only_verify_test_criteria():
     assert report["firmware_commit"] == "sha-of-physically-flashed-build"
     assert report["audio_config_id"] == "bench-config-1"
     assert report["mic_speaker_placement_id"] == "prototype-enclosure-a"
+    assert report["quiet_mode_seconds"] == 600
+    assert report["quiet_unsolicited_speech_events"] == 0
+    assert report["quiet_unsolicited_motion_events"] == 0
     assert report["coverage"]["human_speakers"] == 2
     assert report["coverage"]["load_profiles"] == [
         "camera_wifi", "motors_servos_stand", "voice_only",
@@ -64,7 +74,7 @@ def test_late_double_talk_and_self_interruption_fail():
     rows = fake_rows()
     rows[0]["audible_stop_ms"] += 650
     rows[1]["audible_stop_ms"] += 650
-    rows[-1]["self_interruptions"] = 1
+    rows[-2]["self_interruptions"] = 1
     report = evaluate(rows)
     assert report["audible_stops_within_500ms"] == 18
     assert not report["meets_proposed_gate"]
@@ -76,7 +86,10 @@ def test_late_double_talk_and_self_interruption_fail():
     lambda x: x[0].update({"volume": "max"}),
     lambda x: x[0].update({"human_onset_ms": float("nan")}),
     lambda x: x[1].update({"new_intent_correct": "yes"}),
+    lambda x: x[-2].update({"duration_seconds": 300}),
     lambda x: x[-1].update({"duration_seconds": 300}),
+    lambda x: x[-1].update({"unsolicited_motion_events": -1}),
+    lambda x: x[-1].update({"unsolicited_speech_events": 1.5}),
     lambda x: x[0].pop("vad_arrival_ms"),
     lambda x: x[0].update({"i2s_stop_ms": x[0]["head_queue_clear_ms"] - 1}),
     lambda x: x[0].update({"speaker_distance_cm": 90}),
@@ -103,7 +116,7 @@ def test_reject_invalid_trial_records(change):
 ])
 def test_incomplete_acoustic_trial_coverage_fails(field, value):
     rows = fake_rows()
-    for row in rows[:-1]:
+    for row in rows[:-2]:
         row[field] = value
     with pytest.raises(ValueError):
         evaluate(rows)
@@ -139,9 +152,31 @@ def test_stage_boundary_cannot_precede_human_speech():
 ])
 def test_echo_only_control_cannot_borrow_another_robots_setup(field):
     records = fake_rows()
-    records[-1][field] = "different-physical-setup"
+    records[-2][field] = "different-physical-setup"
     with pytest.raises(ValueError, match="same robot and setup"):
         evaluate(records)
+
+
+@pytest.mark.parametrize("field", [
+    "robot_id", "firmware_commit", "audio_config_id",
+    "mic_speaker_placement_id",
+])
+def test_quiet_mode_must_match_robot_and_flashing_configuration(field):
+    records = fake_rows()
+    records[-1][field] = "another-setup"
+    with pytest.raises(ValueError, match="Quiet-mode control"):
+        evaluate(records)
+
+
+@pytest.mark.parametrize("field", [
+    "unsolicited_speech_events", "unsolicited_motion_events",
+])
+def test_quiet_mode_unsolicited_activity_prevents_a2_gate(field):
+    records = fake_rows()
+    records[-1][field] = 1
+    report = evaluate(records)
+    assert report["quiet_mode_seconds"] == 600
+    assert not report["meets_proposed_gate"]
 
 
 def test_human_acoustic_gate_cannot_mix_distinct_robot_identities():
