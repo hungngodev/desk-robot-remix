@@ -3995,6 +3995,78 @@ async def test_native_private_tool_rejects_revised_fact_before_model(native):
     assert session.native_tool_audio_queued == 0
 
 
+async def test_private_memory_edit_during_native_tts_never_queues_old_audio(native):
+    """A revision change after the model starts overrides its generated speech."""
+    import io
+    import wave
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._memory_tools_enabled = True
+    session._tool_speech_turn = (2, 5)
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(bytes(9600))
+    encoded = base64.b64encode(output.getvalue()).decode()
+
+    class Response:
+        status = 200
+        def __init__(self, data):
+            self.data = data
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return False
+        async def json(self):
+            return self.data
+
+    class Mac:
+        reads = 0
+        writes = 0
+        def get(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            self.reads += 1
+            return Response({
+                "robot_id": "robot-01", "model_context": "",
+                "raw_media_included": False, "persistent_memory_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False, "charging_authorized": False,
+                "memory_tools_enabled": True, "transcript_memory_enabled": False,
+                "voice_monitor_ready": True,
+                "private_memory_generation": 7 if self.reads == 1 else 8,
+            })
+        def post(self, url, *, json, timeout):
+            assert url.endswith("/v1/chat/completions")
+            self.writes += 1
+            return Response({"choices": [
+                {"message": {"content": "An obsolete fact."}},
+                {"message": {"audio": {"data": encoded}}},
+            ]})
+
+    mac = Mac()
+    await session._speak_tool_results(
+        mac, "What did I tell you?",
+        [{"source": "private_opt_in_memory_not_current_sight",
+          "private_memory_generation": 7,
+          "recollections": [{"summary": "old changed memory"}]}],
+        2, 5,
+    )
+    assert (mac.reads, mac.writes) == (2, 1)
+    assert session.closed
+    assert session.last_error == "Mac private memory changed; native tool response stale"
+    assert session.outgoing.empty()
+    assert session.native_tool_audio_queued == 0
+
+
 def test_native_turn_cleanup_preserves_dialogue_but_clears_old_tool_claims(
     native,
 ):
