@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 
 
 def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
-    with TestClient(create_app(settings)) as client:
+    app = create_app(settings)
+    with TestClient(app) as client:
         assert client.get("/v1/robots").status_code == 401
         assert (
             client.get("/v1/robots", headers={b"Authorization": b"Bearer \xf1"}).status_code == 401
@@ -35,10 +36,23 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
             client.post(
                 "/v1/robots/robot-01/pickup", headers=tool, json={"target": "key"}
             ).status_code
-            == 409
+            == 403
         )
         assert client.post("/v1/robots/robot-01/enable", headers=operator).status_code == 200
-        result = client.post("/v1/robots/robot-01/pickup", headers=tool, json={"target": "key"})
+        coordinator = app.state.runtime.coordinator
+        previous_jobs = set(coordinator.jobs)
+        previous_permit = coordinator.permits["robot-01"]
+        # Even an active thirty-second operator arm does not let the model
+        # choose a physical action or consume the human's motion permit.
+        denied = client.post(
+            "/v1/robots/robot-01/pickup", headers=tool, json={"target": "key"}
+        )
+        assert denied.status_code == 403
+        assert set(coordinator.jobs) == previous_jobs
+        assert coordinator.permits["robot-01"] == previous_permit
+        result = client.post(
+            "/v1/robots/robot-01/pickup", headers=operator, json={"target": "key"}
+        )
         assert result.status_code == 202
         assert client.post("/v1/robots/robot-01/stop", headers=tool).status_code == 200
         assert (
