@@ -457,3 +457,13 @@ def test_contact_gauge_refuses_unsafe_floor_or_side_web(tmp_path, override, expe
         command, capture_output=True, text=True, timeout=90,
     )
     assert expected in result.stderr + result.stdout
+
+
+def test_gy530_bracket_does_not_drill_unmeasured_pcb_holes_through_optics():
+    """The 10.5mm pilot PCB cannot fit prior overlapping 6mm M2 slots."""
+    source = (ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad").read_text()
+    assert "tof_pcb_w=10.5;" in source
+    assert "No fake GY-530 PCB screw holes" in source
+    assert "for(x=[-tof_pcb_w/2+2,tof_pcb_w/2-2])" not in source
+    assert "This is an aperture/angle reference ONLY" in source
+    assert 'part="tof_adjustable"' in source
