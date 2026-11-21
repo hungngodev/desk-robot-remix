@@ -979,3 +979,30 @@ async def test_invalid_dock_camera_age_bound_never_starts_capture(
         head = HttpHead(settings.robots[0], client, strict_capture=True)
         with pytest.raises(ValueError, match="receipt age limit"):
             await head.snapshot(max_stream_age_seconds=bad)
+
+
+async def test_dock_stream_disconnect_while_waiting_for_camera_lock_never_polls(
+    settings, tokens,
+):
+    """A late stream teardown cannot redirect docking to /api/camera.jpg."""
+    import asyncio
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        return httpx.Response(200, content=b"invalid standalone jpeg")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        head._stream_connected = True
+        head._stream_version = 1
+        await head.capture_lock.acquire()
+        capture = asyncio.create_task(head.snapshot_for_dock())
+        try:
+            await asyncio.sleep(0)
+            head._stream_connected = False
+        finally:
+            head.capture_lock.release()
+        with pytest.raises(HeadError, match="stream is not connected"):
+            await capture
+        assert paths == []
