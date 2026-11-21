@@ -979,7 +979,7 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert '{"/api/face", HTTP_POST}' in bridge
     assert 'config.max_uri_handlers = 14;' in bridge
     assert '{"/api/audio.reference", HTTP_GET}' in bridge
-    assert '{"\/api/audio.capture.abort", HTTP_POST}' in bridge
+    assert '{"/api/audio.capture.abort", HTTP_POST}' in bridge
     assert '"speaker_playback_verified", false' in bridge
     assert '"aec_physically_qualified", false' in bridge
     assert '"short_output_writes", d.short_output_writes' in bridge
