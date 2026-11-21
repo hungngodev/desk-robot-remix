@@ -60,6 +60,8 @@ def validate_aux(data: dict, robot_id: str) -> dict:
 
     if (not _array(force.get("adc"), 2, lambda n: _sint(n, -32768, 32767))
             or not _uint(force.get("jaw_seq"), 0xffffffff)
+            or ("jaw_age_ms" in force and
+                not _uint(force["jaw_age_ms"], 0xffffffff))
             # Optional for old bench captures; the real WROOM now reports
             # its boot identity so a new ADC counter after reboot is not
             # mistaken for unsigned wrap within one grasp.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
@@ -39,7 +40,12 @@ def force_observation(payload: dict) -> tuple[int, int]:
             # A clipped ADC cannot establish the jaw's actual force.
             or group["adc"][1] in (-32768, 32767)  # saturated ADS1115
             or type(group.get("jaw_seq")) is not int
-            or not 1 <= group["jaw_seq"] <= 0xffffffff):
+            or not 1 <= group["jaw_seq"] <= 0xffffffff
+            # Older bench adapters may omit jaw age. Real WROOM firmware
+            # reports it from the jaw conversion, never the belly channel.
+            or ("jaw_age_ms" in group and (
+                type(group["jaw_age_ms"]) is not int or
+                not 0 <= group["jaw_age_ms"] < 500))):
         raise ValueError("Missing, invalid or stale ADS1115 gripper sample")
     return group["adc"][1], group["jaw_seq"]
 
@@ -77,14 +83,19 @@ async def guarded_grasp(
 
     async def read_force() -> tuple[int, int]:
         nonlocal force_boot_seen, force_boot_id, force_boot_changed
+        started = time.monotonic()
         sample = await _bounded_head_reply(
             head.aux_status(), seconds=_FORCE_READ_TIMEOUT_S,
             timeout_message="ADS1115 jaw force read timed out",
         )
+        request_elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
         if not isinstance(sample, dict) or sample.get("robot_id") != robot_id:
             raise ValueError("Foreign or missing jaw sensor robot identity")
         observation = force_observation(sample)
         group = sample["force"]
+        if ("jaw_age_ms" in group and
+                group["jaw_age_ms"] + request_elapsed_ms >= 500):
+            raise ValueError("Jaw ADC reading expired during transport")
         observed_boot = group.get("boot_id")
         if ("boot_id" in group and (type(observed_boot) is not int
                 or not 0 <= observed_boot <= 0xffffffff)):

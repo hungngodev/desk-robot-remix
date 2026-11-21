@@ -55,6 +55,31 @@ def test_clipped_gripper_adc_cannot_authorize_contact(clipped):
                              "jaw_seq": 1, "adc": [0, clipped]}})
 
 
+@pytest.mark.parametrize("age", [-1, 500, 0xffffffff + 1, "3", True])
+def test_stale_or_invalid_jaw_acquisition_age_never_proves_contact(age):
+    with pytest.raises(ValueError, match="Missing, invalid or stale"):
+        force_adc({"force": {"valid": True, "calibrated": False,
+                             "jaw_seq": 1, "jaw_age_ms": age, "adc": [0, 100]}})
+
+
+async def test_late_jaw_age_during_close_aborts_before_next_step(monkeypatch):
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    class ExpiredJaw(FakeHead):
+        async def aux_status(self):
+            reading = await super().aux_status()
+            if self.seq >= 3:
+                reading["force"]["jaw_age_ms"] = 600
+            else:
+                reading["force"]["jaw_age_ms"] = 0
+            return reading
+    head = ExpiredJaw([100, 101, 240])
+    with pytest.raises(OperationError, match="Lost fresh force sensor"):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    assert head.commands == ["grip 65", "grip 60"]
+
+
 def test_absent_sensor_never_fabricates_force():
     with pytest.raises(ValueError):
         force_adc({"force": {"valid": False, "adc": [0, 100]}})
