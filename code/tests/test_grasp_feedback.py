@@ -20,7 +20,8 @@ class FakeHead:
         else:
             self.seq += 1
         return {"robot_id": "robot-01", "force": {"valid": True, "calibrated": False,
-                          "jaw_seq": self.seq, "adc": [0, value]}}
+                          "jaw_seq": self.seq, "adc": [0, value],
+                          "jaw_age_ms": 0, "boot_id": 5103}}
 
     async def command(self, command):
         self.commands.append(command)
@@ -641,3 +642,69 @@ async def test_reboot_after_jaw_close_never_commands_second_pulse_or_relief(monk
     # The previous command could have actuated. A boot change invalidates
     # the old task, including any attempted relief on a different boot.
     assert head.commands == ["grip 64"]
+
+
+
+@pytest.mark.parametrize("downgrade", [
+    "missing_age", "missing_boot", "aged", "invalid_age_type",
+    "invalid_boot_type", "out_of_range_boot",
+])
+async def test_grasp_refuses_missing_or_invalid_motion_provenance_before_pulse(
+    monkeypatch, downgrade,
+):
+    """Valid force ADC plus sequence is not proof of a fresh same-boot reading."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class DowngradedHead(FakeHead):
+        async def aux_status(self):
+            frame = await super().aux_status()
+            force = frame["force"]
+            if downgrade == "missing_age":
+                del force["jaw_age_ms"]
+            elif downgrade == "missing_boot":
+                del force["boot_id"]
+            elif downgrade == "aged":
+                force["jaw_age_ms"] = 500
+            elif downgrade == "invalid_age_type":
+                force["jaw_age_ms"] = True
+            elif downgrade == "invalid_boot_type":
+                force["boot_id"] = True
+            elif downgrade == "out_of_range_boot":
+                force["boot_id"] = 0x100000000
+            return frame
+
+    head = DowngradedHead([100, 101, 240])
+    with pytest.raises(OperationError, match="Fresh force feedback required"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=healthy,
+        )
+    assert head.commands == []
+
+
+@pytest.mark.parametrize("missing", ["jaw_age_ms", "boot_id"])
+async def test_grasp_loses_required_provenance_after_first_pulse(
+    monkeypatch, missing,
+):
+    """Downgraded firmware cannot trigger a second jaw closing pulse."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class MidGraspDowngrade(FakeHead):
+        async def aux_status(self):
+            frame = await super().aux_status()
+            if self.seq >= 3:
+                frame["force"].pop(missing)
+            return frame
+
+    head = MidGraspDowngrade([100, 101, 240])
+    with pytest.raises(OperationError, match="Lost fresh force sensor"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=healthy,
+        )
+    # Existing guarded relief is permitted only while WROOM reports armed.
+    assert head.commands == ["grip 64", "grip 60"]
