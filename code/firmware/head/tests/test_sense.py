@@ -317,8 +317,11 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn("if (frames > kMaxReadFrames) return 0;", read)
         self.assertIn("NoAudioCodecSimplexPdm::Read(microphone_frame_.data(), frames)", read)
         self.assertIn("reference_frame_.data(), frames, capture_end_us)", read)
-        self.assertIn("reference_clock_.future_reference_frames(", read)
-        self.assertIn("now_us, kRingSize", read)
+        helper = code.split("bool SenseReferenceCodec::ReadReferenceLocked(", 1)[1].split(
+            "int SenseReferenceCodec::Read(", 1
+        )[0]
+        self.assertIn("reference_clock_.future_reference_frames(", helper)
+        self.assertIn("now_us, kRingSize", helper)
         self.assertNotIn("std::vector<int16_t>", read)
 
 
