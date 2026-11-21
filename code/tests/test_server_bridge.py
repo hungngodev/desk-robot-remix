@@ -5,6 +5,7 @@ import json
 import sys
 import threading
 import time
+import types
 import wave
 from io import BytesIO
 from pathlib import Path
@@ -28,6 +29,32 @@ def bridge(monkeypatch):
     monkeypatch.setenv(
         "DESK_ROBOT_DEVICE_MAP", json.dumps({"robot-01": "mac-01", "robot-02": "mac-02"})
     )
+    # Xiaozhi's pinned Message fields and pairing contract, without
+    # requiring an upstream network checkout for host-only tests.
+    core = types.ModuleType("core")
+    core.__path__ = []
+    utils = types.ModuleType("core.utils")
+    utils.__path__ = []
+    dialogue = types.ModuleType("core.utils.dialogue")
+
+    class Message:
+        def __init__(
+            self, role, content=None, uniq_id=None, tool_calls=None,
+            tool_call_id=None, is_temporary=False,
+        ):
+            self.role = role
+            self.content = content
+            self.uniq_id = uniq_id
+            self.tool_calls = tool_calls
+            self.tool_call_id = tool_call_id
+            self.is_temporary = is_temporary
+
+    dialogue.Message = Message
+    for name, stub in (
+        ("core", core), ("core.utils", utils),
+        ("core.utils.dialogue", dialogue),
+    ):
+        monkeypatch.setitem(sys.modules, name, stub)
     return module
 
 
@@ -248,9 +275,15 @@ async def test_installed_xiaozhi_intent_uses_real_mac_context_before_llm(
     )
     assert result is False  # The original LLM still receives the real human.
     assert calls == ["interaction-context"]
-    assert "Pip original persona" in system.content
-    assert "touch_tap" in system.content
-    assert "untrusted descriptive data" in system.content
+    assert system.content == "Pip original persona"
+    assert len(head.dialogue.dialogue) == 3
+    request, receipt = head.dialogue.dialogue[1:]
+    assert request.role == "assistant" and receipt.role == "tool"
+    assert request.tool_calls[0]["id"] == receipt.tool_call_id
+    assert json.loads(receipt.content)["model_context"] == (
+        "Physical sensor edge: touch_tap"
+    )
+    assert json.loads(receipt.content)["motor_authorized"] is False
 
 
 async def test_legacy_brain_blends_live_mac_evidence_per_pet_without_history_bloat(
@@ -309,17 +342,20 @@ async def test_legacy_brain_blends_live_mac_evidence_per_pet_without_history_blo
         monkeypatch.setitem(sys.modules, key, module)
 
     await bridge.inject_live_context_into_legacy_llm(first)
-    assert "touch_tap" in first.dialogue.dialogue[0].content
-    assert "Pip is playful" in first.dialogue.dialogue[0].content
+    assert len(first.dialogue.dialogue) == 3
+    assert first.dialogue.dialogue[0].content == (
+        "Pip is playful and never operates motors."
+    )
+    assert "touch_tap" in first.dialogue.dialogue[2].content
     await bridge.inject_live_context_into_legacy_llm(first)
-    assert "red key" in first.dialogue.dialogue[0].content
-    assert "touch_tap" not in first.dialogue.dialogue[0].content
-    assert first.dialogue.dialogue[0].content.count(
-        "<desk_robot_live_context>"
-    ) == 1
+    assert len(first.dialogue.dialogue) == 3
+    assert "red key" in first.dialogue.dialogue[2].content
+    assert "touch_tap" not in first.dialogue.dialogue[2].content
+    assert "red key" not in first.dialogue.dialogue[0].content
     await bridge.inject_live_context_into_legacy_llm(second)
-    assert "contents not inferred" in second.dialogue.dialogue[0].content
-    assert "red key" not in second.dialogue.dialogue[0].content
+    assert len(second.dialogue.dialogue) == 3
+    assert "contents not inferred" in second.dialogue.dialogue[2].content
+    assert "red key" not in second.dialogue.dialogue[2].content
     assert "shy" in second.dialogue.dialogue[0].content
     assert calls == ["mac-01", "mac-01", "mac-02"]
 
@@ -359,9 +395,11 @@ async def test_legacy_brain_clears_old_context_when_mac_revokes_permission(
         monkeypatch.setitem(sys.modules, key, module)
 
     await bridge.inject_live_context_into_legacy_llm(conn)
-    assert "touch_tap" in system.content
-    await bridge.inject_live_context_into_legacy_llm(conn)
+    assert len(conn.dialogue.dialogue) == 3
+    assert "touch_tap" in conn.dialogue.dialogue[2].content
     assert system.content == "Original robot identity"
+    await bridge.inject_live_context_into_legacy_llm(conn)
+    assert conn.dialogue.dialogue == [system]
 
 
 async def test_legacy_brain_drops_old_mac_reply_after_new_voice_turn(
@@ -409,6 +447,7 @@ async def test_legacy_brain_drops_old_mac_reply_after_new_voice_turn(
         release.set()
         await asyncio.wait_for(pending, timeout=1)
         assert system.content == "Original robot identity"
+        assert conn.dialogue.dialogue == [system]
     finally:
         release.set()
         pending.cancel()
