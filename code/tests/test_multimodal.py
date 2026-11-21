@@ -1140,6 +1140,51 @@ async def test_actual_human_vad_schedules_camera_without_awaiting_jpeg():
         assert not service.hub.frames["robot-01"]
 
 
+async def test_external_pet_jpeg_with_consent_off_never_decodes():
+    visual = MultimodalOrchestrator(
+        config(enabled=False), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def forbidden_decode(*_args, **_kwargs):
+        raise AssertionError("Preprocessing started without camera consent")
+
+    visual._prepare_bounded = forbidden_decode
+    try:
+        await visual.offer_proactive("robot-01", image(), time.monotonic())
+        assert not visual.hub.frames["robot-01"]
+    finally:
+        await visual.close()
+
+
+async def test_external_pet_jpeg_revoke_while_decoding_never_publishes():
+    entered, release = asyncio.Event(), asyncio.Event()
+    policy = config(enabled=True)
+    visual = MultimodalOrchestrator(
+        policy, {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def blocked_prepare(jpeg, *, priority=False):
+        entered.set()
+        await release.wait()
+        return _prepare(jpeg)
+
+    visual._prepare_bounded = blocked_prepare
+    task = asyncio.create_task(
+        visual.offer_proactive("robot-01", image(), time.monotonic())
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        policy.voice_vision_tools_enabled = False
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert not visual.hub.frames["robot-01"]
+    finally:
+        release.set()
+        await visual.close()
+
+
 async def test_camera_is_off_without_explicit_voice_vision_opt_in():
     head = Head()
     service = MultimodalOrchestrator(
@@ -1371,10 +1416,11 @@ async def test_prepare_from_external_pet_cannot_add_frame_during_human_voice(mon
 
     monkeypatch.setattr(media, "_prepare", slow_prepare)
     service = MultimodalOrchestrator(
-        config(enabled=False),
+        config(enabled=True),
         {"robot-01": Head(), "robot-02": Head()},
         Vision(), asyncio.Lock(),
     )
+    service.start_speech_frames = lambda _robot_id: None
     task = asyncio.create_task(
         service.offer_proactive("robot-02", image(), time.monotonic())
     )
@@ -2014,10 +2060,11 @@ async def test_completed_brief_vad_cannot_publish_old_optional_jpeg(
 
     monkeypatch.setattr(media, "_prepare", held_prepare)
     service = MultimodalOrchestrator(
-        config(enabled=False),
+        config(enabled=True),
         {"robot-01": Head(), "robot-02": Head()},
         Vision(), asyncio.Lock(),
     )
+    service.start_speech_frames = lambda _robot_id: None
     started = time.monotonic()
     task = asyncio.create_task(
         service.offer_proactive("robot-02", image(), started)
@@ -2090,10 +2137,11 @@ async def test_old_native_camera_cannot_repopulate_new_voice_turn(
 
 async def test_external_pet_photo_received_before_brief_voice_is_never_replayed():
     service = MultimodalOrchestrator(
-        config(enabled=False),
+        config(enabled=True),
         {"robot-01": Head(), "robot-02": Head()},
         Vision(), asyncio.Lock(),
     )
+    service.start_speech_frames = lambda _robot_id: None
     try:
         old_receipt = time.monotonic()
         service.voice_started("robot-01")

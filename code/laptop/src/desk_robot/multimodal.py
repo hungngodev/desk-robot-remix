@@ -1560,10 +1560,18 @@ class MultimodalOrchestrator:
         # Pet snapshots share the same authenticated head.capture_lock. Only
         # CPU preprocessing runs off-thread. Never publish late paused frames.
         self.hub._check(robot_id)
+        # An external JPEG is not consent: mirror the continuous Sense stream.
+        if not self.settings.voice_vision_tools_enabled:
+            self.hub.discard_video(robot_id)
+            return
         generation = self.hub._generation[robot_id]
         turn = self._turn_epoch[robot_id]
         question = self._question_epoch[robot_id]
         prepared = await self._prepare_bounded(jpeg)
+        if not self.settings.voice_vision_tools_enabled:
+            # Late image preprocessing may finish after the user opts out.
+            self.hub.discard_video(robot_id)
+            return
         if (self._any_human_active(time.monotonic())
                 or self._turn_epoch[robot_id] != turn
                 or self._question_epoch[robot_id] != question
