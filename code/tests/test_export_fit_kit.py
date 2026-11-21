@@ -55,6 +55,14 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
     output.write_bytes(triangle)
     with pytest.raises(ValueError, match="Open"):
         source.closed_mesh_edges(output)
+    # Distinct collinear vertices also have zero area. Merely checking
+    # equality of STL corners is not enough to reject this invalid facet.
+    zero_area = bytes(80) + (1).to_bytes(4, "little") + pack(
+        "<12fH", 0, 0, 1, 0, 0, 0, 1, 1, 1, 2, 2, 2, 0,
+    )
+    output.write_bytes(zero_area)
+    with pytest.raises(ValueError, match="Degenerate"):
+        source.closed_mesh_edges(output)
     output.write_bytes(tetra_stl())
     assert source.binary_stl_triangles(output) == 4
     assert source.closed_mesh_edges(output) == 6
