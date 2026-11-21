@@ -623,3 +623,39 @@ def test_room_callback_failure_is_not_erased_by_clean_reader_shutdown(monkeypatc
         assert feed.last_error is None
 
     asyncio.run(scenario())
+
+
+def test_room_station_summary_preserves_both_moving_and_stationary_radar_targets():
+    """LD2410C dual target detection preserves both distance gates."""
+    f = frame()
+    f["readings"]["ld2410c"]["moving"] = True
+    f["readings"]["ld2410c"]["stationary"] = True
+    f["readings"]["ld2410c"]["moving_cm"] = 185
+    f["readings"]["ld2410c"]["stationary_cm"] = 92
+    decoder = RoomStationDecoder()
+    obs = decoder.accept(json.dumps(f), now=1.0)
+    assert "moving 185 cm, stationary 92 cm" in obs.summary
+
+
+def test_room_station_summary_preserves_thermal_with_all_sensors_valid():
+    """All 5 sensors reporting valid measurements avoids mid-word truncation."""
+    calib = SoilCalibration(dry_adc=3200, wet_adc=1300)
+    decoder = RoomStationDecoder(soil_calibration=calib)
+    f = frame()
+    f["readings"]["scd40"]["co2_ppm"] = 1250
+    f["readings"]["scd40"]["temp_c"] = 24.8
+    f["readings"]["scd40"]["humidity_pct"] = 52.3
+    f["readings"]["bme688"]["temp_c"] = 25.1
+    f["readings"]["bme688"]["humidity_pct"] = 51.0
+    f["readings"]["bme688"]["gas_ohms"] = 120500
+    f["readings"]["ld2410c"]["moving"] = True
+    f["readings"]["ld2410c"]["stationary"] = True
+    f["readings"]["ld2410c"]["moving_cm"] = 210
+    f["readings"]["ld2410c"]["stationary_cm"] = 105
+    f["readings"]["soil"] = {"valid": True, "sample_ms": 1000, "raw_adc": 2250}
+    f["readings"]["amg8833"]["pixels_c"] = [23.2] * 63 + [36.8]
+    obs = decoder.accept(json.dumps(f), now=1.0)
+    assert "(64 unclassified pixels)" in obs.summary
+    assert "Station thermal raw 23.2..36.8 C (64 unclassified pixels)" in obs.summary
+    assert obs.summary.endswith("(64 unclassified pixels)")
+

@@ -162,10 +162,12 @@ def _summary(readings: dict, calibration: SoilCalibration | None = None) -> str:
     if radar["valid"]:
         if radar["presence"]:
             # This is anonymous echo distance, never person detection.
-            target = ("moving" if radar["moving"] else
-                      "stationary" if radar["stationary"] else None)
-            detail = (f", {target} {radar[target + '_cm']:.0f} cm"
-                      if target else "")
+            targets = []
+            if radar["moving"]:
+                targets.append(f"moving {radar['moving_cm']:.0f} cm")
+            if radar["stationary"]:
+                targets.append(f"stationary {radar['stationary_cm']:.0f} cm")
+            detail = (", " + ", ".join(targets)) if targets else ""
             bits.append("Station radar detected an echo" + detail)
         else:
             bits.append("Station radar reported no echo")
@@ -182,7 +184,7 @@ def _summary(readings: dict, calibration: SoilCalibration | None = None) -> str:
         pixels = thermal["pixels_c"]
         bits.append(f"Station thermal raw {min(pixels):.1f}..{max(pixels):.1f} C "
                     "(64 unclassified pixels)")
-    return "; ".join(bits)[:300] if bits else "No fresh room station measurements"
+    return "; ".join(bits)[:400] if bits else "No fresh room station measurements"
 
 
 class RoomStationDecoder:
