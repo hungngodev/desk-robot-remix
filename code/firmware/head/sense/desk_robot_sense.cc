@@ -12,6 +12,9 @@
 #include "led/single_led.h"
 #include "sdkconfig.h"
 #include "assets/lang_config.h"
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+#include <wifi_manager.h>
+#endif
 
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -125,11 +128,17 @@ private:
             // Upstream Xiaozhi normally streams mic PCM only AFTER wake.
             // With explicit audio consent, reuse its existing full-duplex
             // realtime AEC transport. No new mic task, codec or WebSocket.
-            // One boot attempt only: failed networking and deliberate BOOT
-            // mute must never create a covert reconnect loop.
+            // The flashed opt-in remains active across a real WiFi outage.
+            // Reopen the SAME Xiaozhi audio channel once per WiFi epoch,
+            // never on arbitrary remote TTS/session close. A BOOT press
+            // permanently disables unattended reconnect for this boot.
+            const bool wifi_connected = WifiManager::GetInstance().IsConnected();
+            if (!wifi_connected) {
+                board->continuous_audio_started_ = false;
+            }
             if (!board->continuous_audio_started_
                     && !board->audio_operator_touched_.load()
-                    && now_ms >= 10000
+                    && wifi_connected && now_ms >= 10000
                     && device_state == kDeviceStateIdle
                     && app.GetAecMode() == kAecOnDeviceSide) {
                 board->continuous_audio_started_ = true;
