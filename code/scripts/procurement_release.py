@@ -791,8 +791,15 @@ def first_robot_projection(report: dict) -> dict:
     # the other four units exist. The fleet still has additional cross-robot
     # trials, while all shared electrical, power, print, supplier and system
     # gates remain mandatory here. No real receipts means HOLD as before.
+    station_ids = {row["id"] for row in station_rows}
+    pet_ids = {row["id"] for row in pet_rows}
+    missing_linked_parents = sorted({
+        item["parent_role"] for item in report.get("supplemental_decisions", [])
+        if item["parent_role"] not in pet_ids | station_ids
+    })
     qualified_one = (
-        motor in {"stepper", "dc"}
+        not missing_linked_parents
+        and motor in {"stepper", "dc"}
         and not report.get("missing_first_robot_system_evidence", ["missing"])
         and all(
             not item.get("missing_part_evidence", ["missing"])
@@ -803,8 +810,6 @@ def first_robot_projection(report: dict) -> dict:
                 for item in report.get("supplemental_decisions", []))
         and len(report.get("supplemental_decisions", [])) == 14
     )
-    station_ids = {row["id"] for row in station_rows}
-    pet_ids = {row["id"] for row in pet_rows}
     rows = []
     for scope, entries in (("pet or dock", pet_rows),
                            ("shared station", station_rows)):
@@ -873,10 +878,14 @@ def first_robot_projection(report: dict) -> dict:
         elif parent in station_ids:
             target = fleet_quantity
         else:
-            raise ValueError("Unknown linked parent in prototype shopping")
+            # A shortened or invalid plan cannot invent a missing parent
+            # assembly's checkout quantity. Keep its linked decision visible
+            # with zero orderable units and a machine-readable HOLD reason.
+            target = 0
         linked.append({
             "id": item["id"], "name": item["name"], "parent_role": parent,
             "conditional_one_robot_quantity": target,
+            "parent_present_in_plan": parent in pet_ids | station_ids,
             "reviewed": item["reviewed"], "disposition": item["disposition"],
             "additive_purchase_authorized": False,
         })
@@ -890,9 +899,10 @@ def first_robot_projection(report: dict) -> dict:
         "purchase_approved": qualified_one,
         # Machine-readable first-unit blockers remain visible to shopping
         # clients without pretending five-robot integration is a prerequisite.
-        "missing_first_robot_system_evidence": report.get(
-            "missing_first_robot_system_evidence", ["missing"]
-        ),
+        "missing_first_robot_system_evidence": [
+            *report.get("missing_first_robot_system_evidence", ["missing"]),
+            *(f"linked_parent_missing:{parent}" for parent in missing_linked_parents),
+        ],
         "reason": (
             "First complete unit has qualified shared and first-unit system "
             "receipts, supplier evidence and physical trials; the remaining "

@@ -248,6 +248,24 @@ def test_room_power_reference_survives_builder_markdown():
         assert "exact fitted current unqualified" in shown
 
 
+def test_partial_plan_preserves_linked_roles_as_visible_holds_not_fake_cart():
+    # A reduced fixture never authorizes quantities for nonexistent parents.
+    # The single shared station can still be shown without a generator crash.
+    report = mod.generate(fixture())
+    projected = mod.first_robot_projection(report)
+    assert projected["purchase_approved"] is False
+    assert projected["linked_decision_count"] == 14
+    assert "linked_parent_missing:cap_power" in (
+        projected["missing_first_robot_system_evidence"]
+    )
+    linked = next(row for row in projected["linked_decisions"]
+                  if row["id"] == "protected_ntc_pack")
+    assert linked["conditional_one_robot_quantity"] == 0
+    assert linked["parent_present_in_plan"] is False
+    assert linked["additive_purchase_authorized"] is False
+    assert "HOLD" in mod.render_first_robot_markdown(report)
+
+
 def test_reviewed_room_carrier_identity_survives_builder_projections():
     p = fixture()
     ev = {"room_pod": {"scd40": {
