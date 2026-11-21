@@ -92,6 +92,24 @@ async def detect_bounded(jpeg: bytes, calibration: DockCameraCalibration, *,
     )
 
 
+def unpack_dock_frame(observation) -> tuple[bytes, float]:
+    """Keep authenticated JPEG paired with its original Mac receipt clock.
+
+    Legacy simulation heads return bare JPEG bytes. Real HttpHead returns an
+    immutable (JPEG, received_at) pair from its camera condition lock.
+    """
+    now = time.monotonic()
+    if isinstance(observation, bytes):
+        return observation, now
+    if (not isinstance(observation, tuple) or len(observation) != 2
+            or not isinstance(observation[0], bytes)
+            or type(observation[1]) not in (int, float)
+            or not math.isfinite(observation[1])
+            or not 0 <= now - observation[1] <= 0.20):
+        raise ValueError("Invalid or stale dock camera receipt")
+    return observation[0], float(observation[1])
+
+
 async def observe_actual_dock(head, robot) -> dict:
     """Real head JPEG in, real marker pose out. No movement is possible here.
 
@@ -109,18 +127,22 @@ async def observe_actual_dock(head, robot) -> dict:
         # Read-only dock diagnostics should see the same current MJPEG
         # receipt as a guarded approach, not a near-one-second-old frame.
         capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
-        jpeg = await _bounded_head_reply(
+        observation = await _bounded_head_reply(
             capture_dock(), seconds=3.0,
             timeout_message="Dock diagnostic camera snapshot timeout",
         )
     except (OSError, ConnectionError, TimeoutError, RuntimeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
+    try:
+        jpeg, received_at = unpack_dock_frame(observation)
+    except ValueError:
+        return _hold(robot.id, reason="Invalid or stale dock camera receipt",
+                     source="head_snapshot_invalid")
     # Reject malformed or oversized snapshots before occupying the sole native
     # AprilTag worker. Match the native detector's 512000-byte bound.
     if (not isinstance(jpeg, bytes) or len(jpeg) < 4 or len(jpeg) > 512000
             or not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9")):
         return _hold(robot.id, reason="Invalid dock JPEG", source="head_snapshot_invalid")
-    received_at = time.monotonic()
     try:
         pose = await detect_bounded(jpeg, calib, captured_at=received_at)
     except DockDetectorBusy:
