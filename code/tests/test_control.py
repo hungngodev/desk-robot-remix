@@ -1429,3 +1429,29 @@ async def test_hardware_exploration_rejects_reconnecting_camera_task(settings):
         assert not any(command.startswith("drive ") for command in head.commands)
     finally:
         await c.close()
+
+
+async def test_hardware_concurrent_robots_do_not_block_each_other(settings):
+    """Multiple robots in hardware mode must operate independently without fleet starvation."""
+    settings.mode = "hardware"
+    c, _ = make(settings)
+    head1 = HardwareStatusHead("robot-01")
+    head2 = HardwareStatusHead("robot-02")
+    c.heads["robot-01"] = head1
+    c.heads["robot-02"] = head2
+
+    await c.operator_arm("robot-01")
+    await c.operator_arm("robot-02")
+    assert "robot-01" in c.permits
+    assert "robot-02" in c.permits
+
+    try:
+        job1 = c.manual("robot-01", "drive 10 10 100")
+        job2 = c.manual("robot-02", "drive 10 10 100")
+        assert job1.state in {"queued", "running"}
+        assert job2.state in {"queued", "running"}
+        await asyncio.gather(c.tasks[job1.id], c.tasks[job2.id])
+        assert job1.state == "succeeded"
+        assert job2.state == "succeeded"
+    finally:
+        await c.close()

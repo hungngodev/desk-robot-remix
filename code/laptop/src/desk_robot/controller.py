@@ -350,13 +350,6 @@ class Coordinator:
             raise OperationError("Operator permit missing or expired; enable one operation first")
         if (
             self.closed
-            or (
-                self.settings.mode == "hardware"
-                and any(
-                    job.robot_id != robot_id and job.state in {"queued", "running"}
-                    for job in self.jobs.values()
-                )
-            )
             or self.locks[robot_id].locked()
             or any(
                 j.robot_id == robot_id and j.state in {"queued", "running"}
