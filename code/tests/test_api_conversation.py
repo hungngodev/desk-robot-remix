@@ -156,6 +156,10 @@ async def test_kokoro_proactive_session_declares_passive_before_synthesis(
     assert await conversation.say_proactive(
         robot, "A bounded optional remark", permission_check=lambda: True,
     )
+    assert len(session_bodies) == 2
+    lease_id = session_bodies[0].pop("lease_id")
+    assert isinstance(lease_id, str) and len(lease_id) == 32
+    assert session_bodies[1].pop("lease_id") == lease_id
     assert session_bodies == [
         {"device_ids": ["mac-01"], "enabled": True, "passive": True},
         {"device_ids": ["mac-01"], "enabled": False, "passive": True},
@@ -1659,12 +1663,15 @@ async def test_kokoro_lost_grant_response_compensates_bridge_lease(
     assert client.active is False
     assert [request["enabled"] for request in requests] == [True, False]
     assert all(request.get("passive", False) is passive for request in requests)
+    assert requests[0]["lease_id"] == requests[1]["lease_id"]
     async with speaker.session([robot], passive=passive):
         assert client.active is True
     assert client.active is False
     assert [request["enabled"] for request in requests] == [
         True, False, True, False,
     ]
+    assert requests[2]["lease_id"] == requests[3]["lease_id"]
+    assert requests[0]["lease_id"] != requests[2]["lease_id"]
 
 
 @pytest.mark.parametrize("status", [400, 401, 409])
@@ -1699,6 +1706,9 @@ async def test_kokoro_explicit_rejected_grant_preserves_other_fleet_lease(
         async with speaker.session([robot]):
             pytest.fail("Rejected grant must never enter speech session")
     assert client.other_lease_active is True
+    assert len(client.calls) == 1
+    lease_id = client.calls[0].pop("lease_id")
+    assert isinstance(lease_id, str) and len(lease_id) == 32
     assert client.calls == [{"device_ids": ["head-01"], "enabled": True}]
 
 
