@@ -227,6 +227,7 @@ def test_voice_retrieval_fences_private_edit_during_sqlite_read(
         assert response.json()["core_facts"] == [
             {"slot": "favorite_game", "value": "chess"}
         ]
+        assert response.json()["private_memory_generation"] == 0
         assert len(receipts) == 1
 
 

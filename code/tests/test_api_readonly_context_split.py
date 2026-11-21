@@ -449,6 +449,46 @@ def test_xiaozhi_live_context_drops_cached_room_on_station_consent_revoke(settin
         assert payload["model_context_untrusted_not_instructions"] is True
 
 
+
+def test_live_context_private_revision_is_scoped_and_consent_gated(settings):
+    """The native speaker can revalidate private facts without reading SQLite."""
+    from desk_robot.api_readonly_context import register_readonly_context_routes
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=SimpleNamespace(hub=CameraFrameHub(["robot-01", "robot-02"])),
+        coordinator=SimpleNamespace(jobs={}),
+        attention=None,
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 7, "robot-02": 11},
+        ),
+    )
+    register_readonly_context_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: app.state.runtime.coordinator,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+        native_pet_speech_policy=lambda robot_id: {},
+    )
+    with TestClient(app) as client:
+        own = client.get("/v1/pet/robot-01/interaction-context")
+        peer = client.get("/v1/pet/robot-02/interaction-context")
+        assert own.status_code == peer.status_code == 200
+        assert own.json()["private_memory_generation"] == 7
+        assert peer.json()["private_memory_generation"] == 11
+        # A live camera permit does not disclose even a revision of private
+        # memory when the operator withdraws the independent memory opt-in.
+        settings.voice_memory_tools_enabled = False
+        revoked = client.get("/v1/pet/robot-01/interaction-context")
+        assert revoked.status_code == 200
+        assert revoked.json()["private_memory_generation"] is None
+
+
 def test_readonly_voice_planner_drops_room_context_after_opt_out(settings):
     """Slow model planning cannot turn revoked USB room data into a reply."""
     import time

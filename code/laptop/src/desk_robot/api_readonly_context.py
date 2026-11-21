@@ -132,6 +132,12 @@ def register_readonly_context_routes(
         # Expose it only to participating pets with explicit shared-text
         # consent. It remains separate from Coordinator motion authority.
         conversation = getattr(app.state.runtime, "conversation", None)
+        revisions = getattr(conversation, "_private_memory_generation", None)
+        private_memory_generation = (
+            revisions.get(robot_id, 0)
+            if settings.voice_memory_tools_enabled and isinstance(revisions, dict)
+            else None
+        )
         if settings.fleet_text_sharing_enabled:
             dialogue = getattr(conversation, "group_activity_timeline", None)
             if callable(dialogue):
@@ -184,6 +190,7 @@ def register_readonly_context_routes(
             # Live revocation of model-private memory access must also
             # invalidate an older native startup persona containing facts.
             "memory_tools_enabled": settings.voice_memory_tools_enabled,
+            "private_memory_generation": private_memory_generation,
             "transcript_memory_enabled": settings.voice_transcript_memory_enabled,
             "persistent_memory_included": False,
             "raw_media_included": False,

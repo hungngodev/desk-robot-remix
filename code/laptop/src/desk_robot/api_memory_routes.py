@@ -299,6 +299,10 @@ def register_voice_context_route(
             )
         return {
             "robot_id": robot_id,
+            # A consumer may compare this source revision immediately before
+            # speech. Opt-in at read time alone cannot guard a slow model
+            # completion from a later operator memory correction.
+            "private_memory_generation": memory_revision,
             "core_facts": [
                 {"slot": item.slot, "value": item.value}
                 for item in core
