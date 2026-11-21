@@ -1312,6 +1312,13 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   CHECK(send(body, "arm", 21) == "ERR arm bumper_active");
   body.sample_bumper_input(false);
   CHECK(!body.state().armed); // no automatic travel after the contact clears
+  CHECK(send(body, "arm", 22) == "ERR arm bumper_latched");
+  CHECK(send(body, "status", 22).find("\"fault\":\"bumper_latched\"") !=
+        std::string::npos);
+  CHECK(send(body, "status", 22).find("\"ready\":false") !=
+        std::string::npos);
+  CHECK(send(body, "rearm", 22) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 22, true) == "OK rearm");
   CHECK(send(body, "arm", 22) == "OK arm");
   CHECK(body.state().left == 0 && body.state().right == 0);
 

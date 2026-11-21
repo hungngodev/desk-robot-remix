@@ -124,7 +124,12 @@ void BodyControl::set_cap(bool valid, std::uint8_t zones) {
 
 void BodyControl::sample_bumper_input(bool active) {
   state_.bumper_raw = active;
-  if (active) touch_trip(); // stop wheels, preserve payload holding PWM
+  if (active) {
+    // A released switch is not a new operator permission. The guarded
+    // robot must keep wheels off until a deliberate local USB recovery.
+    if (guarded_motion_profile()) bumper_fault_latched_ = true;
+    touch_trip(); // immediate stop; preserve payload holding PWM
+  }
 }
 
 void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
@@ -409,6 +414,11 @@ void BodyControl::tick(std::uint32_t now_ms) {
     state_.armed = false;
     // This is not a measured tilt interlock: orientation qualification
     // remains a separate physical release gate.
+    return;
+  }
+  if (bumper_fault_latched_) {
+    stop_motion();
+    state_.armed = false;
     return;
   }
   if (dc_fault_latched_ || dc_driver_fault_bad(now_ms)) {
@@ -869,6 +879,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool battery_depleted = state_.accessories.gauge.fuel_valid &&
         state_.accessories.gauge.cell_mv < 3200U;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
+        !bumper_fault_latched_ &&
         !motor_watchdog_latched_ && !imu_low_g_latched_ &&
         !imu_sensor_fault_latched_ &&
         !dock_unhealthy && !bumper_hit && !touch_hit &&
@@ -886,6 +897,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         dock_power_lockout_ ? "dock_power_connected" :
         dock_telemetry_bad(now_ms) ? "dock_gpio_missing_or_stale" :
         bumper_hit ? "bumper_active" :
+        bumper_fault_latched_ ? "bumper_latched" :
         touch_hit ? "touch_active" :
         imu_low_g_latched_ ? "imu_low_g_latched" :
         // Once motion trips this local latch, report mandatory USB recovery
@@ -1024,11 +1036,16 @@ void BodyControl::execute(const char* line, std::size_t length,
       return;
     }
     dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
+    bumper_fault_latched_ = false; // only USB, after released raw contact
     motor_watchdog_latched_ = false; // no old drive resumed
     imu_low_g_latched_ = false; // after a truly fresh, clear MPU status
     imu_sensor_fault_latched_ = false; // after fresh sensor and USB recovery
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (bumper_fault_latched_) {
+      std::snprintf(reply, capacity, "ERR arm bumper_latched");
+      return;
+    }
     if (imu_sensor_fault_latched_) {
       std::snprintf(reply, capacity, "ERR arm imu_sensor_fault_latched");
       return;
