@@ -141,6 +141,52 @@ def test_only_operator_can_edit_and_models_need_opt_in_to_read_core(
         ).json()["core_facts"] == []
 
 
+
+def test_operator_core_preference_changes_invalidate_only_affected_private_prompt(
+    settings, tokens, tmp_path,
+):
+    """An active group must not speak a replaced or forgotten core preference."""
+    settings.memory_dir = tmp_path
+    operator = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    model = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        conversation = client.app.state.runtime.conversation
+        first = "/v1/pet/robot-01/core-memory/favorite_game"
+        second = "/v1/pet/robot-02/core-memory/favorite_game"
+
+        assert conversation._private_memory_generation == {}
+        created = client.put(first, headers=operator, json={"value": "chess"})
+        assert created.status_code == 200 and created.json()["changed"] is True
+        assert conversation._private_memory_generation == {"robot-01": 1}
+
+        # A repeated value, unauthorized edit or failed validation must not
+        # cancel a dialogue or invalidate another robot's private memory.
+        repeated = client.put(first, headers=operator, json={"value": " chess "})
+        assert repeated.status_code == 200 and repeated.json()["changed"] is False
+        assert client.put(first, headers=model, json={"value": "checkers"}).status_code == 403
+        assert client.put(first, headers=operator, json={"value": ""}).status_code == 422
+        assert conversation._private_memory_generation == {"robot-01": 1}
+
+        peer = client.put(second, headers=operator, json={"value": "puzzles"})
+        assert peer.status_code == 200 and peer.json()["changed"] is True
+        assert conversation._private_memory_generation == {
+            "robot-01": 1, "robot-02": 1,
+        }
+        removed = client.delete(first, headers=operator)
+        assert removed.status_code == 200 and removed.json()["removed"] is True
+        assert conversation._private_memory_generation == {
+            "robot-01": 2, "robot-02": 1,
+        }
+        absent = client.delete(first, headers=operator)
+        assert absent.status_code == 200 and absent.json()["removed"] is False
+        assert conversation._private_memory_generation == {
+            "robot-01": 2, "robot-02": 1,
+        }
+        assert client.get(
+            "/v1/pet/robot-02/core-memory", headers=operator,
+        ).json()["core_facts"][0]["value"] == "puzzles"
+
+
 def test_personality_prompt_merges_private_core_but_never_relabels_history(
     settings, tmp_path
 ):

@@ -28,6 +28,13 @@ class EpisodeMemoryCorrectionRequest(BaseModel):
 def register_memory_routes(
     app: FastAPI, settings: Settings, *, operator,
 ) -> None:
+    def invalidate_private_prompt(robot_id: str) -> None:
+        """Revoke group prompts that may contain a changed private fact."""
+        conversation = getattr(app.state.runtime, "conversation", None)
+        invalidate = getattr(conversation, "invalidate_private_memory", None)
+        if callable(invalidate):
+            invalidate(robot_id)
+
     def retract_live_asr(robot_id: str, event_id: str) -> None:
         """Keep an operator correction/deletion out of volatile speech context."""
         runtime = app.state.runtime
@@ -40,12 +47,8 @@ def register_memory_routes(
         discard_attention = getattr(attention, "discard_heard", None)
         if callable(discard_attention):
             discard_attention(robot_id, event_id)
-        # A group model may already have copied this pet's old private
-        # memory into an active prompt. Revoke that prompt generation too.
-        conversation = getattr(runtime, "conversation", None)
-        invalidate = getattr(conversation, "invalidate_private_memory", None)
-        if callable(invalidate):
-            invalidate(robot_id)
+        # Keep an already-composed group prompt from quoting deleted text.
+        invalidate_private_prompt(robot_id)
 
     @app.get("/v1/pet/{robot_id}/memories", dependencies=[Depends(operator)])
     async def pet_memories(robot_id: str, limit: int = Query(default=12, ge=1, le=50)):
@@ -106,6 +109,10 @@ def register_memory_routes(
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        if changed:
+            # Core preferences enter the same private dialogue prompts as
+            # episodes; an old model completion must not speak stale facts.
+            invalidate_private_prompt(robot_id)
         return {"robot_id": robot_id, "slot": slot, "changed": changed,
                 "operator_curated": True, "motor_authorized": False}
 
@@ -122,6 +129,8 @@ def register_memory_routes(
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        if removed:
+            invalidate_private_prompt(robot_id)
         return {"robot_id": robot_id, "slot": slot, "removed": removed}
 
     @app.patch("/v1/pet/{robot_id}/memories/{event_id}",
