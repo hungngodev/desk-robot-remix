@@ -662,6 +662,26 @@ class PetController:
                 witnessed=False, observed_at=source.observed_at,
                 confidence=source.confidence,
             )
+            if not stored:
+                # A duplicate is idempotent only if the receiver already has
+                # THIS exact secondhand episode. It might instead hold its own
+                # eyewitness ID, a different story, or a deletion tombstone.
+                prior = self.memory.get_episode(to_robot, source.event_id)
+                if prior is None:
+                    raise ValueError(
+                        "Receiving pet deleted or blocked this shared event"
+                    )
+                if not (
+                    prior.source_robot == source.source_robot
+                    and prior.witnessed is False
+                    and prior.kind == source.kind
+                    and prior.summary == source.summary
+                    and prior.observed_at == source.observed_at
+                    and prior.confidence == source.confidence
+                ):
+                    raise ValueError(
+                        "Receiving pet has a conflicting memory event ID"
+                    )
             if stored and (
                 not self.settings.fleet_text_sharing_enabled
                 or self.memory.get_episode(from_robot, event_id) != source

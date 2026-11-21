@@ -5728,3 +5728,64 @@ async def test_manual_peer_share_retracts_copy_if_source_deleted_during_insert(
         assert memory.get_episode("robot-02", event_id) is None
     finally:
         await pet.close()
+
+
+async def test_operator_peer_share_rejects_conflicting_receiver_event_identity(
+    fleet, tmp_path,
+):
+    """A receiver's unrelated eyewitness event cannot count as a share."""
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    event_id = "shared_id_collision"
+    assert memory.remember(
+        "robot-01", event_id, "I saw the key",
+        kind="object", source_robot="robot-01", witnessed=True,
+    )
+    assert memory.remember(
+        "robot-02", event_id, "I saw a candy",
+        kind="object", source_robot="robot-02", witnessed=True,
+    )
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    try:
+        with pytest.raises(ValueError, match="conflicting memory event ID"):
+            await pet.share_with_peer("robot-01", "robot-02", event_id)
+        own = memory.get_episode("robot-02", event_id)
+        assert own is not None and own.witnessed
+        assert own.source_robot == "robot-02"
+        assert own.summary == "I saw a candy"
+        assert memory.count("robot-01") == memory.count("robot-02") == 1
+    finally:
+        await pet.close()
+
+
+async def test_operator_peer_share_cannot_resurrect_receiver_deleted_episode(
+    fleet, tmp_path,
+):
+    """False return from tombstone is not a successful prior-share receipt."""
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    event_id = "peer_deleted_after_share"
+    assert memory.remember(
+        "robot-01", event_id, "I noticed a silver key",
+        kind="object", source_robot="robot-01", witnessed=True,
+    )
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    try:
+        first = await pet.share_with_peer("robot-01", "robot-02", event_id)
+        assert first["stored"] is True
+        assert memory.forget_episode("robot-02", event_id)
+        assert memory.get_episode("robot-02", event_id) is None
+        with pytest.raises(ValueError, match="deleted or blocked"):
+            await pet.share_with_peer("robot-01", "robot-02", event_id)
+        assert memory.count("robot-02") == 0
+        assert memory.count("robot-01") == 1
+    finally:
+        await pet.close()
