@@ -1086,6 +1086,7 @@ def test_native_private_memory_revoke_during_sqlite_read_returns_no_secret(
     runtime = SimpleNamespace(
         coordinator=SimpleNamespace(robot=settings.robot),
         memory=RevokingMemory(), multimodal=None,
+        conversation=SimpleNamespace(_private_memory_generation={robot: 0}),
         start=noop, close=noop,
     )
     headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
@@ -1536,6 +1537,9 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
 
     runtime = StubRuntime()
     runtime.memory = memory
+    runtime.conversation = SimpleNamespace(
+        _private_memory_generation={robot_id: 0 for robot_id in ids}
+    )
     auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     with TestClient(create_app(settings, runtime=runtime)) as client:
         own = client.get("/v1/pet/robot-01/omni-context", headers=auth)

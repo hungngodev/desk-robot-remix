@@ -68,6 +68,15 @@ def register_native_omni_routes(
         # The existing voice-context tool still supports opt-in recall.
         historical_evidence = {"core": "", "recent": ""}
         if settings.voice_memory_tools_enabled:
+            # A SQLite snapshot is valid only for the current memory
+            # correction/deletion generation of this particular pet.
+            owner = getattr(app.state.runtime, "conversation", None)
+            revisions = getattr(owner, "_private_memory_generation", None)
+            if not isinstance(revisions, dict):
+                raise HTTPException(409, "Native private memory revision unavailable")
+            generation = revisions.get(robot_id, 0)
+            if type(generation) is not int or generation < 0:
+                raise HTTPException(409, "Native private memory revision unavailable")
             core, records = await asyncio.wait_for(
                 asyncio.gather(
                     asyncio.to_thread(
@@ -88,6 +97,13 @@ def register_native_omni_routes(
                 # SQLite yields to independent live-media opt-out. No
                 # private startup context may escape a revoked live session.
                 raise HTTPException(403, "Native live consent revoked during read")
+            current = getattr(
+                getattr(app.state.runtime, "conversation", None),
+                "_private_memory_generation", None,
+            )
+            if (not isinstance(current, dict)
+                    or current.get(robot_id, 0) != generation):
+                raise HTTPException(409, "Private memory changed during native startup")
             # Match proactive speech's single authoritative provenance
             # formatter. A sent line is NOT a visual observation and no
             # model-estimated ASR sentence becomes an operator preference.
