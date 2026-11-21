@@ -227,3 +227,20 @@ def test_power_and_dock_seat_measurements_are_separate_physical_inputs():
     assert "dock_seat_left / dock_seat_right / dock_seat_overtravel" not in sheet
     assert "Do not fabricate any blank measurement" in sheet
 
+def test_cozmars_packaging_precedes_sparky_fallback_without_copying_unlicensed_cad():
+    """Accepted packaging order keeps external Cozmars CAD out of our source tree."""
+    guide = (ROOT / "docs/cad/FUSION_ONE_ROBOT_ASSEMBLY.md").read_text(
+        encoding="utf-8"
+    )
+    cozmars = guide.index("## Cozmars packaging comparison before Sparky fallback")
+    sparky = guide.index("selected **Sparky v0.1** shell")
+    assert cozmars < sparky
+    assert "515f980d4ee91f6a279406085f591b882254aad8" in guide
+    assert "4ea3952fdc452081dfc711839e8b500e033a20ee" in guide
+    assert "aabc2da472af675a90ad51e425bd576ba1d31383" in guide
+    assert "contains no LICENSE file" in guide
+    assert "Creative Commons Attribution NonCommercial ShareAlike" in guide
+    assert "Do not copy its F3Z or STEP into this repository" in guide
+    assert "Sparky therefore remains executable fallback geometry" in guide
+    assert not (ROOT / "docs/cad/originals/cozmars-v2").exists()
+
