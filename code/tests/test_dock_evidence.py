@@ -13,13 +13,14 @@ def payload():
         "angles": {"raw": [0, 0, 0], "present_mask": 0,
                    "valid_mask": 0, "magnet": [0, 0, 0]},
         "force": {"adc": [0, 0], "jaw_seq": 0, "valid": False,
-                  "calibrated": False},
+                  "calibrated": False, "boot_id": 17},
         "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
         "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0, "shunt_uv": 0,
                   "fuel_valid": False, "monitor_valid": False,
                   "current_calibrated": False},
         "proximity": {"raw": 0, "valid": False, "gesture": 0,
-                      "gesture_events": 0, "physically_qualified": False},
+                      "gesture_events": 0, "physically_qualified": False,
+                      "boot_id": 17},
         "dock": {
             "present": True, "valid": True, "left_seated": True,
             "right_seated": True, "input_good": True,
@@ -157,6 +158,48 @@ async def test_dock_evidence_refuses_forged_battery_charge_and_robot_identity():
     head = FakeHead([payload()])
     with pytest.raises(ValueError):
         await observe_dock_evidence(head, "robot-02")
+
+
+@pytest.mark.parametrize("missing_group", ["force", "proximity"])
+async def test_dock_legacy_missing_boot_epoch_is_never_stable(
+    monkeypatch, missing_group,
+):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for sample in samples:
+        sample[missing_group].pop("boot_id")
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["state"] == "dock_sample_epoch_unverified_or_changed"
+    assert result["stable_three_samples"] is False
+    assert result["raw_pack_direction"] == "not_available"
+    assert not result["charging_authorized"] and not result["motor_authorized"]
+
+
+async def test_reboot_with_monotonic_dock_and_pack_sequences_is_not_stable(
+    monkeypatch,
+):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, sample in enumerate(samples):
+        sample["power"].update(
+            shunt_uv=150, pack_ma=30, pack_valid=True,
+            pack_seq=index + 40, monitor_valid=True,
+        )
+    # A restarted WROOM may produce different monotonic GPIO and INA226
+    # sequences. Require one boot epoch rather than trusting those counts.
+    for sample in samples[1:]:
+        sample["force"]["boot_id"] = 18
+        sample["proximity"]["boot_id"] = 18
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["state"] == "dock_sample_epoch_unverified_or_changed"
+    assert not result["stable_three_samples"]
+    assert result["raw_pack_direction"] == "not_available"
+    assert not result["raw_pack_samples_fresh"]
+    assert not result["charging_verified"] and not result["charging_authorized"]
 
 
 async def test_replayed_cached_dock_status_is_not_independent_physical_evidence(monkeypatch):

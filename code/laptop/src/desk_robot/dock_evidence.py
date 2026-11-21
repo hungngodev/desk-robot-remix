@@ -49,6 +49,7 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
     snapshots = []
     sample_sequences = []
     raw_pack_samples = []
+    boot_epochs = []
     for index in range(3):
         # Do not let a cancellation-ignoring alternate telemetry adapter
         # freeze the read-only dock evidence request indefinitely.
@@ -63,6 +64,15 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
         # Validity and freshness are checked in validate_aux. A new HTTP
         # response by itself does NOT mean a new physical GPIO conversion.
         sample_sequences.append(dock["seq"])
+        # Both groups share one WROOM boot, but legacy captures may omit
+        # the epoch. No three-sample stability claim may cross a controller
+        # restart or use unproven sequence provenance.
+        force_boot = sample["force"].get("boot_id")
+        proximity_boot = sample["proximity"].get("boot_id")
+        boot_epochs.append(
+            force_boot if type(force_boot) is int and force_boot > 0
+            and force_boot == proximity_boot else None
+        )
         power = sample["power"]
         raw_pack_samples.append((
             power.get("pack_valid", False),
@@ -81,6 +91,10 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
         delta = (new - old) & 0xffffffff
         return 0 < delta < 0x80000000
 
+    if boot_epochs[0] is None or any(
+        epoch != boot_epochs[0] for epoch in boot_epochs[1:]
+    ):
+        return _result(robot_id, "dock_sample_epoch_unverified_or_changed", False)
     if not (newer(sample_sequences[1], sample_sequences[0])
             and newer(sample_sequences[2], sample_sequences[1])):
         return _result(robot_id, "dock_sample_replayed_or_reset", False)
