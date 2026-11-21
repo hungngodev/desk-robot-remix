@@ -232,7 +232,9 @@ async def inject_live_context_into_legacy_llm(conn) -> None:
                     or data.get("generation") != voice_turn_generation.get(device, 0)
                     or data.get("nonce") != getattr(
                         conn, "_desk_live_context_request", None
-                    )):
+                    )
+                    or not isinstance(data.get("expires_at"), float)
+                    or time.monotonic() > data["expires_at"]):
                 return messages
             # This is a real completed read-only tool call, not a model-made
             # physical action. The downstream model receives its source and
@@ -302,6 +304,9 @@ async def inject_live_context_into_legacy_llm(conn) -> None:
     owner._desk_transient_mac_context = {
         "generation": generation,
         "nonce": nonce,
+        # A later unrelated model request cannot replay this short-lived
+        # sensor/tool receipt if the bridge never saw another human VAD.
+        "expires_at": time.monotonic() + 2.0,
         "call_id": "call_mac_context_" + secrets.token_hex(12),
         "content": json.dumps({
             "robot_id": robot,
