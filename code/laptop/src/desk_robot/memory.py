@@ -48,7 +48,14 @@ def _fts_query(text: str) -> str:
         term for term in _WORDS.findall(normalized)[:96]
         if term not in _QUERY_FILLER
     ]
-    return " OR ".join('"' + term + '"' for term in dict.fromkeys(terms))
+    # FTS5 unicode61 does not always index an already-stored NFD word
+    # identically to its NFC spelling (for example Vietnamese "điện").
+    # Query both canonical forms rather than rewriting private episodes.
+    variants = dict.fromkeys(
+        form for term in terms
+        for form in (term, unicodedata.normalize("NFD", term))
+    )
+    return " OR ".join('"' + term + '"' for term in variants)
 
 
 @dataclass(frozen=True)
