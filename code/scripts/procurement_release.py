@@ -1788,6 +1788,79 @@ def quoted_carrier_matches_signed_role(line: dict, selected: dict) -> bool:
     return retailer is None or line.get("seller") == retailer
 
 
+
+def stock_carrier_failures(evidence: dict) -> list[str]:
+    """Reject counting inventory or paid stock from a different signed carrier.
+
+    This identity check complements landed_cost's inspection receipts and
+    paid-allocation checks. It proves neither arrival nor physical fitness.
+    """
+    if type(evidence) is not dict or type(evidence.get("costs")) is not dict:
+        return ["missing stock carrier evidence"]
+    costs = evidence["costs"]
+    parts = evidence.get("parts", {})
+    station = evidence.get("room_pod", {})
+    supplemental = evidence.get("supplemental_decisions", {})
+    if any(type(group) is not dict for group in (parts, station, supplemental)):
+        return ["invalid signed carrier register"]
+    errors = []
+    for group_name in ("inventory", "paid_in_flight"):
+        entries = costs.get(group_name, [])
+        if type(entries) is not list:
+            errors.append(f"{group_name}: expected an evidence list")
+            continue
+        for index, row in enumerate(entries):
+            label = f"{group_name} {index}"
+            if type(row) is not dict:
+                errors.append(f"{label}: invalid stock record")
+                continue
+            role = row.get("role_key")
+            if type(role) is not str or ":" not in role:
+                errors.append(f"{label}: invalid role identity")
+                continue
+            prefix, ident = role.split(":", 1)
+            if prefix not in ("robot", "dock", "station") or not ident:
+                errors.append(f"{label}: invalid role identity")
+                continue
+            if role.startswith("robot:cap_power:"):
+                component = ident.split(":", 1)[1]
+                if (costs.get("power_package_mode") != "separate_components"
+                        or component not in POWER_CHILDREN):
+                    errors.append(f"{label}: unselected power component")
+                    continue
+                if component == "polarized_battery_connector":
+                    parent = parts.get("cap_power", {})
+                    selected = (parent.get("connector_selected_carrier", {})
+                                if type(parent) is dict else {})
+                else:
+                    selected = supplemental.get(component, {})
+                    if (type(selected) is not dict
+                            or selected.get("disposition") != "selected"):
+                        errors.append(f"{label}: unselected power component")
+                        continue
+            else:
+                selected = (station if prefix == "station" else parts).get(ident, {})
+            if type(selected) is not dict:
+                errors.append(f"{label}: no signed physical carrier for {role}")
+                continue
+            # Manufacturer/vendor is not the checkout retailer. Exact SKU
+            # identifies the model; PCB revision prevents substitutions.
+            keys = ("vendor", "sku", "pcb_revision")
+            if selected.get("model") is not None:
+                keys += ("model",)
+            if any(type(selected.get(key)) is not str
+                   or not selected[key].strip()
+                   or type(row.get(key)) is not str
+                   or row[key] != selected[key]
+                   for key in keys):
+                errors.append(
+                    f"{label}: stock vendor, model/SKU or PCB revision "
+                    f"differs from signed carrier: {role}"
+                )
+    return errors
+
+
+
 def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
     required, categories = cost_requirements(report, scope)
     values = evidence.get("costs", {}) if isinstance(evidence, dict) else {}
@@ -2035,6 +2108,11 @@ def main() -> int:
         ):
             print("HOLD: exact-source Mac, Python, sanitizer, WROOM and Sense "
                   "CI jobs not all verified successful", file=sys.stderr)
+            return 2
+        # Count only physically identified stock against the signed BOM.
+        # Receipt URLs and paid quantities alone do not prove board identity.
+        for mismatch in stock_carrier_failures(evidence):
+            print("HOLD: " + mismatch, file=sys.stderr)
             return 2
         if (not cost["calculation_complete_not_physical_approval"]
                 or args.require_first_robot and not cost["within_prototype_cap"]
