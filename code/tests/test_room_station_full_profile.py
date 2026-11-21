@@ -178,7 +178,12 @@ def test_scd40_readiness_failure_invalidates_cached_measurement_in_runtime():
     assert "if (readiness_status == 0 && ready)" in poll
     assert "scd_valid = desk_robot_room::scd_sample_valid_after_poll(" in poll
     assert "scd_valid, readiness_status, ready, measurement_valid);" in poll
-    assert "const bool fresh = scd_valid && now - last_scd_ms <= kScdStaleMs;" in poll
+    assert (
+        "const bool fresh = scd_started && scd_valid && "
+        "now - last_scd_ms <= kScdStaleMs;"
+    ) in poll
+    assert "scd_started = false;" in poll
+    assert "scd_valid = false;" in poll
     assert "if (readiness_status != 0) return false;" in helper
     ci = (ROOT / ".github/workflows/host-verification.yml").read_text()
     assert "room_station/tests/scd_sample_freshness_tests.cpp" in ci
@@ -235,7 +240,18 @@ def test_bme_pending_conversion_reports_only_last_completed_tuple():
     )[0]
     assert '#include "bme_completed_sample.h"' in source
     assert "bme.gas_resistance = 0;" in scan
-    assert "if (!bme_pending) bme_completed.invalidate();" in scan
+    # A successful new conversion leaves the previously completed tuple
+    # intact until a new full conversion publishes its own tuple.
+    before_begin, after_begin = scan.split(
+        "bme_pending = bme.beginReading() != 0U;", 1
+    )
+    assert "bme_completed.invalidate();" not in before_begin
+    # A failed acquisition must instead retire the old tuple and the sensor,
+    # so a later report cannot pass it off as a fresh sample.
+    failed_begin = after_begin.split("return;", 1)[0]
+    assert "if (!bme_pending) {" in failed_begin
+    assert "bme_completed.invalidate();" in failed_begin
+    assert "bme_started = false;" in failed_begin
     assert "bme_completed.publish(" in scan
     assert "bme_completed.invalidate();" in scan
     assert "bme_completed.fresh(now, kBmeStaleMs)" in report
