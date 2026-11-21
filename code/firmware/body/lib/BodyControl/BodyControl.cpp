@@ -134,6 +134,16 @@ void BodyControl::sample_range_optics(
     std::uint16_t signal_97, bool valid, std::uint32_t now_ms) {
   if (channel >= 8) return;
   auto& sample = state_.optical[channel];
+  if (sample.present) {
+    // A late or duplicate conversion cannot replace the newest raw
+    // observation or regain valid read-only optical provenance. A genuinely
+    // newer measurement restores validity; uint32 millis rollover is safe.
+    const std::uint32_t elapsed = now_ms - sample.at_ms;
+    if (elapsed == 0U || elapsed >= 0x80000000U) {
+      sample.valid = false;
+      return;
+    }
+  }
   sample.present = true;
   sample.valid = valid;
   sample.ambient_97 = ambient_97;
@@ -148,6 +158,16 @@ void BodyControl::invalidate_range_optics() {
 void BodyControl::sample_side_range(std::uint8_t index, std::uint16_t mm,
                                     bool valid, std::uint32_t now_ms) {
   if (index >= 3) return;
+  if (state_.side_present[index]) {
+    // These lanes never authorize motion, but a replay must not appear as
+    // current side/rear evidence to the Mac. Preserve the latest raw sample
+    // for diagnosis and require a truly newer conversion to restore valid.
+    const std::uint32_t elapsed = now_ms - state_.side_at_ms[index];
+    if (elapsed == 0U || elapsed >= 0x80000000U) {
+      state_.side_valid[index] = false;
+      return;
+    }
+  }
   state_.side_present[index] = true;
   state_.side_valid[index] = valid;
   state_.side_mm[index] = mm;

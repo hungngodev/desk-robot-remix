@@ -492,6 +492,67 @@ static void side_range_validity_clears_on_shared_bus_fault_without_fake_samples(
   CHECK(!body.state().armed); // diagnostic input has no motor authority
 }
 
+static void optional_range_replay_preserves_newest_raw_evidence() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.sample_side_range(0, 120, true, 100);
+  body.sample_side_range(0, 999, true, 100); // contradictory same-tick value
+  CHECK(body.state().side_present[0] && !body.state().side_valid[0]);
+  CHECK(body.state().side_mm[0] == 120 &&
+        body.state().side_at_ms[0] == 100);
+  CHECK(send(body, "status", 101).find(
+      "\"side_ranges\":{") != std::string::npos);
+  CHECK(send(body, "status", 101).find(
+      "\"present_mask\":1,\"valid_mask\":0") != std::string::npos);
+  body.sample_side_range(0, 121, true, 101);
+  CHECK(body.state().side_valid[0] && body.state().side_mm[0] == 121);
+  body.sample_side_range(0, 998, true, 100); // stale late completion
+  CHECK(!body.state().side_valid[0] &&
+        body.state().side_mm[0] == 121 &&
+        body.state().side_at_ms[0] == 101);
+  body.sample_side_range(0, 122, true, 102);
+  CHECK(body.state().side_valid[0] && body.state().side_mm[0] == 122);
+
+  body.sample_range_optics(5, 32, 128, true, 100);
+  body.sample_range_optics(5, 65535, 65535, true, 100);
+  CHECK(body.state().optical[5].present && !body.state().optical[5].valid);
+  CHECK(body.state().optical[5].ambient_97 == 32 &&
+        body.state().optical[5].signal_97 == 128 &&
+        body.state().optical[5].at_ms == 100);
+  CHECK(send(body, "optics", 101).find(
+      "\"present_mask\":32,\"valid_mask\":0") != std::string::npos);
+  body.sample_range_optics(5, 33, 129, true, 101);
+  CHECK(body.state().optical[5].valid);
+  body.sample_range_optics(5, 65535, 65535, true, 99);
+  CHECK(!body.state().optical[5].valid &&
+        body.state().optical[5].ambient_97 == 33 &&
+        body.state().optical[5].signal_97 == 129 &&
+        body.state().optical[5].at_ms == 101);
+  body.sample_range_optics(5, 34, 130, true, 102);
+  CHECK(body.state().optical[5].valid);
+
+  // A real post-wrap conversion is forward, an old pre-wrap completion isn't.
+  desk_robot::BodyControl wrapped(desk_robot::BodyProfile::DcPwm);
+  wrapped.sample_side_range(2, 200, true, 0xfffffff0U);
+  wrapped.sample_range_optics(7, 40, 100, true, 0xfffffff0U);
+  wrapped.sample_side_range(2, 201, true, 5U);
+  wrapped.sample_range_optics(7, 41, 101, true, 5U);
+  CHECK(wrapped.state().side_valid[2] &&
+        wrapped.state().side_mm[2] == 201);
+  CHECK(wrapped.state().optical[7].valid &&
+        wrapped.state().optical[7].ambient_97 == 41);
+  wrapped.sample_side_range(2, 999, true, 0xfffffff5U);
+  wrapped.sample_range_optics(7, 999, 999, true, 0xfffffff5U);
+  CHECK(!wrapped.state().side_valid[2] &&
+        wrapped.state().side_mm[2] == 201);
+  CHECK(!wrapped.state().optical[7].valid &&
+        wrapped.state().optical[7].ambient_97 == 41);
+  wrapped.sample_side_range(2, 202, true, 6U);
+  wrapped.sample_range_optics(7, 42, 102, true, 6U);
+  CHECK(wrapped.state().side_valid[2] &&
+        wrapped.state().optical[7].valid);
+  CHECK(!body.state().armed && !wrapped.state().armed);
+}
+
 static void cap_petting_zones_are_optional_and_never_arm() {
   desk_robot::CliffGuard guard;
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
@@ -2128,6 +2189,7 @@ int main() {
     extra_three_ranging_channels_are_diagnostics_only();
     eight_lane_optical_words_are_read_only_and_expire();
     side_range_validity_clears_on_shared_bus_fault_without_fake_samples();
+    optional_range_replay_preserves_newest_raw_evidence();
     cap_petting_zones_are_optional_and_never_arm();
     touch_telemetry_never_grants_motion();
     raw_touch_trip_preempts_debounce_without_forging_a_tap();
