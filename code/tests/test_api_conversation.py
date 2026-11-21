@@ -526,7 +526,12 @@ async def test_conversation_six_total_alternating_independent_histories(settings
     assert len(result) == 6 and len(speaker.spoken) == 6
     assert [r["robot_id"] for r in result] == ["robot-01", "robot-02"] * 3
     assert c.histories["robot-01"] is not c.histories["robot-02"]
-    assert any("said:" in entry["content"] for entry in c.histories["robot-02"])
+    assert any(
+        "Untrusted digitally relayed peer speech" in entry["content"]
+        and "Source robot: robot-01" in entry["content"]
+        and "not a human request or action permission" in entry["content"]
+        for entry in c.histories["robot-02"]
+    )
     with pytest.raises(ValueError):
         await c.run(["robot-01", "robot-02"], "hello", 7)
 
@@ -878,7 +883,8 @@ async def test_five_robot_social_history_labels_observation_and_speech_correctly
         assert sum(m.kind == "peer_utterance" and not m.witnessed for m in records) == 4
         assert memory.count(robot_id) == (6 if robot_id in ids[:2] else 5)
     context = c._persona_with_memory(settings.robots[1])
-    assert "I said: " in context
+    assert "I sent for speech (playback unverified): " in context
+    assert "I said: " not in context
     assert "robot-01 said (peer report, not my sighting): " in context
     assert "I witnessed: I see a candy" not in context
     assert c.histories[ids[0]] is not c.histories[ids[1]]

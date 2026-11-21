@@ -1363,7 +1363,8 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
         assert own.status_code == other.status_code == 200
         text = own.json()["instructions"]
         assert "favorite_game: hide the key" in text
-        assert "I said: Hello, my little friend" in text
+        assert "I sent for speech (playback unverified): Hello, my little friend" in text
+        assert "I said: Hello, my little friend" not in text
         assert "uncertain transcription" in text
         assert "I observed: Hello" not in text
         peer_text = other.json()["instructions"]
