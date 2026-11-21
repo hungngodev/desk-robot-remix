@@ -1539,8 +1539,13 @@ def render_markdown(report: dict) -> str:
     # double counting either physical quantities or automatic purchases.
     for detail in report["supplemental_decisions"]:
         name = detail["name"]
-        status = ("REVIEWED DECISION, CHECK DISPOSITION" if detail["reviewed"]
-                  else "HOLD SUBASSEMBLY DECISION")
+        # A reviewed choice to defer an optional module is not a reviewed
+        # purchase. Keep its row on HOLD even if deferral was correctly recorded.
+        status = (
+            "REVIEWED DECISION, CHECK DISPOSITION"
+            if detail["reviewed"] and detail["disposition"] != "deferred_optional"
+            else "HOLD SUBASSEMBLY DECISION"
+        )
         output.append(
             f"| linked detail (not additive) | {cell(name)} | "
             f"{detail['fleet_quantity']} if selected | not independently counted | "

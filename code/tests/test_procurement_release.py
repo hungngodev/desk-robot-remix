@@ -580,6 +580,28 @@ def test_requested_effects_and_soil_cannot_be_silently_excluded_from_release():
     assert "-DROOM_SOIL_FITTED=0" in station_ini
 
 
+def test_reviewed_optional_deferral_still_prints_shopping_hold():
+    import json
+
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    deferred = {
+        row["id"]: row for row in report["supplemental_decisions"]
+        if row["disposition"] == "deferred_optional"
+    }
+    assert set(deferred) == {"room_amg8833", "room_nfc_game_tokens"}
+    assert all(row["reviewed"] is True for row in deferred.values())
+    rendered = mod.render_markdown(report)
+    for row in deferred.values():
+        expected = (
+            f"| linked detail (not additive) | {row['name']} | "
+            f"{row['fleet_quantity']} if selected | not independently counted | "
+            "HOLD SUBASSEMBLY DECISION |"
+        )
+        assert expected in rendered
+    assert "REVIEWED DECISION, CHECK DISPOSITION | Linked parent amg8833" not in rendered
+    assert "REVIEWED DECISION, CHECK DISPOSITION | Linked parent nfc_game_props" not in rendered
+
+
 def test_entire_shopping_csv_and_two_lists_match_authoritative_source():
     import csv
     import io
