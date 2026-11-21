@@ -124,3 +124,35 @@ def test_exported_candidate_fits_survive_legacy_fusion_entrypoint(tmp_path):
         assert "Missing source mesh" in str(exc)
     else:
         raise AssertionError("Missing original chassis must fail closed")
+
+
+def test_fusion_gui_exposes_protected_pack_source_footprint_block():
+    """Verified CAD conflicts cannot disappear inside a successful mesh import."""
+    canonical = load_script()._load()
+    warning = canonical["packaging_warning"]
+    blocked = {
+        "source_chassis_battery_footprint": {
+            "source_mesh_only": True,
+            "physical_interior_fit_verified": False,
+            "reference_chassis_available": True,
+            "reference_chassis_xy_mm": [58.002, 86.194],
+            "candidate_tray_xy_mm": [107.6, 40.6],
+            "axis_aligned_packaging_possible": False,
+        }
+    }
+    assert "BATTERY PACKAGING CONFLICT" in warning(blocked)
+    assert "before final printing" in warning(blocked)
+    possible = {
+        "source_chassis_battery_footprint": {
+            **blocked["source_chassis_battery_footprint"],
+            "axis_aligned_packaging_possible": True,
+        }
+    }
+    assert "physical fit remain OPEN" in warning(possible)
+    assert "unqualified" in warning(None)
+    import pytest
+    with pytest.raises(ValueError, match="provenance"):
+        warning({"source_chassis_battery_footprint": {
+            "physical_interior_fit_verified": True,
+            "axis_aligned_packaging_possible": True,
+        }})

@@ -103,6 +103,20 @@ the original README files, including noncommercial and share alike restrictions.
     parameter values. Export a final print plate only after you verify
     no missing gear, track, insert, connector or electrical clearance.
 
+## Read the automatic battery packaging warning
+
+After exporting provisional OpenSCAD fit coupons, the Fusion scaffold
+verifies their mesh hashes and source bounds. Its startup message now flags
+a concrete packaging conflict if the provisional battery tray is larger
+than the original stepper chassis XY source envelope. This warning comes
+from the actual binary STL triangles, not a guessed component fit.
+**Do not silently resize the protected pack, omit charging, cut through
+a motor mount, or declare an external battery placement safe.** Use the
+full assembly to redesign the battery location with measured connector
+bend radius, battery removal, crash protection, track/servo swept space
+and real protected charger/boost dimensions. A passing outer bounding
+box is never proof of interior fit or charging acceptance.
+
 ## Measurements that remain necessary
 
 These are the last actual physical design inputs, not missing theoretical

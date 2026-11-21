@@ -69,17 +69,47 @@ def build_manifest(root: Path):
             + [(name, path) for name, path in fits if path.is_file()])
 
 
-def verify_optional_fit_references(root: Path) -> None:
-    """Reject stale generated STLs before Fusion imports their envelopes."""
+def verify_optional_fit_references(root: Path) -> dict | None:
+    """Reject stale generated STLs and return verified source-only geometry."""
     remixes = root / "docs/cad/remixes"
     generated = [
         remixes / "adapter_stls" / (name + ".stl")
         for name in ADAPTER_NAMES
     ] + [remixes / relative for _, relative in FIT_REFERENCES]
     if not any(path.is_file() for path in generated):
-        return
+        return None
     checker = root / "code/scripts/export_fit_kit.py"
-    runpy.run_path(str(checker))["verify_fit_kit"](root, output_dir=remixes)
+    return runpy.run_path(str(checker))["verify_fit_kit"](
+        root, output_dir=remixes
+    )
+
+
+def packaging_warning(verified_fit_kit: dict | None) -> str:
+    """Tell the Fusion builder whether reference chassis packaging is blocked.
+
+    Even an apparent XY bounding fit CANNOT grant print, power or motion
+    qualification. The original stepper chassis mesh has no interior cavity
+    or measured pack, rail, servo and wiring assembly coordinates.
+    """
+    if verified_fit_kit is None:
+        return "No candidate kit imported; physical packaging is unqualified."
+    screen = verified_fit_kit.get("source_chassis_battery_footprint")
+    if not isinstance(screen, dict) or screen.get(
+        "physical_interior_fit_verified"
+    ) is not False:
+        raise ValueError("Unverified Fusion battery packaging provenance")
+    if screen.get("axis_aligned_packaging_possible") is False:
+        return (
+            "BATTERY PACKAGING CONFLICT: exported tray exceeds the source "
+            "SMARS chassis XY envelope at 0/90 degrees. Redesign the body "
+            "mounting and verify a real protected pack before final printing."
+        )
+    if screen.get("axis_aligned_packaging_possible") is True:
+        return (
+            "Battery tray passed only a source outer bounding screen; "
+            "internal clearance, load, cable bends and physical fit remain OPEN."
+        )
+    return "Original chassis reference unavailable; battery footprint not checked."
 
 
 def run(context):
@@ -90,7 +120,7 @@ def run(context):
     ui = app.userInterface
     try:
         repo = find_repo(Path(__file__).resolve())
-        verify_optional_fit_references(repo)
+        fit_receipt = verify_optional_fit_references(repo)
         sources = build_manifest(repo)
         app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
         design = adsk.fusion.Design.cast(app.activeProduct)
@@ -113,7 +143,8 @@ def run(context):
             "Dock and fit gauges, when available, are labeled unqualified references. "
             "This is not the finished robot. Align shaft centers and gears, "
             "validate track compatibility and inspect collisions. Then model "
-            "adapters to caliper measurements before printing."
+            "adapters to caliper measurements before printing.\\n"
+            + packaging_warning(fit_receipt)
         )
     except Exception:
         ui.messageBox("Desk robot Fusion import failure:\\n" + traceback.format_exc())
