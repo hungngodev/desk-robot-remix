@@ -842,6 +842,18 @@ class SenseSelectionTests(unittest.TestCase):
                 ' exactly_zero.update({0xfffffff0u});\n'
                 ' auto at_zero = exactly_zero.update({0u});\n'
                 ' if (!at_zero.set_mood || at_zero.mood != Mood::kNeutral) return 10;\n'
+                // Five minutes without a Mac or human event must preserve
+                // local expression and silence. Physical OLED timing still
+                // needs to be measured on the assembled Sense head.
+                ' HsmBehavior offline(23);\n'
+                ' offline.update({1u});\n'
+                ' bool changed = false;\n'
+                ' for (uint32_t ms = 101; ms <= 300001; ms += 100) {\n'
+                '   auto a = offline.update({ms});\n'
+                '   if (a.set_speech || a.speech[0] != 0) return 11;\n'
+                '   changed = changed || a.set_mood;\n'
+                ' }\n'
+                ' if (!changed) return 12;\n'
                 ' return 0;\n'
                 '}\n'
             )
