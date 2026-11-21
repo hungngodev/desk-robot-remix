@@ -622,6 +622,7 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         JsonPtr result(cJSON_CreateObject(), cJSON_Delete);
         if (!result) return Json(req, 503, Envelope(false, "audio status unavailable"));
         cJSON_AddStringToObject(result.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddNumberToObject(result.get(), "boot", boot_nonce_);
         cJSON_AddNumberToObject(result.get(), "reference_underflow_reads", d.underflow_reads);
         cJSON_AddNumberToObject(result.get(), "reference_overwrite_reads", d.overwrite_reads);
         cJSON_AddNumberToObject(result.get(), "discarded_stale_writes", d.discarded_stale_writes);
