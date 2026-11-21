@@ -1506,6 +1506,7 @@ def test_native_asr_write_revoked_during_sqlite_commit_rolls_back_only_new_event
 
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = False
+    settings.voice_memory_tools_enabled = True
     settings.voice_transcript_memory_enabled = True
     robot = settings.robots[0].id
     memory = MemoryStore(tmp_path / "private", [r.id for r in settings.robots])
@@ -1567,6 +1568,7 @@ async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
 
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
     settings.voice_transcript_memory_enabled = True
     robot = settings.robots[0].id
     ids = [r.id for r in settings.robots]
@@ -1643,6 +1645,7 @@ def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
 
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
     settings.voice_transcript_memory_enabled = True
     robot = settings.robots[0].id
     ids = [r.id for r in settings.robots]

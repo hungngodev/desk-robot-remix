@@ -124,7 +124,10 @@ def register_native_omni_routes(
             "startup_memory_instructions_excluded": True,
             "persona": robot.persona[:900],
             "memory_enabled": settings.voice_memory_tools_enabled,
-            "transcript_memory_enabled": settings.voice_transcript_memory_enabled,
+            "transcript_memory_enabled": (
+                settings.voice_transcript_memory_enabled
+                and settings.voice_memory_tools_enabled
+            ),
             "live_transcript_context_enabled": settings.voice_vision_tools_enabled,
             # The same Mac pet state must govern the native model speaker:
             # a camera/voice consent flag alone never authorizes initiative.
@@ -145,7 +148,8 @@ def register_native_omni_routes(
         coordinator().robot(robot_id)
         if settings.mode != "hardware" or not (
             settings.voice_vision_tools_enabled
-            or settings.voice_transcript_memory_enabled
+            or (settings.voice_transcript_memory_enabled
+                and settings.voice_memory_tools_enabled)
         ):
             raise HTTPException(403, "Native transcript context is disabled")
         spoken = " ".join(request.transcript.split())
@@ -160,16 +164,30 @@ def register_native_omni_routes(
                 ephemeral = remember(
                     robot_id, request.event_id, spoken[:240], observed_at
                 )
-        memory_opt_in = settings.voice_transcript_memory_enabled
+        memory_opt_in = (
+            settings.voice_transcript_memory_enabled
+            and settings.voice_memory_tools_enabled
+        )
         memory_grant = settings.transcript_consent_generation if memory_opt_in else None
+        parent_memory_grant = (
+            settings.voice_memory_consent_generation if memory_opt_in else None
+        )
+
+        def transcript_grant_valid() -> bool:
+            return (
+                settings.voice_transcript_memory_enabled
+                and settings.voice_memory_tools_enabled
+                and settings.transcript_consent_generation == memory_grant
+                and settings.voice_memory_consent_generation == parent_memory_grant
+            )
+
         inserted = False
         if memory_opt_in:
             def persist_transcript_with_cleanup() -> bool:
                 # Cancelling an asyncio.to_thread await never stops its SQLite
                 # worker. Keep the consent fence and compensating delete in
                 # that same worker, even when the HTTP caller disconnects.
-                if (not settings.voice_transcript_memory_enabled
-                        or settings.transcript_consent_generation != memory_grant):
+                if not transcript_grant_valid():
                     return False
                 added = app.state.runtime.memory.remember(
                     robot_id, request.event_id,
@@ -177,8 +195,7 @@ def register_native_omni_routes(
                     kind="heard_human", source_robot=robot_id, witnessed=True,
                     confidence=0.6,
                 )
-                if added and (not settings.voice_transcript_memory_enabled
-                              or settings.transcript_consent_generation != memory_grant):
+                if added and not transcript_grant_valid():
                     app.state.runtime.memory.forget_episode(
                         robot_id, request.event_id,
                     )
@@ -220,9 +237,10 @@ def register_native_omni_routes(
         # A private SQLite write may take longer than the operator's
         # opt-out. Remove ONLY this request's newly inserted episode if
         # permission changed during I/O; never delete an older duplicate.
-        if (memory_opt_in != settings.voice_transcript_memory_enabled
-                or (memory_opt_in and
-                    settings.transcript_consent_generation != memory_grant)):
+        if (memory_opt_in != (
+                settings.voice_transcript_memory_enabled
+                and settings.voice_memory_tools_enabled
+            ) or (memory_opt_in and not transcript_grant_valid())):
             if inserted:
                 await asyncio.to_thread(
                     app.state.runtime.memory.forget_episode,
