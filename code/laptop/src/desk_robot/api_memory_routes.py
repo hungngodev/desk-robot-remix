@@ -230,6 +230,9 @@ def register_voice_context_route(
         # regranting during the first read must not authorize cached vision.
         vision_at_start = settings.voice_vision_tools_enabled
         camera_consent_gen_at_start = getattr(settings, "camera_consent_generation", None)
+        # A room grant cannot be revived by toggling ON during SQLite IO.
+        room_at_start = settings.room_station_context_enabled
+        room_consent_gen_at_start = settings.room_station_consent_generation
         if query is None:
             records = await asyncio.to_thread(
                 app.state.runtime.memory.recent, robot_id, limit=6
@@ -294,7 +297,11 @@ def register_voice_context_route(
             ]
         # Room USB context has independent consent; a cached sample read
         # before SQLite yielded must disappear if the operator opted out.
-        if not settings.room_station_context_enabled:
+        if (
+            not room_at_start
+            or not settings.room_station_context_enabled
+            or settings.room_station_consent_generation != room_consent_gen_at_start
+        ):
             timeline = [
                 item for item in timeline
                 if item.get("channel") != "room_station"
