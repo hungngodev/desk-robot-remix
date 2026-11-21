@@ -610,6 +610,11 @@ static void imu_status_preserves_physical_conversion_and_boot_identity() {
   reading.valid = true;
   reading.at_ms = 70;
   body.set_imu(reading);
+  const auto force_source = send(body, "aux", 80);
+  CHECK(force_source.find(
+      "\"jaw_seq\":0,\"boot_id\":123456789,\"valid\":false") !=
+      std::string::npos);
+  CHECK(force_source.size() < desk_robot::kReplyCapacity - 1);
   const auto result = send(body, "status", 80);
   CHECK(result.find("\"age_ms\":10,\"sample_ms\":70,\"boot_id\":123456789") !=
         std::string::npos);
