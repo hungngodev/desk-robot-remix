@@ -131,6 +131,22 @@ def test_private_aec_capture_requires_live_audio_activity(changed):
         ]
 
 
+def test_sense_status_latches_speaker_activity_inside_pcm_window():
+    """Source contract: status uses the completion edge, not a live counter."""
+    root = SOURCE.parents[1] / "firmware/head"
+    codec = (root / "sense/sense_reference_codec.cc").read_text()
+    header = (root / "sense/sense_reference_codec.h").read_text()
+    bridge = (root / "overlay/robot_bridge.cc").read_text()
+    assert "bench_speaker_at_start_ = speaker_frames_accepted_;" in codec
+    assert "const bool already_ready = bench_window_.ready();" in codec
+    assert "if (!already_ready && bench_window_.ready())" in codec
+    assert "speaker_frames_accepted_ > bench_speaker_at_start_" in codec
+    assert "bench_window_.ready() && bench_speaker_activity_in_window_" in codec
+    assert "bool speaker_activity_in_window;" in header
+    assert '"speaker_activity_in_window"' in bridge
+    assert "progress.speaker_activity_in_window" in bridge
+
+
 def test_postcapture_i2s_output_cannot_qualify_silent_recording():
     """A late speaker write may advance lifetime counters, not the capture."""
     http = fake_read(speaker_in_window=False, final_speaker=8400)
