@@ -1620,3 +1620,58 @@ async def test_group_mid_session_sharing_enable_cannot_backfill_peer_dialogue(se
         "Untrusted digitally relayed peer speech" not in str(history)
         for history in dialogue.histories.values()
     )
+
+
+async def test_group_room_station_revoke_prevents_speech_and_stale_reuse(settings):
+    """Revoked shared USB evidence must not reach either pet speaker."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomObservation
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    settings.room_station_context_enabled = True
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.remember_room(RoomObservation(
+        seq=1, at_ms=100, received_at=time.monotonic(), readings={},
+        summary="ROOM PRIVATE: USB climate observation",
+    ))
+
+    class RevokingChat(SimulatedChat):
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            settings.room_station_context_enabled = False
+            return await super().reply(history)
+
+    revoking_chat = RevokingChat()
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, revoking_chat, speaker)
+    conversation.multimodal = SimpleNamespace(hub=hub)
+    with pytest.raises(RuntimeError, match="consent|permission"):
+        await conversation.run(
+            ["robot-01", "robot-02"], "Discuss your room", 2,
+        )
+    assert revoking_chat.prompts and "ROOM PRIVATE" in revoking_chat.prompts[0]
+    assert speaker.spoken == []
+    assert conversation.active is None
+
+    class SubsequentChat(SimulatedChat):
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            return await super().reply(history)
+
+    subsequent = SubsequentChat()
+    next_group = Conversation(settings, subsequent, SimulatedSpeaker())
+    next_group.multimodal = SimpleNamespace(hub=hub)
+    await next_group.run(["robot-01", "robot-02"], "Discuss a toy", 2)
+    assert subsequent.prompts
+    assert "ROOM PRIVATE" not in str(subsequent.prompts)
