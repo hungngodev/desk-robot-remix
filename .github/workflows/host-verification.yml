@@ -44,6 +44,7 @@ jobs:
           uv run --no-sync pytest -q -ra \
             tests/test_attention.py \
             tests/test_live_turns.py \
+            tests/test_runtime_voice_priority.py \
             tests/test_brain_context.py \
             tests/test_brain_core_memory.py \
             tests/test_brain_memory_retrieval.py \
