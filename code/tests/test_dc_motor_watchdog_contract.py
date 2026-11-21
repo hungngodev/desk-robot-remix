@@ -126,3 +126,21 @@ def test_raw_contact_inhibition_precedes_optional_event_debounce():
     # Raw HIGH remains an interlock even before the first debounce mask.
     assert "const bool bumper_hit = state_.bumper_raw ||" in control
     assert "if (state_.bumper_raw ||" in control
+
+
+def test_default_full_dc_wheels_stay_disabled_until_external_cutoff_qualified():
+    ini = (BODY / "platformio.ini").read_text(encoding="utf-8")
+    firmware = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    test_source = (BODY / "tests/guarded_body_tests.cpp").read_text(encoding="utf-8")
+    assert "-DDESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED=0" in ini
+    assert "#define DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED 0" in firmware
+    assert "!DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED" in firmware
+    assert "zero_motor_pwm();" in firmware.split(
+        "#if DESK_ROBOT_FULL_SENSORS && !DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED", 1
+    )[1].split("#else", 1)[0]
+    assert "control.inhibit_unqualified_motor_cutoff();" in firmware
+    assert "dc.inhibit_unqualified_motor_cutoff();" in test_source
+    # Bench only: preserve the historical DC fixture for disconnected tests.
+    assert "[env:esp32dev]" in ini
+    assert "DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED=0" not in ini.split(
+        "[env:esp32dev]", 1)[1]

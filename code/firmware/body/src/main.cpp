@@ -16,6 +16,11 @@
 #ifndef DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
 #define DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED 0
 #endif
+// The external DC CD74HC123 to DRV8833 nSLEEP wiring is not qualified by
+// compiling a heartbeat. Do not drive wheels without measured fail-low cutoff.
+#ifndef DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED
+#define DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED 0
+#endif
 // A guarded DC image must not silently omit its CPU-stall motor cutoff.
 // The historical unguarded DC bench remains separate from full-sensor motion.
 #if !DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && \
@@ -276,6 +281,11 @@ void apply_outputs() {
                 right_stepper.update(now_us, state.right, state.armed));
 #endif
 #else
+#if DESK_ROBOT_FULL_SENSORS && !DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED
+  // A CPU heartbeat alone does NOT certify its external one-shot and nSLEEP.
+  // Keep every DRV8833 bridge input LOW until the physical cutoff is proven.
+  zero_motor_pwm();
+#else
   if ((applied_left > 0 && state.left < 0) ||
       (applied_left < 0 && state.left > 0) ||
       (applied_right > 0 && state.right < 0) ||
@@ -287,6 +297,7 @@ void apply_outputs() {
   write_motor_pair(body_pins::kMotorChannels[2], body_pins::kMotorChannels[3], state.right);
   applied_left = state.left;
   applied_right = state.right;
+#endif
 #endif
   if (state.servos_attached && !servo_attached) {
     // Program duty before attaching: never emit a default zero-width command.
@@ -372,9 +383,12 @@ void setup() {
   // This is observation identity only, not cryptographic authentication.
   // New WROOM boots must not reuse the last IMU observation session.
   control.set_boot_epoch(esp_random() | 1U);
-#if DESK_ROBOT_STEPPER && !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
-  // The default full stepper image has no independently qualified rail
-  // cutoff. Report this as a hardware motion veto, not just silent LOW coils.
+#if (DESK_ROBOT_STEPPER && !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED) || \
+    (!DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && \
+     !DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED)
+  // Neither a software heartbeat nor simulated guard readings qualify an
+  // actual motor rail. Both guarded physical backends refuse movement until
+  // their external cutoff is independently verified on the assembled board.
   control.inhibit_unqualified_motor_cutoff();
 #endif
 #if DESK_ROBOT_FULL_SENSORS
@@ -521,7 +535,11 @@ void setup() {
       "READY desk-robot-body stepper disarmed local_rearm_required" :
 #endif
 #elif DESK_ROBOT_FULL_SENSORS
+#if !DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED
+      "READY desk-robot-body dc_guarded motor_disabled_cutoff_unqualified" :
+#else
       "READY desk-robot-body dc_guarded disarmed local_rearm_required" :
+#endif
 #else
       "READY desk-robot-body dc_bench_only disarmed" :
 #endif

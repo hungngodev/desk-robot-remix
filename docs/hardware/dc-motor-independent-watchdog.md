@@ -1,5 +1,7 @@
 # Motor cutoff after a stalled ESP32 application: source first design
 
+> The current full guarded DC build deliberately sets `DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED=0`. Its firmware keeps both H-bridge input pairs LOW, reports `motor_cutoff_unqualified`, and refuses arm even when simulated sensors are clear. The heartbeat circuit and nFAULT telemetry are implemented but cannot establish independent cutoff without a wired CD74HC123 Q to DRV8833 nSLEEP, a disconnected heartbeat trial, a CPU halt scope trace, and loaded stop measurements. Only after those tests is changing the build flag to 1 supportable. The historical `esp32dev` DC bench remains motor-disconnected only.
+
 **Status: source implemented in a nonproduction lab target; electronics NOT
 qualified.** A normal DRV8833 breakout with nSLEEP held high does not provide
 an independent application watchdog. The existing WROOM `control.tick()`

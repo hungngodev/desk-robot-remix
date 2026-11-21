@@ -51,6 +51,19 @@ static void unqualified_stepper_cutoff_never_claims_motion_ready() {
   CHECK(send(body, "rearm", 1, true) == "OK rearm");
   CHECK(send(body, "arm", 1) == "ERR arm motor_cutoff_unqualified");
 
+  desk_robot::CliffGuard dc_guard;
+  CHECK(dc_guard.configure(config()));
+  fresh(dc_guard, 3);
+  desk_robot::BodyControl dc(desk_robot::BodyProfile::DcGuarded, &dc_guard);
+  dc.inhibit_unqualified_motor_cutoff();
+  CHECK(send(dc, "rearm", 3, true) == "OK rearm");
+  CHECK(send(dc, "status", 3).find("\"fault\":\"motor_cutoff_unqualified\"") !=
+        std::string::npos);
+  CHECK(send(dc, "status", 3).find("\"ready\":false") !=
+        std::string::npos);
+  CHECK(send(dc, "arm", 3) == "ERR arm motor_cutoff_unqualified");
+  CHECK(!dc.state().armed && dc.state().left == 0 && dc.state().right == 0);
+
   // The ordinary guarded test fixture remains eligible for policy tests.
   desk_robot::CliffGuard qualified_guard;
   CHECK(qualified_guard.configure(config()));
