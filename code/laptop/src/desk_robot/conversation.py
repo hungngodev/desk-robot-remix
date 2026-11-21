@@ -830,7 +830,9 @@ class Conversation:
                                 raise RuntimeError("Group conversation consent revoked")
                             self.histories[robot.id].append({"role": "assistant", "content": text})
                             for peer in robots:
-                                if peer.id != robot.id:
+                                if (peer.id != robot.id
+                                        and (self.settings.mode != "hardware"
+                                             or self.settings.fleet_text_sharing_enabled)):
                                     # This is model-generated speech from a
                                     # different pet, never a fresh human command.
                                     # Keep its identity and quote its words as
