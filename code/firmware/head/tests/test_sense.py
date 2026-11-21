@@ -786,8 +786,8 @@ class SenseSelectionTests(unittest.TestCase):
                 ' picker.pick_min_ms = 200; picker.pick_max_ms = 200;\n'
                 ' picker.update({0xfffffff0u});\n'
                 ' if (!picker.update({0xfffffff1u}).empty()) return 5;\n'
-                // The picker may select a smile, which has no physical motion.
-                // Seed 2 deliberately selects that non-motion idle action.
+                # The picker may select a smile, which has no physical motion.
+                # Seed 2 deliberately selects that non-motion idle action.
                 ' if (picker.update({0x000000b8u}).empty()) return 6;\n'
                 ' HsmBehavior mood(4);\n'
                 ' mood.pick_min_ms = 10000; mood.pick_max_ms = 10000;\n'
