@@ -1124,9 +1124,16 @@ class MultimodalOrchestrator:
                         # until the ordinary adaptive heartbeat is due.
                         # This uses the ALREADY decoded 64x48 gray image,
                         # never another head snapshot, video thread or VLM.
+                        # Preserve one stable confirmation after an actual
+                        # pixel transition. The semantic pet VisualChangeGate
+                        # needs two changed observations against its baseline;
+                        # dropping this frame would suppress an appearing key.
+                        # The hub clears changed_streak on that confirmation,
+                        # so subsequent static frames retain their cheap skip.
                         if (not recent_sensor_edge
                                 and len(self.hub.frames[robot_id]) >= 2
-                                and not self.hub.due(robot_id, received)):
+                                and not self.hub.due(robot_id, received)
+                                and self.hub.changed_streak[robot_id] == 0):
                             earlier = self.hub.previous_gray.get(robot_id)
                             if (earlier is not None
                                     and change_fraction(earlier, prepared[1]) < .01):

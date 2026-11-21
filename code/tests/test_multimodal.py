@@ -205,9 +205,17 @@ async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_p
     visual.start_streams()
     try:
         async with asyncio.timeout(3):
-            while head.emitted < 7:
+            while (head.emitted < 7 or
+                   visual.status("robot-01")["software_timings"][
+                       "stream_frames_selected"] < 4):
                 await asyncio.sleep(0.02)
         metrics = visual.status("robot-01")["software_timings"]
+        # A new object requires one stable FOLLOWUP even though the latest
+        # frame matches the new scene. Otherwise the pet's two-confirmation
+        # semantic gate never reaches its VLM and its eyewitness memory.
+        retained = tuple(visual.hub.frames["robot-01"])
+        assert retained[-2].motion_fraction > .01
+        assert retained[-1].motion_fraction < .01
         assert metrics["stream_frames_received"] >= 7
         # The sampler must not go blind for 3+ seconds after the first
         # two frames. An object appearing one second into the continuous
