@@ -104,6 +104,10 @@ private:
         auto* board = static_cast<DeskRobotSenseBoard*>(context);
         using namespace stackchan::behavior;
         bool last_rendered_fault = false;
+        // Xiaozhi may rewrite OLED status while a safety fault remains
+        // latched. Periodically restore the factual local fault overlay,
+        // but never flood the shared I2C display every 100 ms.
+        uint32_t last_fault_status_refresh_ms = 0;
         bool last_was_idle = false;
         bool model_mood_active = false;
         uint32_t model_mood_started_ms = 0;
@@ -172,11 +176,15 @@ private:
                 // WROOM faults are factual local OLED status even while
                 // Xiaozhi is speaking. Never wait for the speech floor to
                 // become idle to show a newly observed safety fault.
-                // Refresh once on returning to idle because Xiaozhi may
-                // replace the status while speaking. No mandatory speech.
+                // Xiaozhi also rewrites status on live speaking/listening
+                // transitions. Restore the safety overlay at most every
+                // 750 ms while faulted, including continuous listening.
+                // No mandatory warning speech or motor authority follows.
                 if (body_unhealthy &&
-                    (!last_rendered_fault || (idle && !last_was_idle))) {
+                    (!last_rendered_fault || (idle && !last_was_idle) ||
+                     now_ms - last_fault_status_refresh_ms >= 750U)) {
                     board->display_->SetStatus("Body safety stop");
+                    last_fault_status_refresh_ms = now_ms;
                     last_rendered_fault = true;
                 } else if (last_rendered_fault && !body_unhealthy) {
                     // Restore the pinned Xiaozhi localized speaking/listening

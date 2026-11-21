@@ -226,6 +226,22 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn("!board->audio_operator_touched_.load()", board)
 
 
+    def test_latched_body_fault_remains_visible_during_continuous_listening(self):
+        """Xiaozhi may overwrite OLED status without an idle transition."""
+        source = (HEAD / "sense/desk_robot_sense.cc").read_text()
+        face = source.split("static void FaceTask(void* context)", 1)[1]
+        face = face.split("void InitializeDisplay()", 1)[0]
+        self.assertIn("uint32_t last_fault_status_refresh_ms = 0;", face)
+        self.assertIn("now_ms - last_fault_status_refresh_ms >= 750U", face)
+        self.assertIn("last_fault_status_refresh_ms = now_ms;", face)
+        self.assertIn('board->display_->SetStatus("Body safety stop");', face)
+        self.assertIn("if (body_unhealthy &&", face)
+        self.assertIn("else if (last_rendered_fault && !body_unhealthy)", face)
+        # The OLED task must not turn an informational safety cue into
+        # speaker traffic, motion, or another blocking body UART poll.
+        self.assertNotIn("body_bridge_->PollInteraction()", face)
+        self.assertNotIn("ToggleChatState();  // safety fault", face)
+
     def test_local_oled_scheduler_never_blocks_on_uart_poll(self):
         """Preserve responsive local face when WROOM UART holds 350 ms."""
         source = (HEAD / "sense/desk_robot_sense.cc").read_text()
