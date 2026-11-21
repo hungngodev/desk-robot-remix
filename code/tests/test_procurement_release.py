@@ -1848,3 +1848,34 @@ def test_strict_signed_quote_requires_exact_carrier_revision():
     )
     assert not mod.quoted_carrier_matches_signed_role(None, signed)
     assert not mod.quoted_carrier_matches_signed_role(quote, None)
+
+
+def test_fleet_landed_quote_does_not_inherit_first_unit_budget_hold():
+    values = {
+        "scope": "fleet", "calculation_complete_not_physical_approval": True,
+        "payable_now_cents": 6500, "prior_paid_orders_cents": 100,
+        "prototype_cumulative_cents": 6600, "remaining_under_cap_cents": None,
+        "material_subtotals_cents": {"robot": 6500, "dock": 0, "station": 0},
+        "allocated_landed_subtotals_cents": {
+            "robot": 6500, "dock": 0, "station": 0,
+        },
+        "within_prototype_cap": None, "prototype_cap_cents": None,
+        "seller_payable_cents": {"Example": 6500}, "errors": [],
+    }
+    displayed = mod.cost_quote_markdown(values)
+    assert "Cumulative fleet spending: $66.00" in displayed
+    assert "First-unit $50 cap does not apply" in displayed
+    assert "Remaining under prototype $50 cap" not in displayed
+    assert "HOLD: cumulative prototype spending" not in displayed
+    values["scope"] = "first_robot"
+    values["within_prototype_cap"] = False
+    values["prototype_cap_cents"] = 5000
+    values["remaining_under_cap_cents"] = -1600
+    first = mod.cost_quote_markdown(values)
+    assert "Remaining under prototype $50 cap: -$16.00" in first
+    assert "HOLD: cumulative prototype spending exceeds the $50.00 cap" in first
+    values["scope"] = "fleet"
+    values["calculation_complete_not_physical_approval"] = False
+    incomplete = mod.cost_quote_markdown(values)
+    assert "Payable now: unknown" in incomplete
+    assert "Cumulative fleet spending: unknown" in incomplete

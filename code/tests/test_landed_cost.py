@@ -449,3 +449,28 @@ def test_actual_leap_day_quote_remains_valid():
     out = calculate(ev)
     assert out["calculation_complete_not_physical_approval"]
     assert out["payable_now_cents"] == 655
+
+
+def test_fleet_total_is_not_rejected_by_first_unit_prototype_cap():
+    ev = sample()
+    ev["scope"] = "fleet"
+    ev["paid_orders"][0]["total_paid_usd"] = "49.00"
+    fleet = mod.account_landed_cost(
+        ev, REQUIRED, CATEGORIES, expected_scope="fleet"
+    )
+    assert fleet["calculation_complete_not_physical_approval"]
+    assert fleet["errors"] == []
+    assert fleet["prototype_cumulative_cents"] == 5555
+    assert fleet["payable_now_cents"] == 655
+    assert fleet["prototype_cap_cents"] is None
+    assert fleet["remaining_under_cap_cents"] is None
+    assert fleet["within_prototype_cap"] is None
+
+    ev["scope"] = "first_robot"
+    first = mod.account_landed_cost(
+        ev, REQUIRED, CATEGORIES, expected_scope="first_robot"
+    )
+    assert first["calculation_complete_not_physical_approval"]
+    assert first["prototype_cap_cents"] == 5000
+    assert first["remaining_under_cap_cents"] == -555
+    assert first["within_prototype_cap"] is False

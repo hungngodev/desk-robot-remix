@@ -327,6 +327,9 @@ def account_landed_cost(
     cumulative = (payable + already_paid
                   if payable is not None and already_paid is not None
                   else None)
+    # The $50 delivered cap is for the FIRST robot, not for five complete
+    # units. Keep evaluation samples under the same prototype discipline.
+    cap_applies = expected_scope != "fleet"
     return {
         "scope": expected_scope,
         "currency": "USD",
@@ -340,10 +343,12 @@ def account_landed_cost(
         "payable_now_cents": payable,
         "prior_paid_orders_cents": already_paid,
         "prototype_cumulative_cents": cumulative,
-        "prototype_cap_cents": cap_cents,
-        "remaining_under_cap_cents": cap_cents - cumulative
-        if cumulative is not None else None,
-        "within_prototype_cap": cumulative <= cap_cents
-        if cumulative is not None else False,
+        "prototype_cap_cents": cap_cents if cap_applies else None,
+        "remaining_under_cap_cents": (cap_cents - cumulative
+                                      if cumulative is not None else None)
+        if cap_applies else None,
+        "within_prototype_cap": (cumulative <= cap_cents
+                                 if cumulative is not None else False)
+        if cap_applies else None,
         "landed_price_is_a_verified_supplier_checkout": False,
     }

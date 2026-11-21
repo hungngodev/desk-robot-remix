@@ -1698,6 +1698,7 @@ def cost_quote_markdown(cost: dict) -> str:
     # incomplete evidence; the presentation must independently fail closed.
     payable = cost["payable_now_cents"] if complete else None
     cumulative = cost["prototype_cumulative_cents"] if complete else None
+    fleet_scope = cost["scope"] == "fleet"
     remaining = cost["remaining_under_cap_cents"] if complete else None
     lines = [
         "# Landed purchasing cost",
@@ -1707,10 +1708,11 @@ def cost_quote_markdown(cost: dict) -> str:
         ("yes, not purchase approval" if complete else "NO"),
         "Payable now: " + amount(payable),
         "Previously paid: " + amount(cost["prior_paid_orders_cents"]),
-        "Cumulative prototype spending: " +
-        amount(cumulative),
-        "Remaining under prototype $50 cap: " +
-        amount(remaining),
+        ("Cumulative fleet spending: " if fleet_scope
+         else "Cumulative prototype spending: ") + amount(cumulative),
+        ("First-unit $50 cap does not apply to a five-robot fleet quote."
+         if fleet_scope else
+         "Remaining under prototype $50 cap: " + amount(remaining)),
         "These amounts are input calculations, not independently checked "
         "supplier stock, receipt, device fit or permission to buy.",
     ]
@@ -1737,7 +1739,7 @@ def cost_quote_markdown(cost: dict) -> str:
                 category.capitalize() + " allocated landed cost: "
                 + amount(allocated.get(category))
             )
-    if (cumulative is not None
+    if (not fleet_scope and cumulative is not None
             and not cost["within_prototype_cap"]):
         lines.append("HOLD: cumulative prototype spending exceeds the "
                      + amount(cost["prototype_cap_cents"]) + " cap")
