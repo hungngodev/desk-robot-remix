@@ -674,6 +674,9 @@ static void missing_mpu_interrupt_status_cannot_authorize_wheels() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
   fresh(guard, 100);
+  // Isolate IMU fault reporting from the intentionally higher priority
+  // boot-time cliff latch. This does not arm the BodyControl itself.
+  CHECK(guard.try_rearm(100));
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   body.require_imu_for_motion(true);
   body.set_imu_identity(4, 0x68, 0);
