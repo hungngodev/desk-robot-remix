@@ -1246,6 +1246,7 @@ static void belly_adc_does_not_refresh_stale_jaw_sample() {
 static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_grip_feedback(true);
+  CHECK(body.configure_jaw_force_limits({60, 120, 1000, 1, 300}));
   CHECK(send(body, "arm", 100) == "OK arm");
   desk_robot::AccessoryReadings r{};
   r.force.present = r.force.valid = true;
@@ -1308,6 +1309,7 @@ static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
 static void physical_gripper_stops_ramping_when_adc_is_not_trustworthy() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_grip_feedback(true);
+  CHECK(body.configure_jaw_force_limits({120, 60, 1000, 1, 300}));
   CHECK(send(body, "arm", 100) == "OK arm");
   CHECK(send(body, "grip 60", 100) == "ERR grip force_missing_or_stale");
   desk_robot::AccessoryReadings readings{};
@@ -1342,6 +1344,66 @@ static void physical_gripper_stops_ramping_when_adc_is_not_trustworthy() {
     CHECK(body.state().grip == 89 && body.state().grip_target == 89);
     CHECK(send(body, "grip 60", 142U) == "ERR grip force_missing_or_stale");
   }
+}
+
+static void jaw_force_ceiling_is_local_and_direction_aware() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_grip_feedback(true);
+  CHECK(!body.configure_jaw_force_limits({90, 90, 1000, 1, 300}));
+  CHECK(!body.configure_jaw_force_limits({60, 120, 1000, 0, 300}));
+  CHECK(!body.configure_jaw_force_limits({60, 120, 32767, 1, 300}));
+  CHECK(!body.configure_jaw_force_limits({60, 120, 1000, 1, 32000}));
+  CHECK(send(body, "arm", 100) == "OK arm");
+
+  desk_robot::AccessoryReadings r{};
+  r.force.present = r.force.valid = true;
+  r.force.valid_mask = 2U;
+  r.force.adc[1] = 1000;
+  r.force.jaw_sample_seq = 1U;
+  r.force.at_ms = r.force.jaw_at_ms = 100U;
+  body.set_accessories(r, 100);
+  CHECK(send(body, "grip 120", 100) == "ERR grip local_force_limits_missing");
+  CHECK(body.state().grip == 90 && body.state().grip_target == 90);
+  CHECK(!body.configure_jaw_force_limits({60, 120, 1000, 1, 300}));
+  CHECK(send(body, "disarm", 100) == "OK disarm");
+  CHECK(body.configure_jaw_force_limits({60, 120, 1000, 1, 300}));
+  CHECK(!body.configure_jaw_force_limits({120, 60, 1000, 1, 300}));
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "grip 59", 100) == "ERR grip outside_measured_endstops");
+  CHECK(send(body, "grip 120", 100) == "OK grip angle=120");
+  body.tick(180);
+  CHECK(body.state().grip == 94);
+
+  // Overloaded sample arrives while the remote controller is stalled.
+  r.force.adc[1] = 1300;
+  r.force.jaw_sample_seq = 2U;
+  r.force.at_ms = r.force.jaw_at_ms = 181U;
+  body.set_accessories(r, 181);
+  body.tick(200);
+  CHECK(body.state().grip == 94 && body.state().grip_target == 94);
+  CHECK(send(body, "grip 120", 200) ==
+        "ERR grip local_force_limit_or_reversal");
+  // Opening away from measured closed angle is a safe bounded relief path.
+  CHECK(send(body, "grip 90", 200) == "OK grip angle=90");
+  body.tick(220);
+  CHECK(body.state().grip == 93);
+
+  // Large polarity reversal is not permission to squeeze harder.
+  r.force.adc[1] = 700;
+  r.force.jaw_sample_seq = 3U;
+  r.force.at_ms = r.force.jaw_at_ms = 221U;
+  body.set_accessories(r, 221);
+  CHECK(send(body, "grip 120", 221) ==
+        "ERR grip local_force_limit_or_reversal");
+  CHECK(send(body, "grip 90", 221) == "OK grip angle=90");
+  r.force.adc[1] = 32767; // clipped ADC revokes all movement credit
+  r.force.jaw_sample_seq = 4U;
+  r.force.at_ms = r.force.jaw_at_ms = 222U;
+  body.set_accessories(r, 222);
+  body.tick(240);
+  CHECK(body.state().grip_target == body.state().grip);
+  CHECK(send(body, "grip 120", 240) == "ERR grip force_missing_or_stale");
+  CHECK(body.state().servos_attached);
 }
 
 static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
@@ -1941,6 +2003,7 @@ int main() {
     belly_adc_does_not_refresh_stale_jaw_sample();
     physical_gripper_stops_ramping_when_adc_is_not_trustworthy();
     gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion();
+    jaw_force_ceiling_is_local_and_direction_aware();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();

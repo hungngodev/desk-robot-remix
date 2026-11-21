@@ -54,6 +54,59 @@ void move_toward(int& current, int target, std::uint32_t steps) {
 
 }  // namespace
 
+bool BodyControl::configure_jaw_force_limits(const JawForceLimits& limits) {
+  // A running session cannot revise its own jaw safety authority.
+  if (jaw_limits_configured_ || state_.armed ||
+      state_.grip != state_.grip_target ||
+      limits.open_deg < kServoMinDegrees ||
+      limits.open_deg > kServoMaxDegrees ||
+      limits.closed_deg < kServoMinDegrees ||
+      limits.closed_deg > kServoMaxDegrees ||
+      limits.open_deg == limits.closed_deg ||
+      limits.baseline_adc <= -32768 || limits.baseline_adc >= 32767 ||
+      (limits.force_sign != 1 && limits.force_sign != -1) ||
+      limits.max_delta_adc < 1 || limits.max_delta_adc > 30000) {
+    return false;
+  }
+  const int32_t limit_adc = static_cast<int32_t>(limits.baseline_adc) +
+      static_cast<int32_t>(limits.force_sign) * limits.max_delta_adc;
+  if (limit_adc <= -32768 || limit_adc >= 32767 ||
+      state_.grip < (limits.open_deg < limits.closed_deg ?
+                     limits.open_deg : limits.closed_deg) ||
+      state_.grip > (limits.open_deg > limits.closed_deg ?
+                     limits.open_deg : limits.closed_deg)) return false;
+  jaw_limits_ = limits;
+  jaw_limits_configured_ = true;
+  jaw_sample_motion_budget_ = 0;
+  return true;
+}
+
+bool BodyControl::jaw_target_within_limits(int target) const {
+  if (!jaw_limits_configured_) return false;
+  const int low = jaw_limits_.open_deg < jaw_limits_.closed_deg ?
+      jaw_limits_.open_deg : jaw_limits_.closed_deg;
+  const int high = jaw_limits_.open_deg > jaw_limits_.closed_deg ?
+      jaw_limits_.open_deg : jaw_limits_.closed_deg;
+  return target >= low && target <= high;
+}
+
+bool BodyControl::jaw_target_closes(int target) const {
+  return (target - state_.grip) *
+      (jaw_limits_.closed_deg - jaw_limits_.open_deg) > 0;
+}
+
+bool BodyControl::jaw_force_allows_closing() const {
+  if (!jaw_limits_configured_) return false;
+  const auto& force = state_.accessories.force;
+  const int32_t delta = (static_cast<int32_t>(force.adc[1]) -
+                         jaw_limits_.baseline_adc) * jaw_limits_.force_sign;
+  // A large reverse signal is not proof of zero load. Permit bounded
+  // measurement noise without accepting reversed/saturated contact data.
+  const int32_t tolerance = jaw_limits_.max_delta_adc / 3 > 40 ?
+      jaw_limits_.max_delta_adc / 3 : 40;
+  return delta < jaw_limits_.max_delta_adc && delta >= -tolerance;
+}
+
 void BodyControl::stop_motion() {
   state_.left = 0;
   state_.right = 0;
@@ -501,9 +554,14 @@ void BodyControl::tick(std::uint32_t now_ms) {
   // the target before the next servo ramp. Leave PWM attached to retain
   // an already held object rather than dropping it on I2C loss.
   if (grip_feedback_required_ && state_.grip != state_.grip_target &&
-      !grip_feedback_fresh(now_ms)) {
+      (!grip_feedback_fresh(now_ms) ||
+       !jaw_target_within_limits(state_.grip_target) ||
+       (jaw_target_closes(state_.grip_target) &&
+        !jaw_force_allows_closing()))) {
+    // Local feedback, not an outstanding Mac callback, cancels closure.
+    // Preserve holding PWM; an explicitly commanded opening can relieve load.
     state_.grip_target = state_.grip;
-    jaw_sample_motion_budget_ = 0; // invalid/expired jaw evidence ends move
+    jaw_sample_motion_budget_ = 0;
   }
   const std::uint32_t steps = (now_ms - last_servo_step_ms_) / kServoStepMs;
   if (steps != 0) {
@@ -1260,8 +1318,19 @@ void BodyControl::execute(const char* line, std::size_t length,
         return;
       }
       if (grip && grip_feedback_required_) {
-        // Every newly accepted command needs a distinct hardware conversion
-        // before it can advance again, including repeated/retried commands.
+        if (!jaw_limits_configured_) {
+          std::snprintf(reply, capacity, "ERR grip local_force_limits_missing");
+          return;
+        }
+        if (!jaw_target_within_limits(first)) {
+          std::snprintf(reply, capacity, "ERR grip outside_measured_endstops");
+          return;
+        }
+        if (jaw_target_closes(first) && !jaw_force_allows_closing()) {
+          std::snprintf(reply, capacity, "ERR grip local_force_limit_or_reversal");
+          return;
+        }
+        // A newly accepted command requires another independent conversion.
         jaw_sample_motion_budget_ = 0;
       }
       (lift ? state_.lift_target : state_.grip_target) = first;

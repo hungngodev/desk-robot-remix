@@ -462,6 +462,25 @@ void setup() {
   // A full physical jaw cannot execute a queued close while its own
   // ADS1115 feedback has gone stale. Bench-only fixtures remain opt-in.
   control.require_grip_feedback(true);
+#if defined(DESK_ROBOT_JAW_FORCE_LIMITS_QUALIFIED) && DESK_ROBOT_JAW_FORCE_LIMITS_QUALIFIED
+  // Explicit measured values for the installed assembly ONLY. Stock images
+  // have none and cannot close the jaw; a compile flag is not physical proof.
+#if !defined(DESK_ROBOT_JAW_OPEN_DEG) || !defined(DESK_ROBOT_JAW_CLOSED_DEG) || \
+    !defined(DESK_ROBOT_JAW_EMPTY_ADC) || !defined(DESK_ROBOT_JAW_FORCE_SIGN) || \
+    !defined(DESK_ROBOT_JAW_MAX_DELTA_ADC)
+#error Qualified jaw calibration requires all five physical measurements
+#endif
+  const desk_robot::JawForceLimits jaw_limits{
+      DESK_ROBOT_JAW_OPEN_DEG, DESK_ROBOT_JAW_CLOSED_DEG,
+      DESK_ROBOT_JAW_EMPTY_ADC, DESK_ROBOT_JAW_FORCE_SIGN,
+      DESK_ROBOT_JAW_MAX_DELTA_ADC};
+  if (!control.configure_jaw_force_limits(jaw_limits)) {
+    control.force_disarm();
+    Serial.println("ERR jaw_force_limits_invalid jaw_locked");
+  }
+#else
+  Serial.println("WARN jaw_force_limits_unqualified jaw_locked");
+#endif
   // The same upstream Wire bus can read WHO_AM_I from the owned BerryIMU
   // before motion is ever enabled. No IMU driver, sensor fusion, second
   // controller or unqualified safety thresholds are silently installed.

@@ -33,6 +33,16 @@ struct RangeOpticalRaw {
   std::uint32_t at_ms = 0;
 };
 
+// The mounted jaw's force polarity and mechanical travel come only from
+// measured physical calibration. No arbitrary remote threshold is trusted.
+struct JawForceLimits {
+  int open_deg = 0;
+  int closed_deg = 0;
+  int baseline_adc = 0;
+  int force_sign = 0;
+  int max_delta_adc = 0;
+};
+
 struct State {
   bool armed = false;
   bool servos_attached = false;
@@ -153,6 +163,10 @@ class BodyControl {
   // target without a recent, unclipped, independently acquired ADS1115
   // channel 1 value. The historical disconnected DC fixture opts out.
   void require_grip_feedback(bool required) { grip_feedback_required_ = required; }
+  // Boot-only physical calibration, not a remote command. If omitted the
+  // full-profile gripper cannot move; opening relief remains possible after
+  // a calibrated high-force reading while ADC evidence is still fresh.
+  bool configure_jaw_force_limits(const JawForceLimits& limits);
   // Boot-only, irreversible while running: the stock stepper board lacks
   // a qualified independent rail cutoff, so sensors alone cannot enable it.
   void inhibit_unqualified_motor_cutoff();
@@ -209,6 +223,11 @@ class BodyControl {
   std::uint32_t boot_epoch_ = 0;
   bool imu_motion_required_ = false;
   bool grip_feedback_required_ = false;
+  bool jaw_limits_configured_ = false;
+  JawForceLimits jaw_limits_{};
+  bool jaw_target_within_limits(int target) const;
+  bool jaw_target_closes(int target) const;
+  bool jaw_force_allows_closing() const;
   // Maximum four commanded degrees of jaw travel per distinct ADS1115
   // channel-1 conversion. Belly conversions never renew this movement grant.
   std::uint32_t jaw_servo_sample_seq_ = 0;
