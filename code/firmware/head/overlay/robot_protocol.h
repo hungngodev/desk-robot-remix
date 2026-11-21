@@ -63,20 +63,25 @@ class CosmeticMoodCue {
 public:
     void offer(CosmeticMood mood, std::uint32_t now_ms) {
         if (mood == CosmeticMood::kNone) return;
-        // One 32-bit atomic receipt holds the mood and a 100 ms clock tick.
-        // The modulo clock is safe across ESP32 uptime wrap.
-        const std::uint32_t tick = (now_ms / 100U) & 0x00ffffffU;
-        pending_.store((tick << 8U) | static_cast<std::uint32_t>(mood),
+        // Four moods fit in three bits. Store the remaining 29 bits as
+        // eight-millisecond ticks, so the modulus EXACTLY matches the full
+        // uint32_t millisecond clock wrap. The old 100 ms division did not:
+        // it discarded a fresh cue when uptime crossed 49.7 days.
+        constexpr std::uint32_t kShift = 3U;
+        const std::uint32_t tick = now_ms >> kShift;
+        pending_.store((tick << kShift) | static_cast<std::uint32_t>(mood),
                        std::memory_order_release);
     }
     CosmeticMood take(std::uint32_t now_ms) {
         const std::uint32_t receipt = pending_.exchange(
             0U, std::memory_order_acq_rel);
         if (receipt == 0U) return CosmeticMood::kNone;
-        const auto age_ticks = ((now_ms / 100U) -
-            (receipt >> 8U)) & 0x00ffffffU;
-        if (age_ticks > 10U) return CosmeticMood::kNone;
-        switch (receipt & 0xffU) {
+        constexpr std::uint32_t kShift = 3U;
+        constexpr std::uint32_t kTickMask = (1U << 29U) - 1U;
+        const auto age_ticks = ((now_ms >> kShift) -
+            (receipt >> kShift)) & kTickMask;
+        if (age_ticks > 125U) return CosmeticMood::kNone;  // ~1 s TTL
+        switch (receipt & ((1U << kShift) - 1U)) {
             case 1: return CosmeticMood::kNeutral;
             case 2: return CosmeticMood::kHappy;
             case 3: return CosmeticMood::kThinking;

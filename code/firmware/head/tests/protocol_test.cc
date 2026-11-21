@@ -46,6 +46,16 @@ int main() {
     assert(mood.take(0xffffff64U) == CosmeticMood::kNeutral); // uptime wrap
     mood.offer(CosmeticMood::kHappy, 200);
     assert(mood.take(200) == CosmeticMood::kHappy);
+    // True UINT32 millisecond wrap, not merely a value near the rollover.
+    // The former 24-bit /100 clock jumped by millions of ticks here.
+    mood.offer(CosmeticMood::kThinking, 0xfffffff0U);
+    assert(mood.take(100U) == CosmeticMood::kThinking);
+    mood.offer(CosmeticMood::kSurprised, 0xfffffff0U);
+    assert(mood.take(1050U) == CosmeticMood::kNone);
+    // One pending receipt may not be replayed twice after a wrap.
+    mood.offer(CosmeticMood::kNeutral, 0xffffffffU);
+    assert(mood.take(0U) == CosmeticMood::kNeutral);
+    assert(mood.take(1U) == CosmeticMood::kNone);
 
     // Urgent requests must win over telemetry without fabricating ACKs.
     UrgentStopGate gate;
