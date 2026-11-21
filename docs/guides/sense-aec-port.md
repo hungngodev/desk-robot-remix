@@ -168,9 +168,14 @@ store them outside the local protected trial directory.
    completes the private four-second recording. A speaker write occurring
    afterward cannot qualify an otherwise silent recording merely by changing
    the cumulative counters before the Mac's final status request. A silent
-   or inactive speaker trial is rejected before WAV persistence. These
-   receipts are strictly software activity evidence, not actual audible
-   playback. Saturated counters require a fresh, safely restarted bench session.
+   or inactive speaker trial is rejected before WAV persistence. The
+   device also refuses a complete, correctly timestamped capture when
+   either the 16 kHz digital microphone or speaker-reference channel is
+   entirely zero. This checks for missing digital signal only, not adequate
+   volume, broadband excitation, physical sound or echo suppression; the
+   offline correlation estimator and real assembled-head acoustic trials
+   remain mandatory. These receipts are strictly software activity evidence,
+   not actual audible playback. Saturated counters require a fresh, safely restarted bench session.
    The Sense buffer also rejects individual microphone callback
    gaps larger than the frame duration plus 40 ms. These conservative
    limits protect software timestamp validity, not physical AEC quality.
