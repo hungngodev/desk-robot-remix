@@ -163,6 +163,10 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
                     "temporary_fit_coupon"
                 ] is True
     assert next(item for item in report["parts"]
+                if item["part"] == "dock_passive_fit")[
+                    "temporary_fit_coupon"
+                ] is True
+    assert next(item for item in report["parts"]
                 if item["part"] == "head_bridge")[
                     "temporary_fit_coupon"
                 ] is False
@@ -236,6 +240,16 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         manifest.write_text(json.dumps(changed))
         with pytest.raises(ValueError, match="Unqualified installed CAD part"):
             source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
+    passive = json.loads(original)
+    passive_dock = next(
+        item for item in passive["parts"]
+        if item["part"] == "dock_passive_fit"
+    )
+    passive_dock["temporary_fit_coupon"] = False
+    manifest.write_text(json.dumps(passive))
+    with pytest.raises(ValueError, match="Unqualified installed CAD part"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
     for field, forged in (
         ("part", "qualified_chassis"),
