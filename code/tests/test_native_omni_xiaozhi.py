@@ -3763,6 +3763,7 @@ async def test_native_private_speech_rechecks_consent_after_slow_model_completio
                         "motor_authorized": False,
                         "charging_authorized": False,
                         "memory_tools_enabled": access_allowed,
+                        "private_memory_generation": 0,
                         "transcript_memory_enabled": False,
                         "voice_monitor_ready": True,
                     }
