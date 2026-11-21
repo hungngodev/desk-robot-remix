@@ -352,7 +352,7 @@ def test_model_voice_memory_requires_revision_owner_before_any_read(
 
 
 
-def test_live_runtime_registers_per_pet_memory_revision_owners(settings):
+def test_live_runtime_registers_per_pet_memory_revision_owners(settings, tokens):
     """Production create_app must pass the strict privacy gate on first read."""
     from desk_robot.api import create_app
     from fastapi.testclient import TestClient

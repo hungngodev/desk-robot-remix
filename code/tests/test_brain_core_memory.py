@@ -154,7 +154,9 @@ def test_operator_core_preference_changes_invalidate_only_affected_private_promp
         first = "/v1/pet/robot-01/core-memory/favorite_game"
         second = "/v1/pet/robot-02/core-memory/favorite_game"
 
-        assert conversation._private_memory_generation == {}
+        assert conversation._private_memory_generation == {
+            robot.id: 0 for robot in settings.robots
+        }
         created = client.put(first, headers=operator, json={"value": "chess"})
         assert created.status_code == 200 and created.json()["changed"] is True
         assert conversation._private_memory_generation == {"robot-01": 1}
