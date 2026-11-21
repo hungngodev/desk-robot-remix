@@ -42,6 +42,7 @@ class SensePcmWindow {
     failed_ = false;
     ready_ = false;
     reference_nonzero_seen_ = false;
+    microphone_nonzero_seen_ = false;
     return true;
   }
 
@@ -93,6 +94,10 @@ class SensePcmWindow {
       // Preserve the exact all-zero screening rule; acoustic quality and
       // adequate excitation are still verified by the offline estimator.
       reference_nonzero_seen_ |= reference[i] != 0;
+      // A PDM callback with the expected length can still carry an
+      // entirely zeroed/disconnected microphone. Refuse that unusable
+      // four-second measurement without imposing an unmeasured dB gate.
+      microphone_nonzero_seen_ |= mic[i] != 0;
     }
     received_ += accepted;
     last_sample_us_ = accepted_end_us;
@@ -104,7 +109,7 @@ class SensePcmWindow {
       const auto expected = std::int64_t{kFrames} * 1'000'000 / kSampleRate;
       if (elapsed < expected - kMaxWindowDriftUs ||
           elapsed > expected + kMaxWindowDriftUs ||
-          !reference_nonzero_seen_) {
+          !reference_nonzero_seen_ || !microphone_nonzero_seen_) {
         failed_ = true;
       } else {
         ready_ = true;
@@ -141,6 +146,7 @@ class SensePcmWindow {
     ready_ = false;
     failed_ = false;
     reference_nonzero_seen_ = false;
+    microphone_nonzero_seen_ = false;
   }
 
   std::int16_t* storage_ = nullptr;
@@ -151,6 +157,7 @@ class SensePcmWindow {
   bool ready_ = false;
   bool failed_ = false;
   bool reference_nonzero_seen_ = false;
+  bool microphone_nonzero_seen_ = false;
 };
 
 }  // namespace desk_robot

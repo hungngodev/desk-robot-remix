@@ -36,6 +36,18 @@ int main() {
   assert(silent_reference.take().interleaved == nullptr);
   assert(silent_reference.discard() == data.data());
   assert(!silent_reference.occupied());
+  // A full mic frame count may likewise be all zero after a PDM fault.
+  // Calibration requires actual nonzero evidence in BOTH source channels.
+  SensePcmWindow silent_microphone;
+  assert(silent_microphone.begin(data.data(), 1000000));
+  for (int i = 1; i <= 200; ++i)
+    silent_microphone.offer(quiet.data(), ref.data(), 320,
+                            1000000 + i * 20000, true);
+  assert(silent_microphone.frames_received() == SensePcmWindow::kFrames);
+  assert(silent_microphone.failed() && !silent_microphone.ready());
+  assert(silent_microphone.take().interleaved == nullptr);
+  assert(silent_microphone.discard() == data.data());
+  assert(!silent_microphone.occupied());
   assert(capture.begin(data.data(), 1000000));
   capture.offer(mic.data(), ref.data(), 320, 1020000, false);
   assert(capture.failed() && !capture.ready());
