@@ -153,7 +153,12 @@ class OllamaChat:
                 or value.get("mood", "none") not in {
                     "none", "neutral", "happy", "thinking", "surprised",
                 }
+                # A JSON array or object here is unhashable and would
+                # otherwise escape the validated decision boundary as
+                # TypeError, bypassing the caller's ordinary model fallback.
+                or type(value["action"]) is not str
                 or value["action"] not in {"silence", "speak", "inspect"}
+                or type(value["tool"]) is not str
                 or value["tool"] not in {"none", "status", "aux_status"}
                 or not isinstance(value["text"], str)
                 or len(value["text"]) > 200
