@@ -24,7 +24,7 @@
 
 **The selected CAP1188 eight petting zones are not the same as the historic MPR121 twelve zone option.** The change in channel count requires a real design check before claiming all physical gestures and pads. Both are research candidates; exact generic breakout supply/pinout matters. Do not order an Adafruit-branded board.
 
-**One robot now; later duplication is not this shopping task.** Five core VL53L4CD sensors are implemented in code; three side/back VL53L4CD lanes are allocated but not implemented/bench verified. The budget is not closed. The old 1S IP5306 suggestion was a recommendation awaiting electrical proof; do not buy a generic fixed-shutoff module or unverified battery protections just because the HTML lists it.
+**One robot now; later duplication is not this shopping task.** The full WROOM source implements eight generic VL53L0X channels through TCA9548A 0x70: four downward and one front are critical, while left, right and rear remain read-only diagnostics. All eight lanes exist in code; none is physically qualified. The selected GY-530 pilot carrier still requires measured 3.3 V signaling, optics and fit. The budget is not closed. The old 1S IP5306 suggestion was a recommendation awaiting electrical proof; do not buy a generic fixed-shutoff module or unverified battery protections just because the HTML lists it.
 
 ## Check of GitHub URLs in the source file
 
@@ -59,6 +59,6 @@ All 131 original external URLs were attempted for current web reachability or or
 
 
 
-CI compiles both current boards, passes Python tests and simulated native C++ tests on the prior PR commit. No complete physical robot has been assembled. Five critical ToFs, MPU6050 identity/raw samples and basic head touch have code; 3 extra ToFs and most additional pet sensors have only selected bus lanes, not verified sensor drivers. Full echo-cancelled natural interruption, calibrated cliff stopping, grasp and dock autonomy remain unverified hardware acceptance gates. No claim of project completion.
+CI compiles both current boards, passes Python tests and simulated native C++ tests on the prior PR commit. No complete physical robot has been assembled. Five critical VL53L0X readings, three read-only side/rear VL53L0X channels, MPU6050 identity/raw samples and basic head touch have code; all eight VL53L0X lanes have driver logic but no real carrier electrical or optical qualification. Most additional pet sensors still require their own physical verification. Full echo-cancelled natural interruption, calibrated cliff stopping, grasp and dock autonomy remain unverified hardware acceptance gates. No claim of project completion.
 
-Supplier-neutral technical references: [Analog Devices MAX30102](https://www.analog.com/en/products/max30102.html), [Microchip CAP1188](https://www.microchip.com/en-us/product/CAP1188), [ST VL53L4CD](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html), [TCA9548A data sheet](https://www.ti.com/lit/ds/symlink/tca9548a.pdf).
+Supplier-neutral technical references: [Analog Devices MAX30102](https://www.analog.com/en/products/max30102.html), [Microchip CAP1188](https://www.microchip.com/en-us/product/CAP1188), [ST VL53L0X](https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html), [TCA9548A data sheet](https://www.ti.com/lit/ds/symlink/tca9548a.pdf).
