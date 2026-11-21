@@ -271,12 +271,14 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             '''    size_t bytes_written = 0;
 #ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
     // Bound urgent-stop latency when the underlying TX channel does not
-    // drain. Ordinary Opus chunks are far smaller than this 500 ms ceiling.
+    // drain. A 120 ms ceiling reserves time for VAD, bridge dispatch and
+    // decoder flush within the 500 ms acoustic interruption budget.
+    // Physical trials must still measure underruns and audible STOP.
     // Do not ESP_ERROR_CHECK(timeout): a transient stalled TX must not
     // reboot the face or erase evidence from the microphone task.
     const esp_err_t err = i2s_channel_write(
         tx_handle_, buffer.data(), samples * sizeof(int32_t),
-        &bytes_written, pdMS_TO_TICKS(500));
+        &bytes_written, pdMS_TO_TICKS(120));
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Sense speaker I2S write timeout/error (%d), %u bytes accepted",
                  static_cast<int>(err), static_cast<unsigned>(bytes_written));
