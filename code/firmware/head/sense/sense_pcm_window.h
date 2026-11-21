@@ -58,12 +58,23 @@ class SensePcmWindow {
     }
     const std::uint32_t accepted =
         std::min(frames, kFrames - received_);
+    // The last codec read may contain more samples than the remaining
+    // four-second capture window. Never timestamp unrecorded tail samples
+    // as if they were in the WAV. That would bias physical AEC delay and
+    // drift measurements despite an otherwise correct PCM buffer.
+    const std::int64_t accepted_end_us = end_us -
+        (std::int64_t{frames - accepted} * 1'000'000 / kSampleRate);
+    if (accepted_end_us <= first_sample_us_ ||
+        (last_sample_us_ && accepted_end_us <= last_sample_us_)) {
+      failed_ = true;
+      return;
+    }
     for (std::uint32_t i = 0; i < accepted; ++i) {
       storage_[2 * (received_ + i)] = mic[i];
       storage_[2 * (received_ + i) + 1] = reference[i];
     }
     received_ += accepted;
-    last_sample_us_ = end_us;
+    last_sample_us_ = accepted_end_us;
     if (received_ == kFrames) ready_ = true;
   }
 
