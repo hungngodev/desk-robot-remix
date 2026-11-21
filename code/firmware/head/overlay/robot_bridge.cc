@@ -746,6 +746,10 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         cJSON_AddBoolToObject(data.get(), "ready", progress.ready);
         cJSON_AddBoolToObject(data.get(), "failed", progress.failed);
         cJSON_AddNumberToObject(data.get(), "frames", progress.frames);
+        // Latched inside the final microphone callback, not guessed from
+        // cumulative I2S counters after the private recording ended.
+        cJSON_AddBoolToObject(data.get(), "speaker_activity_in_window",
+                              progress.speaker_activity_in_window);
         char generation[24];
         snprintf(generation, sizeof(generation), "%llu",
                  static_cast<unsigned long long>(progress.generation));
