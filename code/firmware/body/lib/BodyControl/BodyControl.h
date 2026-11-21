@@ -153,6 +153,9 @@ class BodyControl {
   // target without a recent, unclipped, independently acquired ADS1115
   // channel 1 value. The historical disconnected DC fixture opts out.
   void require_grip_feedback(bool required) { grip_feedback_required_ = required; }
+  // Boot-only, irreversible while running: the stock stepper board lacks
+  // a qualified independent rail cutoff, so sensors alone cannot enable it.
+  void inhibit_unqualified_motor_cutoff();
   // Only the full battery-powered build opts into this mandatory safety input.
   void require_fuel_monitor(bool required) { fuel_monitor_required_ = required; }
   bool fuel_monitor_fresh(std::uint32_t now_ms) const {
@@ -207,6 +210,7 @@ class BodyControl {
   bool imu_motion_required_ = false;
   bool grip_feedback_required_ = false;
   bool fuel_monitor_required_ = false;
+  bool motor_cutoff_unqualified_ = false;
   std::uint32_t last_control_ms_ = 0;
   std::uint32_t drive_started_ms_ = 0;
   std::uint32_t drive_duration_ms_ = 0;

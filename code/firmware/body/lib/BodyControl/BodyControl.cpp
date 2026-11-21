@@ -380,6 +380,12 @@ void BodyControl::set_imu(const BerryReading& reading) {
   }
 }
 
+void BodyControl::inhibit_unqualified_motor_cutoff() {
+  motor_cutoff_unqualified_ = true;
+  stop_motion();
+  state_.armed = false;
+}
+
 void BodyControl::motor_watchdog_trip() {
   // A recovered CPU must never restart its old drive lease after cutoff.
   // Retain servo holding PWM instead of dropping a held payload.
@@ -910,6 +916,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool battery_depleted = state_.accessories.gauge.fuel_valid &&
         state_.accessories.gauge.cell_mv < 3200U;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
+        !motor_cutoff_unqualified_ &&
         !bumper_fault_latched_ && !battery_fault_latched_ &&
         !fuel_monitor_fault_latched_ &&
         (!fuel_monitor_required_ || fuel_monitor_fresh(now_ms)) &&
@@ -924,6 +931,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         dc_fault_latched_ ? "dc_driver_fault_latched" :
         dc_driver_fault_bad(now_ms) ? "dc_driver_fault_unavailable" :
         motor_watchdog_latched_ ? "motor_watchdog_latched" :
+        motor_cutoff_unqualified_ ? "motor_cutoff_unqualified" :
         guarded_motion_profile() && !cliff_ready ?
             guard_ == nullptr ? "missing_guard" :
             CliffGuard::fault_name(guard_->fault()) :
@@ -1108,6 +1116,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     imu_sensor_fault_latched_ = false; // after fresh sensor and USB recovery
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (motor_cutoff_unqualified_) {
+      std::snprintf(reply, capacity, "ERR arm motor_cutoff_unqualified");
+      return;
+    }
     if (fuel_monitor_fault_latched_) {
       std::snprintf(reply, capacity, "ERR arm fuel_monitor_latched");
       return;

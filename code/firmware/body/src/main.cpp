@@ -372,6 +372,11 @@ void setup() {
   // This is observation identity only, not cryptographic authentication.
   // New WROOM boots must not reuse the last IMU observation session.
   control.set_boot_epoch(esp_random() | 1U);
+#if DESK_ROBOT_STEPPER && !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
+  // The default full stepper image has no independently qualified rail
+  // cutoff. Report this as a hardware motion veto, not just silent LOW coils.
+  control.inhibit_unqualified_motor_cutoff();
+#endif
 #if DESK_ROBOT_FULL_SENSORS
   // The touch breakout OUT is actively driven and powered at 3.3V.
   // GPIO34 has no internal pullup; do not leave it floating when fitted.

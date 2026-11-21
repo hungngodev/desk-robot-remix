@@ -31,6 +31,36 @@ static void fresh(desk_robot::CliffGuard& guard, std::uint32_t now) {
     guard.sample(i, i < 4 ? 50 : 200, true, now);
 }
 
+static void unqualified_stepper_cutoff_never_claims_motion_ready() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.inhibit_unqualified_motor_cutoff();
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  const auto status = send(body, "status", 0);
+  CHECK(status.find("\"ready\":false") != std::string::npos);
+  CHECK(status.find("\"fault\":\"motor_cutoff_unqualified\"") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 0) == "ERR arm motor_cutoff_unqualified");
+  CHECK(send(body, "drive 30 30 200", 0) == "ERR drive disarmed");
+  CHECK(!body.state().armed && !body.state().servos_attached &&
+        body.state().left == 0 && body.state().right == 0);
+  // A second recovery cannot clear a boot hardware qualification veto.
+  fresh(guard, 1);
+  CHECK(send(body, "rearm", 1, true) == "OK rearm");
+  CHECK(send(body, "arm", 1) == "ERR arm motor_cutoff_unqualified");
+
+  // The ordinary guarded test fixture remains eligible for policy tests.
+  desk_robot::CliffGuard qualified_guard;
+  CHECK(qualified_guard.configure(config()));
+  fresh(qualified_guard, 0);
+  desk_robot::BodyControl qualified(desk_robot::BodyProfile::StepperGuarded,
+                                    &qualified_guard);
+  CHECK(send(qualified, "rearm", 0, true) == "OK rearm");
+  CHECK(send(qualified, "arm", 0) == "OK arm");
+}
+
 static void cpu_heartbeat_fault_is_sticky_and_holds_gripper() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -1824,6 +1854,7 @@ int main() {
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
+    unqualified_stepper_cutoff_never_claims_motion_ready();
     cpu_heartbeat_fault_is_sticky_and_holds_gripper();
     std::cout << "PASS CPU heartbeat fault latches drive and holds gripper\n";
     recovery_is_local_and_not_an_arm();
