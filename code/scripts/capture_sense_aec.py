@@ -152,6 +152,7 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
                     or type(data.get("active")) is not bool
                     or type(data.get("ready")) is not bool
                     or type(data.get("failed")) is not bool
+                    or type(data.get("speaker_activity_in_window")) is not bool
                     or data.get("physical_aec_qualified") is not False
                     or count < previous):
                 raise RuntimeError("Sense PCM status changed identity or generation")
@@ -160,6 +161,8 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
             if data["ready"]:
                 if count != FRAMES or data["active"]:
                     raise RuntimeError("Sense ready state has wrong PCM length")
+                if not data["speaker_activity_in_window"]:
+                    raise RuntimeError("Sense capture lacks in-window speaker activity")
                 break
             if not data["active"] or count == FRAMES:
                 raise RuntimeError("Sense PCM capture ended without complete result")
@@ -228,6 +231,7 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
             "frames": frames,
             "microphone_frames_read_delta": mic_frames_after - initial_mic_frames,
             "speaker_frames_accepted_delta": speaker_frames_after - initial_speaker_frames,
+            "speaker_activity_in_window": True,
             "speaker_activity_not_acoustic_playback": True,
             "sample_rate_hz": RATE,
             "first_sample_us": first,
