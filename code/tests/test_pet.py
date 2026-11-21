@@ -2552,6 +2552,100 @@ async def test_apds9960_gestures_are_real_counter_edges_after_qualification(flee
         state.enabled = False
         await pet.close()
 
+
+async def test_wroom_aux_boot_epoch_resets_optional_sources_without_old_replay(
+    fleet, tmp_path,
+):
+    """WROOM restart recovers gestures and independent sample counters."""
+    fleet.mode = "hardware"
+    robot = fleet.robots[0]
+    robot.gesture_interactions_qualified = True
+    robot.paw_contact_interactions_qualified = True
+    robot.paw_contact_ir_raw_threshold = 20000
+    robot.ambient_interactions_qualified = True
+    robot.ambient_temp_change_centi = 100
+    robot.bmp280_interactions_qualified = True
+    robot.bmp280_pressure_change_pa = 200
+    robot.nfc_interactions_qualified = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 25
+
+    def packet(seq, boot, *, gesture_count=None, direction=0, tag=0):
+        return {
+            "robot_id": "robot-01",
+            "pulse": {"present": True, "valid": True, "part_id": 0x15,
+                      "red": 1000, "ir": 1000, "age_ms": 20, "seq": seq,
+                      "bpm": None, "medical": False},
+            "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                       "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [0, 0], "jaw_seq": 0, "boot_id": boot,
+                      "valid": False, "calibrated": False},
+            "climate": {"temp_centi": 2200, "rh_centi": 5000,
+                        "valid": True, "seq": seq, "age_ms": 20},
+            "bmp280": {"present": True, "valid": True, "chip_id": 0x58,
+                       "temp_centi": 2200, "pressure_pa": 100000,
+                       "seq": seq, "age_ms": 20, "physically_verified": False},
+            "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                      "shunt_uv": 0, "fuel_valid": False,
+                      "monitor_valid": False, "current_calibrated": False},
+            "proximity": {"raw": 10, "valid": True, "gesture": direction,
+                          "gesture_events": (
+                              seq if gesture_count is None else gesture_count
+                          ), "physically_qualified": False},
+            "nfc": {"v": True, "t": tag, "e": seq, "s": seq},
+        }
+
+    async def sample(seq, boot, **kwargs):
+        await pet._observe_aux("robot-01", 25, packet(seq, boot, **kwargs))
+
+    def waves():
+        return sum(m.kind == "hand_wave" for m in memory.recent("robot-01"))
+
+    try:
+        await sample(300, 101)
+        await sample(301, 101, direction=3)
+        assert waves() == 1
+        assert state.last_aux_boot_id == 101
+        assert state.last_paw_seq == 301
+
+        # New WROOM boot immediately establishes new per-source baselines.
+        await sample(1, 202, gesture_count=0)
+        assert state.last_aux_boot_id == 202
+        assert state.retired_aux_boot_ids == {101}
+        assert (state.last_paw_seq, state.last_ambient_seq,
+                state.last_bmp_seq, state.last_nfc_scan_seq,
+                state.last_gesture_events) == (1, 1, 1, 1, 0)
+        assert waves() == 1
+        await sample(302, 101, direction=4)  # late old HTTP boot response
+        assert state.last_aux_boot_id == 202
+        assert state.last_paw_seq == 1
+        assert waves() == 1
+
+        await sample(2, 202, gesture_count=1, direction=1, tag=0x12345678)
+        assert waves() == 2
+        assert state.last_nfc_scan_seq == 2
+        await sample(2, 202, gesture_count=1, direction=1)
+        assert waves() == 2
+
+        # UINT32_MAX to zero is a genuine new gesture in the same boot.
+        await sample(100, 303, gesture_count=0xffffffff)
+        assert state.last_gesture_events == 0xffffffff
+        await sample(101, 303, gesture_count=0, direction=2)
+        assert waves() == 3
+        await sample(303, 101, direction=3)
+        assert waves() == 3
+        assert state.last_aux_boot_id == 303
+        assert state.retired_aux_boot_ids == {101, 202}
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_cap1188_touch_memory_carries_real_edge_provenance(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
     conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)

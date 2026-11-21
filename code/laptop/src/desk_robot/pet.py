@@ -145,6 +145,8 @@ class PetState:
     last_force_squeeze: bool | None = None
     last_near_hand: bool | None = None
     last_gesture_events: int | None = None
+    last_aux_boot_id: int | None = None
+    retired_aux_boot_ids: set[int] = field(default_factory=set, repr=False)
     last_paw_seq: int | None = None
     last_paw_contact: bool | None = None
     paw_contact_streak: int = 0
@@ -339,6 +341,8 @@ class PetController:
         state.last_force_squeeze = None
         state.last_near_hand = None
         state.last_gesture_events = None
+        state.last_aux_boot_id = None
+        state.retired_aux_boot_ids.clear()
         state.last_paw_seq = None
         state.last_paw_contact = None
         state.paw_contact_streak = state.paw_release_streak = 0
@@ -835,6 +839,39 @@ class PetController:
         state = self.states[robot_id]
         if not state.enabled or state.generation != generation or self._closed:
             return
+        # The current selected WROOM /api/aux serializer carries its random
+        # per-boot epoch as force.boot_id even when the FSR is unqualified.
+        # Treat that as an envelope identity for ALL WROOM accessory counters.
+        # Old out-of-order HTTP replies cannot resurrect a retired epoch.
+        boot_id = data["force"].get("boot_id")
+        if boot_id is not None:
+            if boot_id in state.retired_aux_boot_ids:
+                return
+            if boot_id != state.last_aux_boot_id:
+                if state.last_aux_boot_id is not None:
+                    state.retired_aux_boot_ids.add(state.last_aux_boot_id)
+                state.last_aux_boot_id = boot_id
+                state.last_gesture_events = None
+                state.last_paw_seq = None
+                state.last_paw_contact = None
+                state.paw_contact_streak = state.paw_release_streak = 0
+                state.last_ambient_seq = None
+                state.ambient_baseline = None
+                state.ambient_streak = 0
+                state.last_bmp_seq = None
+                state.bmp_baseline_pa = None
+                state.bmp_streak = 0
+                state.last_nfc_events = None
+                state.last_nfc_scan_seq = None
+                state.last_fuel_seq = None
+                state.low_fuel_streak = state.recovered_fuel_streak = 0
+                state.last_force_squeeze = None
+                state.last_near_hand = None
+                state.last_nose_angle = None
+        elif state.last_aux_boot_id is not None:
+            # Once authenticated epoch evidence exists, never downgrade to
+            # legacy epochless packets that could replay the older boot.
+            return
         state.aux_reads += 1
         robot = self.settings.robot(robot_id)
         changes: list[SceneChange] = []
@@ -1101,12 +1138,21 @@ class PetController:
 
         gesture = proximity["gesture"]
         count = proximity["gesture_events"]
-        old = state.last_gesture_events
-        state.last_gesture_events = count if proximity["valid"] else None
+        advance = (
+            _sensor_counter_advance(count, state.last_gesture_events)
+            if proximity["valid"] else None
+        )
+        if not proximity["valid"]:
+            state.last_gesture_events = None
+        elif advance != 0:
+            # A stale backwards response cannot rewind a valid baseline;
+            # unsigned32 wrap is a legitimate one-step gesture transition.
+            state.last_gesture_events = count
         if (
             robot.gesture_interactions_qualified
             and proximity["valid"]
-            and old is not None and 0 < count - old <= 3 and gesture in (1, 2, 3, 4)
+            and advance is not None and 0 < advance <= 3
+            and gesture in (1, 2, 3, 4)
         ):
             direction = {1: "up", 2: "down", 3: "left", 4: "right"}[gesture]
             changes.append(SceneChange(
