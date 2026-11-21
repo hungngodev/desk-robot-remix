@@ -3102,6 +3102,13 @@ async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
         "robot-01", "old_asr", "My private conversation was about the safe",
         time.monotonic(),
     )
+    hub.notify("robot-01", "handling_tilt", time.monotonic())
+    hub.remember_tool(
+        "robot-01", "visual_look", "Private VLM scene guess", time.monotonic()
+    )
+    hub.remember_tool(
+        "robot-01", "memory_recall", "Private voice recall", time.monotonic()
+    )
     memory = MemoryStore(tmp_path, ids)
     chat = GroundedChat()
     speaker = PassiveBudgetSimulatedSpeaker()
@@ -3120,7 +3127,11 @@ async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
         )
         assert state.last_error is None
         assert speaker.spoken
-        assert "private conversation" not in str(chat.prompts)
+        prompt = str(chat.prompts)
+        assert "handling_tilt" in prompt
+        assert "private conversation" not in prompt
+        assert "Private VLM scene guess" not in prompt
+        assert "Private voice recall" not in prompt
     finally:
         state.enabled = False
         await pet.close()
