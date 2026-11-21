@@ -1,10 +1,12 @@
 import asyncio
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from desk_robot.api import create_app
 from desk_robot.brain_context import compose_brain_context
+from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation, KokoroHeadSpeaker, conversation_turns
 from desk_robot.memory import MemoryStore
 from desk_robot.multimodal import CameraFrameHub
@@ -1832,7 +1834,8 @@ async def test_group_memory_revision_cancels_stale_model_turn_without_peer_leak(
         await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_unrelated_pet_memory_revision_does_not_cancel_group(settings, tmp_path):
+async def test_unrelated_pet_memory_revision_does_not_cancel_group(tmp_path):
+    settings = load_settings(Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml")
     ids = [robot.id for robot in settings.robots]
     store = MemoryStore(tmp_path, ids)
     speaker = SimulatedSpeaker()
