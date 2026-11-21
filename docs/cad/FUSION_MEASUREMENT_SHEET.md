@@ -18,6 +18,8 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | Generic VL53L0X GY-530 I2C carrier length, width, lens center and 3.3 V pullup verification | | tof_l / w / lens_offset |
 | Sensor lens to floor nominal measured standoff | | tof_floor_height |
 | Dock track guide clear width | | dock_clear_width |
+| Two independent terminal IR emitter carriers, their lateral separation, lens height, aim and optical overlap | | dock_ir_spacing / ir_left_z / ir_right_z / ir_yaw |
+| Two independent seat switches, normally closed polarity, mechanical overtravel and wire clearance | | dock_seat_left / dock_seat_right / dock_seat_overtravel |
 | AprilTag printed black square size and camera height | | tag_square_mm, tag_center_height |
 | Key and candy actual width and thickness | | object_w / h |
 | Actual printer minimum wall and hole clearance | | print_wall, clearance_xy |

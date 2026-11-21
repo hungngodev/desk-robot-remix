@@ -226,3 +226,21 @@ def test_dock_shell_print_commands_use_one_continuation_escape():
                not line.endswith(chr(92) * 2) for line in commands)
     assert 'part="dock_rail_entry_coupon"' in guide.read_text()
     assert 'part="dock_ir_pair_position_coupon"' in guide.read_text()
+
+
+def test_dock_assembly_requires_independent_seating_and_ir_measurements():
+    """Optical beacon placement must not silently imply dock electrical seating."""
+    root = Path(__file__).resolve().parents[2]
+    sheet = (root / "docs/cad/FUSION_MEASUREMENT_SHEET.md").read_text(
+        encoding="utf-8"
+    )
+    guide = (root / "docs/cad/FUSION_ONE_ROBOT_ASSEMBLY.md").read_text(
+        encoding="utf-8"
+    )
+    assert "dock_ir_spacing" in sheet and "ir_left_z" in sheet
+    assert "ir_right_z" in sheet and "ir_yaw" in sheet
+    assert "dock_seat_left" in sheet and "dock_seat_right" in sheet
+    assert "dock_seat_overtravel" in sheet
+    assert "dock_ir_pair_position_coupon" in guide
+    assert "two electrically independent fail-closed seat switches" in guide
+    assert "decoded IR are not seat" in guide

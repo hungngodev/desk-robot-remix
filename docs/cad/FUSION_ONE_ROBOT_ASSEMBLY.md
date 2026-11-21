@@ -96,8 +96,14 @@ the original README files, including noncommercial and share alike restrictions.
    actual measured overall track width, rigid tag board clearly visible from
    the XIAO camera, and a stopped position that leaves the dock charge
    contacts mechanically recessed. Model electrical contacts only when an
-   actual protected, current rated charging path is selected. Never connect
-   bare cell contacts to a live 5 V pad. The CAD does not certify charging.
+   actual protected, current rated charging path is selected. Before
+   cutting the backstop for IR electronics, print the separate unpowered
+   `dock_ir_pair_position_coupon` and measure both real emitter carriers,
+   independent WROOM receiver views, left/right field overlap and aim.
+   Place two electrically independent fail-closed seat switches with measured
+   travel and service access; the AprilTag and decoded IR are not seat
+   evidence. Never connect bare cell contacts to a live 5 V pad. The
+   CAD does not certify charging.
 10. Use **Inspect > Section Analysis** to examine assembly and removable
     service access. Move tracks through full travel, servos through their
     complete mechanical range, and look at camera/cliff lens field obstructions.
