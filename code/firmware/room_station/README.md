@@ -86,6 +86,29 @@ this producer contract but does not prove actual UART packet loss, gas warmup,
 electrical fit, thermal accuracy or a physical station trial. Upstream:
 https://github.com/adafruit/Adafruit_BME680/tree/2.0.5
 
+## Reproducible USB stream evidence capture
+
+After checking the actual Feather PCB and safe sensor voltage domains, run
+the read-only collector from the `code` directory against the physically
+connected USB port. It uses the same serial line, sensor value and replay
+decoder as the Mac, opens one device epoch, and never sends a motor or charger
+command:
+
+```bash
+cd code
+uv run --no-sync python scripts/bench_room_station.py \
+  --port /dev/cu.YOUR_REAL_FEATHER_PORT --seconds 60 \
+  --report ../docs/records/reports/room-station-usb-trial.json
+```
+
+Record the actual operator, board revision, connected exact sensor carrier
+revisions and independent voltage/current/temperature instrument readings
+separately. The JSON intentionally contains **only aggregate counts and
+Mac receive timing**, not a raw radar presence, room CO2 or thermal history.
+A recorded USB frame is not physical authentication of the station, sensor
+accuracy, 3.3 V or 5 V rail qualification, actual charging or motion authority.
+The report explicitly keeps those physical flags `false`.
+
 ## Real build and test sequence
 
 1. Use the existing owned Feather alone on USB. Build with
