@@ -62,9 +62,9 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
             client.post(
                 "/v1/conversation",
                 headers=tool,
-                json={"robot_ids": ["robot-01", "robot-02"], "topic": "Hello", "utterances": 7},
+                json={"robot_ids": ["robot-01", "robot-02"], "topic": "Hello", "utterances": 2},
             ).status_code
-            == 422
+            == 403
         )
 
 
