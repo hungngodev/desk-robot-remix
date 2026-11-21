@@ -279,6 +279,57 @@ def export_kit(
     return report
 
 
+def screen_print_bed_fit(report: dict, bed_xyz_mm: tuple[float, float, float]) -> dict:
+    """Conservative source-mesh screen for a user supplied printer volume.
+
+    Flat orientation means keeping the exported STL's Z axis vertical.
+    A source XY bounding box fitting at 0 or 90 degrees is only a necessary
+    plate envelope check. Unknown orientations are NOT cleared; a physical
+    span longer than the plate diagonal rules out every in-plane yaw.
+    Do not treat the result as print strength, support, material or fit proof.
+    """
+    if (not isinstance(bed_xyz_mm, (list, tuple))
+            or len(bed_xyz_mm) != 3
+            or any(type(v) not in (float, int) or not isfinite(v)
+                   or not 1 <= v <= 5000 for v in bed_xyz_mm)):
+        raise ValueError("Printer X/Y/Z build dimensions must be finite positive mm")
+    if not isinstance(report, dict) or not isinstance(report.get("parts"), list):
+        raise ValueError("Printer screen requires a candidate mesh manifest")
+    x_bed, y_bed, z_bed = bed_xyz_mm
+    diagonal = hypot(x_bed, y_bed)
+    output = []
+    for item in report["parts"]:
+        if not isinstance(item, dict):
+            raise ValueError("Missing candidate part")
+        bounds = item.get("bbox_mm")
+        dims = bounds.get("dimensions_mm") if isinstance(bounds, dict) else None
+        if (not isinstance(dims, list) or len(dims) != 3
+                or any(type(v) not in (float, int) or not isfinite(v)
+                       or v <= 0 for v in dims)
+                or not isinstance(item.get("location"), str)):
+            raise ValueError("Missing or invalid exported STL build envelope")
+        sx, sy, sz = dims
+        fits_flat = (sz <= z_bed and (
+            (sx <= x_bed and sy <= y_bed)
+            or (sx <= y_bed and sy <= x_bed)))
+        excluded_by_span = max(sx, sy) > diagonal
+        output.append({
+            "part": item["location"],
+            "mesh_xyz_mm": list(dims),
+            "fits_source_bounds_flat_at_zero_or_ninety_deg": fits_flat,
+            "flat_yaw_impossible_by_plate_diagonal": excluded_by_span,
+            "flat_height_exceeds_build_volume": sz > z_bed,
+            "other_orientation_or_support_fit_qualified": False,
+        })
+    return {
+        "printer_xyz_mm": list(bed_xyz_mm),
+        "printer_bed_diagonal_mm": round(diagonal, 3),
+        "source_mesh_screen_only": True,
+        "physical_printer_or_material_qualified": False,
+        "parts": output,
+    }
+
+
 def strict_fit_kit_manifest_object(pairs: list[tuple[str, object]]) -> dict:
     """Reject duplicated JSON keys that conceal contradictory CAD evidence."""
     result = {}
@@ -378,12 +429,20 @@ def main() -> None:
     parser.add_argument("--openscad", default="openscad")
     parser.add_argument("--verify", action="store_true",
                         help="Validate existing mesh and source digests")
+    parser.add_argument("--build-volume-mm", nargs=3, type=float,
+                        metavar=("X", "Y", "Z"),
+                        help="Source STL bounding screen for your measured printer X Y Z mm")
     args = parser.parse_args()
     if args.verify:
         report = verify_fit_kit(args.repo, output_dir=args.output)
     else:
         report = export_kit(
             args.repo, output_dir=args.output, openscad=args.openscad,
+        )
+    if args.build_volume_mm is not None:
+        report = dict(report)
+        report["print_bed_screen"] = screen_print_bed_fit(
+            report, tuple(args.build_volume_mm)
         )
     print(json.dumps(report, indent=2))
 

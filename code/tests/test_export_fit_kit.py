@@ -818,3 +818,49 @@ def test_adapter_readme_fit_reference_count_tracks_exporter():
     assert f"up to {fit_count} provisional dock, battery, contact" in readme
     assert "up to nine provisional" not in readme
 
+
+
+def test_printer_build_volume_screen_preserves_unknown_orientations_and_safety():
+    """A small or large printer cannot implicitly qualify a physical build."""
+    screen = module().screen_print_bed_fit
+    report = {"parts": [
+        {"location": "fit_stls/speaker_rear_chamber_reference.stl",
+         "bbox_mm": {"dimensions_mm": [36.0, 32.0, 11.4]}},
+        {"location": "dock_stls/dock_passive_fit.stl",
+         "bbox_mm": {"dimensions_mm": [126.0, 138.0, 93.0]}},
+    ]}
+    large = screen(report, (150, 160, 150))
+    assert all(p["fits_source_bounds_flat_at_zero_or_ninety_deg"]
+               for p in large["parts"])
+    assert not large["physical_printer_or_material_qualified"]
+    assert not any(p["other_orientation_or_support_fit_qualified"]
+                   for p in large["parts"])
+    tight = screen(report, (100, 100, 100))
+    assert tight["parts"][0]["fits_source_bounds_flat_at_zero_or_ninety_deg"]
+    assert not tight["parts"][1]["fits_source_bounds_flat_at_zero_or_ninety_deg"]
+    # A 138 mm physical span fits within the 141 mm plate diagonal, so
+    # reject a false claim that EVERY planar yaw is impossible.
+    assert not tight["parts"][1]["flat_yaw_impossible_by_plate_diagonal"]
+    small = screen(report, (70, 70, 75))
+    assert small["parts"][1]["flat_yaw_impossible_by_plate_diagonal"]
+    assert small["parts"][1]["flat_height_exceeds_build_volume"]
+
+
+@pytest.mark.parametrize("printer", [
+    (0, 100, 100), (True, 100, 100), (float("nan"), 100, 100),
+    (float("inf"), 100, 100), (100, -1, 100),
+    (100, 100), "100x100x100", (100, 100, 10**1000),
+])
+def test_print_screen_rejects_bad_build_volume(printer):
+    with pytest.raises(ValueError, match="Printer X/Y/Z"):
+        module().screen_print_bed_fit({"parts": []}, printer)
+
+
+def test_print_screen_rejects_forged_or_missing_mesh_dimensions():
+    screen = module().screen_print_bed_fit
+    for dims in (None, [-1, 10, 10], [True, 10, 10],
+                 [float("inf"), 10, 10], [10, 10], [0, 10, 10]):
+        with pytest.raises(ValueError, match="STL build envelope"):
+            screen({"parts": [{"location": "fit_stls/a.stl",
+                               "bbox_mm": {"dimensions_mm": dims}}]},
+                   (180, 180, 180))

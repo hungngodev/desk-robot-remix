@@ -79,3 +79,23 @@ Mechanical provenance remains separate: SMARS tracks/lift noncommercial/share-al
 ## Fusion assembly scaffold
 
 New [fusion_assembly_scaffold.py](fusion_assembly_scaffold.py) is a **Fusion GUI script**, not a generic system Python command. Place it within your cloned repository at `docs/cad/remixes/` and unzip the adapter STLs into `docs/cad/remixes/adapter_stls/`. Run in **Fusion > Utilities > Scripts and Add-Ins**. It creates a NEW direct design and stages **12 saved original STLs, up to seven adapters, and up to 13 provisional dock, battery, contact, jaw, speaker, and sensor fit references** as individually named components, interpreting unitless STL coordinates as millimeters. Generate the optional references with `python3 code/scripts/export_fit_kit.py` first. Missing original licensed meshes fail the import; missing optional fit references are omitted, not invented. It deliberately does **not** guess mesh transforms, join tracks, install a battery, make an electrical connector, or create joints. Ground/Align/Joint/Interference remains necessary after real measurements. Source and manifest are syntax checked, but Fusion GUI execution is not available in CI. See [Autodesk MeshBodies.add documentation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_MeshBodies_add.htm).
+
+
+## Measured printer build volume screen
+
+After exporting and verifying the source STL candidates, check the **actual**
+printer usable build dimensions in millimeters rather than assuming the
+selected printer or forcing a scale change:
+
+```sh
+python3 code/scripts/export_fit_kit.py --verify --build-volume-mm 180 180 180
+```
+
+The JSON result adds `print_bed_screen` for every candidate STL. It checks
+the existing source triangle bounding boxes in the flat print orientation
+at zero or ninety degrees, identifies parts whose Z height exceeds the
+specified volume, and explicitly rules out every flat yaw only if the
+candidate has an actual horizontal span longer than the bed diagonal.
+An inconclusive screen is **not** permission to claim a different rotation
+fits. Real supports, resin/FDM process, tolerances, part strength, curing
+and an assembled robot still require printed and measured trials.
