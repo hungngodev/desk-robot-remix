@@ -120,7 +120,7 @@ async def test_live_stream_bench_rejects_end_without_recent_frame(monkeypatch):
             return {"robot_id": "robot-01"}
 
     result = await bench.measure(
-        StaleHead(), "robot-01", seconds=0.09,
+        StaleHead(), "robot-01", seconds=0.1,
         status_period_s=0.05, stream=True,
     )
     assert result["camera_error_count"] == 1
