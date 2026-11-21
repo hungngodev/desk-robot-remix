@@ -134,6 +134,9 @@ class BodyControl {
   // Preserve raw values and presence for diagnosis; no motion permission.
   void invalidate_side_ranges();
   // Optional active 3.3V digital inputs; no software can authorize motion.
+  // Raw normally closed bumper line is sampled every WROOM loop, before
+  // the slower debounce/event classifier. Open circuit stops tracks.
+  void sample_bumper_input(bool active);
   void sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
                               bool reed, bool pir);
   // Boot-time read-only identity; does not confer tilt safety or arm privilege.
