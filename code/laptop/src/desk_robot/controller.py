@@ -9,7 +9,7 @@ from typing import Awaitable, Callable, TypeVar
 from .calibration import Calibration
 from .config import Settings
 from .dock_ir import validate_ir
-from .dock_runtime import detect_bounded, load_real_dock_calibration
+from .dock_runtime import detect_bounded, load_real_dock_calibration, unpack_dock_frame
 from .dock_vision import assess_dock
 from .grasp_feedback import guarded_grasp
 from .transport import Head, validate_command
@@ -687,11 +687,14 @@ class Coordinator:
             # Local WROOM cliff stop remains mandatory for every short pulse.
             # Real docking reuses a strictly fresh MJPEG frame.
             capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
-            jpeg = await _bounded_head_reply(
+            observation = await _bounded_head_reply(
                 capture_dock(), seconds=2.0,
                 timeout_message="Camera snapshot timeout",
             )
-            received_at = time.monotonic()
+            try:
+                jpeg, received_at = unpack_dock_frame(observation)
+            except ValueError as exc:
+                raise OperationError("Stale or invalid dock camera receipt") from exc
             if camera.camera_sensor_pid is not None:
                 # This method checks Espressif's live sensor PID AND the
                 # accepted JPEG boot nonce; a JSON calibration alone cannot
