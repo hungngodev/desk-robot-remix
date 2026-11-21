@@ -11,7 +11,7 @@ def test_docking_original_expansion_history_and_new_required_scope_both_survive(
     register = (ROOT / "docs/source-map.md").read_text(encoding="utf-8")
     rows = register.splitlines()
     for feature_id in ("F037", "G029"):
-        matches = [line for line in rows if line.startswith(f"| \`{feature_id}\` |")]
+        matches = [line for line in rows if line.startswith(f"| `{feature_id}` |")]
         assert len(matches) == 1
         line = matches[0]
         assert "REQUIRED FIRST PET AND DOCK, PHYSICAL HOLD" in line
