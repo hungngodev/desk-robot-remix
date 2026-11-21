@@ -1,6 +1,6 @@
-# VL53L4CD carrier logic voltage and mux isolation qualification (2026-11-13)
+# Historical VL53L4CD carrier voltage warning (superseded 2026-11-13 research)
 
-**Status: research and unpowered wiring gate only. No firmware, motor permit, physical measurement or carrier has been qualified.** This applies to all eight selected VL53L4CD units on the WROOM-owned TCA9548A at 0x70. It does not replace the current ToF driver, mux fault latches or local cliff guard.
+**SUPERSEDED HARDWARE SELECTION: DO NOT USE THIS DOCUMENT AS CURRENT GY-530 WIRING OR PURCHASING INSTRUCTIONS.** Pololu #3692 VL53L4CD was a previous proposal only. The current WROOM `esp32_full` uses eight **VL53L0X GY-530 candidate** carriers at I2C 0x29, one per TCA9548A 0x70 lane, through pinned Pololu `vl53l0x-arduino` 1.3.1. None of the eight current carrier revisions has qualified 3.3 V I2C pullups, regulator, lens mounting or optical performance. The following Pololu #3692 electrical observations are retained only as evidence of why IC supply ratings cannot justify a generic breakout hookup. They do not describe the GY-530. Do not replace `TofBus`, mux fault latches or local cliff guard.
 
 ## Specific risk missed by an IC-only voltage check
 
@@ -15,7 +15,11 @@ Pololu also states that XSHUT and GPIO1 are **not level shifted**, are pulled to
 * [Adafruit multi-mux tutorial](https://learn.adafruit.com/working-with-multiple-i2c-devices/multiple-muxers): demonstrates independent 0x70 and 0x71 mux addresses, selecting one downstream branch at a time and deselecting all others. This is an educational topology reference, not imported source or evidence of the actual bus. Current repository already implements and tests mux select/readback/fault logic, so do not create another bus abstraction.
 * [ST VL53L4CD ULD license example](https://github.com/bslisowski/VL53L4CD-ULD-esp-idf/blob/main/platform.h): shows the ST ULD dual proprietary/BSD 3-Clause notice. This third-party port is not imported or pinned for this product; preserve the existing pinned Pololu/ST attribution and verify exact copied file notices before any source replacement.
 
-## Concrete unpowered acceptance experiment
+## Historical experiment to adapt only after identifying the actual VL53L0X carrier
+
+The named Pololu VIN, VDD, XSHUT and GPIO1 silk labels below describe **VL53L4CD #3692** and must not be assumed on the selected generic VL53L0X GY-530. Before adapting these steps, record the actual GY-530 board schematic, markings, breakout 3.3 V limits, lens pin/position and connector orientation. The current eight-channel WROOM harness must remain unpowered until each actual carrier's logic levels are measured against the mux and host.
+
+## Historical unpowered acceptance experiment
 
 1. Inventory the **exact eight carrier part numbers and PCB markings**; photograph their VIN, VDD, SDA, SCL, XSHUT and GPIO1 labels. Compare each actual carrier schematic with the documented selected source. Do not assume all eight boards have the same circuitry.
 2. Trace WROOM 3.3 V logic through both muxes and every external SDA/SCL pull-up, including onboard resistors. Document the intended logic domain at each mux upstream/downstream pin. **Do not energize until any 5 V pull-up exposure to WROOM is eliminated.**
