@@ -504,6 +504,13 @@ class Runtime:
             except Exception as exc:
                 errors.append(exc)
         await step("WROOM motion", self.coordinator.close(), 4.0)
+        # Cancelling a Coordinator job never terminates native CPU inference.
+        # Report an unconfirmed shutdown rather than abandoning a live worker.
+        vision_close = getattr(
+            getattr(self.coordinator, "vision", None), "close", None
+        )
+        if callable(vision_close):
+            await step("YOLO native inference", vision_close(), 2.0)
         # Stop the one read-only USB producer after the urgent WROOM STOP and
         # before tearing down per-pet camera and context owners.
         room_stop = getattr(self, "_room_stop", None)

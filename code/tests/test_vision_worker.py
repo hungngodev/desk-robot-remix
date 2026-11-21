@@ -141,3 +141,70 @@ async def test_scene_comparator_unhashable_model_kind_is_rejected_without_crash(
     assert change is not None
     assert change.kind == "person"
     assert change.confidence == 0.95
+
+
+
+async def test_yolo_close_waits_for_native_worker_exit_and_rejects_new_detect():
+    vision = YoloWorldVision(None)
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked(jpeg, label):
+        entered.set()
+        release.wait(timeout=5)
+        return [Detection(label, 1.0, (0, 0, 10, 10))]
+
+    vision._detect = blocked
+    started = asyncio.create_task(vision.detect(b"frame", "key"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        started.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await started
+        closing = asyncio.create_task(vision.close())
+        await asyncio.sleep(0)
+        assert not closing.done()
+        with pytest.raises(RuntimeError, match="YOLO detector is closed"):
+            await vision.detect(b"late frame", "candy")
+        closing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        assert any(t.is_alive() for t in vision._worker._threads)
+    finally:
+        release.set()
+    await asyncio.wait_for(vision.close(), timeout=2)
+    assert all(not t.is_alive() for t in vision._worker._threads)
+    await vision.close()
+
+
+async def test_runtime_shutdown_retires_yolo_executor_and_is_repeatable():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from desk_robot.runtime import Runtime
+
+    vision = YoloWorldVision(None)
+    vision._detect = lambda jpeg, label: [
+        Detection(label, 0.95, (0, 0, 10, 10)),
+    ]
+    assert (await vision.detect(b"frame", "key"))[0].label == "key"
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(mode="simulation")
+    runtime.coordinator = SimpleNamespace(
+        vision=vision, close=AsyncMock(), shutdown_stop_failures={},
+    )
+    runtime.pet = SimpleNamespace(close=AsyncMock())
+    runtime.conversation = SimpleNamespace(stop=AsyncMock())
+    runtime.client = SimpleNamespace(aclose=AsyncMock())
+    runtime.multimodal = None
+    runtime._voice_task = None
+    runtime._room_dispatch_lock = threading.Lock()
+    runtime._room_dispatch_pending = None
+    runtime._room_task = None
+    runtime._room_stop = None
+
+    await runtime.close()
+    assert runtime._closed
+    assert all(not t.is_alive() for t in vision._worker._threads)
+    with pytest.raises(RuntimeError, match="YOLO detector is closed"):
+        await vision.detect(b"later frame", "candy")
+    await runtime.close()

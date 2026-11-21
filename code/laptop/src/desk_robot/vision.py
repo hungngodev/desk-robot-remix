@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -38,12 +38,35 @@ class YoloWorldVision:
         # cancelled coroutine drops its asyncio lock.
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desk-yolo")
         self._inference_slot = threading.BoundedSemaphore(1)
+        self._closed = False
+        self._inflight: Future | None = None
+
+    async def close(self) -> None:
+        """Retire submissions and wait for actual native inference termination.
+
+        Canceling a model awaiter cannot terminate native Ultralytics work.
+        If the runtime bounds this cleanup, it must report an unconfirmed
+        shutdown until the retained Future eventually finishes.
+        """
+        self._closed = True
+        self._worker.shutdown(wait=False, cancel_futures=False)
+        pending = self._inflight
+        if pending is not None:
+            try:
+                await asyncio.shield(asyncio.wrap_future(pending))
+            except Exception:
+                # The detector callback drains late inference exceptions.
+                pass
+        await asyncio.to_thread(self._worker.shutdown, wait=True)
 
     async def detect(self, jpeg: bytes, label: str) -> list[Detection]:
+        if self._closed:
+            raise RuntimeError("YOLO detector is closed")
         if not self._inference_slot.acquire(blocking=False):
             raise RuntimeError("YOLO detector still busy")
         try:
             work = self._worker.submit(self._detect, jpeg, label)
+            self._inflight = work
         except BaseException:
             self._inference_slot.release()
             raise
@@ -53,6 +76,8 @@ class YoloWorldVision:
                 if not done.cancelled():
                     done.exception()  # Drain late model failures after cancellation.
             finally:
+                if self._inflight is done:
+                    self._inflight = None
                 self._inference_slot.release()
 
         work.add_done_callback(worker_finished)
