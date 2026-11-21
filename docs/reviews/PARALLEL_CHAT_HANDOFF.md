@@ -1,3 +1,14 @@
+## 21 November 2026: Darwin C++17 toolchain preflight SDK flags for touch boot epoch tests
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `7cad0cafc93583d85fd42e601303240f9d79a8cf`.
+This source and test batch does not close physical or commercial gates.
+
+* Darwin host C++17 toolchain discovery in `code/firmware/head/tests/test_touch_boot_epoch.py`:
+  - In `code/firmware/head/tests/test_touch_boot_epoch.py`, added `_darwin_cxx_flags()` to detect the active macOS SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`) and supply `-isysroot`, `-stdlib=libc++`, and standard library include paths (`usr/include/c++/v1`) to subprocess compilation commands.
+  - Resolves host compiler `'array' file not found` failure during toolchain preflight on Darwin, enabling `test_body_boot_isolates_dedicated_and_cap_touch_counters` to compile and pass cleanly while preserving the negative test `test_missing_standard_array_header_identifies_toolchain_not_touch_source`.
+  - All 3 tests in `firmware/head/tests/test_touch_boot_epoch.py` pass; repo passes `uv run ruff check .` with 0 errors.
+
 ## 21 November 2026: APDS9960 gesture boot epoch recovery, WROOM aux provenance, memory revision fencing fix, and fast-lane lint hardening
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.

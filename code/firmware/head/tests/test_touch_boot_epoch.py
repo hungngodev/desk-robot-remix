@@ -5,6 +5,7 @@ braking capability is inferred from this native counter test.
 """
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -15,11 +16,28 @@ import pytest
 HEAD = Path(__file__).resolve().parents[1]
 
 
+def _darwin_cxx_flags() -> list[str]:
+    flags: list[str] = []
+    if platform.system() == "Darwin":
+        for sdk in (
+            Path("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"),
+            Path("/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk"),
+        ):
+            if sdk.exists():
+                flags.extend(["-isysroot", str(sdk), "-stdlib=libc++"])
+                inc = sdk / "usr/include/c++/v1"
+                if inc.exists():
+                    flags.extend(["-I", str(inc)])
+                break
+    return flags
+
+
 def _compile_checked(compiler: str, cpp: Path, exe: Path, *,
                      toolchain_probe: bool) -> None:
     command = [
         compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
     ]
+    command.extend(_darwin_cxx_flags())
     if not toolchain_probe:
         command.extend(["-I", str(HEAD / "overlay")])
     command.extend([str(cpp), "-o", str(exe)])
