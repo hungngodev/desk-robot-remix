@@ -9,7 +9,10 @@ from desk_robot.pet import PetController
 from desk_robot.runtime import Runtime
 
 
-def test_concurrent_song_and_motion_survive_sensor_events_without_fixed_speech():
+def test_concurrent_song_and_motion_survive_sensor_events_without_fixed_speech(monkeypatch):
+    # Synthetic event times exercise ordering; the production clock rejects
+    # timestamps beyond the actual monotonic clock.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
     ledger = AttentionLedger(["pet1", "pet2"])
     token = ledger.begin_topic(
         "pet1", "Sing while going to the desk edge", at=10,
@@ -37,7 +40,9 @@ def test_concurrent_song_and_motion_survive_sensor_events_without_fixed_speech()
     assert ledger.timeline("pet1", 200) == []
 
 
-def test_duplicate_asr_is_never_a_second_goal_or_physical_permission():
+def test_duplicate_asr_is_never_a_second_goal_or_physical_permission(monkeypatch):
+    # Keep the synthetic sequence within the new local receipt-clock fence.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
     ledger = AttentionLedger(["pet"])
     key = "omni_" + "a" * 12 + "_" + "b" * 20
     assert ledger.heard("pet", key, "Sing to the edge", at=10)
