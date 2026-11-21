@@ -286,7 +286,12 @@ def test_native_startup_context_rejects_live_consent_revoke_during_memory_read(s
 
     memory = Memory()
     app = FastAPI()
-    app.state.runtime = SimpleNamespace(memory=memory)
+    app.state.runtime = SimpleNamespace(
+        memory=memory,
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
     register_native_omni_routes(
         app, settings, authorize=lambda: None,
         coordinator=lambda: SimpleNamespace(robot=settings.robot),
@@ -327,7 +332,12 @@ def test_native_startup_memory_is_exposed_as_data_not_instructions(settings):
             return []
 
     app = FastAPI()
-    app.state.runtime = SimpleNamespace(memory=Memory())
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(),
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
     register_native_omni_routes(
         app, settings, authorize=lambda: None,
         coordinator=lambda: SimpleNamespace(robot=settings.robot),
