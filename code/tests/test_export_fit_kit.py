@@ -954,3 +954,34 @@ def test_oled_bezel_keeps_two_mm_web_at_m2_bores_and_display(tmp_path):
         ], capture_output=True, text=True, timeout=90)
         assert bad.returncode != 0
         assert message in bad.stderr + bad.stdout
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_fsr_retaining_ring_has_printable_wall_and_separate_m2_bores(tmp_path):
+    """The old jaw pad had a paper-thin ring and bores cutting through it."""
+    source = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
+    valid = tmp_path / "fsr_pad.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl",
+        "-o", str(valid), "-D", 'part="fsr_jaw_pocket"', str(source),
+    ], check=True, capture_output=True, text=True, timeout=90)
+    assert module().closed_mesh_edges(valid) > 0
+    assert module().mesh_bounds_mm(valid)["dimensions_mm"] == [
+        28.0, 28.0, 4.0
+    ]
+    assert (17 - 12.35) / 2 >= 2.0
+    assert 2.5 - (2.5 - 0.5) >= 0.4
+    assert (28 / 2 - 3.5) - 1.0 - 17 / 2 >= 0.75
+    for override, message in (
+        ("fsr_ring_extra_d_mm=2", "retaining ring below printable"),
+        ("fsr_plate_extra_mm=10", "screw bore intersects"),
+        ("fsr_hole_edge_mm=2", "outer plate printable web"),
+        ("fsr_ring_base_overlap_mm=0.1", "connection too shallow"),
+    ):
+        bad = subprocess.run([
+            "openscad", "--export-format", "binstl",
+            "-o", str(tmp_path / "bad_fsr.stl"),
+            "-D", 'part="fsr_jaw_pocket"', "-D", override, str(source),
+        ], capture_output=True, text=True, timeout=90)
+        assert bad.returncode != 0
+        assert message in bad.stderr + bad.stdout

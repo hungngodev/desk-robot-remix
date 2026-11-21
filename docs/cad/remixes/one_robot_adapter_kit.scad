@@ -40,6 +40,16 @@ speaker_grille_border=8;
 speaker_grille_hole_edge=3.5;
 speaker_grille_min_web=2;
 fsr_d=12;
+// Temporary FSR contact pad pocket. Previous 22mm plate had 1.5mm
+// screw-to-edge web, 1.325mm retaining ring, a 0.1mm ring/base union,
+// and screw holes that cut the raised retaining ring.
+fsr_plate_extra_mm=16;
+fsr_ring_extra_d_mm=5;
+fsr_ring_base_overlap_mm=0.5;
+fsr_bore_d_mm=2;
+fsr_hole_edge_mm=3.5;
+fsr_min_ring_web_mm=2;
+fsr_min_plate_web_mm=2;
 dock_tag_black_square=60;
 dock_mount_spacing=76;
 // Minimum radial print web from M3 bolt bore to any free plate edge.
@@ -135,19 +145,33 @@ module speaker_grille(){
   }
 }
 module fsr_jaw_pocket(){
-  x=fsr_d+10; y=fsr_d+10;
+  x=fsr_d+fsr_plate_extra_mm; y=x;
+  ring_od=fsr_d+fsr_ring_extra_d_mm;
+  hole_x=x/2-fsr_hole_edge_mm;
+  assert(fsr_min_ring_web_mm>=2 && fsr_min_plate_web_mm>=2);
+  assert((ring_od-fsr_d-fit_xy)/2>=fsr_min_ring_web_mm,
+         "FSR retaining ring below printable radial web");
+  assert(fsr_ring_base_overlap_mm>=0.4 &&
+         fsr_ring_base_overlap_mm<=1.0,
+         "FSR ring/base connection too shallow");
+  assert(fsr_hole_edge_mm-fsr_bore_d_mm/2>=fsr_min_plate_web_mm,
+         "FSR screw breaches outer plate printable web");
+  assert(hole_x-fsr_bore_d_mm/2-ring_od/2>=0.75,
+         "FSR screw bore intersects retaining ring");
   difference(){
     union(){
       translate([0,0,1.25]) cube([x,y,2.5],center=true);
-      translate([0,0,2.4]) difference(){
-        cylinder(h=1.5,d=fsr_d+3);
-        cylinder(h=2,d=fsr_d+fit_xy);
+      translate([0,0,2.5-fsr_ring_base_overlap_mm]) difference(){
+        cylinder(h=1.5+fsr_ring_base_overlap_mm,d=ring_od);
+        cylinder(h=2+fsr_ring_base_overlap_mm,d=fsr_d+fit_xy);
       }
     }
     translate([0,0,3.3]) cylinder(h=3,d=fsr_d+fit_xy,center=true);
+    // Cable exit is intentional, but NOT proof of FSR attachment strength.
     translate([0,-y/2+2,2.5]) cube([3.5,9,5],center=true);
-    for(xx=[-x/2+2.5,x/2-2.5])
-      translate([xx,0,1.25]) cylinder(h=5,d=2,center=true);
+    for(xx=[-hole_x,hole_x])
+      translate([xx,0,1.25])
+        cylinder(h=5,d=fsr_bore_d_mm,center=true);
   }
 }
 module dock_tag_backplate(){

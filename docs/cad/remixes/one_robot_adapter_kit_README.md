@@ -52,7 +52,7 @@ Source [one_robot_adapter_kit.scad](one_robot_adapter_kit.scad) is original CC0 
 | tof_adjustable | 8 provisional | GY-530 optical aperture and angle reference, NOT a retained PCB mount. The pilot still needs measured clips, fastening and lens offset |
 | oled_bezel | 1 | Provisional 37 x 35 mm SSD1306 display window, M2 bores retaining >=2 mm printable web both outside and beside aperture; PCB mount positions unmeasured |
 | speaker_grille | 1 | Provisional 36 x 32 mm perforated front plate for current 20 x 16 mm Challenge 2 W rectangular speaker. M2 holes require at least 2 mm plastic web to the nominal speaker pocket and outer edge; not a sealed soundbox |
-| fsr_jaw_pocket | 1 | Force pad jaw holder |
+| fsr_jaw_pocket | 1 | Provisional 28 x 28 mm FSR jaw pad pocket, >=2 mm retaining ring, 0.5 mm nominal base union and M2 bores clear of ring; adhesion and force unqualified |
 | dock_tag_backplate | 1 | AprilTag marker frame |
 | wire_clip | as needed | Provisional 22 x 13 x 4 mm M2 routing and cable tie plate; at least 2 mm plastic between bores and slot, not tested load-rated strain relief |
 
