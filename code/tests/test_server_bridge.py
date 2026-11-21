@@ -164,6 +164,36 @@ async def test_bridge_auth_identity_and_lease_cleanup(bridge):
         assert not bridge.muted("mac-01")
 
 
+
+async def test_bridge_rejects_human_vad_during_deliberate_and_group_grants(
+    bridge,
+):
+    """Nonpassive does not imply permission to speak over a human."""
+    bridge.register(conn("mac-01"))
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        bridge.human_vad_until["mac-01"] = time.monotonic() + 5
+        for passive in (False, True):
+            attempt = await client.post(
+                "/session", headers=headers,
+                json={"device_ids": ["mac-01"], "enabled": True,
+                      "passive": passive},
+            )
+            assert attempt.status == 409
+            assert not bridge.muted("mac-01")
+        bridge.human_vad_until["mac-01"] = time.monotonic() - 1
+        accepted = await client.post(
+            "/session", headers=headers,
+            json={"device_ids": ["mac-01"], "enabled": True},
+        )
+        assert accepted.status == 200
+        released = await client.post(
+            "/session", headers=headers,
+            json={"device_ids": ["mac-01"], "enabled": False},
+        )
+        assert released.status == 200
+
+
 def test_overlay_targets_pinned_server_and_compiles():
     spec = importlib.util.spec_from_file_location(
         "server_overlay", ROOT / "laptop/server/install_overlay.py"

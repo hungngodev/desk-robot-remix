@@ -2902,6 +2902,83 @@ async def test_deliberate_touch_can_reply_after_passive_speech_cooldown(fleet, t
         await pet.close()
 
 
+
+async def test_native_bridge_budget_allows_genuine_touch_but_not_passive_chatter(
+    fleet, tmp_path,
+):
+    """Match pet timing, Conversation session mode and the native gate."""
+    fleet.mode = "hardware"
+    fleet.fleet_social_autonomy_enabled = False
+
+    class NativeBudgetSpeaker(SimulatedSpeaker):
+        supports_passive_speech_budget = True
+        supports_permission_checks = True
+
+        def __init__(self):
+            super().__init__()
+            self.session_modes = []
+            self.last_passive_at = time.monotonic() - 20
+
+        @asynccontextmanager
+        async def session(self, robots, *, passive=False):
+            self.session_modes.append(passive)
+            if passive and time.monotonic() - self.last_passive_at < 120:
+                raise RuntimeError("Native passive speech cooldown")
+            yield
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = NativeBudgetSpeaker()
+    conversation = Conversation(
+        fleet, GroundedChat(), speaker, memory=memory,
+    )
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        speech_cooldown=120, interaction_cooldown=12,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 11
+    pet.set_voice_monitor_ready(True)
+    pet._group_last_spoken = time.monotonic() - 20
+    try:
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("ambient_shift", "A relative humidity fluctuation", 1.0),
+            11,
+        )
+        assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+        assert speaker.session_modes == []
+
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("touch_tap", "A real head touch edge arrived", 1.0),
+            11,
+        )
+        await wait_for(lambda: state.spoken == 1)
+        await wait_for(lambda: pet._speech_task is None)
+        assert speaker.session_modes == [False]
+        assert len(speaker.spoken) == 1
+        # The native passive gate remains 120 seconds, even after a local
+        # deliberate physical interaction was allowed through.
+        with pytest.raises(RuntimeError, match="Native passive speech cooldown"):
+            await conversation.say_proactive(
+                fleet.robot("robot-01"), "Not another passive announcement",
+            )
+        assert speaker.session_modes == [False, True]
+
+        # Human speech still wins over the deliberate sensor route.
+        pet._human_active_in_fleet = lambda _now: True
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("touch_double", "Another real tap", 1.0),
+            11,
+        )
+        assert pet._speech_task is None
+        assert len(speaker.spoken) == 1
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_touch_can_never_override_authenticated_human_vad(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     conversation = Conversation(

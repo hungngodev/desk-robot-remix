@@ -1074,6 +1074,7 @@ class Conversation:
     async def say_proactive(
         self, robot: RobotConfig, text: str, *,
         permission_check: Callable[[], bool] | None = None,
+        deliberate: bool = False,
     ) -> bool:
         """Reuse exactly one speaker/session owner for optional autonomous remarks.
 
@@ -1081,6 +1082,8 @@ class Conversation:
         cannot make the model's audio bypass the same exclusive bridge lease used
         for robot-to-robot group conversation.
         """
+        if type(deliberate) is not bool:
+            raise ValueError("Deliberate interaction flag must be boolean")
         if self.active is not None and not self.active.done():
             return False
         async with self.session_lock:
@@ -1099,7 +1102,10 @@ class Conversation:
                     "Hardware proactive speaker lacks shared passive speech budget"
                 )
             speaker_session = (
-                self.speaker.session([robot], passive=True)
+                # Only a caller holding an actual local interaction edge
+                # may bypass the *passive* fleet cooldown. The native bridge
+                # still enforces session exclusivity and human VAD priority.
+                self.speaker.session([robot], passive=not deliberate)
                 if passive_budget else self.speaker.session([robot])
             )
             async with speaker_session:

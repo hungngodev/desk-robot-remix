@@ -791,6 +791,10 @@ def create_app():
                     )
                 if not allowed():
                     raise RuntimeError("Passive fleet speech cooldown is active")
+            # A deliberate physical touch bypasses the passive chatter
+            # timer, never the authenticated human speech floor.
+            if human_speech_active():
+                raise RuntimeError("A human turn owns the speech floor")
             if lease_stopping or time.monotonic() < lease_until:
                 raise RuntimeError("A coordinated session is already active")
             for device in selected:

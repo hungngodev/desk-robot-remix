@@ -2924,6 +2924,8 @@ class PetController:
 
             transmitted = await self.conversation.say_proactive(
                 robot, text, permission_check=audio_still_permitted,
+                deliberate=(not camera_derived
+                            and change.kind in _DIRECT_INTERACTION_KINDS),
             )
             if transmitted and state.enabled and not state.quiet and state.generation == generation:
                 now = time.monotonic()
