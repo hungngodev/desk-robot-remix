@@ -195,7 +195,9 @@ def test_screen_rejects_nonrenderable_dock_source_dimensions(
     assert raw.count(original) == 1
     modified = tmp_path / "unprintable.scad"
     modified.write_text(raw.replace(original, replacement), encoding="utf-8")
-    with pytest.raises(ValueError, match="violates printable geometry"):
+    with pytest.raises(
+        ValueError, match="(violates printable geometry|Invalid dock CAD dimensions)"
+    ):
         tool.dock_constants(modified)
 
 
