@@ -39,6 +39,8 @@ private:
     AudioCodec* audio_codec_ = nullptr;  // Sense codec only, no second audio owner
     httpd_handle_t server_ = nullptr;
     std::mutex uart_mutex_;
+    UrgentStopGate urgent_stop_gate_{};
+    std::atomic<bool> body_read_busy_{false};
     bool uart_ready_ = false;
     bool enabled_ = false;
     std::atomic<bool> camera_busy_{false};
@@ -48,6 +50,7 @@ private:
     // Owned by the one Sense face task, not shared with HTTP handlers.
     RealTouchEdges head_touch_edges_{};
     RealTouchEdges body_cap_edges_{};
+    static void BodyReadTask(void* context);
     static void CameraTask(void* context);
     static void CameraStreamTask(void* context);
     Reply Transact(const std::string& command, bool operator_control);
