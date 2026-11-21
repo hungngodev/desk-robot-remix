@@ -597,9 +597,22 @@ class Coordinator:
     async def _explore(self, job: Job) -> dict:
         head = self.heads[job.robot_id]
         last_live_frame_at = float("-inf")
+        camera_grant = (
+            self.settings.camera_consent_generation
+            if self.settings.mode == "hardware" else None
+        )
+
+        def require_camera_grant() -> None:
+            # Revoking and immediately regranting consent must not revive
+            # a camera-based motion job started under the old grant.
+            if (camera_grant is not None
+                    and (not self.settings.voice_vision_tools_enabled
+                         or self.settings.camera_consent_generation != camera_grant)):
+                raise OperationError("Hardware exploration camera consent revoked")
 
         async def observe_camera() -> None:
             nonlocal last_live_frame_at
+            require_camera_grant()
             if self.settings.mode == "hardware":
                 # Hardware exploration MUST consume a genuinely NEW
                 # authenticated XIAO frame from the one Mac MJPEG owner.
@@ -634,6 +647,7 @@ class Coordinator:
                     if not received:
                         raise OperationError("Live exploration camera stalled")
                     frame = newest()
+                require_camera_grant()
                 if (frame is None or not media.stream_owns_camera(job.robot_id)
                         or not media.settings.voice_vision_tools_enabled
                         or not media.status(job.robot_id)["camera_stream_connected"]):
@@ -667,6 +681,7 @@ class Coordinator:
         # This loop persists until a stop, quiet mode, failure, or disconnect.
         # There is no unbounded drive: every track movement expires after 100ms.
         while True:
+            require_camera_grant()
             await self._assert_armed_health(job.robot_id, require_front_clearance=True)
             # The reused Sense camera source must be alive before and after
             # each short pulse; an image does not by itself prove a clear path.
@@ -674,6 +689,7 @@ class Coordinator:
             # A camera request can hang while a local cliff, touch or IMU
             # fault disarms WROOM. Never drive from a pre-camera verdict.
             await self._assert_armed_health(job.robot_id, require_front_clearance=True)
+            require_camera_grant()
             await head.command("drive 20 20 100")
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)

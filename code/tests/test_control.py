@@ -1394,6 +1394,65 @@ async def test_hardware_exploration_needs_existing_continuous_camera_owner(setti
         await c.close()
 
 
+@pytest.mark.parametrize("grant_change", ["off", "regrant", "unchanged"])
+async def test_hardware_exploration_camera_grant_checked_after_health_await(
+    settings, grant_change,
+):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    c, head = make(settings)
+    jpeg = await head.snapshot()
+    paused = asyncio.Event()
+    release = asyncio.Event()
+    health_reads = 0
+
+    async def gated_health(_robot_id, *, require_front_clearance=False):
+        nonlocal health_reads
+        health_reads += 1
+        if health_reads == 2:
+            paused.set()
+            await release.wait()
+        return {"armed": True}
+
+    async def no_new_frame(_robot_id, _after, *, timeout_s):
+        return False
+
+    c._assert_armed_health = gated_health
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _robot_id: True,
+        status=lambda _robot_id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={"robot-01": [SimpleNamespace(
+            source="proactive", jpeg=jpeg, received_at=time.monotonic()
+        )]}),
+        wait_for_proactive_frame=no_new_frame,
+    )
+    task = asyncio.create_task(
+        c._explore(Job("camera-grant-gated", "robot-01", "exploration"))
+    )
+    try:
+        await asyncio.wait_for(paused.wait(), timeout=1)
+        if grant_change != "unchanged":
+            settings.voice_vision_tools_enabled = False
+            if grant_change == "regrant":
+                settings.voice_vision_tools_enabled = True
+        release.set()
+        if grant_change == "unchanged":
+            with pytest.raises(OperationError, match="camera stalled"):
+                await asyncio.wait_for(task, timeout=2)
+            assert head.commands.count("drive 20 20 100") == 1
+        else:
+            with pytest.raises(OperationError, match="camera consent revoked"):
+                await asyncio.wait_for(task, timeout=2)
+            assert not any(cmd.startswith("drive ") for cmd in head.commands)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await c.close()
+
+
 async def test_hardware_exploration_uses_live_hub_frames_not_individual_snapshot(settings):
     c, head = make(settings)
     settings.mode = "hardware"
