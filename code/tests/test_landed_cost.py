@@ -1,5 +1,6 @@
 """Regression coverage for cumulative first-unit delivered cost, not cart approval."""
 import importlib.util
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -601,6 +602,9 @@ def test_actual_leap_day_quote_remains_valid():
 def test_fleet_total_is_not_rejected_by_first_unit_prototype_cap():
     ev = sample()
     ev["scope"] = "fleet"
+    for line in ev["lines"]:
+        line["quoted_at"] = date.today().isoformat()
+        line["stock_checked_at"] = date.today().isoformat()
     ev["paid_orders"][0]["total_paid_usd"] = "49.00"
     fleet = mod.account_landed_cost(
         ev, REQUIRED, CATEGORIES, expected_scope="fleet"
@@ -621,3 +625,82 @@ def test_fleet_total_is_not_rejected_by_first_unit_prototype_cap():
     assert first["prototype_cap_cents"] == 5000
     assert first["remaining_under_cap_cents"] == -555
     assert first["within_prototype_cap"] is False
+
+
+def _current_checkout_sample():
+    evidence = sample()
+    evidence["scope"] = "first_robot"
+    for line in evidence["lines"]:
+        line["quoted_at"] = date.today().isoformat()
+        line["stock_checked_at"] = date.today().isoformat()
+    return evidence
+
+
+def test_buy07_strict_quote_requires_recent_stock_confirmation():
+    ev = _current_checkout_sample()
+    assert mod.account_landed_cost(ev, REQUIRED, CATEGORIES)["errors"] == []
+    del ev["lines"][0]["stock_checked_at"]
+    result = mod.account_landed_cost(ev, REQUIRED, CATEGORIES)
+    assert result["payable_now_cents"] is None
+    assert any("stock_checked_at" in e for e in result["errors"])
+    ev["lines"][0]["stock_checked_at"] = (
+        date.today() - timedelta(days=8)
+    ).isoformat()
+    result = mod.account_landed_cost(ev, REQUIRED, CATEGORIES)
+    assert any("stock check predates" in e for e in result["errors"])
+
+
+def test_buy07_stale_price_needs_bounded_validity_or_new_seller_proof():
+    ev = _current_checkout_sample()
+    line = ev["lines"][0]
+    line["quoted_at"] = (date.today() - timedelta(days=20)).isoformat()
+    result = mod.account_landed_cost(ev, REQUIRED, CATEGORIES)
+    assert result["payable_now_cents"] is None
+    assert any("supplier quote is stale" in e for e in result["errors"])
+    line["quote_valid_through"] = (
+        date.today() + timedelta(days=5)
+    ).isoformat()
+    assert mod.account_landed_cost(ev, REQUIRED, CATEGORIES)["errors"] == []
+    line["quote_valid_through"] = (
+        date.today() + timedelta(days=15)
+    ).isoformat()
+    assert any("30-day validity" in e for e in
+               mod.account_landed_cost(ev, REQUIRED, CATEGORIES)["errors"])
+    line["quote_valid_through"] = (
+        date.today() - timedelta(days=1)
+    ).isoformat()
+    assert any("has expired" in e for e in
+               mod.account_landed_cost(ev, REQUIRED, CATEGORIES)["errors"])
+    del line["quote_valid_through"]
+    line["price_reconfirmed_at"] = date.today().isoformat()
+    assert any("supplier evidence" in e for e in
+               mod.account_landed_cost(ev, REQUIRED, CATEGORIES)["errors"])
+    line["price_reconfirmation_url"] = "https://seller.example/quote-confirmation"
+    assert mod.account_landed_cost(ev, REQUIRED, CATEGORIES)["errors"] == []
+    line["price_reconfirmed_at"] = (
+        date.today() - timedelta(days=8)
+    ).isoformat()
+    assert any("price reconfirmation is stale" in e for e in
+               mod.account_landed_cost(ev, REQUIRED, CATEGORIES)["errors"])
+
+
+def test_buy07_future_or_invalid_date_cannot_qualify_checkout():
+    for field, value in (
+        ("stock_checked_at", (date.today() + timedelta(days=1)).isoformat()),
+        ("stock_checked_at", "2026-02-30"),
+        ("quote_valid_through", "bad-date"),
+        ("price_reconfirmed_at", True),
+    ):
+        ev = _current_checkout_sample()
+        ev["lines"][0][field] = value
+        result = mod.account_landed_cost(ev, REQUIRED, CATEGORIES)
+        assert result["payable_now_cents"] is None, (field, value)
+        assert result["errors"], (field, value)
+
+
+def test_buy07_historical_evaluation_preserves_nonapproving_cost_math():
+    ev = sample()
+    ev["lines"][0]["quoted_at"] = "2024-02-29"
+    result = calculate(ev)
+    assert result["calculation_complete_not_physical_approval"]
+    assert not result["landed_price_is_a_verified_supplier_checkout"]

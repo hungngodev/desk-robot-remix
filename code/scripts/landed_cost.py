@@ -8,7 +8,7 @@ The strict procurement release still owns receipt verification.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
@@ -67,7 +67,7 @@ def _nonempty(value: object, label: str) -> str:
     return value.strip()
 
 
-def _quote_date(value: object) -> None:
+def _quote_date(value: object) -> date:
     """Only a real, canonical ISO calendar date can date a supplier quote."""
     if not isinstance(value, str):
         raise ValueError("quote date must be a YYYY-MM-DD calendar date")
@@ -81,6 +81,61 @@ def _quote_date(value: object) -> None:
     # receipt, even if its format and monetary arithmetic are valid.
     if parsed > date.today():
         raise ValueError("supplier quote date cannot be in the future")
+    return parsed
+
+
+# Historical evaluation remains useful. Actual first-unit/fleet quotes must
+# include dated price and stock confirmations; a product URL alone is not a
+# live supplier availability statement.
+CURRENT_QUOTE_MAX_AGE_DAYS = 7
+MAX_VALIDITY_DAYS = 30
+
+
+def _seller_date(value: object, label: str, *, allow_future: bool = False) -> date:
+    if type(value) is not str:
+        raise ValueError(f"{label} must be a canonical ISO calendar date")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be a canonical ISO calendar date") from exc
+    if parsed.isoformat() != value:
+        raise ValueError(f"{label} must be a canonical ISO calendar date")
+    if not allow_future and parsed > date.today():
+        raise ValueError(f"{label} cannot be in the future")
+    return parsed
+
+
+def _current_checkout_quote(line: dict, quoted: date) -> None:
+    """Bound claimed checkout freshness; release still needs verified receipts.
+
+    Dates and HTTPS links do not independently authenticate seller stock,
+    physical fit or the immutable signed release gate.
+    """
+    today = date.today()
+    checked = _seller_date(line.get("stock_checked_at"), "stock_checked_at")
+    if checked < quoted or (today - checked).days > CURRENT_QUOTE_MAX_AGE_DAYS:
+        raise ValueError("stock check predates supplier quote or is stale")
+
+    expiry = None
+    if "quote_valid_through" in line:
+        expiry = _seller_date(line["quote_valid_through"],
+                              "quote_valid_through", allow_future=True)
+        if expiry < quoted or (expiry - quoted).days > MAX_VALIDITY_DAYS:
+            raise ValueError("seller quote exceeds 30-day validity window")
+        if expiry < today:
+            raise ValueError("seller quote has expired")
+
+    reconfirmed = None
+    if "price_reconfirmed_at" in line or "price_reconfirmation_url" in line:
+        reconfirmed = _seller_date(line.get("price_reconfirmed_at"),
+                                   "price_reconfirmed_at")
+        if (not _url(line.get("price_reconfirmation_url"))
+                or reconfirmed < quoted or checked < reconfirmed
+                or (today - reconfirmed).days > CURRENT_QUOTE_MAX_AGE_DAYS):
+            raise ValueError("price reconfirmation is stale or lacks supplier evidence")
+    if ((today - quoted).days > CURRENT_QUOTE_MAX_AGE_DAYS
+            and expiry is None and reconfirmed is None):
+        raise ValueError("supplier quote is stale without current price proof")
 
 
 def account_landed_cost(
@@ -146,9 +201,11 @@ def account_landed_cost(
             seller = _nonempty(line.get("seller"), "seller")
             sku = _nonempty(line.get("sku"), "sku")
             quote_ref = _nonempty(line.get("quote_reference"), "quote_reference")
-            _quote_date(line.get("quoted_at"))
+            quoted = _quote_date(line.get("quoted_at"))
             if not _url(line.get("stock_evidence_url")):
                 raise ValueError("missing HTTPS stock evidence")
+            if expected_scope in {"first_robot", "fleet"}:
+                _current_checkout_quote(line, quoted)
             packages = positive_count(line.get("quantity_packages"), "packages")
             units = positive_count(line.get("units_per_package"), "units")
             category = role_categories[role]
