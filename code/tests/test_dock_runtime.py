@@ -811,6 +811,7 @@ def test_invalid_dock_receipt_types_are_not_pose_evidence(bad_receipt):
 
 def test_original_dock_receipt_time_is_not_replaced_after_waiting():
     import time
+
     from desk_robot.dock_vision import assess_dock
 
     received = time.monotonic() - 0.15
