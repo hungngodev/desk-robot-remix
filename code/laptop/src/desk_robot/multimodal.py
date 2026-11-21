@@ -193,6 +193,11 @@ class CameraFrameHub:
         self.heard_history = {
             robot: deque(maxlen=4) for robot in robot_ids
         }
+        # Retractions must outlive the short ASR history slot, otherwise
+        # a replayed authenticated event can resurrect operator-deleted text.
+        self.revoked_heard_ids = {
+            robot: deque(maxlen=128) for robot in robot_ids
+        }
         # One shared, volatile USB measurement; NEVER copied to any pet memory
         # or treated as an eyewitness, VAD, tool receipt or motor permit.
         self.shared_room: RoomObservation | None = None
@@ -576,7 +581,8 @@ class CameraFrameHub:
         # a new human request. Keep historical ASR only within its normal TTL.
         if received_at > time.monotonic() + 1:
             raise ValueError("Future native ASR receipt clock")
-        if any(entry[0] == event_id for entry in self.heard_history[robot_id]):
+        if (event_id in self.revoked_heard_ids[robot_id]
+                or any(entry[0] == event_id for entry in self.heard_history[robot_id])):
             return False
         self.heard_history[robot_id].append(
             (event_id, " ".join(transcript.split())[:240], received_at)
@@ -584,8 +590,14 @@ class CameraFrameHub:
         return True
 
     def discard_heard(self, robot_id: str, event_id: str) -> None:
-        """Retract only a newly recorded ASR item after live consent revoke."""
+        """Retract one ASR event and block its old source ID from replay."""
         self._check(robot_id)
+        if (not isinstance(event_id, str) or not 1 <= len(event_id) <= 96
+                or not event_id.isascii()):
+            raise ValueError("Invalid native ASR retraction identity")
+        revoked = self.revoked_heard_ids[robot_id]
+        if event_id not in revoked:
+            revoked.append(event_id)
         entries = self.heard_history[robot_id]
         self.heard_history[robot_id] = deque(
             (item for item in entries if item[0] != event_id),

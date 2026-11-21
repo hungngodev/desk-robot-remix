@@ -3014,3 +3014,15 @@ def test_unhashable_multimodal_cues_are_rejected_without_mutation(invalid):
     assert hub.event_history["robot-01"][-1][0] == "human_voice"
     assert hub.tool_history["robot-01"][-1][0] == "visual_look"
     assert hub.spoken_history["robot-01"][-1][0] == "Hello"
+
+
+def test_discarded_live_asr_event_cannot_replay_or_leak_to_peer():
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    event_id = "omni_" + "a" * 12 + "_" + "b" * 20
+    now = time.monotonic()
+    assert hub.remember_heard("robot-01", event_id, "Private words", now)
+    hub.discard_heard("robot-01", event_id)
+    assert not hub.heard_history["robot-01"]
+    assert not hub.remember_heard("robot-01", event_id, "Replayed words", now)
+    assert hub.remember_heard("robot-02", event_id, "Independent words", now)
+    assert hub.heard_history["robot-02"][-1][1] == "Independent words"

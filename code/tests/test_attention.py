@@ -582,3 +582,20 @@ def test_attention_topic_origin_unhashable_rejected_without_state(invalid):
     assert ledger.timeline("robot-01", time.monotonic()) == []
     epoch = ledger.begin_topic("robot-01", "Discuss a key", time.monotonic(), origin="operator")
     assert epoch == 1
+
+
+def test_attention_retracts_only_deleted_asr_identity():
+    import time
+    ledger = AttentionLedger(["robot-01", "robot-02"])
+    first = "omni_" + "a" * 12 + "_" + "b" * 20
+    other = "omni_" + "c" * 12 + "_" + "d" * 20
+    stamp = time.monotonic()
+    assert ledger.heard("robot-01", first, "Private ASR", stamp)
+    assert ledger.heard("robot-02", first, "Independent peer ASR", stamp)
+    assert not ledger.discard_heard("robot-01", other)
+    assert ledger.discard_heard("robot-01", first)
+    assert not ledger.discard_heard("robot-01", first)
+    assert not ledger.heard("robot-01", first, "Replayed private ASR", stamp)
+    assert not any("Private ASR" in x["content"] for x in ledger.timeline("robot-01", time.monotonic()))
+    assert any("Independent peer ASR" in x["content"]
+               for x in ledger.timeline("robot-02", time.monotonic()))

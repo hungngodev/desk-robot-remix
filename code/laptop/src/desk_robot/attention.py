@@ -49,6 +49,7 @@ class _Attention:
     human_turns: int = 0
     asr: str = ""
     asr_at: float = -math.inf
+    last_heard_id: str | None = None
     heard_ids: deque[str] = field(default_factory=lambda: deque(maxlen=24))
     sent: str = ""
     sent_at: float = -math.inf
@@ -146,6 +147,17 @@ class AttentionLedger:
         state.heard_ids.append(event_id)
         state.asr = cleaned
         state.asr_at = at
+        state.last_heard_id = event_id
+        return True
+
+    def discard_heard(self, robot_id: str, event_id: str) -> bool:
+        """Retract only a matching model ASR cue, retaining replay dedup."""
+        state = self._state(robot_id)
+        if not isinstance(event_id, str) or state.last_heard_id != event_id:
+            return False
+        state.asr = ""
+        state.asr_at = -math.inf
+        state.last_heard_id = None
         return True
 
     def sent(self, robot_id: str, text: str, at: float) -> bool:
