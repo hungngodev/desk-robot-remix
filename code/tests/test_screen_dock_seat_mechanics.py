@@ -54,7 +54,7 @@ def test_source_cad_fixture_trial_cannot_approve_physical_dock():
 @pytest.mark.parametrize("field,value", [
     ("seat_pair_spacing_mm", 55),
     ("switch_body_width_mm", 30),
-    ("switch_center_z_mm", 55),
+    ("switch_center_z_mm", 89),
     ("ir_emitter_center_z_mm", 24),
     ("planned_stop_displacement_mm", 1.0),
     ("planned_stop_displacement_mm", 3.0),
