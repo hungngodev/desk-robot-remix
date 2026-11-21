@@ -43,7 +43,9 @@ These thresholds make the requirement reviewable; no physical trial exists yet.
 `code/scripts/check_barge_in_trials.py` now rejects incomplete trial
 coverage instead of treating an arbitrary set of twenty identical
 interruptions as acceptance evidence. The input is JSON Lines containing
-exactly twenty `kind: human` records and one `kind: robot_only` record.
+exactly twenty `kind: human` records, one `kind: robot_only` record,
+and one `kind: quiet` record. Both controls must be observed for at least
+600 seconds on the same actual robot, firmware, audio setup and head geometry.
 
 Each human row records a unique `id`, `volume` (`low`, `medium`,
 `high`), `interruption_position` (`early` or `late`),
@@ -66,10 +68,18 @@ requires actual retained speech at its start. The robot-only row records
 `self_interruptions`, and the exact same `robot_id`, `firmware_commit`,
 `audio_config_id`, and `mic_speaker_placement_id` as the twenty human
 trials. A control from another robot or mounting configuration is invalid.
-The checker includes those identities in its result so no generic
-five-robot qualification can be inferred. The proposed acoustic gate needs 19/20 audible
-stops within 500 ms, 18/20 correctly retained and understood intents,
-zero self-interruptions and no obsolete audio ever resuming.
+The separate `kind: quiet` row records at least 600 actual seconds with
+nonnegative integer `unsolicited_speech_events` and
+`unsolicited_motion_events`. Both counts must be zero for A2 acceptance,
+including silence while the camera and sensors remain operational. The
+quiet control must repeat the same `robot_id`, `firmware_commit`,
+`audio_config_id`, and `mic_speaker_placement_id` as the interruption
+trials. An echo-only control is not a quiet-mode test.
+The checker includes these identities in its result so no generic
+five-robot qualification can be inferred. The proposed acoustic gate needs
+19/20 audible stops within 500 ms, 18/20 correctly retained and understood
+intents, zero self-interruptions, no obsolete audio resuming, and no
+unsolicited quiet-mode speech or motion.
 
 The checker validates a *declared measurement record*; it does not
 independently measure acoustic waveforms, authenticate a second speaker,
