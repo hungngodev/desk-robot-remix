@@ -35,6 +35,8 @@ def main():
                    help="Sense-only measured acoustic reference alignment (0..250ms)")
     p.add_argument("--continuous-audio", action="store_true",
                    help="Explicit opt in to Sense realtime microphone after boot; BOOT stops it")
+    p.add_argument("--bench-aec-capture", action="store_true",
+                   help="Private Sense-only one-shot raw PCM calibration, never production")
     p.add_argument(
         "--server-ip", required=True, help="Mac LAN IPv4 address, reachable from the head"
     )
@@ -52,6 +54,10 @@ def main():
         p.error("Custom AEC reference delay is for the Sense board only")
     if args.continuous_audio and args.board != "sense":
         p.error("Continuous real-time microphone is qualified only for the Sense audio path")
+    if args.bench_aec_capture and (
+        args.board != "sense" or not args.continuous_audio or args.aec_delay_ms != 0
+    ):
+        p.error("Private PCM calibration requires Sense, continuous mic consent and zero AEC delay")
     values = dict(
         line.split("=", 1)
         for line in (args.secrets.read_text().splitlines() if args.secrets.exists() else [])
@@ -86,12 +92,15 @@ def main():
             if not item.startswith((
                 "CONFIG_DESK_ROBOT_AEC_DELAY_MS=",
                 "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=",
+                "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=",
             ))
         ]
         config["builds"][0]["sdkconfig_append"].extend([
             f"CONFIG_DESK_ROBOT_AEC_DELAY_MS={args.aec_delay_ms}",
             "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED="
             + ("y" if args.continuous_audio else "n"),
+            "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED="
+            + ("y" if args.bench_aec_capture else "n"),
         ])
     target = board / "config.private.json"
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
