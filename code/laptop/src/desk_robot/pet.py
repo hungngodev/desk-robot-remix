@@ -2232,9 +2232,7 @@ class PetController:
         attention = getattr(self, "attention", None)
         continuity = (
             attention.timeline(robot_id, now)
-            if (attention is not None and
-                (self.settings.mode != "hardware"
-                 or self.settings.voice_vision_tools_enabled))
+            if attention is not None
             else []
         )
         timeline = []

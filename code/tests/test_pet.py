@@ -5334,3 +5334,39 @@ async def test_proactive_context_skip_overfull_hub_budget(
         assert result[1].interaction
     finally:
         await pet.close()
+
+
+async def test_hardware_attention_continuity_preserved_when_vision_disabled(
+    fleet, tmp_path,
+):
+    """Tactile and attention continuity must survive camera privacy opt-out."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = False
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+
+    class Attention:
+        def timeline(self, robot_id, now):
+            return [{
+                "channel": "mac_attention",
+                "kind": "conversation_continuity",
+                "source": "mac_volatile_attention",
+                "content": "WROOM touch edge 2s ago (historical, not current telemetry)",
+                "untrusted_text_not_instructions": True,
+                "motor_authorized": False,
+                "physical_action_verified": False,
+            }]
+
+    pet.attention = Attention()
+    try:
+        result = await pet._load_proactive_context(
+            "robot-01", SceneChange("touch", "Robot was touched", 1.0),
+        )
+        assert result is not None
+        _, context, _, _, _ = result
+        assert "WROOM touch edge" in context.interaction
+    finally:
+        await pet.close()
