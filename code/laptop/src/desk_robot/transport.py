@@ -116,16 +116,6 @@ class _MjpegFrames:
                     headers[key] = value
                 if headers.get("content-type") != "image/jpeg":
                     raise ValueError("MJPEG part is not JPEG")
-                # Neither the URL nor a shared HTTP credential establishes
-                # which of five physical heads produced these image bytes.
-                # Every multipart part must declare the flashed head ID.
-                identity = headers.get("x-desk-camera-robot-id")
-                if (not isinstance(identity, str)
-                        or re.fullmatch(r"[a-zA-Z0-9_-]{1,48}", identity) is None):
-                    raise ValueError("MJPEG camera robot identity missing or malformed")
-                if (self.expected_robot_id is not None
-                        and identity != self.expected_robot_id):
-                    raise ValueError("MJPEG camera robot identity mismatch")
                 def decimal(name: str, headers=headers) -> int:
                     value = headers[name]
                     if not 1 <= len(value) <= 20 or not value.isascii() or not value.isdecimal():
@@ -137,6 +127,15 @@ class _MjpegFrames:
                 completed = decimal("x-desk-camera-complete-us")
             except (UnicodeError, KeyError, TypeError, ValueError) as exc:
                 raise ValueError("Malformed MJPEG part headers") from exc
+            # Keep a wrong robot ID distinguishable from corrupt transport
+            # framing. Wrong-pet frames are never admitted to the vision hub.
+            identity = headers.get("x-desk-camera-robot-id")
+            if (not isinstance(identity, str)
+                    or re.fullmatch(r"[a-zA-Z0-9_-]{1,48}", identity) is None):
+                raise ValueError("MJPEG camera robot identity missing or malformed")
+            if (self.expected_robot_id is not None
+                    and identity != self.expected_robot_id):
+                raise ValueError("MJPEG camera robot identity mismatch")
             if not (4 <= size <= 512 * 1024 and 0 <= boot <= 0xffffffff
                     and 1 <= sequence <= 0xffffffff and completed > 0):
                 raise ValueError("MJPEG source bounds invalid")
