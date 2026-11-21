@@ -204,3 +204,26 @@ def test_original_licensed_fusion_meshes_are_revision_pinned(tmp_path):
     first.unlink()
     with pytest.raises(FileNotFoundError, match="Missing original CAD source"):
         verify(tmp_path)
+
+def test_power_and_dock_seat_measurements_are_separate_physical_inputs():
+    """Do not collapse omitted power hardware or two seat switches into placeholders."""
+    sheet = (ROOT / "docs/cad/FUSION_MEASUREMENT_SHEET.md").read_text(
+        encoding="utf-8"
+    )
+    required = (
+        "pack_body_w / pack_body_l / pack_body_h",
+        "pack_connector_w / pack_connector_l / pack_connector_h",
+        "pack_lead_free_l / pack_lead_awg / pack_lead_bend_r",
+        "charger_w / charger_l / charger_h / charger_service_clearance",
+        "boost_w / boost_l / boost_h / boost_thermal_clearance",
+        "fuse_envelope / switch_envelope / power_strain_relief",
+        "battery_service_clearance",
+        "dock_seat_body / dock_seat_mount_pitch / dock_seat_hole_d",
+        "dock_seat_fp / dock_seat_op / dock_seat_overtravel",
+        "dock_seat_wire_clearance",
+    )
+    assert all(item in sheet for item in required)
+    assert "Battery and charge/boost enclosure width / length / height" not in sheet
+    assert "dock_seat_left / dock_seat_right / dock_seat_overtravel" not in sheet
+    assert "Do not fabricate any blank measurement" in sheet
+
