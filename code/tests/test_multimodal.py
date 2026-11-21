@@ -1330,6 +1330,49 @@ async def test_voice_vision_tool_gets_real_authenticated_head_frames_without_act
 
 
 
+@pytest.mark.parametrize("revoke_and_regrant", [False, True])
+async def test_visual_model_regrant_during_inference_cannot_restore_old_grant(
+    settings, revoke_and_regrant,
+):
+    """A new camera grant cannot revive an answer begun on revoked frames."""
+    settings.voice_vision_tools_enabled = True
+    settings.vision_model = "local-vlm"
+    entered, release = asyncio.Event(), asyncio.Event()
+    robot_id = settings.robots[0].id
+
+    class HeldVision:
+        async def answer(self, question, frames):
+            assert frames and question == "What is on the desk?"
+            entered.set()
+            await release.wait()
+            return "old private scene"
+
+    service = MultimodalOrchestrator(
+        settings, {robot_id: Head()}, HeldVision(), asyncio.Lock(),
+    )
+    try:
+        task = asyncio.create_task(service.look(robot_id, "What is on the desk?"))
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        before = settings.camera_consent_generation
+        if revoke_and_regrant:
+            settings.voice_vision_tools_enabled = False
+            settings.voice_vision_tools_enabled = True
+            assert settings.camera_consent_generation > before
+        release.set()
+        if revoke_and_regrant:
+            with pytest.raises(RuntimeError, match="Camera consent revoked"):
+                await asyncio.wait_for(task, timeout=2)
+            assert service.hub.recent_tool_context(robot_id, time.monotonic()) == []
+            assert service._metrics[robot_id]["visual_answers"] == 0
+        else:
+            response = await asyncio.wait_for(task, timeout=2)
+            assert response["answer"] == "old private scene"
+            assert len(service.hub.recent_tool_context(robot_id, time.monotonic())) == 1
+    finally:
+        release.set()
+        await service.close()
+
+
 async def test_visual_model_revoke_during_inference_cannot_publish_answer_or_receipt():
     policy = config()
 

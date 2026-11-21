@@ -1700,6 +1700,10 @@ class MultimodalOrchestrator:
         if (not self.settings.voice_vision_tools_enabled
                 or not self.settings.vision_model):
             raise ValueError("Enable local voice vision and install a vision model")
+        # Consent revocation is permanent for this request, even after regrant.
+        camera_consent_generation = getattr(
+            self.settings, "camera_consent_generation", None
+        )
         if not isinstance(question, str) or not 3 <= len(question.strip()) <= 280:
             raise ValueError("A short real visual question is required")
         if self._closed:
@@ -1792,6 +1796,10 @@ class MultimodalOrchestrator:
             if not self.settings.voice_vision_tools_enabled:
                 # Revoking consent during the slow model call must not
                 # publish a private scene guess into Mac memory or a reply.
+                raise RuntimeError("Camera consent revoked during visual analysis")
+            if (camera_consent_generation is not None
+                    and getattr(self.settings, "camera_consent_generation", None)
+                    != camera_consent_generation):
                 raise RuntimeError("Camera consent revoked during visual analysis")
             if time.monotonic() - chosen[-1].received_at > 16:
                 raise RuntimeError("Camera observation expired during visual analysis")
