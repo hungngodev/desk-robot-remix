@@ -249,6 +249,7 @@ class HttpHead:
         counters = (
             "reference_underflow_reads", "reference_overwrite_reads",
             "discarded_stale_writes", "short_output_writes",
+            "microphone_frames_read", "speaker_frames_accepted",
         )
         if (data.get("robot_id") != self.config.id
                 or type(data.get("boot")) is not int
