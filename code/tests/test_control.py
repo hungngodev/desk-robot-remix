@@ -1402,6 +1402,7 @@ async def test_hardware_exploration_camera_grant_checked_after_health_await(
     settings.voice_vision_tools_enabled = True
     c, head = make(settings)
     jpeg = await head.snapshot()
+    await head.command("arm")  # Same simulated motor permit as existing live-frame test.
     paused = asyncio.Event()
     release = asyncio.Event()
     health_reads = 0
