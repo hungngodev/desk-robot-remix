@@ -28,7 +28,11 @@ from procurement_release import (
     SUPPLEMENTAL_DECISIONS,
     SYSTEM_GATES,
 )
-from verify_playbook_receipts import verified_raw_record
+from verify_playbook_receipts import (
+    reject_nonfinite_receipt_value,
+    strict_receipt_object,
+    verified_raw_record,
+)
 from verify_system import source_snapshot
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -161,7 +165,10 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
         raw = base64.b64decode("".join(file["content"].split()), validate=True)
         if len(raw) != file["size"]:
             return False
-        document = json.loads(raw.decode("utf-8"))
+        document = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=strict_receipt_object,
+            parse_constant=reject_nonfinite_receipt_value,
+        )
     except (ValueError, TypeError, UnicodeError, binascii.Error):
         return False
     rows = document.get("receipts") if type(document) is dict else None

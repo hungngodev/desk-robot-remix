@@ -153,6 +153,39 @@ def test_real_prior_leap_day_can_be_verified_against_matching_immutable_record()
     )
 
 
+def test_pinned_procurement_json_rejects_ambiguous_duplicate_receipt_fields():
+    gate = release.PART_GATES[0]
+    item = receipt("part:imu", gate)
+    good = lookup(URL, records=[item])
+    raw = base64.b64decode(good["content"]).decode()
+    assert release.verified_scoped_record(item, SHA, lambda _: good)
+    for changed in (
+        raw.replace('"result": "pass"',
+                    '"result": "fail", "result": "pass"'),
+        raw.replace('"observed": "trial', '"observed": NaN, "observed": "trial'),
+    ):
+        data = changed.encode()
+        response = {**good, "size": len(data),
+                    "content": base64.b64encode(data).decode()}
+        assert not release.verified_scoped_record(
+            item, SHA, lambda _, payload=response: payload,
+        )
+
+
+def test_common_physical_json_receipt_decoder_rejects_nonfinite_and_duplicates():
+    from verify_playbook_receipts import (
+        reject_nonfinite_receipt_value, strict_receipt_object,
+    )
+    for malformed in (
+        '{"result":"fail","result":"pass"}',
+        '{"measurement":{"x":NaN}}',
+        '{"measurement":{"x":Infinity}}',
+    ):
+        with pytest.raises(ValueError):
+            json.loads(malformed, object_pairs_hook=strict_receipt_object,
+                       parse_constant=reject_nonfinite_receipt_value)
+
+
 def test_existing_file_without_claim_cannot_release_purchase():
     gate = release.PART_GATES[0]
     original = receipt("part:imu", gate)

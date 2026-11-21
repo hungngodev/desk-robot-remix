@@ -89,6 +89,20 @@ def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
 
 
 
+def strict_receipt_object(pairs: list[tuple[str, object]]) -> dict:
+    """Reject ambiguous duplicate keys at any JSON receipt nesting depth."""
+    result = {}
+    for name, value in pairs:
+        if name in result:
+            raise ValueError("Duplicate physical receipt JSON key")
+        result[name] = value
+    return result
+
+
+def reject_nonfinite_receipt_value(value: str) -> None:
+    raise ValueError("Nonfinite physical receipt JSON token: " + value)
+
+
 def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
     """Require the immutable data file to identify the measured procedure.
 
@@ -125,7 +139,10 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
                 return False
             records = list(reader)
         elif urlsplit(url).path.lower().endswith(".json"):
-            document = json.loads(content)
+            document = json.loads(
+                content, object_pairs_hook=strict_receipt_object,
+                parse_constant=reject_nonfinite_receipt_value,
+            )
             records = document.get("receipts") if isinstance(document, dict) else None
         else:
             return False
@@ -155,7 +172,8 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
     tested_on = record.get("tested_on")
     try:
         valid_date = (isinstance(tested_on, str)
-                      and date.fromisoformat(tested_on).isoformat() == tested_on)
+                      and date.fromisoformat(tested_on).isoformat() == tested_on
+                      and date.fromisoformat(tested_on) <= date.today())
     except ValueError:
         valid_date = False
     return bool(

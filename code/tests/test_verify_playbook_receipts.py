@@ -183,6 +183,62 @@ def test_immutable_procedure_identity_rejects_boolean_float_or_padded_ids():
             row, SHA, lambda url, v=invalid: identity_lookup(url, v))
 
 
+def test_physical_json_rejects_duplicate_pass_key_and_nonfinite_measurement():
+    row = promoted("MEASURED")["procedures"][0]
+    row["physical_measurement_receipt"]["raw_data_url"] = RAW.replace(
+        "bench.csv", "duplicate.json",
+    )
+    signoff = row["physical_measurement_receipt"]
+    original = {
+        "procedure_id": 9, "source_sha": SHA, "gate": "MEASURED",
+        "result": "pass", "operator": signoff["operator"],
+        "device_revision": signoff["device_revision"],
+        "tested_on": signoff["tested_on"],
+        "measurement": {"lift_mm": 10},
+    }
+    good = json.dumps({"receipts": [original]})
+    def signed_file(url, contents):
+        if "/contents/" not in url:
+            return lookup(url)
+        data = contents.encode()
+        return {"type": "file", "size": len(data), "encoding": "base64",
+                "content": base64.b64encode(data).decode()}
+
+    assert verify.verified_procedure_record(
+        row, SHA, lambda url: signed_file(url, good))
+    for corrupt in (
+        good.replace('"result": "pass"',
+                     '"result": "fail", "result": "pass"'),
+        good.replace('"lift_mm": 10', '"lift_mm": NaN'),
+        good.replace('"lift_mm": 10', '"lift_mm": Infinity'),
+    ):
+        assert not verify.verified_procedure_record(
+            row, SHA, lambda url, raw=corrupt: signed_file(url, raw))
+
+
+def test_future_date_is_not_a_completed_physical_playbook_trial():
+    from datetime import date, timedelta
+
+    row = promoted("MEASURED")["procedures"][0]
+    signoff = row["physical_measurement_receipt"]
+    signoff["tested_on"] = (date.today() + timedelta(days=1)).isoformat()
+    signoff["raw_data_url"] = RAW.replace("bench.csv", "future.json")
+    record = {
+        "procedure_id": 9, "source_sha": SHA, "gate": "MEASURED",
+        "result": "pass", "operator": signoff["operator"],
+        "device_revision": signoff["device_revision"],
+        "tested_on": signoff["tested_on"],
+        "measurement": {"lift_mm": 10},
+    }
+    data = json.dumps({"receipts": [record]}).encode()
+    def signed_file(url):
+        if "/contents/" not in url:
+            return lookup(url)
+        return {"type": "file", "size": len(data), "encoding": "base64",
+                "content": base64.b64encode(data).decode()}
+    assert not verify.verified_procedure_record(row, SHA, signed_file)
+
+
 def test_unavailable_api_cannot_approve_evidence():
     def offline(_):
         raise URLError("offline")
