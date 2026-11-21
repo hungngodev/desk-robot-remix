@@ -3935,7 +3935,11 @@ async def test_failed_or_cancelled_face_post_does_not_consume_mood_cooldown(flee
     await pet._cue_decided_face(robot.id, "surprised", lambda: True)
     assert len(head.calls) == 2
 
+    # Reset the separate failed-attempt throttle before deliberately
+    # injecting cancellation. Only clearing the acknowledged cooldown
+    # leaves the attempted HTTP cue suppressed and tests no cancellation.
     state.last_model_face_cue_at = float("-inf")
+    state.last_model_face_attempt_at = float("-inf")
     head.failure = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         await pet._cue_decided_face(robot.id, "surprised", lambda: True)
