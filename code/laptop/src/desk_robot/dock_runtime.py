@@ -106,8 +106,11 @@ async def observe_actual_dock(head, robot) -> dict:
         # The native AprilTag slot must not be occupied by an alternate
         # head snapshot that suppresses coroutine cancellation indefinitely.
         from .controller import _bounded_head_reply
+        # Read-only dock diagnostics should see the same current MJPEG
+        # receipt as a guarded approach, not a near-one-second-old frame.
+        capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
         jpeg = await _bounded_head_reply(
-            head.snapshot(), seconds=3.0,
+            capture_dock(), seconds=3.0,
             timeout_message="Dock diagnostic camera snapshot timeout",
         )
     except (OSError, ConnectionError, TimeoutError, RuntimeError, ValueError) as exc:
