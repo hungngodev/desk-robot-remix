@@ -260,9 +260,17 @@ def valid_physical_signoff(receipt: object) -> bool:
 
 def audit(ledger: dict, lookup=github_json) -> list[str]:
     """Return failures, never turn network errors into a success receipt."""
+    if type(ledger) is not dict:
+        return ["incomplete procedure ledger: expected JSON object"]
+    rows = ledger.get("procedures")
+    if type(rows) is not list:
+        return ["incomplete procedure ledger: missing procedures array"]
     errors: list[str] = []
     states = {"OPEN", "TESTED", "MEASURED", "QUALIFIED"}
-    for row in ledger.get("procedures", []):
+    for row in rows:
+        if type(row) is not dict:
+            errors.append("procedure unknown: expected object")
+            continue
         identifier = row.get("id", "unknown")
         if type(identifier) is not int or not 1 <= identifier <= 96:
             errors.append(f"procedure {identifier}: invalid procedure id")
@@ -329,6 +337,21 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
                 errors.append(
                     f"procedure {identifier}: physical lookup failed: {type(exc).__name__}"
                 )
+    # A stand-alone online audit is a release-facing command. It must not
+    # succeed on a shortened or replaced ledger simply because every remaining
+    # OPEN row has no online receipt to check. Preserve detailed row failures
+    # above and validate the full canonical procedure universe here.
+    if (type(ledger.get("schema_version")) is not int
+            or ledger["schema_version"] != 2
+            or ledger.get("canonical_repository") != REPO
+            or type(ledger.get("canonical_pr")) is not int
+            or ledger["canonical_pr"] != 17
+            or type(ledger.get("procedure_count")) is not int
+            or ledger["procedure_count"] != 96):
+        errors.append("incomplete procedure ledger: canonical metadata mismatch")
+    ids = [row.get("id") if type(row) is dict else None for row in rows]
+    if len(rows) != 96 or ids != list(range(1, 97)):
+        errors.append("incomplete procedure ledger: expected exactly 96 unique ordered IDs 1..96")
     return errors
 
 

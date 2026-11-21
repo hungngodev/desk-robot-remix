@@ -55,13 +55,27 @@ def promoted(gate="TESTED"):
     }]}
 
 
+def full_ledger_with(one_row=None):
+    """Use the real 96-row OPEN ledger for successful online audit fixtures."""
+    source = ROOT / "docs/reviews/100_page_procedure_trace.json"
+    ledger = json.loads(source.read_text(encoding="utf-8"))
+    if one_row is not None:
+        identifier = one_row["id"]
+        ledger["procedures"][identifier - 1] = {
+            **ledger["procedures"][identifier - 1], **one_row,
+        }
+    return ledger
+
+
 def test_open_playbook_requires_no_network():
-    assert verify.audit({"procedures": [{"id": 89, "gate": "OPEN"}]},
-                        lambda url: 1 / 0) == []
+    assert verify.audit(full_ledger_with(), lambda url: 1 / 0) == []
+    partial = {"procedures": [{"id": 89, "gate": "OPEN"}]}
+    assert any("incomplete procedure ledger" in err
+               for err in verify.audit(partial, lambda url: 1 / 0))
 
 
 def test_verified_run_and_pinned_physical_record_paths():
-    assert verify.audit(promoted("MEASURED"), lookup) == []
+    assert verify.audit(full_ledger_with(promoted("MEASURED")["procedures"][0]), lookup) == []
     assert verify.verified_actions_run(RUN, SHA, lookup)
     assert verify.verified_raw_record(RAW, SHA, lookup)
 
@@ -318,7 +332,7 @@ def test_online_manual_review_requires_real_matching_pr_comment():
             }
         return lookup(url)
 
-    assert verify.audit(manually_reviewed, reviewed) == []
+    assert verify.audit(full_ledger_with(row), reviewed) == []
     bad = row["manual_review_receipt"]
     bad["reviewer"] = "unknown"
     assert any(
@@ -419,3 +433,39 @@ def test_online_audit_rejects_invalid_procedure_ids_without_network():
         bad["procedures"][0]["id"] = identifier
         errors = verify.audit(bad, lambda _: 1 / 0)
         assert any("invalid procedure id" in problem for problem in errors)
+
+
+def test_standalone_audit_refuses_truncated_duplicate_or_foreign_ledgers():
+    """The CLI must not report success when required gates disappear."""
+    import copy
+
+    complete = full_ledger_with()
+    assert verify.audit(complete, lambda _: 1 / 0) == []
+    variants = []
+    empty = copy.deepcopy(complete)
+    empty["procedures"] = []
+    variants.append(empty)
+    lone = copy.deepcopy(complete)
+    lone["procedures"] = lone["procedures"][:1]
+    variants.append(lone)
+    duplicate = copy.deepcopy(complete)
+    duplicate["procedures"][95] = copy.deepcopy(duplicate["procedures"][94])
+    variants.append(duplicate)
+    missing_physical = copy.deepcopy(complete)
+    missing_physical["procedures"].pop(88)
+    variants.append(missing_physical)
+    out_of_order = copy.deepcopy(complete)
+    out_of_order["procedures"][0], out_of_order["procedures"][1] = (
+        out_of_order["procedures"][1], out_of_order["procedures"][0]
+    )
+    variants.append(out_of_order)
+    for field, fake in (
+        ("schema_version", 1), ("canonical_repository", "someone/other"),
+        ("canonical_pr", 18), ("procedure_count", 1),
+    ):
+        mismatched = copy.deepcopy(complete)
+        mismatched[field] = fake
+        variants.append(mismatched)
+    for invalid in variants:
+        errors = verify.audit(invalid, lambda _: 1 / 0)
+        assert any("incomplete procedure ledger" in error for error in errors)
