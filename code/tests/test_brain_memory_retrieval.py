@@ -453,9 +453,13 @@ def test_live_situation_is_available_without_persistent_memory_consent(
                 "/v1/pet/unconfigured/interaction-context", headers=tool
             ).status_code == 404
             settings.voice_vision_tools_enabled = False
-            assert client.get(
+            cam_off = client.get(
                 "/v1/pet/robot-01/interaction-context", headers=tool
-            ).status_code == 403
+            )
+            assert cam_off.status_code == 200
+            assert [cue["channel"] for cue in cam_off.json()[
+                "current_interaction_timeline"
+            ]] == ["sensor", "tool"]
         finally:
             runtime.multimodal = None
 

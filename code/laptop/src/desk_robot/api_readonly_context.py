@@ -114,8 +114,6 @@ def register_readonly_context_routes(
             settings.robot(robot_id)
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
-        if not settings.voice_vision_tools_enabled:
-            raise HTTPException(403, "Opt in to live camera/sensor context first")
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None:
             raise OperationError("No current multimodal camera/sensor owner")
@@ -152,6 +150,15 @@ def register_readonly_context_routes(
         timeline = visual.hub.interaction_timeline(
             robot_id, now, limit=10 - len(activity) - len(continuity)
         )
+        if not settings.voice_vision_tools_enabled:
+            # Opting out of camera questions excludes camera frames while
+            # preserving WROOM touch, handling, and physical safety events.
+            timeline = [
+                item for item in timeline
+                if item.get("channel") != "camera"
+                and not (item.get("channel") == "sensor"
+                         and item.get("kind") == "camera_face")
+            ]
         # The shared station has a separate opt-in. Revocation cannot be
         # bypassed by a still-fresh room sample cached in the RAM hub.
         if not settings.room_station_context_enabled:

@@ -54,11 +54,13 @@ jobs:
             tests/test_realtime_omni_protocol.py \
             tests/test_native_omni_xiaozhi.py \
             tests/test_voice_memory_reuse.py \
+            tests/test_battery_voice_voltage_integrity.py \
             tests/test_pet.py \
             tests/test_control.py::test_hardware_fleet_allows_only_one_moving_pet_until_acknowledged_stop \
             tests/test_control.py::test_fleet_motion_owner_latches_failed_stop_until_explicit_recovery \
             tests/test_stop_transport_failure.py::StopTransportFailureTests::test_cooperative_job_cancellation_preserves_failed_physical_stop \
             tests/test_stop_transport_failure.py::StopTransportFailureTests::test_terminal_stop_halts_body_but_short_pulse_preserves_arm \
+            tests/test_stop_transport_failure.py::StopTransportFailureTests::test_urgent_halt_bypasses_stalled_status_request \
             tests/test_vision_worker.py::test_scene_comparator_unhashable_model_kind_is_rejected_without_crash \
             tests/test_multimodal.py::test_unhashable_multimodal_cues_are_rejected_without_mutation \
             tests/test_multimodal_api.py::test_mac_semantic_planner_rejects_late_plan_after_new_human_vad \

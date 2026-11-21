@@ -42,7 +42,7 @@ def register_readonly_planner_routes(
             settings.robot(robot_id)
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
-        if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
+        if settings.mode != "hardware":
             raise HTTPException(403, "Native observation planning is disabled")
         transcript = " ".join(request.transcript.split())
         if not transcript or "\x00" in transcript:
@@ -69,6 +69,13 @@ def register_readonly_planner_routes(
             timeline = visual.hub.interaction_timeline(
                 robot_id, time.monotonic(), limit=10
             )
+            if not settings.voice_vision_tools_enabled:
+                timeline = [
+                    entry for entry in timeline
+                    if entry.get("channel") != "camera"
+                    and not (entry.get("channel") == "sensor"
+                             and entry.get("kind") == "camera_face")
+                ]
             if not settings.voice_memory_tools_enabled:
                 timeline = [entry for entry in timeline
                             if not (entry.get("channel") == "tool"
@@ -78,6 +85,12 @@ def register_readonly_planner_routes(
                     entry for entry in timeline
                     if entry.get("channel") != "room_station"
                 ]
+        camera_context_used = any(
+            item.get("channel") == "camera"
+            or (item.get("channel") == "sensor"
+                and item.get("kind") == "camera_face")
+            for item in timeline
+        )
         room_context_used = any(
             item.get("channel") == "room_station" for item in timeline
         )
@@ -121,7 +134,7 @@ def register_readonly_planner_routes(
             raise HTTPException(409, "Read-only plan superseded by a newer human turn")
         # Slow Ollama planning may finish after live consent is withdrawn.
         # Do not return executable selections from an obsolete private prompt.
-        if not settings.voice_vision_tools_enabled:
+        if camera_context_used and not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Live observation consent revoked during planning")
         if private_context_used and not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Private memory consent revoked during planning")
@@ -323,7 +336,9 @@ def register_readonly_planner_routes(
                 continue
             if recall_only and route != "voice-context":
                 continue
-            if route == "look" and not visual_question:
+            if route == "look" and (
+                not settings.voice_vision_tools_enabled or not visual_question
+            ):
                 continue
             if route == "power-status" and not battery_question:
                 continue

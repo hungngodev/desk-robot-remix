@@ -229,9 +229,10 @@ def register_voice_context_route(
         # One existing per-head camera/sensor/tool hub, not an extra agent.
         # Keep historical text and current transient cues separate so a
         # model cannot reinterpret yesterday's memory as today's sighting.
+        vision_at_start = settings.voice_vision_tools_enabled
         visual = getattr(app.state.runtime, "multimodal", None)
         sensor_cues, tool_cues, timeline = [], [], []
-        if settings.voice_vision_tools_enabled and visual is not None:
+        if visual is not None:
             clock = time.monotonic()
             sensor_cues = visual.hub.recent_events(robot_id, clock)
             recent_tools = getattr(visual.hub, "recent_tool_context", None)
@@ -240,6 +241,13 @@ def register_voice_context_route(
             ordered = getattr(visual.hub, "interaction_timeline", None)
             if callable(ordered):
                 timeline = ordered(robot_id, clock, limit=10)
+            if not vision_at_start:
+                timeline = [
+                    item for item in timeline
+                    if item.get("channel") != "camera"
+                    and not (item.get("channel") == "sensor"
+                             and item.get("kind") == "camera_face")
+                ]
         core = await asyncio.to_thread(
             app.state.runtime.memory.core_facts, robot_id, limit=8
         )
@@ -247,11 +255,17 @@ def register_voice_context_route(
         # during that read invalidates the entire current private tool reply.
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Voice memory consent revoked during read")
-        # Camera and interaction consent can be revoked while the SQLite
-        # core-fact query yields. Never return previously collected live cues
-        # after that independent opt-out.
-        if not settings.voice_vision_tools_enabled:
+        # Camera consent revoked while the SQLite core-fact query yielded.
+        # Discard cues collected under the previous live vision permit.
+        if vision_at_start and not settings.voice_vision_tools_enabled:
             sensor_cues, tool_cues, timeline = [], [], []
+        elif not settings.voice_vision_tools_enabled:
+            timeline = [
+                item for item in timeline
+                if item.get("channel") != "camera"
+                and not (item.get("channel") == "sensor"
+                         and item.get("kind") == "camera_face")
+            ]
         # Room USB context has independent consent; a cached sample read
         # before SQLite yielded must disappear if the operator opted out.
         if not settings.room_station_context_enabled:

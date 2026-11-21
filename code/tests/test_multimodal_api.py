@@ -102,7 +102,15 @@ def test_mac_existing_ollama_selects_only_consented_readonly_tools(
             json=request,
         ).status_code == 404
         settings.voice_vision_tools_enabled = False
-        assert client.post(url, headers=headers, json=request).status_code == 403
+        cam_off = client.post(url, headers=headers, json=request)
+        assert cam_off.status_code == 200
+        assert [tool["route"] for tool in cam_off.json()["tools"]] == [
+            "power-status",
+        ]
+        visual_only = {"transcript": "Could you inspect the desk?"}
+        visual_resp = client.post(url, headers=headers, json=visual_only)
+        assert visual_resp.status_code == 200
+        assert visual_resp.json()["tools"] == []
 
 
 
@@ -210,7 +218,7 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
     import time
     from types import SimpleNamespace
 
-    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.multimodal import CameraEvidence, CameraFrameHub
 
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
@@ -221,6 +229,10 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
         hub.remember_tool(
             robot, "memory_recall", "A private historical personal preference",
             time.monotonic(),
+        )
+    else:
+        hub.frames[robot].append(
+            CameraEvidence(b"\xff\xd8fake", time.monotonic(), 0.05, "proactive"),
         )
 
     class Model:
@@ -2248,7 +2260,12 @@ def test_live_interaction_includes_operator_job_without_peer_leak(
         assert finished.status_code == 200
         assert "Mac operator-submitted" not in finished.json()["model_context"]
         settings.voice_vision_tools_enabled = False
-        assert client.get(url, headers=headers).status_code == 403
+        cam_off = client.get(url, headers=headers)
+        assert cam_off.status_code == 200
+        assert all(
+            item.get("channel") != "camera"
+            for item in cam_off.json()["current_interaction_timeline"]
+        )
 
 
 def test_readonly_planner_does_not_treat_casual_visual_words_as_camera_permission(

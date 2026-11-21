@@ -600,3 +600,158 @@ def test_voice_memory_context_strips_room_if_station_opt_out_during_sqlite(setti
             for item in payload["current_interaction_timeline"]
         )
         assert payload["no_new_motion_permission"] is True
+
+
+def test_interaction_context_serves_wroom_touch_and_fault_when_camera_disabled(settings):
+    """WROOM touch and safety faults survive in interaction context without camera consent."""
+    import time
+
+    from desk_robot.api_readonly_context import register_readonly_context_routes
+    from desk_robot.multimodal import CameraEvidence, CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    hub.notify("robot-01", "touch_tap", now)
+    hub.notify("robot-01", "safety_fault", now)
+    hub.frames["robot-01"].append(
+        CameraEvidence(b"\xff\xd8fake", now, 0.05, "proactive"),
+    )
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=SimpleNamespace(hub=hub),
+        coordinator=SimpleNamespace(jobs={}),
+        attention=None, conversation=None,
+    )
+    register_readonly_context_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: app.state.runtime.coordinator,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+        native_pet_speech_policy=lambda robot_id: {},
+    )
+    with TestClient(app) as client:
+        result = client.get("/v1/pet/robot-01/interaction-context")
+        assert result.status_code == 200
+        payload = result.json()
+        timeline = payload["current_interaction_timeline"]
+        kinds = [item.get("kind") for item in timeline]
+        assert "touch_tap" in kinds
+        assert "safety_fault" in kinds
+        # Camera frame must be excluded under camera opt-out
+        assert all(item.get("channel") != "camera" for item in timeline)
+        assert payload["motor_authorized"] is False
+        assert payload["model_context_untrusted_not_instructions"] is True
+
+
+def test_voice_context_serves_wroom_touch_and_fault_when_camera_disabled(settings):
+    """WROOM touch and safety fault cues survive in voice context under camera privacy."""
+    import time
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from desk_robot.multimodal import CameraEvidence, CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = False
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    hub.notify("robot-01", "touch_tap", now)
+    hub.notify("robot-01", "safety_fault", now)
+    hub.frames["robot-01"].append(
+        CameraEvidence(b"\xff\xd8fake", now, 0.05, "proactive"),
+    )
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            return []
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=SimpleNamespace(hub=hub),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+    )
+    with TestClient(app) as client:
+        result = client.get("/v1/pet/robot-01/voice-context")
+        assert result.status_code == 200
+        payload = result.json()
+        sensor_kinds = [cue.get("kind") for cue in payload["live_sensor_cues"]]
+        assert "touch_tap" in sensor_kinds
+        assert "safety_fault" in sensor_kinds
+        assert all(item.get("channel") != "camera" for item in payload["current_interaction_timeline"])
+
+
+def test_plan_readonly_selects_status_and_interaction_tools_when_camera_disabled(settings):
+    """Semantic route planner selects permitted nonvisual tools even when camera is disabled."""
+    import json
+    import time
+
+    from desk_robot.api_readonly_planner import register_readonly_planner_routes
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    settings.voice_memory_tools_enabled = False
+    hub = CameraFrameHub(["robot-01"])
+    hub.notify("robot-01", "touch_tap", time.monotonic())
+
+    class Planner:
+        def __init__(self):
+            self.calls = []
+
+        async def reply(self, history):
+            self.calls.append(history)
+            return json.dumps({"tools": [
+                {"route": "look"},
+                {"route": "status"},
+                {"route": "interaction-context"},
+            ]})
+
+    planner = Planner()
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=SimpleNamespace(hub=hub),
+        conversation=SimpleNamespace(chat=planner),
+    )
+    register_readonly_planner_routes(app, settings, authorize=lambda: None)
+    with TestClient(app) as client:
+        # 1. Nonvisual status question: look is dropped, status is kept
+        res_status = client.post(
+            "/v1/pet/robot-01/plan-readonly",
+            json={"transcript": "What is your safety status?"},
+        )
+        assert res_status.status_code == 200
+        tools = [t["route"] for t in res_status.json()["tools"]]
+        assert tools == ["status"]
+        assert res_status.json()["motor_authorized"] is False
+
+        # 2. Touch question: look is dropped, interaction-context is kept
+        res_touch = client.post(
+            "/v1/pet/robot-01/plan-readonly",
+            json={"transcript": "Did I touch you?"},
+        )
+        assert res_touch.status_code == 200
+        tools_touch = [t["route"] for t in res_touch.json()["tools"]]
+        assert tools_touch == ["interaction-context"]
+
+        # 3. Purely visual question: look is dropped, result is empty tools
+        res_visual = client.post(
+            "/v1/pet/robot-01/plan-readonly",
+            json={"transcript": "Could you inspect the desk?"},
+        )
+        assert res_visual.status_code == 200
+        assert res_visual.json()["tools"] == []

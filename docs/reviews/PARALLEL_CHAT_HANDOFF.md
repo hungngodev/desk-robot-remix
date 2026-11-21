@@ -1,3 +1,35 @@
+## 21 November 2026: Camera consent decoupling for nonvisual tools, WROOM physical event preservation, and fast-lane CI integration
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `7f57ce16cb1aeb97734f1e58e6e58988a6dca50a`.
+This source and test batch does not close physical or commercial gates.
+
+* Decoupled model planning authorization from visual acquisition consent:
+  - In `code/laptop/src/desk_robot/api_readonly_planner.py`, separated model planning authorization
+    from visual acquisition consent (`voice_vision_tools_enabled`). Model route planning operates
+    in hardware mode, while visual `look` strictly requires `voice_vision_tools_enabled`.
+  - Nonvisual tools (`status`, `power-status`, `aux-status`, `latest-pickup`, `interaction-context`,
+    and consented `voice-context`) survive semantic planning even when camera questions are disabled.
+  - In compound requests (e.g. "inspect the desk and battery"), `look` is cleanly omitted under camera
+    opt-out while `power-status` is preserved. Purely visual requests return `tools: []`.
+* Preserved WROOM touch and physical safety cues in read-only and voice context:
+  - In `code/laptop/src/desk_robot/api_readonly_context.py` (`/v1/pet/{robot_id}/interaction-context`),
+    removed the blanket HTTP 403 on camera opt-out. Nonvisual WROOM touch (`touch_tap`), handling,
+    and physical safety faults (`safety_fault`), coordinator activity, and attention continuity are
+    served, while camera frames (`channel == "camera"`) and face detections are excluded.
+  - In `code/laptop/src/desk_robot/api_memory_routes.py` (`/v1/pet/{robot_id}/voice-context`),
+    preserved `sensor_cues` (physical WROOM events and human voice) and `tool_cues` when camera is
+    disabled from the start, filtering out only camera frames from `timeline`. If vision was active
+    at start and revoked during SQLite read, live cues collected under the vision permit are cleared.
+* Fast-lane Mac CI coverage and lint:
+  - Added `tests/test_battery_voice_voltage_integrity.py` and
+    `tests/test_stop_transport_failure.py::StopTransportFailureTests::test_urgent_halt_bypasses_stalled_status_request`
+    to `Mac conversation and memory regression` in `.github/workflows/host-verification.yml`.
+  - Added unit regressions in `code/tests/test_api_readonly_context_split.py`, `test_multimodal_api.py`,
+    and `test_brain_memory_retrieval.py` covering WROOM touch/fault survival under camera opt-out.
+  - Cleaned unused variable assignment in `code/tests/test_screen_assembly_stability.py`; full suite
+    passes `uv run ruff check .` with 0 errors and Mac fast regression lane passes 1,049/1,049 tests.
+
 ## 21 November 2026: 5/5 green CI run 44932709818, battery preflight thread resolution, fleet STOP leases, eyewitness memory preservation, and native speech capacity bounds
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
