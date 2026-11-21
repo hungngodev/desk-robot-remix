@@ -39,7 +39,7 @@ Source [one_robot_adapter_kit.scad](one_robot_adapter_kit.scad) is original CC0 
 | Part | One robot qty | Use |
 | --- | --- | --- |
 | head_bridge | 1 | Centered slotted head/body spacer |
-| tof_adjustable | 8 | One VL53L0X GY-530 candidate bracket per direction |
+| tof_adjustable | 8 provisional | GY-530 optical aperture and angle reference, NOT a retained PCB mount. The pilot still needs measured clips, fastening and lens offset |
 | oled_bezel | 1 | SSD1306 aperture |
 | speaker_grille | 1 | Perforated front plate for current 20 x 16 mm Challenge 2 W rectangular speaker, not sealed soundbox |
 | fsr_jaw_pocket | 1 | Force pad jaw holder |
@@ -51,6 +51,14 @@ Regenerate with `openscad -o head_bridge.stl -D 'part="head_bridge"' one_robot_a
 The rectangular front grille and [separate speaker pocket gauge](speaker_rect_fit_gauge.scad) follow the fixed Challenge Electronics CS20-02P110-04-1X 8 ohm 2 W envelope, 20 x 16 x 4.7 mm. The earlier round 20 mm 1 W front geometry was retired. Neither print provides the qualified one cubic centimeter sealed speaker enclosure, pad clearance, thermal testing or microphone double talk. These remain mandatory physical steps before ordering five speakers.
 
 **Fusion 360 workflow for complete robot**: follow [FUSION_ONE_ROBOT_ASSEMBLY.md](../FUSION_ONE_ROBOT_ASSEMBLY.md). Ground the original 28BYJ48 SMARS chassis, import existing wheel/track/lift/Bluino pinion and rack/Sparky head STL meshes individually in millimeters, assemble with real moving joints, and then insert these adapter meshes as candidate geometry. The head must face exactly forward; camera, mic, speaker and all 8 ToF lens sweeps need clear view. Measure real screw spacing, lens offsets, servo horn and pack before changing these parameters. Use **Mesh > Convert Mesh** only where an editable solid is needed. Native Fusion components for adapter plates are preferable to stretching the original gripper gear teeth.
+
+**Sensor mounting hold:** The nominal 10.5 mm GY-530 carrier is too
+narrow for the former assumed paired screw slots, which overlapped the lens
+aperture. Those unmeasured holes were removed from `tof_adjustable`.
+The base mounting slots remain, but the reference does not retain a PCB.
+Print the fit coupon and measure real carrier width, thickness, connector,
+lens position and any mounting features before designing a captive clamp.
+Do not install eight of these as qualified cliff sensing mounts.
 
 **Grasp tuning**: Print the existing MG90S fit coupons first. The jaw FSR pocket is only a cable-safe pad; the controlled incremental closure is in `code/laptop/src/desk_robot/grasp_feedback.py`. It requires two distinct measured ADC conversions and actual calibration values. Neither a watertight STL nor a simulated code test proves lifting force.
 
