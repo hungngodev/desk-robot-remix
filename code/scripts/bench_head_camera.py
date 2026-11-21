@@ -187,6 +187,9 @@ async def measure(
     await asyncio.gather(
         receive_stream() if stream else poll_camera(), poll_status()
     )
+    # End the camera/status measurement interval BEFORE the optional AEC
+    # GET. A slow diagnostic response cannot dilute measured camera FPS.
+    elapsed = max(0.001, time.monotonic() - started)
     # Keep the actual Sense AEC counters next to camera/WROOM contention
     # measurements. The optional read is authenticated and does not sample
     # microphone PCM, block the active camera, or certify audible playback.
@@ -200,7 +203,6 @@ async def measure(
             )
         except Exception as exc:
             audio_reference_error = type(exc).__name__ + ": " + str(exc)[:110]
-    elapsed = max(0.001, time.monotonic() - started)
     return {
         "aec_reference_diagnostics": audio_reference,
         "aec_reference_probe_error": audio_reference_error,
