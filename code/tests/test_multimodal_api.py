@@ -148,6 +148,52 @@ def test_semantic_planner_preserves_three_explicit_observation_intents(
         assert result["charging_authorized"] is False
 
 
+
+def test_semantic_planner_keeps_explicit_safety_status_with_battery(
+    settings, tokens,
+):
+    """An explicit safety request is not a second battery estimate."""
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+
+    class Model:
+        async def reply(self, history):
+            return json.dumps({"tools": [
+                {"route": "status"}, {"route": "power-status"},
+            ]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        url = f"/v1/pet/{robot}/plan-readonly"
+        both = client.post(url, headers=headers, json={
+            "transcript": "Check your battery and check your safety status",
+        })
+        assert both.status_code == 200
+        assert [tool["route"] for tool in both.json()["tools"]] == [
+            "status", "power-status",
+        ]
+        battery_only = client.post(url, headers=headers, json={
+            "transcript": "Check your battery level",
+        })
+        assert battery_only.status_code == 200
+        assert [tool["route"] for tool in battery_only.json()["tools"]] == [
+            "power-status",
+        ]
+        assert both.json()["motor_authorized"] is False
+
+
+
 @pytest.mark.parametrize("revocation", ["live", "memory"])
 def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
     settings, tokens, revocation,

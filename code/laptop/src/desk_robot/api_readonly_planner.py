@@ -308,7 +308,7 @@ def register_readonly_planner_routes(
         # and at most three approved read-only routes are ever returned.
         for item in choices[:8] if isinstance(choices, list) else []:
             route = item.get("route") if isinstance(item, dict) else None
-            if route == "status" and battery_question:
+            if route == "status" and battery_question and not status_question:
                 # Ollama can choose a general read-only status tool, but a
                 # battery question must use the real WROOM fuel gauge source.
                 route = "power-status"
