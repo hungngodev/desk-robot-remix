@@ -112,6 +112,45 @@ def test_immutable_scoped_source_rejects_forged_local_claim(changed):
     )
 
 
+@pytest.mark.parametrize("tested_on", [
+    "2026-02-30", "20261118", "tomorrow", "",
+    True, None, "2026-11-18T10:00:00",
+])
+def test_physical_receipt_requires_canonical_completed_calendar_day(tested_on):
+    gate = release.PART_GATES[0]
+    invalid = {**receipt("part:imu", gate), "tested_on": tested_on}
+    source = lambda url: lookup(url, records=[invalid])
+    assert not release.verified_scoped_record(invalid, SHA, source)
+    errors = release.audit_release(
+        {"parts": {"imu": {gate: invalid}}}, SHA, source,
+    )
+    assert any("unpinned or generic signoff" in error for error in errors)
+
+
+def test_future_physical_trial_cannot_release_even_with_matching_immutable_json():
+    from datetime import date, timedelta
+
+    gate = release.PART_GATES[0]
+    future = {**receipt("part:imu", gate),
+              "tested_on": (date.today() + timedelta(days=1)).isoformat()}
+    assert not release.verified_scoped_record(
+        future, SHA, lambda url: lookup(url, records=[future]),
+    )
+    errors = release.audit_release(
+        {"parts": {"imu": {gate: future}}}, SHA,
+        lambda url: lookup(url, records=[future]),
+    )
+    assert any("unpinned or generic signoff" in error for error in errors)
+
+
+def test_real_prior_leap_day_can_be_verified_against_matching_immutable_record():
+    gate = release.PART_GATES[0]
+    prior = {**receipt("part:imu", gate), "tested_on": "2024-02-29"}
+    assert release.verified_scoped_record(
+        prior, SHA, lambda url: lookup(url, records=[prior]),
+    )
+
+
 def test_existing_file_without_claim_cannot_release_purchase():
     gate = release.PART_GATES[0]
     original = receipt("part:imu", gate)

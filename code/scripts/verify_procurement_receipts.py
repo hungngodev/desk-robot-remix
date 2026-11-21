@@ -16,6 +16,7 @@ import binascii
 import json
 import re
 import subprocess
+from datetime import date
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -90,6 +91,17 @@ def required_receipts(evidence: dict, *, first_robot: bool = False):
             )
 
 
+def _completed_trial_date(value: object) -> bool:
+    """Physical test receipt needs a real ISO date, not a future promise."""
+    if not isinstance(value, str):
+        return False
+    try:
+        tested = date.fromisoformat(value)
+    except ValueError:
+        return False
+    return tested.isoformat() == value and tested <= date.today()
+
+
 def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
     """Require one matching record in a versioned docs/records/*.json file.
 
@@ -98,7 +110,9 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
     Mere existence of an unrelated nonempty file never releases purchasing.
     """
     url = receipt.get("evidence_url")
-    if not isinstance(url, str) or not urlsplit(url).path.endswith(".json"):
+    if (not _completed_trial_date(receipt.get("tested_on"))
+            or not isinstance(url, str)
+            or not urlsplit(url).path.endswith(".json")):
         return False
     response = {}
 
@@ -180,8 +194,7 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
                 or receipt["reviewer"].strip().casefold() in {
                     "", "unknown", "tbd", "operator", "tester", "fixture",
                 }
-                or not isinstance(receipt.get("tested_on"), str)
-                or not receipt["tested_on"].strip()
+                or not _completed_trial_date(receipt.get("tested_on"))
                 or not isinstance(receipt.get("record_id"), str)
                 or not receipt["record_id"].strip()
                 or not isinstance(receipt.get("device_revision"), str)
