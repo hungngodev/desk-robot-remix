@@ -38,3 +38,23 @@ def test_host_verification_uses_independent_bounded_job_lanes():
         assert checkout["with"]["ref"] == (
             "${{ github.event.pull_request.head.sha || github.sha }}"
         )
+
+
+def test_sense_python_test_syntax_checked_before_expensive_setup():
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[2]
+         / ".github/workflows/host-verification.yml").read_text()
+    )
+    steps = workflow["jobs"]["python-and-head-host"]["steps"]
+    compiled = next(
+        index for index, step in enumerate(steps)
+        if step.get("name") == "Compile head test Python before expensive toolchain setup"
+    )
+    dependencies = next(
+        index for index, step in enumerate(steps)
+        if step.get("name") == "Install Python and locked dependencies"
+    )
+    assert compiled < dependencies
+    assert steps[compiled]["run"] == (
+        "python3 -m compileall -q code/firmware/head/tests"
+    )
