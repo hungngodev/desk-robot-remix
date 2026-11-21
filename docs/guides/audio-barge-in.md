@@ -68,8 +68,13 @@ requires actual retained speech at its start. The robot-only row records
 `self_interruptions`, and the exact same `robot_id`, `firmware_commit`,
 `audio_config_id`, and `mic_speaker_placement_id` as the twenty human
 trials. A control from another robot or mounting configuration is invalid.
-The separate `kind: quiet` row records at least 600 actual seconds with
-nonnegative integer `unsolicited_speech_events` and
+The ten-minute `kind: robot_only` control must additionally report
+positive, finite `robot_speech_seconds` no greater than the observed
+duration, plus `audible_robot_speech_observed=true`. An otherwise silent
+robot is not an echo-suppression test; the speaker must actually be heard
+during the observation window. The separate `kind: quiet` row must
+declare `quiet_mode_enabled=true` and record at least 600 actual
+seconds with nonnegative integer `unsolicited_speech_events` and
 `unsolicited_motion_events`. Both counts must be zero for A2 acceptance,
 including silence while the camera and sensors remain operational. The
 quiet control must repeat the same `robot_id`, `firmware_commit`,
