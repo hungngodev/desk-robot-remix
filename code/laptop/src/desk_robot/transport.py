@@ -266,6 +266,8 @@ class HttpHead:
                 or type(data.get("microphone_privacy_muted")) is not bool
                 or type(data.get("microphone_privacy_epoch")) is not int
                 or not 0 <= data["microphone_privacy_epoch"] <= 0xffffffff
+                or type(data.get("aec_delay_config_ms")) is not int
+                or not 0 <= data["aec_delay_config_ms"] <= 250
                 or data.get("speaker_playback_verified") is not False
                 or data.get("aec_physically_qualified") is not False):
             raise HeadError("Untrusted Sense AEC reference diagnostics")
