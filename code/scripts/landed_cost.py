@@ -97,9 +97,11 @@ def account_landed_cost(
     paid_orders. Every quote has role_key, seller, sku, quantity_packages,
     units_per_package, package_price_usd, quote_reference, quoted_at,
     stock_evidence_url. A seller charge has explicit shipping_usd, tax_usd,
-    duties_usd, discount_usd. Inventory needs an inspection_receipt_url.
-    Any paid in-flight quantity must be explicitly allocated to the same role
-    by its matching paid order reference; a paid total alone proves no item.
+    duties_usd, discount_usd. Inspected inventory must identify acquisition_kind
+    as already_owned or paid_order and include an inspection_receipt_url.
+    Paid-order inventory also needs its order_reference. The same paid order's
+    role allocation must cover inspected AND still-in-flight units together;
+    a paid total alone proves no item.
     """
     if not isinstance(evidence, dict):
         evidence = {}
@@ -200,6 +202,7 @@ def account_landed_cost(
         except (AttributeError, ValueError) as exc:
             errors.append(f"paid order {index}: {exc}")
     inventory_claims: set[tuple[str, str]] = set()
+    inspected_from_paid_order: dict[tuple[str, str], int] = defaultdict(int)
     inventory = evidence.get("inventory", [])
     if not isinstance(inventory, list):
         errors.append("Inventory must be a list")
@@ -216,6 +219,21 @@ def account_landed_cost(
             claim = (role, receipt)
             if claim in inventory_claims:
                 raise ValueError("duplicate inspection receipt for same role")
+            origin = stock.get("acquisition_kind")
+            if origin == "already_owned":
+                if stock.get("order_reference") is not None:
+                    raise ValueError("already owned stock cannot claim a paid order")
+            elif origin == "paid_order":
+                ref = _nonempty(stock.get("order_reference"), "inspected order")
+                if ref not in paid_orders:
+                    raise ValueError("inspected paid stock lacks an order record")
+                paid_claim = (ref, role)
+                combined = inspected_from_paid_order[paid_claim] + quantity
+                if combined > paid_order_allocations.get(ref, {}).get(role, 0):
+                    raise ValueError("inspected stock exceeds paid role allocation")
+                inspected_from_paid_order[paid_claim] = combined
+            else:
+                raise ValueError("inventory acquisition_kind must be already_owned or paid_order")
             inventory_claims.add(claim)
             allocated[role] += quantity
         except (AttributeError, ValueError) as exc:
@@ -237,6 +255,11 @@ def account_landed_cost(
             if paid_order_allocations.get(ref, {}).get(role, 0) < quantity:
                 raise ValueError(
                     "in-flight order does not allocate claimed role and quantity"
+                )
+            if (inspected_from_paid_order[(ref, role)] + quantity
+                    > paid_order_allocations[ref][role]):
+                raise ValueError(
+                    "paid allocation already consumed by inspected inventory"
                 )
             claim = (role, ref)
             if claim in incoming_claims:

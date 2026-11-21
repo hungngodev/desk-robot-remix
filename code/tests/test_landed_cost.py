@@ -81,7 +81,8 @@ def test_explicit_inventory_and_in_flight_are_distinct():
     ev["lines"].pop()
     ev["inventory"] = [{"role_key": "robot:i2c_mux",
                         "usable_allocated": 1,
-                        "inspection_receipt_url": "https://github.com/org/record"}]
+                        "acquisition_kind": "already_owned",
+                         "inspection_receipt_url": "https://github.com/org/record"}]
     out = calculate(ev)
     assert out["calculation_complete_not_physical_approval"]
     assert out["payable_now_cents"] == 608
@@ -96,11 +97,83 @@ def test_explicit_inventory_and_in_flight_are_distinct():
     assert out["awaiting_arrival_roles"] == ["robot:i2c_mux"]
 
 
+
+def test_paid_delivered_inventory_and_in_flight_share_one_order_allocation():
+    """One paid mux cannot cover both received and in-transit requirements."""
+    ev = sample()
+    ev["lines"].pop()  # no new mux quote, all muxes need genuine paid coverage
+    ev["paid_orders"][0]["allocations"] = [
+        {"role_key": "robot:i2c_mux", "quantity": 1},
+    ]
+    ev["inventory"] = [{
+        "role_key": "robot:i2c_mux", "usable_allocated": 1,
+        "acquisition_kind": "paid_order",
+        "order_reference": "already-paid",
+        "inspection_receipt_url": "https://github.com/org/mux-inspected",
+    }]
+    ev["paid_in_flight"] = [{
+        "role_key": "robot:i2c_mux", "quantity": 1,
+        "order_reference": "already-paid",
+    }]
+    need_two = {**REQUIRED, "robot:i2c_mux": 2}
+    def run():
+        return mod.account_landed_cost(
+            ev, need_two, CATEGORIES, expected_scope="evaluation",
+        )
+
+    duplicate = run()
+    assert not duplicate["calculation_complete_not_physical_approval"]
+    assert "robot:i2c_mux" in duplicate["unaccounted_roles"]
+    assert any("already consumed by inspected inventory" in e
+               for e in duplicate["errors"])
+    assert duplicate["payable_now_cents"] is None
+    assert duplicate["within_prototype_cap"] is False
+
+    # Two paid physical units, one with its own inspection and one still
+    # awaiting arrival, genuinely cover the same role without buying twice.
+    ev["paid_orders"][0]["allocations"][0]["quantity"] = 2
+    distinct = run()
+    assert distinct["errors"] == []
+    assert distinct["calculation_complete_not_physical_approval"]
+    assert distinct["awaiting_arrival_roles"] == ["robot:i2c_mux"]
+    assert distinct["payable_now_cents"] == 608
+
+    ev["inventory"][0]["usable_allocated"] = 2
+    overclaimed = run()
+    assert not overclaimed["calculation_complete_not_physical_approval"]
+    assert any("already consumed" in e for e in overclaimed["errors"])
+
+
+def test_inspected_stock_requires_explicit_origin_and_paid_reference():
+    ev = sample()
+    ev["lines"].pop()
+    stock = {
+        "role_key": "robot:i2c_mux", "usable_allocated": 1,
+        "inspection_receipt_url": "https://github.com/org/mux-inspected",
+    }
+    ev["inventory"] = [stock]
+    result = calculate(ev)
+    assert not result["calculation_complete_not_physical_approval"]
+    assert any("acquisition_kind" in error for error in result["errors"])
+
+    stock["acquisition_kind"] = "paid_order"
+    result = calculate(ev)
+    assert any("inspected order" in error for error in result["errors"])
+    stock["order_reference"] = "not-registered"
+    result = calculate(ev)
+    assert any("lacks an order record" in error for error in result["errors"])
+    stock["acquisition_kind"] = "already_owned"
+    result = calculate(ev)
+    assert any("already owned stock cannot claim" in error
+               for error in result["errors"])
+
+
 def test_duplicate_buying_covered_stock_fails_closed():
     ev = sample()
     ev["inventory"] = [{"role_key": "robot:i2c_mux",
                         "usable_allocated": 1,
-                        "inspection_receipt_url": "https://github.com/org/record"}]
+                        "acquisition_kind": "already_owned",
+                         "inspection_receipt_url": "https://github.com/org/record"}]
     out = calculate(ev)
     assert not out["calculation_complete_not_physical_approval"]
     assert any("duplicated purchase" in x for x in out["errors"])
@@ -293,6 +366,7 @@ def test_one_inspection_receipt_cannot_create_two_allocations():
     ev["lines"].pop(0)
     stock = {
         "role_key": "robot:cliff_obstacle", "usable_allocated": 1,
+        "acquisition_kind": "already_owned",
         "inspection_receipt_url": "https://github.com/org/real-inspection",
     }
     ev["inventory"] = [stock.copy(), stock.copy()]
@@ -383,6 +457,7 @@ def test_one_inspection_can_cover_distinct_roles_without_double_counting():
     receipt = "https://github.com/org/combined-inspection"
     ev["inventory"] = [
         {"role_key": role, "usable_allocated": 1,
+         "acquisition_kind": "already_owned",
          "inspection_receipt_url": receipt}
         for role in REQUIRED
     ]
