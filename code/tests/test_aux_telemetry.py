@@ -48,6 +48,9 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
     result = validate_aux(sample(), "robot-01")
     assert result["pulse"]["bpm"] is None
     assert result["force"]["calibrated"] is False
+    current = sample()
+    current["force"]["boot_id"] = 0x12345678
+    assert validate_aux(current, "robot-01")["force"]["boot_id"] == 0x12345678
     assert result["power"]["current_calibrated"] is False
     assert result["proximity"]["gesture"] == 1
     assert result["proximity"]["gesture_events"] == 3
@@ -64,6 +67,8 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
         ("angles", "magnet", [0, 0, 0]), ("angles", "present_mask", True),
         ("force", "adc", [0, 99999]), ("force", "valid", 1),
         ("force", "jaw_seq", -1), ("force", "jaw_seq", True),
+        ("force", "boot_id", -1), ("force", "boot_id", True),
+        ("force", "boot_id", 4294967296),
         ("force", "calibrated", True), ("climate", "rh_centi", 11000),
         ("climate", "temp_centi", float("nan")),
         ("climate", "seq", True), ("climate", "age_ms", -1),
