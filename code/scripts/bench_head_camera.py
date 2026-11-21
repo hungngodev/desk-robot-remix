@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import aclosing
 import json
 import math
 import time
+from contextlib import aclosing
 from pathlib import Path
 
 import httpx
