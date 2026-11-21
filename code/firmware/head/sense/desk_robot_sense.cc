@@ -308,6 +308,7 @@ public:
             const bool now_muted = !audio_operator_muted_.load(
                 std::memory_order_acquire);
             audio_operator_muted_.store(now_muted, std::memory_order_release);
+            app.SetSenseMicrophonePrivacyMuted(now_muted);
             static_cast<SenseReferenceCodec*>(GetAudioCodec())
                 ->SetMicrophonePrivacyMuted(now_muted);
 #endif
@@ -316,24 +317,23 @@ public:
                 return;
             }
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-            // Preserve upstream explicit WiFi audio testing with a real
-            // physical press; switching back to configuration mutes PDM.
+            // Physical mute wins in setup audio testing too. An explicit
+            // second BOOT tap can resume the original upstream test mode.
             if (state == kDeviceStateWifiConfiguring ||
                 state == kDeviceStateAudioTesting) {
-                app.ToggleChatState();
+                if (now_muted) app.StopListening();
+                else app.ToggleChatState();
                 return;
             }
             if (now_muted) {
                 if (state == kDeviceStateConnecting) {
-                    // A pending async channel open must not outlive BOOT.
-                    // The selected application overlay also checks this
-                    // state AFTER OpenAudioChannel finishes.
+                    // Cancel state now, before a blocked network open returns.
                     app.SetDeviceState(kDeviceStateIdle);
-                } else if (state == kDeviceStateListening) {
-                    app.ToggleChatState();  // closes the Xiaozhi channel
-                } else if (state == kDeviceStateSpeaking) {
-                    app.StopListening();  // selected overlay closes channel
                 }
+                // The Sense application overlay drains any encoded Opus,
+                // closes the ORIGINAL Xiaozhi audio channel and prevents
+                // stale toggle/listen tasks from reopening the microphone.
+                app.StopListening();
                 return;
             }
             // Explicit unmute can resume one normal Xiaozhi session only.
