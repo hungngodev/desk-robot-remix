@@ -187,12 +187,18 @@ async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_p
 async def test_stream_consent_revoked_during_frame_preparation_cannot_publish_jpeg():
     """An in-flight image worker cannot outlive operator visual opt out."""
     entered, release = asyncio.Event(), asyncio.Event()
+    stream_closed = asyncio.Event()
     policy = config(enabled=True)
 
     class LiveHead(Head):
         async def stream_frames(self):
-            yield image(square=True), time.monotonic()
-            await asyncio.Event().wait()
+            try:
+                yield image(square=True), time.monotonic()
+                await asyncio.Event().wait()
+            finally:
+                # The head camera lease must be released before a revoked
+                # consumer reports completion, not by eventual GC.
+                stream_closed.set()
 
     head = LiveHead()
     visual = MultimodalOrchestrator(
@@ -216,6 +222,7 @@ async def test_stream_consent_revoked_during_frame_preparation_cannot_publish_jp
         policy.voice_vision_tools_enabled = False
         release.set()
         await asyncio.wait_for(visual._stream_tasks["robot-01"], timeout=1)
+        assert stream_closed.is_set()
         assert not visual.hub.frames["robot-01"]
         assert visual.status("robot-01")["software_timings"][
             "stream_frames_selected"
