@@ -372,7 +372,11 @@ class HttpHead:
         try:
             async with self.client.stream(
                 "GET", url, headers=headers,
-                timeout=httpx.Timeout(5, connect=1),
+                # Four frames per second is the head ceiling. A stalled
+                # stream must not retain a raw camera lease for the default
+                # five second HTTP read timeout after live consent changes.
+                # Healthy frames still share this one persistent connection.
+                timeout=httpx.Timeout(5, connect=1, read=1.5),
                 # Camera media and its bearer never move to another URL.
                 follow_redirects=False,
             ) as response:
