@@ -396,6 +396,8 @@ async def main() -> int:
                         help="Bench the real persistent MJPEG socket instead of snapshots")
     parser.add_argument("--score-motion", action="store_true",
                         help="Instrument 1 FPS camera contrast/motion scores without storing images")
+    parser.add_argument("--require-audio-activity", action="store_true",
+                        help="Also require actual PDM/I2S counter progress throughout MJPEG")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     # Real A9 qualification always requires continuous consented MJPEG.
@@ -422,12 +424,15 @@ async def main() -> int:
             status_period_s=args.status_period,
             stream=args.stream, score_motion=args.score_motion,
         )
+    result["concurrent_audio_required_by_operator"] = args.require_audio_activity
     save_private_report(args.report, result)
     print(json.dumps(result, indent=2))
     return 0 if (result["camera_frames_received"] > 0
                  and result["status_latency"]["count"] > 0
                  and not result["camera_error_count"]
-                 and not result["status_error_count"]) else 1
+                 and not result["status_error_count"]
+                 and (not args.require_audio_activity
+                      or result["concurrent_audio_driver_activity_observed"])) else 1
 
 
 if __name__ == "__main__":
