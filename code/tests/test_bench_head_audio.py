@@ -19,6 +19,7 @@ def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
             underflow_reads: int = 8) -> dict:
     return {
         "robot_id": robot_id,
+        "boot": 19,
         "reference_underflow_reads": underflow_reads,
         "reference_overwrite_reads": 0,
         "discarded_stale_writes": 0,
@@ -140,6 +141,27 @@ async def test_audio_bench_counter_reset_cannot_be_healthy():
     )
     assert report["counter_regressions"] >= 1
     assert report["reference_software_integrity_observed"] is False
+
+
+async def test_audio_bench_rejects_silent_device_reboot_with_zero_counters():
+    class RebootingHead:
+        def __init__(self):
+            self.calls = 0
+
+        async def audio_reference_status(self):
+            self.calls += 1
+            return dict(
+                _sample(self.calls, underflow_reads=0),
+                boot=19 if self.calls == 1 else 20,
+            )
+
+    report = await bench.measure(
+        RebootingHead(), "robot-01", seconds=0.15, poll_period_s=0.05,
+    )
+    assert report["head_boot"] == 19
+    assert report["counter_regressions"] >= 1
+    assert report["reference_software_integrity_observed"] is False
+    assert report["actual_speaker_playback_verified"] is False
 
 
 async def test_audio_bench_hung_endpoint_cannot_block_completion():
