@@ -406,12 +406,19 @@ class HttpHead:
         """
         if not self._stream_connected:
             raise HeadError("Dock observation needs connected live camera stream")
-        return await self.snapshot(max_stream_age_seconds=0.20)
+        return await self.snapshot(
+            max_stream_age_seconds=0.20, require_live_stream=True
+        )
 
-    async def snapshot(self, *, max_stream_age_seconds: float = 1.0) -> bytes:
+    async def snapshot(
+        self, *, max_stream_age_seconds: float = 1.0,
+        require_live_stream: bool = False,
+    ) -> bytes:
         if (type(max_stream_age_seconds) not in (int, float)
-                or not 0 < max_stream_age_seconds <= 1.0):
+                or not 0 < max_stream_age_seconds <= 1.0
+                or type(require_live_stream) is not bool):
             raise ValueError("Invalid camera stream receipt age limit")
+
         # Separate camera serialization: concurrent Mac pet/pickup callers must
         # not trip the Sense single-capture worker or block body keepalives.
         async with self.capture_lock:
@@ -434,7 +441,7 @@ class HttpHead:
                             return self._stream_latest
                 except TimeoutError as exc:
                     raise HeadError("No fresh camera frame on live stream") from exc
-            if self._stream_required:
+            if self._stream_required or require_live_stream:
                 raise HeadError("Continuous XIAO camera stream is not connected")
             response = await self._request("GET", "/api/camera.jpg")
             if not (4 <= len(response.content) <= 4_000_000
