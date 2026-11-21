@@ -290,6 +290,38 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
 #endif
     return static_cast<int>(bytes_written / sizeof(int32_t));''',
         )
+        # Sense PDM is the SAME existing Xiaozhi microphone reader, not a
+        # new capture task. A disconnected or wedged I2S DMA channel must
+        # not hold the input task indefinitely after STOP or opt-out.
+        # Keep the original unbounded behavior in all other build profiles.
+        codec_source = replace_once(
+            codec_source,
+            '    if (i2s_channel_read(rx_handle_, dest, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY) != ESP_OK) {',
+            '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Sense PDM read timeout: bound a missing microphone DMA period while
+    // retaining the stock 16 kHz PDM capture and AEC ownership. This is
+    // a software fault fence, not a measured acoustic interruption time.
+    const esp_err_t read_status = i2s_channel_read(
+        rx_handle_, dest, samples * sizeof(int16_t), &bytes_read,
+        pdMS_TO_TICKS(120));
+#else
+    const esp_err_t read_status = i2s_channel_read(
+        rx_handle_, dest, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY);
+#endif
+    if (read_status != ESP_OK) {''',
+        )
+        codec_source = replace_once(
+            codec_source,
+            '        ESP_LOGE(TAG, "Read Failed!");\\n        return 0;'.replace('\\n', '\n'),
+            '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+        // A stalled microphone returns no fabricated samples. Repeated
+        // expected timeouts must not flood the realtime task's UART logs.
+        if (read_status != ESP_ERR_TIMEOUT) ESP_LOGE(TAG, "Read Failed!");
+#else
+        ESP_LOGE(TAG, "Read Failed!");
+#endif
+        return 0;''',
+        )
         files[path] = codec_source.encode()
         # An I2S DAC at 32 kHz must not force an invalid 32 kHz Opus
         # decoder. Reuse Xiaozhi's existing Opus and ESP-AE rate converter
