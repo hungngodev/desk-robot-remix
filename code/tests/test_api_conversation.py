@@ -1675,3 +1675,43 @@ async def test_group_room_station_revoke_prevents_speech_and_stale_reuse(setting
     await next_group.run(["robot-01", "robot-02"], "Discuss a toy", 2)
     assert subsequent.prompts
     assert "ROOM PRIVATE" not in str(subsequent.prompts)
+
+
+async def test_group_sensor_context_survives_camera_opt_out_without_private_asr(settings):
+    """Fleet conversation retains WROOM touch but not old media or memory."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = False
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    hub.notify("robot-01", "touch_tap", now)
+    hub.remember_heard(
+        "robot-01", "private_old_asr", "Private conversation behind the door", now,
+    )
+    hub.remember_tool("robot-01", "visual_look", "Private camera guess", now)
+    hub.remember_tool("robot-01", "memory_recall", "Private recalled place", now)
+
+    class RecordingChat(SimulatedChat):
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            return await super().reply(history)
+
+    chat = RecordingChat()
+    conversation = Conversation(settings, chat, SimulatedSpeaker())
+    conversation.multimodal = SimpleNamespace(hub=hub)
+    await conversation.run(["robot-01", "robot-02"], "Discuss a toy", 2)
+
+    assert len(chat.prompts) == 2
+    assert "touch_tap" in chat.prompts[0]
+    for prompt in chat.prompts:
+        assert "Private conversation behind the door" not in prompt
+        assert "Private camera guess" not in prompt
+        assert "Private recalled place" not in prompt
