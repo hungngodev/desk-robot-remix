@@ -169,3 +169,23 @@ def test_sense_32khz_speaker_over_ten_seconds_is_rejected(tmp_path):
         wav.writeframes(bytes(320001 * 2))
     with pytest.raises(ValueError, match="WAV"):
         source["read_wav"](file)
+
+
+def test_truncated_wav_header_cannot_be_used_for_acoustic_calibration(tmp_path):
+    """Declared frame count is not evidence that the capture contains PCM."""
+    import struct
+    import wave
+
+    file = tmp_path / "missing_pcm.wav"
+    with wave.open(str(file), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(bytes(16000 * 2))
+    raw = bytearray(file.read_bytes())
+    claimed_bytes = 32000 * 2
+    struct.pack_into("<I", raw, 4, 36 + claimed_bytes)
+    struct.pack_into("<I", raw, raw.index(b"data") + 4, claimed_bytes)
+    file.write_bytes(raw)
+    with pytest.raises(ValueError, match="WAV file truncated"):
+        source["read_wav"](file)
