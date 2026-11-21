@@ -14,6 +14,7 @@
 #include <math.h>
 #include "thermal_pixels.h"
 #include "soil_sample.h"
+#include "radar_sample_clock.h"
 
 #ifndef ROOM_SOIL_FITTED
 #define ROOM_SOIL_FITTED 0
@@ -34,6 +35,7 @@ SensirionI2cScd4x scd;
 Adafruit_BME680 bme(&Wire);
 Adafruit_AMG88xx amg;
 ld2410 radar;
+desk_robot_room::RadarSampleClock radar_sample_clock;
 bool scd_started = false;
 bool scd_valid = false;
 bool bme_started = false;
@@ -134,10 +136,11 @@ void bme_observation(uint32_t now) {
 void radar_observation(uint32_t now) {
   // read() only drains the existing upstream bounded UART parser.
   // A static/moving echo is not authentication or a particular human.
-  const bool connected = radar.isConnected();
+  const bool connected = radar.isConnected() && radar_sample_clock.has_sample();
   Serial.print(F("\"ld2410c\":{\"valid\":")); jsbool(connected);
   if (connected) {
-    Serial.print(F(",\"sample_ms\":")); Serial.print(now);
+    Serial.print(F(",\"sample_ms\":"));
+    Serial.print(radar_sample_clock.sample_ms());
     Serial.print(F(",\"presence\":")); jsbool(radar.presenceDetected());
     Serial.print(F(",\"stationary\":")); jsbool(radar.stationaryTargetDetected());
     Serial.print(F(",\"moving\":")); jsbool(radar.movingTargetDetected());
@@ -237,8 +240,12 @@ void setup() {
 #endif
 }
 void loop() {
-  radar.read();
+  const bool radar_activity = radar.read();
   const uint32_t now = millis();
+  // The pinned library reports connected for up to 100 ms after its last
+  // valid packet. Preserve when UART activity was actually observed instead
+  // of stamping cached target data with the later one-second report time.
+  radar_sample_clock.observe(radar_activity, radar.isConnected(), now);
   bme_step(now); // no heater-time sleep; preserve 256000 baud radar service
   if (now - last_report_ms >= kReportMs) {
     last_report_ms = now;

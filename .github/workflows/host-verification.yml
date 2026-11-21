@@ -210,6 +210,10 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/soil_sample_tests.cpp -o /tmp/desk-room-soil-test
           /tmp/desk-room-soil-test
+      - name: Verify room radar evidence keeps its acquisition timestamp
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/radar_sample_clock_tests.cpp -o /tmp/desk-room-radar-clock-test
+          /tmp/desk-room-radar-clock-test
 
   sense-idf:
     name: XIAO Sense ESP-IDF 6.1 firmware compile
