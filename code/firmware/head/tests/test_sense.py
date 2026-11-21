@@ -196,9 +196,16 @@ class SenseOverlayTests(unittest.TestCase):
         click = board.split("boot_button_.OnClick([this]()", 1)[1].split(
             "void StartNetwork()", 1
         )[0]
-        self.assertIn("audio_operator_touched_.store(true);", click)
-        self.assertIn("if (app.GetDeviceState() == kDeviceStateSpeaking)", click)
+        self.assertIn(
+            "audio_operator_touched_.store(true, std::memory_order_release);",
+            click,
+        )
+        self.assertIn("app.SetSenseMicrophonePrivacyMuted(now_muted);", click)
+        self.assertIn("->SetMicrophonePrivacyMuted(now_muted);", click)
+        self.assertIn("const bool now_muted = !audio_operator_muted_.load(", click)
+        self.assertIn("if (now_muted)", click)
         self.assertIn("app.StopListening();", click)
+        self.assertIn("if (state == kDeviceStateIdle) app.ToggleChatState();", click)
         self.assertIn("!board->audio_operator_touched_.load()", board)
 
 
