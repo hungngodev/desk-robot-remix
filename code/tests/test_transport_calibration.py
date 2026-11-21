@@ -261,12 +261,11 @@ async def test_persistent_mjpeg_video_feeds_existing_snapshot_callers(settings, 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(settings.robots[0], client, strict_capture=True)
         frames = head.stream_frames()
-        first, _ = await anext(frames)
-        assert first == payload_a
-        assert await head.snapshot() == first
-        second, _ = await anext(frames)
-        assert second == payload_b
-        assert await head.snapshot() == second
+        # A single network read may contain several complete frames. The
+        # live consumer receives only the newest, never a stale backlog.
+        newest, _ = await anext(frames)
+        assert newest == payload_b
+        assert await head.snapshot() == newest
         assert head._last_camera == (17, 2, 2000)
         assert calls == ["/api/camera.mjpg"]
         await frames.aclose()
@@ -302,7 +301,8 @@ async def test_mjpeg_duplicate_camera_identity_cannot_replay_frame(settings, tok
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(settings.robots[0], client, strict_capture=True)
         frames = head.stream_frames()
-        await anext(frames)
+        # Validate every identity before exposing even the first frame of
+        # a coalesced network read. A replay poisons the entire batch.
         with pytest.raises(HeadError, match="stale or replayed"):
             await anext(frames)
         await frames.aclose()
@@ -331,8 +331,8 @@ async def test_mjpeg_stream_rejects_old_boot_replay_after_real_head_reset(
         head = HttpHead(settings.robots[0], client, strict_capture=True)
         frames = head.stream_frames()
         try:
-            assert (await anext(frames))[0].startswith(b"\xff\xd8")
-            assert (await anext(frames))[0].startswith(b"\xff\xd8")
+            # Retired boot replay inside one coalesced read must fail
+            # before any frame from that read reaches a vision consumer.
             with pytest.raises(HeadError, match="retired boot"):
                 await anext(frames)
             assert head._last_camera == (13, 1, 1000)
