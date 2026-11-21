@@ -10,7 +10,11 @@ import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
-from .brain_context import active_job_timeline, compose_brain_context
+from .brain_context import (
+    active_job_timeline,
+    compose_brain_context,
+    is_camera_derived_timeline_item,
+)
 from .config import Settings
 from .controller import OperationError
 from .transport import HeadError
@@ -150,15 +154,6 @@ def register_readonly_context_routes(
         timeline = visual.hub.interaction_timeline(
             robot_id, now, limit=10 - len(activity) - len(continuity)
         )
-        if not settings.voice_vision_tools_enabled:
-            # Opting out of camera questions excludes camera frames while
-            # preserving WROOM touch, handling, and physical safety events.
-            timeline = [
-                item for item in timeline
-                if item.get("channel") != "camera"
-                and not (item.get("channel") == "sensor"
-                         and item.get("kind") == "camera_face")
-            ]
         # The shared station has a separate opt-in. Revocation cannot be
         # bypassed by a still-fresh room sample cached in the RAM hub.
         if not settings.room_station_context_enabled:
@@ -168,6 +163,14 @@ def register_readonly_context_routes(
             ]
         timeline.extend(activity)
         timeline.extend(continuity)
+        if not settings.voice_vision_tools_enabled:
+            # The live opt-out includes completed visual_look interpretations,
+            # not just raw camera frames and camera_face sensor events.
+            # Apply to every outgoing timeline source before model composition.
+            timeline = [
+                item for item in timeline
+                if not is_camera_derived_timeline_item(item)
+            ]
         if not settings.voice_memory_tools_enabled:
             # Revoking memory consent also revokes the transient retrieval
             # result. A still-active camera permit is not permission to read

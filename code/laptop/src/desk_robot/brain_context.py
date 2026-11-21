@@ -27,6 +27,22 @@ def _clean(value: str, *, limit: int) -> str:
     return " ".join(value.split())[:limit]
 
 
+def is_camera_derived_timeline_item(entry: object) -> bool:
+    """One consent classification for real camera evidence AND VLM text.
+
+    A completed visual_look receipt remains camera-derived even though it
+    travels on the common tool channel. It is never WROOM safety evidence.
+    """
+    if not isinstance(entry, dict):
+        return False
+    channel, kind = entry.get("channel"), entry.get("kind")
+    return (
+        channel == "camera"
+        or (channel == "sensor" and kind == "camera_face")
+        or (channel == "tool" and kind == "visual_look")
+    )
+
+
 def _memory_label(entry: Memory) -> str:
     if entry.kind == "heard_human":
         return ("I may have heard (uncertain transcription)"

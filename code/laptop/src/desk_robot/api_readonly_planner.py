@@ -14,7 +14,7 @@ import time
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from .brain_context import compose_brain_context
+from .brain_context import compose_brain_context, is_camera_derived_timeline_item
 from .config import Settings
 from .controller import OperationError
 
@@ -72,9 +72,7 @@ def register_readonly_planner_routes(
             if not settings.voice_vision_tools_enabled:
                 timeline = [
                     entry for entry in timeline
-                    if entry.get("channel") != "camera"
-                    and not (entry.get("channel") == "sensor"
-                             and entry.get("kind") == "camera_face")
+                    if not is_camera_derived_timeline_item(entry)
                 ]
             if not settings.voice_memory_tools_enabled:
                 timeline = [entry for entry in timeline
@@ -86,10 +84,7 @@ def register_readonly_planner_routes(
                     if entry.get("channel") != "room_station"
                 ]
         camera_context_used = any(
-            item.get("channel") == "camera"
-            or (item.get("channel") == "sensor"
-                and item.get("kind") == "camera_face")
-            for item in timeline
+            is_camera_derived_timeline_item(item) for item in timeline
         )
         room_context_used = any(
             item.get("channel") == "room_station" for item in timeline

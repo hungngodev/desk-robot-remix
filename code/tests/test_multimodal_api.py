@@ -209,7 +209,78 @@ def test_semantic_planner_keeps_explicit_safety_status_with_battery(
 
 
 
-@pytest.mark.parametrize("revocation", ["live", "memory"])
+def test_native_context_and_ollama_planner_exclude_revoked_visual_tool_text(
+    settings, tokens,
+):
+    """Camera opt-out revokes a completed visual_look while WROOM faults stay."""
+    import json
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    ids = [robot.id for robot in settings.robots]
+    hub = CameraFrameHub(ids)
+    hub.remember_tool(
+        ids[0], "visual_look", "PRIVATE_RED_KEY_BESIDE_MUG",
+        time.monotonic(),
+    )
+    hub.notify(ids[0], "safety_fault", time.monotonic())
+
+    class Model:
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            return json.dumps({"tools": [{"route": "status"}]})
+
+    async def noop():
+        pass
+
+    model = Model()
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot, jobs={}),
+        conversation=SimpleNamespace(chat=model),
+        multimodal=SimpleNamespace(hub=hub),
+        start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    live_url = f"/v1/pet/{ids[0]}/interaction-context"
+    plan_url = f"/v1/pet/{ids[0]}/plan-readonly"
+    req = {"transcript": "What is your safety status?"}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        on = client.get(live_url, headers=headers)
+        assert on.status_code == 200
+        assert "PRIVATE_RED_KEY_BESIDE_MUG" in on.json()["model_context"]
+        assert any(item["kind"] == "safety_fault"
+                   for item in on.json()["current_interaction_timeline"])
+        plan_on = client.post(plan_url, headers=headers, json=req)
+        assert plan_on.status_code == 200
+        assert "PRIVATE_RED_KEY_BESIDE_MUG" in model.prompts[-1]
+
+        settings.voice_vision_tools_enabled = False
+        off = client.get(live_url, headers=headers)
+        assert off.status_code == 200
+        assert "PRIVATE_RED_KEY_BESIDE_MUG" not in str(off.json())
+        assert any(item["kind"] == "safety_fault"
+                   for item in off.json()["current_interaction_timeline"])
+        peer = client.get(
+            f"/v1/pet/{ids[1]}/interaction-context", headers=headers,
+        )
+        assert peer.status_code == 200
+        assert "PRIVATE_RED_KEY_BESIDE_MUG" not in str(peer.json())
+        plan_off = client.post(plan_url, headers=headers, json=req)
+        assert plan_off.status_code == 200
+        assert [tool["route"] for tool in plan_off.json()["tools"]] == ["status"]
+        assert "PRIVATE_RED_KEY_BESIDE_MUG" not in model.prompts[-1]
+        assert "safety_fault" in model.prompts[-1]
+
+
+@pytest.mark.parametrize("revocation", ["live", "memory", "derived_live"])
 def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
     settings, tokens, revocation,
 ):
@@ -230,6 +301,11 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
             robot, "memory_recall", "A private historical personal preference",
             time.monotonic(),
         )
+    elif revocation == "derived_live":
+        hub.remember_tool(
+            robot, "visual_look", "PRIVATE_RED_KEY_DERIVED_FROM_CAMERA",
+            time.monotonic(),
+        )
     else:
         hub.frames[robot].append(
             CameraEvidence(b"\xff\xd8fake", time.monotonic(), 0.05, "proactive"),
@@ -245,6 +321,8 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
                 assert "private historical" in str(history)
                 settings.voice_memory_tools_enabled = False
             else:
+                if revocation == "derived_live":
+                    assert "PRIVATE_RED_KEY_DERIVED_FROM_CAMERA" in str(history)
                 settings.voice_vision_tools_enabled = False
             return json.dumps({"tools": [{"route": "status"}]})
 
