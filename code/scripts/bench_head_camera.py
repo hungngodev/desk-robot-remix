@@ -298,6 +298,11 @@ async def main() -> int:
                         help="Instrument 1 FPS camera contrast/motion scores without storing images")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
+    # Real A9 qualification always requires continuous consented MJPEG.
+    # Snapshot polling remains an internal fake-head test helper only and
+    # can never make the physical hardware bench report success.
+    if not args.stream:
+        parser.error("Physical camera bench requires --stream persistent MJPEG")
     if not 5 <= args.seconds <= 300:
         parser.error("Physical camera bench requires 5..300 seconds")
     if args.score_motion and not args.stream:
