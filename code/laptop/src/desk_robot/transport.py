@@ -346,7 +346,7 @@ class HttpHead:
             except ValueError as exc:
                 raise HeadError(str(exc)) from exc
 
-    async def camera_identity(self) -> str:
+    async def camera_identity(self, dock_receipt: tuple | None = None) -> str:
         """Verify the initialized XIAO sensor against an authentic frame boot.
 
         The offline camera calibration cannot authorize docking simply by
@@ -366,11 +366,42 @@ class HttpHead:
                 or data["camera_pid_raw"] != expected_raw[pid]):
             raise HeadError("Camera sensor PID mismatch or unsupported sensor")
         boot = data.get("boot")
-        if (type(boot) is not int or not 0 <= boot <= 0xffffffff
-                or self._last_camera is None
-                or boot != self._last_camera[0]):
+        if type(boot) is not int or not 0 <= boot <= 0xffffffff:
+            raise HeadError("Invalid camera identity boot")
+        if dock_receipt is not None:
+            await self.dock_receipt_current(dock_receipt, expected_boot=boot)
+        elif self._last_camera is None or boot != self._last_camera[0]:
             raise HeadError("Camera identity boot differs from accepted JPEG")
         return pid
+
+    async def dock_receipt_current(
+        self, receipt: tuple, *, expected_boot: int | None = None
+    ) -> None:
+        """Recheck the selected JPEG's original boot after any awaited work.
+
+        The live stream may have published another frame or reconnected while
+        HTTP identity, AprilTag detection, IR, or body status was pending.
+        """
+        if (not isinstance(receipt, tuple) or len(receipt) != 4
+                or not isinstance(receipt[0], bytes)
+                or type(receipt[1]) not in (int, float)
+                or not 0 <= time.monotonic() - receipt[1] <= 0.20
+                or not isinstance(receipt[2], tuple) or len(receipt[2]) != 3
+                or any(type(n) is not int for n in receipt[2])
+                or not 0 <= receipt[2][0] <= 0xffffffff
+                or not 1 <= receipt[2][1] <= 0xffffffff
+                or receipt[2][2] <= 0
+                or type(receipt[3]) is not int or receipt[3] < 1):
+            raise HeadError("Invalid or expired selected dock JPEG provenance")
+        boot = receipt[2][0]
+        async with self._stream_condition:
+            if (not self._stream_connected
+                    or receipt[3] != self._stream_generation
+                    or self._last_camera is None
+                    or self._last_camera[0] != boot
+                    or boot in self._retired_camera_boots
+                    or (expected_boot is not None and expected_boot != boot)):
+                raise HeadError("Dock JPEG boot changed during camera identity check")
 
     def _accept_camera_identity(self, identity: tuple[int, int, int]) -> None:
         boot, sequence, completed = identity
@@ -487,7 +518,7 @@ class HttpHead:
                     self._stream_latest = None
                     self._stream_condition.notify_all()
 
-    async def snapshot_for_dock(self) -> tuple[bytes, float]:
+    async def snapshot_for_dock(self) -> tuple[bytes, float, tuple[int, int, int], int]:
         """Only a very recent authenticated MJPEG receipt may guide docking.
 
         Never initiate a separate still capture when the live stream is down.
@@ -497,18 +528,21 @@ class HttpHead:
             raise HeadError("Dock observation needs connected live camera stream")
         return await self.snapshot(
             max_stream_age_seconds=0.20, require_live_stream=True,
-            include_stream_receipt=True,
+            include_stream_receipt=True, include_stream_identity=True,
         )
 
     async def snapshot(
         self, *, max_stream_age_seconds: float = 1.0,
         require_live_stream: bool = False,
         include_stream_receipt: bool = False,
-    ) -> bytes | tuple[bytes, float]:
+        include_stream_identity: bool = False,
+    ) -> bytes | tuple:
         if (type(max_stream_age_seconds) not in (int, float)
                 or not 0 < max_stream_age_seconds <= 1.0
                 or type(require_live_stream) is not bool
                 or type(include_stream_receipt) is not bool
+                or type(include_stream_identity) is not bool
+                or (include_stream_identity and not include_stream_receipt)
                 or (include_stream_receipt and not require_live_stream)):
             raise ValueError("Invalid camera stream receipt age limit")
 
@@ -532,8 +566,15 @@ class HttpHead:
                                 raise HeadError("Camera stream lost during snapshot")
                             self._snapshot_version = self._stream_version
                             if include_stream_receipt:
-                                # Keep JPEG bytes and original Mac receipt
-                                # timestamp coupled under the camera lock.
+                                # The selected JPEG, boot, sequence, and
+                                # stream generation are one immutable receipt.
+                                if include_stream_identity:
+                                    if self._last_camera is None:
+                                        raise HeadError("Dock frame has no source identity")
+                                    return (
+                                        self._stream_latest, self._stream_received_at,
+                                        self._last_camera, self._stream_generation,
+                                    )
                                 return self._stream_latest, self._stream_received_at
                             return self._stream_latest
                 except TimeoutError as exc:

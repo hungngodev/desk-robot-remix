@@ -9,7 +9,10 @@ from typing import Awaitable, Callable, TypeVar
 from .calibration import Calibration
 from .config import Settings
 from .dock_ir import validate_ir
-from .dock_runtime import detect_bounded, load_real_dock_calibration, unpack_dock_frame
+from .dock_runtime import (
+    detect_bounded, load_real_dock_calibration, unpack_dock_frame,
+    verify_selected_dock_frame,
+)
 from .dock_vision import assess_dock
 from .grasp_feedback import guarded_grasp
 from .transport import Head, validate_command
@@ -761,7 +764,8 @@ class Coordinator:
                         "Dock camera live sensor identity unavailable"
                     )
                 observed_pid = await _bounded_head_reply(
-                    read_identity(), seconds=2.0,
+                    (read_identity(observation) if isinstance(observation, tuple)
+                     and len(observation) == 4 else read_identity()), seconds=2.0,
                     timeout_message="Dock camera live sensor identity timeout",
                 )
                 if observed_pid != camera.camera_sensor_pid:
@@ -872,6 +876,12 @@ class Coordinator:
                     "phase": "hold", "reason": latest.reason,
                     "charging_authorized": False, "physical_acceptance_pass": False,
                 }
+            # IR and WROOM checks can await across a camera reconnect.
+            # Refuse any pulse that no longer belongs to the selected boot.
+            try:
+                await verify_selected_dock_frame(head, observation)
+            except Exception as exc:
+                raise OperationError("Dock JPEG source changed before drive") from exc
             await head.command(command)
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)

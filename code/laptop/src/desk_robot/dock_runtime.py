@@ -141,13 +141,31 @@ def unpack_dock_frame(observation) -> tuple[bytes, float]:
     now = time.monotonic()
     if isinstance(observation, bytes):
         return observation, now
-    if (not isinstance(observation, tuple) or len(observation) != 2
+    if (not isinstance(observation, tuple) or len(observation) not in (2, 4)
             or not isinstance(observation[0], bytes)
             or type(observation[1]) not in (int, float)
             or not math.isfinite(observation[1])
             or not 0 <= now - observation[1] <= 0.20):
         raise ValueError("Invalid or stale dock camera receipt")
+    if len(observation) == 4:
+        identity, generation = observation[2:]
+        if (not isinstance(identity, tuple) or len(identity) != 3
+                or any(type(n) is not int for n in identity)
+                or not 0 <= identity[0] <= 0xffffffff
+                or not 1 <= identity[1] <= 0xffffffff
+                or identity[2] <= 0
+                or type(generation) is not int or generation < 1):
+            raise ValueError("Invalid or stale dock camera receipt")
     return observation[0], float(observation[1])
+
+
+async def verify_selected_dock_frame(head, observation) -> None:
+    """Reject stream replacement after an awaited dock vision or body call."""
+    if isinstance(observation, tuple) and len(observation) == 4:
+        verify = getattr(head, "dock_receipt_current", None)
+        if not callable(verify):
+            raise ValueError("Dock frame source verifier absent")
+        await verify(observation)
 
 
 async def observe_actual_dock(head, robot) -> dict:
@@ -202,7 +220,8 @@ async def observe_actual_dock(head, robot) -> dict:
         )
     try:
         observed_pid = await _bounded_head_reply(
-            read_identity(), seconds=2.0,
+            (read_identity(observation) if isinstance(observation, tuple)
+             and len(observation) == 4 else read_identity()), seconds=2.0,
             timeout_message="Dock camera live sensor identity timeout",
         )
     except Exception as exc:
@@ -238,6 +257,14 @@ async def observe_actual_dock(head, robot) -> dict:
             robot.id,
             reason=f"Dock marker detection unavailable: {type(exc).__name__}",
             source="apriltag_detection_failed",
+        )
+    # The native detector can finish after a same-PID stream reconnect.
+    try:
+        await verify_selected_dock_frame(head, observation)
+    except Exception as exc:
+        return _hold(
+            robot.id, reason=f"Dock frame source changed: {type(exc).__name__}",
+            source="head_snapshot_invalid",
         )
     # A corrupted native adapter result must not escape as a plausible dock
     # phase or crash the observer after the detector worker has completed.
