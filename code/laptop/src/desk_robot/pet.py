@@ -651,28 +651,49 @@ class PetController:
         def persist_shared_copy() -> bool:
             if not self.settings.fleet_text_sharing_enabled:
                 return False
+            # An operator may delete or correct the original while the first
+            # thread is retrieving it. A stale pre-deletion eyewitness must
+            # not be propagated as a newly accepted private peer episode.
+            if self.memory.get_episode(from_robot, event_id) != source:
+                raise ValueError("Original eyewitness memory changed or expired")
             stored = self.memory.remember(
                 to_robot, source.event_id, source.summary,
                 kind=source.kind, source_robot=source.source_robot,
                 witnessed=False, observed_at=source.observed_at,
                 confidence=source.confidence,
             )
-            if stored and not self.settings.fleet_text_sharing_enabled:
+            if stored and (
+                not self.settings.fleet_text_sharing_enabled
+                or self.memory.get_episode(from_robot, event_id) != source
+            ):
                 # The worker survives cancellation of an operator HTTP
-                # request. It also owns retraction of its new private copy.
+                # request. Retract only THIS newly inserted secondhand copy.
                 self.memory.forget_episode(to_robot, source.event_id)
-                return False
+                if not self.settings.fleet_text_sharing_enabled:
+                    return False
+                raise ValueError("Original eyewitness memory changed or expired")
             return stored
 
         stored = await asyncio.to_thread(persist_shared_copy)
         if not self.settings.fleet_text_sharing_enabled:
             if stored:
-                # Retract only the copy THIS request inserted. A repeated
-                # share of a preexisting event must not delete older consent.
+                # A repeated share of a preexisting event must not erase
+                # older consent.
                 await asyncio.to_thread(
                     self.memory.forget_episode, to_robot, source.event_id,
                 )
             raise ValueError("Fleet sharing consent revoked during peer write")
+        # The caller may have been suspended while the source was deleted.
+        # Do not return a new share success without one final current read.
+        current_source = await asyncio.to_thread(
+            self.memory.get_episode, from_robot, event_id,
+        )
+        if current_source != source:
+            if stored:
+                await asyncio.to_thread(
+                    self.memory.forget_episode, to_robot, source.event_id,
+                )
+            raise ValueError("Original eyewitness memory changed or expired")
         return {
             "from_robot": from_robot,
             "to_robot": to_robot,

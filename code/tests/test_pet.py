@@ -5655,3 +5655,76 @@ async def test_operator_peer_share_older_retained_eyewitness_outside_recent_fift
         assert memory.count("robot-03") == 0
     finally:
         await pet.close()
+
+
+async def test_manual_peer_share_rejects_eyewitness_deleted_before_copy(
+    fleet, tmp_path, monkeypatch,
+):
+    """A delayed operator request cannot fan out a memory deleted meantime."""
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    event_id = "deleted_before_copy"
+    assert memory.remember(
+        "robot-01", event_id, "A small green screw was here",
+        kind="object", source_robot="robot-01", witnessed=True,
+    )
+    read = memory.get_episode
+    source_reads = 0
+
+    def deleted_mid_share(robot_id, requested_id):
+        nonlocal source_reads
+        if robot_id == "robot-01" and requested_id == event_id:
+            source_reads += 1
+            if source_reads == 2:
+                memory.forget_episode("robot-01", event_id)
+        return read(robot_id, requested_id)
+
+    monkeypatch.setattr(memory, "get_episode", deleted_mid_share)
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    try:
+        with pytest.raises(ValueError, match="Original eyewitness memory"):
+            await pet.share_with_peer("robot-01", "robot-02", event_id)
+        assert source_reads >= 2
+        assert memory.count("robot-01") == 0
+        assert memory.count("robot-02") == 0
+    finally:
+        await pet.close()
+
+
+async def test_manual_peer_share_retracts_copy_if_source_deleted_during_insert(
+    fleet, tmp_path, monkeypatch,
+):
+    """Pending SQLite recipient insert is not authority after source deletion."""
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    event_id = "deleted_during_copy"
+    assert memory.remember(
+        "robot-01", event_id, "A blue pen was next to the charger",
+        kind="object", source_robot="robot-01", witnessed=True,
+    )
+    original_remember = memory.remember
+
+    def delete_original_during_peer_write(robot_id, item_id, summary, **kwargs):
+        inserted = original_remember(robot_id, item_id, summary, **kwargs)
+        if robot_id == "robot-02":
+            assert memory.forget_episode("robot-01", event_id)
+        return inserted
+
+    monkeypatch.setattr(memory, "remember", delete_original_during_peer_write)
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    try:
+        with pytest.raises(ValueError, match="Original eyewitness memory"):
+            await pet.share_with_peer("robot-01", "robot-02", event_id)
+        assert memory.count("robot-01") == 0
+        assert memory.count("robot-02") == 0
+        assert memory.get_episode("robot-02", event_id) is None
+    finally:
+        await pet.close()
