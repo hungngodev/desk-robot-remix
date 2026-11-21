@@ -116,3 +116,29 @@ def test_all_exact_battery_candidates_are_screened_but_none_order_released():
     assert '"complete_power_path_safe_to_buy": False' in catalog
     assert "TEN exact manufacturer configurations" in docs
     assert 'fit = None' in catalog
+
+
+def test_full_body_power_monitor_and_cutoff_are_wired_to_compiled_profiles():
+    """Source and builder contract only, not a physical qualification."""
+    ini = (SRC / "firmware/body/platformio.ini").read_text()
+    main = (SRC / "firmware/body/src/main.cpp").read_text()
+    control = (SRC / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    header = (SRC / "firmware/body/lib/BodyControl/BodyControl.h").read_text()
+    guarded = (SRC / "firmware/body/tests/guarded_body_tests.cpp").read_text()
+    wiring = (HW / "wiring.md").read_text()
+    assert ini.count("-DDESK_ROBOT_REQUIRE_FUEL_MONITOR=1") == 2
+    assert "[env:esp32_full]" in ini
+    assert "[env:esp32_dc_full]" in ini
+    assert "-DDESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED=0" in ini
+    assert "control.require_fuel_monitor(true)" in main
+    assert "control.inhibit_unqualified_motor_cutoff()" in main
+    assert "fuel_monitor_fresh(now_ms)" in control
+    assert "ERR arm fuel_monitor_latched" in control
+    assert "ERR arm motor_cutoff_unqualified" in control
+    assert "void inhibit_unqualified_motor_cutoff();" in header
+    assert "required_fuel_gauge_loss_stops_and_requires_local_rearm" in guarded
+    assert "unqualified_stepper_cutoff_never_claims_motion_ready" in guarded
+    assert "DESK_ROBOT_REQUIRE_FUEL_MONITOR=1" in wiring
+    assert "motor_cutoff_unqualified" in wiring
+    assert "physically qualified" in wiring
+
