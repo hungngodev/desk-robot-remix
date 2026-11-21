@@ -764,6 +764,11 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         cJSON_AddNumberToObject(result.get(), "speaker_frames_accepted", d.speaker_frames_accepted);
         cJSON_AddBoolToObject(result.get(), "microphone_privacy_muted", d.microphone_privacy_muted);
         cJSON_AddNumberToObject(result.get(), "microphone_privacy_epoch", d.microphone_privacy_epoch);
+        // Report the actual flashed AEC offset, not the bench command-line
+        // intent. Raw acoustic capture requires zero to avoid measuring only
+        // the residual lag after the firmware already shifted the reference.
+        cJSON_AddNumberToObject(result.get(), "aec_delay_config_ms",
+                                CONFIG_DESK_ROBOT_AEC_DELAY_MS);
         cJSON_AddBoolToObject(result.get(), "reference_integrity_failed", d.integrity_failed);
         cJSON_AddBoolToObject(result.get(), "speaker_playback_verified", false);
         cJSON_AddBoolToObject(result.get(), "aec_physically_qualified", false);
