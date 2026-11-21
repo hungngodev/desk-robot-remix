@@ -2146,7 +2146,7 @@ async def test_legacy_mac_context_remains_tool_data_never_system_or_human(bridge
     assert len(conn.dialogue.dialogue) == 4
     request, receipt = conn.dialogue.dialogue[-2:]
     assert request.role == "assistant"
-    assert request.tool_calls[0]["function"]["name"] == "interaction-context"
+    assert request.tool_calls[0]["function"]["name"] == "desk_robot_situation"
     assert receipt.role == "tool"
     assert request.tool_calls[0]["id"] == receipt.tool_call_id
     body = json.loads(receipt.content)
