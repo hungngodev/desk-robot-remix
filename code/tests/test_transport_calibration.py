@@ -231,7 +231,8 @@ async def test_snapshot_rejects_missing_or_cross_pet_camera_identity(
 ):
     """A misrouted physical JPEG is never attributed to a different pet."""
     for sender in (None, "robot-02"):
-        async def handler(request):
+        # Bind this specific mocked camera identity, not the loop cell.
+        async def handler(request, sender=sender):
             headers = {
                 "X-Desk-Camera-Boot": "31",
                 "X-Desk-Camera-Sequence": "1",
