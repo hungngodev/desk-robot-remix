@@ -259,3 +259,42 @@ def test_native_activity_context_only_reflects_live_same_robot_coordinator_work(
     assert "physical progress and outcome unverified" in status
     docking.state = "succeeded"
     assert _active_robot_activity(jobs, "pet-one") == ""
+
+
+def test_native_startup_context_rejects_live_consent_revoke_during_memory_read(settings):
+    """Revoking live consent during native SQLite retrieval cannot leak facts."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from desk_robot.api_native_omni_routes import register_native_omni_routes
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = True
+
+    class Memory:
+        revoke_live = False
+
+        def recent(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 6
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 6
+            if self.revoke_live:
+                settings.voice_vision_tools_enabled = False
+            return []
+
+    memory = Memory()
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(memory=memory)
+    register_native_omni_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: SimpleNamespace(robot=settings.robot),
+        native_pet_speech_policy=lambda robot_id: {},
+    )
+    with TestClient(app) as client:
+        assert client.get("/v1/pet/robot-01/omni-context").status_code == 200
+        memory.revoke_live = True
+        denied = client.get("/v1/pet/robot-01/omni-context")
+        assert denied.status_code == 403
+        assert "live consent revoked" in denied.json()["detail"].lower()
