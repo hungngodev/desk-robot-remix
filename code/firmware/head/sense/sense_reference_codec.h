@@ -42,6 +42,11 @@ public:
         if (previous != muted) {
             microphone_privacy_epoch_.fetch_add(1, std::memory_order_acq_rel);
         }
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+        // A physical mute also destroys any private raw-PDM bench recording.
+        // The atomic flag is set BEFORE waiting for its bounded RAM owner.
+        if (muted) AbortBenchPcmCapture();
+#endif
     }
 
     // Read-only integrity counters for A2 diagnostics, not an acoustic pass.
