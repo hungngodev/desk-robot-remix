@@ -458,3 +458,41 @@ def test_live_situation_is_available_without_persistent_memory_consent(
             ).status_code == 403
         finally:
             runtime.multimodal = None
+
+
+def test_deleted_episode_tombstone_fences_late_replay_and_other_pets(tmp_path):
+    ids = ["robot-01", "robot-02"]
+    store = MemoryStore(tmp_path, ids)
+    # Operator deletion can happen BEFORE a delayed callback finishes.
+    assert not store.forget_episode("robot-01", "late_voice_event")
+    assert not store.remember(
+        "robot-01", "late_voice_event", "Old speech after revocation",
+        kind="heard_human", source_robot="robot-01", witnessed=True,
+    )
+    # A second pet's private ledger is independent, even with the same ID.
+    assert store.remember(
+        "robot-02", "late_voice_event", "Independent second pet speech",
+        kind="heard_human", source_robot="robot-02", witnessed=True,
+    )
+    assert store.remember(
+        "robot-01", "existing_event", "Old private scene",
+        kind="scene", source_robot="robot-01", witnessed=True,
+    )
+    assert store.forget_episode("robot-01", "existing_event")
+    assert not store.remember(
+        "robot-01", "existing_event", "Replayed scene after deletion",
+        kind="scene", source_robot="robot-01", witnessed=True,
+    )
+    # The deletion remains enforced across full store construction/reconnect.
+    reopened = MemoryStore(tmp_path, ids)
+    assert not reopened.remember(
+        "robot-01", "late_voice_event", "Replayed old audio after restart",
+        kind="heard_human", source_robot="robot-01", witnessed=True,
+    )
+    assert not reopened.remember(
+        "robot-01", "existing_event", "Replayed old scene after restart",
+        kind="scene", source_robot="robot-01", witnessed=True,
+    )
+    assert reopened.count("robot-01") == 0
+    assert reopened.count("robot-02") == 1
+    assert reopened.search("robot-01", "private scene speech") == []

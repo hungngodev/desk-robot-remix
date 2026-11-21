@@ -118,6 +118,15 @@ class MemoryStore:
                          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1)
                        )"""
                 )
+                # A deletion tombstone contains only the random event ID,
+                # never private episode text. Retain it across reconnects so
+                # an old delayed audio/vision callback cannot resurrect a
+                # fact after an operator forget or consent revocation.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS deleted_episode_ids (
+                         event_id TEXT PRIMARY KEY
+                       )"""
+                )
                 # Operator-curated core identity/preferences are distinct
                 # from automatic sensor episodes. Like Letta core memory,
                 # a tiny stable block survives the 250-event rolling buffer.
@@ -248,6 +257,14 @@ class MemoryStore:
         if when > time.time() + 60:
             raise ValueError("Observation timestamp exceeds local clock")
         with self._connect(robot_id) as db:
+            # Begin before checking the tombstone: the competing operator
+            # DELETE and a delayed remembered event must have ONE order.
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "SELECT 1 FROM deleted_episode_ids WHERE event_id=?",
+                (event_id,),
+            ).fetchone() is not None:
+                return False
             cursor = db.execute(
                 """INSERT OR IGNORE INTO memories
                    (event_id,source_robot,witnessed,kind,summary,observed_at,confidence)
@@ -406,6 +423,13 @@ class MemoryStore:
         if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            # Even a deletion arriving before a slow SQLite writer creates a
+            # durable fence. Never copy a peer's deletion to this pet's DB.
+            db.execute(
+                "INSERT OR IGNORE INTO deleted_episode_ids(event_id) VALUES (?)",
+                (event_id,),
+            )
             return db.execute(
                 "DELETE FROM memories WHERE event_id=?", (event_id,)
             ).rowcount == 1
