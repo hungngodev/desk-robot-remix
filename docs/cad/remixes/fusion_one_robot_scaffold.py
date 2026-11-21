@@ -41,6 +41,8 @@ FIT_REFERENCES = (
     ("Contact Pocket Gauge Only", "fit_stls/dock_contact_recess_gauge.stl"),
     ("Jaw Reference Coupon Only", "fit_stls/jaw_calibration_coupon.stl"),
     ("Speaker Fit Gauge Only", "fit_stls/speaker_rect_fit_gauge.stl"),
+    ("Unqualified 1cc Speaker Chamber Reference Only",
+     "fit_stls/speaker_rear_chamber_reference.stl"),
     ("GY530 Sensor Fit Gauge Only", "fit_stls/vl53l0x_gy530_fit_gauge.stl"),
 )
 

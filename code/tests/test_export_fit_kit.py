@@ -138,11 +138,12 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     report = source.export_kit(tmp_path, output_dir=rendered)
     assert len(commands) == (
         len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS) + len(source.RANGER_FITS) + len(source.DOCKS)
-    ) == 15
-    assert len(report["parts"]) == 15
+    ) == 16
+    assert len(report["parts"]) == 16
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
     assert (rendered / "fit_stls/speaker_rect_fit_gauge.stl").is_file()
+    assert (rendered / "fit_stls/speaker_rear_chamber_reference.stl").is_file()
     assert (rendered / "fit_stls/vl53l0x_gy530_fit_gauge.stl").is_file()
     assert (rendered / "dock_stls/dock_passive_fit.stl").is_file()
     assert (rendered / "dock_stls/dock_rail_entry_coupon.stl").is_file()
@@ -411,11 +412,12 @@ def test_real_openscad_renders_provisional_source_parts(tmp_path):
         len(source.ADAPTERS) + len(source.GAUGES)
         + len(source.SPEAKER_FITS) + len(source.RANGER_FITS)
         + len(source.DOCKS)
-    ) == 15
+    ) == 16
     assert (output / "adapter_stls/speaker_grille.stl").is_file()
     assert (output / "dock_stls/dock_passive_fit.stl").is_file()
     assert (output / "dock_stls/dock_rail_entry_coupon.stl").is_file()
     assert (output / "dock_stls/dock_ir_pair_position_coupon.stl").is_file()
+    assert (output / "fit_stls/speaker_rear_chamber_reference.stl").is_file()
     for item in report["parts"]:
         assert source.binary_stl_triangles(output / item["location"]) > 0
     assert report["full_printable_assembly_verified"] is False
@@ -723,3 +725,43 @@ def test_protected_pack_audit_tracks_active_fit_coupon_dimensions():
     assert "70 mm leads, bend radius" in audit
     assert "107.6 x 40.6 mm" in audit
 
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_speaker_rear_chamber_reference_retains_conservative_air_budget(tmp_path):
+    """A closed rear pocket and gasket land are necessary, never sufficient."""
+    scad = ROOT / "docs/cad/remixes/speaker_rect_fit_gauge.scad"
+    adapter = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
+    speaker_text = scad.read_text(encoding="utf-8")
+    grille_text = adapter.read_text(encoding="utf-8")
+    assert "speaker_chamber_border=8;" in speaker_text
+    assert "speaker_grille_border=8;" in grille_text
+    assert "speaker_chamber_hole_edge=3.5;" in speaker_text
+    assert "speaker_grille_hole_edge=3.5;" in grille_text
+    assert "speaker_chamber_bolt_d=2.35;" in speaker_text
+    assert "m2_clearance_d=2.35;" in grille_text
+    output = tmp_path / "rear.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(output),
+        "-D", 'part="speaker_rear_chamber_reference"', str(scad),
+    ], check=True, capture_output=True, text=True, timeout=120)
+    verifier = module()
+    assert verifier.closed_mesh_edges(output) > 0
+    box = verifier.mesh_bounds_mm(output)
+    assert box["dimensions_mm"] == [36.0, 32.0, 11.4]
+    inner_l, inner_w, depth = 20.7, 16.7, 9.0
+    conservative_air_mm3 = inner_l * inner_w * depth - 20 * 16 * 4.7
+    assert conservative_air_mm3 >= 1000
+    for override, message in (
+        ("speaker_chamber_depth=6", "nominal net air volume below 1cc"),
+        ("speaker_chamber_hole_edge=2", "bolt breaches outer wall"),
+        ("speaker_chamber_border=6", "bolt breaches gasket land"),
+    ):
+        bad = subprocess.run([
+            "openscad", "--export-format", "binstl",
+            "-o", str(tmp_path / "invalid_rear.stl"),
+            "-D", 'part="speaker_rear_chamber_reference"',
+            "-D", override, str(scad),
+        ], capture_output=True, text=True, timeout=90)
+        assert bad.returncode != 0
+        assert message in bad.stderr + bad.stdout

@@ -27,7 +27,8 @@ GAUGES = (
     "battery_boost_tray", "dock_contact_recess_gauge",
     "jaw_calibration_coupon",
 )
-SPEAKER_FITS = ("speaker_rect_fit_gauge",)
+SPEAKER_FITS = ("speaker_rect_fit_gauge",
+                "speaker_rear_chamber_reference")
 RANGER_FITS = ("vl53l0x_gy530_fit_gauge",)
 DOCKS = ("dock_passive_fit", "dock_rail_entry_coupon",
          "dock_ir_pair_position_coupon")

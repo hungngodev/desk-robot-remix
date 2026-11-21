@@ -12,6 +12,7 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | XIAO Sense assembled board width, height and camera depth | | sense_w / h / depth |
 | SSD1306 PCB width, height and window active area | | oled_pcb_w / h, oled_screen_w / h |
 | Exact Challenge CS20-02P110-04-1X 20 x 16 x 4.7 mm body, solder pads and gasket dimensions | | speaker_l / speaker_w / speaker_depth / acoustics_1cc |
+| Acoustic cup net volume, compressed gasket thickness, sealed lead feedthrough and interference to camera/mic/OLED | | speaker_air_cc / gasket_h / lead_seal / head_clearance |
 | WROOM dev board assembled envelope and USB service clearance | | wroom_w / l / usb_clearance |
 | Battery and charge/boost enclosure width / length / height | | power_w / l / h |
 | TCA9548A and ULN2003 board physical widths | | mux_w, driver_w |

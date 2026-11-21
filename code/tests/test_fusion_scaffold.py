@@ -83,13 +83,13 @@ def test_mechanical_sheet_never_approves_premium_ranger_or_mismatched_pack():
 
 
 def test_exported_candidate_fits_survive_legacy_fusion_entrypoint(tmp_path):
-    """All eight optional fit references are preserved by the old GUI name.
+    """All nine optional fit references are preserved by the old GUI name.
 
     build_manifest() is a path plan only. The GUI run additionally verifies
     export_fit_kit's hash and unqualified flags before importing meshes.
     """
     source = load_script()
-    assert len(source.FIT_REFERENCES) == 8
+    assert len(source.FIT_REFERENCES) == 9
     for _, rel in source.SOURCE_MESHES:
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +106,7 @@ def test_exported_candidate_fits_survive_legacy_fusion_entrypoint(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"generated candidate fixture")
     names_paths = source.build_manifest(tmp_path)
-    assert len(names_paths) == 12 + 7 + 8
+    assert len(names_paths) == 12 + 7 + 9
     assert len({name for name, _ in names_paths}) == len(names_paths)
     assert {path for _, path in names_paths} == {
         *(tmp_path / rel for _, rel in source.SOURCE_MESHES),
@@ -116,7 +116,7 @@ def test_exported_candidate_fits_survive_legacy_fusion_entrypoint(tmp_path):
     # Only an optional candidate disappears when its file is absent;
     # a required source mesh must still fail hard.
     fits[-1].unlink()
-    assert len(source.build_manifest(tmp_path)) == 26
+    assert len(source.build_manifest(tmp_path)) == 27
     (tmp_path / source.SOURCE_MESHES[0][1]).unlink()
     try:
         source.build_manifest(tmp_path)
