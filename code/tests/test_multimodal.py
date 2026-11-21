@@ -3121,3 +3121,163 @@ def test_discarded_live_asr_event_cannot_replay_or_leak_to_peer():
     assert not hub.remember_heard("robot-01", event_id, "Replayed words", now)
     assert hub.remember_heard("robot-02", event_id, "Independent words", now)
     assert hub.heard_history["robot-02"][-1][1] == "Independent words"
+
+
+@pytest.mark.parametrize("stage", ["snapshot", "decode"])
+@pytest.mark.parametrize("grant_state", ["unchanged", "revoked", "regranted"])
+async def test_capture_camera_grant_stays_revoked_after_fast_regrant(
+    settings, stage, grant_state,
+):
+    """A completed old-grant JPEG must not enter the new consent epoch."""
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+    entered, release = asyncio.Event(), asyncio.Event()
+    head = Head()
+
+    async def held_snapshot():
+        head.captures += 1
+        entered.set()
+        await release.wait()
+        return image(square=True)
+
+    async def held_decode(jpeg, *, priority):
+        entered.set()
+        await release.wait()
+        return _prepare(jpeg)
+
+    if stage == "snapshot":
+        head.snapshot = held_snapshot
+    service = MultimodalOrchestrator(
+        settings, {rid: head}, Vision(), asyncio.Lock(),
+    )
+    if stage == "decode":
+        service._prepare_bounded = held_decode
+    task = asyncio.create_task(service.capture(rid, source="speech"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        grant = settings.camera_consent_generation
+        if grant_state != "unchanged":
+            settings.voice_vision_tools_enabled = False
+            if grant_state == "regranted":
+                settings.voice_vision_tools_enabled = True
+            assert settings.camera_consent_generation > grant
+        release.set()
+        if grant_state == "unchanged":
+            evidence = await asyncio.wait_for(task, timeout=2)
+            assert evidence.jpeg and service.hub.frames[rid]
+        else:
+            with pytest.raises(RuntimeError, match="Camera consent revoked"):
+                await asyncio.wait_for(task, timeout=2)
+            assert not service.hub.frames[rid]
+    finally:
+        release.set()
+        await service.close()
+
+
+async def test_new_camera_grant_cannot_reuse_cached_old_speech_frame(settings):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+    head = Head()
+    service = MultimodalOrchestrator(
+        settings, {rid: head}, Vision(), asyncio.Lock(),
+    )
+    try:
+        await service.capture(rid, source="speech")
+        assert head.captures == 1
+        settings.voice_vision_tools_enabled = False
+        settings.voice_vision_tools_enabled = True
+        await service.capture(rid, source="speech", reuse_if_recent_s=0.65)
+        assert head.captures == 2
+        assert len(service.hub.frames[rid]) == 1
+        assert service._metrics[rid]["native_speech_camera_reuses"] == 0
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize("regranted", [False, True])
+async def test_external_proactive_jpeg_cannot_publish_after_camera_revoke(
+    settings, regranted,
+):
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+    entered, release = asyncio.Event(), asyncio.Event()
+    service = MultimodalOrchestrator(
+        settings, {rid: Head()}, Vision(), asyncio.Lock(),
+    )
+
+    async def paused_decode(jpeg, *, priority=False):
+        entered.set()
+        await release.wait()
+        return _prepare(jpeg)
+
+    service._prepare_bounded = paused_decode
+    task = asyncio.create_task(
+        service.offer_proactive(rid, image(), time.monotonic())
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        settings.voice_vision_tools_enabled = False
+        if regranted:
+            settings.voice_vision_tools_enabled = True
+        release.set()
+        await asyncio.wait_for(task, timeout=2)
+        assert not service.hub.frames[rid]
+    finally:
+        release.set()
+        await service.close()
+
+
+async def test_continuous_stream_regrant_during_decode_rejects_old_frame(settings):
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class StreamingHead(Head):
+        async def stream_frames(self):
+            yield image(square=True), time.monotonic()
+            await asyncio.Event().wait()
+
+    service = MultimodalOrchestrator(
+        settings, {rid: StreamingHead()}, Vision(), asyncio.Lock(),
+    )
+
+    async def paused_decode(jpeg, *, priority=False):
+        entered.set()
+        await release.wait()
+        return _prepare(jpeg)
+
+    service._prepare_bounded = paused_decode
+    try:
+        service.start_streams()
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        settings.voice_vision_tools_enabled = False
+        settings.voice_vision_tools_enabled = True
+        release.set()
+        await asyncio.wait_for(service._stream_tasks[rid], timeout=2)
+        assert not service.hub.frames[rid]
+        assert service._metrics[rid]["stream_frames_selected"] == 0
+    finally:
+        release.set()
+        await service.close()
+
+
+async def test_native_live_subscriber_does_not_cross_camera_regrant(settings):
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+    service = MultimodalOrchestrator(
+        settings, {rid: Head()}, Vision(), asyncio.Lock(),
+    )
+    stream = service.native_live_frames(rid)
+    pending = asyncio.create_task(anext(stream))
+    try:
+        await asyncio.sleep(0.02)
+        settings.voice_vision_tools_enabled = False
+        settings.voice_vision_tools_enabled = True
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(pending, timeout=1)
+        assert not service.hub.frames[rid]
+    finally:
+        await stream.aclose()
+        await service.close()

@@ -870,6 +870,12 @@ class MultimodalOrchestrator:
     def __init__(self, settings: "Settings", heads: dict[str, "Head"],
                  scene: "OllamaScene", inference_lock: asyncio.Lock):
         self.settings = settings
+        # One observed camera grant per pet. A rapid OFF/ON must invalidate
+        # cached JPEGs once without clearing valid frames from the new grant.
+        self._camera_grants = {
+            r.id: getattr(settings, "camera_consent_generation", None)
+            for r in settings.robots
+        }
         self.heads = heads
         self.scene = scene
         self.inference_lock = inference_lock
@@ -963,6 +969,19 @@ class MultimodalOrchestrator:
             "motor_authorized": False,
         }
 
+    def _camera_grant_valid(self, robot_id: str, origin: int | None) -> bool:
+        """Reject old media grants and invalidate their cached JPEGs once.
+
+        The setting's generation advances on every opt-out, even when the
+        operator immediately opts back in before an awaited decode finishes.
+        Synthetic legacy policies without an epoch retain their old behavior.
+        """
+        current = getattr(self.settings, "camera_consent_generation", None)
+        if current != self._camera_grants[robot_id]:
+            self._camera_grants[robot_id] = current
+            self.hub.discard_video(robot_id)
+        return self.settings.voice_vision_tools_enabled and current == origin
+
     def stream_owns_camera(self, robot_id: str) -> bool:
         """One live visual worker owns acquisition, including reconnects."""
         self.hub._check(robot_id)
@@ -980,13 +999,16 @@ class MultimodalOrchestrator:
         condition = self._model_frame_conditions[robot_id]
         version = self._model_frame_versions[robot_id]
         last_delivered = float("-inf")
-        while not self._closed and self.settings.voice_vision_tools_enabled:
+        camera_grant = getattr(self.settings, "camera_consent_generation", None)
+        while not self._closed and self._camera_grant_valid(robot_id, camera_grant):
             async with condition:
                 try:
                     await asyncio.wait_for(condition.wait_for(
                         lambda version=version: (self._model_frame_versions[robot_id] > version
                                  or self._closed
-                                 or not self.settings.voice_vision_tools_enabled)
+                                 or not self.settings.voice_vision_tools_enabled
+                                 or getattr(self.settings, "camera_consent_generation", None)
+                                    != camera_grant)
                     # Settings is operator-controlled but does not emit an
                     # asyncio.Condition notification on mutation. Recheck
                     # consent at most 100ms later even in a completely
@@ -994,7 +1016,7 @@ class MultimodalOrchestrator:
                     ), timeout=0.1)
                 except TimeoutError:
                     continue
-                if self._closed or not self.settings.voice_vision_tools_enabled:
+                if self._closed or not self._camera_grant_valid(robot_id, camera_grant):
                     return
                 version = self._model_frame_versions[robot_id]
             # Sensor confirmation can enter the same three-frame ring
@@ -1005,6 +1027,8 @@ class MultimodalOrchestrator:
                 item for item in reversed(self.hub.frames[robot_id])
                 if item.source in ("speech", "proactive")
             ), None)
+            if (not self._camera_grant_valid(robot_id, camera_grant)):
+                return
             if (frame is not None and frame.received_at > last_delivered
                     and 0 <= time.monotonic() - frame.received_at <= 1):
                 last_delivered = frame.received_at
@@ -1022,9 +1046,12 @@ class MultimodalOrchestrator:
         self.hub._check(robot_id)
         condition = self._model_frame_conditions[robot_id]
         latest = after if after is not None else -math.inf
+        camera_grant = getattr(self.settings, "camera_consent_generation", None)
 
         def ready() -> bool:
             return (self._closed or not self.settings.voice_vision_tools_enabled
+                    or getattr(self.settings, "camera_consent_generation", None)
+                       != camera_grant
                     or any(
                         frame.source == "proactive" and frame.received_at > latest
                         for frame in self.hub.frames[robot_id]
@@ -1038,7 +1065,7 @@ class MultimodalOrchestrator:
             except TimeoutError:
                 return False
             # A cached frame is not permission to observe after opt out.
-            return (not self._closed and self.settings.voice_vision_tools_enabled
+            return (not self._closed and self._camera_grant_valid(robot_id, camera_grant)
                     and any(
                         frame.source == "proactive" and frame.received_at > latest
                         for frame in self.hub.frames[robot_id]
@@ -1075,6 +1102,9 @@ class MultimodalOrchestrator:
         """
         failures = 0
         while not self._closed and self.settings.voice_vision_tools_enabled:
+            camera_grant = getattr(self.settings, "camera_consent_generation", None)
+            if not self._camera_grant_valid(robot_id, camera_grant):
+                return
             try:
                 # Closing the consumer must promptly release the head's sole
                 # MJPEG HTTP lease, especially on live visual opt out. Plain
@@ -1085,8 +1115,7 @@ class MultimodalOrchestrator:
                         # HttpHead validated the frame's device source header.
                         # Snapshot its clock before Pillow yields the loop.
                         source_identity = getattr(head, "_last_camera", None)
-                        if self._closed or not self.settings.voice_vision_tools_enabled:
-                            self.hub.discard_video(robot_id)
+                        if self._closed or not self._camera_grant_valid(robot_id, camera_grant):
                             return
                         failures = 0  # Healthy frames reset reconnection backoff.
                         metrics = self._metrics[robot_id]
@@ -1157,11 +1186,9 @@ class MultimodalOrchestrator:
                             # by the outer reconnect loop.
                             metrics["stream_frames_skipped"] += 1
                             continue
-                        if not self.settings.voice_vision_tools_enabled:
-                            # Opt out can arrive while Pillow/motion preparation
-                            # owns the frame. Do not publish that completed JPEG
-                            # to the Mac hub, native subscriber or pet observer.
-                            self.hub.discard_video(robot_id)
+                        if not self._camera_grant_valid(robot_id, camera_grant):
+                            # Opt out, including a rapid OFF/ON during Pillow,
+                            # permanently cancels this old stream session.
                             return
                         # A slow Pillow worker can finish after this source
                         # frame's one-second live-video freshness window.
@@ -1561,10 +1588,11 @@ class MultimodalOrchestrator:
                       reuse_if_recent_s: float = 0.0,
                       trigger_kind: str | None = None) -> CameraEvidence:
         self.hub._check(robot_id)
+        camera_grant = getattr(self.settings, "camera_consent_generation", None)
         if self._closed:
             raise RuntimeError("Multimodal orchestrator closed")
         if (getattr(self.settings, "mode", "hardware") == "hardware"
-                and not self.settings.voice_vision_tools_enabled):
+                and not self._camera_grant_valid(robot_id, camera_grant)):
             raise RuntimeError("Camera consent revoked for capture")
         if not 0 <= reuse_if_recent_s <= 1.0:
             raise ValueError("Invalid shared live camera age")
@@ -1580,7 +1608,7 @@ class MultimodalOrchestrator:
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
             if (getattr(self.settings, "mode", "hardware") == "hardware"
-                    and not self.settings.voice_vision_tools_enabled):
+                    and not self._camera_grant_valid(robot_id, camera_grant)):
                 raise RuntimeError("Camera consent revoked for capture")
             if (source == "proactive"
                     and (pending := self._look_tasks.get(robot_id)) is not None
@@ -1625,10 +1653,9 @@ class MultimodalOrchestrator:
                 # that sampler on reconnect or a newer VAD is insufficient:
                 # old HTTP/decode work must never repopulate the emptied hub.
                 if (getattr(self.settings, "mode", "hardware") == "hardware"
-                        and not self.settings.voice_vision_tools_enabled):
-                    # An opt-out during JPEG I/O or Pillow preparation is final:
-                    # never publish an old sensor-triggered image to the Mac hub.
-                    self.hub.discard_video(robot_id)
+                        and not self._camera_grant_valid(robot_id, camera_grant)):
+                    # A short OFF/ON during JPEG I/O or Pillow remains revoked
+                    # for this request even when the current boolean is True.
                     raise RuntimeError("Camera consent revoked for capture")
                 if (self._turn_epoch[robot_id] != turn
                         or self._question_epoch[robot_id] != question):
@@ -1671,17 +1698,16 @@ class MultimodalOrchestrator:
         # Pet snapshots share the same authenticated head.capture_lock. Only
         # CPU preprocessing runs off-thread. Never publish late paused frames.
         self.hub._check(robot_id)
+        camera_grant = getattr(self.settings, "camera_consent_generation", None)
         # An external JPEG is not consent: mirror the continuous Sense stream.
-        if not self.settings.voice_vision_tools_enabled:
-            self.hub.discard_video(robot_id)
+        if not self._camera_grant_valid(robot_id, camera_grant):
             return
         generation = self.hub._generation[robot_id]
         turn = self._turn_epoch[robot_id]
         question = self._question_epoch[robot_id]
         prepared = await self._prepare_bounded(jpeg)
-        if not self.settings.voice_vision_tools_enabled:
-            # Late image preprocessing may finish after the user opts out.
-            self.hub.discard_video(robot_id)
+        if not self._camera_grant_valid(robot_id, camera_grant):
+            # An old JPEG cannot enter the regranted scene after Pillow.
             return
         if (self._any_human_active(time.monotonic())
                 or self._turn_epoch[robot_id] != turn
