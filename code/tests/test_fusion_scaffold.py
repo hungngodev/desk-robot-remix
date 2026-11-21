@@ -23,11 +23,17 @@ def test_fusion_source_manifest_is_complete_and_not_a_fake_assembly():
     # The generated adapter kit may exist after running the supported export
     # command. Tests must not fail merely because a user built the STLs.
     manifest = source.build_manifest(ROOT)
-    generated = sum(
+    adapter_candidates = sum(
         (ROOT / "docs/cad/remixes/adapter_stls" / (name + ".stl")).is_file()
         for name in source.ADAPTER_NAMES
     )
-    assert len(manifest) == len(source.SOURCE_MESHES) + generated
+    fit_candidates = sum(
+        (ROOT / "docs/cad/remixes" / rel).is_file()
+        for _, rel in source.FIT_REFERENCES
+    )
+    assert len(manifest) == (
+        len(source.SOURCE_MESHES) + adapter_candidates + fit_candidates
+    )
     assert all(path.is_file() for _, path in manifest)
     # The legacy entrypoint delegates to ONE canonical Fusion implementation.
     # Test the real mesh importer rather than demanding duplicate API code
@@ -41,6 +47,7 @@ def test_fusion_source_manifest_is_complete_and_not_a_fake_assembly():
     assert 'return _load()["run"](context)' in wrapper
     assert source.SOURCE_MESHES == canonical["SOURCE_MESHES"]
     assert source.ADAPTER_NAMES == canonical["ADAPTER_NAMES"]
+    assert source.FIT_REFERENCES == canonical["FIT_REFERENCES"]
     assert "verify_optional_fit_references(repo)" in implementation
     assert "MillimeterMeshUnit" in implementation
     assert "DirectDesignType" in implementation
@@ -69,3 +76,47 @@ def test_mechanical_sheet_never_approves_premium_ranger_or_mismatched_pack():
     assert "86 mm" in sheet and "68 mm" in sheet
     assert "undersized" in sheet
     assert "unqualified" in sheet
+
+
+def test_exported_candidate_fits_survive_legacy_fusion_entrypoint(tmp_path):
+    """All seven optional fit references are preserved by the old GUI name.
+
+    build_manifest() is a path plan only. The GUI run additionally verifies
+    export_fit_kit's hash and unqualified flags before importing meshes.
+    """
+    source = load_script()
+    assert len(source.FIT_REFERENCES) == 7
+    for _, rel in source.SOURCE_MESHES:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"source mesh fixture")
+    adapters = [
+        tmp_path / "docs/cad/remixes/adapter_stls" / (name + ".stl")
+        for name in source.ADAPTER_NAMES
+    ]
+    fits = [
+        tmp_path / "docs/cad/remixes" / rel
+        for _, rel in source.FIT_REFERENCES
+    ]
+    for path in adapters + fits:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"generated candidate fixture")
+    names_paths = source.build_manifest(tmp_path)
+    assert len(names_paths) == 12 + 7 + 7
+    assert len({name for name, _ in names_paths}) == len(names_paths)
+    assert {path for _, path in names_paths} == {
+        *(tmp_path / rel for _, rel in source.SOURCE_MESHES),
+        *adapters,
+        *fits,
+    }
+    # Only an optional candidate disappears when its file is absent;
+    # a required source mesh must still fail hard.
+    fits[-1].unlink()
+    assert len(source.build_manifest(tmp_path)) == 25
+    (tmp_path / source.SOURCE_MESHES[0][1]).unlink()
+    try:
+        source.build_manifest(tmp_path)
+    except FileNotFoundError as exc:
+        assert "Missing source mesh" in str(exc)
+    else:
+        raise AssertionError("Missing original chassis must fail closed")

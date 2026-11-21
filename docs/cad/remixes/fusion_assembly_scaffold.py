@@ -18,6 +18,7 @@ def _load():
 # a single canonical source of mesh selections.
 SOURCE_MESHES = _load()["SOURCE_MESHES"]
 ADAPTER_NAMES = _load()["ADAPTER_NAMES"]
+FIT_REFERENCES = _load()["FIT_REFERENCES"]
 
 
 def find_repository(script_path: Path) -> Path:
