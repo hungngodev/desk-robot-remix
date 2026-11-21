@@ -1,7 +1,9 @@
 """Desk edge VL53L0X sensor geometry and stopping-envelope paper preflight.
 
-Reuses the actual 13.5mm lens center implied by the CC0 source OpenSCAD
-adapter and the existing firmware validity range, not a new ToF driver.
+Recomputes the lens center offset from the selected GY-530 CC0 OpenSCAD
+bracket and the existing firmware validity range, not a new ToF driver.
+The current 13.3mm PCB envelope yields 11.15mm lens-center height above
+the adapter mounting datum; the physical carrier/lens position is unmeasured.
 A paper feasibility check is NOT a physical cliff calibration or permission
 to enable local motors. All inputs concerning mounted robot must be measured.
 """
