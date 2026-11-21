@@ -961,3 +961,22 @@ def test_body_status_is_async_and_urgent_stop_preempts_uart_telemetry():
     assert "httpd_req_async_handler_complete(req);" in source
     assert "class UrgentStopGate" in protocol
     assert "Request(const Request&) = delete;" in protocol
+
+def test_sense_pcm_window_native_cpp_regression():
+    """Compile the same bounded 4s PCM window used by the real Sense codec."""
+    compiler = shutil.which("c++")
+    assert compiler is not None, "A native C++17 compiler is required"
+    native_cpp_env = load_module(
+        "sense_pcm_native_env", HEAD / "tests/test_overlay.py"
+    ).native_cpp_env
+    with tempfile.TemporaryDirectory() as directory:
+        exe = Path(directory) / "sense_pcm_window_test"
+        subprocess.run(
+            [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+             "-I", str(HEAD / "sense"),
+             str(HEAD / "tests/sense_pcm_window_test.cc"),
+             "-o", str(exe)],
+            check=True,
+            env=native_cpp_env(),
+        )
+        subprocess.run([str(exe)], check=True)
