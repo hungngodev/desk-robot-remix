@@ -291,22 +291,28 @@ class AttentionLedger:
         if not pieces:
             return []
         content = "; ".join(pieces)
-        if len(content) > 260 and safety_piece is not None:
-            # Preserve complete, correctly historical fault evidence when a
-            # long topic and newer ASR consume the ordinary attention budget.
-            # Clipping inside "safety_fault ... historical" silently drops
-            # the distinction between a past fault and current WROOM state.
+        if len(content) > 260:
+            # Bound every attention timeline, not only explicit safety faults.
+            # Keep the freshest human words and the complete historical
+            # sensor qualifier ahead of older topic and transmitted speech.
+            # Never slice a qualifier into a misleading current observation.
             mandatory = [pieces[0]] if newer_asr else []
-            mandatory.append(safety_piece)
-            if len("; ".join(mandatory)) > 260:
-                # A concurrent secondary handling cue is lower priority than
-                # the actual safety fault and its provenance qualifier.
-                first_fault = safety_piece.split("; also ", 1)[0]
-                if " (historical, not current telemetry)" not in first_fault:
-                    first_fault += " (historical, not current telemetry)"
-                mandatory[-1] = first_fault
+            event_to_keep = (
+                safety_piece if safety_piece is not None
+                else event_piece if events else None
+            )
+            if event_to_keep is not None:
+                mandatory.append(event_to_keep)
+                if len("; ".join(mandatory)) > 260:
+                    # A secondary sensor edge is optional; the primary event
+                    # and its "historical" qualifier are not.
+                    primary_event = event_to_keep.split("; also ", 1)[0]
+                    if " (historical, not current telemetry)" not in primary_event:
+                        primary_event += " (historical, not current telemetry)"
+                    mandatory[-1] = primary_event
             for optional in pieces:
-                if optional == safety_piece or (newer_asr and optional == pieces[0]):
+                if (optional == event_to_keep
+                        or (newer_asr and optional == pieces[0])):
                     continue
                 candidate = "; ".join([*mandatory, optional])
                 if len(candidate) <= 260:

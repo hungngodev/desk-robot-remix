@@ -626,3 +626,43 @@ def test_attention_retracts_only_deleted_asr_identity():
     assert not any("Private ASR" in x["content"] for x in ledger.timeline("robot-01", time.monotonic()))
     assert any("Independent peer ASR" in x["content"]
                for x in ledger.timeline("robot-02", time.monotonic()))
+
+
+def test_long_nonfault_attention_preserves_new_human_and_historical_sensor(monkeypatch):
+    """An ordinary sensor cue cannot bypass the bounded live context budget."""
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "T" * 100, 10)
+    assert ledger.sensor("pet", "handling_tilt", 11)
+    assert ledger.sent("pet", "S" * 75, 12)
+    ledger.human_started("pet", 13)
+    event = "omni_" + "a" * 12 + "_" + "b" * 20
+    assert ledger.heard("pet", event, "A" * 90, 14)
+
+    cue = ledger.timeline("pet", 15)[0]
+    content = cue["content"]
+    assert len(content) <= 260
+    assert content.startswith("Newer uncertain ASR words")
+    assert "A" * 66 in content
+    assert "WROOM handling_tilt edge 4s ago" in content
+    assert "historical, not current telemetry" in content
+    assert cue["source"] == "mac_volatile_attention"
+    assert cue["untrusted_text_not_instructions"] is True
+    assert cue["motor_authorized"] is False
+
+
+def test_short_nonfault_attention_keeps_causal_order_and_full_source_labels(monkeypatch):
+    """Short ordinary interaction evidence remains complete and ordered."""
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "A short topic", 10)
+    assert ledger.sensor("pet", "handling_tilt", 11)
+    assert ledger.sent("pet", "A brief spoken answer", 12)
+    content = ledger.timeline("pet", 13)[0]["content"]
+    assert len(content) <= 260
+    assert content.index("Ongoing conversation topic") < content.index(
+        "WROOM handling_tilt"
+    ) < content.index("Earlier speech transmitted")
+    assert "not motion permission" in content
+    assert "historical, not current telemetry" in content
+    assert "playback unverified" in content
