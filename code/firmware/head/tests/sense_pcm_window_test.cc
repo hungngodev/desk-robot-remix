@@ -23,6 +23,19 @@ int main() {
   assert(result.interleaved[0]==1234 && result.interleaved[1]==-5678);
   assert(result.interleaved[127998]==1234 && result.interleaved[127999]==-5678);
   assert(!capture.ready() && !capture.occupied());
+  // Accepted I2S frames are not proof of a usable acoustic stimulus.
+  // A full, correctly timestamped capture of digital silence must fail.
+  SensePcmWindow silent_reference;
+  std::array<std::int16_t, 320> quiet{};
+  assert(silent_reference.begin(data.data(), 1000000));
+  for (int i = 1; i <= 200; ++i)
+    silent_reference.offer(mic.data(), quiet.data(), 320,
+                           1000000 + i * 20000, true);
+  assert(silent_reference.frames_received() == SensePcmWindow::kFrames);
+  assert(silent_reference.failed() && !silent_reference.ready());
+  assert(silent_reference.take().interleaved == nullptr);
+  assert(silent_reference.discard() == data.data());
+  assert(!silent_reference.occupied());
   assert(capture.begin(data.data(), 1000000));
   capture.offer(mic.data(), ref.data(), 320, 1020000, false);
   assert(capture.failed() && !capture.ready());

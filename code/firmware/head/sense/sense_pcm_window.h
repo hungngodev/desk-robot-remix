@@ -41,6 +41,7 @@ class SensePcmWindow {
     last_sample_us_ = 0;
     failed_ = false;
     ready_ = false;
+    reference_nonzero_seen_ = false;
     return true;
   }
 
@@ -87,6 +88,11 @@ class SensePcmWindow {
     for (std::uint32_t i = 0; i < accepted; ++i) {
       storage_[2 * (received_ + i)] = mic[i];
       storage_[2 * (received_ + i) + 1] = reference[i];
+      // An I2S frame count can advance while the entire transmitted
+      // reference is digital silence (e.g. muted gain or silent TTS).
+      // Preserve the exact all-zero screening rule; acoustic quality and
+      // adequate excitation are still verified by the offline estimator.
+      reference_nonzero_seen_ |= reference[i] != 0;
     }
     received_ += accepted;
     last_sample_us_ = accepted_end_us;
@@ -97,7 +103,8 @@ class SensePcmWindow {
       const auto elapsed = last_sample_us_ - first_sample_us_;
       const auto expected = std::int64_t{kFrames} * 1'000'000 / kSampleRate;
       if (elapsed < expected - kMaxWindowDriftUs ||
-          elapsed > expected + kMaxWindowDriftUs) {
+          elapsed > expected + kMaxWindowDriftUs ||
+          !reference_nonzero_seen_) {
         failed_ = true;
       } else {
         ready_ = true;
@@ -133,6 +140,7 @@ class SensePcmWindow {
     last_sample_us_ = 0;
     ready_ = false;
     failed_ = false;
+    reference_nonzero_seen_ = false;
   }
 
   std::int16_t* storage_ = nullptr;
@@ -142,6 +150,7 @@ class SensePcmWindow {
   std::int64_t last_sample_us_ = 0;
   bool ready_ = false;
   bool failed_ = false;
+  bool reference_nonzero_seen_ = false;
 };
 
 }  // namespace desk_robot
