@@ -1805,8 +1805,9 @@ def main() -> int:
             return 2
         try:
             from verify_procurement_receipts import audit_release, checkout_sha
+            checked_sha = checkout_sha()
             failures = audit_release(
-                evidence, checkout_sha(), first_robot=args.require_first_robot
+                evidence, checked_sha, first_robot=args.require_first_robot
             )
         except (OSError, ValueError, TypeError, KeyError) as exc:
             print("HOLD: cannot verify real purchasing evidence: " + str(exc),
@@ -1843,6 +1844,18 @@ def main() -> int:
         report = attach_verified_checkout_evidence(
             report, cost, evidence["costs"]
         )
+        # Receipts, checkout and carrier matching can take time. The first
+        # live PR read is not a lease: reject an approved cart if another
+        # worker changed the canonical hardware or purchasing requirements.
+        try:
+            if checkout_sha() != checked_sha:
+                print("HOLD: PR #17 advanced during purchasing verification",
+                      file=sys.stderr)
+                return 2
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            print("HOLD: cannot recheck live purchasing revision: " + str(exc),
+                  file=sys.stderr)
+            return 2
     report = public_purchase_view(
         report, live_receipts_verified=(args.require_release or args.require_first_robot)
     )

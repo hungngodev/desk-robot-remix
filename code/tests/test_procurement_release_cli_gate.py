@@ -69,3 +69,75 @@ def test_fleet_release_refuses_nonfleet_views():
         assert result.returncode != 0
         assert result.stdout == ""
         assert "Fleet release may only print a full fleet view" in result.stderr
+
+
+def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
+    monkeypatch, tmp_path, capsys,
+):
+    """A mid-audit branch advance must not print a once-approved cart."""
+    import importlib.util
+    import json
+    import sys
+
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
+    import verify_procurement_receipts as verifier
+
+    spec = importlib.util.spec_from_file_location(
+        "procurement_cli_race_test", SCRIPT,
+    )
+    assert spec and spec.loader
+    release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release)
+
+    plan = tmp_path / "plan.json"
+    evidence = tmp_path / "evidence.json"
+    plan.write_text("{}", encoding="utf-8")
+    evidence.write_text(json.dumps({"costs": {"lines": []}}), encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", [str(SCRIPT), "--plan", str(plan),
+                      "--evidence", str(evidence),
+                      "--require-first-robot", "--format", "first-robot-markdown"],
+    )
+    monkeypatch.setattr(release, "generate", lambda *args: {})
+    monkeypatch.setattr(
+        release, "first_robot_projection",
+        lambda *_: {"purchase_approved": True},
+    )
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": True, "awaiting_arrival_roles": []},
+    )
+    monkeypatch.setattr(verifier, "audit_release", lambda *args, **kwargs: [])
+    monkeypatch.setattr(release, "attach_verified_checkout_evidence",
+                        lambda report, *args: report)
+    monkeypatch.setattr(release, "public_purchase_view",
+                        lambda report, **kwargs: report)
+    monkeypatch.setattr(release, "render_first_robot_markdown",
+                        lambda report: "synthetic cart, NOT approval")
+    revisions = iter(["a" * 40, "b" * 40])
+    monkeypatch.setattr(verifier, "checkout_sha", lambda: next(revisions))
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "PR #17 advanced during purchasing verification" in captured.err
+
+    monkeypatch.setattr(verifier, "checkout_sha", lambda: "a" * 40)
+    assert release.main() == 0
+    assert "synthetic cart" in capsys.readouterr().out
+
+    revisions = iter(["a" * 40, None])
+
+    def offline_after_initial_receipt_check():
+        revision = next(revisions)
+        if revision is None:
+            raise ValueError("network unavailable")
+        return revision
+
+    monkeypatch.setattr(
+        verifier, "checkout_sha", offline_after_initial_receipt_check,
+    )
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cannot recheck live purchasing revision" in captured.err
