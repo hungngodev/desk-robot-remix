@@ -1368,6 +1368,7 @@ class NativeOmniSession:
         ]
         epoch, request_turn = entries[0][2:]
         facts: dict[int, dict] = {}
+        rejected_routes: dict[int, str] = {}
         try:
             for completed in asyncio.as_completed(tasks):
                 try:
@@ -1413,6 +1414,8 @@ class NativeOmniSession:
                         or result.get("error")
                         or result.get("_desk_robot_turn_superseded")):
                     self.native_readonly_tools_dropped += 1
+                    if route != "plan-readonly":
+                        rejected_routes[index] = route
                     continue
                 if result.get("source") == (
                     "existing_mac_ollama_readonly_route_selection"
@@ -1454,11 +1457,28 @@ class NativeOmniSession:
                         except asyncio.QueueFull:
                             self.native_readonly_tools_dropped += 1
                     continue
-                self.native_readonly_tools_completed += 1
-                self._context_wakeup.set()
                 fact = native_grounded_fact(route, result)
                 if fact is not None:
+                    self.native_readonly_tools_completed += 1
+                    self._context_wakeup.set()
                     facts[index] = fact
+                else:
+                    self.native_readonly_tools_dropped += 1
+                    if route != "plan-readonly":
+                        rejected_routes[index] = route
+            # A foreign or malformed HTTP 200 is NEVER a tool fact. When
+            # another clause has a usable fact, state only that the rejected
+            # requested route could not be verified. Never pass any untrusted
+            # response text, foreign robot identity or authority fields to
+            # the model, and preserve silence for entirely forged batches.
+            if facts:
+                for index, route in rejected_routes.items():
+                    facts[index] = {
+                        "source": "mac_tool_execution_unavailable",
+                        "route": route,
+                        "available": False,
+                        "physical_action_verified": False,
+                    }
             # Reads finish concurrently, but the spoken model should receive
             # facts in the human's requested clause order, not network order.
             return [facts[index] for index in sorted(facts)]
