@@ -178,8 +178,10 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
 
 
 
-def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
-    """Select up to three DISTINCT read-only tools from explicit clauses.
+def native_readonly_requests_with_capacity(
+    transcript: str,
+) -> tuple[tuple[tuple[str, dict], ...], bool]:
+    """Return at most three safe routes plus an explicit overcapacity flag.
 
     This is not an agent action planner or a physical action command.
     Preserve one complete question for ordinary single-intent ASR. Split
@@ -187,7 +189,7 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
     """
     if (not isinstance(transcript, str)
             or not 3 <= len(transcript) <= 2400 or "\x00" in transcript):
-        return ()
+        return (), False
     if len(transcript) > 280:
         # Human ASR often contains a long introduction followed by one
         # direct question. Route ONLY a separately punctuated short final
@@ -196,7 +198,7 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
         tail = clauses_by_sentence[-1].strip()
         if (len(clauses_by_sentence) < 2 or not tail.endswith("?")
                 or not 3 <= len(tail) <= 280):
-            return ()
+            return (), False
         transcript = tail
     whole = native_readonly_request(transcript)
     # Split only at a new spoken request. Splitting every "and" loses
@@ -210,8 +212,11 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
         r"(?:what|where|how|is|are|did|do|does|have|has|"
         r"check|look|tell|show|describe|inspect|remember|recall|"
         r"remind|pick|drive|move|start)\b)",
-        transcript, maxsplit=2, flags=re.IGNORECASE,
+        transcript, flags=re.IGNORECASE,
     )
+    # Inspect a fourth explicit distinct read-only clause before truncating:
+    # otherwise the unexecuted request disappears before the queue can
+    # honestly warn that the answer will not be complete.
     candidates = [native_readonly_request(part) for part in clauses]
     found: list[tuple[str, dict]] = []
     seen: set[str] = set()
@@ -223,14 +228,19 @@ def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
             continue
         seen.add(route)
         found.append((route, payload))
-        if len(found) >= 3:
+        if len(found) >= 4:
             break
     if len(found) < 2:
         # Preserve the entire spoken memory/visual question where possible.
         # If the first clause was an unsupported physical command, still
         # permit an explicitly requested independent READ-ONLY second clause.
-        return (whole,) if whole is not None else tuple(found)
-    return tuple(found)
+        return ((whole,) if whole is not None else tuple(found)), False
+    return tuple(found[:3]), len(found) > 3
+
+
+def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
+    """Compatibility router for callers that only need the first three tools."""
+    return native_readonly_requests_with_capacity(transcript)[0]
 
 
 

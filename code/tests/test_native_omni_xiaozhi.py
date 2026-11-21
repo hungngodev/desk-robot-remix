@@ -8634,3 +8634,63 @@ async def test_native_semantic_planner_overflow_marks_entire_answer_incomplete(
     }.issubset(session._readonly_requests)
     session._clear_obsolete_tool_turn()
     assert session._readonly_capacity_exceeded is None
+
+
+def test_native_four_distinct_readonly_requests_report_cap_without_silent_drop(native):
+    module, _ = native
+    transcript = (
+        "Look at my desk and check your battery level "
+        "and check the temperature and do you remember the key?"
+    )
+    selected, over_capacity = module.native_readonly_requests_with_capacity(
+        transcript
+    )
+    assert over_capacity
+    assert [route for route, _ in selected] == [
+        "look", "power-status", "aux-status",
+    ]
+    assert module.native_readonly_requests(transcript) == selected
+    # A repeated request for the same route does not consume a fourth slot.
+    repeated, repeated_overflow = module.native_readonly_requests_with_capacity(
+        "Look at my desk and check your battery "
+        "and look at the window and check temperature"
+    )
+    assert not repeated_overflow
+    assert [route for route, _ in repeated] == [
+        "look", "power-status", "aux-status",
+    ]
+    # Actuator commands may not masquerade as a fourth safe read.
+    mixed, mixed_overflow = module.native_readonly_requests_with_capacity(
+        "Look at the desk and check battery and check temperature "
+        "and drive off the edge"
+    )
+    assert not mixed_overflow
+    assert [route for route, _ in mixed] == [
+        "look", "power-status", "aux-status",
+    ]
+
+
+async def test_native_four_clause_asr_marks_complete_answer_unavailable(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    accepted = session._queue_readonly_tool({
+        "item_id": "four_observations_one_human_turn",
+        "transcript": (
+            "Look at my desk and check your battery level "
+            "and check the temperature and do you remember the key?"
+        ),
+    })
+    assert accepted
+    assert session._readonly_queue.qsize() == 3
+    assert session._readonly_capacity_exceeded == (0, 0)
+    assert [entry[0] for entry in session._readonly_queue._queue] == [
+        "look", "power-status", "aux-status",
+    ]
+    assert session.native_readonly_tools_dropped == 0

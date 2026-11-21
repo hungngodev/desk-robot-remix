@@ -33,6 +33,7 @@ from desk_robot_voice_intents import (
     native_grounded_fact,
     native_readonly_request,
     native_readonly_requests,
+    native_readonly_requests_with_capacity,
     pack_grounded_facts,
 )
 
@@ -1280,7 +1281,16 @@ class NativeOmniSession:
         if (not isinstance(item, str) or not 1 <= len(item) <= 128
                 or not item.isascii() or item in self._readonly_seen):
             return False
-        requests = native_readonly_requests(event.get("transcript"))
+        requests, over_capacity = native_readonly_requests_with_capacity(
+            event.get("transcript")
+        )
+        if over_capacity:
+            # The final distinct request did not fit the supported three
+            # tool capacity. Preserve the existing three routes, but NEVER
+            # claim that their results fully answer the human's question.
+            self._readonly_capacity_exceeded = (
+                self._generation, self._readonly_turn,
+            )
         if not requests:
             # Follow a nearby visual object across questions without
             # inventing its location or pretending native MiniCPM consumed
