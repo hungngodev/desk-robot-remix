@@ -326,20 +326,37 @@ def register_readonly_planner_routes(
                 r"dock contacts?)\??$"
             ),
         )
-        pickup_question = (
-            any(cue in utterance for cue in (
-                "pickup", "pick up", "picked up", "grasp", "grasped",
-            ))
-            and (any(cue in utterance for cue in (
-                "job", "status", "done", "finished", "complete", "already",
-                "yet", "succeed", "success",
-            )) or utterance.startswith(("did you ", "have you ", "has it ")))
+        # Model-selected history is not permission to inspect a pet's recent
+        # actions merely because somebody mentions picking up an object or
+        # a film titled "What Happened". The cue must be part of the same
+        # explicit human request clause, not an unrelated anecdote.
+        pickup_verb = re.compile(
+            r"\b(?:pick(?:ed|ing)? up|pickup|grasp(?:ed|ing)?)\b"
         )
-        interaction_question = any(cue in utterance for cue in (
-            "what happened", "what just happened", "what did you notice",
-            "what did you detect", "did i touch", "did someone touch",
-            "did i tap", "did someone tap", "what did you sense",
-        ))
+        pickup_result = re.compile(
+            r"\b(?:job|status|done|finish(?:ed)?|complete(?:d)?|"
+            r"already|yet|succeed(?:ed)?|success|whether|if)\b"
+        )
+        pickup_question = any(
+            bool(
+                (is_request[i] or re.match(r"^(?:have|has)\b", piece))
+                and pickup_verb.search(piece)
+                and (pickup_result.search(piece)
+                     or re.match(r"^(?:did|have|has)\b", piece))
+            )
+            for i, piece in enumerate(clauses)
+        )
+        interaction_request = re.compile(
+            r"^(?:(?:hey [a-z]+[, ]+|please )*)"
+            r"(?:what (?:just )?happened|"
+            r"what did (?:you|i|someone) (?:notice|detect|sense|touch|tap)|"
+            r"did (?:i|someone) (?:touch|tap)|"
+            r"(?:can|could|would) you tell me what (?:just )?happened|"
+            r"tell me what (?:just )?happened)\b"
+        )
+        interaction_question = any(
+            interaction_request.match(piece) is not None for piece in clauses
+        )
         # Ignore a few malformed or forbidden model suggestions without
         # losing later legitimate observations. The scan is bounded,
         # and at most three approved read-only routes are ever returned.

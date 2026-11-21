@@ -102,3 +102,53 @@ def test_readonly_visual_quantifier_requires_scene_referent(
     assert response.status_code == 200
     assert [item["route"] for item in response.json()["tools"]] == expected
     assert response.json()["motor_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    "transcript,expected",
+    [
+        ("I picked up a key yesterday and now the story is done", []),
+        ("I watched the film What Happened yesterday", []),
+        ("My pickup job was completed yesterday", []),
+        ("Is the pickup job done?", ["latest-pickup"]),
+        ("Did you pick up that key already?", ["latest-pickup"]),
+        ("Did you finish picking up the key?", ["latest-pickup"]),
+        ("Have you picked up the key?", ["latest-pickup"]),
+        ("What just happened?", ["interaction-context"]),
+        ("Did I touch you?", ["interaction-context"]),
+        ("Can you tell me what happened?", ["interaction-context"]),
+        (
+            "Did you pick up the key already and what just happened?",
+            ["latest-pickup", "interaction-context"],
+        ),
+    ],
+)
+def test_readonly_recent_job_and_interaction_require_human_request(
+    settings, tokens, transcript, expected,
+):
+    """An overeager model cannot open history for an unrelated anecdote."""
+    settings.mode = "hardware"
+    robot_id = settings.robots[0].id
+
+    class OvereagerModel:
+        async def reply(self, _history):
+            return json.dumps({"tools": [
+                {"route": "latest-pickup"}, {"route": "interaction-context"},
+            ]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=OvereagerModel()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        reply = client.post(
+            f"/v1/pet/{robot_id}/plan-readonly",
+            headers=headers, json={"transcript": transcript},
+        )
+    assert reply.status_code == 200
+    assert [item["route"] for item in reply.json()["tools"]] == expected
+    assert reply.json()["motor_authorized"] is False
