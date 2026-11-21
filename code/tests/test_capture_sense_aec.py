@@ -279,7 +279,8 @@ def test_partial_pcm_failure_aborts_its_generation():
                 timeout,
             ))
             return Response({
-                "ok": True, "reply": "Private bench PCM capture aborted",
+                "ok": True, "robot_id": "robot-01",
+                "reply": "Private bench PCM capture aborted",
             })
         return original(request, timeout)
 
@@ -304,7 +305,8 @@ def test_operator_keyboard_interrupt_aborts_same_private_capture():
         if request.full_url.endswith("/api/audio.capture.abort"):
             aborted.append(request.get_header("X-desk-audio-generation"))
             return Response({
-                "ok": True, "reply": "Private bench PCM capture aborted",
+                "ok": True, "robot_id": "robot-01",
+                "reply": "Private bench PCM capture aborted",
             })
         return original(request, timeout)
 
@@ -315,6 +317,25 @@ def test_operator_keyboard_interrupt_aborts_same_private_capture():
             clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
         )
     assert aborted == ["42"]
+
+
+@pytest.mark.parametrize("response", [
+    {"ok": True, "robot_id": "robot-02", "reply": "Private bench PCM capture aborted"},
+    {"ok": True, "reply": "Private bench PCM capture aborted"},
+])
+def test_abort_ack_cannot_claim_another_pet_or_missing_identity(response):
+    """A foreign head ACK cannot prove this robot's private buffer wiped."""
+    class AbortHTTP:
+        def open(self, request, timeout):
+            assert request.full_url.endswith("/api/audio.capture.abort")
+            assert request.get_header("X-desk-audio-generation") == "42"
+            return Response(response)
+
+    with pytest.raises(RuntimeError, match="identity unconfirmed"):
+        capture._abort_capture(
+            AbortHTTP(), "http://192.168.1.23:8081",
+            "x" * 32, "robot-01", 42,
+        )
 
 
 def test_audio_capture_abort_is_guarded_and_generation_scoped_in_sense_firmware():
