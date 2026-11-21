@@ -86,6 +86,14 @@ cancellation of already buffered TX DMA or preservation of real human
 speech during double talk. The operator must still record the actual
 audio and hardware timing tests from the mandatory barge-in guide.
 
+With continuous microphone consent flashed, the Sense head reuses the
+**same** Xiaozhi listening path after a server audio channel closes even
+when WiFi stays associated. It retries only from idle, at most once every
+five seconds, and never starts a second microphone or WebSocket owner.
+A local BOOT privacy action disables unattended restart for the rest of
+that boot. This is software recovery logic, not evidence that network
+reconnection, double talk or acoustic STOP passed on real hardware.
+
 ## Authenticated one-shot Sense microphone/reference capture
 
 The selected `SenseReferenceCodec` now exposes one *optional* private
@@ -148,8 +156,9 @@ store them outside the local protected trial directory.
    This rejects an old completed recording from the same device after
    a new START. Firmware also discards a PDM callback whose samples began
    before the authorized START, even if that callback completed afterward.
-   The Mac checks a final microphone privacy epoch receipt after raw transfer
-   and refuses a capture whose physical BOOT mute changed during recording.
+   The Mac checks the final microphone privacy epoch **and capture
+   generation** after raw transfer, rejecting a physical BOOT mute or a
+   speaker/reference reset that invalidated the samples before WAV saving.
    The client requires exactly 64000 stereo PCM frames and a four-second
    device timestamp span within 80 ms, and rejects truncated/oversized
    replies. It additionally checks that the authenticated codec's PDM read
