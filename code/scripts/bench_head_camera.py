@@ -385,6 +385,17 @@ async def measure(
     }
 
 
+def bench_passed(report: dict, *, require_audio: bool) -> bool:
+    """Transport-only and explicitly combined digital audio trials stay distinct."""
+    return (
+        report["camera_frames_received"] > 0
+        and report["status_latency"]["count"] > 0
+        and not report["camera_error_count"]
+        and not report["status_error_count"]
+        and (not require_audio or report["concurrent_audio_driver_activity_observed"])
+    )
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "config/local.toml")
@@ -427,12 +438,7 @@ async def main() -> int:
     result["concurrent_audio_required_by_operator"] = args.require_audio_activity
     save_private_report(args.report, result)
     print(json.dumps(result, indent=2))
-    return 0 if (result["camera_frames_received"] > 0
-                 and result["status_latency"]["count"] > 0
-                 and not result["camera_error_count"]
-                 and not result["status_error_count"]
-                 and (not args.require_audio_activity
-                      or result["concurrent_audio_driver_activity_observed"])) else 1
+    return 0 if bench_passed(result, require_audio=args.require_audio_activity) else 1
 
 
 if __name__ == "__main__":
