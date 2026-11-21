@@ -102,7 +102,8 @@ class Runtime:
         # The USB thread may emit faster than the Mac can consume room context.
         # One coalesced, latest-only callback cannot crowd out live human VAD.
         self._room_dispatch_lock = threading.Lock()
-        self._room_dispatch_pending: RoomObservation | None = None
+        # Queue provenance belongs to the original sharing grant, not a later ON.
+        self._room_dispatch_pending: tuple[RoomObservation, int | None, bool] | None = None
         self._room_dispatch_enqueued = False
         self.room_context_failures = 0
         self._closed = False
@@ -120,10 +121,18 @@ class Runtime:
         waits for environmental prompt assembly, inference or other UI work.
         """
         with self._room_dispatch_lock:
-            observation = self._room_dispatch_pending
+            queued = self._room_dispatch_pending
             self._room_dispatch_pending = None
             self._room_dispatch_enqueued = False
-        if observation is not None:
+        if queued is not None:
+            observation, grant_generation, granted_at_queue = queued
+            if (
+                not granted_at_queue
+                or not self.settings.room_station_context_enabled
+                or getattr(self.settings, "room_station_consent_generation", None)
+                != grant_generation
+            ):
+                return
             try:
                 self._on_room_observation(observation)
             except Exception:
@@ -148,7 +157,11 @@ class Runtime:
         with self._room_dispatch_lock:
             if self._closed:
                 return
-            self._room_dispatch_pending = observation
+            self._room_dispatch_pending = (
+                observation,
+                getattr(self.settings, "room_station_consent_generation", None),
+                self.settings.room_station_context_enabled,
+            )
             if self._room_dispatch_enqueued:
                 return
             self._room_dispatch_enqueued = True

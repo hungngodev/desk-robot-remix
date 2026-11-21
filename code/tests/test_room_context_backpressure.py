@@ -102,3 +102,37 @@ def test_unexpected_live_loop_scheduling_failure_is_not_suppressed():
         runtime._queue_room_observation(BrokenLoop(), room(1))
     assert runtime._room_dispatch_pending is None
     assert runtime._room_dispatch_enqueued is False
+
+
+def test_pending_room_report_is_not_regranted_after_consent_cycle(settings):
+    """The async USB handoff carries the grant that admitted each report."""
+    runtime, delivered = make_runtime()
+    runtime.settings = settings
+    loop = QueuedLoop()
+
+    settings.room_station_context_enabled = True
+    first_generation = settings.room_station_consent_generation
+    runtime._queue_room_observation(loop, room(1))
+    settings.room_station_context_enabled = False
+    settings.room_station_context_enabled = True
+    assert settings.room_station_consent_generation == first_generation + 1
+    loop.callbacks.pop()()
+    assert delivered == []
+
+    # A new real report under the new grant is still accepted normally.
+    runtime._queue_room_observation(loop, room(2))
+    loop.callbacks.pop()()
+    assert [observation.seq for observation in delivered] == [2]
+
+    # Sampling the USB feed while context is OFF cannot pre-authorize delivery
+    # when a human grants sharing later.
+    settings.room_station_context_enabled = False
+    runtime._queue_room_observation(loop, room(3))
+    settings.room_station_context_enabled = True
+    loop.callbacks.pop()()
+    assert [observation.seq for observation in delivered] == [2]
+
+    runtime._queue_room_observation(loop, room(4))
+    loop.callbacks.pop()()
+    assert [observation.seq for observation in delivered] == [2, 4]
+    assert runtime._room_dispatch_pending is None
