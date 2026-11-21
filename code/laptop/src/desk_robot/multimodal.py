@@ -210,7 +210,7 @@ class CameraFrameHub:
 
     def notify(self, robot_id: str, kind: str, now: float) -> None:
         self._check(robot_id)
-        if kind not in TRIGGERS or not _admissible_mac_event_clock(now):
+        if type(kind) is not str or kind not in TRIGGERS or not _admissible_mac_event_clock(now):
             raise ValueError("Unknown physical event or invalid time")
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
@@ -445,7 +445,7 @@ class CameraFrameHub:
         Visual guesses expire after eight seconds; status after thirty.
         """
         self._check(robot_id)
-        if (kind not in {
+        if (type(kind) is not str or kind not in {
                 "visual_look", "robot_status", "pickup_status",
                 "sensor_telemetry", "memory_recall",
             }
@@ -506,7 +506,7 @@ class CameraFrameHub:
         self._check(robot_id)
         if (not isinstance(text, str) or not 1 <= len(text.strip()) <= 280
                 or "\x00" in text or not _admissible_mac_event_clock(sent_at)
-                or source not in {
+                or type(source) is not str or source not in {
                     "mac_tts_transmitted_not_speaker_playback_ack",
                     "native_model_text_opus_sent_playback_unverified",
                 }):

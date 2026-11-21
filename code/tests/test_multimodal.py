@@ -2920,3 +2920,30 @@ def test_future_transmitted_speech_does_not_resurface_as_live_own_utterance():
     assert entries[0]["content"] == "REAL_RECENT_AUDIO_SENT"
     assert entries[0]["playback_verified"] is False
     assert hub.interaction_timeline("robot-02", now) == []
+
+
+@pytest.mark.parametrize("invalid", [[], {}, ["visual_look"], {"source": "model"}])
+def test_unhashable_multimodal_cues_are_rejected_without_mutation(invalid):
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    for invoke in (
+        lambda: hub.notify("robot-01", invalid, now),
+        lambda: hub.remember_tool("robot-01", invalid, "uncertain tool text", now),
+        lambda: hub.remember_spoken(
+            "robot-01", "sent speech", now, source=invalid,
+        ),
+    ):
+        with pytest.raises(ValueError):
+            invoke()
+    assert not hub.event_history["robot-01"]
+    assert not hub.tool_history["robot-01"]
+    assert not hub.spoken_history["robot-01"]
+    assert not hub.urgent["robot-01"]
+    assert not hub.event_history["robot-02"]
+    # Valid source labels retain their original provenance and behavior.
+    hub.notify("robot-01", "human_voice", now)
+    hub.remember_tool("robot-01", "visual_look", "Possibly a cup", now)
+    hub.remember_spoken("robot-01", "Hello", now)
+    assert hub.event_history["robot-01"][-1][0] == "human_voice"
+    assert hub.tool_history["robot-01"][-1][0] == "visual_look"
+    assert hub.spoken_history["robot-01"][-1][0] == "Hello"
