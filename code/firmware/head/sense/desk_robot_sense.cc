@@ -110,6 +110,10 @@ private:
         // latched. Periodically restore the factual local fault overlay,
         // but never flood the shared I2C display every 100 ms.
         uint32_t last_fault_status_refresh_ms = 0;
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+        bool last_mic_privacy_overlay = false;
+        uint32_t last_mic_privacy_refresh_ms = 0;
+#endif
         bool last_was_idle = false;
         bool last_face_available = false;
         bool last_idle_face_fault = false;
@@ -229,6 +233,30 @@ private:
                     }
                     // Unknown states defer clear until a known status owner.
                 }
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+                // Upstream Xiaozhi's top-bar mute icon tracks SPEAKER volume,
+                // not the physical BOOT microphone privacy state. Render a
+                // separate silent status from the actual consent latch.
+                // Never let it overwrite an independent WROOM safety stop.
+                const bool mic_privacy_on = board->audio_operator_muted_.load(
+                    std::memory_order_acquire);
+                if (!body_unhealthy && mic_privacy_on &&
+                    (!last_mic_privacy_overlay || last_idle_face_fault ||
+                     now_ms - last_mic_privacy_refresh_ms >= 750U)) {
+                    board->display_->SetStatus("Mic privacy ON");
+                    last_mic_privacy_refresh_ms = now_ms;
+                } else if (!body_unhealthy && !mic_privacy_on &&
+                           last_mic_privacy_overlay) {
+                    // BOOT manual unmute restores Xiaozhi's current status.
+                    if (device_state == kDeviceStateSpeaking)
+                        board->display_->SetStatus(Lang::Strings::SPEAKING);
+                    else if (device_state == kDeviceStateListening)
+                        board->display_->SetStatus(Lang::Strings::LISTENING);
+                    else if (idle)
+                        board->display_->SetStatus("");
+                }
+                last_mic_privacy_overlay = mic_privacy_on;
+#endif
             }
             if (face_available && board->display_ != nullptr) {
                 // Only the Mac's CURRENT context decision may request a

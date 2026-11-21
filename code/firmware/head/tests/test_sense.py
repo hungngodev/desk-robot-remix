@@ -1187,6 +1187,30 @@ def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
     assert 'SetStatus("Body safety stop")' in face
 
 
+
+def test_boot_microphone_privacy_has_own_local_oled_status():
+    """Physical BOOT mic privacy must not be confused with speaker volume."""
+    board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    face = board.split("static void FaceTask(void* context)", 1)[1].split(
+        "void InitializeDisplay()", 1
+    )[0]
+    assert 'audio_operator_muted_.load(' in face
+    assert 'SetStatus("Mic privacy ON")' in face
+    assert '!body_unhealthy && mic_privacy_on' in face
+    assert '!body_unhealthy && !mic_privacy_on' in face
+    assert 'last_idle_face_fault ||' in face
+    assert 'now_ms - last_mic_privacy_refresh_ms >= 750U' in face
+    assert 'last_mic_privacy_overlay = mic_privacy_on;' in face
+    assert face.index('SetStatus("Body safety stop")') < face.index(
+        'SetStatus("Mic privacy ON")'
+    )
+    assert 'SetStatus(Lang::Strings::SPEAKING)' in face
+    assert 'SetStatus(Lang::Strings::LISTENING)' in face
+    assert 'app.ToggleChatState();' not in face.split(
+        'const bool mic_privacy_on = ', 1
+    )[1].split('last_mic_privacy_overlay = mic_privacy_on;', 1)[0]
+
+
 def test_playback_reference_clock_native_cpp_regression():
     """Compile the same pure C++ clock the Sense firmware uses, not a Python model."""
     compiler = shutil.which("c++")
