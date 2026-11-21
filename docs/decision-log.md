@@ -33,6 +33,16 @@ Sources and reuse boundaries: [source-map.md](source-map.md).
 
 The user explicitly requested a single **day-zero full-feature** plan and a forward-only build rather than first making a reduced talking robot and later rewriting hardware, AI, memory, autonomy or enclosure. This does not mean physically running every sensor simultaneously before testing, nor does it authorize changing the unchanged $50 delivered cap. [Complete scope](README.md#full-final-project-contract-and-scope) maps the 41-section HTML, 200 individually named requirements/ideas and 131 unique external URLs, and records each unresolved conflict before permanent work. Hard requirements are full pushed context-grounded proactive conversations, natural first-build interruption, persistent independent identity/memory, peer social experience, body local safety, real key/candy pickup and operator-enabled continuing activity. Experimental odd sensors, optional games and advanced docking remain traceable and interface-reserved, not claimed installed; their cost, voltage, geometry and source license must be approved separately. Build one fully representative core and duplicate four after acceptance; no throwaway head/body migration.
 
+**2026-11-21 superseding scope decision:** The prior paragraph preserves
+the November 9 history that grouped advanced docking with reserved expansions.
+The now accepted first complete pet requires physically safe self docking
+with **one separate dock per pet**, eventually five docks, and **one shared
+room station**. See feature IDs `F037` and `G029` in
+[source map](source-map.md) and the [builder release gate](guides/one-complete-robot.md).
+This is a scope requirement, **not** charger, printing, motor or battery
+purchase approval. Keep contact power disabled until independent seat,
+protection, low cell regulation, NTC and measured charge evidence qualifies.
+
 This is a **planning commitment**, not approval of an exact untested IP5306 board, VL53L4CD module, Mac provider or GPL face engine. No physical test status changes.
 
 ## Continuing recording rule

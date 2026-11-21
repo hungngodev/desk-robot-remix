@@ -23,3 +23,15 @@ def test_docking_original_expansion_history_and_new_required_scope_both_survive(
     assert "dedicated dock" in guide
     assert "qualified charger" in guide
     assert "normally unpowered" in guide or "unpowered dock" in guide
+
+
+def test_product_decision_and_register_agree_on_required_docking():
+    product = (ROOT / "docs/product-definition.md").read_text(encoding="utf-8")
+    decisions = (ROOT / "docs/decision-log.md").read_text(encoding="utf-8")
+    register = (ROOT / "docs/source-map.md").read_text(encoding="utf-8")
+    assert "Accepted docking scope revision, 2026-11-21" in product
+    assert "2026-11-21 superseding scope decision" in decisions
+    assert "five docks" in product
+    assert "one shared room station" in product
+    assert "PHYSICAL HOLD" in product and "PHYSICAL HOLD" in register
+    assert "historically EXPANSION" in register

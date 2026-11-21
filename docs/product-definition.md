@@ -5,6 +5,17 @@ mounting CAD and assembly instructions. It distinguishes requested behavior from
 working software and physically verified hardware. **No complete robot has been
 assembled, flashed or tested.**
 
+**Accepted docking scope revision, 2026-11-21:** The completed first robot
+includes its own independently qualified dock. The eventual five pets each
+have a dedicated dock, with one separate shared room station. Docking and
+charging were originally classed as expansion ideas in older records; that
+historical scope is superseded by this accepted required experience. Safe
+predock, seated alignment, normally unpowered contacts, pack temperature,
+charger, measured net charge, bounded retries and departure remain
+**PHYSICAL HOLD**, not implemented hardware acceptance. Neither a passing
+CI check nor an AprilTag image authorizes energizing contacts.
+
+
 Accepted requirements are not pending discovery: local Mac first; ordinary-speech
 interruption in robot one; camera observations and reactions without a spoken
 prompt; proactive activities and exploration until the user pauses/stops them;
