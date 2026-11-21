@@ -435,6 +435,27 @@ class SenseOverlayTests(unittest.TestCase):
         assert "last_fault_status_refresh_ms = now_ms;" in face
         assert "board->display_->SetStatus(\"Body safety stop\");" in face
 
+    def test_sense_server_audio_close_rejoins_only_same_consentful_xiaozhi_channel(self):
+        """WiFi may stay connected after WebSocket closes; BOOT still wins."""
+        board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+        face = board.split("static void FaceTask(void* context)", 1)[1].split(
+            "void InitializeDisplay()", 1,
+        )[0]
+        self.assertIn("last_audio_listen_attempt_ms_ = 0;", board)
+        self.assertIn(
+            "now_ms - board->last_audio_listen_attempt_ms_ >= 5000U", face,
+        )
+        self.assertIn("board->last_audio_listen_attempt_ms_ = now_ms;", face)
+        self.assertIn("if (!wifi_connected)", face)
+        self.assertIn("device_state == kDeviceStateIdle", face)
+        self.assertIn("!board->audio_operator_touched_.load()", face)
+        self.assertIn("app.GetAecMode() == kAecOnDeviceSide", face)
+        self.assertIn("app.ToggleChatState();  // existing Xiaozhi realtime listen", face)
+        self.assertEqual(face.count("app.ToggleChatState();"), 1)
+        # A physical BOOT press disables all automatic reopen attempts.
+        self.assertIn("audio_operator_touched_.store(true", board)
+
+
     def test_sense_safety_status_remains_visible_during_speech(self):
         """A factual WROOM fault cannot wait for the idle expression owner."""
         board = (HEAD / "sense/desk_robot_sense.cc").read_text()

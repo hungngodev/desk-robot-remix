@@ -52,6 +52,7 @@ private:
     std::atomic<bool> audio_operator_touched_{false};
     std::atomic<bool> audio_operator_muted_{false};
     bool continuous_audio_started_ = false;
+    uint32_t last_audio_listen_attempt_ms_ = 0;
 #endif
 
     static const char* MoodName(stackchan::behavior::Mood mood) {
@@ -138,21 +139,25 @@ private:
             // Upstream Xiaozhi normally streams mic PCM only AFTER wake.
             // With explicit audio consent, reuse its existing full-duplex
             // realtime AEC transport. No new mic task, codec or WebSocket.
-            // The flashed opt-in remains active across a real WiFi outage.
-            // Reopen the SAME Xiaozhi audio channel once per WiFi epoch,
-            // never on arbitrary remote TTS/session close. A BOOT press
-            // permanently disables unattended reconnect for this boot.
+            // A server WebSocket can close and Xiaozhi returns to Idle
+            // without a WiFi-disconnect edge. Retrying only once per WiFi
+            // epoch would leave the consented live microphone silent forever.
+            // Throttle reconnection through the SAME Xiaozhi event owner;
+            // NEVER restart after BOOT touched privacy for this boot.
             const bool wifi_connected = WifiManager::GetInstance().IsConnected();
             if (!wifi_connected) {
                 board->continuous_audio_started_ = false;
             }
-            if (!board->continuous_audio_started_
-                    && !board->audio_operator_touched_.load()
-                    && wifi_connected && now_ms >= 10000
-                    && device_state == kDeviceStateIdle
-                    && app.GetAecMode() == kAecOnDeviceSide) {
-                board->continuous_audio_started_ = true;
-                app.ToggleChatState();  // existing Xiaozhi realtime listen
+            if (!board->continuous_audio_started_ ||
+                    now_ms - board->last_audio_listen_attempt_ms_ >= 5000U) {
+                if (!board->audio_operator_touched_.load()
+                        && wifi_connected && now_ms >= 10000
+                        && device_state == kDeviceStateIdle
+                        && app.GetAecMode() == kAecOnDeviceSide) {
+                    board->continuous_audio_started_ = true;
+                    board->last_audio_listen_attempt_ms_ = now_ms;
+                    app.ToggleChatState();  // existing Xiaozhi realtime listen
+                }
             }
 #endif
             const bool speaking = device_state == kDeviceStateSpeaking;
