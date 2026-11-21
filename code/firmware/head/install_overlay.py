@@ -481,6 +481,28 @@ void Application::HandleWakeWordDetectedEvent() {""",
 
 void Application::HandleWakeWordDetectedEvent() {""",
         )
+        # A physical BOOT mute can cancel an in-flight channel open.
+        # The upstream helper only checks state BEFORE blocking on network.
+        # Recheck it after transport open so a stale callback cannot start
+        # the microphone once BOOT has changed the device to idle.
+        text = replace_once(
+            text,
+            """    SetListeningMode(mode);
+}
+
+void Application::HandleStartListeningEvent() {""",
+            """#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    // BOOT privacy may have cancelled while OpenAudioChannel blocked.
+    if (GetDeviceState() != kDeviceStateConnecting) {
+        protocol_->CloseAudioChannel();
+        return;
+    }
+#endif
+    SetListeningMode(mode);
+}
+
+void Application::HandleStartListeningEvent() {""",
+        )
         files[path] = text.encode()
         return files
     files = cores3_files(target)
