@@ -2423,6 +2423,9 @@ class PetController:
             self.settings.mode == "hardware"
             and self.settings.voice_memory_tools_enabled
         )
+        # Snapshot the exact grant BEFORE SQLite awaits. OFF/ON is a new
+        # authorization even when the final boolean is True.
+        memory_grant = self.settings.voice_memory_consent_generation
         scheduled_activity = change.kind == _ACTIVITY_RECONSIDERATION_KIND
         if (self.settings.mode == "hardware"
                 and not private_memory_allowed):
@@ -2458,7 +2461,9 @@ class PetController:
                 timeout=2.0,
             )
         if (private_memory_allowed
-                and not self.settings.voice_memory_tools_enabled):
+                and (not self.settings.voice_memory_tools_enabled
+                     or self.settings.voice_memory_consent_generation
+                        != memory_grant)):
             # Permission can change during the off-thread SQLite read.
             # Do not submit stale private text to the model after revoke.
             state.suppressed += 1
@@ -2890,6 +2895,7 @@ class PetController:
         # A private core preference or episode can change during SQLite
         # retrieval, slow reasoning or even speech synthesis. The operator
         # route invalidates this one pet's memory revision on each real edit.
+        memory_grant = self.settings.voice_memory_consent_generation
         memory_revisions = getattr(
             self.conversation, "_private_memory_generation", {}
         )
@@ -2917,14 +2923,29 @@ class PetController:
                     self.conversation, "_private_memory_generation", None
                 )
                 return (
-                    not private_memory_allowed or memory_revision is None
-                    or (isinstance(revisions, dict)
-                        and revisions.get(robot_id, 0) == memory_revision)
+                    not private_memory_allowed
+                    or (self.settings.voice_memory_tools_enabled
+                        and self.settings.voice_memory_consent_generation
+                            == memory_grant
+                        and (memory_revision is None
+                             or (isinstance(revisions, dict)
+                                 and revisions.get(robot_id, 0)
+                                     == memory_revision)))
                 )
+
+            def private_memory_failure_reason() -> str:
+                if (private_memory_allowed
+                        and (not self.settings.voice_memory_tools_enabled
+                             or self.settings.voice_memory_consent_generation
+                                != memory_grant)):
+                    return "memory_consent_revoked"
+                return "private_memory_revised"
 
             if not private_memory_current():
                 state.suppressed += 1
-                state.last_initiative_suppression = "private_memory_revised"
+                state.last_initiative_suppression = (
+                    private_memory_failure_reason()
+                )
                 return
             # A social turn is NOT five independent agents speaking at once.
             # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
@@ -3012,7 +3033,9 @@ class PetController:
                 return
             if not private_memory_current():
                 state.suppressed += 1
-                state.last_initiative_suppression = "private_memory_revised"
+                state.last_initiative_suppression = (
+                    private_memory_failure_reason()
+                )
                 return
             if not self.voice_monitor_ready:
                 state.suppressed += 1

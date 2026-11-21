@@ -3696,11 +3696,12 @@ async def test_proactive_private_wav_revoked_during_kokoro_never_reaches_head(
         await pet.close()
 
 
+@pytest.mark.parametrize("regrant", [False, True])
 @pytest.mark.parametrize("stage", ["memory_read", "model_reasoning"])
 async def test_proactive_private_consent_revocation_never_reaches_speaker(
-    fleet, tmp_path, stage,
+    fleet, tmp_path, stage, regrant,
 ):
-    """A concurrent opt out fences slow SQLite and already started reasoning."""
+    """Even OFF/ON cannot revive a revoked SQLite read or old model answer."""
     import threading
 
     fleet.mode = "hardware"
@@ -3724,6 +3725,7 @@ async def test_proactive_private_consent_revocation_never_reaches_speaker(
         async def reply(self, history):
             if stage == "memory_read":
                 raise AssertionError("Revoked historical text reached the model")
+            assert "Private archived observation" in str(history)
             entered.set()
             assert await asyncio.to_thread(release.wait, 3)
             return "A playful idea I might have said"
@@ -3743,6 +3745,8 @@ async def test_proactive_private_consent_revocation_never_reaches_speaker(
     try:
         assert await asyncio.to_thread(entered.wait, 2)
         fleet.voice_memory_tools_enabled = False
+        if regrant:
+            fleet.voice_memory_tools_enabled = True
         release.set()
         await asyncio.wait_for(task, timeout=3)
         assert state.last_error is None
