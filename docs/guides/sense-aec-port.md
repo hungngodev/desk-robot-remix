@@ -143,8 +143,14 @@ store them outside the local protected trial directory.
    must report integer `aec_delay_config_ms=0` and
    `microphone_privacy_muted=false`. Missing or nonzero configuration
    stops the client before any START request. It also validates the same
-   robot identity and boot epoch through capture status and raw PCM headers,
-   requires exactly 64000 stereo PCM frames and a four-second
+   robot identity, boot epoch and the particular capture generation in
+   the authenticated START response, subsequent STATUS and raw PCM headers.
+   This rejects an old completed recording from the same device after
+   a new START. Firmware also discards a PDM callback whose samples began
+   before the authorized START, even if that callback completed afterward.
+   The Mac checks a final microphone privacy epoch receipt after raw transfer
+   and refuses a capture whose physical BOOT mute changed during recording.
+   The client requires exactly 64000 stereo PCM frames and a four-second
    device timestamp span within 80 ms, and rejects truncated/oversized
    replies. The Sense buffer also rejects individual microphone callback
    gaps larger than the frame duration plus 40 ms. These conservative
