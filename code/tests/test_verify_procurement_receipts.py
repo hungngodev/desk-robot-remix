@@ -216,6 +216,17 @@ def test_empty_evidence_fails_closed_even_with_valid_sha():
     assert "no release receipts recorded" not in errors or len(errors) > 1
 
 
+def live_pr_at(sha=SHA):
+    return {
+        "number": 17, "state": "open", "draft": True,
+        "head": {
+            "sha": sha, "ref": "impl/mac-hardware-safety-preflight-2026-11-10",
+            "repo": {"full_name": "hungngodev/desk-robot-remix"},
+        },
+        "base": {"repo": {"full_name": "hungngodev/desk-robot-remix"}},
+    }
+
+
 def test_clean_exact_sha_required(monkeypatch):
     good = {"sha": SHA, "tracked_clean": True, "root_tree_intact": True}
     monkeypatch.setattr(release, "source_snapshot", lambda: good)
@@ -223,7 +234,7 @@ def test_clean_exact_sha_required(monkeypatch):
         release.subprocess, "check_output",
         lambda *args, **kwargs: "impl/mac-hardware-safety-preflight-2026-11-10",
     )
-    assert release.checkout_sha() == SHA
+    assert release.checkout_sha(lookup=lambda _: live_pr_at()) == SHA
     for bad in (
         {**good, "tracked_clean": False},
         {**good, "root_tree_intact": False},
@@ -234,6 +245,57 @@ def test_clean_exact_sha_required(monkeypatch):
                             lambda bad=bad: bad)
         with pytest.raises(ValueError, match="clean exact commit"):
             release.checkout_sha()
+
+
+@pytest.mark.parametrize("change", [
+    ("number", 18), ("state", "closed"), ("draft", False),
+    ("head_sha", "b" * 40), ("head_ref", "other"),
+    ("head_repo", "other/project"), ("base_repo", "other/project"),
+])
+def test_purchase_source_refuses_stale_or_foreign_live_pr(
+    monkeypatch, change,
+):
+    good = {"sha": SHA, "tracked_clean": True, "root_tree_intact": True}
+    monkeypatch.setattr(release, "source_snapshot", lambda: good)
+    monkeypatch.setattr(
+        release.subprocess, "check_output",
+        lambda *args, **kwargs: "impl/mac-hardware-safety-preflight-2026-11-10",
+    )
+    key, value = change
+    pr = live_pr_at()
+    if key == "head_sha":
+        pr["head"]["sha"] = value
+    elif key == "head_ref":
+        pr["head"]["ref"] = value
+    elif key == "head_repo":
+        pr["head"]["repo"]["full_name"] = value
+    elif key == "base_repo":
+        pr["base"]["repo"]["full_name"] = value
+    else:
+        pr[key] = value
+    with pytest.raises(ValueError, match="live draft PR #17"):
+        release.checkout_sha(lookup=lambda _: pr)
+
+
+def test_live_pr_network_unavailable_holds_purchasing(monkeypatch):
+    from urllib.error import URLError
+
+    monkeypatch.setattr(
+        release, "source_snapshot",
+        lambda: {"sha": SHA, "tracked_clean": True, "root_tree_intact": True},
+    )
+    monkeypatch.setattr(
+        release.subprocess, "check_output",
+        lambda *args, **kwargs: "impl/mac-hardware-safety-preflight-2026-11-10",
+    )
+
+    def offline(_):
+        raise URLError("network inaccessible")
+
+    with pytest.raises(ValueError, match="Cannot verify live PR #17"):
+        release.checkout_sha(lookup=offline)
+    with pytest.raises(ValueError, match="Invalid live PR #17"):
+        release.checkout_sha(lookup=lambda _: [])
 
 
 def test_live_network_failure_cannot_qualify_fake_record():

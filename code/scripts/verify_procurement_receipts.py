@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
-def checkout_sha() -> str:
+def checkout_sha(lookup=None) -> str:
     """Require a clean complete tree, not a sparse/truncated Git index.
 
     Share the canonical host verification's real worktree presence checks.
@@ -60,6 +60,34 @@ def checkout_sha() -> str:
         current_branch = ""
     if current_branch != "impl/mac-hardware-safety-preflight-2026-11-10":
         raise ValueError("Purchasing requires the canonical PR #17 branch")
+    # A local branch name does not prove that the checkout is the live
+    # reviewed draft. Ordering from an old clean SHA could bypass newer
+    # power, charger, BOM or CAD blockers introduced on PR #17.
+    from verify_playbook_receipts import github_json
+    live_lookup = github_json if lookup is None else lookup
+    try:
+        pr = live_lookup(
+            "https://api.github.com/repos/"
+            "hungngodev/desk-robot-remix/pulls/17"
+        )
+    except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
+        raise ValueError("Cannot verify live PR #17 purchasing revision") from exc
+    if not isinstance(pr, dict):
+        raise ValueError("Invalid live PR #17 purchasing revision")
+    head = pr.get("head")
+    base = pr.get("base")
+    head_repo = head.get("repo") if isinstance(head, dict) else None
+    base_repo = base.get("repo") if isinstance(base, dict) else None
+    if (type(pr.get("number")) is not int or pr["number"] != 17
+            or pr.get("state") != "open" or pr.get("draft") is not True
+            or not isinstance(head, dict)
+            or head.get("sha") != sha
+            or head.get("ref") != current_branch
+            or not isinstance(head_repo, dict)
+            or head_repo.get("full_name") != "hungngodev/desk-robot-remix"
+            or not isinstance(base_repo, dict)
+            or base_repo.get("full_name") != "hungngodev/desk-robot-remix"):
+        raise ValueError("Local checkout does not match live draft PR #17 head")
     return sha
 
 
