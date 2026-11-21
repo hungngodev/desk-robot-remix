@@ -145,3 +145,33 @@ def test_print_guide_commands_are_unescaped_markdown():
     assert "--dock-id 1 --marker-id 12" in section
     assert "--verify" in section
     assert "100 percent actual size" in section
+
+
+def test_real_open_cv_detector_reads_generated_vector_cells():
+    """A printed marker design must be legible to the REAL 36h11 decoder."""
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    if not hasattr(cv2, "aruco"):
+        pytest.skip("OpenCV aruco is optional")
+    module = source()
+    svg = module.build_svg(1, 12)
+    _root, rectangles = svg_rectangles(svg)
+    # Ten pixels/mm is an image space integration check, not evidence
+    # of printed scale, real camera optics or actual dock seating.
+    raster = np.full((700, 700), 255, dtype=np.uint8)
+    for rect in rectangles[1:]:
+        attrs = rect.attrib
+        x = round(float(attrs["x"]) * 10)
+        y = round(float(attrs["y"]) * 10)
+        w = round(float(attrs["width"]) * 10)
+        h = round(float(attrs["height"]) * 10)
+        raster[y:y + h, x:x + w] = 0
+    dictionary = cv2.aruco.getPredefinedDictionary(
+        cv2.aruco.DICT_APRILTAG_36h11
+    )
+    corners, ids, _rejected = cv2.aruco.ArucoDetector(
+        dictionary
+    ).detectMarkers(raster)
+    assert ids is not None and ids.ravel().tolist() == [12]
+    assert len(corners) == 1
+    assert module.build_svg(2, 13) != svg

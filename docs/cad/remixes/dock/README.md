@@ -81,9 +81,9 @@ Generate a true vector tag directly from the installed OpenCV AprilTag dictionar
 ```sh
 cd code
 uv sync --extra vision
-python3 scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
+uv run --extra vision python scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
   --output ../docs/cad/remixes/dock/tag_dock01_id12.svg
-python3 scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
+uv run --extra vision python scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
   --output ../docs/cad/remixes/dock/tag_dock01_id12.svg --verify
 ```
 
