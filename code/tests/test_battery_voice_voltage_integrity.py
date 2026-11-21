@@ -11,11 +11,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
-from fastapi.routing import APIRoute
-
 from desk_robot.api_readonly_context import register_readonly_context_routes
 from desk_robot.controller import OperationError
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
 
 
 @pytest.mark.parametrize("cell_mv", [0, 2499, 2500, 3875, 4500, 4501])

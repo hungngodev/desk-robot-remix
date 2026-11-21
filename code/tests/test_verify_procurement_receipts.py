@@ -435,7 +435,9 @@ def test_procurement_nested_measurement_type_confusion_never_releases(replacemen
     claimed = copy.deepcopy(recorded)
     claimed["measurement"]["lift"]["lift_mm"] = replacement
 
-    source = lambda url: lookup(url, records=[recorded])
+    def source(url):
+        return lookup(url, records=[recorded])
+
     assert release.verified_scoped_record(recorded, SHA, source)
     assert not release.verified_scoped_record(claimed, SHA, source)
     errors = release.audit_release(

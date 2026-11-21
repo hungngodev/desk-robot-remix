@@ -5,7 +5,6 @@ import asyncio
 import time
 
 import pytest
-
 from desk_robot.controller import Coordinator, Job, OperationError
 from desk_robot.dock_ir import dock_beacon_code
 from desk_robot.dock_vision import DockCameraCalibration, DockPose

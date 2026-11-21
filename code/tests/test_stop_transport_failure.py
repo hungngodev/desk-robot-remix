@@ -155,7 +155,6 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
     async def test_urgent_halt_bypasses_stalled_status_request(self):
         """A stalled status GET must not consume the terminal HALT budget."""
         import httpx
-
         from desk_robot.transport import HttpHead
 
         entered = asyncio.Event()
