@@ -41,8 +41,8 @@ def test_one_shared_real_sensor_event_registry_owns_camera_and_pet_kinds():
     assert _DIRECT_INTERACTION_KINDS <= _PHYSICAL_INITIATIVE_KINDS
 
 
-def test_optional_reed_event_is_real_and_unwired_pir_bumper_are_lab_only():
-    """Compile the stable reed event path, never fake unqualified input wiring."""
+def test_required_nc_bumper_and_reed_are_real_but_pir_remains_lab_only():
+    """Full builds require real fail-closed GPIO35, not unqualified PIR."""
     ini = (ROOT / "code/firmware/body/platformio.ini").read_text()
     main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
     sensors = (ROOT / "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp").read_text()
@@ -52,10 +52,13 @@ def test_optional_reed_event_is_real_and_unwired_pir_bumper_are_lab_only():
     lab = ini.split("[env:esp32_full_interaction_lab]", 1)[1].split("[env:", 1)[0]
     for profile in (full, dc):
         assert "-DDESK_ROBOT_ENABLE_REED=1" in profile
+        assert "-DDESK_ROBOT_ENABLE_BUMPER=1" in profile
         assert "-DDESK_ROBOT_ENABLE_PIR=1" not in profile
-        assert "-DDESK_ROBOT_ENABLE_BUMPER=1" not in profile
     assert "-DDESK_ROBOT_ENABLE_PIR=1" in lab
-    assert "-DDESK_ROBOT_ENABLE_BUMPER=1" in lab
+    # Lab inherits the full guarded NC bumper profile rather than
+    # redeclaring a second conflicting build flag.
+    assert "build_flags = ${env:esp32_full.build_flags}" in lab
+    assert "control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);" in main
     assert "write8(0x20, 0x0D, 0x01)" in sensors  # GPIOB0 pullup
     assert "extension_fresh" in main
     assert "mask |= 2U;" in main
