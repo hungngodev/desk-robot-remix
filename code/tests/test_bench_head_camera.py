@@ -218,10 +218,50 @@ async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http
     assert result["concurrent_audio_driver_activity_observed"] is True
     assert result["concurrent_audio_counter_delta"]["microphone_frames_read"] > 0
     assert result["concurrent_audio_counter_delta"]["speaker_frames_accepted"] > 0
-    assert result["actual_speaker_playback_verified"] is False if (
-        "actual_speaker_playback_verified" in result
-    ) else result["physical_aec_latency_measured"] is False
+    assert result["physical_aec_latency_measured"] is False
+    assert result["speaker_silence_verified"] is False
     assert result["camera_error_count"] == 0
+
+
+async def test_camera_continuity_cannot_claim_simultaneous_speech_without_audio(
+):
+    import time
+
+    class SilentCodecHead:
+        def __init__(self):
+            self._last_camera = None
+
+        async def stream_frames(self):
+            for n in range(12):
+                await asyncio.sleep(.02)
+                self._last_camera = (8, n + 1, (n + 1) * 20000)
+                yield JPEG, time.monotonic()
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+        async def audio_reference_status(self):
+            return {
+                "robot_id": "robot-01", "boot": 8,
+                "microphone_frames_read": 10,
+                "speaker_frames_accepted": 10,
+                "reference_underflow_reads": 0,
+                "microphone_privacy_muted": False,
+                "reference_integrity_failed": False,
+                "speaker_playback_verified": False,
+                "aec_physically_qualified": False,
+            }
+
+    result = await bench.measure(
+        SilentCodecHead(), "robot-01", seconds=.17,
+        status_period_s=.05, stream=True,
+    )
+    assert result["camera_frames_received"] >= 3
+    assert result["concurrent_audio_samples"] >= 2
+    assert result["concurrent_audio_errors"] == []
+    assert result["concurrent_audio_driver_activity_observed"] is False
+    assert result["concurrent_audio_counter_delta"]["microphone_frames_read"] == 0
+    assert result["concurrent_audio_counter_delta"]["speaker_frames_accepted"] == 0
 
 
 async def test_cancelled_camera_bench_closes_stream_lease():
