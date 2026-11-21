@@ -555,6 +555,131 @@ async def test_private_group_consent_revoked_while_model_thinks_sends_no_audio(
         await asyncio.gather(task, return_exceptions=True)
 
 
+
+@pytest.mark.parametrize("source", ["memory", "vision", "room"])
+@pytest.mark.parametrize("change", ["revoked", "regranted"])
+async def test_group_context_revoke_and_regrant_during_model_cannot_speak(
+    settings, tmp_path, source, change,
+):
+    """Each admitted grant epoch fences slow model speech and peer sharing."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_memory_tools_enabled = source == "memory"
+    settings.voice_vision_tools_enabled = source == "vision"
+    settings.room_station_context_enabled = source == "room"
+    marker = "ORIGINAL_GRANT_PRIVATE_CONTEXT"
+    memory = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    if source == "memory":
+        memory.remember(
+            "robot-01", "private_key_2001", marker,
+            kind="key", source_robot="robot-01", witnessed=True,
+        )
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SlowChat:
+        async def reply(self, history):
+            assert marker in str(history)
+            entered.set()
+            await release.wait()
+            return "This old grant must not produce speech."
+
+    speaker = SimulatedSpeaker()
+    conv = Conversation(settings, SlowChat(), speaker, memory=memory)
+    if source != "memory":
+        channel = "tool" if source == "vision" else "room_station"
+        kind = "visual_look" if source == "vision" else "climate"
+        conv.multimodal = SimpleNamespace(hub=SimpleNamespace(
+            interaction_timeline=lambda *args, **kwargs: [{
+                "channel": channel,
+                "kind": kind,
+                "content": marker,
+                "shared_not_robot_eyewitness": source == "room",
+                "source": "room_usb" if source == "room" else "xiaozhi",
+            }],
+        ))
+    task = asyncio.create_task(conv.run(
+        ["robot-01", "robot-02"], "Discuss what you know", 2,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        field = {
+            "memory": "voice_memory_tools_enabled",
+            "vision": "voice_vision_tools_enabled",
+            "room": "room_station_context_enabled",
+        }[source]
+        before = {
+            "memory": settings.voice_memory_consent_generation,
+            "vision": settings.camera_consent_generation,
+            "room": settings.room_station_consent_generation,
+        }[source]
+        setattr(settings, field, False)
+        if change == "regranted":
+            setattr(settings, field, True)
+        release.set()
+        with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+            await asyncio.wait_for(task, timeout=3)
+        after = {
+            "memory": settings.voice_memory_consent_generation,
+            "vision": settings.camera_consent_generation,
+            "room": settings.room_station_consent_generation,
+        }[source]
+        assert after == before + 1
+        assert speaker.spoken == []
+        assert conv.active is None
+        assert conv.histories == {}
+        assert memory.count("robot-02") == 0
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_group_memory_regrant_while_speaker_waits_drops_untransmitted_text(
+    settings, tmp_path,
+):
+    """A speaker awaiting hardware must recheck the original memory grant."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_memory_tools_enabled = True
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    store.remember(
+        "robot-01", "key_3001", "PRIVATE_KEY_FOR_TTS",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class PausedSpeaker(SimulatedSpeaker):
+        async def say(self, robot, text, *, permission_check=None):
+            entered.set()
+            await release.wait()
+            await super().say(robot, text, permission_check=permission_check)
+
+    class Chat:
+        async def reply(self, history):
+            assert "PRIVATE_KEY_FOR_TTS" in str(history)
+            return "Old private memory should never leave the speaker."
+
+    speaker = PausedSpeaker()
+    conv = Conversation(settings, Chat(), speaker, memory=store)
+    task = asyncio.create_task(conv.run(
+        ["robot-01", "robot-02"], "Recall the key", 2,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        settings.voice_memory_tools_enabled = False
+        settings.voice_memory_tools_enabled = True
+        release.set()
+        with pytest.raises(RuntimeError, match="(permission revoked|Group conversation consent revoked)"):
+            await asyncio.wait_for(task, timeout=3)
+        assert speaker.spoken == []
+        assert conv.histories == {}
+        assert store.count("robot-02") == 0
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_group_stream_revocation_stops_next_segment_and_never_shares_partial(
     settings, tmp_path,
 ):

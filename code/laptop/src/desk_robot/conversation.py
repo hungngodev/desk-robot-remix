@@ -639,6 +639,13 @@ class Conversation:
             robot.id: self._private_memory_generation.get(robot.id, 0)
             for robot in robots
         }
+        # Source permission epochs survive a rapid OFF/ON during slow model
+        # generation. Current booleans alone cannot revive old context.
+        private_consent_generation = self.settings.voice_memory_consent_generation
+        visual_consent_generation = (
+            self.settings.camera_consent_generation if visual_at_start else None
+        )
+        room_consent_generation = None
         # Remember only whether an actual room observation entered a group
         # model prompt. Revoking that station source must fence later speech.
         room_context_used = False
@@ -651,11 +658,17 @@ class Conversation:
                 (not sharing_at_start
                  or self.settings.fleet_text_sharing_enabled)
                 and (not private_at_start
-                     or self.settings.voice_memory_tools_enabled)
+                     or (self.settings.voice_memory_tools_enabled
+                         and self.settings.voice_memory_consent_generation
+                            == private_consent_generation))
                 and (not (visual_at_start or visual_context_used)
-                     or self.settings.voice_vision_tools_enabled)
+                     or (self.settings.voice_vision_tools_enabled
+                         and self.settings.camera_consent_generation
+                            == visual_consent_generation))
                 and (not room_context_used
-                     or self.settings.room_station_context_enabled)
+                     or (self.settings.room_station_context_enabled
+                         and self.settings.room_station_consent_generation
+                            == room_consent_generation))
                 and (not memory_context_at_start or all(
                     self._private_memory_generation.get(robot.id, 0)
                     == memory_generation[robot.id] for robot in robots
@@ -751,6 +764,7 @@ class Conversation:
 
             def live_cues(robot_id: str) -> str:
                 nonlocal room_context_used, visual_context_used
+                nonlocal visual_consent_generation, room_consent_generation
                 # Reuse the existing per-pet Mac timeline, not a second
                 # camera, microphone or sensor event owner. This snapshot
                 # may change between turns in the same group conversation.
@@ -811,6 +825,10 @@ class Conversation:
                             if (self.settings.mode == "hardware"
                                     and any(not independent_nonvisual(item)
                                             for item in raw)):
+                                if not visual_context_used and not visual_at_start:
+                                    visual_consent_generation = (
+                                        self.settings.camera_consent_generation
+                                    )
                                 visual_context_used = True
                         else:
                             timeline = [
@@ -825,6 +843,10 @@ class Conversation:
                             item.get("channel") == "room_station"
                             for item in timeline
                         ):
+                            if not room_context_used:
+                                room_consent_generation = (
+                                    self.settings.room_station_consent_generation
+                                )
                             room_context_used = True
                 timeline.extend(activity)
                 # A completed recall from a DIFFERENT human turn is not
@@ -1063,9 +1085,17 @@ class Conversation:
                             or (sharing_at_start
                              and not self.settings.fleet_text_sharing_enabled)
                             or (private_at_start
-                                and not self.settings.voice_memory_tools_enabled)
+                                and (not self.settings.voice_memory_tools_enabled
+                                     or self.settings.voice_memory_consent_generation
+                                        != private_consent_generation))
                             or ((visual_at_start or visual_context_used)
-                                and not self.settings.voice_vision_tools_enabled)
+                                and (not self.settings.voice_vision_tools_enabled
+                                     or self.settings.camera_consent_generation
+                                        != visual_consent_generation))
+                            or (room_context_used
+                                and (not self.settings.room_station_context_enabled
+                                     or self.settings.room_station_consent_generation
+                                        != room_consent_generation))
                         )
                         if revoked:
                             record["topic"] = ""
