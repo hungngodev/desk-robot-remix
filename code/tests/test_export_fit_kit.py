@@ -161,6 +161,12 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
     assert all(item["bbox_mm"]["dimensions_mm"] == [1.0, 1.0, 1.0]
                for item in report["parts"])
+    assert report["source_chassis_battery_footprint"] == {
+        "source_mesh_only": True,
+        "physical_interior_fit_verified": False,
+        "reference_chassis_available": False,
+        "axis_aligned_packaging_possible": None,
+    }
     assert source.verify_fit_kit(tmp_path, output_dir=rendered) == report
     # A modified JSON receipt must never promote a reversible fit kit
     # to a physically qualified assembly, energized dock, or licensed product.
@@ -180,6 +186,14 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     forged_bounds["parts"][0]["bbox_mm"]["dimensions_mm"][0] = 999.0
     manifest.write_text(json.dumps(forged_bounds))
     with pytest.raises(ValueError, match="STL bounds changed"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
+    forged_screen = json.loads(original)
+    forged_screen["source_chassis_battery_footprint"][
+        "physical_interior_fit_verified"
+    ] = True
+    manifest.write_text(json.dumps(forged_screen))
+    with pytest.raises(ValueError, match="footprint screen changed"):
         source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
     for field, forged in (("installed_quantity_per_robot", 1),
@@ -562,3 +576,28 @@ def test_selected_protected_pack_body_cannot_be_silently_undersized(tmp_path):
         result.stdout + result.stderr
     )
     assert not output.exists() or output.stat().st_size == 0
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_actual_source_chassis_cannot_contain_86mm_tray_on_axis(tmp_path):
+    """Source STL versus actual OpenSCAD tray triangles, not a CAD drawing."""
+    script = module()
+    chassis = ROOT / (
+        "docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl"
+    )
+    assert chassis.is_file()
+    output = tmp_path / "fit_stls/battery_boost_tray.stl"
+    output.parent.mkdir(parents=True)
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(output),
+        "-D", 'part="battery_boost_tray"',
+        str(ROOT / "docs/cad/remixes/remaining_fit_gauges.scad"),
+    ], check=True, capture_output=True, text=True, timeout=120)
+    screen = script.reference_body_footprint_screen(ROOT, tmp_path)
+    assert screen["reference_chassis_available"] is True
+    assert screen["source_mesh_only"] is True
+    assert screen["physical_interior_fit_verified"] is False
+    assert max(screen["candidate_tray_xy_mm"]) > max(
+        screen["reference_chassis_xy_mm"]
+    )
+    assert screen["axis_aligned_packaging_possible"] is False

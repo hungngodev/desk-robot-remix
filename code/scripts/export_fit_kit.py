@@ -139,6 +139,38 @@ def closed_mesh_edges(path: Path) -> int:
     return len(incidence)
 
 
+def reference_body_footprint_screen(root: Path, output: Path) -> dict:
+    """Detect a known axis-aligned packaging conflict from source meshes.
+
+    The original SMARS chassis mesh is an OUTER reference, not a cavity.
+    A tray bigger than that footprint cannot fit inside at 0 or 90 degrees;
+    a smaller box would still NOT prove internal, diagonal or swept fit.
+    """
+    chassis = root / (
+        "docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl"
+    )
+    candidate = output / "fit_stls/battery_boost_tray.stl"
+    result = {
+        "source_mesh_only": True,
+        "physical_interior_fit_verified": False,
+        "reference_chassis_available": chassis.is_file(),
+    }
+    if not chassis.is_file():
+        result["axis_aligned_packaging_possible"] = None
+        return result
+    body = mesh_bounds_mm(chassis)["dimensions_mm"][:2]
+    tray = mesh_bounds_mm(candidate)["dimensions_mm"][:2]
+    fits = ((tray[0] <= body[0] and tray[1] <= body[1])
+            or (tray[0] <= body[1] and tray[1] <= body[0]))
+    result.update({
+        "chassis_original_mesh_sha256": sha256(chassis.read_bytes()).hexdigest(),
+        "reference_chassis_xy_mm": body,
+        "candidate_tray_xy_mm": tray,
+        "axis_aligned_packaging_possible": fits,
+    })
+    return result
+
+
 def export_kit(
     root: Path = ROOT, *, output_dir: Path | None = None,
     openscad: str = "openscad",
@@ -207,6 +239,9 @@ def export_kit(
         "full_printable_assembly_verified": False,
         "dock_charge_contacts_approved": False,
         "commercial_manufacture_authorized": False,
+        "source_chassis_battery_footprint": reference_body_footprint_screen(
+            root, out,
+        ),
         "parts": rendered,
     }
     (out / "fit_kit_manifest.json").write_text(
@@ -231,6 +266,12 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
                 "commercial_manufacture_authorized",
             ))):
         raise ValueError("Unsafe fit kit provenance flags")
+    # A changed source chassis must invalidate an old packing screen.
+    # Passing this reference-only screen can never authorize fit or charging.
+    if report.get("source_chassis_battery_footprint") != (
+        reference_body_footprint_screen(root, output)
+    ):
+        raise ValueError("Source chassis / battery tray footprint screen changed")
     expected = {}
     for folder, filename, names in (
         ("adapter_stls", "one_robot_adapter_kit.scad", ADAPTERS),

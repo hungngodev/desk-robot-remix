@@ -34,7 +34,12 @@ This is not a printable, integrated production robot.
 only, plus `installed_quantity_per_robot: 0` for every unqualified part.
 `temporary_fit_coupon` identifies trial prints that are never permanently
 installed. The mesh verifier rejects altered installed quantities or coupon
-labels. Final assembly print quantities come only after real parts are fitted,
+labels. When the original stepper chassis STL is present, the manifest also
+compares the exported battery tray against that source chassis outer footprint.
+An oversized tray is a visible axis-aligned packaging conflict, not a reason
+to remove the protected battery. Even a successful bounding-box screen could
+never prove interior or diagonal clearance, motor sweep, service access, or
+real physical fit. Final assembly print quantities come only after real parts are fitted,
 licensed, and qualified; this provisional export does not create another
 purchase or production parts list.
 
