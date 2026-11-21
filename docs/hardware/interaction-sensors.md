@@ -212,9 +212,12 @@ meters per second squared. First verify the breakout supply and printed pins,
 then test a stationary gravity sample, each known physical axis, motion
 vibration, motor noise, disconnect/reconnect, and the actual ages through
 `code/scripts/serial_bench.py --inspect` with the robot on a catch tray.
-The current six-axis driver does not implement local tilt stops or reliable
-picked-up/set-down recognition. Those require calibrated board orientation,
-noise thresholds and physical tests before trusted body interlocks can be armed.
+The selected full WROOM firmware now includes a local measured-upright MPU6050
+motor veto, separate from the raw data driver and the five ToF cliff guard.
+It cannot qualify a physically held robot whose gravity vector and floor
+range readings remain indistinguishable from the desk. Physical pickup and
+putdown detection still requires mounting and floor fusion trials; a host
+test alone does not authorize motion.
 
 
 ## Required raw IMU heartbeat before local arm
@@ -229,12 +232,50 @@ permit and again before a controlled job. Bench tests include a mid-drive
 expired sample and verify that neither a fresh network request nor a status
 read can resume motion automatically.
 
-This heartbeat **does not implement a calibrated tilt, shake or held-state
-interlock**. A fresh reading with a gravity vector is not proof that a robot
-is on a desk or level. All movement remains blocked by the five real ToF
-requirements until measured calibration and local USB rearm. Before any desk
-trial, the operator must additionally establish each board axis, loaded
-stopping distance, power integrity and tilt/held thresholds on a catch tray.
+The freshness heartbeat alone never measures tilt or held state. The
+separate local `BodyControl` attitude guard compares two **distinct** valid
+MPU6050 conversions against the installed unit's measured upright
+accelerometer vector, gravitational magnitude envelope and minimum upright
+projection. A single transient outlier cannot latch a stop, while sustained
+unsafe orientation latches both tracks off without waiting for the Mac.
+A real low-g interrupt or a stale/contradictory IMU sample retains its own
+independent, stricter fail-closed path. All five guarded ToF conversions
+must remain healthy; successful IMU observations never override a floor
+fault. Putdown and reacquired healthy data do not automatically resume
+canceled movement. Local USB rearm requires two new upright conversions
+and healthy floor evidence, and still does not arm or resume old targets.
+
+**Default full firmware remains attitude-unqualified and motion-inert.**
+`code/firmware/body/src/main.cpp` calls
+`require_imu_attitude_guard(true)` for every full sensor build. It prints
+`WARN imu_attitude_unqualified wheels_locked` and rejects motion until the
+installed unit has measured calibration. Do not copy the host test values
+into production. For a physically measured assembly only, set
+`DESK_ROBOT_ATTITUDE_LIMITS_QUALIFIED=1` and provide all six required
+compile-time values: `DESK_ROBOT_UPRIGHT_ACCEL_X`,
+`DESK_ROBOT_UPRIGHT_ACCEL_Y`, `DESK_ROBOT_UPRIGHT_ACCEL_Z`,
+`DESK_ROBOT_UPRIGHT_PROJECTION_PERMILLE`,
+`DESK_ROBOT_ACCEL_MIN_NORM_RAW` and `DESK_ROBOT_ACCEL_MAX_NORM_RAW`.
+The boot guard validates a bounded raw norm and an upright projection of
+500 through 990 per mille; these are input sanity bounds and **not** a
+measured safe maximum tilt. Motor cutoff, power, charger, bumper, gripper
+and floor calibration gates still apply.
+
+For A11 qualification, disconnect drive power and record the exact MPU6050
+carrier revision, I2C address, mounting axes, stationary raw axes, six-axis
+signs under controlled pitch/roll and an upright desk reference. Measure
+upright acceleration distributions and outliers for each installed unit at
+rest, with tracks and both MG90S servos operating, and over expected
+temperatures. Choose projection and norm boundaries only from those
+observations and the measured stopping margin, recording the values beside
+the flashed commit and serial logs. Then, on a tethered catch tray, verify
+one-sample vibration rejection, sustained static unsafe tilt with
+`low_g_irq=false`, stale/replayed IMU, contradictory axes, a cliff during
+attitude recovery, a level robot still held above the desk, putdown,
+explicit USB rearm, and measured loaded stopping distance. Capture raw
+samples, elapsed time and floor/IMU freshness for each case.
+**A11 remains open** until actual physical handling trials pass. Source
+tests and compilation are not physical acceptance.
 
 
 ### BerryIMU upstream identity collision handling
