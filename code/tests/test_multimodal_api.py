@@ -1398,22 +1398,31 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
         own = client.get("/v1/pet/robot-01/omni-context", headers=auth)
         other = client.get("/v1/pet/robot-02/omni-context", headers=auth)
         assert own.status_code == other.status_code == 200
-        text = own.json()["instructions"]
-        assert "favorite_game: hide the key" in text
-        assert "I sent for speech (playback unverified): Hello, my little friend" in text
-        assert "I said: Hello, my little friend" not in text
-        assert "uncertain transcription" in text
-        assert "I observed: Hello" not in text
-        peer_text = other.json()["instructions"]
+        own_payload, peer_payload = own.json(), other.json()
+        text = own_payload["instructions"]
+        private = own_payload["untrusted_historical_evidence"]
+        # Native startup instructions remain trusted operator policy.
+        # History is attributed lower-trust DATA, never appended to SYSTEM.
+        assert own_payload["startup_memory_instructions_excluded"] is True
+        assert private["core"] == "favorite_game: hide the key"
+        assert "favorite_game: hide the key" not in text
+        assert "I sent for speech (playback unverified): Hello, my little friend" in private["recent"]
+        assert "I said: Hello, my little friend" not in private["recent"]
+        assert "uncertain transcription" in private["recent"]
+        assert "I observed: Hello" not in private["recent"]
+        peer_text = peer_payload["untrusted_historical_evidence"]["recent"]
         assert "robot-01 said (peer report, not my sighting): I saw a pink key" in peer_text
         assert "I heard robot-01 say" not in peer_text
-        assert "favorite_game" not in peer_text
+        assert "favorite_game" not in peer_payload["untrusted_historical_evidence"]["core"]
         assert "Hello, my little friend" not in peer_text
         settings.voice_memory_tools_enabled = False
         disabled = client.get("/v1/pet/robot-01/omni-context", headers=auth)
         assert disabled.status_code == 200
         assert disabled.json()["memory_enabled"] is False
         assert "hide the key" not in disabled.json()["instructions"]
+        assert disabled.json()["untrusted_historical_evidence"] == {
+            "core": "", "recent": "",
+        }
 
 
 def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cross_pet_leak(
@@ -1627,7 +1636,16 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
                     visual._turn_epoch[robot] += 1  # New authenticated VAD.
                 finally:
                     release.set()
-                assert pending.result(timeout=4).status_code == 200
+                stale = pending.result(timeout=4)
+                # A superseded PRIVATE retrieval must not return its data
+                # to the old Xiaozhi caller even if the SQLite read finished.
+                # Read-only physical AUX can return its old HTTP result, but
+                # neither response can enter the new human turn's context.
+                assert stale.status_code == (
+                    409 if route == "voice-context" else 200
+                )
+                if route == "voice-context":
+                    assert "superseded" in stale.json()["detail"]
             assert not hub.tool_history[robot]
             # A genuinely NEW tool request in that turn is still recorded.
             assert client.get(url, headers=headers).status_code == 200
