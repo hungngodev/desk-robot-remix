@@ -1615,7 +1615,25 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert "COM-05-045" not in cart["unpriced_skus"]
     assert len(set((x["vendor"], x["sku"]) for x in cart["items"])) == 13
     assert Counter(x["vendor"] for x in cart["items"])["ElectroPeak"] == 6
+    assert Counter(x["checkout_seller_candidate"] for x in cart["items"])["DigiKey"] == 3
+    groups = {g["checkout_seller_candidate"]: g
+              for g in cart["checkout_storefront_groups"]}
+    assert len(groups) == 6
+    assert groups["DigiKey"]["skus"] == [
+        "CS20-02P110-04-1X", "TSAL6200", "TSOP38438",
+    ]
+    assert groups["ElectroPeak"]["skus"] == sorted(
+        x["sku"] for x in cart["items"]
+        if x["checkout_seller_candidate"] == "ElectroPeak"
+    )
+    assert groups["Newark"]["skus"] == ["D2F-01L3"]
+    assert all(not x["shipping_consolidation_verified"] for x in groups.values())
     rows = {x["id"]: x for x in cart["items"]}
+    assert rows["speaker"]["manufacturer_or_brand"] == "Challenge Electronics"
+    assert rows["speaker"]["checkout_seller_candidate"] == "DigiKey"
+    assert rows["dock_ir_receivers"]["manufacturer_or_brand"] == "Vishay"
+    assert rows["dock_ir_receivers"]["checkout_seller_candidate"] == "DigiKey"
+    assert rows["dock_ir_emitter_channels"]["checkout_seller_candidate"] == "DigiKey"
     assert rows["cliff_obstacle"]["quantity"] == 1
     assert rows["i2c_mux"]["quantity"] == 2
     assert rows["dock_ir_emitter_channels"]["quantity"] == 2
@@ -1630,6 +1648,10 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     rendered = mod.render_pilot_supplier_cart(mod.generate(plan))
     assert "13 SKUs; 17 items." in rendered
     assert "Priced-only historical subtotal" in rendered
+    assert "6 listing storefronts" in rendered
+    assert "| DigiKey | Challenge Electronics | CS20-02P110-04-1X |" in rendered
+    assert "| DigiKey | Vishay | TSOP38438 |" in rendered
+    assert "shared DigiKey listings do NOT verify a single shipment" in rendered
     assert "18.87" in rendered and "59.28" in rendered and "9.28" in rendered
     assert "NOT a current landed quote or purchase approval" in rendered
     assert "0 SKUs have unknown comparable USD price" in rendered
@@ -1637,6 +1659,20 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert "NOT complete driven dock channels" in rendered
 
 
+
+
+
+@pytest.mark.parametrize("url", [
+    "https://digikey.com.evil.example/item",
+    "https://www.digikey.com.evil.example/item",
+    "http://www.digikey.com/en/products",
+    "https://foo@www.digikey.com/en/products",
+    "https://www.digikey.com:443/en/products",
+    "https://www.unknown-seller.example/product",
+])
+def test_pilot_checkout_seller_requires_exact_source_host(url):
+    with pytest.raises(ValueError, match="Unrecognized pilot supplier"):
+        mod._pilot_checkout_seller_candidate(url)
 
 
 def test_pilot_cart_exposes_actual_source_and_test_not_hardware_approval():

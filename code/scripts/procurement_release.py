@@ -1099,6 +1099,27 @@ def first_robot_pilot_samples(report: dict) -> dict:
 
 
 
+# These are storefronts of the source-locked sample URLs, not inferred
+# shipping group discounts. Listing host and manufacturer can differ.
+_PILOT_STOREFRONT_BY_HOST = {
+    "electropeak.com": "ElectroPeak",
+    "www.dfrobot.com": "DFRobot",
+    "www.newark.com": "Newark",
+    "www.digikey.com": "DigiKey",
+    "www.pololu.com": "Pololu",
+    "www.sparkfun.com": "SparkFun",
+}
+
+
+def _pilot_checkout_seller_candidate(url: str) -> str:
+    parts = urlsplit(url)
+    if (parts.scheme != "https" or parts.username is not None
+            or parts.password is not None or parts.port is not None
+            or parts.hostname not in _PILOT_STOREFRONT_BY_HOST):
+        raise ValueError("Unrecognized pilot supplier storefront URL")
+    return _PILOT_STOREFRONT_BY_HOST[parts.hostname]
+
+
 def pilot_supplier_cart(report: dict) -> dict:
     """Exact-source first-robot evaluation cart; never a whole robot release."""
     pilot = first_robot_pilot_samples(report)
@@ -1140,6 +1161,7 @@ def pilot_supplier_cart(report: dict) -> dict:
                 raise ValueError("Missing sample implementation file: " + relative)
         if not test_path.startswith("code/") or "/tests/" not in test_path:
             raise ValueError("Invalid sample test owner: " + role["id"])
+        checkout_seller = _pilot_checkout_seller_candidate(url)
         items.append({
             "implementation_source": source_path,
             "implementation_test": test_path,
@@ -1147,6 +1169,8 @@ def pilot_supplier_cart(report: dict) -> dict:
             "implementation_source_is_code": source_path.startswith("code/"),
             "tests_executed_on_this_checkout": False,
             "id": role["id"], "name": role["name"], "vendor": seller,
+            "manufacturer_or_brand": seller,
+            "checkout_seller_candidate": checkout_seller,
             "sku": sku, "product_url": url, "quantity": qty,
             "historical_unit_quote_usd": quote,
             "historical_line_quote_usd": round(qty * quote, 2)
@@ -1156,7 +1180,9 @@ def pilot_supplier_cart(report: dict) -> dict:
             "missing_for_functional_channel":
                 role["missing_for_functional_channel"],
         })
-    items.sort(key=lambda x: (x["vendor"].casefold(), x["sku"]))
+    items.sort(key=lambda x: (
+        x["checkout_seller_candidate"].casefold(), x["sku"]
+    ))
     qty_sum = sum(x["quantity"] for x in items)
     known_subtotal = round(sum(x["historical_line_quote_usd"]
                                for x in items
@@ -1168,6 +1194,19 @@ def pilot_supplier_cart(report: dict) -> dict:
         "source": "first_robot_pilot_samples",
         "exact_sku_count": len(items),
         "component_quantity": qty_sum,
+        # Group source listings by seller host, never by manufacturer brand.
+        # Checkout, carrier and combined shipping are still unverified.
+        "checkout_storefront_groups": [
+            {
+                "checkout_seller_candidate": storefront,
+                "skus": sorted(x["sku"] for x in items
+                               if x["checkout_seller_candidate"] == storefront),
+                "shipping_consolidation_verified": False,
+            }
+            for storefront in sorted({
+                x["checkout_seller_candidate"] for x in items
+            })
+        ],
         "historical_priced_partial_subtotal_usd": known_subtotal,
         "historical_first_unit_budget": pilot["historical_first_unit_budget"],
         "unpriced_skus": [x["sku"] for x in items
@@ -1196,15 +1235,16 @@ def render_pilot_supplier_cart(report: dict) -> str:
         "or proof that optional firmware is enabled. No lithium charging or "
         "motor motion is authorized.",
         "",
-        "| Seller | SKU | Part | Qty | Historical USD each | Link | Engineering source |",
-        "| --- | --- | --- | ---: | ---: | --- | --- |",
+        "| Candidate checkout seller | Brand or manufacturer | SKU | Part | Qty | Historical USD each | Link | Engineering source |",
+        "| --- | --- | --- | --- | ---: | ---: | --- | --- |",
     ]
     for x in cart["items"]:
         quote = ("$" + format(x["historical_unit_quote_usd"], ".2f")
                  if x["historical_unit_quote_usd"] is not None
                  else "not verified")
         lines.append(
-            f"| {x['vendor']} | {x['sku']} | "
+            f"| {x['checkout_seller_candidate']} | "
+            f"{x['manufacturer_or_brand']} | {x['sku']} | "
             f"{str(x['name']).replace('|', '/')} | "
             f"{x['quantity']} | {quote} | {x['product_url']} | "
             f"{x['implementation_source']} ({x['implementation_state']}) |"
@@ -1212,6 +1252,9 @@ def render_pilot_supplier_cart(report: dict) -> str:
     lines += [
         "",
         f"{cart['exact_sku_count']} SKUs; {cart['component_quantity']} items.",
+        f"{len(cart['checkout_storefront_groups'])} listing storefronts; "
+        "shared DigiKey listings do NOT verify a single shipment, "
+        "shipping charge, live stock or combined checkout.",
         "Priced-only historical subtotal USD "
         + format(cart["historical_priced_partial_subtotal_usd"], ".2f"),
         _pilot_budget_summary(cart["historical_first_unit_budget"]),
