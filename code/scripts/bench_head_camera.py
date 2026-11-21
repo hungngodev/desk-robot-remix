@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import aclosing
 import json
 import math
 import time
@@ -115,67 +116,71 @@ async def measure(
         last_source_identity: tuple[int, int, int] | None = None
         try:
             async with asyncio.timeout(seconds + 0.5):
-                async for jpeg, received in head.stream_frames():
-                    if time.monotonic() >= deadline:
-                        break
-                    if (not isinstance(jpeg, bytes)
-                            or not jpeg.startswith(b"\xff\xd8")
-                            or not jpeg.endswith(b"\xff\xd9")):
-                        raise ValueError("Incomplete JPEG in continuous stream")
-                    if last_frame_at is None:
-                        if received - started > MAX_CAMERA_GAP_S:
-                            raise RuntimeError("Continuous camera stalled before first JPEG")
-                    else:
-                        if received <= last_frame_at:
-                            raise ValueError("Camera stream receipt clock regressed")
-                        gap = received - last_frame_at
-                        stream_intervals.append(gap)
-                        if gap > MAX_CAMERA_GAP_S:
-                            raise RuntimeError(
-                                f"Continuous camera stalled for {gap:.2f}s between JPEGs"
+                # An interrupted timed bench must release its only head
+                # MJPEG HTTP connection before status/report cleanup begins.
+                # Async-for by itself does not guarantee generator closure.
+                async with aclosing(head.stream_frames()) as stream:
+                    async for jpeg, received in stream:
+                        if time.monotonic() >= deadline:
+                            break
+                        if (not isinstance(jpeg, bytes)
+                                or not jpeg.startswith(b"\xff\xd8")
+                                or not jpeg.endswith(b"\xff\xd9")):
+                            raise ValueError("Incomplete JPEG in continuous stream")
+                        if last_frame_at is None:
+                            if received - started > MAX_CAMERA_GAP_S:
+                                raise RuntimeError("Continuous camera stalled before first JPEG")
+                        else:
+                            if received <= last_frame_at:
+                                raise ValueError("Camera stream receipt clock regressed")
+                            gap = received - last_frame_at
+                            stream_intervals.append(gap)
+                            if gap > MAX_CAMERA_GAP_S:
+                                raise RuntimeError(
+                                    f"Continuous camera stalled for {gap:.2f}s between JPEGs"
+                                )
+                        last_frame_at = received
+                        identity = getattr(head, "_last_camera", None)
+                        if identity is None:
+                            raise ValueError("Stream has no authenticated frame identity")
+                        if identity in seen_camera_identities:
+                            raise ValueError("Duplicate live camera frame identity")
+                        if last_source_identity is not None:
+                            if identity[0] != last_source_identity[0]:
+                                raise RuntimeError("Sense camera rebooted during continuous bench")
+                            # These are two elapsed times on the SAME Sense boot,
+                            # not an ESP-to-Mac absolute clock synchronization.
+                            source_gap = (
+                                identity[2] - last_source_identity[2]
+                            ) / 1_000_000
+                            if source_gap <= 0:
+                                raise ValueError("Sense frame completion clock regressed")
+                            sense_capture_intervals.append(source_gap)
+                            if source_gap > MAX_CAMERA_GAP_S:
+                                raise RuntimeError(
+                                    f"Sense camera capture stalled for {source_gap:.2f}s"
+                                )
+                        last_source_identity = identity
+                        seen_camera_identities.add(identity)
+                        camera_sizes.append(len(jpeg))
+                        if score_motion and received - last_scored_at >= 1.0:
+                            # Instrumented calibration only: decode on the host
+                            # without storing JPEGs, running a VLM or sending
+                            # any motor/audio command. This costs extra CPU and
+                            # must be labeled separately from raw transport FPS.
+                            _, fingerprint, brightness = await asyncio.to_thread(
+                                _prepare, jpeg
                             )
-                    last_frame_at = received
-                    identity = getattr(head, "_last_camera", None)
-                    if identity is None:
-                        raise ValueError("Stream has no authenticated frame identity")
-                    if identity in seen_camera_identities:
-                        raise ValueError("Duplicate live camera frame identity")
-                    if last_source_identity is not None:
-                        if identity[0] != last_source_identity[0]:
-                            raise RuntimeError("Sense camera rebooted during continuous bench")
-                        # These are two elapsed times on the SAME Sense boot,
-                        # not an ESP-to-Mac absolute clock synchronization.
-                        source_gap = (
-                            identity[2] - last_source_identity[2]
-                        ) / 1_000_000
-                        if source_gap <= 0:
-                            raise ValueError("Sense frame completion clock regressed")
-                        sense_capture_intervals.append(source_gap)
-                        if source_gap > MAX_CAMERA_GAP_S:
-                            raise RuntimeError(
-                                f"Sense camera capture stalled for {source_gap:.2f}s"
-                            )
-                    last_source_identity = identity
-                    seen_camera_identities.add(identity)
-                    camera_sizes.append(len(jpeg))
-                    if score_motion and received - last_scored_at >= 1.0:
-                        # Instrumented calibration only: decode on the host
-                        # without storing JPEGs, running a VLM or sending
-                        # any motor/audio command. This costs extra CPU and
-                        # must be labeled separately from raw transport FPS.
-                        _, fingerprint, brightness = await asyncio.to_thread(
-                            _prepare, jpeg
-                        )
-                        if previous_fingerprint is not None:
-                            scored_changes.append(
-                                change_fraction(previous_fingerprint, fingerprint)
-                            )
-                            scored_brightness_deltas.append(
-                                abs(brightness - previous_brightness)
-                            )
-                        previous_fingerprint = fingerprint
-                        previous_brightness = brightness
-                        last_scored_at = received
+                            if previous_fingerprint is not None:
+                                scored_changes.append(
+                                    change_fraction(previous_fingerprint, fingerprint)
+                                )
+                                scored_brightness_deltas.append(
+                                    abs(brightness - previous_brightness)
+                                )
+                            previous_fingerprint = fingerprint
+                            previous_brightness = brightness
+                            last_scored_at = received
                 # A feed can end exactly at the requested deadline after
                 # sending only one early JPEG. Ending on time is not proof
                 # that frames kept arriving throughout the bench.
