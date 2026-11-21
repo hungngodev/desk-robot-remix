@@ -160,8 +160,15 @@ def _summary(readings: dict, calibration: SoilCalibration | None = None) -> str:
                     f"raw gas resistance {bme['gas_ohms']:.0f} ohms")
     radar = readings["ld2410c"]
     if radar["valid"]:
-        bits.append("Station radar detected an echo" if radar["presence"]
-                    else "Station radar reported no echo")
+        if radar["presence"]:
+            # This is anonymous echo distance, never person detection.
+            target = ("moving" if radar["moving"] else
+                      "stationary" if radar["stationary"] else None)
+            detail = (f", {target} {radar[target + '_cm']:.0f} cm"
+                      if target else "")
+            bits.append("Station radar detected an echo" + detail)
+        else:
+            bits.append("Station radar reported no echo")
     soil = readings["soil"]
     if soil["valid"]:
         bits.append(f"Station soil probe raw ADC {soil['raw_adc']}")
@@ -170,7 +177,11 @@ def _summary(readings: dict, calibration: SoilCalibration | None = None) -> str:
             bits.append(f"Station relative soil moisture {relative}% from measured calibration")
     thermal = readings["amg8833"]
     if thermal["valid"]:
-        bits.append("Station thermal array returned 64 unclassified temperatures")
+        # Summarize only the observed range, not a person, bearing or heat
+        # source identity. Sensor orientation and emissivity are unqualified.
+        pixels = thermal["pixels_c"]
+        bits.append(f"Station thermal raw {min(pixels):.1f}..{max(pixels):.1f} C "
+                    "(64 unclassified pixels)")
     return "; ".join(bits)[:300] if bits else "No fresh room station measurements"
 
 
