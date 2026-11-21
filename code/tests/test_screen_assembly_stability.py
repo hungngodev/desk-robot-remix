@@ -112,7 +112,7 @@ def test_pose_specific_supports_never_borrow_docked_footprint():
     """Equal mass and COM still need their own wheel/dock contact polygon."""
     data = complete()
     stowed = next(p for p in data["poses"] if p["name"] == "stowed_empty")
-    docked = next(p for p in data["poses"] if p["name"] == "docked_stopped")
+    assert any(p["name"] == "docked_stopped" for p in data["poses"])
     stowed["support_contacts_mm"] = [
         [-8, -45], [8, -45], [8, 45], [-8, 45],
     ]
