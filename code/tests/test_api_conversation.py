@@ -1593,3 +1593,30 @@ async def test_kokoro_explicit_rejected_grant_preserves_other_fleet_lease(
             pytest.fail("Rejected grant must never enter speech session")
     assert client.other_lease_active is True
     assert client.calls == [{"device_ids": ["head-01"], "enabled": True}]
+
+
+async def test_group_mid_session_sharing_enable_cannot_backfill_peer_dialogue(settings):
+    """Opting into sharing mid-session must not authorize an older session."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = False
+
+    class Chat:
+        calls = 0
+
+        async def reply(self, history):
+            self.calls += 1
+            if self.calls == 1:
+                settings.fleet_text_sharing_enabled = True
+            return "This pet's original speech stays private to its own model."
+
+    chat = Chat()
+    dialogue = Conversation(settings, chat, SimulatedSpeaker())
+    transcript = await dialogue.run(
+        ["robot-01", "robot-02"], "Talk about a desk toy", 2,
+    )
+    assert len(transcript) == 2
+    assert chat.calls == 2
+    assert all(
+        "Untrusted digitally relayed peer speech" not in str(history)
+        for history in dialogue.histories.values()
+    )
