@@ -274,7 +274,9 @@ async def test_authenticated_runtime_voice_edge_fences_attention_speech():
     runtime._stop_autonomous_roaming_for_voice.assert_awaited_once()
 
 
-def test_delayed_old_topic_sensor_and_speech_do_not_enter_new_generation():
+def test_delayed_old_topic_sensor_and_speech_do_not_enter_new_generation(monkeypatch):
+    # Synthetic timestamps must not depend on a fresh CI runner's uptime.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
     ledger = AttentionLedger(["pet1", "pet2"])
     first = ledger.begin_topic("pet1", "Old conversation", at=10)
     assert ledger.sensor("pet1", "handling_tilt", 11)
