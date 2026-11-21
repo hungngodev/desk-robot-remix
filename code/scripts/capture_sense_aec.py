@@ -16,6 +16,7 @@ import re
 import stat
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import wave
@@ -27,6 +28,16 @@ BYTES = FRAMES * 2 * 2
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(item) for item in (
     "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
 ))
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a head HTTP redirect with an authenticated device bearer."""
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            request.full_url, code, "Sense capture redirect refused",
+            headers, fp,
+        )
 
 
 def head_address(url: str) -> str:
@@ -222,8 +233,11 @@ def main() -> int:
     token = os.environ.get(args.token_env, "")
     if len(token) < 24:
         parser.error("Missing valid private device token")
-    # Disable HTTP_PROXY and environment proxies for this private bearer.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    # Disable proxies AND redirects. urllib's default redirect handler can
+    # carry Authorization from a private robot URL to an unrelated origin.
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), NoRedirect()
+    )
     raw, report = capture_head(
         opener, args.head_url, args.robot_id, token,
     )
