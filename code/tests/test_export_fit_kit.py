@@ -527,3 +527,25 @@ def test_apriltag_backplate_has_printable_mount_web_and_through_bores(tmp_path):
             assert not any(blocks_vertical_bore(x, y, face)
                            for face in faces), (x, y)
 
+
+def test_selected_protected_pack_body_cannot_be_silently_undersized(tmp_path):
+    """The current 86 mm candidate body cannot use the old 68 mm tray."""
+    source = ROOT / "docs/cad/remixes/remaining_fit_gauges.scad"
+    text = source.read_text(encoding="utf-8")
+    assert "candidate_pack_body_l_mm = 86;" in text
+    assert "power_l = 86;" in text
+    assert "power_l >= candidate_pack_body_l_mm" in text
+    if not shutil.which("openscad"):
+        pytest.skip("OpenSCAD not installed for negative gauge render")
+    output = tmp_path / "undersized_pack.stl"
+    result = subprocess.run(
+        ["openscad", "--export-format", "binstl", "-o", str(output),
+         "-D", 'part="battery_boost_tray"', "-D", "power_l=68",
+         str(source)],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode != 0
+    assert "Battery tray shorter than selected candidate pack body" in (
+        result.stdout + result.stderr
+    )
+    assert not output.exists() or output.stat().st_size == 0
