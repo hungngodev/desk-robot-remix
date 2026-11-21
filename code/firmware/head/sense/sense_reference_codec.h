@@ -12,6 +12,10 @@
 #include "config.h"  // Selected Sense board AUDIO_*_SAMPLE_RATE contract.
 #include "reference_timeline.h"
 #include "sdkconfig.h"
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+#include "sense_pcm_window.h"
+#include "esp_timer.h"
+#endif
 
 #include <array>
 #include <cstdint>
@@ -42,6 +46,21 @@ public:
         bool integrity_failed;
     };
     ReferenceDiagnostics GetReferenceDiagnostics();
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+    // A private opt-in build and one authenticated operator request are
+    // required. This reuses the Xiaozhi 16 kHz mic/reference Read callback.
+    struct BenchCaptureProgress {
+        bool active;
+        bool ready;
+        bool failed;
+        uint32_t frames;
+    };
+    bool BeginBenchPcmCapture();
+    BenchCaptureProgress GetBenchPcmProgress();
+    desk_robot::SensePcmWindow::Complete TakeBenchPcmCapture();
+    void AbortBenchPcmCapture();
+    static void ReleaseBenchPcmCapture(int16_t* data);
+#endif
 
 protected:
     int Read(int16_t* dest, int samples) override;
@@ -66,6 +85,12 @@ private:
     // starting point. It is not a physical acoustic calibration.
     static constexpr uint32_t kDelaySamples =
         CONFIG_DESK_ROBOT_AEC_DELAY_MS * (kMicRate / 1000);
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+    // The captured digital reference already includes this delay. Require
+    // zero for measuring absolute acoustic lag rather than residual lag.
+    static_assert(kDelaySamples == 0,
+                  "Raw acoustic calibration capture needs AEC delay 0 ms");
+#endif
     static constexpr uint32_t kMaxGapSamples = kRingSize;
     static_assert((kRingSize & (kRingSize - 1)) == 0);
     // Reuse fixed bounded mic/reference frame scratch buffers instead of
@@ -76,6 +101,13 @@ private:
     std::array<int16_t, kMaxReadFrames> microphone_frame_{};
     std::array<int16_t, kMaxReadFrames> reference_frame_{};
     std::mutex reference_mutex_;
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+    std::mutex bench_mutex_;
+    desk_robot::SensePcmWindow bench_window_{};
+    esp_timer_handle_t bench_expiry_timer_ = nullptr;
+    int64_t bench_started_us_ = 0;
+    static void BenchPcmExpiry(void* context);
+#endif
     std::array<int16_t, kRingSize> reference_{};
     uint64_t write_index_ = 0;
     // Bump when playback is cancelled/reset. A blocked I2S writer must not
