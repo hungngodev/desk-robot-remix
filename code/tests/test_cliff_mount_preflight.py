@@ -28,6 +28,8 @@ def test_exact_source_bracket_lens_is_below_minimum_if_mount_flush_to_desk():
     assert source["firmware_valid_min_mm"] == 30
     assert source["firmware_valid_max_mm"] == 1300
     assert source["manufacturer_system_fov_deg"] == 25.0
+    assert source["source_aperture_axis_parallel_to_base"]
+    assert not source["source_flat_base_points_optics_downward"]
     low = evaluate()
     # Source and evaluated geometry must agree; reject a stale 18 mm PCB
     # assumption without weakening the 30 mm sensor-validity gate.
@@ -52,7 +54,12 @@ def test_properly_raised_sensor_can_be_feasible_but_not_qualified():
     assert r["full_fov_floor_path_in_valid_range"]
     assert r["nominal_stopping_geometry_possible"]
     assert r["worst_observed_stop_supplied"]
+    # Feasible only if the adapter is actually oriented to point downward.
+    # A flat-mounted source bracket's Y-axis aperture is not a floor ranger.
     assert r["candidate_geometry_possible_on_paper"]
+    assert r["source_aperture_axis_parallel_to_base"]
+    assert not r["source_flat_base_points_optics_downward"]
+    assert not r["downward_optical_axis_reorientation_physically_verified"]
     assert not r["actual_dark_glossy_surface_and_edge_trials"]
     assert not r["sensor_mount_and_optical_alignment_physically_verified"]
     assert not r["40_sensor_fleet_purchase_approved"]
@@ -155,6 +162,8 @@ def test_forward_2d_contact_coverage_uses_st_25_degree_optical_rear_setback():
     assert all(s["covered"] for s in result["support_checks"])
     assert result["necessary_planar_coverage_on_paper"]
     assert not result["fully_safe_cliff_operation_proven"]
+    assert result["reference_bracket_requires_downward_reorientation"]
+    assert not result["mounted_axis_physically_verified"]
 
 
 def test_planar_lead_cannot_pass_if_floor_is_below_sensor_minimum_range():

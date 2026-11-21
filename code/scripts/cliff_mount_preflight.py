@@ -44,6 +44,16 @@ def verify_source_contract() -> dict:
         raise ValueError("Missing or ambiguous ToF bracket height")
     if "face_z=tof_pcb_h+7;" not in scad or "face_z/2+1" not in scad:
         raise ValueError("CAD lens position changed; update check")
+    # The current upright front face is pierced ALONG local Y:
+    # rotate([90,0,0]) maps the cylinder's initial Z axis to Y. When the
+    # bracket's base sits flat, the nominal aperture looks horizontally,
+    # NOT down toward the desk. The paper floor path is conditional on a
+    # separate physically measured reorientation/placement.
+    aperture = scad.split("module tof_adjustable()", 1)[1].split(
+        "module oled_bezel()", 1
+    )[0]
+    if 'rotate([90,0,0])' not in aperture:
+        raise ValueError("ToF source aperture axis changed; update mount model")
     accepted = re.findall(r"distance\s*>=\s*(\d+)\s*&&\s*distance\s*<=\s*(\d+)", source)
     if len(accepted) != 1:
         raise ValueError("VL53L0X firmware source threshold changed")
@@ -53,6 +63,8 @@ def verify_source_contract() -> dict:
         "firmware_valid_min_mm": min_mm,
         "firmware_valid_max_mm": max_mm,
         "manufacturer_system_fov_deg": ST_SYSTEM_FOV_DEG,
+        "source_aperture_axis_parallel_to_base": True,
+        "source_flat_base_points_optics_downward": False,
     }
 
 
@@ -148,6 +160,7 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
         ),
         "actual_dark_glossy_surface_and_edge_trials": False,
         "sensor_mount_and_optical_alignment_physically_verified": False,
+        "downward_optical_axis_reorientation_physically_verified": False,
         "40_sensor_fleet_purchase_approved": False,
     }
 
@@ -280,6 +293,8 @@ def screen_planar_cliff_coverage(
             full_fov_range_ok and all(c["covered"] for c in cases)
         ),
         "actual_surface_and_motor_faults_verified": False,
+        "reference_bracket_requires_downward_reorientation": True,
+        "mounted_axis_physically_verified": False,
         "fully_safe_cliff_operation_proven": False,
     }
 

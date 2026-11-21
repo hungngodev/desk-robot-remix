@@ -20,6 +20,20 @@ Current `docs/cad/remixes/one_robot_adapter_kit.scad` has:
 * lens opening center at `face_z / 2 + 1`, **11.15 mm above
   the printed adapter mounting plane**, calculated from provisional CAD
 
+**Important unqualified mounting orientation:** The actual
+`tof_adjustable` source drills the optical aperture through its upright face
+with `rotate([90,0,0])`: the bore is parallel to the flat base mounting plane
+and points horizontally when that base lies flat. It does **not** become a
+downward cliff sensor merely because the lens center is 11.15 mm above its
+base. All subsequent 11.15/31.15 mm path, 25 degree cone and wheel lead
+calculations are only conditional geometry for a separately reoriented
+sensor with measured lens height, downward optical axis, chassis mount and
+wheel positions. A real 90 degree reorientation changes the source datum,
+so do not transplant the 11.15 mm offset without measuring the final 3D
+transform. The preflight now exports explicit `source_flat_base_points_optics_downward:
+false` and `downward_optical_axis_reorientation_physically_verified: false`
+flags. It cannot release motor movement or 40 ranger purchases.
+
 Thus a flush desk mount has only **11.15 mm** nominal vertical optical
 path, **below the production driver minimum 30 mm**. A chassis mounting
 plane 20 mm above the desk produces **31.15 mm** nominal vertical optical
