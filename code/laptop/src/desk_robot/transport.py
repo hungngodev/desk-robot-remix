@@ -198,6 +198,9 @@ class HttpHead:
                 self.config.head_url.rstrip("/") + path,
                 headers={"Authorization": f"Bearer {secret(self.config.token_env)}"},
                 timeout=httpx.Timeout(3, connect=1),
+                # Never inherit shared-client redirect behavior for a
+                # device bearer or a physical command recipient.
+                follow_redirects=False,
                 **kwargs,
             )
             response.raise_for_status()
@@ -370,6 +373,8 @@ class HttpHead:
             async with self.client.stream(
                 "GET", url, headers=headers,
                 timeout=httpx.Timeout(5, connect=1),
+                # Camera media and its bearer never move to another URL.
+                follow_redirects=False,
             ) as response:
                 response.raise_for_status()
                 if not response.headers.get("content-type", "").lower().startswith(

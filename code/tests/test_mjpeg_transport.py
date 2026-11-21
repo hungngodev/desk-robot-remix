@@ -173,3 +173,37 @@ async def test_batched_stream_rejects_replayed_identity_before_latest(monkeypatc
         with pytest.raises(HeadError, match="stale or replayed"):
             async for _ in head.stream_frames():
                 pass
+
+
+@pytest.mark.asyncio
+async def test_sense_bearer_requests_refuse_redirect_even_if_shared_client_follows(
+    monkeypatch,
+):
+    """A foreign redirect cannot change the authenticated camera endpoint."""
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    visited = []
+
+    def redirect(request):
+        visited.append(str(request.url))
+        return httpx.Response(
+            302, headers={"location": "https://foreign.invalid/other"},
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(redirect), follow_redirects=True,
+    ) as client:
+        head = HttpHead(
+            RobotConfig(
+                id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+                head_url="http://head.example",
+            ), client,
+        )
+        with pytest.raises(HeadError, match="head request failed"):
+            await head._request("GET", "/api/audio.reference")
+        with pytest.raises(HeadError, match="camera stream unavailable"):
+            async for _ in head.stream_frames():
+                pass
+    assert visited == [
+        "http://head.example/api/audio.reference",
+        "http://head.example/api/camera.mjpg",
+    ]
