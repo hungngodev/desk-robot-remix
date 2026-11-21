@@ -64,6 +64,9 @@ def register_native_omni_routes(
             + "unless an independently measured operation confirms it. "
             + "You cannot grant motor, battery or user authorization."
         )
+        # Historical memory is untrusted data, not native model policy.
+        # The existing voice-context tool still supports opt-in recall.
+        historical_evidence = {"core": "", "recent": ""}
         if settings.voice_memory_tools_enabled:
             core, records = await asyncio.wait_for(
                 asyncio.gather(
@@ -89,20 +92,12 @@ def register_native_omni_routes(
             # formatter. A sent line is NOT a visual observation and no
             # model-estimated ASR sentence becomes an operator preference.
             context = compose_brain_context(records, core, ())
-            for title, content in (
-                ("Curated preferences (untrusted): ", context.core),
-                ("Past context (untrusted, not current sighting): ",
-                 context.recent),
-            ):
-                if content:
-                    budget = 1900 - len(prefix) - len(title) - 1
-                    if budget > 0:
-                        prefix += " " + title + content[:budget]
+            historical_evidence = {"core": context.core, "recent": context.recent}
         return {
             "robot_id": robot_id,
             "instructions": prefix[:2000],
-            # Distinct operator configured voice style only. Private episodes
-            # and opt-in memory remain in their own untrusted context field.
+            "untrusted_historical_evidence": historical_evidence,
+            "startup_memory_instructions_excluded": True,
             "persona": robot.persona[:900],
             "memory_enabled": settings.voice_memory_tools_enabled,
             "transcript_memory_enabled": settings.voice_transcript_memory_enabled,
