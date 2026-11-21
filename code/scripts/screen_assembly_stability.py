@@ -122,6 +122,9 @@ def screen(measurement: object) -> dict:
             or any(not isinstance(name, str) or not name for name in names)):
         raise ValueError("Missing, unnamed or duplicated load pose")
     results = []
+    baseline_components: dict[str, float] | None = None
+    baseline_roles: set[str] = set()
+    baseline_pose_name: str = ""
     for case in cases:
         if set(case) != {"name", "components", "support_contacts_mm"}:
             raise ValueError("Each load pose needs measured components and support contacts")
@@ -149,6 +152,30 @@ def screen(measurement: object) -> dict:
             masses[role] = (float(mass), _point(part["com_mm"], dimension=3))
         if not ROLES.issubset(masses):
             raise ValueError("Missing body, power, head, gripper, sensors or payload")
+
+        # Fixed assembly roles and their measured masses must remain consistent
+        # across all poses for the same physical robot. Only the articulated
+        # center-of-mass coordinates may move, and only payload mass may vary.
+        if baseline_components is None:
+            baseline_components = {
+                r: m for r, (m, _) in masses.items() if r != "payload"
+            }
+            baseline_roles = set(masses.keys())
+            baseline_pose_name = case["name"]
+        else:
+            if set(masses.keys()) != baseline_roles:
+                raise ValueError(
+                    f"Assembly roles in pose '{case['name']}' do not match baseline roles "
+                    f"from '{baseline_pose_name}'"
+                )
+            for role, base_mass in baseline_components.items():
+                if not math.isclose(masses[role][0], base_mass, rel_tol=1e-7, abs_tol=1e-7):
+                    raise ValueError(
+                        f"Fixed assembly role '{role}' mass changed between poses "
+                        f"({base_mass}g in '{baseline_pose_name}' vs {masses[role][0]}g in '{case['name']}'); "
+                        "stability screen requires consistent assembly mass evidence"
+                    )
+
         payload_mass = masses["payload"][0]
         if case["name"] == "stowed_empty" and payload_mass != 0:
             raise ValueError("Empty stowed pose must have zero payload")

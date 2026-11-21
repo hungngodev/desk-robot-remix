@@ -189,3 +189,27 @@ def test_hull_margin_is_signed_and_does_not_qualify_outside_contact():
     ])
     assert tool.minimum_signed_edge_margin((0, 0), hull) == pytest.approx(10)
     assert tool.minimum_signed_edge_margin((12, 0), hull) < 0
+
+
+def test_cross_pose_fixed_component_mass_mismatch_fails_closed():
+    tool = load()
+    data = complete()
+    # Misweight power_stack in key_grasp_extended (1g vs 150g in other poses)
+    key_pose = next(p for p in data["poses"] if p["name"] == "key_grasp_extended")
+    battery = next(c for c in key_pose["components"] if c["id"] == "power_stack")
+    battery["mass_g"] = 1
+
+    with pytest.raises(ValueError, match="Fixed assembly role 'power_stack' mass changed between poses"):
+        tool.screen(data)
+
+
+def test_cross_pose_assembly_role_substitution_fails_closed():
+    tool = load()
+    data = complete()
+    key_pose = next(p for p in data["poses"] if p["name"] == "key_grasp_extended")
+    # Add an extra component role to key_grasp_extended not present in baseline
+    key_pose["components"].append({"id": "extra_ballast", "mass_g": 50, "com_mm": [0, 0, 10]})
+
+    with pytest.raises(ValueError, match="Assembly roles in pose 'key_grasp_extended' do not match baseline roles"):
+        tool.screen(data)
+

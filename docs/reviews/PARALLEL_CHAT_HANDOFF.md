@@ -1,3 +1,14 @@
+## 21 November 2026: Cross-pose assembly mass and role consistency in stability screen
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `fa3f0d9f1092a106ca5e9858715891392dfd6fe3`.
+This source and test batch does not close physical or commercial gates.
+
+* Assembly stability cross-pose mass and role consistency (Review PRRT_kwDOVlmnQ866bfbv):
+  - In `code/scripts/screen_assembly_stability.py`, `screen()` now enforces strict role ID set equality and fixed assembly role mass consistency across all evaluated load poses (`stowed_empty`, `key_grasp_extended`, `candy_grasp_lifted`, `docked_stopped`).
+  - While center-of-mass positions (`com_mm`) are permitted to articulate and `payload` mass varies by grasp scenario, fixed components (`body_and_tracks`, `power_stack`, `head_and_sense`, `lift_and_gripper`, `sensors_and_wiring`) cannot vary their measured masses across poses or substitute roles.
+  - Added negative regression tests in `code/tests/test_screen_assembly_stability.py`: `test_cross_pose_fixed_component_mass_mismatch_fails_closed` and `test_cross_pose_assembly_role_substitution_fails_closed`.
+
 ## 21 November 2026: Monotonic optional sensor acquisition and uint32 wrap handling
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
