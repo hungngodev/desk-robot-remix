@@ -2110,7 +2110,7 @@ class PetController:
                 if (type(power.get("soc_centi")) is int
                         and 0 <= power["soc_centi"] <= 10000
                         and type(power.get("cell_mv")) is int
-                        and 0 <= power["cell_mv"] <= 4500):
+                        and 2500 <= power["cell_mv"] <= 4500):
                     selected["fuel_gauge"] = {
                         "soc_centi": power["soc_centi"],
                         "cell_mv": power["cell_mv"],

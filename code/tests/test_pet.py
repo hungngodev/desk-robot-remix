@@ -4577,7 +4577,11 @@ async def test_proactive_mac_does_not_claim_invalid_dock_charger_evidence(
     ("bmp280", "age_ms", "80"),
     ("power", "soc_centi", -1),
     ("power", "soc_centi", 10001),
+    ("power", "cell_mv", 0),
+    ("power", "cell_mv", 2499),
     ("power", "cell_mv", 4501),
+    ("power", "cell_mv", True),
+    ("power", "cell_mv", "3700"),
     ("proximity", "gesture", 5),
     ("proximity", "gesture", True),
     ("nfc", "e", -1),
@@ -4624,6 +4628,37 @@ async def test_proactive_ollama_cannot_narrate_out_of_range_wroom_readings(
         assert receipt["verified_charging"] is False
         assert key not in receipt["data"]
         assert any(name != key for name in receipt["data"])
+    finally:
+        await pet.close()
+
+
+@pytest.mark.parametrize("cell_mv", [2500, 3600, 4500])
+async def test_proactive_fuel_readonly_accepts_only_plausible_voltage_boundaries(
+    fleet, tmp_path, cell_mv,
+):
+    class Head:
+        async def aux_status(self):
+            return {
+                "robot_id": "robot-01",
+                "power": {
+                    "fuel_valid": True,
+                    "soc_centi": 6000,
+                    "cell_mv": cell_mv,
+                },
+            }
+
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    try:
+        receipt = await pet._proactive_tool_receipt("robot-01", "aux_status")
+        assert receipt["data"]["fuel_gauge"] == {
+            "soc_centi": 6000, "cell_mv": cell_mv, "qualified": False,
+        }
+        assert receipt["verified_charging"] is False
     finally:
         await pet.close()
 
