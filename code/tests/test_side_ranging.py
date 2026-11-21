@@ -288,3 +288,91 @@ def test_unrepresentably_large_side_event_clock_fails_closed(now):
         tracker.observe(body(), now=now, near_mm=170)
     # The next real timestamp must remain a baseline and not invent motion.
     assert tracker.observe(body(), now=1.0, near_mm=170) == []
+
+
+def test_transport_delay_does_not_make_serialized_side_sample_fresh():
+    tracker = SideRangeEvents()
+    sample = lambda mm, stamp: body(
+        mm=(mm, 600, 600),
+        sample_ms=(stamp, stamp, stamp),
+        boot_id=901,
+    )
+    assert tracker.observe(sample(600, 100), now=10.0, near_mm=170,
+                           require_hardware_identity=True) == []
+    assert tracker.observe(sample(100, 200), now=11.1, near_mm=170,
+                           require_hardware_identity=True,
+                           request_elapsed_ms=1100.0) == []
+    assert tracker.observe(sample(100, 300), now=12.2, near_mm=170,
+                           require_hardware_identity=True,
+                           request_elapsed_ms=1100.0) == []
+    # A new immediate far baseline followed by two genuinely fresh
+    # conversions may still produce the same source-qualified cue.
+    assert tracker.observe(sample(600, 400), now=12.3, near_mm=170,
+                           require_hardware_identity=True) == []
+    assert tracker.observe(sample(100, 500), now=12.4, near_mm=170,
+                           require_hardware_identity=True) == []
+    assert tracker.observe(sample(95, 600), now=12.5, near_mm=170,
+                           require_hardware_identity=True) == [("left", 95)]
+    for bad in (-1, float("nan"), float("inf"), True, "5", 10 ** 500):
+        with pytest.raises(ValueError, match="request duration"):
+            tracker.observe(sample(100, 700), now=13.0, near_mm=170,
+                            request_elapsed_ms=bad)
+
+
+async def test_real_side_status_slow_transport_never_records_stale_firsthand_event(
+    tmp_path,
+):
+    """The actual Mac status await must contribute to the side freshness gate."""
+    settings = load_settings(
+        Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    )
+    settings.mode = "hardware"
+    settings.robots[0].side_interactions_qualified = True
+    settings.robots[0].side_near_threshold_mm = 180
+    memory = MemoryStore(tmp_path, [r.id for r in settings.robots])
+    conversation = Conversation(
+        settings, SimulatedChat(), SimulatedSpeaker(), memory=memory
+    )
+    pet = PetController(settings, {}, conversation, memory, SimulatedScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.quiet, state.generation = True, True, 3
+
+    steps = [
+        (0, 600, 100),
+        (0.38, 100, 200),
+        (0.38, 100, 300),
+        (0, 600, 400),
+        (0, 100, 500),
+        (0, 95, 600),
+    ]
+
+    class DelayedHead:
+        async def status(self):
+            delay, mm, stamp = steps.pop(0)
+            if delay:
+                await asyncio.sleep(delay)
+            result = body(
+                mm=(mm, 600, 600),
+                sample_ms=(stamp, stamp, stamp),
+                boot_id=901,
+            )
+            result["robot_id"] = "robot-01"
+            return result
+
+    pet.heads["robot-01"] = DelayedHead()
+    try:
+        for _ in range(3):
+            await pet._touch_from_body("robot-01", 3)
+        assert [m for m in memory.recent("robot-01")
+                if m.kind == "side_object"] == []
+        for _ in range(3):
+            await pet._touch_from_body("robot-01", 3)
+        events = [m for m in memory.recent("robot-01")
+                  if m.kind == "side_object"]
+        assert len(events) == 1
+        assert "left" in events[0].summary
+        assert events[0].witnessed
+        assert memory.count("robot-02") == 0
+    finally:
+        state.enabled = False
+        await pet.close()

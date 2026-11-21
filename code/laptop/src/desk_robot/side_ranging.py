@@ -32,7 +32,8 @@ class SideRangeEvents:
     retired_boot_ids: set[int] = field(default_factory=set)
 
     def observe(self, body: dict, *, now: float, near_mm: int,
-                require_hardware_identity: bool = False) -> list[tuple[str, int]]:
+                require_hardware_identity: bool = False,
+                request_elapsed_ms: float = 0.0) -> list[tuple[str, int]]:
         """Only transition far -> near after two genuinely new fresh samples.
 
         A range-age clock is WROOM local uptime; the Mac reconstructs a
@@ -46,6 +47,16 @@ class SideRangeEvents:
                 or type(near_mm) is not int or not 35 <= near_mm <= 1000
                 or type(require_hardware_identity) is not bool):
             raise ValueError("Measured side range threshold and finite clock required")
+        # Source age_ms is measured when WROOM serialized the response.
+        # An HTTP request that took too long cannot restore stale physical
+        # evidence to a live Mac observation using its late receive clock.
+        try:
+            elapsed_ms = float(request_elapsed_ms)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Finite side status request duration required") from exc
+        if (type(request_elapsed_ms) not in (int, float)
+                or not math.isfinite(elapsed_ms) or elapsed_ms < 0):
+            raise ValueError("Finite side status request duration required")
         # Changing a measured threshold is not a physical object arrival.
         # Start a new baseline instead of interpreting the same range twice.
         if self.threshold_mm != near_mm:
@@ -112,7 +123,7 @@ class SideRangeEvents:
         results: list[tuple[str, int]] = []
         for i, name in enumerate(SIDE_NAMES):
             track = self.directions[i]
-            fresh = bool(valid & (1 << i)) and ages[i] <= 350
+            fresh = bool(valid & (1 << i)) and ages[i] + elapsed_ms <= 350
             if not fresh or not 1 <= distances[i] <= 1300:
                 self.directions[i] = Direction()
                 continue

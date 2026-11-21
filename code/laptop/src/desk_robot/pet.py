@@ -1536,7 +1536,8 @@ class PetController:
                 self._consider_speech(robot_id, change, generation)
 
     async def _observe_side_ranges(
-        self, robot_id: str, generation: int, body: dict
+        self, robot_id: str, generation: int, body: dict, *,
+        request_elapsed_ms: float = 0.0,
     ) -> None:
         """Read real WROOM channels 5..7 with no new drive authority."""
         state = self.states[robot_id]
@@ -1549,6 +1550,7 @@ class PetController:
         detected = state.side_events.observe(
             body, now=time.monotonic(), near_mm=robot.side_near_threshold_mm,
             require_hardware_identity=True,
+            request_elapsed_ms=request_elapsed_ms,
         )
         for direction, mm in detected:
             if not state.enabled or state.generation != generation:
@@ -1576,6 +1578,9 @@ class PetController:
         getter = getattr(self.heads[robot_id], "status", None)
         if getter is None:
             return
+        # Capture the request start, not just response arrival. Hardware
+        # age_ms alone omits time spent waiting for UART/HTTP delivery.
+        request_started_at = time.monotonic()
         if self.settings.mode == "hardware":
             # A disconnected or cancellation-resistant alternate head must
             # not leave proactive observation active without touch/safety IO.
@@ -1602,7 +1607,14 @@ class PetController:
             await self._observe_body_safety(robot_id, generation, body)
             await self._observe_imu(robot_id, generation, body)
             await self._observe_optional(robot_id, generation, body)
-            await self._observe_side_ranges(robot_id, generation, body)
+            # Only the read-only side arrival gets a conservative age budget;
+            # WROOM safety continues to use its independent local watchdog.
+            await self._observe_side_ranges(
+                robot_id, generation, body,
+                request_elapsed_ms=max(
+                    0.0, (time.monotonic() - request_started_at) * 1000.0
+                ) if self.settings.mode == "hardware" else 0.0,
+            )
         touch = body.get("touch") if isinstance(body, dict) else None
         if not isinstance(touch, dict):
             return
