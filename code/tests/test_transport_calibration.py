@@ -910,3 +910,43 @@ async def test_camera_identity_mismatch_never_qualifies_dock_sensor(
         await head.snapshot()
         with pytest.raises(HeadError, match="Camera (sensor PID|identity)"):
             await head.camera_identity()
+
+
+async def test_dock_uses_recent_stream_receipt_without_still_capture(
+    settings, tokens,
+):
+    """A previously cached 0.5s-old JPEG cannot steer a physical dock job."""
+    import asyncio
+    import time
+
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        return httpx.Response(500)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        with pytest.raises(HeadError, match="connected live camera stream"):
+            await head.snapshot_for_dock()
+        head._stream_connected = True
+        head._stream_latest = b"\\xff\\xd8dock\\xff\\xd9"
+        head._stream_version = 1
+        head._stream_received_at = time.monotonic() - 0.5
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(head.snapshot_for_dock(), timeout=0.06)
+        assert head._snapshot_version == 0
+        head._stream_received_at = time.monotonic()
+        assert await head.snapshot_for_dock() == b"\\xff\\xd8dock\\xff\\xd9"
+        assert head._snapshot_version == 1
+        assert requests == []
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, True, float("nan")])
+async def test_invalid_dock_camera_age_bound_never_starts_capture(
+    settings, tokens, bad,
+):
+    async with httpx.AsyncClient() as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        with pytest.raises(ValueError, match="receipt age limit"):
+            await head.snapshot(max_stream_age_seconds=bad)
