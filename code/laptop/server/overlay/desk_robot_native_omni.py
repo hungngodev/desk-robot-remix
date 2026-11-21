@@ -952,6 +952,7 @@ class NativeOmniSession:
         self, http: aiohttp.ClientSession, epoch: int, request_turn: int,
         *, require_private_consent: bool = False,
         require_live_consent: bool = False,
+        expected_private_memory_generation: int | None = None,
     ) -> str:
         """Read real transient sensor, speech and vision context from Mac.
 
@@ -1012,6 +1013,12 @@ class NativeOmniSession:
                     "Mac private memory consent changed; native session must restart"
                 )
                 return ""
+            if expected_private_memory_generation is not None:
+                revision = info.get("private_memory_generation")
+                if (type(revision) is not int
+                        or revision != expected_private_memory_generation):
+                    self.fail("Mac private memory changed; native tool response stale")
+                    return ""
             context = info.get("model_context")
             if (self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
@@ -1087,13 +1094,23 @@ class NativeOmniSession:
         )
         # Keep current physical sensor and camera-tool cues alongside the
         # human question; don't force the next model to invent continuity.
-        private_facts = any(
-            isinstance(fact, dict)
+        private_revisions = [
+            fact.get("private_memory_generation")
+            for fact in facts if isinstance(fact, dict)
             and fact.get("source") == "private_opt_in_memory_not_current_sight"
-            for fact in facts
-        )
+        ]
+        private_facts = bool(private_revisions)
+        if private_facts and (
+            any(type(value) is not int or not 0 <= value < 2**63
+                for value in private_revisions)
+            or len(set(private_revisions)) != 1
+        ):
+            self.fail("Cannot validate private memory revision for tool speech")
+            return
+        expected_revision = private_revisions[0] if private_facts else None
         live_scene = await self._current_tool_scene(
             http, epoch, request_turn, require_private_consent=private_facts,
+            expected_private_memory_generation=expected_revision,
         )
         if self.closed or self._tool_speech_turn != (epoch, request_turn):
             return
@@ -1197,6 +1214,7 @@ class NativeOmniSession:
                 http, epoch, request_turn,
                 require_private_consent=private_facts,
                 require_live_consent=True,
+                expected_private_memory_generation=expected_revision,
             )
             if (self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):

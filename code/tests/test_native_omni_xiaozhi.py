@@ -3792,6 +3792,7 @@ async def test_native_private_speech_rechecks_consent_after_slow_model_completio
     await session._speak_tool_results(
         mac, "What did you remember about me?",
         [{"source": "private_opt_in_memory_not_current_sight",
+          "private_memory_generation": 0,
           "recollections": [{"summary": "historical private memory"}]}],
         2, 5,
     )
@@ -3823,6 +3824,7 @@ async def test_native_tool_chat_revoked_consent_cannot_speak_prefetched_private_
     session._tool_speech_turn = (2, 5)
     facts = [{
         "source": "private_opt_in_memory_not_current_sight",
+        "private_memory_generation": 0,
         "recollections": [{"summary": "private owner fact"}],
     }]
 
@@ -3921,6 +3923,7 @@ async def test_native_private_tool_needs_fresh_consent_when_mac_context_unavaila
     await session._speak_tool_results(
         Mac(), "What do you remember?", [
             {"source": "private_opt_in_memory_not_current_sight",
+             "private_memory_generation": 0,
              "recollections": [{"summary": "past private detail"}]},
         ], 2, 5,
     )
@@ -3928,6 +3931,65 @@ async def test_native_private_tool_needs_fresh_consent_when_mac_context_unavaila
     assert session.last_error == (
         "Cannot revalidate Mac private memory consent for tool speech"
     )
+    assert session.outgoing.empty()
+    assert session.native_tool_audio_queued == 0
+
+
+
+async def test_native_private_tool_rejects_revised_fact_before_model(native):
+    """Operator correction after recall cannot reach model or physical speaker."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._memory_tools_enabled = True
+    session._tool_speech_turn = (2, 5)
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01",
+                "model_context": "",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "memory_tools_enabled": True,
+                "private_memory_generation": 8,
+                "transcript_memory_enabled": False,
+                "voice_monitor_ready": True,
+            }
+
+    class Mac:
+        def get(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            return Reply()
+
+        def post(self, *args, **kwargs):
+            raise AssertionError("Stale private memory leaked to the voice model")
+
+    await session._speak_tool_results(
+        Mac(), "What did I tell you?",
+        [{"source": "private_opt_in_memory_not_current_sight",
+          "private_memory_generation": 7,
+          "recollections": [{"summary": "old corrected fact"}]}],
+        2, 5,
+    )
+    assert session.closed
+    assert session.last_error == "Mac private memory changed; native tool response stale"
     assert session.outgoing.empty()
     assert session.native_tool_audio_queued == 0
 
