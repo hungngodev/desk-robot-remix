@@ -65,11 +65,14 @@ There are **not two competing build plans**. The original seven stages above are
 
 The Sense and body build profiles and their test targets exist in source, including
 the eight VL53L0X full WROOM target and five-pet host simulation. This is not a
-claim that the current PR head compiles or passes: recent GitHub Actions jobs fail
-before recording any steps, with unavailable logs. The stepper design is intended
-to refuse arming without fresh required sensors and calibration, but the real
-bench stop margin remains unmeasured. Physical fit, power, speech interruption,
-pickup and fleet play are still open.
+claim that the current PR head compiles or passes. Check the [five-job Host
+verification workflow](https://github.com/hungngodev/desk-robot-remix/actions/workflows/host-verification.yml)
+for the exact PR #17 head SHA, and inspect the run conclusion, executed steps,
+job logs and tests for that same commit. Older green runs do not qualify newer
+commits, and an executed failing test is not a pre-step runner failure. The stepper
+design is intended to refuse arming without fresh required sensors and calibration,
+but the real bench stop margin remains unmeasured. Physical fit, power, speech
+interruption, pickup and fleet play are still open.
 
 [Implementation progress](guides/firmware-foundation.md) · [Test evidence](records/verification.md) · [Reuse and licenses](source-map.md)
 
