@@ -168,6 +168,67 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
         ).status_code == 403
         assert len(receipts) == 1
 
+
+@pytest.mark.parametrize("mutated_robot,expected_status", [
+    ("robot-01", 409),
+    ("robot-02", 200),
+])
+def test_voice_retrieval_fences_private_edit_during_sqlite_read(
+    settings, mutated_robot, expected_status,
+):
+    """A private edit supersedes in-flight reads only for its own pet."""
+    from types import SimpleNamespace
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = False
+    revisions = {"robot-01": 0, "robot-02": 0}
+    receipts = []
+    turn_owner = SimpleNamespace(_turn_epoch={"robot-01": 2})
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 6
+            return [SimpleNamespace(
+                summary="Private old preference", witnessed=True,
+                source_robot="robot-01", kind="own_observation",
+            )]
+
+        def core_facts(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 8
+            # This worker runs after the first await. In production the
+            # operator PUT/PATCH/DELETE route advances this exact revision.
+            revisions[mutated_robot] += 1
+            return [SimpleNamespace(slot="favorite_game", value="chess")]
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=None,
+        conversation=SimpleNamespace(_private_memory_generation=revisions),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda request, robot_id: (turn_owner, 2),
+        remember_tool_context=lambda *args: receipts.append(args),
+    )
+    with TestClient(app) as client:
+        response = client.get("/v1/pet/robot-01/voice-context")
+
+    assert response.status_code == expected_status
+    if expected_status == 409:
+        assert "Private old preference" not in response.text
+        assert "chess" not in response.text
+        assert receipts == []
+    else:
+        assert response.json()["core_facts"] == [
+            {"slot": "favorite_game", "value": "chess"}
+        ]
+        assert len(receipts) == 1
+
+
 def test_vision_revocation_during_memory_read_clears_live_cues(settings):
     """A late opt-out must defeat cues captured before the SQLite await."""
     from types import SimpleNamespace

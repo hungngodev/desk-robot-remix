@@ -202,6 +202,13 @@ def register_voice_context_route(
         # Capture the current voice turn BEFORE off-thread SQLite lookups.
         # A completed older lookup must not become a new turn's memory cue.
         owner = requested_tool_context(request, robot_id)
+        # SQLite lookups yield to operator edits. A valid voice turn token
+        # alone cannot certify that retrieved private facts are still current.
+        conversation = getattr(app.state.runtime, "conversation", None)
+        revisions = getattr(conversation, "_private_memory_generation", None)
+        memory_revision = (
+            revisions.get(robot_id, 0) if isinstance(revisions, dict) else None
+        )
         if query is None:
             records = await asyncio.to_thread(
                 app.state.runtime.memory.recent, robot_id, limit=6
@@ -246,6 +253,16 @@ def register_voice_context_route(
                 item for item in timeline
                 if item.get("channel") != "room_station"
             ]
+        # A completed read may contain text from before an operator correction
+        # or deletion, even if it still belongs to the same voice turn.
+        current_revisions = getattr(
+            getattr(app.state.runtime, "conversation", None),
+            "_private_memory_generation", None,
+        )
+        if (memory_revision is not None
+                and (not isinstance(current_revisions, dict)
+                     or current_revisions.get(robot_id, 0) != memory_revision)):
+            raise HTTPException(409, "Private memory changed during retrieval")
         # A SQLite worker may complete after a NEW authenticated voice turn.
         # Discard the entire private response, not merely its Mac timeline
         # receipt; the superseded caller has no authority to reuse these facts.
