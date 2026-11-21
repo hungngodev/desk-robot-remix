@@ -4,6 +4,9 @@ import io
 import json
 import stat
 import struct
+import urllib.error
+import urllib.request
+import urllib.response
 import wave
 from pathlib import Path
 
@@ -140,3 +143,34 @@ def test_consent_audio_capture_compiled_off_by_default():
         assert route in bridge
     assert 'if (!Authorize(req))' in bridge
     assert 'ReleaseBenchPcmCapture(pcm.interleaved)' in bridge
+
+
+def test_private_capture_opener_does_not_follow_redirect_with_bearer():
+    """A compromised LAN robot must not redirect its bearer to a second host."""
+    seen = []
+
+    class RedirectingHead(urllib.request.HTTPHandler):
+        def http_open(self, request):
+            seen.append((request.full_url, request.get_header("Authorization")))
+            return urllib.response.addinfourl(
+                io.BytesIO(b""),
+                {"Location": "https://example.invalid/steal-bearer"},
+                request.full_url, code=302,
+            )
+
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), capture.NoRedirect(), RedirectingHead(),
+    )
+    origin = "http://192.168.1.23:8081/api/audio.reference"
+    request = urllib.request.Request(
+        origin, headers={"Authorization": "Bearer " + "x" * 32},
+    )
+    with pytest.raises(urllib.error.HTTPError, match="Sense capture redirect refused"):
+        opener.open(request, timeout=1)
+    assert seen == [(origin, "Bearer " + "x" * 32)]
+
+
+def test_capture_main_installs_no_redirect_handler():
+    """The guarded opener must be used by the real user facing CLI."""
+    source = SOURCE.read_text()
+    assert "urllib.request.ProxyHandler({}), NoRedirect()" in source
