@@ -828,7 +828,7 @@ The [existing host workflow](../../.github/workflows/host-verification.yml) alre
 ## 2026-11-10 ten connected engineering passes, not ten physical trials
 
 The consolidated PR #17 now includes code and tests for these connected paths:
-WROOM latched fault to Mac job cancellation; Pololu VL53L4CD and OzzMaker
+WROOM latched fault to Mac job cancellation; Pololu VL53L0X and OzzMaker
 BerryIMU identity verification; native touch to Stackchan OLED reaction;
 fail-closed head fault display; per-board Sense AEC reference delay; replay
 resistant JPEG completion metadata; correct distinction among own utterances,
@@ -873,7 +873,7 @@ uvx --from platformio==6.1.18 pio run -d firmware/body -e esp32_full
 
 ## 2026-11-11 registered five-pet human voice and WROOM dock monitor source inspection
 
-This check was conducted by comparing **current GitHub branch file contents** in the same revision (not by running the robots). All 10 static source-consistency assertions returned true: full `esp32_full` requires dock GPIO, local WROOM validates nonzero sequenced samples newer than 500ms, any seat or PGOOD latches motion stop, C++ tests cover installed/missing/hot-removed cases, the pinned Xiaozhi VAD gate uses current authenticated connections and clears on disconnect, MiniCPM output START and each Opus packet obey that gate, tests cover spoken/start/packet races, all eight selected VL53L4CD lanes are represented correctly, PN532 is explicitly not integrated and physical trials remain zero, and source-manifest regression tests cover the same implementation evidence.
+This check was conducted by comparing **current GitHub branch file contents** in the same revision (not by running the robots). All 10 static source-consistency assertions returned true: full `esp32_full` requires dock GPIO, local WROOM validates nonzero sequenced samples newer than 500ms, any seat or PGOOD latches motion stop, C++ tests cover installed/missing/hot-removed cases, the pinned Xiaozhi VAD gate uses current authenticated connections and clears on disconnect, MiniCPM output START and each Opus packet obey that gate, tests cover spoken/start/packet races, all eight selected VL53L0X lanes are represented correctly, PN532 is explicitly not integrated and physical trials remain zero, and source-manifest regression tests cover the same implementation evidence.
 
 **This is a STATIC audit, not `HOST_TESTED` or `FIRMWARE_COMPILED`.** The latest PR #17 workflow run [43110335948](https://github.com/hungngodev/desk-robot-remix/actions/runs/43110335948) finished with four failed jobs. Job step records remain absent and earlier log downloads returned `BlobNotFound`; no passing Python, C++ or ESP32 compile can be asserted. The full read-only expansion bus and actual purchased carrier wiring still need physical testing. The power charger, gripper fit, dock contact and original licensed mesh assembly are not completed by these safety reviews.
 
