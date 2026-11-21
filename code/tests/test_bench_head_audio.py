@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,23 @@ SPEC = importlib.util.spec_from_file_location(
 )
 bench = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bench)
+
+
+def test_audio_diagnostic_receipts_are_private_and_exclusive(tmp_path):
+    path = tmp_path / "audio-private" / "diagnostic.json"
+    bench.preflight_private_report(path)
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    bench.save_private_report(path, {"robot_id": "robot-01", "aec": False})
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert json.loads(path.read_text())["aec"] is False
+    with pytest.raises(FileExistsError):
+        bench.save_private_report(path, {"aec": True})
+    assert json.loads(path.read_text())["aec"] is False
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    with pytest.raises(ValueError, match="private mode"):
+        bench.preflight_private_report(public / "leak.json")
 
 
 def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
