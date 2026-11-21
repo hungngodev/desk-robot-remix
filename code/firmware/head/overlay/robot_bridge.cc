@@ -352,7 +352,12 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     Command command;
     if (!enabled_) return {503, false, "control disabled"};
     if (!ParseCommand(text, operator_control, command)) return {400, false, "invalid or unauthorized command"};
+    const bool urgent = command.verb == "stop" || command.verb == "halt";
+    // Announce urgent STOP before waiting for the body UART lock.
+    UrgentStopGate::Request urgency(urgent_stop_gate_, urgent);
     std::lock_guard<std::mutex> lock(uart_mutex_);
+    if (urgent_stop_gate_.preempts(urgent))
+        return {503, false, "body read superseded by urgent stop"};
     if (!uart_ready_) return {503, false, "body UART unavailable"};
     // No retries: an uncertain ACK may still mean that physical movement happened.
     uart_flush_input(kUart);
@@ -362,6 +367,8 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     const auto deadline = esp_timer_get_time() + kTimeoutMs * 1000;
     std::string line;
     while (esp_timer_get_time() < deadline) {
+        if (urgent_stop_gate_.preempts(urgent))
+            return {503, false, "body response superseded by urgent stop"};
         uint8_t c = 0;
         if (uart_read_bytes(kUart, &c, 1, pdMS_TO_TICKS(10)) != 1) continue;
         if (c == '\r') continue;
@@ -484,6 +491,34 @@ esp_err_t Bridge::Json(httpd_req_t* req, int status, const std::string& body) {
 }
 
 esp_err_t Bridge::Dispatch(httpd_req_t* req) { return static_cast<Bridge*>(req->user_ctx)->Handle(req); }
+
+void Bridge::BodyReadTask(void* context) {
+    // The synchronous HTTP handler must remain free to receive urgent STOP
+    // even when a body status reply occupies the UART for hundreds of ms.
+    auto* req = static_cast<httpd_req_t*>(context);
+    auto* bridge = static_cast<Bridge*>(req->user_ctx);
+    {
+        const bool aux = strcmp(req->uri, "/api/aux") == 0;
+        const bool ir = strcmp(req->uri, "/api/ir") == 0;
+        const bool optics = strcmp(req->uri, "/api/optics") == 0;
+        const auto reply = bridge->Transact(
+            optics ? "optics" : ir ? "ir" : aux ? "aux" : "status", false);
+        if (!reply.ok) {
+            bridge->Json(req, reply.status, Envelope(false, reply.text));
+        } else {
+            auto body = Parse(reply.text);
+            if (!body) {
+                bridge->Json(req, 503, Envelope(false, "invalid body JSON"));
+            } else {
+                cJSON_AddStringToObject(body.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+                bridge->Json(req, 200, Encode(body.get()));
+            }
+        }
+    }
+    bridge->body_read_busy_.store(false, std::memory_order_release);
+    httpd_req_async_handler_complete(req);
+    vTaskDelete(nullptr);
+}
 
 void Bridge::CameraTask(void* context) {
     auto* req = static_cast<httpd_req_t*>(context);
@@ -655,15 +690,20 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         strcmp(req->uri, "/api/aux") == 0 ||
         strcmp(req->uri, "/api/ir") == 0 ||
         strcmp(req->uri, "/api/optics") == 0) {
-        const bool aux = strcmp(req->uri, "/api/aux") == 0;
-        const bool ir = strcmp(req->uri, "/api/ir") == 0;
-        const bool optics = strcmp(req->uri, "/api/optics") == 0;
-        auto reply = Transact(
-            optics ? "optics" : ir ? "ir" : aux ? "aux" : "status", false);
-        if (!reply.ok) return Json(req, reply.status, Envelope(false, reply.text));
-        auto json = Parse(reply.text);
-        cJSON_AddStringToObject(json.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
-        return Json(req, 200, Encode(json.get()));
+        if (body_read_busy_.exchange(true, std::memory_order_acq_rel))
+            return Json(req, 503, Envelope(false, "body telemetry busy"));
+        httpd_req_t* async_req = nullptr;
+        if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+            body_read_busy_.store(false, std::memory_order_release);
+            return Json(req, 503, Envelope(false, "body read worker unavailable"));
+        }
+        if (xTaskCreate(BodyReadTask, "robot_body_read", 8192,
+                        async_req, 3, nullptr) != pdPASS) {
+            Json(async_req, 503, Envelope(false, "body read task unavailable"));
+            httpd_req_async_handler_complete(async_req);
+            body_read_busy_.store(false, std::memory_order_release);
+        }
+        return ESP_OK;
     }
     if (req->content_len == 0 || req->content_len > kMaxBody) {
         httpd_resp_set_hdr(req, "Connection", "close");
