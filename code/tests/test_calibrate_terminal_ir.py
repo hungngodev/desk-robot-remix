@@ -5,6 +5,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -121,6 +122,77 @@ async def test_capture_uses_authenticated_mac_read_only_ir_endpoint(monkeypatch)
 
 async def fast_sleep(_seconds):
     return None
+
+
+@pytest.mark.parametrize(("optical_age_ms", "roundtrip_s"), [
+    (185, .020),  # Head age plus transport delay exceeds 200 ms.
+    (20, .210),  # Even a young frame expires during a long HTTP response.
+])
+async def test_capture_rejects_http_delay_that_expires_optical_evidence(
+    monkeypatch, optical_age_ms, roundtrip_s,
+):
+    monkeypatch.setattr(cal.asyncio, "sleep", fast_sleep)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        sample = position_records()[0]["ir"].copy()
+        sample["left_age_ms"] = optical_age_ms
+        return httpx.Response(200, json=sample)
+
+    original_client = httpx.AsyncClient
+
+    def create_client(*args, **kwargs):
+        return original_client(
+            *args, transport=httpx.MockTransport(handler), **kwargs,
+        )
+
+    monkeypatch.setattr(cal.httpx, "AsyncClient", create_client)
+    moments = iter((1000.0, 1000.0 + roundtrip_s))
+    # Rebind this script's clock only; do not alter asyncio's global clock.
+    monkeypatch.setattr(
+        cal, "time", SimpleNamespace(monotonic=lambda: next(moments)),
+    )
+    with pytest.raises(ValueError, match="Delayed terminal IR HTTP response"):
+        await cal.capture(
+            "http://localhost:8765", "S" * 40, "robot-01", "left", 20, .05,
+        )
+    assert len(calls) == 1
+
+
+async def test_capture_accepts_fast_delivery_inside_optical_age_budget(monkeypatch):
+    monkeypatch.setattr(cal.asyncio, "sleep", fast_sleep)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        sample = position_records()[0]["ir"].copy()
+        sample["left_seq"] = len(calls)
+        sample["left_age_ms"] = 180
+        return httpx.Response(200, json=sample)
+
+    original_client = httpx.AsyncClient
+
+    def create_client(*args, **kwargs):
+        return original_client(
+            *args, transport=httpx.MockTransport(handler), **kwargs,
+        )
+
+    monkeypatch.setattr(cal.httpx, "AsyncClient", create_client)
+    ticks = [0]
+
+    def clock():
+        index, phase = divmod(ticks[0], 2)
+        ticks[0] += 1
+        return 1000.0 + index + (.019 if phase else 0.0)
+
+    monkeypatch.setattr(cal, "time", SimpleNamespace(monotonic=clock))
+    rows = await cal.capture(
+        "http://localhost:8765", "S" * 40, "robot-01", "left", 20, .05,
+    )
+    assert len(calls) == len(rows) == 20
+    assert rows[0]["received_monotonic"] == pytest.approx(1000.019)
+    assert rows[-1]["ir"]["left_seq"] == 20
 
 
 

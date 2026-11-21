@@ -153,12 +153,26 @@ async def capture(base_url: str, token: str, robot_id: str,
         follow_redirects=False,
     ) as client:
         for i in range(count):
+            # Optical age is measured at the head, before HTTP delivery.
+            # Count that delivery time rather than promoting stale frames.
+            request_started = time.monotonic()
             response = await client.get(f"/v1/robots/{robot_id}/dock/ir")
+            received_at = time.monotonic()
             response.raise_for_status()
             reading = validate_ir(response.json(), robot_id,
                                   expected_dock_id=expected_dock_id)
+            roundtrip_ms = (received_at - request_started) * 1000.0
+            if (not math.isfinite(roundtrip_ms) or roundtrip_ms < 0
+                    or any(
+                        reading[f"{side}_valid"]
+                        and reading[f"{side}_age_ms"] + roundtrip_ms > 200
+                        for side in ("left", "right")
+                    )):
+                raise ValueError(
+                    "Delayed terminal IR HTTP response exceeds optical freshness budget"
+                )
             rows.append({
-                "label": label, "received_monotonic": time.monotonic(),
+                "label": label, "received_monotonic": received_at,
                 "ir": reading,
             })
             if i + 1 != count:
