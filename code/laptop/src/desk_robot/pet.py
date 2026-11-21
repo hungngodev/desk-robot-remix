@@ -26,7 +26,7 @@ from .brain_context import (
 from .config import Settings
 from .conversation import Conversation
 from .handling import HandlingGate
-from .memory import MemoryStore
+from .memory import CameraProvenance, MemoryStore
 from .sensor_event_contract import (
     DIRECT_INTERACTION_KINDS,
     PHYSICAL_INITIATIVE_KINDS,
@@ -516,6 +516,8 @@ class PetController:
         # Device capture-completion ticks cannot be converted to Mac time
         # without a calibrated clock offset, so preserve them as identity.
         event_id, observed_at = uuid.uuid4().hex, time.time()
+        interpreted_at = observed_at
+        camera_provenance = None
         if camera_received_at is not None or camera_source_identity is not None:
             if not camera_derived or camera_received_at is None:
                 raise ValueError("Camera receipt provenance requires a camera observation")
@@ -542,6 +544,10 @@ class PetController:
                     f"camera_{robot_id}_{identity[0]:08x}_"
                     f"{identity[1]:08x}_{identity[2]:x}"
                 )
+            camera_provenance = CameraProvenance(
+                received_at=observed_at, interpreted_at=interpreted_at,
+                source_identity=camera_source_identity,
+            )
         def persist_eyewitness() -> bool:
             # Cancelling an await never cancels the SQLite worker. Retraction
             # must be owned by that worker if visual consent was withdrawn.
@@ -551,6 +557,7 @@ class PetController:
                 robot_id, event_id, change.description,
                 kind=change.kind, source_robot=robot_id, witnessed=True,
                 observed_at=observed_at, confidence=change.confidence,
+                camera_provenance=camera_provenance,
             )
             if (inserted and (not current_visual_epoch()
                     or (camera_derived and self.settings.mode == "hardware"
@@ -606,6 +613,7 @@ class PetController:
                             kind=change.kind, source_robot=robot_id,
                             witnessed=False, observed_at=observed_at,
                             confidence=change.confidence,
+                            camera_provenance=camera_provenance,
                         )
                         results.append(inserted)
                         if inserted:
@@ -692,11 +700,15 @@ class PetController:
             # not be propagated as a newly accepted private peer episode.
             if self.memory.get_episode(from_robot, event_id) != source:
                 raise ValueError("Original eyewitness memory changed or expired")
+            original_camera = self.memory.get_camera_provenance(
+                from_robot, event_id,
+            )
             stored = self.memory.remember(
                 to_robot, source.event_id, source.summary,
                 kind=source.kind, source_robot=source.source_robot,
                 witnessed=False, observed_at=source.observed_at,
                 confidence=source.confidence,
+                camera_provenance=original_camera,
             )
             if not stored:
                 # A duplicate is idempotent only if the receiver already has

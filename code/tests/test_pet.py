@@ -1481,12 +1481,23 @@ async def test_camera_source_receipt_keeps_order_and_identity_across_restart(
         assert originals[0].observed_at - originals[1].observed_at > 1.9
         assert originals[0].event_id.startswith("camera_robot-01_00000007_")
         assert originals[1].event_id != originals[0].event_id
+        source_record = memory.get_camera_provenance(
+            "robot-01", originals[0].event_id,
+        )
+        assert source_record.source_identity == (7, 102, 6000000)
+        assert source_record.received_at == originals[0].observed_at
+        assert source_record.interpreted_at > source_record.received_at
         copies = memory.recent("robot-02")
         assert [(row.event_id, row.observed_at, row.witnessed)
                 for row in copies] == [
             (row.event_id, row.observed_at, False) for row in originals
         ]
         assert all(row.source_robot == "robot-01" for row in copies)
+        assert all(
+            memory.get_camera_provenance("robot-02", row.event_id)
+            == memory.get_camera_provenance("robot-01", row.event_id)
+            for row in copies
+        )
 
         # A retried authenticated frame must never create a new story or
         # rewrite existing provenance, even if reasoning ran much later.
@@ -1500,6 +1511,9 @@ async def test_camera_source_receipt_keeps_order_and_identity_across_restart(
         reopened = MemoryStore(tmp_path, ids)
         assert reopened.recent("robot-01") == originals
         assert reopened.recent("robot-02") == copies
+        assert reopened.get_camera_provenance(
+            "robot-01", originals[0].event_id,
+        ) == source_record
 
         await pet._store_observation(
             "robot-01", SceneChange("key", "Expired observation", 0.99),

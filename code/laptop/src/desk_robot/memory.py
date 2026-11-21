@@ -81,6 +81,14 @@ class Memory:
 
 
 @dataclass(frozen=True)
+class CameraProvenance:
+    """Provenance without raw media or invented device-to-Mac clock mapping."""
+    received_at: float
+    interpreted_at: float
+    source_identity: tuple[int, int, int] | None = None
+
+
+@dataclass(frozen=True)
 class CoreFact:
     robot_id: str
     slot: str
@@ -126,6 +134,17 @@ class MemoryStore:
                          summary TEXT NOT NULL,
                          observed_at REAL NOT NULL,
                          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1)
+                       )"""
+                )
+                # One private sidecar per robot, no JPEG or PCM stored.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS camera_provenance (
+                         event_id TEXT PRIMARY KEY,
+                         mac_received_at REAL NOT NULL,
+                         interpreted_at REAL NOT NULL,
+                         device_boot INTEGER,
+                         device_frame INTEGER,
+                         device_complete_us TEXT
                        )"""
                 )
                 # A deletion tombstone contains only the random event ID,
@@ -180,7 +199,11 @@ class MemoryStore:
                                   tokenize='porter unicode61')"""
                 )
                 db.executescript(
-                    """CREATE TRIGGER IF NOT EXISTS memories_fts_insert
+                    """CREATE TRIGGER IF NOT EXISTS camera_provenance_delete
+                       AFTER DELETE ON memories BEGIN
+                         DELETE FROM camera_provenance WHERE event_id=old.event_id;
+                       END;
+                       CREATE TRIGGER IF NOT EXISTS memories_fts_insert
                        AFTER INSERT ON memories BEGIN
                          INSERT INTO memories_fts(rowid,summary,kind)
                          VALUES (new.rowid,new.summary,new.kind);
@@ -250,6 +273,7 @@ class MemoryStore:
         witnessed: bool,
         observed_at: float | None = None,
         confidence: float = 1.0,
+        camera_provenance: CameraProvenance | None = None,
     ) -> bool:
         """Idempotently store one fact; duplicates do not rewrite earlier evidence."""
         if (not isinstance(robot_id, str) or not isinstance(source_robot, str)
@@ -289,6 +313,26 @@ class MemoryStore:
         # beyond a small clock-skew allowance are rejected.
         if when > time.time() + 60:
             raise ValueError("Observation timestamp exceeds local clock")
+        if camera_provenance is not None:
+            if type(camera_provenance) is not CameraProvenance:
+                raise ValueError("Invalid camera provenance type")
+            received = camera_provenance.received_at
+            interpreted = camera_provenance.interpreted_at
+            if (type(received) not in (int, float)
+                    or type(interpreted) not in (int, float)
+                    or not math.isfinite(received) or not math.isfinite(interpreted)
+                    or not 0 <= received <= interpreted <= time.time() + 60
+                    or abs(float(when) - received) > 0.01):
+                raise ValueError("Invalid camera chronology or receive clock")
+            identity = camera_provenance.source_identity
+            if identity is not None and (
+                type(identity) is not tuple or len(identity) != 3
+                or any(type(value) is not int for value in identity)
+                or not 0 <= identity[0] <= 0xffffffff
+                or not 1 <= identity[1] <= 0xffffffff
+                or not 1 <= identity[2] <= 0xffffffffffffffff
+            ):
+                raise ValueError("Invalid camera device completion identity")
         with self._connect(robot_id) as db:
             # Begin before checking the tombstone: the competing operator
             # DELETE and a delayed remembered event must have ONE order.
@@ -330,9 +374,23 @@ class MemoryStore:
             # immediately evicted by the 250-row retention policy. Report
             # persisted evidence, not merely a successful INSERT, so callers
             # cannot share a fact the eyewitness pet no longer remembers.
-            return db.execute(
+            retained = db.execute(
                 "SELECT 1 FROM memories WHERE event_id=?", (event_id,),
             ).fetchone() is not None
+            if retained and camera_provenance is not None:
+                identity = camera_provenance.source_identity
+                db.execute(
+                    """INSERT INTO camera_provenance
+                       (event_id,mac_received_at,interpreted_at,
+                        device_boot,device_frame,device_complete_us)
+                       VALUES (?,?,?,?,?,?)""",
+                    (event_id, camera_provenance.received_at,
+                     camera_provenance.interpreted_at,
+                     identity[0] if identity is not None else None,
+                     identity[1] if identity is not None else None,
+                     str(identity[2]) if identity is not None else None),
+                )
+            return retained
 
     def get_episode(self, robot_id: str, event_id: str) -> Memory | None:
         """Look up one retained episode by ID without leaking peer history.
@@ -355,6 +413,27 @@ class MemoryStore:
         event, source, witnessed, kind, summary, at, score = row
         return Memory(robot_id, event, source, bool(witnessed),
                       kind, summary, at, score)
+
+    def get_camera_provenance(
+        self, robot_id: str, event_id: str,
+    ) -> CameraProvenance | None:
+        """Read only an active camera episode from one pet's local database."""
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        with self._connect(robot_id) as db:
+            row = db.execute(
+                """SELECT p.mac_received_at,p.interpreted_at,
+                          p.device_boot,p.device_frame,p.device_complete_us
+                   FROM camera_provenance AS p JOIN memories AS m
+                   ON p.event_id=m.event_id WHERE p.event_id=?""",
+                (event_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        received, interpreted, boot, frame, complete = row
+        identity = ((int(boot), int(frame), int(complete))
+                    if boot is not None else None)
+        return CameraProvenance(received, interpreted, identity)
 
     def recent(self, robot_id: str, *, limit: int = 12) -> list[Memory]:
         if type(limit) is not int or not 1 <= limit <= 50:
