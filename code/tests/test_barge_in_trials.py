@@ -38,13 +38,15 @@ def fake_rows():
     } for n in range(20)]
     return rows + [{
         "kind": "robot_only", "duration_seconds": 600,
-        "self_interruptions": 0,
+        "self_interruptions": 0, "robot_speech_seconds": 120,
+        "audible_robot_speech_observed": True,
         "robot_id": "robot-01",
         "firmware_commit": "sha-of-physically-flashed-build",
         "audio_config_id": "bench-config-1",
         "mic_speaker_placement_id": "prototype-enclosure-a",
     }, {
         "kind": "quiet", "duration_seconds": 600,
+        "quiet_mode_enabled": True,
         "unsolicited_speech_events": 0, "unsolicited_motion_events": 0,
         "robot_id": "robot-01",
         "firmware_commit": "sha-of-physically-flashed-build",
@@ -62,6 +64,9 @@ def test_well_formed_synthetic_rows_only_verify_test_criteria():
     assert report["audio_config_id"] == "bench-config-1"
     assert report["mic_speaker_placement_id"] == "prototype-enclosure-a"
     assert report["quiet_mode_seconds"] == 600
+    assert report["robot_speech_seconds"] == 120
+    assert report["audible_robot_speech_observed"] is True
+    assert report["quiet_mode_enabled"] is True
     assert report["quiet_unsolicited_speech_events"] == 0
     assert report["quiet_unsolicited_motion_events"] == 0
     assert report["coverage"]["human_speakers"] == 2
@@ -87,6 +92,10 @@ def test_late_double_talk_and_self_interruption_fail():
     lambda x: x[0].update({"human_onset_ms": float("nan")}),
     lambda x: x[1].update({"new_intent_correct": "yes"}),
     lambda x: x[-2].update({"duration_seconds": 300}),
+    lambda x: x[-2].update({"robot_speech_seconds": 0}),
+    lambda x: x[-2].update({"robot_speech_seconds": 601}),
+    lambda x: x[-2].update({"audible_robot_speech_observed": False}),
+    lambda x: x[-1].update({"quiet_mode_enabled": False}),
     lambda x: x[-1].update({"duration_seconds": 300}),
     lambda x: x[-1].update({"unsolicited_motion_events": -1}),
     lambda x: x[-1].update({"unsolicited_speech_events": 1.5}),
