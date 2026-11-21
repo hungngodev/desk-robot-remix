@@ -967,7 +967,9 @@ async def test_dock_uses_recent_stream_receipt_without_still_capture(
             await asyncio.wait_for(head.snapshot_for_dock(), timeout=0.06)
         assert head._snapshot_version == 0
         head._stream_received_at = time.monotonic()
-        assert await head.snapshot_for_dock() == b"\xff\xd8dock\xff\xd9"
+        frame, received = await head.snapshot_for_dock()
+        assert frame == b"\xff\xd8dock\xff\xd9"
+        assert 0 <= time.monotonic() - received <= 0.20
         assert head._snapshot_version == 1
         assert requests == []
 
