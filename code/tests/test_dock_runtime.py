@@ -793,3 +793,17 @@ async def test_stale_mac_receipt_does_not_enter_dock_detector(tmp_path, monkeypa
     assert result["phase"] == "hold"
     assert result["source"] == "head_snapshot_invalid"
     assert not result["motor_authorized"] and not result["charging_authorized"]
+
+
+@pytest.mark.parametrize("bad_receipt", [
+    (b"\xff\xd8\xff\xd9", float("nan")),
+    (b"\xff\xd8\xff\xd9", float("inf")),
+    (b"\xff\xd8\xff\xd9", True),
+    (b"\xff\xd8\xff\xd9", -1.0),
+    (b"\xff\xd8\xff\xd9", "recent"),
+    (b"\xff\xd8\xff\xd9",),
+    ("not jpeg", 1.0),
+])
+def test_invalid_dock_receipt_types_are_not_pose_evidence(bad_receipt):
+    with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
+        dock_runtime.unpack_dock_frame(bad_receipt)
