@@ -59,6 +59,9 @@ public:
         uint32_t short_output_writes;
         uint32_t microphone_frames_read;
         uint32_t speaker_frames_accepted;
+        // BOOT privacy is measured at the real PDM owner, not a GUI guess.
+        bool microphone_privacy_muted;
+        uint32_t microphone_privacy_epoch;
         bool integrity_failed;
     };
     ReferenceDiagnostics GetReferenceDiagnostics();
