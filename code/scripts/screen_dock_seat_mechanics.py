@@ -99,7 +99,7 @@ def contact_constants(source: Path = CONTACT_CAD) -> dict:
                  "contact_carrier_h", "contact_centers_mm",
                  "contact_outer_d_mm"):
         matches = re.findall(
-            rf"^{name}\\s*=\\s*(\\d+(?:\\.\\d+)?)\\s*;",
+            rf"^{name}\s*=\s*(\d+(?:\.\d+)?)\s*;",
             text, re.M,
         )
         if len(matches) != 1:
