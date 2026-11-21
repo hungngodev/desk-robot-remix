@@ -76,10 +76,22 @@ def estimate_delay(
         nfft,
     )
     lag_limit = min(round(sample_rate * max_delay_ms / 1000), len(mic) - 1)
-    lag = int(np.argmax(np.abs(corr[:lag_limit + 1])))
-    confidence = float(abs(corr[lag]) / (ref_energy * mic_energy))
+    strength = np.abs(corr[:lag_limit + 1])
+    lag = int(np.argmax(strength))
+    peak = float(strength[lag])
+    confidence = peak / (ref_energy * mic_energy)
     if not math.isfinite(confidence) or confidence < 0.15:
         raise ValueError("Playback and microphone capture insufficiently correlated")
+    # One confidently correlated peak does not make the delay identifiable:
+    # periodic tones and equally loud echoes generate several plausible lags.
+    # Exclude the 1 ms neighbourhood of the best peak (filter sidelobes),
+    # then fail closed when a separate echo is nearly as strong. Physical
+    # AEC setup must use a broadband stimulus with a unique correlation peak.
+    alternate = strength.copy()
+    guard = sample_rate // 1000
+    alternate[max(0, lag - guard):min(len(alternate), lag + guard + 1)] = 0
+    if float(alternate.max()) >= 0.90 * peak:
+        raise ValueError("Ambiguous acoustic delay: periodic tone or competing echo")
     return {
         "reference_delay_ms": round(lag * 1000 / sample_rate, 3),
         "sample_lag": lag,
