@@ -292,6 +292,18 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("urgent_flush", app)
         self.assertIn("audio_service_.ResetDecoder()", app)
         self.assertIn("GetAudioCodec()->EnableOutput(false)", app)
+        # A pending network open must check again before enabling listening.
+        network_open = app.split("void Application::ContinueOpenAudioChannel(", 1)[1].split(
+            "void Application::HandleStartListeningEvent()", 1
+        )[0]
+        self.assertIn("BOOT privacy may have cancelled while OpenAudioChannel blocked",
+                      network_open)
+        self.assertIn("GetDeviceState() != kDeviceStateConnecting", network_open)
+        self.assertIn("protocol_->CloseAudioChannel();", network_open)
+        self.assertLess(network_open.index("protocol_->OpenAudioChannel()"),
+                        network_open.index("BOOT privacy may have cancelled"))
+        self.assertLess(network_open.index("BOOT privacy may have cancelled"),
+                        network_open.rindex("SetListeningMode(mode);"))
         self.assertIn('SenseReferenceCodec', (
             self.root / overlay.BOARDS["sense"] / "desk_robot_sense.cc").read_text())
         # The source checkout remains exact and the patch is reversible.
