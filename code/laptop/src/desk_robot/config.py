@@ -68,6 +68,7 @@ class Settings(BaseModel):
     # storage never becomes a serializable configuration or model instruction.
     _camera_consent_generation: int = PrivateAttr(default=0)
     _voice_memory_consent_generation: int = PrivateAttr(default=0)
+    _transcript_consent_generation: int = PrivateAttr(default=0)
     _room_station_consent_generation: int = PrivateAttr(default=0)
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
@@ -168,6 +169,10 @@ class Settings(BaseModel):
             name == "room_station_context_enabled"
             and getattr(self, "room_station_context_enabled", False) is True
         )
+        transcript_was_granted = (
+            name == "voice_transcript_memory_enabled"
+            and getattr(self, "voice_transcript_memory_enabled", False) is True
+        )
         super().__setattr__(name, value)
         if was_granted and not self.voice_vision_tools_enabled:
             # Even an immediate re-enable is a NEW grant; old VLM evidence
@@ -182,6 +187,10 @@ class Settings(BaseModel):
             # late Ollama plan if the operator has already opted out.
             self._room_station_consent_generation += 1
 
+        if transcript_was_granted and not self.voice_transcript_memory_enabled:
+            # Immediate regrant does not revive an in-flight transcript write.
+            self._transcript_consent_generation += 1
+
     @property
     def camera_consent_generation(self) -> int:
         return self._camera_consent_generation
@@ -189,6 +198,10 @@ class Settings(BaseModel):
     @property
     def voice_memory_consent_generation(self) -> int:
         return self._voice_memory_consent_generation
+
+    @property
+    def transcript_consent_generation(self) -> int:
+        return self._transcript_consent_generation
 
     @property
     def room_station_consent_generation(self) -> int:
