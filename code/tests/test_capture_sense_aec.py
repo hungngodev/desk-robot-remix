@@ -540,7 +540,7 @@ def test_private_aec_capture_rejects_directory_symlink_swap_during_wav_write(
     monkeypatch.setattr(capture, "_create_private", replace_private_path)
     with pytest.raises(ValueError, match="directory changed during write"):
         capture.save_wavs(
-            private, b"\\x00" * capture.BYTES, {"robot_id": "robot-01"},
+            private, bytes(capture.BYTES), {"robot_id": "robot-01"},
         )
     assert swapped
     assert list(outside.iterdir()) == []
