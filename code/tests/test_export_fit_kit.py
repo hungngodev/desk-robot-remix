@@ -798,3 +798,21 @@ def test_speaker_rear_chamber_reference_retains_conservative_air_budget(tmp_path
         ], capture_output=True, text=True, timeout=90)
         assert bad.returncode != 0
         assert message in bad.stderr + bad.stdout
+
+def test_adapter_readme_fit_reference_count_tracks_exporter():
+    """Builder print counts must follow the exporter instead of stale prose."""
+    source = module()
+    readme = (
+        ROOT / "docs/cad/remixes/one_robot_adapter_kit_README.md"
+    ).read_text(encoding="utf-8")
+    fit_count = (
+        len(source.GAUGES)
+        + len(source.SPEAKER_FITS)
+        + len(source.RANGER_FITS)
+        + len(source.DOCKS)
+    )
+    assert fit_count == 9
+    assert f"current **{fit_count}** provisional fit references" in readme
+    assert f"up to {fit_count} provisional dock, battery, contact" in readme
+    assert "up to thirteen provisional" not in readme
+
