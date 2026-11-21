@@ -76,13 +76,83 @@ post-cancellation playback publish also marks integrity failure.
 `integrity_failed` flag under the codec mutex. `ClearReference()`
 resets session indices but **does not erase the lifetime failure**.
 
-**This is an internal device diagnostic, not yet a remote health
-endpoint or an acoustic performance metric.** Any nonzero
+**The authenticated Sense `/api/audio.reference` endpoint now exposes
+these counters read-only to the Mac `HttpHead.audio_reference_status()`
+and the camera contention bench. This is a software integrity diagnostic,
+not an acoustic performance metric.** Any nonzero
 `integrity_failed` blocks an A2 qualification claim; even a clean
 counter does not prove measured ERLE, delay/clock compensation,
 cancellation of already buffered TX DMA or preservation of real human
 speech during double talk. The operator must still record the actual
 audio and hardware timing tests from the mandatory barge-in guide.
+
+## Opt-in real Sense microphone/reference capture
+
+The pinned Xiaozhi upstream source already has an optional
+`AudioDebugger::Feed` in `main/audio/audio_service.cc`. When the explicitly
+enabled audio debugger runs, it transmits the existing
+`ReadAudioData` PCM to a configured UDP listener. This Sense codec
+supplies *interleaved microphone and post-volume playback reference*
+at 16 kHz before AFE processing. This reuses the one Xiaozhi microphone
+and AEC codec, not a second audio driver or invented WAVs.
+
+**Bench only. It is OFF by default.** The upstream switch
+`CONFIG_USE_AUDIO_DEBUGGER` defaults to `n`. Its raw UDP audio has no
+encryption, sender authentication, packet sequence, or playback
+generation. Do not use it on a public WiFi/LAN or production build.
+Obtain consent from everyone whose microphone audio could be recorded.
+Use an isolated private network, record only a deliberate short trial,
+disable the switch and reflash normal firmware afterward. Do not commit
+recordings, and delete them when analysis is complete.
+
+1. Build the *existing* Sense overlay using the project's firmware
+   instructions. For this temporary lab image only, set
+   `CONFIG_USE_AUDIO_DEBUGGER=y` and
+   `CONFIG_AUDIO_DEBUG_UDP_SERVER="<actual_private_Mac_IP>:<chosen_port>"`
+   in its ESP-IDF configuration. Keep the selected Sense
+   `CONFIG_USE_DEVICE_AEC=y`, 16 kHz PDM and 32 kHz output settings.
+   Verify the real board ID, head/microphone consent, and that the
+   source IP and interface are on the isolated lab network. Do not
+   enable a new UDP microphone service in the normal product image.
+2. On the Mac, run the source-backed receiver before the timed test:
+
+   ```sh
+   cd code
+   uv run --no-sync python scripts/capture_sense_aec_udp.py \
+     --bind-ip <actual_private_Mac_IP> --port <chosen_port> \
+     --expected-source-ip <actual_private_Sense_IP> \
+     --duration 5 --output-dir data/private/aec_lab_trial \
+     --i-consent-to-private-raw-audio
+   ```
+
+3. Have the real head play a distinctive broadband test stimulus through
+   the *existing* Xiaozhi speaker while its ordinary microphone/AFE
+   task is running. The tool captures exactly five seconds of the two
+   corresponding 16 kHz channels and writes mode 0600 files
+   `microphone.wav`, `speaker_reference.wav`, and `capture.json`
+   in a mode 0700 directory. A stopped stream, malformed/foreign
+   packet or large receive gap rejects the capture; existing files
+   are never overwritten.
+4. Feed these **actual board sourced WAVs** into the current offline
+   estimator, retaining its separate software-only result:
+
+   ```sh
+   cd code
+   uv run --no-sync python scripts/estimate_aec_delay.py \
+     --microphone data/private/aec_lab_trial/microphone.wav \
+     --speaker data/private/aec_lab_trial/speaker_reference.wav
+   ```
+
+The capture tool verifies sample/channel layout and receives packets
+only from a declared private IPv4 source. That IP **does not authenticate
+the ESP32**. The pinned raw UDP format has no sequence numbers, so
+undetected packet loss, jitter, clock drift, source boot epoch, and
+physical speaker playback are **not verified** merely because it
+produced two aligned WAV files. Correlation quality, physical timing,
+double talk with human speech, WiFi/camera/servo load, echo suppression,
+interrupt to audible-silence timing, and repeatability across board
+restarts must still be measured and documented under A2 before closing
+the open playback and AEC acceptance threads.
 
 ## Configuration and verification
 
