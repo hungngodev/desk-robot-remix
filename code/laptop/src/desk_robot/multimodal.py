@@ -589,6 +589,11 @@ class CameraFrameHub:
         )
         return True
 
+    def heard_revoked(self, robot_id: str, event_id: str) -> bool:
+        """Read the local replay fence before accepting delayed ASR context."""
+        self._check(robot_id)
+        return isinstance(event_id, str) and event_id in self.revoked_heard_ids[robot_id]
+
     def discard_heard(self, robot_id: str, event_id: str) -> None:
         """Retract one ASR event and block its old source ID from replay."""
         self._check(robot_id)

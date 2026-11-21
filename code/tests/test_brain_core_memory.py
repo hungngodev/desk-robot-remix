@@ -206,3 +206,61 @@ def test_operator_memory_routes_convert_store_validation_to_422(settings, tokens
         assert client.get(
             "/v1/pet/robot-02/core-memory", headers=operator,
         ).json()["core_facts"] == []
+
+
+def test_operator_episode_edits_retract_only_matching_live_asr_cues(settings, tokens, tmp_path):
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.attention import AttentionLedger
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.memory_dir = tmp_path
+    authorization = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        original_visual = runtime.multimodal
+        original_attention = runtime.attention
+        hub = CameraFrameHub(["robot-01", "robot-02"])
+        attention = AttentionLedger(["robot-01", "robot-02"])
+        runtime.multimodal = SimpleNamespace(hub=hub)
+        runtime.attention = attention
+        try:
+            deleted_id = "omni_" + "a" * 12 + "_" + "b" * 20
+            corrected_id = "omni_" + "c" * 12 + "_" + "d" * 20
+            now = time.monotonic()
+            for event_id, text in ((deleted_id, "Old private words"),
+                                   (corrected_id, "Mistaken words")):
+                assert runtime.memory.remember(
+                    "robot-01", event_id, text,
+                    kind="heard_human", source_robot="robot-01", witnessed=True,
+                )
+                assert hub.remember_heard("robot-01", event_id, text, now)
+                assert attention.heard("robot-01", event_id, text, now)
+            # The same source event identity on a peer remains independent.
+            assert hub.remember_heard("robot-02", deleted_id, "Peer words", now)
+            assert attention.heard("robot-02", deleted_id, "Peer words", now)
+            reply = client.delete(
+                f"/v1/pet/robot-01/memories/{deleted_id}", headers=authorization,
+            )
+            assert reply.status_code == 200 and reply.json()["removed"] is True
+            assert not hub.remember_heard(
+                "robot-01", deleted_id, "Old replay", time.monotonic()
+            )
+            assert not runtime.memory.remember(
+                "robot-01", deleted_id, "Durable replay",
+                kind="heard_human", source_robot="robot-01", witnessed=True,
+            )
+            assert any(x[0] == deleted_id for x in hub.heard_history["robot-02"])
+            patch = client.patch(
+                f"/v1/pet/robot-01/memories/{corrected_id}",
+                headers=authorization, json={"summary": "Operator corrected words"},
+            )
+            assert patch.status_code == 200 and patch.json()["corrected"] is True
+            assert hub.heard_revoked("robot-01", corrected_id)
+            assert attention.timeline("robot-01", time.monotonic()) == []
+            assert runtime.memory.recent("robot-01")[0].summary == "Operator corrected words"
+            assert "Peer words" in attention.timeline("robot-02", time.monotonic())[0]["content"]
+        finally:
+            runtime.multimodal = original_visual
+            runtime.attention = original_attention

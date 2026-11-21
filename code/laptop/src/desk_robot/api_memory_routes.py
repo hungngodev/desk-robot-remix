@@ -28,6 +28,19 @@ class EpisodeMemoryCorrectionRequest(BaseModel):
 def register_memory_routes(
     app: FastAPI, settings: Settings, *, operator,
 ) -> None:
+    def retract_live_asr(robot_id: str, event_id: str) -> None:
+        """Keep an operator correction/deletion out of volatile speech context."""
+        runtime = app.state.runtime
+        visual = getattr(runtime, "multimodal", None)
+        owner = getattr(visual, "hub", None)
+        discard = getattr(owner, "discard_heard", None)
+        if callable(discard):
+            discard(robot_id, event_id)
+        attention = getattr(runtime, "attention", None)
+        discard_attention = getattr(attention, "discard_heard", None)
+        if callable(discard_attention):
+            discard_attention(robot_id, event_id)
+
     @app.get("/v1/pet/{robot_id}/memories", dependencies=[Depends(operator)])
     async def pet_memories(robot_id: str, limit: int = Query(default=12, ge=1, le=50)):
         # Explicit operator view of bounded text provenance, never raw media.
@@ -121,6 +134,8 @@ def register_memory_routes(
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        if corrected:
+            retract_live_asr(robot_id, event_id)
         return {
             "robot_id": robot_id,
             "event_id": event_id,
@@ -143,6 +158,10 @@ def register_memory_routes(
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        # The durable tombstone applies even when a delayed transcript
+        # has not inserted its episode yet. Retract this same event in RAM
+        # whether or not a row existed at delete time.
+        retract_live_asr(robot_id, event_id)
         return {"robot_id": robot_id, "event_id": event_id,
                 "removed": removed, "local_only": True}
 

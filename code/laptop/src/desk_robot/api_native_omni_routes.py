@@ -175,6 +175,21 @@ def register_native_omni_routes(
         if ephemeral and not settings.voice_vision_tools_enabled:
             visual.hub.discard_heard(robot_id, request.event_id)
             ephemeral = False
+        # Deletion may finish while a SQLite writer is still pending.
+        # A tombstoned or already-seen event is not a NEW voice observation,
+        # even when the caller replays the same authenticated HTTP receipt.
+        revoked_check = (
+            getattr(visual.hub, "heard_revoked", None)
+            if visual is not None else None
+        )
+        if (ephemeral and visual is not None
+                and ((memory_opt_in and not inserted)
+                     or (callable(revoked_check)
+                         and revoked_check(robot_id, request.event_id)))):
+            discard = getattr(visual.hub, "discard_heard", None)
+            if callable(discard):
+                discard(robot_id, request.event_id)
+            ephemeral = False
         # A private SQLite write may take longer than the operator's
         # opt-out. Remove ONLY this request's newly inserted episode if
         # permission changed during I/O; never delete an older duplicate.
