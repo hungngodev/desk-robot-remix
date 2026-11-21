@@ -280,6 +280,51 @@ async def test_camera_continuity_cannot_claim_simultaneous_speech_without_audio(
     assert result["concurrent_audio_counter_delta"]["speaker_frames_accepted"] == 0
 
 
+@pytest.mark.parametrize("wrong_receipt", [
+    {"robot_id": "robot-02"}, {"speaker_playback_verified": True},
+])
+async def test_foreign_or_fabricated_audio_receipt_cannot_join_camera_bench(
+    wrong_receipt,
+):
+    import time
+
+    class Head:
+        def __init__(self):
+            self._last_camera = None
+
+        async def stream_frames(self):
+            for index in range(12):
+                await asyncio.sleep(.02)
+                self._last_camera = (19, index + 1, (index + 1) * 20000)
+                yield JPEG, time.monotonic()
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+        async def audio_reference_status(self):
+            return {
+                "robot_id": "robot-01", "boot": 19,
+                "microphone_frames_read": 160,
+                "speaker_frames_accepted": 320,
+                "reference_underflow_reads": 0,
+                "microphone_privacy_muted": False,
+                "reference_integrity_failed": False,
+                "speaker_playback_verified": False,
+                "aec_physically_qualified": False,
+                **wrong_receipt,
+            }
+
+    report = await bench.measure(
+        Head(), "robot-01", seconds=.16,
+        status_period_s=.05, stream=True,
+    )
+    assert report["camera_frames_received"] >= 3
+    assert report["status_error_count"] == 0
+    assert report["concurrent_audio_samples"] == 0
+    assert report["concurrent_audio_errors"]
+    assert report["concurrent_audio_driver_activity_observed"] is False
+
+
 async def test_cancelled_camera_bench_closes_stream_lease():
     """Cancelling a bench must release the same live MJPEG HTTP lease."""
     entered, closed = asyncio.Event(), asyncio.Event()
