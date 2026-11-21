@@ -594,6 +594,7 @@ async def test_group_context_revoke_and_regrant_during_model_cannot_speak(
                 "kind": kind,
                 "content": marker,
                 "shared_not_robot_eyewitness": source == "room",
+                "identity_verified": False,
                 "source": "room_usb" if source == "room" else "xiaozhi",
             }],
         ))
