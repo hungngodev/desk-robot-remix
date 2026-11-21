@@ -1150,6 +1150,13 @@ class MultimodalOrchestrator:
                             # to the Mac hub, native subscriber or pet observer.
                             self.hub.discard_video(robot_id)
                             return
+                        # A slow Pillow worker can finish after this source
+                        # frame's one-second live-video freshness window.
+                        # Do not revive an obsolete scene, even if its receipt
+                        # was valid before the asynchronous decode began.
+                        if time.monotonic() - received > 1.0:
+                            metrics["stream_frames_skipped"] += 1
+                            continue
                         if (self._closed or turn != self._turn_epoch[robot_id]
                                 or generation != self.hub._generation[robot_id]
                                 or (source == "proactive"

@@ -211,6 +211,56 @@ async def test_invalid_live_frame_receipts_cannot_poison_sampling_cursor():
         await visual.close()
 
 
+async def test_stream_frame_aging_out_during_jpeg_decode_is_not_published():
+    """A slow native decode must not resurrect an obsolete visual scene."""
+    allow_next_frame = asyncio.Event()
+
+    class SlowThenFreshHead(Head):
+        async def stream_frames(self):
+            yield image(square=True), time.monotonic() - 0.9
+            await allow_next_frame.wait()
+            yield image(square=False), time.monotonic()
+            await asyncio.Event().wait()
+
+    head = SlowThenFreshHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    calls = 0
+
+    async def delayed_first_decode(jpeg, *, priority=False):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(0.2)
+        return _prepare(jpeg)
+
+    visual._prepare_bounded = delayed_first_decode
+    visual.start_streams()
+    try:
+        async with asyncio.timeout(3):
+            while visual.status("robot-01")["software_timings"][
+                "stream_frames_skipped"
+            ] < 1:
+                await asyncio.sleep(0.01)
+        assert not visual.hub.frames["robot-01"]
+        assert head.captures == 0
+        allow_next_frame.set()
+        async with asyncio.timeout(3):
+            while visual.status("robot-01")["software_timings"][
+                "stream_frames_selected"
+            ] < 1:
+                await asyncio.sleep(0.01)
+        metrics = visual.status("robot-01")["software_timings"]
+        assert metrics["stream_frames_received"] == 2
+        assert metrics["stream_frames_selected"] == 1
+        assert metrics["stream_reconnects"] == 0
+        assert len(visual.hub.frames["robot-01"]) == 1
+    finally:
+        await visual.close()
+
+
 @pytest.mark.parametrize("malformed", [True, False])
 async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream(malformed):
     """Malformed bytes and deceptive JPEG dimensions must not break video."""
