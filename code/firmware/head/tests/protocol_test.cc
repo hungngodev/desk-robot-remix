@@ -30,6 +30,17 @@ int main() {
     assert(cap.Observe(0) == 0); // wrap never fabricates a contact
     assert(cap.Observe(3) == 3);
 
+    // OLED expressions require a genuinely active and ready local WROOM
+    // guard. A legacy "not_required" profile or an unready calibration may
+    // still provide sensors, but neither can advertise a healthy body.
+    assert(!BodySafetyUnhealthy(true, true, "none"));
+    assert(BodySafetyUnhealthy(false, true, "not_required"));
+    assert(BodySafetyUnhealthy(false, false, "none"));
+    assert(BodySafetyUnhealthy(true, false, "none"));
+    assert(BodySafetyUnhealthy(true, true, "cliff"));
+    assert(BodySafetyUnhealthy(true, true, ""));
+    assert(BodySafetyUnhealthy(true, false, "not_required"));
+
     // Cosmetic cues are latest only, time bounded, and never motor commands.
     CosmeticMoodCue mood;
     assert(ParseCosmeticMood("mood:thinking") == CosmeticMood::kThinking);
