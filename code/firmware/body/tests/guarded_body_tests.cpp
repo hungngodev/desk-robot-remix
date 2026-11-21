@@ -1511,7 +1511,12 @@ static void required_fuel_gauge_loss_stops_and_requires_local_rearm() {
 
   desk_robot::AccessoryReadings readings{};
   body.set_accessories(readings, 101);
-  CHECK(send(body, "status", 101).find("\"fault\":\"fuel_monitor_latched\"") !=
+  // Optical guard has not yet been locally rearmed. Its existing fault
+  // outranks the simultaneous missing gauge in the shared status, while
+  // both conditions still independently prevent motor readiness.
+  CHECK(send(body, "status", 101).find("\"fault\":\"missing_sample\"") !=
+        std::string::npos);
+  CHECK(send(body, "status", 101).find("\"ready\":false") !=
         std::string::npos);
   readings.gauge.fuel_present = readings.gauge.fuel_valid = true;
   readings.gauge.cell_mv = 3700;
