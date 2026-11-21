@@ -10,7 +10,9 @@ from .calibration import Calibration
 from .config import Settings
 from .dock_ir import validate_ir
 from .dock_runtime import (
-    detect_bounded, load_real_dock_calibration, unpack_dock_frame,
+    detect_bounded,
+    load_real_dock_calibration,
+    unpack_dock_frame,
     verify_selected_dock_frame,
 )
 from .dock_vision import assess_dock

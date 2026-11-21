@@ -6,12 +6,10 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-
 from desk_robot.controller import Coordinator, Job
 from desk_robot.dock_runtime import observe_actual_dock, unpack_dock_frame
 from desk_robot.dock_vision import DockCameraCalibration
 from desk_robot.transport import HeadError, HttpHead
-
 
 JPEG = bytes.fromhex("ffd8696d616765ffd9")
 
