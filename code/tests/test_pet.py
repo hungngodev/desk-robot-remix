@@ -3137,6 +3137,63 @@ async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
         await pet.close()
 
 
+async def test_shared_room_revoke_cannot_reuse_cached_room_fact_in_proactive_speech(
+    fleet, tmp_path,
+):
+    """A room USB opt-out fences its cached fact without silencing touch."""
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomObservation
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = False
+    fleet.room_station_context_enabled = True
+    ids = [robot.id for robot in fleet.robots]
+    hub = CameraFrameHub(ids)
+    hub.remember_room(RoomObservation(
+        seq=1, at_ms=100, received_at=time.monotonic(), readings={},
+        summary="PRIVATE ROOM: shared station measured a climate shift",
+    ))
+    hub.notify("robot-01", "touch_tap", time.monotonic())
+    prompts = []
+
+    class RevokingChat:
+        async def reply(self, history):
+            prompts.append(history)
+            assert "PRIVATE ROOM" in str(history)
+            fleet.room_station_context_enabled = False
+            return "I noticed the room has changed."
+
+    memory = MemoryStore(tmp_path, ids)
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, RevokingChat(), speaker, memory=memory,
+        ), memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 81
+    change = SceneChange("touch_tap", "My head was tapped", 1.0)
+    try:
+        await pet._speak(
+            "robot-01", change, 81, offered_at=time.monotonic(),
+        )
+        assert len(prompts) == 1
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        fresh = await pet._load_proactive_context("robot-01", change)
+        assert fresh is not None
+        assert "PRIVATE ROOM" not in fresh[1].interaction
+        assert "touch_tap" in fresh[1].interaction
+        assert fresh[4] is False
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_proactive_physical_sensor_rechecks_live_consent_after_model_await(
     fleet, tmp_path,
 ):
