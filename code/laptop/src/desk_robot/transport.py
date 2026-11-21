@@ -238,6 +238,28 @@ class HttpHead:
                 raise HeadError("Status robot identity mismatch")
             return data
 
+    async def audio_reference_status(self) -> dict:
+        """Read device AEC reference integrity, never infer audible playback.
+
+        The original Sense codec owns both microphone and speaker. This
+        endpoint exposes bounded monotonic counters only, not PCM or TTS
+        progress. A head cannot self-certify acoustic qualification.
+        """
+        data = _response_object(await self._request("GET", "/api/audio.reference"))
+        counters = (
+            "reference_underflow_reads", "reference_overwrite_reads",
+            "discarded_stale_writes",
+        )
+        if data.get("robot_id") != self.config.id or any(
+            type(data.get(key)) is not int or not 0 <= data[key] <= 0xffffffff
+            for key in counters
+        ) or type(data.get("reference_integrity_failed")) is not bool or (
+            data.get("speaker_playback_verified") is not False
+            or data.get("aec_physically_qualified") is not False
+        ):
+            raise HeadError("Untrusted Sense AEC reference diagnostics")
+        return data
+
     async def aux_status(self) -> dict:
         """Authenticate and validate all optional sensor provenance, never arm."""
         async with self.lock:
