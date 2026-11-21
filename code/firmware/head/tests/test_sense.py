@@ -318,7 +318,12 @@ class SenseOverlayTests(unittest.TestCase):
         idle_mood = face.index("if (idle && board->display_ != nullptr)")
         self.assertLess(status, idle_mood)
         self.assertIn("(!last_rendered_fault || (idle && !last_was_idle))", face)
-        self.assertIn("else if (last_rendered_fault && !body_unhealthy)", face)
+        # Recovery while speaking may not erase Xiaozhi's active status.
+        self.assertIn(
+            "else if (last_rendered_fault && !body_unhealthy && idle)", face
+        )
+        self.assertIn('board->display_->SetStatus("");', face)
+        self.assertIn("last_rendered_fault = false;", face)
         self.assertIn("const Action action = board->face_behavior_.update(obs);", face)
         self.assertGreater(face.index("board->display_->SetEmotion("), idle_mood)
 
