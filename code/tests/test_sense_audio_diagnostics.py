@@ -27,9 +27,11 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
         calls.append((request.method, request.url.path, request.headers.get("authorization")))
         return httpx.Response(200, json={
             "robot_id": "robot-01",
+            "boot": 41,
             "reference_underflow_reads": 11,
             "reference_overwrite_reads": 2,
             "discarded_stale_writes": 3,
+            "short_output_writes": 0,
             "reference_integrity_failed": True,
             "speaker_playback_verified": False,
             "aec_physically_qualified": False,
@@ -45,6 +47,9 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", [
     {"robot_id": "robot-02"},
+    {"boot": True},
+    {"boot": -1},
+    {"short_output_writes": True},
     {"reference_underflow_reads": -1},
     {"reference_underflow_reads": True},
     {"reference_overwrite_reads": 0x1_0000_0000},
@@ -57,9 +62,11 @@ async def test_no_foreign_or_fabricated_reference_evidence(monkeypatch, changed)
     monkeypatch.setenv("SENSE_DIAG_TEST_TOKEN", "s" * 32)
     receipt = {
         "robot_id": "robot-01",
+        "boot": 41,
         "reference_underflow_reads": 0,
         "reference_overwrite_reads": 0,
         "discarded_stale_writes": 0,
+        "short_output_writes": 0,
         "reference_integrity_failed": False,
         "speaker_playback_verified": False,
         "aec_physically_qualified": False,
