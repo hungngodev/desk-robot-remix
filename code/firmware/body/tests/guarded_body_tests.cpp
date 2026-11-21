@@ -1366,10 +1366,13 @@ static void jaw_force_ceiling_is_local_and_direction_aware() {
   CHECK(body.state().grip == 90 && body.state().grip_target == 90);
   CHECK(!body.configure_jaw_force_limits({60, 120, 1000, 1, 300}));
   CHECK(send(body, "disarm", 100) == "OK disarm");
-  CHECK(body.configure_jaw_force_limits({60, 120, 1000, 1, 300}));
+  CHECK(body.configure_jaw_force_limits({70, 120, 1000, 1, 300}));
   CHECK(!body.configure_jaw_force_limits({120, 60, 1000, 1, 300}));
   CHECK(send(body, "arm", 100) == "OK arm");
-  CHECK(send(body, "grip 59", 100) == "ERR grip outside_measured_endstops");
+  // The generic servo parser rejects angles outside 60..120 first.
+  // 69 is globally valid but outside this specific mounted jaw's
+  // measured 70..120 travel, so it exercises the local endstop guard.
+  CHECK(send(body, "grip 69", 100) == "ERR grip outside_measured_endstops");
   CHECK(send(body, "grip 120", 100) == "OK grip angle=120");
   body.tick(180);
   CHECK(body.state().grip == 94);
