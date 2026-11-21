@@ -1483,3 +1483,62 @@ async def test_speaker_doubles_advertising_permission_support_accept_keyword():
                     assert any(arg.arg == "permission_check" for arg in method.args.kwonlyargs), (
                         f"{path.name}:{node.name}.say must accept permission_check"
                     )
+
+
+@pytest.mark.parametrize("passive", [False, True])
+@pytest.mark.parametrize("failure", [TimeoutError, asyncio.CancelledError])
+async def test_kokoro_lost_grant_response_compensates_bridge_lease(
+    settings, monkeypatch, failure, passive,
+):
+    """A bridge can apply the grant before its HTTP response disappears."""
+    monkeypatch.setenv(settings.speech_bridge_token_env, "p" * 32)
+    robot = SimpleNamespace(device_id="head-01")
+    requests = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        active = False
+        fail_once = True
+
+        async def post(self, url, **kwargs):
+            assert url.endswith("/session")
+            body = kwargs["json"]
+            requests.append(body.copy())
+            if body["enabled"]:
+                assert not self.active, "An earlier lease was leaked"
+                self.active = True
+                if self.fail_once:
+                    self.fail_once = False
+                    raise failure("response lost after lease applied")
+            else:
+                self.active = False
+            return Response({
+                "device_ids": ["head-01"],
+                "enabled": body["enabled"],
+                "expires_in_seconds": 305 if body["enabled"] else 0,
+                **({"passive": True} if body.get("passive") else {}),
+            })
+
+    client = Client()
+    speaker = KokoroHeadSpeaker(settings, client)
+    with pytest.raises(failure):
+        async with speaker.session([robot], passive=passive):
+            pytest.fail("Lost grant cannot open a speech session")
+    assert client.active is False
+    assert [request["enabled"] for request in requests] == [True, False]
+    assert all(request.get("passive", False) is passive for request in requests)
+    async with speaker.session([robot], passive=passive):
+        assert client.active is True
+    assert client.active is False
+    assert [request["enabled"] for request in requests] == [
+        True, False, True, False,
+    ]
