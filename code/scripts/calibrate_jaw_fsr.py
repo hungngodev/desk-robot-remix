@@ -34,6 +34,7 @@ def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
             not isinstance(row, tuple) or len(row) != 2
             or type(row[0]) is not int or type(row[1]) is not int
             or not -32768 <= row[0] <= 32767
+            or row[0] in (-32768, 32767)  # clipped ADC is not force evidence
             or not 1 <= row[1] <= 0xffffffff for row in rows
         ):
             raise ValueError(f"Untrusted {name} ADC records")

@@ -29,6 +29,17 @@ def test_recommends_signed_raw_limits_without_marking_physical_success():
     assert result["manual_review_required"]
 
 
+@pytest.mark.parametrize("phase,endpoint", [
+    ("free", -32768), ("contact", 32767), ("upper", 32767),
+])
+def test_adc_clipping_cannot_qualify_force_trial(phase, endpoint):
+    samples = measured_samples()
+    _, seq = samples[phase][0]
+    samples[phase][0] = (endpoint, seq)
+    with pytest.raises(ValueError, match="Untrusted"):
+        propose(samples)
+
+
 def test_inverted_adc_polarity_supported():
     samples = measured_samples()
     for rows in samples.values():
