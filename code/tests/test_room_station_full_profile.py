@@ -156,3 +156,44 @@ def test_ci_builds_complete_station_not_just_sensor_disabled_stub():
     assert "not a continuous 3.3 V budget" in note
     assert "greater than 200 mA" in note
     assert "run the exact fitted" in note
+
+def test_scd40_readiness_failure_invalidates_cached_measurement_in_runtime():
+    # The pure-C++ helper test is insufficient if the real Feather producer
+    # accidentally stops calling it. Keep the actual firmware consumer wired.
+    source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    helper = (ROOT / "code/firmware/room_station/src/scd_sample_freshness.h").read_text()
+    poll = source.split("void scd_observation(uint32_t now) {", 1)[1].split(
+        "void bme_step(", 1
+    )[0]
+    assert '#include "scd_sample_freshness.h"' in source
+    assert "const int readiness_status = scd.getDataReadyStatus(ready);" in poll
+    assert "if (readiness_status == 0 && ready)" in poll
+    assert "scd_valid = desk_robot_room::scd_sample_valid_after_poll(" in poll
+    assert "scd_valid, readiness_status, ready, measurement_valid);" in poll
+    assert "const bool fresh = scd_valid && now - last_scd_ms <= kScdStaleMs;" in poll
+    assert "if (readiness_status != 0) return false;" in helper
+    ci = (ROOT / ".github/workflows/host-verification.yml").read_text()
+    assert "room_station/tests/scd_sample_freshness_tests.cpp" in ci
+
+
+def test_thermal_scan_publishes_only_complete_staged_frames():
+    # An I2C failure in chunk eight may invalidate a scan. Never expose
+    # a mixed old/new 64-pixel array or make the report block radar UART.
+    source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    scan = source.split("void thermal_step(uint32_t now) {", 1)[1].split(
+        "void thermal_observation(uint32_t now) {", 1
+    )[0]
+    report = source.split("void thermal_observation(uint32_t now) {", 1)[1].split(
+        "void report(uint32_t now) {", 1
+    )[0]
+    assert "thermal_staging + 8U * thermal_next_chunk" in scan
+    assert "thermal_valid = false;" in scan
+    assert "if (++thermal_next_chunk == AMG88xx_PIXEL_ARRAY_SIZE / 8U)" in scan
+    assert "thermal[i] = thermal_staging[i];" in scan
+    assert scan.index("thermal[i] = thermal_staging[i];") < scan.index(
+        "thermal_valid = true;"
+    )
+    assert "thermal_sample_ms = now;" in scan
+    assert "read_thermal_chunk(" not in report
+    assert "thermal_valid && now - thermal_sample_ms <= kThermalStaleMs" in report
+    assert "thermal_step(now);" in source
