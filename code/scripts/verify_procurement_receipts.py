@@ -300,9 +300,14 @@ def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
         return False
     item = matched[0]
     bounds = (item.get("value"), item.get("minimum"), item.get("maximum"))
-    return (all(type(number) in (int, float) and math.isfinite(number)
-                for number in bounds)
-            and bounds[1] <= bounds[0] <= bounds[2])
+    if not all(type(number) in (int, float) for number in bounds):
+        return False
+    try:
+        if not all(math.isfinite(number) for number in bounds):
+            return False
+    except (OverflowError, ValueError):
+        return False
+    return bounds[1] <= bounds[0] <= bounds[2]
 
 
 def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:

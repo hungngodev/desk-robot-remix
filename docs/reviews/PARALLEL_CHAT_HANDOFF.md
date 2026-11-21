@@ -1,3 +1,14 @@
+## 21 November 2026: Guarded numeric overflow in procurement receipt validation
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `53a0be8217bbba99ec6d8d9b1c750b3297a7be35`.
+This source and test batch does not close physical or commercial gates.
+
+* Physical gate measurement OverflowError guard (Review PRRT_kwDOVlmnQ866bg1k):
+  - In `code/scripts/verify_procurement_receipts.py`, updated `_qualified_gate_measurement` to safely handle `OverflowError` (and `ValueError`) when evaluating large integer numbers against `math.isfinite()`.
+  - Malformed or giant JSON numeric values (such as 1,001-digit integers) fail closed as unpinned/generic signoffs without raising uncaught exceptions in `audit_release()` or `verified_scoped_record()`.
+  - Updated `code/tests/test_verify_procurement_receipts.py`: added 1,001-digit positive and negative integer variants across `value`, `minimum`, and `maximum` in `test_critical_physical_receipt_needs_bounded_actual_measurement` and added `test_parser_to_audit_release_huge_integer_fails_closed` testing JSON parser-to-audit fail-closed handling while verifying finite metric receipts pass.
+
 ## 21 November 2026: Cross-pose assembly mass and role consistency in stability screen
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.

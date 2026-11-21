@@ -756,6 +756,18 @@ def test_critical_physical_receipt_needs_bounded_actual_measurement(gate):
         {**measurement, "quantities": [
             {**observed, "value": True},
         ]},
+        {**measurement, "quantities": [
+            {**observed, "value": 10**1000},
+        ]},
+        {**measurement, "quantities": [
+            {**observed, "value": -(10**1000)},
+        ]},
+        {**measurement, "quantities": [
+            {**observed, "minimum": -(10**1000)},
+        ]},
+        {**measurement, "quantities": [
+            {**observed, "maximum": 10**1000},
+        ]},
     ]
     for changed in variants:
         falsified = {**original, "measurement": changed}
@@ -774,3 +786,48 @@ def test_documentary_decision_does_not_require_physical_instrument():
     assert release.verified_scoped_record(
         record, SHA, lambda url: lookup(url, records=[record]),
     )
+
+
+def test_parser_to_audit_release_huge_integer_fails_closed():
+    gate = "loaded_drive_and_stopping"
+    metric, unit = release.PHYSICAL_GATE_METRICS[gate]
+    huge_positive_str = "1" + "0" * 1000
+    huge_negative_str = "-1" + "0" * 1000
+    for huge_val_str in (huge_positive_str, huge_negative_str):
+        raw_json = f"""
+        {{
+            "record_id": "system:{gate}",
+            "result": "pass",
+            "source_sha": "{SHA}",
+            "scope": "system",
+            "gate": "{gate}",
+            "reviewer": "real_review_account",
+            "tested_on": "2026-11-18",
+            "device_revision": "inspected_rev_A",
+            "evidence_url": "{URL}",
+            "measurement": {{
+                "sample_count": 3,
+                "conditions": {{"setup": "bench_stop", "instrument": "meter_laser"}},
+                "quantities": [
+                    {{
+                        "name": "{metric}",
+                        "unit": "{unit}",
+                        "value": {huge_val_str},
+                        "minimum": 0,
+                        "maximum": 1000000
+                    }}
+                ]
+            }}
+        }}
+        """
+        parsed_receipt = json.loads(raw_json)
+
+        def source(url, row=parsed_receipt):
+            return lookup(url, records=[row])
+
+        assert not release.verified_scoped_record(parsed_receipt, SHA, source)
+        errors = release.audit_release(
+            {"system": {gate: parsed_receipt}}, SHA, source,
+        )
+        assert any(f"system.{gate}" in err and "unpinned" in err for err in errors)
+
