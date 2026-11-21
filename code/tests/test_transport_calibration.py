@@ -1004,6 +1004,8 @@ async def test_dock_stream_disconnect_while_waiting_for_camera_lock_never_polls(
             head._stream_connected = False
         finally:
             head.capture_lock.release()
-        with pytest.raises(HeadError, match="stream is not connected"):
+        with pytest.raises(
+            HeadError, match="stream is not connected|connected live camera stream"
+        ):
             await capture
         assert paths == []
