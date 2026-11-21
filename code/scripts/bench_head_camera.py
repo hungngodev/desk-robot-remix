@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpx
 from desk_robot.config import load_settings
+from desk_robot.multimodal import _prepare, change_fraction
 from desk_robot.transport import HttpHead
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,14 +39,21 @@ def summarize(values: list[float]) -> dict:
 async def measure(
     head, robot_id: str, *, seconds: float,
     camera_period_s: float = 1.0, status_period_s: float = 0.2,
-    stream: bool = False,
+    stream: bool = False, score_motion: bool = False,
 ) -> dict:
     """Exercise existing head transport; never send any POST/motion command."""
     if not (0.1 <= seconds <= 3600
             and 0.05 <= camera_period_s <= 10
             and 0.05 <= status_period_s <= 10):
         raise ValueError("Invalid read-only bench duration or periods")
+    if score_motion and not stream:
+        raise ValueError("Motion scoring requires continuous MJPEG stream")
     camera_times: list[float] = []
+    scored_changes: list[float] = []
+    scored_brightness_deltas: list[float] = []
+    previous_fingerprint: bytes | None = None
+    previous_brightness: float | None = None
+    last_scored_at = -math.inf
     stream_intervals: list[float] = []
     sense_capture_intervals: list[float] = []
     status_times: list[float] = []
@@ -95,7 +103,8 @@ async def measure(
         No HTTP snapshot requests, images on disk or invented camera timing.
         A quiet or stalled stream remains a measurable bench failure.
         """
-        nonlocal camera_error_count
+        nonlocal camera_error_count, previous_fingerprint
+        nonlocal previous_brightness, last_scored_at
         last_frame_at: float | None = None
         last_source_identity: tuple[int, int, int] | None = None
         try:
@@ -143,6 +152,24 @@ async def measure(
                     last_source_identity = identity
                     seen_camera_identities.add(identity)
                     camera_sizes.append(len(jpeg))
+                    if score_motion and received - last_scored_at >= 1.0:
+                        # Instrumented calibration only: decode on the host
+                        # without storing JPEGs, running a VLM or sending
+                        # any motor/audio command. This costs extra CPU and
+                        # must be labeled separately from raw transport FPS.
+                        _, fingerprint, brightness = await asyncio.to_thread(
+                            _prepare, jpeg
+                        )
+                        if previous_fingerprint is not None:
+                            scored_changes.append(
+                                change_fraction(previous_fingerprint, fingerprint)
+                            )
+                            scored_brightness_deltas.append(
+                                abs(brightness - previous_brightness)
+                            )
+                        previous_fingerprint = fingerprint
+                        previous_brightness = brightness
+                        last_scored_at = received
                 # A feed can end exactly at the requested deadline after
                 # sending only one early JPEG. Ending on time is not proof
                 # that frames kept arriving throughout the bench.
@@ -214,6 +241,20 @@ async def measure(
         "requested_camera_fps": None if stream else round(1.0 / camera_period_s, 3),
         "successful_camera_fps": round(len(camera_sizes) / elapsed, 3),
         "camera_frames_received": len(camera_sizes),
+        "motion_score_instrumented": score_motion,
+        "motion_sample_pair_count": len(scored_changes),
+        "motion_changed_fraction_max": (
+            round(max(scored_changes), 4) if scored_changes else None
+        ),
+        "motion_changed_fraction_p95": (
+            round(sorted(scored_changes)[math.ceil(.95 * len(scored_changes)) - 1], 4)
+            if scored_changes else None
+        ),
+        "brightness_change_max": (
+            round(max(scored_brightness_deltas), 1)
+            if scored_brightness_deltas else None
+        ),
+        "physical_motion_qualified": False,
         "stream_frame_interarrival": summarize(stream_intervals),
         "sense_capture_completion_interarrival": summarize(sense_capture_intervals),
         "camera_latency": summarize(camera_times),
@@ -242,10 +283,14 @@ async def main() -> int:
     parser.add_argument("--status-period", type=float, default=0.2)
     parser.add_argument("--stream", action="store_true",
                         help="Bench the real persistent MJPEG socket instead of snapshots")
+    parser.add_argument("--score-motion", action="store_true",
+                        help="Instrument 1 FPS camera contrast/motion scores without storing images")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     if not 5 <= args.seconds <= 300:
         parser.error("Physical camera bench requires 5..300 seconds")
+    if args.score_motion and not args.stream:
+        parser.error("--score-motion requires --stream")
     settings = load_settings(args.config)
     if settings.mode != "hardware":
         parser.error("Use real hardware configuration, not simulation")
@@ -258,7 +303,7 @@ async def main() -> int:
             head, robot.id, seconds=args.seconds,
             camera_period_s=args.camera_period,
             status_period_s=args.status_period,
-            stream=args.stream,
+            stream=args.stream, score_motion=args.score_motion,
         )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

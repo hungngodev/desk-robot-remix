@@ -19,6 +19,60 @@ def test_bench_percentiles_are_bounded_and_do_not_claim_a_latency_with_no_sample
                  "p95_ms": 30.0, "max_ms": 30.0}
 
 
+async def test_stream_motion_instrumentation_reports_light_and_cover_without_media():
+    import io
+    from PIL import Image
+
+    def jpeg(dark, light, *, cover=False):
+        image = Image.new("L", (64, 48))
+        image.putdata([
+            20 if cover else (dark if (i // 64 + i % 64) % 2 else light)
+            for i in range(64 * 48)
+        ])
+        out = io.BytesIO()
+        image.save(out, format="JPEG", quality=95)
+        return out.getvalue()
+
+    class PhotometricHead:
+        def __init__(self):
+            self._last_camera = None
+            self.commands = []
+
+        async def stream_frames(self):
+            began = time.monotonic()
+            for index, frame in enumerate((
+                jpeg(40, 110), jpeg(80, 220), jpeg(0, 0, cover=True),
+            )):
+                self._last_camera = (19, index + 1, (index + 1) * 1_000_000)
+                yield frame, began - 2 + index
+                await asyncio.sleep(0)
+            await asyncio.sleep(.22)
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+        async def snapshot(self):
+            raise AssertionError("No snapshot during continuous stream")
+
+        async def command(self, *args, **kwargs):
+            self.commands.append(args)
+            raise AssertionError("Bench cannot command body")
+
+    head = PhotometricHead()
+    result = await bench.measure(
+        head, "robot-01", seconds=.2, status_period_s=.05,
+        stream=True, score_motion=True,
+    )
+    assert result["camera_error_count"] == 0
+    assert result["motion_score_instrumented"] is True
+    assert result["motion_sample_pair_count"] == 2
+    assert result["motion_changed_fraction_max"] > .9
+    assert result["motion_changed_fraction_p95"] > .9
+    assert result["physical_motion_qualified"] is False
+    assert result["sensor_exposure_clock_synchronized"] is False
+    assert head.commands == []
+
+
 async def test_live_bench_uses_read_only_camera_status_without_audio_or_motors():
     class FakeHead:
         def __init__(self):
