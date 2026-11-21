@@ -398,6 +398,18 @@ def test_postwrite_head_receipt_rejects_foreign_or_revoked_privacy(state):
         )
 
 
+def test_voice_acceptance_research_no_longer_prescribes_90ms_capture():
+    """The builder must not substitute a historical unmeasured lag as fact."""
+    note = (
+        SOURCE.parents[2] / "docs/research/2026-11-10-natural-voice-acceptance.md"
+    ).read_text()
+    assert "code/scripts/capture_sense_aec.py" in note
+    assert "CONFIG_DESK_ROBOT_AEC_DELAY_MS=0" in note
+    assert "docs/guides/sense-aec-port.md" in note
+    assert "provisional 90ms" not in note
+    assert "physical acceptance" in note
+
+
 def test_audio_capture_abort_is_guarded_and_generation_scoped_in_sense_firmware():
     bridge = (SOURCE.parents[1] / "firmware/head/overlay/robot_bridge.cc").read_text()
     assert '"/api/audio.capture.abort", HTTP_POST' in bridge
