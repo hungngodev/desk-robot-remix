@@ -103,7 +103,15 @@ class SenseOverlayTests(unittest.TestCase):
             source.index('if (!board->continuous_audio_started_'),
             source.index('app.ToggleChatState();  // existing Xiaozhi realtime listen'),
         )
-        self.assertIn('audio_operator_touched_.store(true);', source)
+        self.assertIn('audio_operator_touched_.store(true, std::memory_order_release);', source)
+        self.assertIn('std::atomic<bool> audio_operator_muted_{false};', source)
+        boot = source.split('boot_button_.OnClick([this]() {', 1)[1].split('void StartNetwork() override', 1)[0]
+        self.assertIn('->SetMicrophonePrivacyMuted(now_muted);', boot)
+        self.assertIn('app.SetDeviceState(kDeviceStateIdle);', boot)
+        self.assertIn('app.StopListening();  // selected overlay closes channel', boot)
+        self.assertIn('if (state == kDeviceStateIdle) app.ToggleChatState();', boot)
+        self.assertLess(boot.index('->SetMicrophonePrivacyMuted(now_muted);'),
+                        boot.index('if (now_muted)'))
         self.assertIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS', (board / 'sense_reference_codec.h').read_text())
         self.assertIn('#include "stackchan_behavior.hpp"', source)
         self.assertIn('HsmBehavior face_behavior_', source)
@@ -358,6 +366,27 @@ class SenseOverlayTests(unittest.TestCase):
             ROOT / "firmware/body/src/main.cpp"
         ).read_text()
 
+
+    def test_physical_boot_privacy_discards_live_and_calibration_pcm(self):
+        """BOOT closes the genuine microphone path, not merely a UI label."""
+        header = (HEAD / "sense/sense_reference_codec.h").read_text()
+        code = (HEAD / "sense/sense_reference_codec.cc").read_text()
+        read = code.split("int SenseReferenceCodec::Read(", 1)[1].split(
+            "int SenseReferenceCodec::Write(", 1
+        )[0]
+        self.assertIn("microphone_privacy_muted_.exchange(", header)
+        self.assertIn("microphone_privacy_epoch_.fetch_add(", header)
+        self.assertIn("if (muted) AbortBenchPcmCapture();", header)
+        self.assertIn("const uint32_t privacy_epoch =", read)
+        self.assertIn("if (microphone_privacy_muted_.load(", read)
+        self.assertIn("std::fill_n(dest, samples, 0);", read)
+        self.assertIn("std::fill_n(microphone_frame_.begin(), frames, 0);", read)
+        self.assertIn("bench_window_.offer(", read)
+        self.assertLess(read.index("microphone_privacy_epoch_.load("),
+                        read.index("NoAudioCodecSimplexPdm::Read("))
+        self.assertLess(read.index("std::fill_n(dest, samples, 0);"),
+                        read.index("bench_window_.offer("))
+        self.assertGreater(read.count("privacy_epoch != microphone_privacy_epoch_"), 1)
 
     def test_reference_generation_fence_prevents_stale_barge_audio(self):
         """Source contract only; physical DMA silence still needs A2 trials."""
