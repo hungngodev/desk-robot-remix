@@ -58,6 +58,42 @@ def test_room_bench_counts_real_decoder_receipts_without_sensor_person_claim():
     assert "rail voltage" in result["notes"]
 
 
+def test_room_bench_records_terminal_blackout_without_another_frame():
+    decoder = RoomStationDecoder()
+    first = decoder.accept(_packet(5, 1000), now=10.2)
+
+    class OneFrame:
+        rejected = 0
+        callback_failures = 0
+
+        def __init__(self, port, on_observation):
+            self.on_observation = on_observation
+
+        def _read_port(self, running):
+            self.on_observation(first)
+
+    ticks = iter((10.0, 15.0))
+    report = capture("/dev/cu.test", seconds=5, feed_factory=OneFrame,
+                     clock=lambda: next(ticks))
+    assert report["accepted_frames"] == 1
+    assert report["largest_mac_receive_gap_ms"] is None
+    assert report["initial_receive_silence_ms"] == 200.0
+    assert report["trailing_receive_silence_ms"] == 4800.0
+    assert report["largest_mac_receive_silence_ms"] == 4800.0
+    assert report["station_power_physically_qualified"] is False
+
+    class NoFrames(OneFrame):
+        def _read_port(self, running):
+            pass
+
+    ticks = iter((10.0, 15.0))
+    absent = capture("/dev/cu.test", seconds=5, feed_factory=NoFrames,
+                     clock=lambda: next(ticks))
+    assert absent["accepted_frames"] == 0
+    assert absent["largest_mac_receive_silence_ms"] == 5000.0
+    assert absent["read_only_usb_sample_captured"] is False
+
+
 def test_room_bench_transport_failure_does_not_promote_any_physical_gate():
     class Broken:
         rejected = 0
