@@ -1564,6 +1564,9 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
 
     runtime = Runtime()
     runtime.memory = memory
+    runtime.conversation = SimpleNamespace(
+        _private_memory_generation={rid: 0 for rid in ids}
+    )
     headers = {
         "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
         "X-Desk-Robot-Tool-Receipt": "1",
@@ -1864,7 +1867,11 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
                 robot=lambda rid: settings.robot(rid),
                 heads={robot: Head()},
             ),
-            memory=memory, multimodal=visual, start=noop, close=noop,
+            memory=memory, multimodal=visual,
+            conversation=SimpleNamespace(
+                _private_memory_generation={rid: 0 for rid in ids},
+            ),
+            start=noop, close=noop,
         )
         url = (f"/v1/robots/{robot}/aux" if route == "aux"
                else f"/v1/pet/{robot}/voice-context?query=blue%20key")
