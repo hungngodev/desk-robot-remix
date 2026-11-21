@@ -2,7 +2,6 @@
 
 import httpx
 import pytest
-
 from desk_robot.config import RobotConfig
 from desk_robot.transport import HeadError, HttpHead
 
