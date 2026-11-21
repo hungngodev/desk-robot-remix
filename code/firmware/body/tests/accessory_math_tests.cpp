@@ -17,6 +17,19 @@ int main() {
     CHECK(desk_robot::ina226_bus_mv(9584) == 11980);
     CHECK(desk_robot::ina226_shunt_uv(8000) == 20000);
     CHECK(desk_robot::ina226_shunt_uv(-8000) == -20000);
+    // INA226 16-bit register rails must be rejected BEFORE scaling.
+    // Positive 0x7fff truncates below the converted 81920uV ceiling.
+    int shunt_uv = 123;
+    CHECK(!desk_robot::ina226_shunt_uv_from_raw(0x7fffU, shunt_uv));
+    CHECK(shunt_uv == 123); // failed sample must not overwrite prior value
+    CHECK(!desk_robot::ina226_shunt_uv_from_raw(0x8000U, shunt_uv));
+    CHECK(shunt_uv == 123);
+    CHECK(desk_robot::ina226_shunt_uv_from_raw(0x7ffeU, shunt_uv));
+    CHECK(shunt_uv == 81915);
+    CHECK(desk_robot::ina226_shunt_uv_from_raw(0x8001U, shunt_uv));
+    CHECK(shunt_uv == -81917);
+    CHECK(desk_robot::ina226_shunt_uv_from_raw(0U, shunt_uv));
+    CHECK(shunt_uv == 0);
     // Four physically distinct BQ2407x PGOOD/CHG combinations.
     // PGOOD high while CHG low is a diagnostic contradiction, not
     // permission to erase CHG before the WROOM receives it.

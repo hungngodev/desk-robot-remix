@@ -31,6 +31,14 @@ inline unsigned ina226_bus_mv(std::uint16_t raw) {
 inline int ina226_shunt_uv(std::int16_t raw) {
   return static_cast<int>(raw) * 5 / 2;
 }
+// A converted-only +/-81920uV limit misses the positive ADC rail:
+// 0x7fff rounds down to 81917uV. Reject BOTH signed saturation codes
+// before division; do not assign an old shunt reading a fresh identity.
+inline bool ina226_shunt_uv_from_raw(std::uint16_t raw, int& out_uv) {
+  if (raw == 0x7fffU || raw == 0x8000U) return false;
+  out_uv = ina226_shunt_uv(static_cast<std::int16_t>(raw));
+  return true;
+}
 inline bool ina226_pack_current_ma(int signed_shunt_uv,
                                    unsigned shunt_milliohm, int& out_ma) {
   // TI INA226: +/-81.92mV, 2.5uV LSB. Choose exactly one physically
