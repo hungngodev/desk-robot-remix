@@ -152,7 +152,13 @@ store them outside the local protected trial directory.
    and refuses a capture whose physical BOOT mute changed during recording.
    The client requires exactly 64000 stereo PCM frames and a four-second
    device timestamp span within 80 ms, and rejects truncated/oversized
-   replies. The Sense buffer also rejects individual microphone callback
+   replies. It additionally checks that the authenticated codec's PDM read
+   counter advanced by at least 64000 frames and that accepted speaker I2S
+   frames increased during this capture. A silent or inactive speaker trial
+   is rejected before saving WAV files, but I2S acceptance remains strictly
+   software activity evidence, not actual audible playback. Saturated
+   counters require a fresh, safely restarted bench session.
+   The Sense buffer also rejects individual microphone callback
    gaps larger than the frame duration plus 40 ms. These conservative
    limits protect software timestamp validity, not physical AEC quality.
    It makes **no automatic retry** of a possibly already-started capture.
