@@ -63,6 +63,64 @@ def test_flat_contact_and_duplicate_or_reordered_hardware_frames_rejected():
         propose(samples)
 
 
+async def test_real_jaw_calibration_refuses_missing_wroom_boot_or_age():
+    def respond(_request):
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"valid": True, "calibrated": False,
+                      "adc": [0, 100], "jaw_seq": 1},
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ValueError, match="requires WROOM boot and jaw age"):
+            await capture(client, base_url="http://127.0.0.1:8008",
+                          robot="robot-01", token="s" * 32,
+                          count=5, interval=0.12, boot_state={})
+
+
+async def test_real_jaw_calibration_rejects_reboot_amid_independent_samples():
+    sequence = 0
+    def respond(_request):
+        nonlocal sequence
+        sequence += 1
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"valid": True, "calibrated": False,
+                      "adc": [0, 100], "jaw_seq": sequence,
+                      "boot_id": 5 if sequence < 3 else 6,
+                      "jaw_age_ms": 10},
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ValueError, match="WROOM reboot"):
+            await capture(client, base_url="http://127.0.0.1:8008",
+                          robot="robot-01", token="s" * 32,
+                          count=5, interval=0.12, boot_state={})
+
+
+async def test_real_jaw_calibration_preserves_boot_across_manual_phases():
+    sequence = 0
+    current_boot = 17
+    def respond(_request):
+        nonlocal sequence
+        sequence += 1
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"valid": True, "calibrated": False,
+                      "adc": [0, 100], "jaw_seq": sequence,
+                      "boot_id": current_boot, "jaw_age_ms": 10},
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        shared_boot = {}
+        first = await capture(client, base_url="http://127.0.0.1:8008",
+                              robot="robot-01", token="s" * 32,
+                              count=5, interval=0.12, boot_state=shared_boot)
+        assert len(first) == 5 and shared_boot["boot_id"] == 17
+        current_boot = 18
+        with pytest.raises(ValueError, match="WROOM reboot"):
+            await capture(client, base_url="http://127.0.0.1:8008",
+                          robot="robot-01", token="s" * 32,
+                          count=5, interval=0.12, boot_state=shared_boot)
+
+
 async def test_capture_requires_independent_jaw_seq_and_reuses_existing_aux():
     next_seq = 0
     def respond(request):

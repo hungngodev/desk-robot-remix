@@ -13,6 +13,7 @@ import json
 import math
 import os
 import statistics
+import time
 from pathlib import Path
 
 import httpx
@@ -82,12 +83,14 @@ def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
 async def capture(
     client: httpx.AsyncClient, *, base_url: str, robot: str,
     token: str, count: int = 8, interval: float = 0.18,
+    boot_state: dict | None = None,
 ) -> list[tuple[int, int]]:
     if not 5 <= count <= 40 or not 0.12 <= interval <= 2:
         raise ValueError("Invalid real ADC sampling cadence")
     samples = []
     seen = None
     for _ in range(count * 5):
+        started = time.monotonic()
         response = await client.get(
             f"{base_url.rstrip('/')}/v1/robots/{robot}/aux",
             headers={"Authorization": f"Bearer {token}"}, timeout=3.0,
@@ -100,6 +103,21 @@ async def capture(
         if not isinstance(payload, dict) or payload.get("robot_id") != robot:
             raise ValueError("Jaw calibration robot identity mismatch")
         adc, seq = force_observation(payload)
+        if boot_state is not None:
+            # The real WROOM reports one boot identity and acquisition age.
+            # A reboot between unloaded, light and upper force trials cannot
+            # be disguised as a uint32 ADC sequence rollover.
+            force = payload["force"]
+            boot = force.get("boot_id")
+            age = force.get("jaw_age_ms")
+            if (type(boot) is not int or not 0 <= boot <= 0xffffffff
+                    or type(age) is not int or not 0 <= age < 500):
+                raise ValueError("Physical jaw calibration requires WROOM boot and jaw age")
+            if "boot_id" in boot_state and boot_state["boot_id"] != boot:
+                raise ValueError("WROOM reboot invalidated jaw force calibration")
+            if age + max(0, int((time.monotonic() - started) * 1000)) >= 500:
+                raise ValueError("Stale jaw force calibration sample in transport")
+            boot_state["boot_id"] = boot
         if seen is None or _fresh_jaw_sequence(seq, seen):
             samples.append((adc, seq))
             seen = seq
@@ -126,6 +144,7 @@ async def main() -> None:
     if not isinstance(source, dict):
         raise ValueError("Calibration must be JSON object")
     readings = {}
+    boot_state = {}  # shared WROOM identity across all three manual phases
     async with httpx.AsyncClient() as client:
         for key, step in (
             ("free", "Release the jaw sensor: no object and no applied pressure"),
@@ -135,7 +154,7 @@ async def main() -> None:
             input(step + ". Press Enter to record samples. ")
             readings[key] = await capture(
                 client, base_url=args.url, robot=args.robot,
-                token=token, count=args.samples,
+                token=token, count=args.samples, boot_state=boot_state,
             )
     proposed = propose_force_limits(readings)
     # Never silently enable autonomous grasping based on raw ADC alone.
