@@ -130,6 +130,37 @@ def test_amg8833_high_gain_pixel_range_matches_panasonic(pixel, valid):
             accept(payload)
 
 
+def test_shared_room_context_retains_raw_thermal_range_and_radar_distance():
+    payload = frame()
+    payload["readings"]["amg8833"]["pixels_c"][17] = 37.5
+    evidence = accept(payload)
+    assert "Station radar detected an echo, stationary 107 cm" in evidence.summary
+    assert "Station thermal raw 23.0..37.5 C" in evidence.summary
+    assert "unclassified pixels" in evidence.summary
+    assert len(evidence.summary) <= 300
+    assert evidence.person_identified is False
+    assert evidence.motion_authorized is False
+    assert evidence.charging_authorized is False
+
+    hub = CameraFrameHub(["robot-01"])
+    hub.remember_room(evidence)
+    observed = [item for item in hub.interaction_timeline("robot-01", now=1.5)
+                if item["channel"] == "room_station"]
+    assert len(observed) == 1
+    assert "thermal raw 23.0..37.5 C" in observed[0]["content"]
+    assert observed[0]["shared_not_robot_eyewitness"] is True
+
+    payload["readings"]["ld2410c"].update(moving=True, stationary=False,
+                                           moving_cm=24)
+    moving = accept(payload)
+    assert "moving 24 cm" in moving.summary
+    payload["readings"]["amg8833"] = {"valid": False}
+    payload["readings"]["ld2410c"].update(presence=False, moving=False)
+    absent = accept(payload)
+    assert "thermal raw" not in absent.summary
+    assert "stationary 107 cm" not in absent.summary
+
+
 def test_full_read_only_room_frame_has_provenance_not_actuator_authority():
     evidence = accept(frame())
     assert evidence.seq == 1
