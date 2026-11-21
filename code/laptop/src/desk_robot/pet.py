@@ -2186,16 +2186,15 @@ class PetController:
         # The existing camera hub owns all transient sensor/tool events.
         # No second model, audio stack or memory database is introduced.
         jobs = getattr(self, "coordinator_jobs", None)
+        # A read-only coordinator job is not camera evidence. Retain its
+        # bounded status after camera opt-out without authorizing movement.
         activity = (
             active_job_timeline(jobs.values(), robot_id)
-            if (isinstance(jobs, dict)
-                and (self.settings.mode != "hardware"
-                     or self.settings.voice_vision_tools_enabled))
-            else []
+            if isinstance(jobs, dict) else []
         )
+        # Group text requires its own explicit sharing consent, not vision.
         if (self.settings.mode != "hardware"
-                or (self.settings.voice_vision_tools_enabled
-                    and self.settings.fleet_text_sharing_enabled)):
+                or self.settings.fleet_text_sharing_enabled):
             ongoing = getattr(self.conversation, "group_activity_timeline", None)
             if callable(ongoing):
                 activity.extend(ongoing(robot_id))
@@ -2211,37 +2210,60 @@ class PetController:
         timeline = []
         # A physical touch can still trigger curiosity after visual opt
         # out; it must not reuse the old opt-in ASR/camera/tool timeline.
-        if (self.multimodal is not None
-                and (self.settings.mode != "hardware"
-                     or self.settings.voice_vision_tools_enabled)):
+        if self.multimodal is not None:
             hub = self.multimodal.hub
             now = time.monotonic()
             ordered = getattr(hub, "interaction_timeline", None)
+            live_media_allowed = (
+                self.settings.mode != "hardware"
+                or self.settings.voice_vision_tools_enabled
+            )
             if callable(ordered):
-                # Active jobs and current turn ownership take precedence over
-                # optional past events. The hub rejects limit <= 0; when
-                # those higher-priority cues fill this budget, skip the read
-                # instead of crashing the normal spontaneous activity path.
                 remaining = max(0, 10 - len(activity) - len(continuity))
                 if remaining:
-                    timeline = ordered(robot_id, now, limit=remaining)
-                    if not self.settings.voice_memory_tools_enabled:
+                    # The single hub retains independent physical sensor
+                    # receipts even after camera/ASR opt-out. Filter BEFORE
+                    # taking the conversational budget; do not let retained
+                    # old camera/ASR traffic evict a new WROOM safety fault.
+                    raw = ordered(
+                        robot_id, now, limit=remaining if live_media_allowed else 16
+                    )
+                    if live_media_allowed:
                         timeline = [
-                            item for item in timeline
-                            if not (item.get("channel") == "tool"
-                                    and item.get("kind") == "memory_recall")
+                            item for item in raw
+                            if (self.settings.voice_memory_tools_enabled
+                                or not (item.get("channel") == "tool"
+                                        and item.get("kind") == "memory_recall"))
                         ]
+                    else:
+                        timeline = [
+                            item for item in raw
+                            if (item.get("channel") == "sensor"
+                                and item.get("source") == "wroom_event")
+                            or (item.get("channel") == "sensor_history"
+                                and item.get("source") == "wroom_event_history")
+                            or (item.get("channel") == "room_station"
+                                and item.get("shared_not_robot_eyewitness") is True)
+                        ][-remaining:]
             else:
                 hints = hub.recent_events(robot_id, now)
                 timeline = [
                     {"channel": "sensor", "kind": item["kind"]}
                     for item in hints
+                    if (live_media_allowed
+                        or item.get("source") == "wroom_sensed_event")
                 ]
         # Mac activity remains a nonauthoritative live status, never a
         # separate speech trigger, past memory, or motor permission.
         timeline.extend(activity)
         timeline.extend(continuity)
-        live_context_used = self.settings.mode == "hardware" and bool(timeline)
+        # This is a consent fence for camera, ASR and tool context ONLY.
+        # Physical WROOM events and read-only jobs are independently allowed.
+        live_context_used = (
+            self.settings.mode == "hardware"
+            and self.settings.voice_vision_tools_enabled
+            and bool(timeline)
+        )
         context = compose_brain_context(memory, core_memory, timeline)
         return recent_memory, context, private_memory_allowed, live_context_used
 
