@@ -144,9 +144,12 @@ store them outside the local protected trial directory.
    `microphone_privacy_muted=false`. Missing or nonzero configuration
    stops the client before any START request. It also validates the same
    robot identity and boot epoch through capture status and raw PCM headers,
-   requires exactly 64000 stereo PCM frames and a plausible four-second
-   device timestamp span, and rejects truncated/oversized replies. It
-   makes **no automatic retry** of a possibly already-started capture.
+   requires exactly 64000 stereo PCM frames and a four-second
+   device timestamp span within 80 ms, and rejects truncated/oversized
+   replies. The Sense buffer also rejects individual microphone callback
+   gaps larger than the frame duration plus 40 ms. These conservative
+   limits protect software timestamp validity, not physical AEC quality.
+   It makes **no automatic retry** of a possibly already-started capture.
    The output is private mode 0600 `microphone.wav`,
    `speaker_reference.wav`, and `capture.json`, in a mode 0700
    directory with no overwrite.
