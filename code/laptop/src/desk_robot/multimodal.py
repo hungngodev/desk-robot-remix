@@ -14,6 +14,7 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import aclosing
 from dataclasses import dataclass
 from io import BytesIO
 from typing import TYPE_CHECKING
@@ -1024,105 +1025,110 @@ class MultimodalOrchestrator:
         failures = 0
         while not self._closed and self.settings.voice_vision_tools_enabled:
             try:
-                async for jpeg, received in head.stream_frames():
-                    if self._closed or not self.settings.voice_vision_tools_enabled:
-                        self.hub.discard_video(robot_id)
-                        return
-                    failures = 0  # Healthy frames reset reconnection backoff.
-                    metrics = self._metrics[robot_id]
-                    metrics["stream_frames_received"] += 1
-                    # Camera feed can be 4 FPS while cheap motion sampling is
-                    # at most 2 FPS. No frame means no model work; no queue
-                    # grows while Mac inference is busy.
-                    now = time.monotonic()
-                    # The head supplies MAC receipt times, not device clocks.
-                    # Validate before storing the sampler cursor: a future
-                    # timestamp would otherwise suppress every later real
-                    # frame, while NaN would disable cadence filtering.
-                    if (not _finite(received)
-                            or received > now + 0.5
-                            or now - received > 6.0
-                            or received <= self._last_stream_sample[robot_id]):
-                        metrics["stream_frames_skipped"] += 1
-                        continue
-                    local_speech = self.hub.user_active(robot_id, now)
-                    # Another robot's human voice has priority for inference
-                    # and the speaker, NOT a license to blind this robot.
-                    # Continue lighter passive observation across the fleet.
-                    sample_gap = (
-                        1.0 if self._any_human_active(now) and not local_speech
-                        else 0.5
-                    )
-                    # A fresh physical touch/cliff/handling edge deserves
-                    # the next ALREADY streamed frame, even within the
-                    # ordinary 500 ms idle sampling gap. Reuse the existing
-                    # video feed instead of opening /api/camera.jpg. Do not
-                    # accelerate inference or interfere with active human VAD.
-                    recent_sensor_edge = (
-                        self.hub.urgent[robot_id]
-                        and not self._any_human_active(now)
-                        and any(
-                            kind != "human_voice"
-                            and 0 <= received - event_at <= 0.8
-                            for kind, event_at in
-                            self.hub.event_history[robot_id]
+                # Closing the consumer must promptly release the head's sole
+                # MJPEG HTTP lease, especially on live visual opt out. Plain
+                # async-for does not guarantee an async generator is closed
+                # before a return from the enclosing coroutine.
+                async with aclosing(head.stream_frames()) as stream:
+                    async for jpeg, received in stream:
+                        if self._closed or not self.settings.voice_vision_tools_enabled:
+                            self.hub.discard_video(robot_id)
+                            return
+                        failures = 0  # Healthy frames reset reconnection backoff.
+                        metrics = self._metrics[robot_id]
+                        metrics["stream_frames_received"] += 1
+                        # Camera feed can be 4 FPS while cheap motion sampling is
+                        # at most 2 FPS. No frame means no model work; no queue
+                        # grows while Mac inference is busy.
+                        now = time.monotonic()
+                        # The head supplies MAC receipt times, not device clocks.
+                        # Validate before storing the sampler cursor: a future
+                        # timestamp would otherwise suppress every later real
+                        # frame, while NaN would disable cadence filtering.
+                        if (not _finite(received)
+                                or received > now + 0.5
+                                or now - received > 6.0
+                                or received <= self._last_stream_sample[robot_id]):
+                            metrics["stream_frames_skipped"] += 1
+                            continue
+                        local_speech = self.hub.user_active(robot_id, now)
+                        # Another robot's human voice has priority for inference
+                        # and the speaker, NOT a license to blind this robot.
+                        # Continue lighter passive observation across the fleet.
+                        sample_gap = (
+                            1.0 if self._any_human_active(now) and not local_speech
+                            else 0.5
                         )
-                    )
-                    # Prime two selected frames for actual motion scoring,
-                    # then let the existing hub set the idle/active/VAD rate.
-                    # The stream is still drained continuously, and genuine
-                    # physical triggers bypass both optional sampling gates.
-                    bootstrap = metrics["stream_frames_selected"] < 2
-                    if not recent_sensor_edge and (
-                        received - self._last_stream_sample[robot_id] < sample_gap
-                        or (not bootstrap and not self.hub.due(robot_id, received))
-                    ):
-                        metrics["stream_frames_skipped"] += 1
-                        continue
-                    self._last_stream_sample[robot_id] = received
-                    source = "speech" if local_speech else "proactive"
-                    turn = self._turn_epoch[robot_id]
-                    generation = self.hub._generation[robot_id]
-                    try:
-                        prepared = await self._prepare_bounded(
-                            jpeg, priority=source == "speech"
+                        # A fresh physical touch/cliff/handling edge deserves
+                        # the next ALREADY streamed frame, even within the
+                        # ordinary 500 ms idle sampling gap. Reuse the existing
+                        # video feed instead of opening /api/camera.jpg. Do not
+                        # accelerate inference or interfere with active human VAD.
+                        recent_sensor_edge = (
+                            self.hub.urgent[robot_id]
+                            and not self._any_human_active(now)
+                            and any(
+                                kind != "human_voice"
+                                and 0 <= received - event_at <= 0.8
+                                for kind, event_at in
+                                self.hub.event_history[robot_id]
+                            )
                         )
-                    except (RuntimeError, ValueError, OSError):
-                        # A malformed or truncated JPEG is a bad FRAME, not
-                        # a dead camera connection. Preserve the continuous
-                        # stream and allow the next legitimate frame through.
-                        # A true stream transport failure is still handled
-                        # by the outer reconnect loop.
-                        metrics["stream_frames_skipped"] += 1
-                        continue
-                    if not self.settings.voice_vision_tools_enabled:
-                        # Opt out can arrive while Pillow/motion preparation
-                        # owns the frame. Do not publish that completed JPEG
-                        # to the Mac hub, native subscriber or pet observer.
-                        self.hub.discard_video(robot_id)
-                        return
-                    if (self._closed or turn != self._turn_epoch[robot_id]
-                            or generation != self.hub._generation[robot_id]
-                            or (source == "proactive"
-                                and received <= self._last_fleet_human_turn_at)):
-                        metrics["stream_frames_skipped"] += 1
-                        continue
-                    try:
-                        self.hub.offer_prepared(
-                            robot_id, prepared, received, source=source,
-                            generation=generation,
-                        )
-                    except (RuntimeError, ValueError):
-                        metrics["stream_frames_skipped"] += 1
-                    else:
-                        metrics["stream_frames_selected"] += 1
-                        # An attempted urgent frame that failed JPEG decoding
-                        # must never masquerade as successful sensor context.
-                        if recent_sensor_edge:
-                            metrics["stream_sensor_priority_frames"] += 1
-                        async with self._model_frame_conditions[robot_id]:
-                            self._model_frame_versions[robot_id] += 1
-                            self._model_frame_conditions[robot_id].notify_all()
+                        # Prime two selected frames for actual motion scoring,
+                        # then let the existing hub set the idle/active/VAD rate.
+                        # The stream is still drained continuously, and genuine
+                        # physical triggers bypass both optional sampling gates.
+                        bootstrap = metrics["stream_frames_selected"] < 2
+                        if not recent_sensor_edge and (
+                            received - self._last_stream_sample[robot_id] < sample_gap
+                            or (not bootstrap and not self.hub.due(robot_id, received))
+                        ):
+                            metrics["stream_frames_skipped"] += 1
+                            continue
+                        self._last_stream_sample[robot_id] = received
+                        source = "speech" if local_speech else "proactive"
+                        turn = self._turn_epoch[robot_id]
+                        generation = self.hub._generation[robot_id]
+                        try:
+                            prepared = await self._prepare_bounded(
+                                jpeg, priority=source == "speech"
+                            )
+                        except (RuntimeError, ValueError, OSError):
+                            # A malformed or truncated JPEG is a bad FRAME, not
+                            # a dead camera connection. Preserve the continuous
+                            # stream and allow the next legitimate frame through.
+                            # A true stream transport failure is still handled
+                            # by the outer reconnect loop.
+                            metrics["stream_frames_skipped"] += 1
+                            continue
+                        if not self.settings.voice_vision_tools_enabled:
+                            # Opt out can arrive while Pillow/motion preparation
+                            # owns the frame. Do not publish that completed JPEG
+                            # to the Mac hub, native subscriber or pet observer.
+                            self.hub.discard_video(robot_id)
+                            return
+                        if (self._closed or turn != self._turn_epoch[robot_id]
+                                or generation != self.hub._generation[robot_id]
+                                or (source == "proactive"
+                                    and received <= self._last_fleet_human_turn_at)):
+                            metrics["stream_frames_skipped"] += 1
+                            continue
+                        try:
+                            self.hub.offer_prepared(
+                                robot_id, prepared, received, source=source,
+                                generation=generation,
+                            )
+                        except (RuntimeError, ValueError):
+                            metrics["stream_frames_skipped"] += 1
+                        else:
+                            metrics["stream_frames_selected"] += 1
+                            # An attempted urgent frame that failed JPEG decoding
+                            # must never masquerade as successful sensor context.
+                            if recent_sensor_edge:
+                                metrics["stream_sensor_priority_frames"] += 1
+                            async with self._model_frame_conditions[robot_id]:
+                                self._model_frame_versions[robot_id] += 1
+                                self._model_frame_conditions[robot_id].notify_all()
                 if self._closed:
                     break
                 raise RuntimeError("XIAO camera stream ended")
