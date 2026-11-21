@@ -301,6 +301,8 @@ SenseReferenceCodec::GetReferenceDiagnostics() {
         missing_reference_reads_, reference_overwrite_reads_,
         stale_publish_discards_, short_output_writes_,
         microphone_frames_read_, speaker_frames_accepted_,
+        microphone_privacy_muted_.load(std::memory_order_acquire),
+        microphone_privacy_epoch_.load(std::memory_order_acquire),
         reference_integrity_failed_};
 }
 
