@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -82,6 +83,21 @@ class KeyScene:
         self.calls += 1
         assert before == WHITE and after == RED
         return SceneChange("key", "A flat key appeared on the desk", 0.96)
+
+
+class PassiveBudgetSimulatedSpeaker(SimulatedSpeaker):
+    """Test-only speaker that models the shared passive lease contract.
+
+    This is neither a real Xiaozhi playback grant nor acoustic evidence.
+    Hardware-mode policy tests should not bypass production budget checks.
+    """
+    supports_passive_speech_budget = True
+
+    @asynccontextmanager
+    async def session(self, robots, *, passive=False):
+        assert passive is True
+        assert len(robots) == 1
+        yield
 
 
 async def wait_for(predicate, timeout=2):
@@ -2913,10 +2929,12 @@ async def test_proactive_private_wav_revoked_during_kokoro_never_reaches_head(
             calls.append(url)
             body = kwargs.get("json", {})
             if url.endswith("/session"):
+                assert body.get("passive") is True
                 return Response(payload={
                     "device_ids": sorted(body["device_ids"]),
                     "enabled": body["enabled"],
                     "expires_in_seconds": 305 if body["enabled"] else 0,
+                    "passive": True,
                 })
             if url.endswith("/v1/audio/speech"):
                 if revocation == "private_memory":
@@ -3042,7 +3060,7 @@ async def test_proactive_hardware_voice_never_reads_private_history_without_opt_
         memory.core_facts = denied
 
     chat = GroundedChat()
-    speaker = SimulatedSpeaker()
+    speaker = PassiveBudgetSimulatedSpeaker()
     pet = PetController(
         fleet, {}, Conversation(fleet, chat, speaker, memory=memory),
         memory, KeyScene(), speech_cooldown=0,
@@ -3086,7 +3104,7 @@ async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
     )
     memory = MemoryStore(tmp_path, ids)
     chat = GroundedChat()
-    speaker = SimulatedSpeaker()
+    speaker = PassiveBudgetSimulatedSpeaker()
     pet = PetController(
         fleet, {}, Conversation(fleet, chat, speaker, memory=memory),
         memory, KeyScene(),
@@ -3202,10 +3220,12 @@ async def test_proactive_sensor_private_live_context_revoked_during_tts(
             calls.append(url)
             body = kwargs.get("json", {})
             if url.endswith("/session"):
+                assert body.get("passive") is True
                 return Response({
                     "device_ids": sorted(body["device_ids"]),
                     "enabled": body["enabled"],
                     "expires_in_seconds": 305 if body["enabled"] else 0,
+                    "passive": True,
                 })
             if url.endswith("/v1/audio/speech"):
                 fleet.voice_vision_tools_enabled = False
