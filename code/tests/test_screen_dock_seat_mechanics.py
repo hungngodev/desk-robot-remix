@@ -29,6 +29,7 @@ def example():
         "operating_displacement_mm": 1.5,
         "planned_stop_displacement_mm": 2.0,
         "safe_total_displacement_mm": 2.5,
+        "required_travel_reserve_mm": 0.2,
     }
 
 
@@ -37,6 +38,7 @@ def test_source_cad_fixture_trial_cannot_approve_physical_dock():
     assert result["source_only_layout_possible"]
     assert result["switch_pair_separately_located"]
     assert result["stop_displacement_inside_measured_travel"]
+    assert result["ir_emitter_aperture_inside_backstop"]
     assert len(result["switches"]) == 2
     assert all(s["within_backstop_with_2mm_web"] for s in result["switches"])
     assert all(s["avoids_apriltag_paper_with_2mm_gap"] for s in result["switches"])
@@ -56,6 +58,9 @@ def test_source_cad_fixture_trial_cannot_approve_physical_dock():
     ("switch_body_width_mm", 30),
     ("switch_center_z_mm", 89),
     ("ir_emitter_center_z_mm", 24),
+    ("ir_emitter_center_z_mm", 110),
+    ("planned_stop_displacement_mm", 2.5),
+    ("required_travel_reserve_mm", 0.6),
     ("planned_stop_displacement_mm", 1.0),
     ("planned_stop_displacement_mm", 3.0),
     ("safe_total_displacement_mm", 1.6),

@@ -19,7 +19,7 @@ NUMERICS = (
     "seat_pair_spacing_mm", "switch_body_width_mm", "switch_body_height_mm",
     "switch_center_z_mm", "ir_emitter_center_z_mm",
     "operating_displacement_mm", "planned_stop_displacement_mm",
-    "safe_total_displacement_mm",
+    "safe_total_displacement_mm", "required_travel_reserve_mm",
 )
 
 
@@ -143,10 +143,20 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
     independent_separation = (
         d["seat_pair_spacing_mm"] - d["switch_body_width_mm"] >= 2 * margin
     )
+    # Vendor total safe travel is a LIMIT, not an acceptable hard stop.
+    # Caller supplies real mechanical/print tolerance from its measured
+    # installed switch: require the reserve on BOTH sides of the operating
+    # threshold and before the maximum total travel.
     actuation = (
-        d["operating_displacement_mm"]
-        < d["planned_stop_displacement_mm"]
-        <= d["safe_total_displacement_mm"]
+        d["operating_displacement_mm"] + d["required_travel_reserve_mm"]
+        <= d["planned_stop_displacement_mm"]
+        <= d["safe_total_displacement_mm"] - d["required_travel_reserve_mm"]
+    )
+    ir_emitter_within_backstop = (
+        geometry["backstop_min_z_mm"] + geometry["ir_hole_radius_mm"] + margin
+        <= d["ir_emitter_center_z_mm"]
+        <= geometry["backstop_max_z_mm"]
+        - geometry["ir_hole_radius_mm"] - margin
     )
     fits = (
         all(c["within_backstop_with_2mm_web"]
@@ -154,6 +164,7 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
             and c["avoids_nominal_ir_hole_with_2mm_gap"]
             for c in checks)
         and independent_separation and actuation
+        and ir_emitter_within_backstop
     )
     return {
         "dock_id": d["dock_id"],
@@ -161,6 +172,7 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
         "source_only_layout_possible": fits,
         "switch_pair_separately_located": independent_separation,
         "stop_displacement_inside_measured_travel": actuation,
+        "ir_emitter_aperture_inside_backstop": ir_emitter_within_backstop,
         "switches": checks,
         "normally_closed_polarity_physically_tested": False,
         "switch_bounce_and_faults_physically_tested": False,

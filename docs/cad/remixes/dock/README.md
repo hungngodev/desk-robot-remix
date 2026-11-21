@@ -118,8 +118,12 @@ from the repository root. The JSON must include `dock_id` (1 through 5),
 `cad_source_sha256` of this exact SCAD file, `seat_pair_spacing_mm`,
 `switch_body_width_mm`, `switch_body_height_mm`,
 `switch_center_z_mm`, `ir_emitter_center_z_mm`,
-`operating_displacement_mm`, `planned_stop_displacement_mm` and
-`safe_total_displacement_mm`.
+`operating_displacement_mm`, `planned_stop_displacement_mm`,
+`safe_total_displacement_mm` and `required_travel_reserve_mm`. The measured
+travel reserve must fit both after the operating point and before the
+manufacturer's maximum total plunger travel; the program will reject a
+hard stop at the switch's travel limit. The mounted IR aperture must also
+remain inside the actual backstop height.
 
 The tool rejects missing, ambiguous or stale evidence. It checks both
 switch footprints against the actual printed tag pocket, nominal IR hole
