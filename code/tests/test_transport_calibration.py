@@ -930,14 +930,14 @@ async def test_dock_uses_recent_stream_receipt_without_still_capture(
         with pytest.raises(HeadError, match="connected live camera stream"):
             await head.snapshot_for_dock()
         head._stream_connected = True
-        head._stream_latest = b"\\xff\\xd8dock\\xff\\xd9"
+        head._stream_latest = b"\xff\xd8dock\xff\xd9"
         head._stream_version = 1
         head._stream_received_at = time.monotonic() - 0.5
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(head.snapshot_for_dock(), timeout=0.06)
         assert head._snapshot_version == 0
         head._stream_received_at = time.monotonic()
-        assert await head.snapshot_for_dock() == b"\\xff\\xd8dock\\xff\\xd9"
+        assert await head.snapshot_for_dock() == b"\xff\xd8dock\xff\xd9"
         assert head._snapshot_version == 1
         assert requests == []
 
