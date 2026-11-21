@@ -413,6 +413,14 @@ async def test_kokoro_speech_receipt_must_match_exact_head_and_not_claim_acousti
 
     def respond(request):
         seen.append(request.url.path)
+        if request.url.path == "/session":
+            body = json.loads(request.content)
+            return httpx.Response(200, json={
+                "device_ids": body["device_ids"],
+                "enabled": body["enabled"],
+                "expires_in_seconds": 305 if body["enabled"] else 0,
+                "lease_id": body["lease_id"],
+            })
         if request.url.path == "/v1/audio/speech":
             return httpx.Response(200, content=b"RIFFsynthetic-audio")
         assert request.url.path == "/speak"
@@ -427,12 +435,13 @@ async def test_kokoro_speech_receipt_must_match_exact_head_and_not_claim_acousti
     robot = SimpleNamespace(device_id="head-01", voice="af_bella")
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         speaker = KokoroHeadSpeaker(settings, client)
-        if acceptable:
-            await speaker.say(robot, "Hello there")
-        else:
-            with pytest.raises(RuntimeError, match="receipt missing matching head identity"):
+        async with speaker.session([robot]):
+            if acceptable:
                 await speaker.say(robot, "Hello there")
-    assert seen == ["/v1/audio/speech", "/speak"]
+            else:
+                with pytest.raises(RuntimeError, match="receipt missing matching head identity"):
+                    await speaker.say(robot, "Hello there")
+    assert seen == ["/session", "/v1/audio/speech", "/speak", "/session"]
 
 
 @pytest.mark.parametrize("corrupt_grant", [

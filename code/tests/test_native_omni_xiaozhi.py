@@ -4075,7 +4075,7 @@ async def test_private_memory_edit_during_native_tts_never_queues_old_audio(nati
     )
     assert (mac.reads, mac.writes) == (2, 1)
     assert session.closed
-    assert session.last_error == "Mac private memory changed; native tool response stale"
+    assert session.last_error == "Mac private memory changed; native session must restart"
     assert session.outgoing.empty()
     assert session.native_tool_audio_queued == 0
 

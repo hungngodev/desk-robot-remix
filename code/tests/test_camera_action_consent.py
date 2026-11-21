@@ -82,7 +82,7 @@ async def test_pickup_revocation_during_observe_never_grasps(settings, regrant):
     controller._assert_armed_health = healthy
     controller._observe = observe
     calibration = SimpleNamespace(
-        grip_open=20, lift_down=10, servo_settle_seconds=0,
+        grip_open=70, lift_down=80, servo_settle_seconds=0,
         ground=lambda center: (0, 0), within=lambda position: True,
         grip_ground_mm=(0, 0), alignment_tolerance_mm=1,
     )
@@ -92,6 +92,6 @@ async def test_pickup_revocation_during_observe_never_grasps(settings, regrant):
                 Job("pickup-consent", "robot-01", "pickup"),
                 "key", calibration, camera_grant=grant,
             )
-        assert head.commands == ["grip 20", "lift 10"]
+        assert head.commands == ["grip 70", "lift 80"]
     finally:
         await controller.close()

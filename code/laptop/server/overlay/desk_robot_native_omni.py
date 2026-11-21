@@ -378,6 +378,7 @@ class NativeOmniSession:
     def fail(self, reason: str) -> None:
         self.last_error = reason[:140]
         self.closed = True
+        self._mac_context_verified = False
         task = self.started
         if task is not None and not task.done():
             task.cancel()
