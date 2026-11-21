@@ -838,19 +838,58 @@ class Coordinator:
             raise OperationError("Real pickup requires at least three seconds of verified hold")
         if self.settings.mode == "hardware" and calibration.grip_force_delta_raw is None:
             raise OperationError("Real pickup requires measured ADS1115 gripper contact threshold")
+        if self.settings.mode == "hardware":
+            self._pickup_live_media(robot_id)
         return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
+
+    def _pickup_live_media(self, robot_id: str):
+        """Never let hardware grasp use a stale or privately disabled camera."""
+        media = self.multimodal
+        if (media is None or not self.settings.voice_vision_tools_enabled
+                or not media.stream_owns_camera(robot_id)
+                or not media.status(robot_id)["camera_stream_connected"]):
+            raise OperationError("Hardware pickup requires connected live XIAO camera stream")
+        return media
 
     async def _observe(
         self, robot_id: str, target: str, c: Calibration,
+        *, after: float = float("-inf"),
     ) -> tuple[Detection, float]:
-        jpeg = await _bounded_head_reply(
-            self.heads[robot_id].snapshot(), seconds=3.0,
-            timeout_message="Pickup camera snapshot timeout",
-        )
-        # This is the Mac JPEG receipt time, NOT sensor exposure time.
-        # Returning it to the physical action owner prevents slow inference
-        # or later slow WROOM preflight from driving on obsolete pixels.
-        jpeg_received_at = time.monotonic()
+        if self.settings.mode == "hardware":
+            # Grasp must share the SAME authenticated pushed XIAO MJPEG feed
+            # as exploration and voice, never fall back to /api/camera.jpg.
+            media = self._pickup_live_media(robot_id)
+
+            def newest():
+                return next((
+                    frame for frame in reversed(media.hub.frames[robot_id])
+                    if frame.source in ("proactive", "speech")
+                    and frame.received_at > after
+                    and 0 <= time.monotonic() - frame.received_at <= 1.0
+                ), None)
+
+            frame = newest()
+            if frame is None:
+                await _bounded_head_reply(
+                    media.wait_for_proactive_frame(
+                        robot_id, after, timeout_s=2.0
+                    ), seconds=2.5,
+                    timeout_message="Live pickup camera stalled",
+                )
+                frame = newest()
+            self._pickup_live_media(robot_id)
+            if frame is None:
+                raise OperationError("Live pickup camera stalled")
+            jpeg = frame.jpeg
+            jpeg_received_at = frame.received_at
+        else:
+            jpeg = await _bounded_head_reply(
+                self.heads[robot_id].snapshot(), seconds=3.0,
+                timeout_message="Pickup camera snapshot timeout",
+            )
+            jpeg_received_at = time.monotonic()
+        # A Mac receipt is NOT actual exposure time; a newer physical
+        # stream frame is required for every successive grasp observation.
         if image_size(jpeg) != (c.image_width, c.image_height):
             raise OperationError("Camera resolution differs from measured calibration")
         objects = [
@@ -866,13 +905,27 @@ class Coordinator:
         ]
         if len(objects) != 1:
             raise OperationError("Lost or ambiguous target; stop and request operator intervention")
-        if (self.settings.mode == "hardware"
-                and time.monotonic() - jpeg_received_at > 2.0):
-            raise OperationError("Pickup visual evidence expired during inference")
+        if self.settings.mode == "hardware":
+            self._pickup_live_media(robot_id)
+            if time.monotonic() - jpeg_received_at > 2.0:
+                raise OperationError("Pickup visual evidence expired during inference")
         return objects[0], jpeg_received_at
 
     async def _pickup(self, job: Job, target: str, c: Calibration) -> dict:
         head = self.heads[job.robot_id]
+        if self.settings.mode == "hardware":
+            # A missing camera must stop BEFORE jaw or lift preposition.
+            self._pickup_live_media(job.robot_id)
+        last_live_frame_at = float("-inf")
+
+        async def observe() -> tuple[Detection, float]:
+            nonlocal last_live_frame_at
+            result = await self._observe(
+                job.robot_id, target, c, after=last_live_frame_at
+            )
+            last_live_frame_at = result[1]
+            return result
+
         await self._assert_armed_health(job.robot_id)
         await head.command(f"grip {c.grip_open}")
         await self._assert_armed_health(job.robot_id)
@@ -881,7 +934,7 @@ class Coordinator:
         initial = None
         for attempt in range(24):
             await self._assert_armed_health(job.robot_id)
-            detection, visual_received_at = await self._observe(job.robot_id, target, c)
+            detection, visual_received_at = await observe()
             point = c.ground(detection.center)
             if not c.within(point):
                 raise OperationError("Target outside calibrated work area")
@@ -933,7 +986,7 @@ class Coordinator:
             if sample:
                 await asyncio.sleep(c.hold_seconds)
             await self._assert_armed_health(job.robot_id)
-            detection, _ = await self._observe(job.robot_id, target, c)
+            detection, _ = await observe()
             px, py = detection.center
             if not (a <= px <= x and b <= py <= y):
                 raise OperationError(
@@ -958,7 +1011,7 @@ class Coordinator:
         await self._assert_armed_health(job.robot_id)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
-        lowered, _ = await self._observe(job.robot_id, target, c)
+        lowered, _ = await observe()
         lowered_ground = c.ground(lowered.center)
         if (
             not c.within(lowered_ground)
@@ -980,7 +1033,7 @@ class Coordinator:
             if sample:
                 await asyncio.sleep(0.15)
             await self._assert_armed_health(job.robot_id)
-            placed, _ = await self._observe(job.robot_id, target, c)
+            placed, _ = await observe()
             ground = c.ground(placed.center)
             if (
                 not c.within(ground)

@@ -19,7 +19,17 @@ async def test_slow_pickup_visual_result_expires_without_motion(settings):
     from desk_robot.vision import Detection
 
     settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
     c, head = make(settings)
+    jpeg = await head.snapshot()
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _id: True,
+        status=lambda _id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={"robot-01": [SimpleNamespace(
+            source="proactive", jpeg=jpeg, received_at=time.monotonic()
+        )]}),
+    )
 
     class DelayedDetection:
         async def detect(self, jpeg, target):
@@ -1210,6 +1220,95 @@ async def test_bounded_head_reply_disregards_uncooperative_late_success():
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+async def test_hardware_pickup_refuses_snapshot_without_live_camera_before_jaw_motion(settings):
+    from desk_robot.calibration import Calibration
+
+    settings.mode = "hardware"
+    c, head = make(settings)
+
+    async def forbidden_snapshot():
+        raise AssertionError("No hardware JPEG should be fetched while consent is off")
+
+    head.snapshot = forbidden_snapshot
+    try:
+        with pytest.raises(OperationError, match="connected live XIAO camera"):
+            await c._pickup(
+                Job("missing-pickup-video", "robot-01", "pickup"),
+                "key", Calibration.load(settings.robots[0].calibration),
+            )
+        assert head.commands == []
+    finally:
+        await c.close()
+
+
+async def test_hardware_pickup_consumes_distinct_stream_frames_not_snapshot(settings):
+    from desk_robot.calibration import Calibration
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    c, head = make(settings)
+    jpeg = await head.snapshot()
+
+    async def forbidden_snapshot():
+        raise AssertionError("Pickup duplicated live stream with a physical snapshot")
+
+    async def no_fresh_frame(_robot_id, _after, *, timeout_s):
+        return False
+
+    head.snapshot = forbidden_snapshot
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _id: True,
+        status=lambda _id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={"robot-01": [SimpleNamespace(
+            source="proactive", jpeg=jpeg, received_at=time.monotonic()
+        )]}),
+        wait_for_proactive_frame=no_fresh_frame,
+    )
+    cals = Calibration.load(settings.robots[0].calibration)
+    try:
+        detection, first_at = await c._observe("robot-01", "key", cals)
+        assert detection.label == "key"
+        with pytest.raises(OperationError, match="camera stalled"):
+            await c._observe("robot-01", "key", cals, after=first_at)
+    finally:
+        await c.close()
+
+
+async def test_hardware_pickup_cannot_use_camera_frame_after_consent_revoke(settings):
+    from desk_robot.calibration import Calibration
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    c, head = make(settings)
+    jpeg = await head.snapshot()
+
+    async def delayed_detect(image, target):
+        settings.voice_vision_tools_enabled = False
+        return await SimulationVision().detect(image, target)
+
+    async def forbidden_snapshot():
+        raise AssertionError("Pickup must not use legacy still camera")
+
+    head.snapshot = forbidden_snapshot
+    c.vision.detect = delayed_detect
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _id: True,
+        status=lambda _id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={"robot-01": [SimpleNamespace(
+            source="proactive", jpeg=jpeg, received_at=time.monotonic()
+        )]}),
+    )
+    try:
+        with pytest.raises(OperationError, match="connected live XIAO camera"):
+            await c._observe(
+                "robot-01", "key", Calibration.load(settings.robots[0].calibration),
+            )
+    finally:
+        await c.close()
 
 
 async def test_hardware_exploration_needs_existing_continuous_camera_owner(settings):
