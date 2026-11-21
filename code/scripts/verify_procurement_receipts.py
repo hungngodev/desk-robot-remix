@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 import re
 import subprocess
 from datetime import date
@@ -246,6 +247,62 @@ def _same_json_measurement(recorded: object, claimed: object) -> bool:
     return type(recorded) in (str, int, float, bool, type(None)) and recorded == claimed
 
 
+# These are safety-critical physical quantities, not a narrative signoff.
+# The limits are recorded observations against a reviewer-approved criterion;
+# this structural check does not establish that the criterion is safe.
+PHYSICAL_GATE_METRICS = {
+    "loaded_drive_and_stopping": ("stopping_distance_mm", "mm"),
+    "hardware_motor_driver_fails_low_after_cpu_stall": ("cutoff_latency_ms", "ms"),
+    "full_power_load_and_faults": ("peak_pack_current_A", "A"),
+    "protected_1s_charger_and_dock_contacts": ("net_pack_current_A", "A"),
+    "battery_pack_ntc_to_charger_ts_thermal_fault_trial": (
+        "thermal_cutoff_latency_ms", "ms",
+    ),
+    "amplifier_speaker_power_limit_and_thermal_trial": (
+        "amplifier_case_temperature_C", "C",
+    ),
+}
+
+
+def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
+    """Reject text-only or out-of-limit critical physical gate signoffs.
+
+    Numeric evidence is necessary but NOT sufficient for physical approval:
+    a human must still inspect actual setup, instrument, calibration, limits
+    and the installed hardware. Other gates retain their own open criteria.
+    """
+    expected = PHYSICAL_GATE_METRICS.get(gate) if isinstance(gate, str) else None
+    if expected is None:
+        return True
+    if type(measurement) is not dict:
+        return False
+    conditions = measurement.get("conditions")
+    samples = measurement.get("sample_count")
+    observations = measurement.get("quantities")
+    if (type(samples) is not int or not 1 <= samples <= 100000
+            or type(conditions) is not dict
+            or not all(isinstance(conditions.get(key), str)
+                       and conditions[key].strip()
+                       and conditions[key].strip().casefold()
+                       not in {"unknown", "tbd", "none", "pass"}
+                       for key in ("setup", "instrument"))
+            or type(observations) is not list
+            or not 1 <= len(observations) <= 100):
+        return False
+    matched = [
+        item for item in observations
+        if type(item) is dict
+        and (item.get("name"), item.get("unit")) == expected
+    ]
+    if len(matched) != 1:
+        return False
+    item = matched[0]
+    bounds = (item.get("value"), item.get("minimum"), item.get("maximum"))
+    return (all(type(number) in (int, float) and math.isfinite(number)
+                for number in bounds)
+            and bounds[1] <= bounds[0] <= bounds[2])
+
+
 def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
     """Require one matching record in a versioned docs/records/*.json file.
 
@@ -308,6 +365,7 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
     return (record.get("result") == "pass"
             and all(record.get(key) == receipt.get(key) for key in fields)
             and isinstance(measurement, dict) and bool(measurement)
+            and _qualified_gate_measurement(record.get("gate"), measurement)
             and _same_json_measurement(measurement, receipt.get("measurement")))
 
 
@@ -372,7 +430,8 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
                     "", "unknown", "tbd", "generic",
                 }
                 or not isinstance(receipt.get("measurement"), dict)
-                or not receipt["measurement"]):
+                or not receipt["measurement"]
+                or not _qualified_gate_measurement(gate, receipt["measurement"])):
             errors.append(f"{scope}.{gate}: unpinned or generic signoff")
             continue
         try:

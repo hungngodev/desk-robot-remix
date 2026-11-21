@@ -21,13 +21,26 @@ URL = ("https://github.com/hungngodev/desk-robot-remix/blob/"
        + SHA + "/docs/records/release-evidence.json")
 
 
+def measurement_for_gate(scope, gate):
+    if gate in release.PHYSICAL_GATE_METRICS:
+        metric, unit = release.PHYSICAL_GATE_METRICS[gate]
+        return {
+            "sample_count": 3,
+            "conditions": {"setup": "installed_bench_fixture",
+                           "instrument": "calibrated_meter"},
+            "quantities": [{"name": metric, "unit": unit,
+                            "value": 5.0, "minimum": 0.0, "maximum": 10.0}],
+        }
+    return {"observed": "trial for " + scope + "." + gate}
+
+
 def receipt(scope, gate):
     return {
         "record_id": scope + ":" + gate,
         "result": "pass", "source_sha": SHA, "scope": scope, "gate": gate,
         "reviewer": "real_review_account", "tested_on": "2026-11-18",
         "device_revision": "inspected_rev_A",
-        "measurement": {"observed": "trial for " + scope + "." + gate},
+        "measurement": measurement_for_gate(scope, gate),
         "evidence_url": URL,
     }
 
@@ -708,4 +721,56 @@ def test_purchase_ci_verifies_every_named_job_from_same_exact_run_attempt():
     from urllib.error import URLError
     assert not release.verified_required_ci_jobs(
         run_url, SHA, lambda _: (_ for _ in ()).throw(URLError("offline"))
+    )
+
+
+@pytest.mark.parametrize("gate", sorted(release.PHYSICAL_GATE_METRICS))
+def test_critical_physical_receipt_needs_bounded_actual_measurement(gate):
+    original = receipt("system", gate)
+    assert release.verified_scoped_record(
+        original, SHA, lambda url: lookup(url, records=[original]),
+    )
+    measurement = original["measurement"]
+    observed = measurement["quantities"][0]
+    variants = [
+        {"observed": "pass, see bench notes"},
+        {**measurement, "sample_count": True},
+        {**measurement, "sample_count": 0},
+        {**measurement, "conditions": {"setup": "bench"}},
+        {**measurement, "conditions": {
+            "setup": "bench", "instrument": "unknown",
+        }},
+        {**measurement, "quantities": []},
+        {**measurement, "quantities": [
+            {**observed, "name": "unrelated_metric"},
+        ]},
+        {**measurement, "quantities": [
+            {**observed, "unit": "wrong_unit"},
+        ]},
+        {**measurement, "quantities": [
+            {**observed, "value": 11.0},
+        ]},
+        {**measurement, "quantities": [
+            {**observed, "minimum": 10.0, "maximum": 0.0},
+        ]},
+        {**measurement, "quantities": [
+            {**observed, "value": True},
+        ]},
+    ]
+    for changed in variants:
+        falsified = {**original, "measurement": changed}
+        def source(url, row=falsified):
+            return lookup(url, records=[row])
+        assert not release.verified_scoped_record(falsified, SHA, source)
+        errors = release.audit_release(
+            {"system": {gate: falsified}}, SHA, source,
+        )
+        assert any("system." + gate in error and "unpinned" in error
+                   for error in errors)
+
+
+def test_documentary_decision_does_not_require_physical_instrument():
+    record = receipt("supplemental:room_amg8833", "decision_receipt")
+    assert release.verified_scoped_record(
+        record, SHA, lambda url: lookup(url, records=[record]),
     )
