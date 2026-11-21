@@ -158,6 +158,29 @@ checking. MAX98357 speaker connects across SPK+ and SPK−, neither to ground;
 use the selected Challenge Electronics CS20-02P110-04-1X 8 ohm 2 W rectangular speaker, not the retired 1 W candidate; actual MAX98357A 5V output and enclosure acoustic/thermal margins must still be qualified. Use qualified supplies/grounds and
 rated actuator wiring. Do not join independent USB5V sources blindly.
 
+## Live AEC reference integrity bench
+
+After flashing the selected Sense build and enabling the existing authenticated
+head transport, run this read only check without capturing microphone audio:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_audio.py \
+  --config config/local.toml --robot robot-01 --seconds 60 \
+  --report ../docs/records/reports/sense-aec-reference-local.json
+```
+
+The actual `GET /api/audio.reference` receipt includes the Sense boot identity,
+reference underflow and ring overwrite counts, stale post cancellation writes,
+and `short_output_writes` from incomplete I2S speaker writes. The Mac rejects
+foreign identities, invalid counters, changed boot identities, or decreasing
+counters. Software integrity fails if any counter advances during the trial
+or the firmware reports a sticky integrity fault. This endpoint exposes no
+microphone PCM, grants no motor authority and **never** claims physical speaker
+playback, AEC quality, or natural barge in. Do not reset the head in the middle
+of a trial to erase failure evidence. Save the actual bench report and the
+independent acoustic waveform/stop timing trials before A2 approval.
+
 ## Bounded I2S write under urgent speech interruption
 
 The exact pinned Xiaozhi `NoAudioCodec::Write` normally calls the ESP-IDF
