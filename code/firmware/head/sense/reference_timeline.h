@@ -16,8 +16,9 @@ class PlaybackReferenceClock {
   // in the ring. Reads must not add silence for that SAME audio duration.
   std::uint64_t silence_frames(std::int64_t now_us,
                                std::uint64_t max_frames) {
-    if (end_us_ <= 0) {
+    if (!initialized_) {
       end_us_ = now_us;
+      initialized_ = true;
       return 0;
     }
     if (now_us <= end_us_) return 0;
@@ -45,6 +46,7 @@ class PlaybackReferenceClock {
 
   void accepted_output_frames(int samples) {
     if (samples > 0) {
+      initialized_ = true;
       // Accepted I2S chunks may be partial. Carry sub-microsecond residue,
       // rather than truncating every 32 kHz frame to 31 microseconds.
       const auto numerator = static_cast<std::uint64_t>(samples) * 1000000U
@@ -71,6 +73,7 @@ class PlaybackReferenceClock {
 
   void reset() {
     end_us_ = 0;
+    initialized_ = false;
     silence_remainder_ = 0;
     output_remainder_ = 0;
   }
@@ -78,6 +81,7 @@ class PlaybackReferenceClock {
 
  private:
   std::int64_t end_us_ = 0;
+  bool initialized_ = false;
   std::uint64_t silence_remainder_ = 0;
   std::uint64_t output_remainder_ = 0;
 };

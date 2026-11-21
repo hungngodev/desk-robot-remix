@@ -140,6 +140,23 @@ static void reset_retires_fractional_timing_residue() {
   CHECK(clock.represented_end_us() == 3010007);
 }
 
+static void zero_timestamp_is_valid_clock_origin() {
+  PlaybackReferenceClock clock;
+  CHECK(clock.silence_frames(0, 16384) == 0);
+  // Zero is a valid monotonic clock origin, not an uninitialized sentinel.
+  CHECK(clock.silence_frames(10000, 16384) == 160);
+  CHECK(clock.silence_frames(20000, 16384) == 160);
+  clock.reset();
+  CHECK(clock.silence_frames(0, 16384) == 0);
+  CHECK(clock.silence_frames(10000, 16384) == 160);
+  // A chunk accepted before an explicit reference read still initializes
+  // the timeline and cannot be discarded by the next silence callback.
+  PlaybackReferenceClock output_first;
+  output_first.accepted_output_frames(320);
+  CHECK(output_first.represented_end_us() == 10000);
+  CHECK(output_first.silence_frames(20000, 16384) == 160);
+}
+
 static void huge_idle_gaps_are_bounded() {
   PlaybackReferenceClock clock;
   CHECK(clock.silence_frames(1000000, 16384) == 0);
@@ -157,6 +174,7 @@ int main() {
     queued_output_is_not_premature_microphone_reference();
     late_opus_chunk_accounts_for_real_gap_once();
     huge_idle_gaps_are_bounded();
+    zero_timestamp_is_valid_clock_origin();
     irregular_idle_cadence_retains_fractional_reference_samples();
     short_i2s_writes_preserve_submicrosecond_playback_time();
     reset_retires_fractional_timing_residue();
