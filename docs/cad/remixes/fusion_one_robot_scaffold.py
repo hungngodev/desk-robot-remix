@@ -143,11 +143,18 @@ def packaging_warning(verified_fit_kit: dict | None) -> str:
         "physical_interior_fit_verified"
     ) is not False:
         raise ValueError("Unverified Fusion battery packaging provenance")
+    if screen.get("flat_tray_any_yaw_impossible") is True:
+        return (
+            "BATTERY PACKAGING CONFLICT: the tray has a physical XY span "
+            "longer than the original SMARS chassis outer XY diagonal. "
+            "Rotating the tray flat cannot fix this; redesign its mounting "
+            "without dropping protection and verify the full power assembly "
+            "before final printing."
+        )
     if screen.get("axis_aligned_packaging_possible") is False:
         return (
-            "BATTERY PACKAGING CONFLICT: exported tray exceeds the source "
-            "SMARS chassis XY envelope at 0/90 degrees. Redesign the body "
-            "mounting and verify a real protected pack before final printing."
+            "BATTERY PACKAGING CONFLICT at 0/90 degrees. Other planar "
+            "angles and actual internal clearances are not qualified."
         )
     if screen.get("axis_aligned_packaging_possible") is True:
         return (

@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 from collections import Counter
 from hashlib import sha256
-from math import isfinite
+from math import hypot, isfinite
 from pathlib import Path
 from struct import unpack_from
 
@@ -140,11 +140,12 @@ def closed_mesh_edges(path: Path) -> int:
 
 
 def reference_body_footprint_screen(root: Path, output: Path) -> dict:
-    """Detect a known axis-aligned packaging conflict from source meshes.
+    """Screen flat tray orientation against a source chassis outer footprint.
 
-    The original SMARS chassis mesh is an OUTER reference, not a cavity.
-    A tray bigger than that footprint cannot fit inside at 0 or 90 degrees;
-    a smaller box would still NOT prove internal, diagonal or swept fit.
+    The original SMARS chassis mesh is an OUTER reference, not an interior
+    cavity. A physical span longer than that outer XY diagonal cannot fit
+    within its footprint at ANY flat yaw. This is necessary, not sufficient:
+    no clearance, height, tilt, servo sweep or material strength is proven.
     """
     chassis = root / (
         "docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl"
@@ -157,15 +158,24 @@ def reference_body_footprint_screen(root: Path, output: Path) -> dict:
     }
     if not chassis.is_file():
         result["axis_aligned_packaging_possible"] = None
+        result["flat_tray_any_yaw_impossible"] = None
         return result
     body = mesh_bounds_mm(chassis)["dimensions_mm"][:2]
     tray = mesh_bounds_mm(candidate)["dimensions_mm"][:2]
     fits = ((tray[0] <= body[0] and tray[1] <= body[1])
             or (tray[0] <= body[1] and tray[1] <= body[0]))
+    # The longest actual XY extent connects two mesh vertices at least
+    # this far apart. No pair of points inside the chassis outer XY
+    # rectangle can be farther apart than its diagonal for any flat yaw.
+    # This does not prove anything about 3D tilt or external mounting.
+    outer_diagonal = hypot(*body)
+    flat_yaw_impossible = max(tray) > outer_diagonal
     result.update({
         "chassis_original_mesh_sha256": sha256(chassis.read_bytes()).hexdigest(),
         "reference_chassis_xy_mm": body,
         "candidate_tray_xy_mm": tray,
+        "chassis_outer_xy_diagonal_mm": round(outer_diagonal, 3),
+        "flat_tray_any_yaw_impossible": flat_yaw_impossible,
         "axis_aligned_packaging_possible": fits,
     })
     return result

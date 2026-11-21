@@ -138,14 +138,17 @@ def test_fusion_gui_exposes_protected_pack_source_footprint_block():
             "reference_chassis_xy_mm": [58.002, 86.194],
             "candidate_tray_xy_mm": [107.6, 40.6],
             "axis_aligned_packaging_possible": False,
+            "flat_tray_any_yaw_impossible": True,
         }
     }
     assert "BATTERY PACKAGING CONFLICT" in warning(blocked)
+    assert "Rotating the tray flat cannot fix this" in warning(blocked)
     assert "before final printing" in warning(blocked)
     possible = {
         "source_chassis_battery_footprint": {
             **blocked["source_chassis_battery_footprint"],
             "axis_aligned_packaging_possible": True,
+            "flat_tray_any_yaw_impossible": False,
         }
     }
     assert "physical fit remain OPEN" in warning(possible)

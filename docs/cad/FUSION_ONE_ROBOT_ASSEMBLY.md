@@ -116,7 +116,14 @@ the original README files, including noncommercial and share alike restrictions.
 ## Read the automatic battery packaging warning
 
 After exporting provisional OpenSCAD fit coupons, the Fusion scaffold
-verifies their mesh hashes and source bounds. Its startup message now flags
+verifies their mesh hashes and source bounds. The original chassis source
+XY envelope is approximately 58.002 by 86.194 mm, with a 103.892 mm
+diagonal. The provisional battery tray with mounting tabs spans about
+107.6 mm along its long axis. Because this physical span exceeds the
+chassis's entire outer planar diagonal, **no flat yaw rotation** can place
+the whole tray inside the original chassis outer XY footprint. Tilting
+out of plane or external mounting changes the system and still needs
+full modeled track, power, cable and stability clearance. Its startup message now flags
 a concrete packaging conflict if the provisional battery tray is larger
 than the original stepper chassis XY source envelope. This warning comes
 from the actual binary STL triangles, not a guessed component fit.

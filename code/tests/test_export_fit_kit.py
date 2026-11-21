@@ -166,6 +166,7 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         "physical_interior_fit_verified": False,
         "reference_chassis_available": False,
         "axis_aligned_packaging_possible": None,
+        "flat_tray_any_yaw_impossible": None,
     }
     assert source.verify_fit_kit(tmp_path, output_dir=rendered) == report
     # A modified JSON receipt must never promote a reversible fit kit
@@ -601,3 +602,7 @@ def test_actual_source_chassis_cannot_contain_86mm_tray_on_axis(tmp_path):
         screen["reference_chassis_xy_mm"]
     )
     assert screen["axis_aligned_packaging_possible"] is False
+    assert screen["flat_tray_any_yaw_impossible"] is True
+    assert screen["chassis_outer_xy_diagonal_mm"] < max(
+        screen["candidate_tray_xy_mm"]
+    )
