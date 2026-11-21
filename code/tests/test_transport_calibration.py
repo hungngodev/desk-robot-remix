@@ -977,7 +977,10 @@ async def test_camera_identity_mismatch_never_qualifies_dock_sensor(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(settings.robots[0], client, strict_capture=True)
         await head.snapshot()
-        with pytest.raises(HeadError, match="Camera (sensor PID|identity)"):
+        expected_error = ("Invalid camera identity boot"
+                          if override.get("boot") is True
+                          else "Camera (sensor PID|identity)")
+        with pytest.raises(HeadError, match=expected_error):
             await head.camera_identity()
 
 
@@ -1001,13 +1004,17 @@ async def test_dock_uses_recent_stream_receipt_without_still_capture(
         head._stream_connected = True
         head._stream_latest = b"\xff\xd8dock\xff\xd9"
         head._stream_version = 1
+        head._last_camera = (41, 1, 9000)
+        head._stream_generation = 3
         head._stream_received_at = time.monotonic() - 0.5
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(head.snapshot_for_dock(), timeout=0.06)
         assert head._snapshot_version == 0
         head._stream_received_at = time.monotonic()
-        frame, received = await head.snapshot_for_dock()
+        frame, received, source_identity, stream_generation = await head.snapshot_for_dock()
         assert frame == b"\xff\xd8dock\xff\xd9"
+        assert source_identity == (41, 1, 9000)
+        assert stream_generation == 3
         assert 0 <= time.monotonic() - received <= 0.20
         assert head._snapshot_version == 1
         assert requests == []
