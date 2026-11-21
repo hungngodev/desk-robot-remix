@@ -99,7 +99,9 @@ class AttentionLedger:
     ) -> bool:
         _clock(at)
         state = self._state(robot_id)
-        if (state.generation != generation or state.topic_state != "active"
+        if (type(generation) is not int
+                or state.generation != generation
+                or state.topic_state != "active"
                 or at < state.topic_updated_at):
             return False
         state.topic_state = "interrupted" if interrupted else "completed"

@@ -494,3 +494,17 @@ def test_future_or_overflowing_attention_event_clocks_never_poison_current_human
     assert "Where did the key go?" in current[0]["content"]
     assert current[0]["untrusted_text_not_instructions"] is True
     assert ledger.timeline("peer", now + 0.1) == []
+
+
+def test_boolean_topic_generation_cannot_finish_first_live_conversation(monkeypatch):
+    # bool is an int subclass, but not a valid current conversation owner.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 100.0)
+    ledger = AttentionLedger(["pet"])
+    generation = ledger.begin_topic("pet", "Keep discussing the mug", 10)
+    assert generation == 1
+    assert not ledger.finish_topic("pet", True, 12, interrupted=True)
+    assert not ledger.finish_topic("pet", 1.0, 12, interrupted=True)
+    assert ledger._state("pet").topic_state == "active"
+    assert "Ongoing conversation topic" in ledger.timeline("pet", 13)[0]["content"]
+    assert ledger.finish_topic("pet", generation, 14, interrupted=False)
+    assert ledger._state("pet").topic_state == "completed"
