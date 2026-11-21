@@ -10,8 +10,19 @@ total_height_mm = 8.0;
 spacing_mm = 8.0;
 clearances_mm = [0.15, 0.30, 0.45, 0.60];
 assert(case_length_mm > 0 && case_width_mm > 0, "Measure actual servo case first");
-assert(wall_mm >= 2 && floor_mm >= 1.5 && total_height_mm > floor_mm);
+assert(wall_mm >= 2 && floor_mm >= 1.5 && total_height_mm >= floor_mm + 3);
+assert(spacing_mm >= 2, "Servo fit coupons need printable separation");
+assert(len(clearances_mm) >= 1 && len(clearances_mm) <= 8,
+       "Servo fit coupon count must be bounded");
 module fit_gauge(clearance_mm) {
+    // The pocket expands by half the requested clearance on each wall.
+    // The prior script accepted an arbitrarily large clearance, deleting
+    // the printed wall while still appearing to produce a valid fit test.
+    assert(is_num(clearance_mm) &&
+           clearance_mm >= 0.1 && clearance_mm <= 1.5,
+           "Servo pocket clearance must be measured and positive");
+    assert(wall_mm-clearance_mm/2 >= 2,
+           "Servo pocket clearance leaves insufficient printable wall");
     length = case_length_mm + 2*wall_mm;
     width = case_width_mm + 2*wall_mm;
     difference() {
