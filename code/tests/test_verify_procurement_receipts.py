@@ -192,6 +192,9 @@ def test_common_physical_json_receipt_decoder_rejects_nonfinite_and_duplicates()
         '{"measurement":{"x":Infinity}}',
         '{"measurement":{"x":1e9999}}',
         '{"measurement":{"x":-1e9999}}',
+        '{"measurement":{"x":1e-9999}}',
+        '{"measurement":{"x":-1e-9999}}',
+        '{"measurement":{"x":1.0000000000000001}}',
     ):
         with pytest.raises(ValueError):
             json.loads(malformed, object_pairs_hook=strict_receipt_object,
@@ -456,3 +459,46 @@ def test_procurement_nested_list_boolean_cannot_impersonate_sample_count():
     assert not release.verified_scoped_record(
         forged, SHA, lambda url: lookup(url, records=[recorded])
     )
+
+
+@pytest.mark.parametrize(("token", "claimed"), [
+    ("1e-9999", 0.0),
+    ("-1e-9999", -0.0),
+    ("1.0000000000000001", 1.0),
+])
+def test_procurement_immutable_measurement_refuses_lossy_numeric_source(
+    token, claimed,
+):
+    gate = release.PART_GATES[0]
+    item = receipt("part:imu", gate)
+    item["measurement"] = {"measured_current_a": claimed}
+    # Without strict parsing the immutable raw source and local claim compare
+    # equal even though they contain different numeric measurements.
+    baseline = json.dumps({"receipts": [item]})
+    original = json.dumps(claimed)
+    raw = baseline.replace(
+        '"measured_current_a": ' + original,
+        '"measured_current_a": ' + token,
+    ).encode("utf-8")
+    assert raw != baseline.encode("utf-8")
+    payload = {
+        "type": "file", "size": len(raw), "encoding": "base64",
+        "content": base64.b64encode(raw).decode("ascii"),
+    }
+    assert not release.verified_scoped_record(
+        item, SHA, lambda _: payload,
+    )
+
+
+@pytest.mark.parametrize("valid", ["0.0", "-0.0", "0.125", "1e-8", "1.0"])
+def test_finite_decimal_receipt_floats_still_decode(valid):
+    from verify_playbook_receipts import (
+        finite_receipt_float,
+        strict_receipt_object,
+    )
+    decoded = json.loads(
+        '{"measurement":{"x":' + valid + '}}',
+        object_pairs_hook=strict_receipt_object,
+        parse_float=finite_receipt_float,
+    )
+    assert decoded["measurement"]["x"] == float(valid)

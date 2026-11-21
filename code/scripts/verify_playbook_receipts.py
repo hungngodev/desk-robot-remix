@@ -19,6 +19,7 @@ import os
 import re
 import sys
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
@@ -105,10 +106,18 @@ def reject_nonfinite_receipt_value(value: str) -> None:
 
 
 def finite_receipt_float(value: str) -> float:
-    """Reject exponent overflow, which parse_constant does not see."""
-    number = float(value)
-    if not math.isfinite(number):
-        raise ValueError("Nonfinite physical receipt JSON number: " + value)
+    """Fail closed if a physical JSON number loses its decimal value.
+
+    parse_constant rejects NaN/Infinity tokens, but Python's binary float
+    parser can silently convert nonzero measurements into zero or infinity.
+    Receipt evidence must not silently change numeric identity on import.
+    """
+    if len(value) > 64:
+        raise ValueError("Overlong physical receipt JSON number")
+    exact = Decimal(value)
+    number = float(exact)
+    if not math.isfinite(number) or Decimal(str(number)) != exact:
+        raise ValueError("Lossy physical receipt JSON number: " + value)
     return number
 
 
