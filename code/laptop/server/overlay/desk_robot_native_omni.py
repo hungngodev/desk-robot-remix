@@ -1477,7 +1477,7 @@ class NativeOmniSession:
                         "look", "status", "power-status", "aux-status",
                         "latest-pickup", "interaction-context", "voice-context",
                     }
-                    if (not isinstance(intents, list) or len(intents) > 2
+                    if (not isinstance(intents, list) or len(intents) > 3
                             or result.get("untrusted_model_selection") is not True
                             or result.get("model_can_arm_motors") is not False
                             or any(

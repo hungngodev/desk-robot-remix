@@ -105,6 +105,49 @@ def test_mac_existing_ollama_selects_only_consented_readonly_tools(
         assert client.post(url, headers=headers, json=request).status_code == 403
 
 
+
+def test_semantic_planner_preserves_three_explicit_observation_intents(
+    settings, tokens,
+):
+    """Mac may select all three native-supported read-only observations."""
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot = settings.robots[0].id
+    question = "Could you inspect the desk and battery level and temperature?"
+
+    class Model:
+        async def reply(self, history):
+            return json.dumps({"tools": [
+                {"route": "look"}, {"route": "power-status"},
+                {"route": "aux-status"},
+            ]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        reply = client.post(
+            f"/v1/pet/{robot}/plan-readonly", headers=headers,
+            json={"transcript": question},
+        )
+        assert reply.status_code == 200
+        result = reply.json()
+        assert [item["route"] for item in result["tools"]] == [
+            "look", "power-status", "aux-status",
+        ]
+        assert result["tools"][0]["payload"] == {"question": question}
+        assert result["motor_authorized"] is False
+        assert result["charging_authorized"] is False
+
+
 @pytest.mark.parametrize("revocation", ["live", "memory"])
 def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
     settings, tokens, revocation,

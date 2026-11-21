@@ -89,7 +89,7 @@ def register_readonly_planner_routes(
         context = compose_brain_context([], [], timeline).interaction[:280]
         schema = (
             'Return ONLY a JSON object {"tools":[{"route":"look"},'
-            '{"route":"status"}]}. Choose 0 to 2 distinct tools for an '
+            '{"route":"status"}]}. Choose 0 to 3 distinct tools for an '
             'EXPLICIT user request. Allowed read-only names: look for actual '
             'camera sight, power-status for raw battery gauge estimates, '
             'status for body/safety telemetry, aux-status for actual '
@@ -304,8 +304,8 @@ def register_readonly_planner_routes(
             "did i tap", "did someone tap", "what did you sense",
         ))
         # Ignore a few malformed or forbidden model suggestions without
-        # losing a later legitimate second observation. The scan is bounded,
-        # and at most two approved read-only routes are ever returned.
+        # losing later legitimate observations. The scan is bounded,
+        # and at most three approved read-only routes are ever returned.
         for item in choices[:8] if isinstance(choices, list) else []:
             route = item.get("route") if isinstance(item, dict) else None
             if route == "status" and battery_question:
@@ -333,7 +333,7 @@ def register_readonly_planner_routes(
             ):
                 continue
             picked.append(route)
-            if len(picked) == 2:
+            if len(picked) == 3:
                 break
         return {
             "robot_id": robot_id,

@@ -5717,7 +5717,7 @@ async def test_native_batch_refuses_malformed_authority_and_cross_pet(
         await asyncio.gather(worker, return_exceptions=True)
 
 
-async def test_ambiguous_completed_asr_uses_existing_mac_planner_then_two_real_tools(
+async def test_ambiguous_completed_asr_uses_existing_mac_planner_then_three_real_tools(
     native, monkeypatch,
 ):
     import types
@@ -5749,6 +5749,7 @@ async def test_ambiguous_completed_asr_uses_existing_mac_planner_then_two_real_t
                 "tools": [
                     {"route": "look", "payload": {"question": question}},
                     {"route": "status", "payload": {}},
+                    {"route": "aux-status", "payload": {}},
                 ],
             }
         await asyncio.sleep(0)
@@ -5779,13 +5780,13 @@ async def test_ambiguous_completed_asr_uses_existing_mac_planner_then_two_real_t
     worker = asyncio.create_task(session._readonly_tool_worker())
     try:
         async with asyncio.timeout(1):
-            while session.native_readonly_tools_completed < 2:
+            while session.native_readonly_tools_completed < 3:
                 await asyncio.sleep(.005)
         assert [route for route, _ in calls].count("plan-readonly") == 1
         assert {route for route, _ in calls} == {
-            "plan-readonly", "look", "status",
+            "plan-readonly", "look", "status", "aux-status",
         }
-        assert len(calls) == 3
+        assert len(calls) == 4
         assert session._context_wakeup.is_set()
         assert session.native_readonly_tools_dropped == 0
     finally:
