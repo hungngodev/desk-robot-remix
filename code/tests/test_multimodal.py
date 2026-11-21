@@ -47,7 +47,7 @@ def test_mac_camera_timeline_keeps_device_clock_separate_from_receipt():
     assert 0 <= camera["age_ms"] <= 250
     with pytest.raises(ValueError, match="completion identity"):
         hub.offer_prepared(
-            "robot-01", valid, now + 1, source="proactive",
+            "robot-01", valid, now + 0.05, source="proactive",
             source_identity=(19, True, 2000100),
         )
 
