@@ -73,3 +73,22 @@ def test_rejects_stale_duplicate_forged_source_and_bad_direction():
     input_rows[0]["direction"] = "front"
     with pytest.raises(ValueError, match="direction|side|identity"):
         module().analyze(input_rows, "robot-01")
+
+
+def test_rejects_same_physical_side_sample_counted_as_both_near_and_far():
+    rows = samples()
+    # Each side's far class attempts to reuse its twenty near acquisition IDs.
+    # Different physical lenses sharing an ID across the same sweep remain OK.
+    for row in rows:
+        if row["label"] == "far":
+            row["sample_id"] -= 20
+    with pytest.raises(ValueError, match="sample_id.*side direction"):
+        module().analyze(rows, "robot-01")
+
+
+def test_separate_lenses_may_share_a_synchronized_capture_id():
+    rows = samples()
+    result = module().analyze(rows, "robot-01")
+    assert result["samples_total"] == 120
+    assert result["independent_sample_provenance_verified"] is False
+    assert result["physical_acceptance_pass"] is False

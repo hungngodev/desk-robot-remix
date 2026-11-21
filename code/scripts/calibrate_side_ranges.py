@@ -29,6 +29,7 @@ def percentile(values: list[int], proportion: float) -> int:
 
 def analyze(rows: list[dict], robot_id: str) -> dict:
     samples = defaultdict(list)
+    seen_capture_ids = defaultdict(set)
     for line in rows:
         if (not isinstance(line, dict) or line.get("robot_id") != robot_id
                 or line.get("direction") not in SIDE
@@ -56,8 +57,11 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
         # assigned by the measurement capture utility, not by this analyzer.
         capture_id = line.get("sample_id")
         if (type(capture_id) is not int or capture_id < 1
-                or any(x[0] == capture_id for x in samples[line["direction"], line["label"]])):
-            raise ValueError("Unique positive measured sample_id required per labeled class")
+                or capture_id in seen_capture_ids[line["direction"]]):
+            # One physical side-lens conversion cannot be both near and far.
+            # Separate lenses may share one synchronized sweep/capture ID.
+            raise ValueError("Unique positive measured sample_id required per side direction")
+        seen_capture_ids[line["direction"]].add(capture_id)
         samples[line["direction"], line["label"]].append(
             (capture_id, mm[channel])
         )
