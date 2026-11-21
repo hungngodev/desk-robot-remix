@@ -428,8 +428,11 @@ class HttpHead:
                                 # A delayed chunk whose camera timestamp
                                 # barely moved cannot become a fresh scene
                                 # just because the consumer resumed later.
-                                if (network_elapsed > 1.5
-                                        and network_elapsed - source_elapsed > 1.0):
+                                # Two ordinary 250ms frame periods are the
+                                # permitted unaccounted backlog. This only
+                                # compares relative clocks within one boot;
+                                # it is not a synchronized exposure timestamp.
+                                if network_elapsed - source_elapsed > 0.5:
                                     raise HeadError(
                                         "Buffered stale camera frame after stream backlog"
                                     )
