@@ -345,6 +345,7 @@ async def test_dock_turns_by_chassis_not_lens_axis(
 
 async def test_dock_approach_requires_operator_permit_after_qualification(settings, tmp_path):
     settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
     robot = settings.robots[0]
     robot.dock_motion_qualified = True
     robot.dock_turn_sign = 1
@@ -366,6 +367,10 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
         with pytest.raises(OperationError, match="assigned physical NEC beacon"):
             controller.dock("robot-01")
         robot.dock_beacon_id = 1
+        settings.voice_vision_tools_enabled = False
+        with pytest.raises(OperationError, match="camera consent"):
+            controller.dock("robot-01")
+        settings.voice_vision_tools_enabled = True
         with pytest.raises(OperationError, match="permit"):
             controller.dock("robot-01")
         assert head.commands == []
