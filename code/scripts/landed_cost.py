@@ -8,6 +8,7 @@ The strict procurement release still owns receipt verification.
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
@@ -50,6 +51,18 @@ def _nonempty(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label}: missing identifier")
     return value.strip()
+
+
+def _quote_date(value: object) -> None:
+    """Only a real, canonical ISO calendar date can date a supplier quote."""
+    if not isinstance(value, str):
+        raise ValueError("quote date must be a YYYY-MM-DD calendar date")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("quote date must be a YYYY-MM-DD calendar date") from exc
+    if parsed.isoformat() != value:
+        raise ValueError("quote date must be a YYYY-MM-DD calendar date")
 
 
 def account_landed_cost(
@@ -110,7 +123,7 @@ def account_landed_cost(
             seller = _nonempty(line.get("seller"), "seller")
             sku = _nonempty(line.get("sku"), "sku")
             quote_ref = _nonempty(line.get("quote_reference"), "quote_reference")
-            _nonempty(line.get("quoted_at"), "quoted_at")
+            _quote_date(line.get("quoted_at"))
             if not _url(line.get("stock_evidence_url")):
                 raise ValueError("missing HTTPS stock evidence")
             packages = positive_count(line.get("quantity_packages"), "packages")

@@ -382,3 +382,25 @@ def test_one_quote_can_legitimately_cover_distinct_skus():
     out = calculate(ev)
     assert out["calculation_complete_not_physical_approval"]
     assert out["payable_now_cents"] == 655
+
+
+@pytest.mark.parametrize("quoted_at", [
+    "2026-02-30", "20261118", "not-a-date", "2026-W47-3",
+    "2026-11-18T12:00:00", 20261118, None,
+])
+def test_quote_requires_an_actual_iso_calendar_date(quoted_at):
+    ev = sample()
+    ev["lines"][0]["quoted_at"] = quoted_at
+    out = calculate(ev)
+    assert not out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] is None
+    assert any("quote date must be a YYYY-MM-DD calendar date" in error
+               for error in out["errors"])
+
+
+def test_actual_leap_day_quote_remains_valid():
+    ev = sample()
+    ev["lines"][0]["quoted_at"] = "2024-02-29"
+    out = calculate(ev)
+    assert out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] == 655
