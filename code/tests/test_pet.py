@@ -1518,6 +1518,53 @@ async def test_camera_source_receipt_keeps_order_and_identity_across_restart(
         await pet.close()
 
 
+
+async def test_live_camera_hub_receipt_reaches_private_memory_with_source_id(
+    fleet, tmp_path,
+):
+    """Producer, live observer and SQLite retain one actual source identity."""
+    from desk_robot.multimodal import CameraFrameHub
+
+    ids = [robot.id for robot in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(), interval=0.01,
+    )
+    hub = CameraFrameHub(ids)
+    pet.multimodal = SimpleNamespace(
+        hub=hub, stream_owns_camera=lambda rid: rid == "robot-01",
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 37, True
+    for image, sequence, complete_us in (
+        (WHITE, 11, 1000000),
+        (RED, 12, 1200000),
+        (RED, 13, 1400000),
+    ):
+        received_at = time.monotonic()
+        hub.offer_prepared(
+            "robot-01",
+            (image, VisualChangeGate._reduced(image), 0.0),
+            received_at, source="proactive",
+            source_identity=(5, sequence, complete_us),
+        )
+    observer = asyncio.create_task(pet._observe("robot-01", 37))
+    try:
+        await wait_for(lambda: memory.count("robot-01") == 1)
+        record = memory.recent("robot-01")[0]
+        assert record.event_id == "camera_robot-01_00000005_0000000d_155cc0"
+        assert record.witnessed and record.source_robot == "robot-01"
+        assert 0 <= time.time() - record.observed_at <= 5
+        assert pet.states["robot-01"].last_error is None
+    finally:
+        state.enabled = False
+        observer.cancel()
+        await asyncio.gather(observer, return_exceptions=True)
+        await pet.close()
+
+
 async def test_auto_fanout_revocation_during_peer_sqlite_commit_retracts_only_copy(
     fleet, tmp_path, monkeypatch,
 ):
