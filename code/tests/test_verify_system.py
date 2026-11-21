@@ -41,7 +41,7 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
         verify.steps("physical-accepted-by-a-badge", tmp_path)
 
 
-def test_all_four_ci_jobs_check_the_reviewed_pr_head_not_synthetic_merge():
+def test_all_five_ci_jobs_check_the_reviewed_pr_head_not_synthetic_merge():
     """GitHub checkout defaults to refs/pull/N/merge without an explicit ref.
 
     Keep every executable lane on the exact SHA of the source under review;
@@ -50,11 +50,14 @@ def test_all_four_ci_jobs_check_the_reviewed_pr_head_not_synthetic_merge():
     workflow = (ROOT / ".github/workflows/host-verification.yml").read_text()
     requested = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
     expected = 'expected="${{ github.event.pull_request.head.sha || github.sha }}"'
-    assert workflow.count("      - uses: actions/checkout@v4") == 4
-    assert workflow.count(requested) == 4
-    assert workflow.count(expected) == 4
-    assert workflow.count('actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"') == 4
-    assert workflow.count("Verify exact source commit under test") == 4
+    # The fifth lane runs fast Mac brain tests independently of the long
+    # Sense firmware compile; it must bind to the reviewed PR head too.
+    lanes = 5
+    assert workflow.count("      - uses: actions/checkout@v4") == lanes
+    assert workflow.count(requested) == lanes
+    assert workflow.count(expected) == lanes
+    assert workflow.count('actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"') == lanes
+    assert workflow.count("Verify exact source commit under test") == lanes
     assert "pull_request_target:" not in workflow
 
 
