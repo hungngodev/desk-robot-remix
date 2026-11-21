@@ -54,7 +54,7 @@ Source [one_robot_adapter_kit.scad](one_robot_adapter_kit.scad) is original CC0 
 | speaker_grille | 1 | Provisional 36 x 32 mm perforated front plate for current 20 x 16 mm Challenge 2 W rectangular speaker. M2 holes require at least 2 mm plastic web to the nominal speaker pocket and outer edge; not a sealed soundbox |
 | fsr_jaw_pocket | 1 | Force pad jaw holder |
 | dock_tag_backplate | 1 | AprilTag marker frame |
-| wire_clip | as needed | Cable routing |
+| wire_clip | as needed | Provisional 22 x 13 x 4 mm M2 routing and cable tie plate; at least 2 mm plastic between bores and slot, not tested load-rated strain relief |
 
 Regenerate with `openscad -o head_bridge.stl -D 'part="head_bridge"' one_robot_adapter_kit.scad`, substitute each name. CAD was rendered locally as seven **watertight, single-body** STL meshes with provisional dimensions and packaged for this conversation. These parts are **not** a final fitted assembled robot.
 

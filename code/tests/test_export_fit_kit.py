@@ -864,3 +864,36 @@ def test_print_screen_rejects_forged_or_missing_mesh_dimensions():
             screen({"parts": [{"location": "fit_stls/a.stl",
                                "bbox_mm": {"dimensions_mm": dims}}]},
                    (180, 180, 180))
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_cable_route_plate_has_reliable_screw_to_slot_printable_web(tmp_path):
+    """The old 16 mm part left < 1 mm web; don't repeat that false print."""
+    source = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
+    target = tmp_path / "wire_clip.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(target),
+        "-D", 'part="wire_clip"', str(source),
+    ], check=True, capture_output=True, text=True, timeout=90)
+    assert module().closed_mesh_edges(target) > 0
+    assert module().mesh_bounds_mm(target)["dimensions_mm"] == [
+        22.0, 13.0, 4.0
+    ]
+    # M2 center at 3.5mm, radius 1.15mm, slot starts at 8mm.
+    assert 8 - (3.5 + 2.3 / 2) >= 2.0
+    assert 3.5 - 2.3 / 2 >= 2.0
+    for overridden, message in (
+        ("wire_clip_length_mm=16",
+         "center-slot printable web"),
+        ("wire_clip_hole_edge_mm=2",
+         "exterior printable edge"),
+        ("wire_clip_slot_w_mm=11",
+         "side printable web"),
+    ):
+        bad = subprocess.run([
+            "openscad", "--export-format", "binstl",
+            "-o", str(tmp_path / "invalid_wire.stl"),
+            "-D", 'part="wire_clip"', "-D", overridden, str(source),
+        ], capture_output=True, text=True, timeout=90)
+        assert bad.returncode != 0
+        assert message in bad.stdout + bad.stderr

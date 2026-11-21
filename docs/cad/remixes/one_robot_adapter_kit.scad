@@ -153,11 +153,40 @@ module dock_tag_backplate(){
         oval_slot(6,m3_clearance_d,12);
   }
 }
+// Source-only cable routing tie plate. Former 16mm length left only
+// 0.85mm plastic from each 2.3mm M2 bore to its 6mm through slot.
+// This is NOT a strain-relief or mechanically qualified tie anchor.
+wire_clip_length_mm=22;
+wire_clip_width_mm=13;
+wire_clip_h_mm=4;
+wire_clip_hole_edge_mm=3.5;
+wire_clip_bore_d_mm=2.3;
+wire_clip_slot_l_mm=6;
+wire_clip_slot_w_mm=4;
+wire_clip_min_web_mm=2;
 module wire_clip(){
+  assert(wire_clip_h_mm>=3 && wire_clip_width_mm>=10);
+  assert(wire_clip_min_web_mm>=2);
+  assert(wire_clip_hole_edge_mm-wire_clip_bore_d_mm/2 >=
+         wire_clip_min_web_mm,
+         "Cable route M2 bore breaches exterior printable edge");
+  assert(wire_clip_length_mm/2-wire_clip_slot_l_mm/2
+         -wire_clip_hole_edge_mm-wire_clip_bore_d_mm/2 >=
+         wire_clip_min_web_mm,
+         "Cable route M2 bore breaches center-slot printable web");
+  assert(wire_clip_width_mm/2-wire_clip_slot_w_mm/2 >=
+         wire_clip_min_web_mm,
+         "Cable route slot breaches side printable web");
   difference(){
-    cube([16,13,4]);
-    for(x=[3,13]) translate([x,6.5,2]) cylinder(h=6,d=2.3,center=true);
-    translate([8,6.5,2.5]) cube([6,4,6],center=true);
+    cube([wire_clip_length_mm,wire_clip_width_mm,wire_clip_h_mm]);
+    for(x=[wire_clip_hole_edge_mm,
+           wire_clip_length_mm-wire_clip_hole_edge_mm])
+      translate([x,wire_clip_width_mm/2,wire_clip_h_mm/2])
+        cylinder(h=wire_clip_h_mm+2,d=wire_clip_bore_d_mm,center=true);
+    translate([wire_clip_length_mm/2,wire_clip_width_mm/2,
+               wire_clip_h_mm/2])
+      cube([wire_clip_slot_l_mm,wire_clip_slot_w_mm,
+            wire_clip_h_mm+2],center=true);
   }
 }
 if(part=="head_bridge") head_bridge();
