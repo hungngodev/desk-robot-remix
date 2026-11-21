@@ -1927,9 +1927,13 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
         async def aux_status(self):
             return {
                 "robot_id": self.reported_id,
-                "climate": {"valid": True, "temp_centi": 2210,
-                            "rh_centi": 5400},
-                "bmp280": {"valid": True, "pressure_pa": 101312},
+                "force": {"boot_id": 12345},
+                "proximity": {"boot_id": 12345},
+                "climate": {"valid": True, "seq": 1, "age_ms": 10,
+                            "temp_centi": 2210, "rh_centi": 5400},
+                "bmp280": {"present": True, "valid": True, "chip_id": 0x58,
+                           "seq": 1, "age_ms": 10, "temp_centi": 2130,
+                           "pressure_pa": 101312},
             }
 
     async def noop():
@@ -2003,15 +2007,21 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
         entered, release = threading.Event(), threading.Event()
 
         class Head:
+            def __init__(self):
+                self.seq = 0
+
             async def aux_status(self, route=route, entered=entered, release=release):
                 if route == "aux":
                     entered.set()
                     if not await asyncio.to_thread(release.wait, 3):
                         raise RuntimeError("Timed out waiting for fresh human turn")
+                self.seq += 1
                 return {
                     "robot_id": robot,
-                    "climate": {"valid": True, "temp_centi": 2210,
-                                "rh_centi": 5400},
+                    "force": {"boot_id": 23456},
+                    "proximity": {"boot_id": 23456},
+                    "climate": {"valid": True, "seq": self.seq, "age_ms": 10,
+                                "temp_centi": 2210, "rh_centi": 5400},
                 }
 
         original_search = MemoryStore.search

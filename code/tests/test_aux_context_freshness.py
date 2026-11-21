@@ -4,6 +4,7 @@ The route fake supplies an already authenticated human turn. It deliberately
 does not use a physical WROOM or claim mounted sensor calibration.
 """
 import asyncio
+import math
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -175,7 +176,7 @@ def test_ambient_malformed_legacy_value_is_not_promoted(sensor, field, bad):
             headers={"x-test-turn": "active"},
         )
     assert response.status_code == 200
-    if isinstance(bad, float):
+    if isinstance(bad, float) and not math.isfinite(bad):
         assert response.json()[sensor][field] is None
     assert heard == []
 
