@@ -56,10 +56,21 @@ def capture(
         if (not isinstance(item, RoomObservation) or item.motion_authorized
                 or item.charging_authorized or item.person_identified):
             raise ValueError("Room USB data must never carry action or identity authority")
+        # Stage an entire decoded observation before counting anything.
+        # If an alternate reader supplies an incomplete record, a callback
+        # failure must never be counted as a successful physical USB receipt.
+        if not isinstance(item.readings, dict) or set(item.readings) != set(SENSORS):
+            raise ValueError("Incomplete room station bench sensor record")
+        valid_by_sensor = {}
+        for name in SENSORS:
+            reading = item.readings[name]
+            if not isinstance(reading, dict) or type(reading.get("valid")) is not bool:
+                raise ValueError("Invalid room station bench sensor validity")
+            valid_by_sensor[name] = reading["valid"]
         received_at.append(item.received_at)
         sequence.append(item.seq)
-        for name in SENSORS:
-            if item.readings[name]["valid"]:
+        for name, valid in valid_by_sensor.items():
+            if valid:
                 sensor_counts[name] += 1
 
     reader = feed_factory(port, observed)

@@ -58,6 +58,38 @@ def test_room_bench_counts_real_decoder_receipts_without_sensor_person_claim():
     assert "rail voltage" in result["notes"]
 
 
+def test_room_bench_callback_failure_cannot_count_partial_usb_receipt():
+    from dataclasses import replace
+
+    decoder = RoomStationDecoder()
+    genuine = decoder.accept(_packet(7, 1000), now=1.0)
+    incomplete = replace(genuine, readings={
+        key: value for key, value in genuine.readings.items()
+        if key != "amg8833"
+    })
+
+    class FailedCallback:
+        rejected = 0
+        callback_failures = 0
+
+        def __init__(self, port, on_observation):
+            self.on_observation = on_observation
+
+        def _read_port(self, running):
+            try:
+                self.on_observation(incomplete)
+            except ValueError:
+                self.callback_failures += 1
+
+    report = capture("/dev/cu.test", seconds=1,
+                     feed_factory=FailedCallback, clock=lambda: 0)
+    assert report["callback_failures"] == 1
+    assert report["accepted_frames"] == 0
+    assert report["valid_sensor_frames"]["scd40"] == 0
+    assert report["first_station_sequence"] is None
+    assert report["read_only_usb_sample_captured"] is False
+
+
 def test_room_bench_records_terminal_blackout_without_another_frame():
     decoder = RoomStationDecoder()
     first = decoder.accept(_packet(5, 1000), now=10.2)
