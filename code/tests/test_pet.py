@@ -93,10 +93,15 @@ class PassiveBudgetSimulatedSpeaker(SimulatedSpeaker):
     """
     supports_passive_speech_budget = True
 
+    def __init__(self):
+        super().__init__()
+        self.session_modes = []
+
     @asynccontextmanager
     async def session(self, robots, *, passive=False):
-        assert passive is True
+        assert type(passive) is bool
         assert len(robots) == 1
+        self.session_modes.append(passive)
         yield
 
 
@@ -3429,6 +3434,7 @@ async def test_proactive_hardware_voice_never_reads_private_history_without_opt_
         assert speaker.spoken == [
             ("robot-01", "A new object! That looks interesting.")
         ]
+        assert speaker.session_modes == [True]
     finally:
         state.enabled = False
         await pet.close()
@@ -3475,6 +3481,7 @@ async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
         )
         assert state.last_error is None
         assert speaker.spoken
+        assert speaker.session_modes == [False]
         prompt = str(chat.prompts)
         assert "handling_tilt" in prompt
         assert "private conversation" not in prompt
@@ -3636,12 +3643,11 @@ async def test_proactive_sensor_private_live_context_revoked_during_tts(
             calls.append(url)
             body = kwargs.get("json", {})
             if url.endswith("/session"):
-                assert body.get("passive") is True
+                assert body.get("passive") is None
                 return Response({
                     "device_ids": sorted(body["device_ids"]),
                     "enabled": body["enabled"],
                     "expires_in_seconds": 305 if body["enabled"] else 0,
-                    "passive": True,
                 })
             if url.endswith("/v1/audio/speech"):
                 fleet.voice_vision_tools_enabled = False
