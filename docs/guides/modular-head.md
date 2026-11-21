@@ -87,7 +87,24 @@ reader woke up later. This is a
 **relative backlog check**, not clock synchronization or proof of image
 exposure latency. Mac and ESP32 clocks cannot be compared absolutely.
 A real A9 trial still needs measured camera-to-Mac latency, object freshness,
-concurrent voice and consent/offline recovery.
+concurrent voice and consent/offline recovery. A physical camera bench can no
+longer pass through legacy snapshot polling. With explicit video consent,
+run this read-only test against the actual provisioned head, with its motors
+disconnected or safely on a stand:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_camera.py \
+  --config config/local.toml --robot robot-01 --seconds 60 \
+  --stream --score-motion \
+  --report data/private/head_camera_trial.json
+```
+
+The report measures persistent stream interarrival, device capture-completion
+deltas and concurrent WROOM status request timing. It does **not** qualify
+true optical exposure timing, image interpretation, gripper reach, audible
+playback, motor safety or A9 physical behavior. No motor command or still
+snapshot is sent by this bench command.
 
 ## Existing case and small changes
 
@@ -117,8 +134,11 @@ and active design before touching geometry.
 ## Power/audio and staged bring-up
 
 - Logic stays 3.3 V. Verify amplifier variant/pins and supply per its documentation.
-  Speaker connects **SPK+ to SPK−**, neither output to GND. Limit output for the
-  8 Ω / 1 W speaker; check acoustic port and cavity fit.
+  Speaker connects **SPK+ to SPK−**, neither output to GND. The selected
+  Challenge CS20-02P110-04-1X is an **8 Ω, 2 W** rectangular speaker
+  candidate, not the superseded 1 W round speaker. Limit output to its
+  measured installed acoustic/thermal rating and check enclosure port,
+  MAX98357A gain, distortion and cavity fit.
 - Use the final **qualified matched rechargeable 1S cell, charger/protection and regulated 5V distribution system**, with separately rated actuator branches. An unidentified owned power bank may only be used for isolated bench testing after verifying its output; it is not the selected permanent power architecture. Do not route
   motor current through head/body regulators or laptop USB.
 - On USB with motors absent, verify screen, fresh camera capture, PDM recording,
