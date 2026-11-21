@@ -62,6 +62,32 @@ def test_room_station_power_budget_is_machine_readable_and_fail_closed():
 
 
 
+def test_amg8833_scan_is_bounded_incremental_and_never_fakes_frame_time():
+    firmware = (
+        ROOT / "code/firmware/room_station/src/main.cpp"
+    ).read_text()
+    stage = firmware.split("void thermal_step(", 1)[1].split(
+        "void thermal_observation(", 1
+    )[0]
+    report = firmware.split("void thermal_observation(", 1)[1].split(
+        "void report(", 1
+    )[0]
+    assert "thermal_step(now);" in firmware
+    assert firmware.index("radar.read();") < firmware.index("thermal_step(now);")
+    assert stage.count("read_thermal_chunk(") == 1
+    assert "thermal_staging + 8U * thermal_next_chunk" in stage
+    assert "thermal_valid = false;" in stage
+    assert "thermal_next_chunk == AMG88xx_PIXEL_ARRAY_SIZE / 8U" in stage
+    assert "thermal[i] = thermal_staging[i];" in stage
+    assert "thermal_sample_ms = now;" in stage
+    assert "thermal_valid = true;" in stage
+    assert "kThermalScanMaxMs = 250;" in firmware
+    assert "read_thermal_chunk" not in report
+    assert "thermal_valid && now - thermal_sample_ms <= kThermalStaleMs" in report
+    assert "Serial.print(thermal_sample_ms);" in report
+    assert "Serial.print(now);" not in report
+
+
 def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
     code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
     # Upstream Adafruit_BME680 2.0.5 endReading() returns true on

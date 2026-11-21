@@ -25,6 +25,8 @@ namespace {
 constexpr uint32_t kReportMs = 1000;
 constexpr uint32_t kScdStaleMs = 8500;
 constexpr uint32_t kBmeStaleMs = 3000;
+constexpr uint32_t kThermalStaleMs = 3000;
+constexpr uint32_t kThermalScanMaxMs = 250;
 constexpr uint32_t kBootWaitMs = 1200;
 constexpr uint8_t kBmePrimary = 0x77;
 constexpr uint8_t kBmeAlternate = 0x76;
@@ -49,6 +51,12 @@ uint32_t last_scd_ms = 0;
 uint32_t last_report_ms = 0;
 uint32_t sequence = 0;
 float thermal[AMG88xx_PIXEL_ARRAY_SIZE] = {};
+float thermal_staging[AMG88xx_PIXEL_ARRAY_SIZE] = {};
+bool thermal_valid = false, thermal_scan_active = false;
+bool thermal_ever_requested = false;
+uint8_t thermal_next_chunk = 0;
+uint32_t thermal_requested_ms = 0, thermal_started_ms = 0;
+uint32_t thermal_sample_ms = 0;
 
 bool finite_temperature(float temp) {
   return isfinite(temp) && temp >= -40.0f && temp <= 125.0f;
@@ -179,20 +187,43 @@ void soil_observation(uint32_t now) {
 // Retain Adafruit's normal device initialization and its contiguous pixel
 // register layout and the portable tested eight 16-byte read helper.
 // This stationary sensor never authorizes motor or charging commands.
-void thermal_observation(uint32_t now) {
-  bool valid = amg_started;
-  if (valid) {
-    for (uint8_t chunk = 0; chunk < AMG88xx_PIXEL_ARRAY_SIZE / 8U; ++chunk) {
-      if (!desk_robot_room::read_thermal_chunk(
-              Wire, kAmgAddress, chunk, thermal + 8U * chunk)) {
-        valid = false;
-        break;
-      }
-    }
+// Read only one 16-byte I2C chunk per loop iteration. The LD2410C
+// 256000-baud UART needs service between transfers; do not block it
+// through eight sensor transactions inside one JSON report.
+void thermal_step(uint32_t now) {
+  if (!amg_started) return;
+  if (!thermal_scan_active) {
+    if (thermal_ever_requested && now - thermal_requested_ms < kReportMs)
+      return;
+    thermal_ever_requested = true;
+    thermal_requested_ms = thermal_started_ms = now;
+    thermal_next_chunk = 0;
+    thermal_scan_active = true;
   }
+  // A stalled or partially missing scan is not a completed frame.
+  // These are sequential pixel readings, not a simultaneous thermal image.
+  if (now - thermal_started_ms >= kThermalScanMaxMs ||
+      !desk_robot_room::read_thermal_chunk(
+          Wire, kAmgAddress, thermal_next_chunk,
+          thermal_staging + 8U * thermal_next_chunk)) {
+    thermal_scan_active = false;
+    thermal_valid = false;
+    return;
+  }
+  if (++thermal_next_chunk == AMG88xx_PIXEL_ARRAY_SIZE / 8U) {
+    for (unsigned i = 0; i < AMG88xx_PIXEL_ARRAY_SIZE; ++i)
+      thermal[i] = thermal_staging[i];
+    thermal_sample_ms = now;
+    thermal_valid = true;
+    thermal_scan_active = false;
+  }
+}
+void thermal_observation(uint32_t now) {
+  // Never read I2C in the report path or stamp cached pixels with now.
+  const bool valid = thermal_valid && now - thermal_sample_ms <= kThermalStaleMs;
   Serial.print(F("\"amg8833\":{\"valid\":")); jsbool(valid);
   if (valid) {
-    Serial.print(F(",\"sample_ms\":")); Serial.print(now);
+    Serial.print(F(",\"sample_ms\":")); Serial.print(thermal_sample_ms);
     Serial.print(F(",\"pixels_c\":["));
     for (unsigned i = 0; i < AMG88xx_PIXEL_ARRAY_SIZE; ++i) {
       if (i) Serial.print(',');
@@ -255,6 +286,7 @@ void loop() {
   // of stamping cached target data with the later one-second report time.
   radar_sample_clock.observe(radar_activity, radar.isConnected(), now);
   bme_step(now); // no heater-time sleep; preserve 256000 baud radar service
+  thermal_step(now); // one I2C chunk per loop, complete frame only
   if (now - last_report_ms >= kReportMs) {
     last_report_ms = now;
     report(now);
