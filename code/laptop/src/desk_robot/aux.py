@@ -59,6 +59,11 @@ def validate_aux(data: dict, robot_id: str) -> dict:
         raise ValueError("Invalid AS5600 magnetic angle source")
 
     if (not _array(force.get("adc"), 2, lambda n: _sint(n, -32768, 32767))
+            # The actual WROOM explicitly marks clipped jaw ADC values
+            # invalid. Keep diagnostic endpoint codes when valid=False, but
+            # never trust valid=True with saturated force source evidence.
+            or (force.get("valid") is True and
+                force["adc"][1] in (-32768, 32767))
             or not _uint(force.get("jaw_seq"), 0xffffffff)
             or ("jaw_age_ms" in force and (
                 not _uint(force["jaw_age_ms"], 0xffffffff)

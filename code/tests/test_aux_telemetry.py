@@ -68,6 +68,7 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
         ("angles", "valid_mask", 7), ("angles", "raw", [100, 200]),
         ("angles", "magnet", [0, 0, 0]), ("angles", "present_mask", True),
         ("force", "adc", [0, 99999]), ("force", "valid", 1),
+        ("force", "adc", [0, -32768]), ("force", "adc", [0, 32767]),
         ("force", "jaw_seq", -1), ("force", "jaw_seq", True),
         ("force", "boot_id", -1), ("force", "boot_id", True),
         ("force", "boot_id", 4294967296),
@@ -91,6 +92,16 @@ def test_aux_rejects_forged_invalid_or_calibrated_sensors(group, field, value):
     payload[group][field] = value
     with pytest.raises(ValueError):
         validate_aux(payload, "robot-01")
+
+
+@pytest.mark.parametrize("clipped", [-32768, 32767])
+def test_clipped_jaw_adc_is_visible_only_as_invalid_diagnostic(clipped):
+    data = sample()
+    data["force"]["adc"][1] = clipped
+    data["force"]["valid"] = False
+    result = validate_aux(data, "robot-01")
+    assert result["force"]["adc"][1] == clipped
+    assert result["force"]["valid"] is False
 
 
 def test_expired_jaw_age_is_allowed_only_as_invalid_diagnostic():
