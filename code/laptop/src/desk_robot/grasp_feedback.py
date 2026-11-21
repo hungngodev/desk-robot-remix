@@ -71,14 +71,33 @@ async def guarded_grasp(
     if not isinstance(robot_id, str) or not robot_id:
         raise ValueError("Gripper requires the configured robot identity")
 
+    force_boot_seen = False
+    force_boot_id: int | None = None
+    force_boot_changed = False
+
     async def read_force() -> tuple[int, int]:
+        nonlocal force_boot_seen, force_boot_id, force_boot_changed
         sample = await _bounded_head_reply(
             head.aux_status(), seconds=_FORCE_READ_TIMEOUT_S,
             timeout_message="ADS1115 jaw force read timed out",
         )
         if not isinstance(sample, dict) or sample.get("robot_id") != robot_id:
             raise ValueError("Foreign or missing jaw sensor robot identity")
-        return force_observation(sample)
+        observation = force_observation(sample)
+        group = sample["force"]
+        observed_boot = group.get("boot_id")
+        if ("boot_id" in group and (type(observed_boot) is not int
+                or not 0 <= observed_boot <= 0xffffffff)):
+            raise ValueError("Invalid WROOM boot identity for jaw evidence")
+        if force_boot_seen and observed_boot != force_boot_id:
+            # Across a CPU reboot the jaw sequence may look like uint32 wrap.
+            # Do not issue another close OR a best-effort relief on the new
+            # unarmed session, even if an alternate health adapter says yes.
+            force_boot_changed = True
+            raise ValueError("WROOM reboot invalidated grasp force sequence")
+        force_boot_seen = True
+        force_boot_id = observed_boot
+        return observation
 
     async def confirmed_health() -> None:
         # The normal Coordinator raises for disarmed/foreign WROOM status,
@@ -144,6 +163,8 @@ async def guarded_grasp(
                 }
         raise OperationError("Closed jaw limit reached with no tactile contact")
     except (Exception, asyncio.CancelledError):
+        if force_boot_changed:
+            raise  # No commands of any kind after a newly observed reboot.
         # Cancellation also can arrive AFTER a jaw command has moved the servo.
         # A failed partial grasp can leave a powered MG90S squeezing an object.
         # Transport failures and hardware timeout exceptions matter too: a
