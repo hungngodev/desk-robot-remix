@@ -345,7 +345,9 @@ class RoomSerialFeed:
                 if not synchronized:
                     # No valid JSON may pass until the current challenge is
                     # acknowledged. Stale ACKs and older buffered frames drop.
-                    if line == expected:
+                    # Arduino Serial.println emits CRLF. Match either exact
+                    # terminator while retaining the full unpredictable nonce.
+                    if line == expected or line == expected[:-1] + b"\r\n":
                         synchronized = True
                         frame_deadline = now + USB_POST_SYNC_FRAME_TIMEOUT_S
                         discard_until_newline = False

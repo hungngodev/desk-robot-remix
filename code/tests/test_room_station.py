@@ -21,7 +21,7 @@ class SynchronizedFakePort:
         assert request.startswith(b"SYNC ") and request.endswith(b"\n")
         nonce = request[5:-1]
         assert len(nonce) == 16 and all(c in b"0123456789abcdef" for c in nonce)
-        self._session_reply = b"SYNC_ACK " + nonce + b"\n"
+        self._session_reply = b"SYNC_ACK " + nonce + b"\r\n"
         return len(request)
 
     def _read_session_reply(self):
@@ -870,3 +870,82 @@ def test_usb_reader_never_accepts_second_frame_without_its_own_ack(monkeypatch):
         feed._read_port(lambda: True)
     assert observed == [1]
     assert opened[0].sync_count == 2
+
+
+
+@pytest.mark.parametrize("terminator", [b"\r\n", b"\n"])
+def test_real_feather_crlf_and_legacy_lf_sync_handshake(monkeypatch, terminator):
+    """Accept exactly the selected board's CRLF ACK and canonical LF ACK."""
+    import sys
+    from types import SimpleNamespace
+
+    observed, opened = [], []
+
+    class Port(SynchronizedFakePort):
+        def __init__(self, *args, **kwargs):
+            self.reads = 0
+            opened.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def write(self, request):
+            result = super().write(request)
+            self._session_reply = self._session_reply[:-2] + terminator
+            return result
+
+        def readline(self, size):
+            self.reads += 1
+            if self.reads == 1:
+                return self._read_session_reply()
+            if self.reads == 2:
+                return json.dumps(frame(1, 1000)).encode() + b"\n"
+            return b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda sample: observed.append(sample.seq))
+    feed._read_port(lambda: not opened or opened[0].reads < 3)
+    assert observed == [1]
+    assert feed.received == 1
+
+
+def test_feather_wrong_nonce_crlf_does_not_unlock_buffered_json(monkeypatch):
+    """A terminated but wrong nonce cannot validate an earlier USB report."""
+    import sys
+    from types import SimpleNamespace
+
+    observed, opened = [], []
+
+    class Port(SynchronizedFakePort):
+        def __init__(self, *args, **kwargs):
+            self.reads = 0
+            opened.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            self.reads += 1
+            if self.reads == 1:
+                ack = self._session_reply
+                digit = b"0" if ack[9:10] != b"0" else b"1"
+                return ack[:9] + digit + ack[10:]
+            if self.reads == 2:
+                return json.dumps(frame(1, 1000)).encode() + b"\n"
+            if self.reads == 3:
+                return self._read_session_reply()
+            if self.reads == 4:
+                return json.dumps(frame(2, 2000)).encode() + b"\n"
+            return b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda sample: observed.append(sample.seq))
+    feed._read_port(lambda: not opened or opened[0].reads < 5)
+    assert observed == [2]
+    assert feed.received == 1
