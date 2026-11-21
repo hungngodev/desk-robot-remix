@@ -73,6 +73,7 @@ public:
         bool ready;
         bool failed;
         uint32_t frames;
+        uint64_t generation;
     };
     bool BeginBenchPcmCapture();
     // A physical BOOT mute or playback cancellation invalidates any

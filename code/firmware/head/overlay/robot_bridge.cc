@@ -646,19 +646,22 @@ void Bridge::BenchPcmTask(void* context) {
     const auto still_authorized = [&]() {
         return transfer->codec->BenchPcmGeneration() == transfer->generation;
     };
-    char first[32], last[32], boot[24], frames[20];
+    char first[32], last[32], boot[24], frames[20], generation[24];
     snprintf(first, sizeof(first), "%lld",
              static_cast<long long>(pcm.first_sample_us));
     snprintf(last, sizeof(last), "%lld",
              static_cast<long long>(pcm.last_sample_us));
     snprintf(boot, sizeof(boot), "%u", static_cast<unsigned>(transfer->boot));
     snprintf(frames, sizeof(frames), "%u", static_cast<unsigned>(pcm.frames));
+    snprintf(generation, sizeof(generation), "%llu",
+             static_cast<unsigned long long>(transfer->generation));
     esp_err_t status = httpd_resp_set_type(req, "application/octet-stream");
     if (status == ESP_OK) status = httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
     if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Robot-Id", CONFIG_DESK_ROBOT_ID);
     if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Boot", boot);
     if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Frames", frames);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Generation", generation);
     if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-First-Us", first);
     if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Last-Us", last);
     const int64_t deadline_us = esp_timer_get_time() + 5'000'000;
@@ -693,9 +696,20 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         if (req->content_len != 0)
             return Json(req, 400, Envelope(false, "Bench capture request must be empty"));
         if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
-        if (!static_cast<SenseReferenceCodec*>(audio_codec_)->BeginBenchPcmCapture())
+        auto* codec = static_cast<SenseReferenceCodec*>(audio_codec_);
+        JsonPtr started(cJSON_CreateObject(), cJSON_Delete);
+        if (!started) return Json(req, 503, Envelope(false, "Bench start reply unavailable"));
+        if (!codec->BeginBenchPcmCapture())
             return Json(req, 409, Envelope(false, "Bench PCM unavailable or already active"));
-        return Json(req, 202, Envelope(true, "Private bench PCM capture started"));
+        char generation[24];
+        snprintf(generation, sizeof(generation), "%llu",
+                 static_cast<unsigned long long>(codec->BenchPcmGeneration()));
+        cJSON_AddBoolToObject(started.get(), "ok", true);
+        cJSON_AddStringToObject(started.get(), "reply", "Private bench PCM capture started");
+        cJSON_AddStringToObject(started.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddNumberToObject(started.get(), "boot", boot_nonce_);
+        cJSON_AddStringToObject(started.get(), "capture_generation", generation);
+        return Json(req, 202, Encode(started.get()));
     }
     if (strcmp(req->uri, "/api/audio.capture.status") == 0) {
         if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
@@ -709,6 +723,10 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         cJSON_AddBoolToObject(data.get(), "ready", progress.ready);
         cJSON_AddBoolToObject(data.get(), "failed", progress.failed);
         cJSON_AddNumberToObject(data.get(), "frames", progress.frames);
+        char generation[24];
+        snprintf(generation, sizeof(generation), "%llu",
+                 static_cast<unsigned long long>(progress.generation));
+        cJSON_AddStringToObject(data.get(), "capture_generation", generation);
         cJSON_AddBoolToObject(data.get(), "physical_aec_qualified", false);
         return Json(req, 200, Encode(data.get()));
     }

@@ -1232,7 +1232,10 @@ def test_private_aec_capture_returns_true_http_accept_and_conflict_codes():
     assert 'case 202: status_text = "202 Accepted"; break;' in bridge
     assert 'case 409: status_text = "409 Conflict"; break;' in bridge
     assert '"/api/audio.capture.start"' in bridge
-    assert 'Json(req, 202, Envelope(true, "Private bench PCM capture started"))' in bridge
+    assert 'return Json(req, 202, Encode(started.get()));' in bridge
+    assert 'cJSON_AddStringToObject(started.get(), "capture_generation", generation)' in bridge
+    assert 'cJSON_AddStringToObject(data.get(), "capture_generation", generation)' in bridge
+    assert '"X-Desk-Audio-Generation"' in bridge
     assert 'Json(req, 409, Envelope(false, "Bench PCM unavailable or already active"))' in bridge
     # Private raw audio must remain behind a selected Sense build flag.
     assert 'defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)' in bridge

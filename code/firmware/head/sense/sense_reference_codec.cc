@@ -384,6 +384,7 @@ SenseReferenceCodec::GetBenchPcmProgress() {
         bench_window_.ready(),
         bench_window_.failed(),
         bench_window_.frames_received(),
+        bench_capture_generation_.load(std::memory_order_acquire),
     };
 }
 
