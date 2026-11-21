@@ -65,7 +65,11 @@ The rectangular front grille and [separate speaker pocket gauge](speaker_rect_fi
 **Sensor mounting hold:** The nominal 10.5 mm GY-530 carrier is too
 narrow for the former assumed paired screw slots, which overlapped the lens
 aperture. Those unmeasured holes were removed from `tof_adjustable`.
-The base mounting slots remain, but the reference does not retain a PCB.
+The base mounting slots remain, but the reference does not retain a PCB. The separate GY530 source-size
+pocket coupon now enforces at least a 2 mm perimeter and 1.5 mm
+floor even when a builder overrides dimensional parameters. It still
+cannot establish the real lens center, 3.3 V I2C pullup compatibility,
+controller mount, optical FoV, connector routing or cliff stopping.
 Print the fit coupon and measure real carrier width, thickness, connector,
 lens position and any mounting features before designing a captive clamp.
 Do not install eight of these as qualified cliff sensing mounts.

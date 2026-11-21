@@ -897,3 +897,30 @@ def test_cable_route_plate_has_reliable_screw_to_slot_printable_web(tmp_path):
         ], capture_output=True, text=True, timeout=90)
         assert bad.returncode != 0
         assert message in bad.stdout + bad.stderr
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_gy530_fit_coupon_rejects_weak_walls_and_missing_floor(tmp_path):
+    """Nominal 10.5x13.3 PCB sample must retain a measurable plastic cup."""
+    source = ROOT / "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad"
+    out = tmp_path / "gy530.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl",
+        "-o", str(out), str(source),
+    ], check=True, capture_output=True, text=True, timeout=90)
+    assert module().closed_mesh_edges(out) > 0
+    assert module().mesh_bounds_mm(out)["dimensions_mm"] == [
+        15.2, 18.0, 4.3
+    ]
+    for override, message in (
+        ("wall=0.5", "side wall below printable minimum"),
+        ("base=0", "floor below printable minimum"),
+        ("pocket_depth=0", "depth outside meaningful sample bounds"),
+    ):
+        bad = subprocess.run([
+            "openscad", "--export-format", "binstl",
+            "-o", str(tmp_path / "invalid_gy530.stl"),
+            "-D", override, str(source),
+        ], capture_output=True, text=True, timeout=90)
+        assert bad.returncode != 0
+        assert message in bad.stderr + bad.stdout
