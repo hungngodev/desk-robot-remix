@@ -423,6 +423,32 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
 }
 
 void BodyControl::set_imu(const BerryReading& reading) {
+  // WROOM forwards the same cached conversion on many faster motor cycles.
+  // Its unchanged timestamp must also retain the same raw evidence. A
+  // changed or older sample cannot silently replace the safety input.
+  bool identical = imu_sample_seen_ && reading.at_ms == imu_last_at_ms_ &&
+      reading.model == imu_.model && reading.valid == imu_.valid &&
+      reading.temperature_raw == imu_.temperature_raw &&
+      reading.low_g_status_valid == imu_.low_g_status_valid &&
+      reading.low_g_irq == imu_.low_g_irq &&
+      reading.low_g_event_seq == imu_.low_g_event_seq;
+  for (unsigned i = 0; i < 3; ++i) {
+    identical = identical && reading.accel[i] == imu_.accel[i] &&
+                reading.gyro[i] == imu_.gyro[i];
+  }
+  const std::uint32_t advance = reading.at_ms - imu_last_at_ms_;
+  if (!imu_sample_seen_ || (advance != 0U && advance < 0x80000000U)) {
+    imu_sample_seen_ = true;
+    imu_last_at_ms_ = reading.at_ms;
+    imu_provenance_bad_ = false;
+  } else if (!identical) {
+    imu_provenance_bad_ = true;
+    if (imu_motion_required_ && state_.armed) {
+      imu_sensor_fault_latched_ = true;
+      stop_motion();
+      state_.armed = false; // preserve holding PWM on an unsafe IMU replay
+    }
+  }
   imu_ = reading;
   // Native FF_INT is read-to-clear. A following healthy poll cannot erase
   // the safety stop: only a deliberate local USB rearm may resume wheels.
@@ -1072,6 +1098,7 @@ void BodyControl::execute(const char* line, std::size_t length,
             imu_.model == BerryModel::Mpu6050 &&
             imu_.accel[0] == 0 && imu_.accel[1] == 0 &&
             imu_.accel[2] == 0 ? "imu_zero_accel" :
+        imu_motion_required_ && imu_provenance_bad_ ? "imu_sample_unordered" :
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
         battery_below_arm_min ? "battery_low" :
         battery_fault_latched_ ? "battery_low_latched" :

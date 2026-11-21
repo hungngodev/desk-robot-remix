@@ -739,19 +739,20 @@ static void missing_mpu_interrupt_status_cannot_authorize_wheels() {
   CHECK(send(body, "status", 100).find(
       "\"fault\":\"imu_low_g_status_unavailable\"") != std::string::npos);
   imu.low_g_status_valid = true;
+  imu.at_ms = 101; // a distinct successful source conversion
   body.set_imu(imu);
-  CHECK(send(body, "rearm", 100, true) == "OK rearm");
-  CHECK(send(body, "arm", 100) == "OK arm");
-  CHECK(send(body, "drive 20 20 200", 100).find("OK drive") == 0);
+  CHECK(send(body, "rearm", 101, true) == "OK rearm");
+  CHECK(send(body, "arm", 101) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 101).find("OK drive") == 0);
   imu.low_g_status_valid = false;  // intermittent I2C/clone failure
-  imu.at_ms = 101;
+  imu.at_ms = 102;
   body.set_imu(imu);
-  fresh(guard, 101);
-  body.tick(101);
+  fresh(guard, 102);
+  body.tick(102);
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0 && body.state().servos_attached);
-  CHECK(send(body, "arm", 101) == "ERR arm imu_sensor_fault_latched");
-  const auto status = send(body, "status", 101);
+  CHECK(send(body, "arm", 102) == "ERR arm imu_sensor_fault_latched");
+  const auto status = send(body, "status", 102);
   CHECK(status.find("\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
   CHECK(status.find("\"low_g_valid\":false,\"low_g_irq\":false") !=
         std::string::npos);
@@ -773,20 +774,21 @@ static void zero_acceleration_mpu_does_not_authorize_motion() {
   CHECK(send(body, "rearm", 100, true) == "ERR rearm imu_missing_or_stale");
   CHECK(!body.imu_fresh(100));
   imu.accel[2] = 16384; // source-scale synthetic 1g, not physical calibration
-  body.set_imu(imu);
-  CHECK(send(body, "rearm", 100, true) == "OK rearm");
-  CHECK(send(body, "arm", 100) == "OK arm");
-  CHECK(send(body, "drive 20 20 200", 100).find("OK drive") == 0);
-  CHECK(body.state().servos_attached);
-  imu.accel[2] = 0;
   imu.at_ms = 101;
   body.set_imu(imu);
-  fresh(guard, 101);
-  body.tick(101);
+  CHECK(send(body, "rearm", 101, true) == "OK rearm");
+  CHECK(send(body, "arm", 101) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 101).find("OK drive") == 0);
+  CHECK(body.state().servos_attached);
+  imu.accel[2] = 0;
+  imu.at_ms = 102;
+  body.set_imu(imu);
+  fresh(guard, 102);
+  body.tick(102);
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0 && body.state().servos_attached);
-  CHECK(send(body, "arm", 101) == "ERR arm imu_sensor_fault_latched");
-  CHECK(send(body, "status", 101).find("\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
+  CHECK(send(body, "arm", 102) == "ERR arm imu_sensor_fault_latched");
+  CHECK(send(body, "status", 102).find("\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
 }
 
 static void required_imu_is_a_local_freshness_interlock() {
@@ -847,19 +849,87 @@ static void required_imu_is_a_local_freshness_interlock() {
   CHECK(send(body, "status", 252).find(
       "\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
   reading.valid = true;
+  reading.at_ms = 253; // only a new acquisition can repair invalid evidence
   body.set_imu(reading);
-  CHECK(send(body, "arm", 252) == "ERR arm imu_sensor_fault_latched");
-  CHECK(send(body, "status", 252).find(
+  CHECK(send(body, "arm", 253) == "ERR arm imu_sensor_fault_latched");
+  CHECK(send(body, "status", 253).find(
       "\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
-  CHECK(send(body, "rearm", 252) == "ERR rearm local_only");
-  CHECK(send(body, "rearm", 252, true) == "OK rearm");
-  CHECK(send(body, "arm", 252) == "OK arm");
+  CHECK(send(body, "rearm", 253) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 253, true) == "OK rearm");
+  CHECK(send(body, "arm", 253) == "OK arm");
   CHECK(body.state().left == 0 && body.state().right == 0);
   // Unrecognized model cannot claim a valid raw sample.
   reading.model = desk_robot::BerryModel::Unknown;
   body.set_imu(reading);
   body.tick(253);
   CHECK(!body.state().armed);
+}
+
+
+static void imu_replay_and_rollover_are_local_motion_safety_evidence() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_imu_for_motion(true);
+  body.set_imu_identity(4, 0x68, 0);
+  desk_robot::BerryReading reading{};
+  reading.model = desk_robot::BerryModel::Mpu6050;
+  reading.valid = true;
+  reading.low_g_status_valid = true;
+  reading.accel[2] = 16384;
+  reading.at_ms = 100;
+  body.set_imu(reading);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 100).find("OK drive") == 0);
+  body.set_imu(reading); // normal cached reading between real I2C polls
+  fresh(guard, 101);
+  body.tick(101);
+  CHECK(body.state().armed && body.state().left == 20);
+  reading.accel[0] = 900; // changed data under the same conversion identity
+  body.set_imu(reading);
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(body.state().servos_attached); // never drop an already held object
+  CHECK(!body.imu_fresh(101));
+  CHECK(send(body, "arm", 101) == "ERR arm imu_sensor_fault_latched");
+  CHECK(send(body, "rearm", 101, true) == "ERR rearm imu_missing_or_stale");
+  reading.at_ms = 102; // genuine newer conversion
+  body.set_imu(reading);
+  fresh(guard, 102);
+  CHECK(body.imu_fresh(102));
+  CHECK(send(body, "arm", 102) == "ERR arm imu_sensor_fault_latched");
+  CHECK(send(body, "rearm", 102, true) == "OK rearm");
+  CHECK(send(body, "arm", 102) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 102).find("OK drive") == 0);
+  reading.at_ms = 101; // out-of-order sample, even if otherwise plausible
+  body.set_imu(reading);
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "arm", 103) == "ERR arm imu_sensor_fault_latched");
+  reading.at_ms = 104;
+  body.set_imu(reading);
+  fresh(guard, 104);
+  CHECK(send(body, "rearm", 104, true) == "OK rearm");
+  CHECK(send(body, "arm", 104) == "OK arm");
+  CHECK(body.state().left == 0); // no automatic old drive restart
+
+  // millis() genuinely wraps after a new device conversion. Half-range
+  // unsigned ordering accepts progress, but rejects a delayed old packet.
+  desk_robot::BodyControl wrapped(desk_robot::BodyProfile::StepperGuarded);
+  wrapped.require_imu_for_motion(true);
+  wrapped.set_imu_identity(4, 0x68, 0);
+  reading.at_ms = 0xfffffff9U;
+  wrapped.set_imu(reading);
+  CHECK(wrapped.imu_fresh(0xfffffffbU));
+  reading.at_ms = 3U;
+  wrapped.set_imu(reading);
+  CHECK(wrapped.imu_fresh(3U));
+  reading.at_ms = 0xfffffffaU; // pre-wrap packet arriving after wrap
+  wrapped.set_imu(reading);
+  CHECK(!wrapped.imu_fresh(4U));
+  reading.at_ms = 5U;
+  wrapped.set_imu(reading);
+  CHECK(wrapped.imu_fresh(5U));
 }
 
 static void touch_gesture_counters_survive_slow_status_polling() {
@@ -2068,6 +2138,7 @@ int main() {
     required_imu_is_a_local_freshness_interlock();
     zero_acceleration_mpu_does_not_authorize_motion();
     mpu_native_low_g_irq_vetoes_local_wheels();
+    imu_replay_and_rollover_are_local_motion_safety_evidence();
     missing_mpu_interrupt_status_cannot_authorize_wheels();
     imu_status_preserves_physical_conversion_and_boot_identity();
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";

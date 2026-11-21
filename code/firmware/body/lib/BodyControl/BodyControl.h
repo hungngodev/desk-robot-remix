@@ -207,7 +207,8 @@ class BodyControl {
     return state_.imu_family >= 1 && state_.imu_family <= 4 &&
            imu_.model == static_cast<BerryModel>(state_.imu_family) &&
            BerryImu::identify(state_.imu_gyro_id, state_.imu_aux_id) == imu_.model &&
-           imu_.valid && mpu_accel_plausible && low_g_clear &&
+           imu_.valid && !imu_provenance_bad_ &&
+           mpu_accel_plausible && low_g_clear &&
            now_ms - imu_.at_ms <= 200U;
   }
   std::uint32_t watchdog_remaining(std::uint32_t now_ms) const;
@@ -267,6 +268,11 @@ class BodyControl {
   bool command_timeout_latched_ = false; // silent head link, USB only
   bool imu_low_g_latched_ = false;  // native MPU event needs local USB rearm
   bool imu_sensor_fault_latched_ = false; // lost live IMU during motion: USB only
+  // BerryImu is polled at a slower sensor cadence than the motor loop.
+  // Permit identical cached readings, never reordered or contradictory ones.
+  bool imu_sample_seen_ = false;
+  bool imu_provenance_bad_ = false;
+  std::uint32_t imu_last_at_ms_ = 0;
   bool dc_driver_fault_bad(std::uint32_t now_ms) const;
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};
