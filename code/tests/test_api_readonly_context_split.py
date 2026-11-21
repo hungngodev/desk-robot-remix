@@ -384,7 +384,12 @@ def test_voice_memory_lookup_rejects_payload_after_turn_is_superseded(settings):
 
     memory = Memory()
     app = FastAPI()
-    app.state.runtime = SimpleNamespace(memory=memory, multimodal=None)
+    app.state.runtime = SimpleNamespace(
+        memory=memory, multimodal=None,
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
     register_voice_context_route(
         app, settings,
         authorize=lambda: None,
@@ -584,6 +589,9 @@ def test_voice_memory_context_strips_room_if_station_opt_out_during_sqlite(setti
     app = FastAPI()
     app.state.runtime = SimpleNamespace(
         memory=Memory(), multimodal=SimpleNamespace(hub=hub),
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
     )
     register_voice_context_route(
         app, settings, authorize=lambda: None,
@@ -677,6 +685,9 @@ def test_voice_context_serves_wroom_touch_and_fault_when_camera_disabled(setting
     app = FastAPI()
     app.state.runtime = SimpleNamespace(
         memory=Memory(), multimodal=SimpleNamespace(hub=hub),
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
     )
     register_voice_context_route(
         app, settings, authorize=lambda: None,

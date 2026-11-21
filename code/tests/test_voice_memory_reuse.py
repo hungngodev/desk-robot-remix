@@ -122,7 +122,12 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
             return []
 
     app = FastAPI()
-    app.state.runtime = SimpleNamespace(memory=Memory(), multimodal=None)
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=None,
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
     register_voice_context_route(
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda request, robot_id: (
@@ -266,7 +271,10 @@ def test_vision_revocation_during_memory_read_clears_live_cues(settings):
 
     app = FastAPI()
     app.state.runtime = SimpleNamespace(
-        memory=Memory(), multimodal=SimpleNamespace(hub=Hub())
+        memory=Memory(), multimodal=SimpleNamespace(hub=Hub()),
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
     )
     register_voice_context_route(
         app, settings, authorize=lambda: None,
@@ -282,3 +290,62 @@ def test_vision_revocation_during_memory_read_clears_live_cues(settings):
     assert body["recent_tool_interpretations"] == []
     assert body["current_interaction_timeline"] == []
     assert settings.voice_memory_tools_enabled is True
+
+
+
+@pytest.mark.parametrize("owner_type", [
+    "missing_conversation", "missing_revision_dict", "invalid_dict",
+    "missing_pet_revision", "bool_revision", "float_revision",
+    "negative_revision", "string_revision",
+])
+def test_model_voice_memory_requires_revision_owner_before_any_read(
+    settings, owner_type,
+):
+    """Legacy/injected runtimes cannot bypass private memory edit fencing."""
+    from types import SimpleNamespace
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+
+    class NoReads:
+        def recent(self, *args, **kwargs):
+            raise AssertionError("Missing revision owner must reject before SQLite")
+
+        def search(self, *args, **kwargs):
+            raise AssertionError("Missing revision owner must reject before SQLite")
+
+        def core_facts(self, *args, **kwargs):
+            raise AssertionError("Missing revision owner must reject before SQLite")
+
+    runtime = SimpleNamespace(memory=NoReads(), multimodal=None)
+    if owner_type != "missing_conversation":
+        if owner_type == "missing_revision_dict":
+            runtime.conversation = SimpleNamespace()
+        else:
+            revisions = {
+                "invalid_dict": None,
+                "missing_pet_revision": {"robot-02": 3},
+                "bool_revision": {"robot-01": True},
+                "float_revision": {"robot-01": 1.0},
+                "negative_revision": {"robot-01": -1},
+                "string_revision": {"robot-01": "1"},
+            }[owner_type]
+            runtime.conversation = SimpleNamespace(
+                _private_memory_generation=revisions,
+            )
+    app = FastAPI()
+    app.state.runtime = runtime
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+    )
+    with TestClient(app) as client:
+        for suffix in ("", "?query=some%20private%20fact"):
+            response = client.get("/v1/pet/robot-01/voice-context" + suffix)
+            assert response.status_code == 409
+            assert "Private memory revision unavailable" in response.json()["detail"]
+            assert "private fact" not in response.text

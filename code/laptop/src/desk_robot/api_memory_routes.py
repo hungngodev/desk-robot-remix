@@ -213,8 +213,12 @@ def register_voice_context_route(
         conversation = getattr(app.state.runtime, "conversation", None)
         revisions = getattr(conversation, "_private_memory_generation", None)
         memory_revision = (
-            revisions.get(robot_id, 0) if isinstance(revisions, dict) else None
+            revisions.get(robot_id) if isinstance(revisions, dict) else None
         )
+        if type(memory_revision) is not int or memory_revision < 0:
+            # A partial runtime must not bypass correction/deletion fencing
+            # or disclose old private voice memories after an operator edit.
+            raise HTTPException(409, "Private memory revision unavailable")
         if query is None:
             records = await asyncio.to_thread(
                 app.state.runtime.memory.recent, robot_id, limit=6
@@ -279,9 +283,9 @@ def register_voice_context_route(
             getattr(app.state.runtime, "conversation", None),
             "_private_memory_generation", None,
         )
-        if (memory_revision is not None
-                and (not isinstance(current_revisions, dict)
-                     or current_revisions.get(robot_id, 0) != memory_revision)):
+        if (not isinstance(current_revisions, dict)
+                or type(current_revisions.get(robot_id)) is not int
+                or current_revisions[robot_id] != memory_revision):
             raise HTTPException(409, "Private memory changed during retrieval")
         # A SQLite worker may complete after a NEW authenticated voice turn.
         # Discard the entire private response, not merely its Mac timeline
