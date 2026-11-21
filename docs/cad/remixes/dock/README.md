@@ -133,3 +133,26 @@ positions and available backstop perimeter, plus mechanical travel.
 This is a **2D paper clearance screen only**. Do not substitute example
 test dimensions for physical calipers, assume an NC contact polarity,
 cut unmeasured final switch holes, or energize charge contacts.
+
+
+## Source linked, nonpowered contact carrier layout preflight
+
+The same read only seat switch program also checks whether the original
+**nonconductive** 54 by 25 by 9 mm contact fit coupon can even sit in the
+unpowered dock channel without crossing the backstop or the physically
+measured robot underside. The source is
+`docs/cad/remixes/remaining_fit_gauges.scad` and its
+`dock_contact_recess_gauge` part. Provide the exact
+`contact_cad_source_sha256` of that file with the actual measured
+`contact_center_y_mm`, `robot_underside_z_at_stop_mm` (relative to
+the desk surface, so the dock base thickness counts), and
+`required_contact_top_gap_mm` (at least 2 mm). The chosen example
+dimensions used in tests are **synthetic only** and are not docking
+measurements. The program explicitly refuses an overlapping backstop,
+too narrow rail channel, missing clearance or old file hash.
+
+This screen is only for a dummy **unpowered** gauge, not pogo pins.
+It cannot choose electrical contacts, determine polarity, accommodate real
+spring stroke, validate the robot's final approaching path, or energize
+charger rails. The result always marks `physical_contact_mate_verified`
+and `charging_authorized` false regardless of apparent envelope fit.

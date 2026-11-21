@@ -21,7 +21,12 @@ def example():
     return {
         "dock_id": 1,
         "cad_source_sha256": source["source_sha256"],
+        "contact_cad_source_sha256": tool.contact_constants()["source_sha256"],
         "seat_pair_spacing_mm": 98,
+        # Synthetic candidate floor location, NOT an actual pogo contact.
+        "contact_center_y_mm": 116,
+        "robot_underside_z_at_stop_mm": 15,
+        "required_contact_top_gap_mm": 2,
         **{
             f"{side}_{key}": value
             for side in ("left", "right")
@@ -45,6 +50,13 @@ def test_source_cad_fixture_trial_cannot_approve_physical_dock():
     assert result["switch_pair_separately_located"]
     assert result["stop_displacement_inside_measured_travel"]
     assert result["ir_emitter_aperture_inside_backstop"]
+    assert result["contact_floor_layout_possible"]
+    assert result["unpowered_contact_floor_layout"][
+        "physical_contact_mate_verified"
+    ] is False
+    assert result["unpowered_contact_floor_layout"][
+        "electrical_contact_selected"
+    ] is False
     assert len(result["switches"]) == 2
     assert all(s["within_backstop_with_2mm_web"] for s in result["switches"])
     assert all(s["avoids_apriltag_paper_with_2mm_gap"] for s in result["switches"])
@@ -70,6 +82,9 @@ def test_source_cad_fixture_trial_cannot_approve_physical_dock():
     ("right_planned_stop_displacement_mm", 1.0),
     ("left_planned_stop_displacement_mm", 3.0),
     ("right_safe_total_displacement_mm", 1.6),
+    ("contact_center_y_mm", 132),
+    ("robot_underside_z_at_stop_mm", 10),
+    ("required_contact_top_gap_mm", 1),
 ])
 def test_interference_or_overtravel_is_rejected_on_paper(field, value):
     datum = example()
@@ -88,6 +103,8 @@ def test_interference_or_overtravel_is_rejected_on_paper(field, value):
     ("right_switch_center_z_mm", -1),
     ("left_switch_center_z_mm", float("inf")),
     ("seat_pair_spacing_mm", None),
+    ("contact_center_y_mm", 10**1000),
+    ("required_contact_top_gap_mm", False),
 ])
 def test_bad_measured_switch_inputs_fail_closed(field, value):
     data = example()
@@ -100,6 +117,10 @@ def test_stale_source_revision_and_unexpected_measurement_rejected(tmp_path):
     data = example()
     data["cad_source_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="Stale dock CAD"):
+        load().screen(data)
+    data = example()
+    data["contact_cad_source_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="Stale unpowered contact"):
         load().screen(data)
     data = example()
     data["guessed_clearance_mm"] = 6
@@ -118,6 +139,14 @@ def test_printer_source_and_switch_screen_share_real_pocket_width():
     assert g["tag_paper_x_max_mm"] == pytest.approx(98.6)
     assert g["ir_pair_spacing_mm"] == 98
     assert g["ir_hole_radius_mm"] == 2.75
+    assert g["backstop_front_y_mm"] == 133
+    assert g["clear_channel_x_min_mm"] == 13
+    assert g["clear_channel_x_max_mm"] == 113
+    cg = load().contact_constants()
+    assert cg["carrier_length_mm"] == 54
+    assert cg["carrier_depth_mm"] == 25
+    assert cg["carrier_height_mm"] == 9
+    assert cg["electrical_contact_selected"] is False
 
 
 def test_independent_right_switch_measurements_cannot_inherit_left_pass():
@@ -136,3 +165,53 @@ def test_independent_right_switch_measurements_cannot_inherit_left_pass():
     assert not bad["switches"][1]["stop_displacement_inside_measured_travel"]
     assert not bad["source_only_layout_possible"]
     assert not bad["charging_authorized"]
+
+
+def test_contact_floor_position_is_checked_against_source_geometry():
+    result = load().screen(example())
+    carrier = result["unpowered_contact_floor_layout"]
+    assert carrier["source_carrier_x_mm"] == [36.0, 90.0]
+    assert carrier["source_carrier_y_mm"] == [103.5, 128.5]
+    assert carrier["source_carrier_top_z_mm"] == 12
+    assert carrier["inside_clear_channel_with_2mm_margin"]
+    assert carrier["ahead_of_backstop_with_2mm_margin"]
+    assert carrier["under_measured_robot_with_required_gap"]
+    assert not carrier["physical_contact_mate_verified"]
+
+
+def test_contact_carrier_measured_floor_changes_do_not_grant_charge():
+    source = load()
+    data = example()
+    data["contact_center_y_mm"] = 128
+    bad_backstop = source.screen(data)
+    assert not bad_backstop["contact_floor_layout_possible"]
+    assert not bad_backstop["charging_authorized"]
+    data = example()
+    data["robot_underside_z_at_stop_mm"] = 13
+    unsafe_height = source.screen(data)
+    assert not unsafe_height["source_only_layout_possible"]
+    assert not unsafe_height["contact_floor_layout_possible"]
+    data = example()
+    data["required_contact_top_gap_mm"] = 2.5
+    safe = source.screen(data)
+    assert safe["contact_floor_layout_possible"]
+    assert not safe["charging_authorized"]
+    assert not safe["unpowered_contact_floor_layout"][
+        "electrical_contact_selected"
+    ]
+
+
+def test_contact_carrier_source_revision_or_dimensions_cannot_drift(tmp_path):
+    source = load()
+    old = source.CONTACT_CAD.read_text(encoding="utf-8")
+    fake = tmp_path / "changed.scad"
+    fake.write_text(old + "\n// changed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Stale unpowered contact"):
+        source.screen(example(), contact_cad=fake)
+    fake.write_text(
+        old.replace("contact_carrier_l = 54;",
+                    "contact_carrier_l = 900;"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Invalid unpowered contact"):
+        source.contact_constants(fake)

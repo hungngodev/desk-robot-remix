@@ -15,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CAD = ROOT / "docs/cad/remixes/dock/dock_passive_fit.scad"
+CONTACT_CAD = ROOT / "docs/cad/remixes/remaining_fit_gauges.scad"
 PER_SWITCH_NUMERICS = (
     "switch_body_width_mm", "switch_body_height_mm", "switch_center_z_mm",
     "ir_emitter_center_z_mm", "operating_displacement_mm",
@@ -24,6 +25,9 @@ PER_SWITCH_NUMERICS = (
 NUMERICS = ("seat_pair_spacing_mm",) + tuple(
     f"{side}_{name}" for side in ("left", "right")
     for name in PER_SWITCH_NUMERICS
+) + (
+    "contact_center_y_mm", "robot_underside_z_at_stop_mm",
+    "required_contact_top_gap_mm",
 )
 
 
@@ -32,6 +36,7 @@ def dock_constants(source: Path = CAD) -> dict:
     names = (
         "track_outer_width_mm", "side_clearance_each_mm",
         "guide_wall_mm", "wall_outside_margin_mm",
+        "base_length_mm", "backstop_thickness_mm",
         "backstop_height_mm", "base_thickness_mm", "tag_black_side_mm",
         "tag_white_margin_each_mm", "tag_paper_slack_each_mm",
         "tag_bottom_z_mm", "ir_pair_spacing_mm", "ir_probe_bore_d_mm",
@@ -60,6 +65,18 @@ def dock_constants(source: Path = CAD) -> dict:
         raise ValueError("Dock tag/IR source geometry is inconsistent")
     return {
         "backstop_width_mm": width,
+        "dock_base_length_mm": values["base_length_mm"],
+        "backstop_front_y_mm": (
+            values["base_length_mm"] - values["backstop_thickness_mm"]
+        ),
+        "clear_channel_x_min_mm": (
+            values["guide_wall_mm"] + values["wall_outside_margin_mm"]
+        ),
+        "clear_channel_x_max_mm": (
+            width - values["guide_wall_mm"]
+            - values["wall_outside_margin_mm"]
+        ),
+        "dock_base_top_z_mm": values["base_thickness_mm"],
         "backstop_min_z_mm": values["base_thickness_mm"],
         "backstop_max_z_mm": (
             values["base_thickness_mm"] + values["backstop_height_mm"]
@@ -74,6 +91,35 @@ def dock_constants(source: Path = CAD) -> dict:
     }
 
 
+def contact_constants(source: Path = CONTACT_CAD) -> dict:
+    """Original NONCONDUCTIVE contact fit gauge, never a selected connector."""
+    text = source.read_text(encoding="utf-8")
+    values = {}
+    for name in ("contact_carrier_l", "contact_carrier_w",
+                 "contact_carrier_h", "contact_centers_mm",
+                 "contact_outer_d_mm"):
+        matches = re.findall(
+            rf"^{name}\\s*=\\s*(\\d+(?:\\.\\d+)?)\\s*;",
+            text, re.M,
+        )
+        if len(matches) != 1:
+            raise ValueError("Missing or ambiguous contact CAD datum: " + name)
+        values[name] = float(matches[0])
+    if not all(math.isfinite(v) and 0 < v <= 500 for v in values.values()):
+        raise ValueError("Invalid unpowered contact carrier dimensions")
+    if not values["contact_outer_d_mm"] < values["contact_centers_mm"] < (
+        values["contact_carrier_l"] - values["contact_outer_d_mm"]
+    ):
+        raise ValueError("Invalid contact coupon pocket separation")
+    return {
+        "carrier_length_mm": values["contact_carrier_l"],
+        "carrier_depth_mm": values["contact_carrier_w"],
+        "carrier_height_mm": values["contact_carrier_h"],
+        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "electrical_contact_selected": False,
+    }
+
+
 def _numeric(value: object) -> bool:
     # A huge Python int overflows math.isfinite. Bound before conversion.
     return (
@@ -82,10 +128,14 @@ def _numeric(value: object) -> bool:
     )
 
 
-def screen(measurements: dict, *, cad: Path = CAD) -> dict:
+def screen(measurements: dict, *, cad: Path = CAD,
+           contact_cad: Path = CONTACT_CAD) -> dict:
     if not isinstance(measurements, dict):
         raise ValueError("Exact measured dock-seat input object required")
-    if set(measurements) != {"dock_id", "cad_source_sha256", *NUMERICS}:
+    if set(measurements) != {
+        "dock_id", "cad_source_sha256", "contact_cad_source_sha256",
+        *NUMERICS,
+    }:
         raise ValueError("Dock-seat record has missing or unexpected fields")
     if type(measurements["dock_id"]) is not int or not (
         1 <= measurements["dock_id"] <= 5
@@ -96,6 +146,9 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
     geometry = dock_constants(cad)
     if measurements["cad_source_sha256"] != geometry["source_sha256"]:
         raise ValueError("Stale dock CAD source revision for seat measurement")
+    contact = contact_constants(contact_cad)
+    if measurements["contact_cad_source_sha256"] != contact["source_sha256"]:
+        raise ValueError("Stale unpowered contact carrier CAD source revision")
     width = geometry["backstop_width_mm"]
     d = measurements
     margin = 2.0
@@ -176,7 +229,52 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
     ir_emitter_within_backstop = all(
         x["ir_emitter_aperture_inside_backstop"] for x in checks
     )
+    # The gauge is centered across the existing unpowered entry channel,
+    # with its 54mm long dimension across the dock and 25mm depth along
+    # the approach. This orientation is NOT proven for real pogo contacts.
+    # Robot underside Z is measured from the desk surface, not from the
+    # dock floor; the printed dock base thickness is part of the envelope.
+    carrier_x0 = (width - contact["carrier_length_mm"]) / 2
+    carrier_x1 = (width + contact["carrier_length_mm"]) / 2
+    carrier_y0 = (d["contact_center_y_mm"]
+                  - contact["carrier_depth_mm"] / 2)
+    carrier_y1 = (d["contact_center_y_mm"]
+                  + contact["carrier_depth_mm"] / 2)
+    carrier_top_z = (
+        geometry["dock_base_top_z_mm"] + contact["carrier_height_mm"]
+    )
+    in_rail_channel = (
+        carrier_x0 >= geometry["clear_channel_x_min_mm"] + margin
+        and carrier_x1 <= geometry["clear_channel_x_max_mm"] - margin
+    )
+    before_backstop = (
+        carrier_y0 >= margin
+        and carrier_y1 + margin <= geometry["backstop_front_y_mm"]
+    )
+    fits_under_robot = (
+        carrier_top_z + d["required_contact_top_gap_mm"]
+        <= d["robot_underside_z_at_stop_mm"]
+    )
+    gap_is_measured = d["required_contact_top_gap_mm"] >= 2
+    contact_floor_possible = (
+        in_rail_channel and before_backstop
+        and fits_under_robot and gap_is_measured
+    )
+    contact_floor = {
+        "source_gauge_only": True,
+        "source_carrier_x_mm": [carrier_x0, carrier_x1],
+        "source_carrier_y_mm": [carrier_y0, carrier_y1],
+        "source_carrier_top_z_mm": carrier_top_z,
+        "inside_clear_channel_with_2mm_margin": in_rail_channel,
+        "ahead_of_backstop_with_2mm_margin": before_backstop,
+        "under_measured_robot_with_required_gap": fits_under_robot,
+        "required_contact_gap_at_least_2mm": gap_is_measured,
+        "actual_pogo_body_and_spring_travel_verified": False,
+        "physical_contact_mate_verified": False,
+        "electrical_contact_selected": False,
+    }
     fits = (
+        contact_floor_possible and
         all(c["within_backstop_with_2mm_web"]
             and c["avoids_apriltag_paper_with_2mm_gap"]
             and c["avoids_nominal_ir_hole_with_2mm_gap"]
@@ -187,7 +285,10 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
     return {
         "dock_id": d["dock_id"],
         "cad_source_sha256": geometry["source_sha256"],
+        "contact_cad_source_sha256": contact["source_sha256"],
         "source_only_layout_possible": fits,
+        "contact_floor_layout_possible": contact_floor_possible,
+        "unpowered_contact_floor_layout": contact_floor,
         "switch_pair_separately_located": independent_separation,
         "stop_displacement_inside_measured_travel": actuation,
         "ir_emitter_aperture_inside_backstop": ir_emitter_within_backstop,
