@@ -263,9 +263,9 @@ def test_native_activity_context_only_reflects_live_same_robot_coordinator_work(
 
 def test_native_startup_context_rejects_live_consent_revoke_during_memory_read(settings):
     """Revoking live consent during native SQLite retrieval cannot leak facts."""
+    from desk_robot.api_native_omni_routes import register_native_omni_routes
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from desk_robot.api_native_omni_routes import register_native_omni_routes
 
     settings.mode = "hardware"
     settings.voice_memory_tools_enabled = True
