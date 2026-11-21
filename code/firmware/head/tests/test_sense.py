@@ -581,6 +581,9 @@ class SenseSelectionTests(unittest.TestCase):
         assert "httpd_req_async_handler_complete(req)" in bridge
         assert "CameraStreamTask" in bridge and "CameraStreamTask" in header
         assert bridge.count("camera_->SnapshotJpeg()") == 2
+        # Both HTTP routes must reject invalid JPEG framing before publication.
+        assert "else if (!CompleteJpeg(jpeg->data(), jpeg->size()))" in bridge
+        assert "if (!jpeg || !CompleteJpeg(jpeg->data(), jpeg->size()))" in bridge
         assert "camera_busy_.exchange(true)" in bridge
         assert "camera_busy_.store(false)" in bridge
         assert "vTaskDelay(pdMS_TO_TICKS(250))" in bridge
