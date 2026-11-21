@@ -1135,3 +1135,28 @@ def test_private_aec_capture_returns_true_http_accept_and_conflict_codes():
     assert 'Json(req, 409, Envelope(false, "Bench PCM unavailable or already active"))' in bridge
     # Private raw audio must remain behind a selected Sense build flag.
     assert 'defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)' in bridge
+
+def test_private_pcm_transfer_revoked_by_boot_mute_and_reference_reset():
+    """Transferred PCM cannot keep streaming after a consent cancellation."""
+    header = (HEAD / "sense/sense_reference_codec.h").read_text()
+    codec = (HEAD / "sense/sense_reference_codec.cc").read_text()
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    assert "uint64_t BenchPcmGeneration() const noexcept" in header
+    assert "bench_capture_generation_.fetch_add(" in codec
+    assert "if (muted) AbortBenchPcmCapture();" in header
+    assert "AbortBenchPcmCapture();" in codec.split(
+        "void SenseReferenceCodec::ClearReference()", 1
+    )[1].split("void SenseReferenceCodec::", 1)[0]
+    worker = bridge.split("void Bridge::BenchPcmTask(", 1)[1].split(
+        "esp_err_t Bridge::Handle(", 1
+    )[0]
+    assert "transfer->codec->BenchPcmGeneration() == transfer->generation" in worker
+    assert "esp_timer_get_time() >= deadline_us || !still_authorized()" in worker
+    assert "transfer->codec->EndBenchPcmTransfer();" in worker
+    assert "ReleaseBenchPcmCapture(pcm.interleaved)" in worker
+    # New raw buffers cannot overlap an outstanding moved HTTP transfer,
+    # nor be opened after a physical BOOT privacy mute.
+    starter = codec.split("bool SenseReferenceCodec::BeginBenchPcmCapture()", 1)[1]
+    starter = starter.split("SenseReferenceCodec::BenchCaptureProgress", 1)[0]
+    assert "bench_transfer_active_" in starter
+    assert "microphone_privacy_muted_.load(" in starter
