@@ -643,13 +643,55 @@ static void mpu_native_low_g_irq_vetoes_local_wheels() {
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0 && body.state().servos_attached);
   CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
-  CHECK(send(body, "status", 101).find("\"fault\":\"imu_low_g_candidate\"") != std::string::npos);
+  const auto low_g_status = send(body, "status", 101);
+  CHECK(low_g_status.find("\"fault\":\"imu_low_g_candidate\"") != std::string::npos);
+  CHECK(low_g_status.find("\"valid\":false") != std::string::npos);
+  CHECK(low_g_status.find("\"low_g_valid\":true,\"low_g_irq\":true,\"low_g_seq\":1") !=
+        std::string::npos); // report the veto event, not fabricated clearance
   imu.low_g_irq = false;
   imu.at_ms = 102;
   body.set_imu(imu);
   fresh(guard, 102);
   CHECK(!body.state().armed); // no automatic restart on interrupt clearance
   CHECK(send(body, "arm", 102) == "OK arm"); // separate explicit action
+}
+
+static void missing_mpu_interrupt_status_cannot_authorize_wheels() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_imu_for_motion(true);
+  body.set_imu_identity(4, 0x68, 0);
+  desk_robot::BerryReading imu{};
+  imu.model = desk_robot::BerryModel::Mpu6050;
+  imu.valid = true;
+  imu.accel[2] = 16384;
+  imu.at_ms = 100;
+  // A completed axis conversion plus a FAILED INT_STATUS read is not safe
+  // motion evidence, even if the previous interrupt value appeared clear.
+  body.set_imu(imu);
+  CHECK(!body.imu_fresh(100));
+  CHECK(send(body, "rearm", 100, true) == "ERR rearm imu_missing_or_stale");
+  CHECK(send(body, "status", 100).find(
+      "\"fault\":\"imu_low_g_status_unavailable\"") != std::string::npos);
+  imu.low_g_status_valid = true;
+  body.set_imu(imu);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 100).find("OK drive") == 0);
+  imu.low_g_status_valid = false;  // intermittent I2C/clone failure
+  imu.at_ms = 101;
+  body.set_imu(imu);
+  fresh(guard, 101);
+  body.tick(101);
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0 && body.state().servos_attached);
+  CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
+  const auto status = send(body, "status", 101);
+  CHECK(status.find("\"fault\":\"imu_low_g_status_unavailable\"") != std::string::npos);
+  CHECK(status.find("\"low_g_valid\":false,\"low_g_irq\":false") !=
+        std::string::npos);
 }
 
 static void zero_acceleration_mpu_does_not_authorize_motion() {
@@ -662,6 +704,7 @@ static void zero_acceleration_mpu_does_not_authorize_motion() {
   desk_robot::BerryReading imu{};
   imu.model = desk_robot::BerryModel::Mpu6050;
   imu.valid = true;
+  imu.low_g_status_valid = true;
   imu.at_ms = 100;
   body.set_imu(imu);
   CHECK(send(body, "rearm", 100, true) == "ERR rearm imu_missing_or_stale");
@@ -1472,6 +1515,7 @@ int main() {
     required_imu_is_a_local_freshness_interlock();
     zero_acceleration_mpu_does_not_authorize_motion();
     mpu_native_low_g_irq_vetoes_local_wheels();
+    missing_mpu_interrupt_status_cannot_authorize_wheels();
     imu_status_preserves_physical_conversion_and_boot_identity();
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();

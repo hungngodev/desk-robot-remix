@@ -789,6 +789,14 @@ void BodyControl::execute(const char* line, std::size_t length,
         side_valid_mask |= 1U << i;
     }
     const bool imu_valid = imu_fresh(now_ms);
+    // Sensor evidence remains reportable when an asserted MPU interrupt
+    // correctly makes that same frame unsafe for motor permission. Retain
+    // chip identity and age guards so a stale or swapped board cannot
+    // manufacture a current low-g observation in the shared Mac brain.
+    const bool imu_raw_fresh = imu_.valid && now_ms - imu_.at_ms <= 200U &&
+        state_.imu_family >= 1U && state_.imu_family <= 4U &&
+        imu_.model == static_cast<BerryModel>(state_.imu_family) &&
+        BerryImu::identify(state_.imu_gyro_id, state_.imu_aux_id) == imu_.model;
     // Report actual LOCAL motion readiness. A healthy optical guard alone
     // cannot make the robot ready while its dock, IMU, touch or physical
     // driver fault interlock would reject an ARM request.
@@ -815,10 +823,13 @@ void BodyControl::execute(const char* line, std::size_t length,
         dock_telemetry_bad(now_ms) ? "dock_gpio_missing_or_stale" :
         bumper_hit ? "bumper_active" :
         touch_hit ? "touch_active" :
-        imu_motion_required_ && imu_.valid &&
+        imu_motion_required_ && imu_raw_fresh &&
             imu_.model == BerryModel::Mpu6050 &&
             imu_.low_g_status_valid && imu_.low_g_irq ?
             "imu_low_g_candidate" :
+        imu_motion_required_ && imu_raw_fresh &&
+            imu_.model == BerryModel::Mpu6050 &&
+            !imu_.low_g_status_valid ? "imu_low_g_status_unavailable" :
         imu_motion_required_ && imu_.valid &&
             imu_.model == BerryModel::Mpu6050 &&
             imu_.accel[0] == 0 && imu_.accel[1] == 0 &&
@@ -874,10 +885,10 @@ void BodyControl::execute(const char* line, std::size_t length,
         imu_.accel[0], imu_.accel[1], imu_.accel[2],
         imu_.gyro[0], imu_.gyro[1], imu_.gyro[2],
         imu_.temperature_raw,
-        (imu_valid && imu_.model == BerryModel::Mpu6050) ? "true" : "false",
-        (imu_valid && imu_.model == BerryModel::Mpu6050 &&
+        (imu_raw_fresh && imu_.model == BerryModel::Mpu6050) ? "true" : "false",
+        (imu_raw_fresh && imu_.model == BerryModel::Mpu6050 &&
          imu_.low_g_status_valid) ? "true" : "false",
-        (imu_valid && imu_.model == BerryModel::Mpu6050 &&
+        (imu_raw_fresh && imu_.model == BerryModel::Mpu6050 &&
          imu_.low_g_status_valid && imu_.low_g_irq) ? "true" : "false",
         static_cast<unsigned long>(imu_.low_g_event_seq),
         static_cast<unsigned long>(imu_.valid ? imu_age : 0U),

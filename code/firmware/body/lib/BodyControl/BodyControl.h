@@ -161,8 +161,11 @@ class BodyControl {
     // flagged event is a local wheel veto, never proof of a measured fall.
     // Do not require a Mac callback to notice it, or assume the unqualified
     // 300mg/40ms silicon settings are calibrated pickup thresholds.
+    // A failed INT_STATUS read cannot prove that the MPU native free-fall
+    // monitor was clear. Keep the wheels disabled until that status is
+    // acquired successfully, not merely until the 14-byte axis read succeeds.
     const bool low_g_clear = imu_.model != BerryModel::Mpu6050 ||
-        !imu_.low_g_status_valid || !imu_.low_g_irq;
+        (imu_.low_g_status_valid && !imu_.low_g_irq);
     return state_.imu_family >= 1 && state_.imu_family <= 4 &&
            imu_.model == static_cast<BerryModel>(state_.imu_family) &&
            BerryImu::identify(state_.imu_gyro_id, state_.imu_aux_id) == imu_.model &&
