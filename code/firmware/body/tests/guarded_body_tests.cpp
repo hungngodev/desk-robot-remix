@@ -644,7 +644,7 @@ static void mpu_native_low_g_irq_vetoes_local_wheels() {
         body.state().right == 0 && body.state().servos_attached);
   CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
   const auto low_g_status = send(body, "status", 101);
-  CHECK(low_g_status.find("\"fault\":\"imu_low_g_candidate\"") != std::string::npos);
+  CHECK(low_g_status.find("\"fault\":\"imu_low_g_latched\"") != std::string::npos);
   CHECK(low_g_status.find("\"valid\":false") != std::string::npos);
   CHECK(low_g_status.find("\"low_g_valid\":true,\"low_g_irq\":true,\"low_g_seq\":1") !=
         std::string::npos); // report the veto event, not fabricated clearance
@@ -653,7 +653,14 @@ static void mpu_native_low_g_irq_vetoes_local_wheels() {
   body.set_imu(imu);
   fresh(guard, 102);
   CHECK(!body.state().armed); // no automatic restart on interrupt clearance
-  CHECK(send(body, "arm", 102) == "OK arm"); // separate explicit action
+  CHECK(send(body, "arm", 102) == "ERR arm imu_low_g_latched");
+  CHECK(send(body, "rearm", 102) == "ERR rearm local_only");
+  CHECK(send(body, "status", 102).find(
+      "\"fault\":\"imu_low_g_latched\"") != std::string::npos);
+  CHECK(send(body, "rearm", 102, true) == "OK rearm");
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 102) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
 }
 
 static void missing_mpu_interrupt_status_cannot_authorize_wheels() {

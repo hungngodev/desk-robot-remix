@@ -139,7 +139,7 @@ class BodyControl {
   // Boot-time read-only identity; does not confer tilt safety or arm privilege.
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   // Raw, read-only diagnostics. No tilt or motor permission follows from it.
-  void set_imu(const BerryReading& reading) { imu_ = reading; }
+  void set_imu(const BerryReading& reading);
   // Per-boot provenance for read-only IMU observations; never grants motion.
   void set_boot_epoch(std::uint32_t epoch) { boot_epoch_ = epoch; }
   // Physical WROOM assembly requires a fresh identified 6-axis sample, even
@@ -209,6 +209,7 @@ class BodyControl {
   std::uint32_t dc_fault_last_seq_ = 0, dc_fault_last_at_ms_ = 0;
   bool dc_fault_last_active_ = false;
   bool motor_watchdog_latched_ = false;  // only local USB may clear
+  bool imu_low_g_latched_ = false;  // native MPU event needs local USB rearm
   bool dc_driver_fault_bad(std::uint32_t now_ms) const;
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};

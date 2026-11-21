@@ -319,6 +319,18 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   }
 }
 
+void BodyControl::set_imu(const BerryReading& reading) {
+  imu_ = reading;
+  // Native FF_INT is read-to-clear. A following healthy poll cannot erase
+  // the safety stop: only a deliberate local USB rearm may resume wheels.
+  if (imu_motion_required_ && reading.model == BerryModel::Mpu6050 &&
+      reading.valid && reading.low_g_status_valid && reading.low_g_irq) {
+    imu_low_g_latched_ = true;
+    stop_motion();
+    state_.armed = false; // retain servo PWM on a held key
+  }
+}
+
 void BodyControl::motor_watchdog_trip() {
   // A recovered CPU must never restart its old drive lease after cutoff.
   // Retain servo holding PWM instead of dropping a held payload.
@@ -808,7 +820,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         (state_.bumper_raw || state_.bumper_active);
     const bool touch_hit = state_.touch_active || state_.touch_raw_active;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
-        !motor_watchdog_latched_ && !dock_unhealthy && !bumper_hit && !touch_hit &&
+        !motor_watchdog_latched_ && !imu_low_g_latched_ &&
+        !dock_unhealthy && !bumper_hit && !touch_hit &&
         (!imu_motion_required_ || imu_valid);
     // A critical cliff/bus fault takes precedence over a simultaneous
     // cosmetic or optional-input event in the Mac's multimodal context.
@@ -823,6 +836,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         dock_telemetry_bad(now_ms) ? "dock_gpio_missing_or_stale" :
         bumper_hit ? "bumper_active" :
         touch_hit ? "touch_active" :
+        imu_low_g_latched_ ? "imu_low_g_latched" :
         imu_motion_required_ && imu_raw_fresh &&
             imu_.model == BerryModel::Mpu6050 &&
             imu_.low_g_status_valid && imu_.low_g_irq ?
@@ -956,8 +970,13 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
     motor_watchdog_latched_ = false; // no old drive resumed
+    imu_low_g_latched_ = false; // after a truly fresh, clear MPU status
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (imu_low_g_latched_) {
+      std::snprintf(reply, capacity, "ERR arm imu_low_g_latched");
+      return;
+    }
     if (motor_watchdog_latched_) {
       std::snprintf(reply, capacity, "ERR arm motor_watchdog_latched");
       return;
