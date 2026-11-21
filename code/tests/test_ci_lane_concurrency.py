@@ -27,6 +27,10 @@ def test_host_verification_uses_independent_bounded_job_lanes():
         assert "Verify exact source commit under test" in (
             str(job["steps"])
         )
+        if lane == "mac-fast":
+            tests = str(job["steps"])
+            assert "tests/test_native_omni_xiaozhi.py" in tests
+            assert "tests/test_voice_memory_reuse.py" in tests
         checkout = next(
             step for step in job["steps"]
             if step.get("uses", "").startswith("actions/checkout@")
