@@ -277,6 +277,21 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('"camera_sensor_pid"', bridge)
 
 
+    def test_sense_safety_status_remains_visible_during_speech(self):
+        """A factual WROOM fault cannot wait for the idle expression owner."""
+        board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+        face = board.split("static void FaceTask(void* context)", 1)[1].split(
+            "void InitializeDisplay()", 1,
+        )[0]
+        status = face.index('SetStatus("Body safety stop")')
+        idle_mood = face.index("if (idle && board->display_ != nullptr)")
+        self.assertLess(status, idle_mood)
+        self.assertIn("(!last_rendered_fault || (idle && !last_was_idle))", face)
+        self.assertIn("else if (last_rendered_fault && !body_unhealthy)", face)
+        self.assertIn("const Action action = board->face_behavior_.update(obs);", face)
+        self.assertGreater(face.index("board->display_->SetEmotion("), idle_mood)
+
+
     def test_tof_optics_read_only_bridge_validation_and_one_uart_owner(self):
         """Eight optical raw words never become a second motion sensor owner."""
         protocol = (HEAD / "overlay/robot_protocol.h").read_text()

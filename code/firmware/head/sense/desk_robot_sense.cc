@@ -148,14 +148,21 @@ private:
             // Stackchan idle picker may update the existing OLED only when
             // the device is idle; never write its motion actions to the body.
             const bool idle = device_state == kDeviceStateIdle;
-            if (idle && board->display_ != nullptr) {
-                // Show independent WROOM safety as factual OLED status,
-                // not a compulsory emotional reaction or a speech request.
-                if (body_unhealthy && (!last_rendered_fault || !last_was_idle))
+            if (board->display_ != nullptr) {
+                // WROOM faults are factual local OLED status even while
+                // Xiaozhi is speaking. Never wait for the speech floor to
+                // become idle to show a newly observed safety fault.
+                // Refresh once on returning to idle because Xiaozhi may
+                // replace the status while speaking. No mandatory speech.
+                if (body_unhealthy &&
+                    (!last_rendered_fault || (idle && !last_was_idle)))
                     board->display_->SetStatus("Body safety stop");
                 else if (last_rendered_fault && !body_unhealthy)
                     board->display_->SetStatus("");
                 last_rendered_fault = body_unhealthy;
+            }
+            if (idle && board->display_ != nullptr) {
+                // Only the contextual HSM mood remains idle-exclusive.
                 // Reuse pinned Stackchan expression selection without
                 // mapping a fault, touch, or sighting to a fixed emotion.
                 if (!last_was_idle) {
