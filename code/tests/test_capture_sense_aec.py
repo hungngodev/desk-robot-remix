@@ -47,7 +47,8 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
               start_generation="1", status_generation="1", raw_generation="1",
               final_generation=None, final_muted=False, final_boot=None,
               initial_mic=100, final_mic=64100,
-              initial_speaker=200, final_speaker=8400):
+              initial_speaker=200, final_speaker=8400,
+              speaker_in_window=True):
     if raw is None:
         raw = struct.pack("<hh", 123, -456) * capture.FRAMES
     header = {
@@ -78,6 +79,7 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
         Response({
             "robot_id": robot, "boot": boot, "active": not ready,
             "ready": ready, "failed": False, "frames": frames,
+            "speaker_activity_in_window": speaker_in_window,
             "physical_aec_qualified": False,
             "capture_generation": status_generation,
         }),
@@ -129,6 +131,20 @@ def test_private_aec_capture_requires_live_audio_activity(changed):
         ]
 
 
+def test_postcapture_i2s_output_cannot_qualify_silent_recording():
+    """A late speaker write may advance lifetime counters, not the capture."""
+    http = fake_read(speaker_in_window=False, final_speaker=8400)
+    with pytest.raises(RuntimeError, match="in-window speaker activity"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+    assert [call[0].split("/")[-1] for call in http.calls] == [
+        "audio.reference", "audio.capture.start", "audio.capture.status",
+        "audio.capture.abort",
+    ]
+
+
 def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
     http = fake_read()
     raw, report = capture.capture_head(
@@ -149,6 +165,7 @@ def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
     assert report["microphone_frames_read_delta"] == 64000
     assert report["speaker_frames_accepted_delta"] == 8200
     assert report["speaker_activity_not_acoustic_playback"] is True
+    assert report["speaker_activity_in_window"] is True
     for value in ("physical_speaker_playback_verified",
                   "aec_physically_qualified",
                   "source_device_physically_authenticated"):
