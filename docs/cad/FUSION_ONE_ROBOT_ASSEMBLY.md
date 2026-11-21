@@ -71,6 +71,11 @@ the original README files, including noncommercial and share alike restrictions.
    brackets so their elevations and optical sweeps can be calibrated.
    Keep the four downward sensors away from track shadow and lifted jaw.
    Check the actual tabletop reflection from each bracket position.
+   The current `tof_adjustable` mesh is only an optical angle/aperture
+   reference. Assumed PCB screw holes were removed because they crossed the
+   lens opening with the 10.5 mm pilot board. Design and verify a separate
+   real PCB retainer after measuring the purchased carrier; do not treat
+   eight imported aperture references as mounted cliff sensors.
 8. Create small, independent mounting/vent openings for eight capacitive
    touch electrodes, the MAX30102 finger contact pad, APDS9960 gesture sensor,
    two FSR pads (belly and jaw), SHT41 vent, RGB heart, PN532 toy reader,
