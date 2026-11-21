@@ -96,12 +96,19 @@ disconnected or safely on a stand:
 cd code
 uv run --no-sync python scripts/bench_head_camera.py \
   --config config/local.toml --robot robot-01 --seconds 60 \
-  --stream --score-motion \
+  --stream --score-motion --require-audio-activity \
   --report data/private/head_camera_trial.json
 ```
 
-The report measures persistent stream interarrival, device capture-completion
-deltas and concurrent WROOM status request timing. It does **not** qualify
+For this **combined audio and camera** run, begin a consented Xiaozhi
+microphone session and ordinary audible speaker test during the camera window.
+The additional flag requires microphone and digital speaker reference activity
+while MJPEG and WROOM status are being sampled. Without it, the CLI remains a
+streaming-only camera and telemetry diagnostic rather than a simultaneous
+audio/video trial. The report measures persistent stream interarrival, device
+capture-completion deltas, concurrent WROOM status and matched Mac-clock AEC
+counter progress. One post-run audio status snapshot does not prove simultaneous
+activity; the bench now polls the actual existing audio diagnostics in parallel. It does **not** qualify
 true optical exposure timing, image interpretation, gripper reach, audible
 playback, motor safety or A9 physical behavior. No motor command or still
 snapshot is sent by this bench command.
