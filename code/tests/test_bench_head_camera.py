@@ -17,6 +17,22 @@ SPEC.loader.exec_module(bench)
 JPEG = b"\xff\xd8" + b"real frame" + b"\xff\xd9"
 
 
+async def test_hardware_camera_cli_requires_live_mjpeg_not_snapshots(
+    tmp_path, monkeypatch, capsys,
+):
+    import sys
+
+    monkeypatch.setattr(sys, "argv", [
+        "bench_head_camera.py", "--robot", "robot-01",
+        "--report", str(tmp_path / "camera.json"),
+    ])
+    with pytest.raises(SystemExit) as exc:
+        await bench.main()
+    assert exc.value.code == 2
+    assert "requires --stream persistent MJPEG" in capsys.readouterr().err
+    assert not (tmp_path / "camera.json").exists()
+
+
 async def test_camera_bench_keeps_status_independent_and_never_qualifies_hardware():
     class Head:
         def __init__(self):
