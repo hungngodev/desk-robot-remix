@@ -20,9 +20,12 @@ def test_host_verification_uses_independent_bounded_job_lanes():
         job = jobs[lane]
         concurrent = job["concurrency"]
         assert concurrent["cancel-in-progress"] is False
+        # First attempts still share one bounded PR queue; an explicit
+        # run_attempt > 1 can verify an exact SHA despite ongoing pushes.
+        assert "github.run_attempt > 1 && github.run_id" in concurrent["group"]
         assert concurrent["group"] == (
             "host-verification-" + lane + "-"
-            + "${{ github.event.pull_request.number || github.ref }}"
+            + "${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}"
         )
         assert "Verify exact source commit under test" in (
             str(job["steps"])

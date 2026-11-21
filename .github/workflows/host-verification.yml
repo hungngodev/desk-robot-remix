@@ -11,15 +11,15 @@ permissions:
   contents: read
   actions: read
 
-# Per-job lanes let fast Python verification run while the long Sense build
-# holds its own slot. Each lane retains only one running and one newest
-# pending revision per PR, without force-cancelling active firmware builds.
-# Never combine all four lanes into one workflow-level concurrency group.
+# Per-job lanes keep one active and one newest pending automatic PR revision.
+# An explicit rerun uses its run ID as a separate lane group so it can finish
+# even while other workers push, without queueing every intermediate commit.
+# Never combine the lanes into one workflow-level concurrency group.
 jobs:
   mac-fast:
     name: Mac conversation and memory regression
     concurrency:
-      group: host-verification-mac-fast-${{ github.event.pull_request.number || github.ref }}
+      group: host-verification-mac-fast-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
@@ -66,7 +66,7 @@ jobs:
 
   python-and-head-host:
     concurrency:
-      group: host-verification-python-and-head-host-${{ github.event.pull_request.number || github.ref }}
+      group: host-verification-python-and-head-host-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
     name: Python and head host tests
     runs-on: ubuntu-latest
@@ -180,7 +180,7 @@ jobs:
 
   body-platformio:
     concurrency:
-      group: host-verification-body-platformio-${{ github.event.pull_request.number || github.ref }}
+      group: host-verification-body-platformio-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
     name: ESP32 WROOM firmware compile
     runs-on: ubuntu-latest
@@ -232,7 +232,7 @@ jobs:
 
   body-host:
     concurrency:
-      group: host-verification-body-host-${{ github.event.pull_request.number || github.ref }}
+      group: host-verification-body-host-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
     name: Body C++ host tests with sanitizers
     runs-on: ubuntu-latest
@@ -272,7 +272,7 @@ jobs:
 
   sense-idf:
     concurrency:
-      group: host-verification-sense-idf-${{ github.event.pull_request.number || github.ref }}
+      group: host-verification-sense-idf-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
     name: XIAO Sense ESP-IDF 6.1 firmware compile
     runs-on: ubuntu-latest
