@@ -450,6 +450,7 @@ def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatc
     # Pathological USB JSON must not close the port and reset its replay fence.
     import sys
     from types import SimpleNamespace
+
     import desk_robot.room_station as room_module
 
     original_loads = room_module.json.loads
