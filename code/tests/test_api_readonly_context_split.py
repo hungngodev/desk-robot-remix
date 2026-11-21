@@ -498,3 +498,54 @@ def test_readonly_voice_planner_drops_room_context_after_opt_out(settings):
         assert second.status_code == 200
         assert "ROOM PRIVATE" not in planner.calls[1]
         assert second.json()["motor_authorized"] is False
+
+
+def test_voice_memory_context_strips_room_if_station_opt_out_during_sqlite(settings):
+    """Private memory consent cannot override a later USB station opt-out."""
+    import time
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomObservation
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = True
+    settings.room_station_context_enabled = True
+    hub = CameraFrameHub(["robot-01"])
+    hub.remember_room(RoomObservation(
+        seq=1, at_ms=100, received_at=time.monotonic(), readings={},
+        summary="ROOM PRIVATE: room air observation",
+    ))
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 6
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 8
+            settings.room_station_context_enabled = False
+            return []
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=SimpleNamespace(hub=hub),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+    )
+    with TestClient(app) as client:
+        result = client.get("/v1/pet/robot-01/voice-context")
+        assert result.status_code == 200
+        payload = result.json()
+        assert "ROOM PRIVATE" not in str(payload)
+        assert all(
+            item.get("channel") != "room_station"
+            for item in payload["current_interaction_timeline"]
+        )
+        assert payload["no_new_motion_permission"] is True
