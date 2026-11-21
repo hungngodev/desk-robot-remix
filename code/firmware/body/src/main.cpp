@@ -70,13 +70,18 @@ std::uint32_t touch_last_sample_ms = 0;
 
 std::uint32_t last_extra_sample_ms = 0;
 void poll_optional(std::uint32_t now_ms) {
+#if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
+  // Read the normally closed safety contact every loop. The 25 ms cadence
+  // below is only for debounced event counters, not motor inhibition.
+  control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);
+#endif
   if (now_ms - last_extra_sample_ms < 25) return;
   last_extra_sample_ms = now_ms;
   std::uint8_t mask = 0;
   bool bumper = false, reed = false, pir = false;
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
   mask |= 1U;
-  bumper = digitalRead(body_pins::kBumperInput) == HIGH; // NC series to GND; open or unplugged -> HIGH trip
+  bumper = control.state().bumper_raw; // already sampled this loop; open circuit trips
 #endif
   // Slow magnetic/PIR inputs arrive from MCP23017 GPIOB on the existing
   // accessory mux. The required dock seat/PGOOD remains independent GPIOA.
@@ -104,13 +109,12 @@ void poll_optional(std::uint32_t now_ms) {
 }
 
 void poll_touch(std::uint32_t now_ms) {
+  // Independent wheel inhibition must not wait for the 25 ms gesture timer.
+  const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
+  control.sample_touch_input(active);
   if (now_ms - touch_last_sample_ms < 25) return;
   touch_last_sample_ms = now_ms;
-  const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
-  // One raw active sample stops the body in this same WROOM loop. Gesture
-  // counters still require three matching samples, so contact noise may
-  // conservatively stop the robot but cannot fake a counted tap/hold.
-  control.sample_touch_input(active);
+  // Only recognized gestures need three equal 25 ms samples.
   if (active != touch_candidate) {
     touch_candidate = active;
     touch_candidate_samples = 1;
