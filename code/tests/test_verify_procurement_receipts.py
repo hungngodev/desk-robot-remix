@@ -174,7 +174,8 @@ def test_pinned_procurement_json_rejects_ambiguous_duplicate_receipt_fields():
 
 def test_common_physical_json_receipt_decoder_rejects_nonfinite_and_duplicates():
     from verify_playbook_receipts import (
-        reject_nonfinite_receipt_value, strict_receipt_object,
+        reject_nonfinite_receipt_value,
+        strict_receipt_object,
     )
     for malformed in (
         '{"result":"fail","result":"pass"}',
