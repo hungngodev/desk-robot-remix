@@ -251,8 +251,7 @@ def export_kit(
                     "installed_quantity_per_robot": 0,
                     "temporary_fit_coupon": name in (
                         *GAUGES, *SPEAKER_FITS, *RANGER_FITS, *MG90S_FITS,
-                        "dock_rail_entry_coupon",
-                        "dock_ir_pair_position_coupon",
+                        *DOCKS,
                     ),
                 })
         for entry in rendered:
@@ -394,9 +393,9 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         # A manifest is not a release BOM. Even a syntactically valid edit
         # must never turn a test coupon into an installed robot component.
         name = Path(location).stem
-        coupon = name in (*GAUGES, *SPEAKER_FITS, *RANGER_FITS, *MG90S_FITS,
-                          "dock_rail_entry_coupon",
-                          "dock_ir_pair_position_coupon")
+        coupon = name in (
+            *GAUGES, *SPEAKER_FITS, *RANGER_FITS, *MG90S_FITS, *DOCKS
+        )
         # Sources and mesh bytes cannot validate a hand-edited label, unit
         # system or quoted build quantity. Keep source-first prototypes
         # from being mistaken for final install or procurement instructions.
