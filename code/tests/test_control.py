@@ -1485,8 +1485,8 @@ async def test_hardware_exploration_rejects_reconnecting_camera_task(settings):
         await c.close()
 
 
-async def test_hardware_concurrent_robots_do_not_block_each_other(settings):
-    """Multiple robots in hardware mode must operate independently without fleet starvation."""
+async def test_hardware_fleet_allows_only_one_moving_pet_until_acknowledged_stop(settings):
+    """Two arm permits are fine, but a second body may not drive concurrently."""
     settings.mode = "hardware"
     c, _ = make(settings)
     head1 = HardwareStatusHead("robot-01")
@@ -1500,12 +1500,47 @@ async def test_hardware_concurrent_robots_do_not_block_each_other(settings):
     assert "robot-02" in c.permits
 
     try:
-        job1 = c.manual("robot-01", "drive 10 10 100")
-        job2 = c.manual("robot-02", "drive 10 10 100")
-        assert job1.state in {"queued", "running"}
-        assert job2.state in {"queued", "running"}
-        await asyncio.gather(c.tasks[job1.id], c.tasks[job2.id])
-        assert job1.state == "succeeded"
-        assert job2.state == "succeeded"
+        first = c.manual("robot-01", "drive 10 10 100")
+        assert c._fleet_motion_owner == first.id
+        with pytest.raises(OperationError, match="one moving pet"):
+            c.manual("robot-02", "drive 10 10 100")
+        assert not any(command.startswith("drive ") for command in head2.commands)
+        assert "robot-02" in c.permits  # refusal does not consume consent
+        await c.tasks[first.id]
+        assert first.state == "succeeded"
+        assert c._fleet_motion_owner is None
+        assert head1.commands[-1] == "halt"
+        second = c.manual("robot-02", "drive 10 10 100")
+        await c.tasks[second.id]
+        assert second.state == "succeeded"
+        assert c._fleet_motion_owner is None
     finally:
+        await c.close()
+
+
+async def test_fleet_motion_owner_latches_failed_stop_until_explicit_recovery(settings):
+    """A failed final halt is not a license to start another moving pet."""
+    c, head = make(settings)
+    await c.operator_arm("robot-01")
+    await c.operator_arm("robot-02")
+    head.fail_command = "halt"
+    try:
+        first = c.manual("robot-01", "drive 10 10 100")
+        await c.tasks[first.id]
+        assert first.state == "failed"
+        assert c._fleet_motion_owner == first.id
+        with pytest.raises(OperationError, match="one moving pet"):
+            c.manual("robot-02", "drive 10 10 100")
+        assert "robot-02" in c.permits
+        # An explicit independently acknowledged WROOM STOP unblocks later
+        # operator-approved motion. Reconnect or task completion alone cannot.
+        head.fail_command = None
+        ack = await c.stop("robot-01")
+        assert ack["ok"] is True
+        assert c._fleet_motion_owner is None
+        second = c.manual("robot-02", "drive 10 10 100")
+        await c.tasks[second.id]
+        assert second.state == "succeeded"
+    finally:
+        head.fail_command = None
         await c.close()

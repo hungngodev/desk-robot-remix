@@ -110,6 +110,10 @@ class Coordinator:
         # an independent physical video client for exploration.
         self.multimodal = None
         self.locks = {r.id: asyncio.Lock() for r in settings.robots}
+        # This initial fleet has ONE authorized moving pet at a time.
+        # Keep ownership through WROOM STOP, not merely job-state changes.
+        # A failed STOP latches the fleet until an explicit successful STOP.
+        self._fleet_motion_owner: str | None = None
         self.jobs: dict[str, Job] = {}
         self.tasks: dict[str, asyncio.Task] = {}
         self.closed = False
@@ -287,6 +291,16 @@ class Coordinator:
                 # overwrite an unconfirmed physical STOP receipt.
                 self.jobs[jid].state = "cancelled"
                 self.jobs[jid].error = "Operator cancelled before job started"
+        owner_id = self._fleet_motion_owner
+        if stop_acknowledged and owner_id is not None:
+            owner = self.jobs.get(owner_id)
+            owner_task = self.tasks.get(owner_id)
+            if (owner is not None and owner_task is not None
+                    and owner.robot_id == robot_id and owner_task.done()):
+                # A completed abandoned job may have failed its final STOP.
+                # The operator's *new* acknowledged halt is the only explicit
+                # recovery; a STOP for some other pet cannot release it.
+                self._fleet_motion_owner = None
         return acknowledgement
 
     async def stop_active_exploration(self) -> tuple[str, ...]:
@@ -378,6 +392,10 @@ class Coordinator:
             )
         ):
             raise OperationError("Robot busy or coordinator closing")
+        if self._fleet_motion_owner is not None:
+            raise OperationError(
+                "Fleet motion busy: one moving pet until WROOM STOP is acknowledged"
+            )
         # Retain only bounded history; never accumulate infinite tasks/results in a long-running server.
         if len(self.jobs) >= 100:
             for jid in list(self.jobs):
@@ -388,6 +406,9 @@ class Coordinator:
         self._permit_epoch[robot_id] += 1
         self.permits.pop(robot_id, None)  # consume once, even if ACK/job later fails
         job = Job(uuid.uuid4().hex, robot_id, kind)
+        # Claim synchronously, before the task is even scheduled. No queued
+        # second body can slip in between per-robot task starts.
+        self._fleet_motion_owner = job.id
         self.jobs[job.id] = job
         self.tasks[job.id] = asyncio.create_task(self._run(job, work))
         return job
@@ -443,8 +464,10 @@ class Coordinator:
                         task.cancel()
                 # Dispatch WROOM stop before potentially slow canceled camera
                 # or model cleanup. No second actor may treat this as charging.
+                stop_acknowledged = False
                 try:
                     await _bounded_body_stop(self.heads[job.robot_id])
+                    stop_acknowledged = True
                     job.events.append(
                         "stop acknowledged; servo positions are commanded, not measured"
                     )
@@ -452,6 +475,7 @@ class Coordinator:
                     job.error = f"{job.error or ''}; STOP failed: {exc}; rely on body watchdog"
                     job.state = "failed"
                 pending = [t for t in (operation, keeper) if t is not None]
+                unresponsive: set[asyncio.Task] = set()
                 if pending:
                     done, unresponsive = await asyncio.wait(
                         pending, timeout=2.0
@@ -464,6 +488,9 @@ class Coordinator:
                             f"{job.error or ''}; cancellation cleanup timed out"
                         )
                         job.state = "failed"
+                if (stop_acknowledged and not unresponsive
+                        and self._fleet_motion_owner == job.id):
+                    self._fleet_motion_owner = None
 
     def manual(self, robot_id: str, command: str) -> Job:
         robot = self.robot(robot_id)
