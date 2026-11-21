@@ -354,6 +354,38 @@ def test_compound_spoken_intent_preserves_both_requested_tool_results(
 
 
 
+@pytest.mark.parametrize("with_safety_fault", [False, True])
+def test_compound_grasp_and_battery_reveals_omitted_pickup_receipt(
+    with_safety_fault,
+):
+    question = (
+        "Could you tell me whether the gripper picked up the key, "
+        "and how much battery remains?"
+    )
+    timeline = [
+        {"channel": "tool", "kind": "pickup_status",
+         "content": "PICKUP_PENDING; gripper closure unverified"},
+        {"channel": "tool", "kind": "robot_status",
+         "content": "BATTERY_UNKNOWN; gauge not calibrated"},
+    ]
+    if with_safety_fault:
+        timeline.append({"channel": "sensor", "kind": "safety_fault"})
+    timeline.append(
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": question}
+    )
+    result = compose_brain_context([], [], timeline).interaction
+    assert "Recent model ASR guess" in result
+    assert len(result) <= 400
+    if with_safety_fault:
+        assert "latched safety fault" in result
+        assert "Some requested tool results did not fit" in result
+    else:
+        assert "Mac pickup job receipt, not verified grasp" in result
+        assert "Recent head telemetry, not physical acceptance" in result
+        assert "Some requested tool results did not fit" not in result
+
+
 # Realistic completed ASR phrasings, not a synthetic intent classifier.
 # This corpus guards completed read-only tool receipt prioritization; it does
 # NOT claim ASR correctness, native model tool use or audible speech.

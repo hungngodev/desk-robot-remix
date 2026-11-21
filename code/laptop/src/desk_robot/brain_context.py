@@ -431,6 +431,20 @@ def compose_brain_context(
             latest,
         ):
             requested_tools.add("robot_status")
+        # Compound grasp questions may mention a pickup after a courteous
+        # preamble or in a later clause. An omitted completed pickup receipt
+        # must trigger the same explicit budget warning as other tool results.
+        if re.search(
+            r"\b(?:(?:whether|if) (?:the|your) gripper "
+            r"(?:picked up|grabbed|lifted|is holding)|"
+            r"(?:and|then|also) (?:please )?"
+            r"(?:did you pick up|have you picked up|"
+            r"did the gripper (?:grab|lift)|"
+            r"is the pickup (?:done|finished|complete)|"
+            r"check (?:the )?pickup))\b",
+            latest,
+        ):
+            requested_tools.add("pickup_status")
     cue_parts.sort(key=lambda candidate: (
         0.5 if candidate[3] and candidate[2] in requested_tools
         else candidate[0]
