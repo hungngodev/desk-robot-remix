@@ -290,11 +290,28 @@ def _number_header(response, name: str, low: int, high: int) -> int:
     return _number(int(value), low, high, name)
 
 
-def _create_private(path: Path):
+def _create_private(path: Path, *, directory_fd: int | None = None):
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
-    return os.fdopen(os.open(path, flags, 0o600), "wb")
+    # Once a private destination is opened, never resolve its pathname again
+    # for actual microphone PCM writes. Another local process may retarget it.
+    target = path.name if directory_fd is not None else path
+    return os.fdopen(os.open(target, flags, 0o600, dir_fd=directory_fd), "wb")
+
+
+def _check_private_directory(directory: Path, directory_fd: int) -> None:
+    """Reject a swapped recording path without following a replacement link."""
+    owned = os.fstat(directory_fd)
+    try:
+        named = os.stat(directory, follow_symlinks=False)
+    except FileNotFoundError as exc:
+        raise ValueError("AEC capture directory changed during write") from exc
+    if (not stat.S_ISDIR(owned.st_mode)
+            or stat.S_IMODE(owned.st_mode) & 0o077
+            or not stat.S_ISDIR(named.st_mode)
+            or (owned.st_dev, owned.st_ino) != (named.st_dev, named.st_ino)):
+        raise ValueError("AEC capture directory changed during write")
 
 
 def preflight_private_destination(directory: Path) -> None:
@@ -317,28 +334,41 @@ def save_wavs(directory: Path, raw: bytes, report: dict, *,
     mic, ref = split_pcm(raw)
     paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
              directory / "capture.json"]
+    # O_NOFOLLOW on individual WAV paths alone is insufficient: a local
+    # process could swap the containing private directory for a symlink after
+    # preflight. Anchor creation and cleanup to one verified directory inode.
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    directory_fd = os.open(directory, flags)
     written = []
     try:
+        _check_private_directory(directory, directory_fd)
         for path, pcm in zip(paths[:2], (mic, ref), strict=True):
-            with _create_private(path) as out:
-                written.append(path)
+            with _create_private(path, directory_fd=directory_fd) as out:
+                written.append(path.name)
                 with wave.open(out, "wb") as wav:
                     wav.setnchannels(1)
                     wav.setsampwidth(2)
                     wav.setframerate(RATE)
                     wav.writeframes(pcm)
-        with _create_private(paths[2]) as out:
-            written.append(paths[2])
+        with _create_private(paths[2], directory_fd=directory_fd) as out:
+            written.append(paths[2].name)
             out.write((json.dumps(report, sort_keys=True, indent=2) + "\n").encode())
-        # A BOOT mute during disk I/O invalidates even a properly validated
-        # HTTP response. Recheck before returning the private WAV paths.
-        # If that final receipt fails, remove the entire newly written set.
+        # A BOOT mute during disk I/O invalidates even a validated HTTP
+        # response. Recheck both device privacy and destination identity.
         if verify_before_publish is not None:
             verify_before_publish()
+        _check_private_directory(directory, directory_fd)
     except BaseException:
-        for path in written:
-            path.unlink(missing_ok=True)
+        # Do not unlink through the pathname if it was retargeted: that could
+        # delete unrelated files and leave the original private PCM orphaned.
+        for name in written:
+            try:
+                os.unlink(name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
         raise
+    finally:
+        os.close(directory_fd)
 
 
 def verify_postwrite_privacy(opener, head_url: str, token: str,
