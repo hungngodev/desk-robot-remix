@@ -425,7 +425,27 @@ def test_current_2w_rectangular_front_grille_renders(tmp_path):
     dimensions = tuple(round(max(v[k] for v in points)
                              - min(v[k] for v in points), 2)
                        for k in range(3))
-    assert dimensions == (32.0, 28.0, 3.0)
+    assert dimensions == (36.0, 32.0, 3.0)
+    # Both the free outside edge and nominal speaker gasket/pocket boundary
+    # must retain at least 2 mm around M2 bores. This is a paper + STL
+    # geometric screen, NOT a physical fastening or water/air seal trial.
+    border = 8.0
+    edge = 3.5
+    bore_radius = 2.35 / 2
+    pocket_clearance = 0.35
+    assert edge - bore_radius >= 2.0
+    assert border - edge - bore_radius - pocket_clearance >= 2.0
+    for assignment, message in (
+        ("speaker_grille_border=6", "gasket/pocket printable web"),
+        ("speaker_grille_hole_edge=2", "outside printable web"),
+    ):
+        invalid = subprocess.run([
+            "openscad", "--export-format", "binstl",
+            "-o", str(tmp_path / "invalid_grille.stl"),
+            "-D", 'part="speaker_grille"', "-D", assignment, str(source),
+        ], capture_output=True, text=True, timeout=60)
+        assert invalid.returncode != 0
+        assert message in invalid.stderr + invalid.stdout
     # A watertight frontal plate is still not the tested speaker baffle,
     # mounting gasket, sealed 1cc box, or electrical/thermal certification.
 

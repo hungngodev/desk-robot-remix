@@ -26,6 +26,12 @@ oled_window_y=12;
 speaker_l=20;
 speaker_w=16;
 speaker_h=4.7;
+// Preserve >=2 mm printable plastic between all M2 grille bores and
+// both the nominal speaker/gasket pocket and outside free edges.
+// Original 32x28 plate gave only 0.975 mm at the inner edge.
+speaker_grille_border=8;
+speaker_grille_hole_edge=3.5;
+speaker_grille_min_web=2;
 fsr_d=12;
 dock_tag_black_square=60;
 dock_mount_spacing=76;
@@ -86,14 +92,26 @@ module speaker_grille(){
   // Keep it dimensionally separate from the physical speaker pocket and
   // its solder-pad strain relief; do not reuse retired 20mm round grille.
   assert(speaker_l == 20 && speaker_w == 16 && speaker_h == 4.7);
-  panel_x=speaker_l+12; panel_y=speaker_w+12;
+  panel_x=speaker_l+2*speaker_grille_border;
+  panel_y=speaker_w+2*speaker_grille_border;
+  assert(speaker_grille_min_web>=2);
+  assert(speaker_grille_hole_edge-m2_clearance_d/2 >=
+         speaker_grille_min_web,
+         "Speaker grille hole breaches outside printable web");
+  assert(panel_x/2-speaker_grille_hole_edge-m2_clearance_d/2
+         -(speaker_l/2+fit_xy) >= speaker_grille_min_web &&
+         panel_y/2-speaker_grille_hole_edge-m2_clearance_d/2
+         -(speaker_w/2+fit_xy) >= speaker_grille_min_web,
+         "Speaker grille hole breaches gasket/pocket printable web");
   difference(){
     translate([0,0,1.5]) cube([panel_x,panel_y,3],center=true);
     for(x=[-7.5,-3.75,0,3.75,7.5],y=[-5,0,5])
       if(abs(x)+1.2 < speaker_l/2 && abs(y)+1.2 < speaker_w/2)
         translate([x,y,1.5]) cylinder(h=6,d=2.4,center=true);
-    for(x=[-panel_x/2+3.5,panel_x/2-3.5],
-        y=[-panel_y/2+3.5,panel_y/2-3.5])
+    for(x=[-panel_x/2+speaker_grille_hole_edge,
+            panel_x/2-speaker_grille_hole_edge],
+        y=[-panel_y/2+speaker_grille_hole_edge,
+            panel_y/2-speaker_grille_hole_edge])
       translate([x,y,1.5]) cylinder(h=5,d=m2_clearance_d,center=true);
   }
 }
