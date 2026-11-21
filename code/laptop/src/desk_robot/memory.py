@@ -14,6 +14,7 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,8 +41,11 @@ def _fts_query(text: str) -> str:
     suffix rules. Quoted individual tokens also prevent FTS5 operators or
     user hyphens from becoming query syntax.
     """
+    # Streaming ASR and clients can send canonically equivalent NFD text.
+    # Combining marks otherwise split a Vietnamese word before FTS tokenization.
+    normalized = unicodedata.normalize("NFC", text.casefold())
     terms = [
-        term for term in _WORDS.findall(text.casefold())[:96]
+        term for term in _WORDS.findall(normalized)[:96]
         if term not in _QUERY_FILLER
     ]
     return " OR ".join('"' + term + '"' for term in dict.fromkeys(terms))
