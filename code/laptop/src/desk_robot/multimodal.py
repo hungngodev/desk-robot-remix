@@ -1161,7 +1161,7 @@ class MultimodalOrchestrator:
             return  # any live human voice owns the fleet's camera priority
         # Local WROOM sensor and fault evidence is independent of camera consent.
         # Never turn a touch or cliff edge into a legacy snapshot opt-in.
-        if (self.settings.mode == "hardware"
+        if (getattr(self.settings, "mode", "hardware") == "hardware"
                 and not self.settings.voice_vision_tools_enabled):
             return
         self._cancel_proactive_snapshot(robot_id)
@@ -1464,7 +1464,7 @@ class MultimodalOrchestrator:
         self.hub._check(robot_id)
         if self._closed:
             raise RuntimeError("Multimodal orchestrator closed")
-        if (self.settings.mode == "hardware"
+        if (getattr(self.settings, "mode", "hardware") == "hardware"
                 and not self.settings.voice_vision_tools_enabled):
             raise RuntimeError("Camera consent revoked for capture")
         if not 0 <= reuse_if_recent_s <= 1.0:
@@ -1480,7 +1480,7 @@ class MultimodalOrchestrator:
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
-            if (self.settings.mode == "hardware"
+            if (getattr(self.settings, "mode", "hardware") == "hardware"
                     and not self.settings.voice_vision_tools_enabled):
                 raise RuntimeError("Camera consent revoked for capture")
             if (source == "proactive"
@@ -1525,7 +1525,7 @@ class MultimodalOrchestrator:
                 # Its API request is not owned by _capture_tasks, so cancelling
                 # that sampler on reconnect or a newer VAD is insufficient:
                 # old HTTP/decode work must never repopulate the emptied hub.
-                if (self.settings.mode == "hardware"
+                if (getattr(self.settings, "mode", "hardware") == "hardware"
                         and not self.settings.voice_vision_tools_enabled):
                     # An opt-out during JPEG I/O or Pillow preparation is final:
                     # never publish an old sensor-triggered image to the Mac hub.
