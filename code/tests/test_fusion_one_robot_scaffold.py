@@ -75,3 +75,23 @@ def test_fusion_rejects_stale_stl_sources_before_import(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="SCAD source changed"):
         module.verify_optional_fit_references(tmp_path)
     assert calls == [(tmp_path, tmp_path / "docs/cad/remixes")]
+
+
+def test_legacy_fusion_builder_entrypoint_delegates_to_verified_single_importer(
+    tmp_path,
+):
+    """The README's historical script must never stage a weaker CAD layout."""
+    old = ROOT / "docs/cad/remixes/fusion_assembly_scaffold.py"
+    spec = importlib.util.spec_from_file_location("fusion_legacy", old)
+    assert spec and spec.loader
+    legacy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(legacy)
+    canonical = load()
+    assert "fusion_one_robot_scaffold.py" in str(legacy._IMPLEMENTATION)
+    assert legacy._load()["FIT_REFERENCES"] == canonical.FIT_REFERENCES
+    # Both entrypoints enforce mandatory saved upstream mesh identity.
+    with pytest.raises(FileNotFoundError, match="Missing source mesh"):
+        legacy.build_manifest(tmp_path)
+    with pytest.raises(FileNotFoundError, match="Missing source mesh"):
+        canonical.build_manifest(tmp_path)
+    assert legacy._load()["verify_optional_fit_references"] is not None
