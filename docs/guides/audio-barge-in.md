@@ -297,6 +297,54 @@ default is retained for a first bench measurement, never as proof of AEC
 performance or as an acceptable substitute for retained human utterances.
 
 
+## Private, actual Sense microphone and reference acquisition
+
+The Sense build now has an explicitly gated, RAM-only four-second stereo
+calibration window inside the **existing Xiaozhi PDM plus reference reader**.
+It does not instantiate another microphone stack or alter ordinary firmware.
+Normal build configuration sets
+`CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=n`. A separate private bench
+image needs all of `--board sense --continuous-audio --aec-delay-ms 0
+--bench-aec-capture` passed to `code/firmware/head/private_config.py`.
+The device must already be assembled, authorized and continuously listening.
+Only the optional bench image registers the authenticated
+`/api/audio.capture.start`, `/api/audio.capture.status` and
+`/api/audio.capture.raw` endpoints. The capture does not begin at boot.
+The operator should reproduce four seconds of actual speaking output with
+simultaneous microphone capture; an incomplete, discontinuous or reset
+reference invalidates the trial. The private capture must never be deployed
+as a production image.
+
+For a real bench trial, first configure the private image with the robot's
+existing unique token and an accessible Mac LAN IPv4 address. Build and flash
+only that explicitly approved private image. From the Mac, with the physical
+operator's permission and a private output directory, use the installed
+`code/scripts/capture_sense_aec.py` tool:
+
+```sh
+python code/scripts/capture_sense_aec.py \
+  --head-url http://192.168.1.20:8081 \
+  --robot-id robot-01 \
+  --token-env DESK_ROBOT_HEAD_01_TOKEN \
+  --output-dir ./data/private/sense-aec-trial-01 \
+  --i-consent-to-private-raw-audio
+python code/scripts/estimate_aec_delay.py \
+  --speaker ./data/private/sense-aec-trial-01/speaker_reference.wav \
+  --microphone ./data/private/sense-aec-trial-01/microphone.wav
+```
+
+Replace the sample IP, robot ID and token environment name with the actual
+local device identity. The capture tool refuses public or proxied addresses,
+requires an authenticated matching boot ID, declines partial PCM and writes
+private 0700 directory and 0600 files without overwriting existing captures.
+Those files contain **real microphone audio**, so do not commit, share or
+place them in a synchronized public folder. The device's sample times and
+software integrity counters are diagnostics, not proof of audible speaker
+output. Reflash the standard build with PCM capture off after calibration.
+Keep the true speaker latency, microphone intelligibility, acoustic
+isolation, barge-in stop measurements and the twenty human plus ten-minute
+echo-only procedure open until recorded on the assembled head.
+
 ## Xiaozhi natural realtime VAD and actual acoustic acceptance
 
 The pinned server overlay now uses real realtime listener VAD to preempt ordinary one to one assistant TTS, not only coordinated fleet speech. It requires two consecutive VAD positive frames within 300ms and sends an urgent true decoder/I2S speaker flush while preserving incoming ASR frames. The compiled SenseReferenceCodec already sends real PDM microphone and playback reference channels into ESP SR AEC. These statements concern code integration and tests, not an acoustic calibration on the user's actual head. The companion code/scripts/check_barge_in_trials.py checks real operator measured speaker stop and understanding records. Physical speaker/mic delay is estimated separately by code/scripts/estimate_aec_delay.py. Keep live spoken acceptance false until actual acoustic trials pass.
