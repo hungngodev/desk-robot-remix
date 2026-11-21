@@ -327,6 +327,16 @@ def test_audio_capture_abort_is_guarded_and_generation_scoped_in_sense_firmware(
     assert 'config.max_uri_handlers = 14;' in bridge
 
 
+def test_audio_builder_guide_points_to_live_capture_without_claiming_qualification():
+    """A first-unit builder must not follow the superseded no-capture advice."""
+    guide = (SOURCE.parents[2] / "docs/guides/audio-barge-in.md").read_text()
+    assert "code/scripts/capture_sense_aec.py" in guide
+    assert "code/firmware/head/sense/sense_reference_codec.cc" in guide
+    assert "still-open physical PCM capture path" not in guide
+    assert "actual paired-sample adapter remains to implement" not in guide
+    assert "no 20-trial physical acceptance is claimed" in guide
+
+
 def test_consent_audio_capture_compiled_off_by_default():
     root = SOURCE.parents[1]
     head = (root / "firmware/head/sense/sense_reference_codec.h").read_text()

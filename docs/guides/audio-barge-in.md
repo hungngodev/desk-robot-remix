@@ -128,7 +128,10 @@ test was performed during this source review.
 The [Sense port design](sense-aec-port.md) identifies an existing ESP-IDF AFE
 input for real mic/reference pairs, preserving the purchased board and pin map.
 RIO's reference/calibration ideas can be reused without importing a second full
-processing chain. The actual paired-sample adapter remains to implement.
+processing chain. The paired microphone and software-reference adapter now exists in
+`code/firmware/head/sense/sense_reference_codec.cc` and is compiled as
+part of the selected Sense build; real acoustic delay and double-talk
+performance are still unmeasured.
 
 Pinned Xiaozhi revision`c435f99a88066029ec2dbd2d758c8cc9d051565b`:
 
@@ -142,8 +145,8 @@ Pinned Xiaozhi revision`c435f99a88066029ec2dbd2d758c8cc9d051565b`:
   and concurrency need validation. Merely setting the reference flag invents
   data; the samples must actually exist and match playback.
 
-A Sense software-reference port is technically possible and adds no replacement
-board cost. RIO is the closest hardware-matched reference found. Existing Box Lite
+The Sense software-reference port is integrated into the selected Xiaozhi
+codec and adds no replacement board cost. RIO is the closest hardware-matched reference found. Existing Box Lite
 code is another unqualified pattern, with shared buffer state, equal-rate
 assumptions and DMA timing concerns. A robust port needs bounded thread-safe
 queues, actual post-resampling/post-volume playback samples, alignment/drift
@@ -227,9 +230,10 @@ Source/API references: [Espressif AEC](https://docs.espressif.com/projects/esp-s
 [audio hardware guidance](https://docs.espressif.com/projects/esp-faq/en/latest/application-solution/audio-development-framework.html),
 [server audio handler](https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/d9c2e8c5d92627b670dec57d72a07a4226a410a3/main/xiaozhi-server/core/handle/receiveAudioHandle.py).
 
-Existing Sense build success remains historical software evidence. The RIO port,
-streamed-frame path and complete interruption chain remain to be implemented and
-tested. A compiled head profile establishes software integration only. No hardware
+Existing Sense build success remains historical software evidence. The selected Sense reference codec, consented continuous MJPEG stream,
+and native Xiaozhi interruption hooks now have source integration and host
+regressions. The complete audible interruption chain still needs device
+measurement on the assembled head; no 20-trial physical acceptance is claimed. A compiled head profile establishes software integration only. No hardware
 has been flashed by this project and no interruption test has passed.
 
 
@@ -259,9 +263,11 @@ operator mic/camera consent and a known speech activity trial, then retain
 the actual hardware result. Normal silence can increment some counters;
 evaluate changes across measured trials, not a zero counter alone.
 
-This telemetry narrows down A2 reference integrity defects but does **not**
-satisfy the still-open physical PCM capture path, acoustic latency
-calibration, device playback position receipt or twenty actual barge-in trials.
+This telemetry helps diagnose A2 reference integrity. The optional,
+authenticated four-second PCM capture path is now implemented and described
+below, but a real assembled-head recording, measured acoustic latency,
+verified device playback progress, and twenty human interruption trials
+are still absent. Source integration never satisfies those physical gates.
 
 ## Per-robot playback reference alignment in the pinned Sense build
 
