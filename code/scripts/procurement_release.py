@@ -988,6 +988,49 @@ PILOT_PHYSICAL_SELECTION_HOLDS = frozenset({
 })
 
 
+def _historical_pilot_budget(sample_subtotal_usd: float) -> dict:
+    """Display earlier reported spending without inventing a landed checkout.
+
+    The historical BOM is only a budget reference. It is NOT proof of an
+    invoice, delivered price, qualified part, or permission to order.
+    """
+    reference = json.loads((PLAN.parent / "bom.json").read_text(encoding="utf-8"))
+    cap = reference.get("cap_usd")
+    paid = reference.get("reported_already_purchased_usd")
+    if (reference.get("currency") != "USD"
+            or any(type(amount) not in (int, float)
+                   or not 0 <= amount <= 100000
+                   or round(amount, 2) != amount
+                   for amount in (cap, paid, sample_subtotal_usd))
+            or cap == 0):
+        raise ValueError("Invalid historical first-unit pilot budget reference")
+    combined = round(paid + sample_subtotal_usd, 2)
+    return {
+        "first_unit_cap_usd": float(cap),
+        "reported_prior_spend_usd": float(paid),
+        "historical_combined_before_tax_shipping_usd": combined,
+        "historical_over_cap_before_tax_shipping_usd": round(
+            max(0.0, combined - cap), 2
+        ),
+        "current_landed_total_verified": False,
+    }
+
+
+def _pilot_budget_summary(budget: dict) -> str:
+    return (
+        "Historical first-unit cap USD "
+        f"{budget['first_unit_cap_usd']:.2f}; reported prior spend USD "
+        f"{budget['reported_prior_spend_usd']:.2f}; combined prior spend "
+        "plus sample merchandise USD "
+        f"{budget['historical_combined_before_tax_shipping_usd']:.2f}; "
+        "amount already above cap BEFORE tax, shipping, and remaining "
+        "unpriced robot roles USD "
+        f"{budget['historical_over_cap_before_tax_shipping_usd']:.2f}. "
+        "These are historical references, NOT a current landed quote or "
+        "purchase approval."
+    )
+
+
 def first_robot_pilot_samples(report: dict) -> dict:
     """Separate purchasing low-voltage bench samples from production release.
 
@@ -1035,14 +1078,16 @@ def first_robot_pilot_samples(report: dict) -> dict:
                 if ident == "dock_ir_emitter_channels" else []
             ),
         })
+    subtotal = round(sum(
+        x["pilot_sample_quantity"] * x["historical_unit_quote_usd"]
+        for x in decisions if x["pilot_sample_quantity"]
+        and x["historical_unit_quote_usd"] is not None
+    ), 2)
     return {
         "purpose": "First robot bench samples, not five robot release",
         "pilot_sample_count": sum(x["pilot_sample_quantity"] for x in decisions),
-        "pilot_historical_quoted_subtotal_usd": round(sum(
-            x["pilot_sample_quantity"] * x["historical_unit_quote_usd"]
-            for x in decisions if x["pilot_sample_quantity"]
-            and x["historical_unit_quote_usd"] is not None
-        ), 2),
+        "pilot_historical_quoted_subtotal_usd": subtotal,
+        "historical_first_unit_budget": _historical_pilot_budget(subtotal),
         "actual_current_landed_cost_verified": False,
         "whole_first_robot_purchase_approved": one["purchase_approved"],
         "lithium_charging_or_motor_motion_authorized": False,
@@ -1124,6 +1169,7 @@ def pilot_supplier_cart(report: dict) -> dict:
         "exact_sku_count": len(items),
         "component_quantity": qty_sum,
         "historical_priced_partial_subtotal_usd": known_subtotal,
+        "historical_first_unit_budget": pilot["historical_first_unit_budget"],
         "unpriced_skus": [x["sku"] for x in items
                           if x["historical_unit_quote_usd"] is None],
         "landed_total_verified": False,
@@ -1168,6 +1214,7 @@ def render_pilot_supplier_cart(report: dict) -> str:
         f"{cart['exact_sku_count']} SKUs; {cart['component_quantity']} items.",
         "Priced-only historical subtotal USD "
         + format(cart["historical_priced_partial_subtotal_usd"], ".2f"),
+        _pilot_budget_summary(cart["historical_first_unit_budget"]),
         f"{len(cart['unpriced_skus'])} SKUs have unknown comparable USD price. "
         "There is no verified landed total.",
         "Bare TSAL6200 IR emitters are NOT complete driven dock channels. "
@@ -1227,6 +1274,7 @@ def render_first_robot_pilot_samples(report: dict) -> str:
         "Pilot historical sample subtotal USD "
         + str(p["pilot_historical_quoted_subtotal_usd"])
         + " before tax and shipping.",
+        _pilot_budget_summary(p["historical_first_unit_budget"]),
         "Do not add the 14 linked subassemblies as duplicate line items. "
         "Full one-robot or five-robot purchasing still requires receipt "
         "evidence and exact assembled electrical and mechanical decisions.",

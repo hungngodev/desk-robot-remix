@@ -1475,6 +1475,13 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert len(rows) == 49
     assert pilot["pilot_sample_count"] == 17
     assert pilot["pilot_historical_quoted_subtotal_usd"] == 40.41
+    assert pilot["historical_first_unit_budget"] == {
+        "first_unit_cap_usd": 50.0,
+        "reported_prior_spend_usd": 18.87,
+        "historical_combined_before_tax_shipping_usd": 59.28,
+        "historical_over_cap_before_tax_shipping_usd": 9.28,
+        "current_landed_total_verified": False,
+    }
     assert not pilot["whole_first_robot_purchase_approved"]
     assert not pilot["lithium_charging_or_motor_motion_authorized"]
     assert not pilot["actual_current_landed_cost_verified"]
@@ -1521,7 +1528,30 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert text.count("## 2.") == 1
     assert "SEN-19-006" in text
     assert "40.41" in text
+    assert "18.87" in text and "59.28" in text and "9.28" in text
+    assert "NOT a current landed quote or purchase approval" in text
     assert "not a physically qualified robot" in text
+
+
+
+@pytest.mark.parametrize("currency, cap, paid", [
+    ("USD", True, 18.87), ("USD", -50, 18.87),
+    ("USD", 50, -18.87), ("EUR", 50, 18.87),
+    ("USD", 50, float("nan")), ("USD", float("inf"), 18.87),
+    ("USD", 50, 18.871),
+])
+def test_pilot_budget_rejects_untrusted_or_invalid_historical_reference(
+    tmp_path, monkeypatch, currency, cap, paid,
+):
+    import json
+
+    monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
+    (tmp_path / "bom.json").write_text(json.dumps({
+        "currency": currency, "cap_usd": cap,
+        "reported_already_purchased_usd": paid,
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid historical first-unit"):
+        mod._historical_pilot_budget(40.41)
 
 
 def test_pilot_sample_cannot_inherit_approved_sku_from_replaced_sensor():
@@ -1573,6 +1603,10 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert cart["exact_sku_count"] == 13
     assert cart["component_quantity"] == 17
     assert cart["historical_priced_partial_subtotal_usd"] == 40.41
+    assert cart["historical_first_unit_budget"]["reported_prior_spend_usd"] == 18.87
+    assert cart["historical_first_unit_budget"]["historical_combined_before_tax_shipping_usd"] == 59.28
+    assert cart["historical_first_unit_budget"]["historical_over_cap_before_tax_shipping_usd"] == 9.28
+    assert not cart["historical_first_unit_budget"]["current_landed_total_verified"]
     assert not cart["landed_total_verified"]
     assert not cart["complete_robot_purchase_approved"]
     assert not cart["lithium_charging_or_motor_motion_authorized"]
@@ -1596,6 +1630,8 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     rendered = mod.render_pilot_supplier_cart(mod.generate(plan))
     assert "13 SKUs; 17 items." in rendered
     assert "Priced-only historical subtotal" in rendered
+    assert "18.87" in rendered and "59.28" in rendered and "9.28" in rendered
+    assert "NOT a current landed quote or purchase approval" in rendered
     assert "0 SKUs have unknown comparable USD price" in rendered
     assert "There is no verified landed total" in rendered
     assert "NOT complete driven dock channels" in rendered
