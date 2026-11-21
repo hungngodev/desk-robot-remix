@@ -1186,3 +1186,72 @@ async def test_roaming_stop_transport_failure_is_not_silent():
     runtime.coordinator = Coordinator()
     with pytest.raises(RuntimeError, match="physical STOP unconfirmed"):
         await runtime._on_voice_interrupt("robot-01", "normal")
+
+
+async def test_older_voice_stop_cannot_start_newer_turn_camera_early():
+    """Two overlapping authenticated starts must each own their STOP barrier."""
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+
+    class DelayedPet:
+        def __init__(self):
+            self.calls = 0
+
+        async def interrupt(self, robot_id):
+            index = self.calls
+            self.calls += 1
+            entered[index].set()
+            await release[index].wait()
+
+    class Conversation:
+        async def stop(self):
+            pass
+
+    class Head:
+        async def snapshot(self):
+            # A real capture is unnecessary: the test checks whether a camera
+            # task was started before the current turn's device STOP completed.
+            await asyncio.Event().wait()
+
+    settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")],
+        voice_vision_tools_enabled=True, vision_model="local-vlm",
+    )
+    visual = MultimodalOrchestrator(
+        settings, {"robot-01": Head()}, object(), asyncio.Lock(),
+    )
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = settings
+    runtime.pet = DelayedPet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = visual
+    first = asyncio.create_task(
+        runtime._on_voice_interrupt("robot-01", "speech_start")
+    )
+    second = None
+    try:
+        await asyncio.wait_for(entered[0].wait(), timeout=1)
+        first_epoch = visual._turn_epoch["robot-01"]
+        second = asyncio.create_task(
+            runtime._on_voice_interrupt("robot-01", "speech_start")
+        )
+        await asyncio.wait_for(entered[1].wait(), timeout=1)
+        assert visual._turn_epoch["robot-01"] > first_epoch
+        # The earlier STOP finishes first. It must not begin sampling camera
+        # frames while the newer human request is still preempting the head.
+        release[0].set()
+        await asyncio.wait_for(first, timeout=1)
+        assert visual._capture_tasks.get("robot-01") is None
+        release[1].set()
+        await asyncio.wait_for(second, timeout=1)
+        assert visual._capture_tasks.get("robot-01") is not None
+    finally:
+        for event in release:
+            event.set()
+        await asyncio.gather(
+            *([first] + ([second] if second is not None else [])),
+            return_exceptions=True,
+        )
+        await visual.close()

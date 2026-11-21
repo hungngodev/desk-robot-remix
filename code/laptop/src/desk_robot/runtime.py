@@ -396,8 +396,9 @@ class Runtime:
         # The VAD producer is authenticated already. Fence old camera/tool
         # work synchronously BEFORE awaiting slow audio STOP. This does not
         # launch another camera HTTP request, inference, or audio owner.
+        prepared_epoch = None
         if callable(prepare) and kind in ("speech_start", "normal", "group"):
-            prepare(robot_id, end_expected=kind == "speech_start")
+            prepared_epoch = prepare(robot_id, end_expected=kind == "speech_start")
         # Human speech cancels one shared five-pet speech floor once. The
         # authenticated human camera must still start if audio STOP fails,
         # without treating the unresolved speaker lease as a success.
@@ -415,7 +416,14 @@ class Runtime:
         if visual is not None:
             if callable(prepare):
                 if kind in ("speech_start", "normal", "group"):
-                    visual.start_speech_frames(robot_id)
+                    if type(prepared_epoch) is int:
+                        visual.start_speech_frames(
+                            robot_id, prepared_epoch=prepared_epoch,
+                        )
+                    else:
+                        # Older test adapters have no turn token; the real
+                        # multimodal owner always provides one.
+                        visual.start_speech_frames(robot_id)
             elif kind == "speech_start":
                 visual.voice_started(robot_id)
             elif kind in ("normal", "group"):

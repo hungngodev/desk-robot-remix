@@ -1344,7 +1344,7 @@ class MultimodalOrchestrator:
         self.prepare_human_turn(robot_id, end_expected=False)
         self.start_speech_frames(robot_id)
 
-    def prepare_human_turn(self, robot_id: str, *, end_expected: bool) -> None:
+    def prepare_human_turn(self, robot_id: str, *, end_expected: bool) -> int:
         """Immediately fence camera/old tools before awaiting slow audio STOP.
 
         The authenticated Mac VAD callback calls this synchronously, then
@@ -1378,9 +1378,17 @@ class MultimodalOrchestrator:
             prior = self._look_tasks.get(peer)
             if prior is not None and not prior.done():
                 prior.cancel()
-    def start_speech_frames(self, robot_id: str) -> None:
-        """Start optional VAD JPEGs only after the urgent speaker cleanup."""
+        # The caller must not activate camera work for a superseded human turn
+        # after awaiting an older, slow device speaker STOP.
+        return self._turn_epoch[robot_id]
+
+    def start_speech_frames(
+        self, robot_id: str, *, prepared_epoch: int | None = None,
+    ) -> None:
+        """Start optional VAD JPEGs only for a still-current prepared turn."""
         self.hub._check(robot_id)
+        if prepared_epoch is not None and prepared_epoch != self._turn_epoch[robot_id]:
+            return
         if (self._closed or not self.settings.voice_vision_tools_enabled
                 or not self.hub.user_active(robot_id, time.monotonic())):
             return
