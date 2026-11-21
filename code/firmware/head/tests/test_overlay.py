@@ -244,6 +244,10 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3", source)
         self.assertIn("pdMS_TO_TICKS(120)", source)
         self.assertIn("size_t bytes_written = 0", source)
+        self.assertIn("const int safe_volume = std::clamp(output_volume_, 0, 100);", source)
+        self.assertIn("pow(double(safe_volume) / 100.0, 2) * 65536", source)
+        # Only the opt-in Sense build changes gain. Upstream remains byte exact.
+        self.assertNotIn("safe_volume", original)
         self.assertIn("if (err != ESP_OK)", source)
         self.assertIn("bytes_written = 0;", source)
         self.assertIn("bytes_written > static_cast<size_t>(samples)", source)
