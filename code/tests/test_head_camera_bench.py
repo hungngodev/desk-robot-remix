@@ -240,7 +240,16 @@ async def test_slow_audio_reference_diagnostic_does_not_reduce_camera_fps():
 
         async def audio_reference_status(self):
             await asyncio.sleep(0.25)
-            return {"robot_id": "robot-01", "speaker_playback_verified": False}
+            return {
+                "robot_id": "robot-01",
+                "reference_underflow_reads": 0,
+                "reference_overwrite_reads": 0,
+                "discarded_stale_writes": 0,
+                "short_output_writes": 0,
+                "reference_integrity_failed": False,
+                "speaker_playback_verified": False,
+                "aec_physically_qualified": False,
+            }
 
     start = time.monotonic()
     report = await bench.measure(
