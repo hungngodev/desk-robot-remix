@@ -14,6 +14,7 @@ import binascii
 import csv
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -103,6 +104,14 @@ def reject_nonfinite_receipt_value(value: str) -> None:
     raise ValueError("Nonfinite physical receipt JSON token: " + value)
 
 
+def finite_receipt_float(value: str) -> float:
+    """Reject exponent overflow, which parse_constant does not see."""
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Nonfinite physical receipt JSON number: " + value)
+    return number
+
+
 def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
     """Require the immutable data file to identify the measured procedure.
 
@@ -142,6 +151,7 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
             document = json.loads(
                 content, object_pairs_hook=strict_receipt_object,
                 parse_constant=reject_nonfinite_receipt_value,
+                parse_float=finite_receipt_float,
             )
             records = document.get("receipts") if isinstance(document, dict) else None
         else:

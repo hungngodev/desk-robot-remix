@@ -211,6 +211,8 @@ def test_physical_json_rejects_duplicate_pass_key_and_nonfinite_measurement():
                      '"result": "fail", "result": "pass"'),
         good.replace('"lift_mm": 10', '"lift_mm": NaN'),
         good.replace('"lift_mm": 10', '"lift_mm": Infinity'),
+        good.replace('"lift_mm": 10', '"lift_mm": 1e9999'),
+        good.replace('"lift_mm": 10', '"lift_mm": -1e9999'),
     ):
         assert not verify.verified_procedure_record(
             row, SHA, lambda url, raw=corrupt: signed_file(url, raw))

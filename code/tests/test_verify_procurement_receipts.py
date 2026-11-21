@@ -182,6 +182,7 @@ def test_pinned_procurement_json_rejects_ambiguous_duplicate_receipt_fields():
 
 def test_common_physical_json_receipt_decoder_rejects_nonfinite_and_duplicates():
     from verify_playbook_receipts import (
+        finite_receipt_float,
         reject_nonfinite_receipt_value,
         strict_receipt_object,
     )
@@ -189,10 +190,31 @@ def test_common_physical_json_receipt_decoder_rejects_nonfinite_and_duplicates()
         '{"result":"fail","result":"pass"}',
         '{"measurement":{"x":NaN}}',
         '{"measurement":{"x":Infinity}}',
+        '{"measurement":{"x":1e9999}}',
+        '{"measurement":{"x":-1e9999}}',
     ):
         with pytest.raises(ValueError):
             json.loads(malformed, object_pairs_hook=strict_receipt_object,
-                       parse_constant=reject_nonfinite_receipt_value)
+                       parse_constant=reject_nonfinite_receipt_value,
+                       parse_float=finite_receipt_float)
+
+
+def test_immutable_procurement_record_rejects_exponent_overflow():
+    gate = release.PART_GATES[0]
+    claimed = receipt("part:imu", gate)
+    claimed["measurement"] = {"lift_mm": float("inf")}
+    # The local claim and source would compare equal as infinity without
+    # checking parsed float finiteness at the immutable JSON boundary.
+    raw = json.dumps({"receipts": [claimed]}).replace(
+        "Infinity", "1e9999",
+    ).encode("utf-8")
+    response = {
+        "type": "file", "size": len(raw), "encoding": "base64",
+        "content": base64.b64encode(raw).decode("ascii"),
+    }
+    assert not release.verified_scoped_record(
+        claimed, SHA, lambda _: response,
+    )
 
 
 def test_existing_file_without_claim_cannot_release_purchase():

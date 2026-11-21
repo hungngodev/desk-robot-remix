@@ -29,6 +29,7 @@ from procurement_release import (
     SYSTEM_GATES,
 )
 from verify_playbook_receipts import (
+    finite_receipt_float,
     reject_nonfinite_receipt_value,
     strict_receipt_object,
     verified_raw_record,
@@ -168,6 +169,7 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
         document = json.loads(
             raw.decode("utf-8"), object_pairs_hook=strict_receipt_object,
             parse_constant=reject_nonfinite_receipt_value,
+            parse_float=finite_receipt_float,
         )
     except (ValueError, TypeError, UnicodeError, binascii.Error):
         return False
