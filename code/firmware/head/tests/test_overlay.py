@@ -292,6 +292,41 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("urgent_flush", app)
         self.assertIn("audio_service_.ResetDecoder()", app)
         self.assertIn("GetAudioCodec()->EnableOutput(false)", app)
+        # The original single Xiaozhi Opus owner discards buffered voice
+        # packets before any further send when physical BOOT has muted PDM.
+        header = (self.root / "main/application.h").read_text()
+        self.assertIn("void SetSenseMicrophonePrivacyMuted(bool muted)", header)
+        self.assertIn("std::atomic<bool> sense_microphone_privacy_muted_{false};", header)
+        pending_send = app.split("if (bits & MAIN_EVENT_SEND_AUDIO)", 1)[1].split(
+            "if (bits & MAIN_EVENT_WAKE_WORD_DETECTED)", 1
+        )[0]
+        self.assertIn("sense_microphone_privacy_muted_.load(", pending_send)
+        self.assertIn("while (audio_service_.PopPacketFromSendQueue()) {}", pending_send)
+        self.assertLess(
+            pending_send.index("sense_microphone_privacy_muted_.load("),
+            pending_send.index("protocol_->SendAudio("),
+        )
+        stop = app.split("void Application::HandleStopListeningEvent()", 1)[1].split(
+            "void Application::HandleWakeWordDetectedEvent()", 1
+        )[0]
+        self.assertIn("sense_microphone_privacy_muted_.load(", stop)
+        self.assertIn("protocol_->CloseAudioChannel();", stop)
+        self.assertIn("audio_service_.ResetDecoder();", stop)
+        self.assertIn("while (audio_service_.PopPacketFromSendQueue()) {}", stop)
+        toggle = app.split("void Application::HandleToggleChatEvent()", 1)[1].split(
+            "void Application::ContinueOpenAudioChannel(", 1
+        )[0]
+        self.assertIn("sense_microphone_privacy_muted_.load(", toggle)
+        start = app.split("void Application::HandleStartListeningEvent()", 1)[1].split(
+            "void Application::HandleStopListeningEvent()", 1
+        )[0]
+        self.assertIn("sense_microphone_privacy_muted_.load(", start)
+        self.assertIn(
+            "sense_microphone_privacy_muted_.load(",
+            app.split("void Application::StartListeningAudio()", 1)[1].split(
+                "void Application::ConfigureWakeWordForListening()", 1
+            )[0],
+        )
         # A pending network open must check again before enabling listening.
         network_open = app.split("void Application::ContinueOpenAudioChannel(", 1)[1].split(
             "void Application::HandleStartListeningEvent()", 1
