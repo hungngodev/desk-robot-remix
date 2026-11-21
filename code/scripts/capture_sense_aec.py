@@ -160,7 +160,10 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         frames = _number_header(response, "X-Desk-Audio-Frames", FRAMES, FRAMES)
         first = _number_header(response, "X-Desk-Audio-First-Us", 1, 2**63 - 1)
         last = _number_header(response, "X-Desk-Audio-Last-Us", 1, 2**63 - 1)
-        if reported_boot != boot or not 3_500_000 <= last - first <= 4_500_000:
+        # A correctly counted PCM window with a large clock gap still
+        # corrupts absolute acoustic lag. Match the Sense window's bounded
+        # 80 ms accumulated timing tolerance, including older bench builds.
+        if reported_boot != boot or not 3_920_000 <= last - first <= 4_080_000:
             raise RuntimeError("Sense PCM boot or capture timestamps inconsistent")
         raw = response.read(BYTES + 1)
     if len(raw) != BYTES:
