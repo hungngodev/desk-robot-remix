@@ -18,6 +18,13 @@ _FORCE_READ_TIMEOUT_S = 2.0
 # alternate head adapters and cancellation after an unacknowledged jaw pulse.
 _GRIP_COMMAND_TIMEOUT_S = 2.5
 _HEALTH_READ_TIMEOUT_S = 2.5
+# Seven multiplexed accessory lanes and alternating ADS1115 belly/jaw
+# conversions can take ~336 ms between real jaw acquisitions. Retry an
+# unchanged, still-valid sequence within a bounded deadline rather than
+# mistaking a healthy ADC for a stall after one 180 ms sleep.
+_JAW_FRESH_WAIT_S = 0.45
+_JAW_POLL_INTERVAL_S = 0.075
+_JAW_MAX_POLLS = 5
 
 
 def grip_angles(start: int, end: int, step: int) -> tuple[int, ...]:
@@ -128,17 +135,36 @@ async def guarded_grasp(
                 or ("robot_id" in status and status["robot_id"] != robot_id)):
             raise OperationError("Gripper operation blocked by WROOM health")
 
+    async def read_new_jaw(previous_seq: int, failure: str) -> tuple[int, int]:
+        """Wait for one distinct same-boot conversion, not repeated cached ADC.
+
+        Old/backward sequence values, invalid sample age, a changed boot or
+        failed local safety authority immediately veto another jaw pulse.
+        A healthy but not-yet-updated ADS1115 may consume at most one bounded
+        wait; no fresh result is synthesized from elapsed time.
+        """
+        async with asyncio.timeout(_JAW_FRESH_WAIT_S):
+            for attempt in range(_JAW_MAX_POLLS):
+                measured, seq = await read_force()
+                if _fresh_jaw_sequence(seq, previous_seq):
+                    return measured, seq
+                if seq != previous_seq or attempt == _JAW_MAX_POLLS - 1:
+                    raise OperationError(failure)
+                await asyncio.sleep(_JAW_POLL_INTERVAL_S)
+                await confirmed_health()
+        raise OperationError(failure)
+
     try:
         baseline_a, seq_a = await read_force()
-        # One ADS1115 jaw channel conversion approximately every 144ms;
-        # require distinct observations, not repeated reads of one ADC value.
+        # A seven-lane mux can expose the same last completed conversion
+        # after 180 ms. Poll for a new hardware ID before declaring a stall.
         await asyncio.sleep(0.18)
-        baseline_b, seq_b = await read_force()
+        baseline_b, seq_b = await read_new_jaw(
+            seq_a, "No new ADS1115 jaw sample; jaw not moved",
+        )
     except (KeyError, TypeError, ValueError, AttributeError,
             TimeoutError) as exc:
         raise OperationError("Fresh force feedback required before moving jaw") from exc
-    if not _fresh_jaw_sequence(seq_b, seq_a):
-        raise OperationError("No new ADS1115 jaw sample; jaw not moved")
     if abs(baseline_a - baseline_b) > max(40, threshold // 3):
         raise OperationError("Gripper baseline unstable; jaw not moved")
     baseline = (baseline_a + baseline_b) // 2
@@ -156,12 +182,12 @@ async def guarded_grasp(
             await asyncio.sleep(0.18)
             await confirmed_health()
             try:
-                measured, seq = await read_force()
+                measured, seq = await read_new_jaw(
+                    latest_seq, "No new jaw sample after servo movement",
+                )
             except (KeyError, TypeError, ValueError, AttributeError,
-            TimeoutError) as exc:
+                    TimeoutError) as exc:
                 raise OperationError("Lost fresh force sensor during closing") from exc
-            if not _fresh_jaw_sequence(seq, latest_seq):
-                raise OperationError("No new jaw sample after servo movement")
             latest_seq = seq
             raw_delta = (measured - baseline) * calibration.grip_force_sign
             if raw_delta > ceiling:

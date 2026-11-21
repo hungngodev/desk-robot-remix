@@ -113,7 +113,9 @@ async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
     async def instant(_seconds):
         pass
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
-    head = FakeHead([(100, 1), (100, 2), (240, 3), (240, 3)])
+    head = FakeHead([
+        (100, 1), (100, 2), (240, 3), *([(240, 3)] * 5),
+    ])
     with pytest.raises(OperationError, match="No new jaw sample"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == ["grip 64", "grip 68", "grip 60"]
@@ -456,7 +458,8 @@ async def test_jaw_baseline_rejects_replayed_or_backwards_sequence(
     async def instant(_seconds):
         pass
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
-    head = FakeHead([(100, first), (101, second)])
+    repeats = [(101, second)] * (4 if first == second else 0)
+    head = FakeHead([(100, first), (101, second), *repeats])
     with pytest.raises(OperationError, match="No new ADS1115 jaw sample"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == []
@@ -708,3 +711,62 @@ async def test_grasp_loses_required_provenance_after_first_pulse(
         )
     # Existing guarded relief is permitted only while WROOM reports armed.
     assert head.commands == ["grip 64", "grip 60"]
+
+
+async def test_grasp_waits_for_real_mux_jaw_conversion_instead_of_aborting(
+    monkeypatch,
+):
+    """Cached same-boot jaw samples are normal before the next mux cycle."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([
+        (100, 1), (100, 1), (101, 2),
+        (101, 2), (240, 3),
+        (240, 3), (245, 4),
+    ])
+    result = await guarded_grasp(
+        head, Settings(), robot_id="robot-01", health=healthy,
+    )
+    assert head.commands == ["grip 64", "grip 68"]
+    assert result["contact_delta_raw"] >= Settings.grip_force_delta_raw
+    assert result["physical_acceptance_pass"] is False
+
+
+async def test_stalled_jaw_after_close_cannot_authorize_another_pulse(
+    monkeypatch,
+):
+    """A valid cached ADC value is not a new force conversion."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([
+        (100, 1), (101, 2), *([(101, 2)] * 5),
+    ])
+    with pytest.raises(OperationError, match="No new jaw sample"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=healthy,
+        )
+    assert head.commands == ["grip 64", "grip 60"]
+
+
+async def test_delayed_jaw_sample_does_not_override_local_disarm(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([(100, 1), (101, 2), (101, 2), (240, 3)])
+    checks = 0
+
+    async def disarm_on_retry():
+        nonlocal checks
+        checks += 1
+        return {"armed": checks < 3, "robot_id": "robot-01"}
+
+    with pytest.raises(OperationError, match="WROOM health"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=disarm_on_retry,
+        )
+    assert head.commands == ["grip 64"]
