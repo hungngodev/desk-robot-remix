@@ -60,6 +60,17 @@ module dock_contact_recess_gauge() {
     assert(contact_centers_mm > 8 && contact_centers_mm < contact_carrier_l-14);
     assert(contact_outer_d_mm > 1 && contact_outer_d_mm < 10);
     assert(contact_pocket_depth_mm > 1 && contact_pocket_depth_mm < contact_carrier_h);
+    // The two recessed contact pockets must not break into the adjacent M3
+    // mounting bore at either end. This is a printable nonenergized gauge,
+    // not a safe or selected electrical contact holder.
+    contact_radius_mm = (contact_outer_d_mm + fit_xy) / 2;
+    bolt_radius_mm = m3_clearance / 2;
+    bolt_center_x_mm = contact_carrier_l / 2 - 5;
+    contact_center_x_mm = contact_centers_mm / 2;
+    minimum_bridge_mm = 2;
+    assert(bolt_center_x_mm - contact_center_x_mm >=
+           bolt_radius_mm + contact_radius_mm + minimum_bridge_mm,
+           "Contact recess would intersect or thin the mounting web");
     difference() {
         translate([-contact_carrier_l/2,-contact_carrier_w/2,0])
             cube([contact_carrier_l, contact_carrier_w, contact_carrier_h]);
