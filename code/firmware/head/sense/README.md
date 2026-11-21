@@ -158,6 +158,19 @@ checking. MAX98357 speaker connects across SPK+ and SPK−, neither to ground;
 use the selected Challenge Electronics CS20-02P110-04-1X 8 ohm 2 W rectangular speaker, not the retired 1 W candidate; actual MAX98357A 5V output and enclosure acoustic/thermal margins must still be qualified. Use qualified supplies/grounds and
 rated actuator wiring. Do not join independent USB5V sources blindly.
 
+## Reconnecting consented realtime listening
+
+When the private firmware setting `CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED`
+is enabled, the Sense board uses the original Xiaozhi `ToggleChatState`
+and its one Opus microphone/speaker session. The same guarded boot attempt
+may happen once again after a real WiFi disconnect followed by reconnection
+and return to idle. This does not start another microphone owner, open
+a new custom audio WebSocket, or retry a model response. An operator
+pressing BOOT disables unattended audio restart until the board reboots.
+Arbitrary server-side session closure while WiFi stays connected does
+not automatically reopen the microphone; verify recovery and consent
+in the real network loss and manual mute trials before qualification.
+
 ## Live AEC reference integrity bench
 
 After flashing the selected Sense build and enabling the existing authenticated
