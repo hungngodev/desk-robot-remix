@@ -118,3 +118,51 @@ def test_authenticated_local_capture_path_rejects_no_valid_pets():
     assert _safe_endpoint("https://my-robot-mac.example:8008", "robot-01").endswith(
         "/v1/robots/robot-01/status",
     )
+
+
+class SequencedFakeClient(FakeClient):
+    """Return exact WROOM conversion counters across a uint32 rollover."""
+
+    def __init__(self, counters):
+        super().__init__()
+        self.counters = counters
+
+    async def get(self, url, *, headers, timeout):
+        response = await super().get(url, headers=headers, timeout=timeout)
+        index = min(self.count - 1, len(self.counters) - 1)
+        response.data["imu"]["sample_ms"] = self.counters[index]
+        return response
+
+
+async def test_capture_accepts_same_boot_uint32_wrap_within_and_across_phases():
+    rows = await read(
+        SequencedFakeClient([0xfffffffe, 0xffffffff, 0, 1]), count=4,
+    )
+    assert [row["body"]["imu"]["sample_ms"] for row in rows] == [
+        0xfffffffe, 0xffffffff, 0, 1,
+    ]
+    # A labelled phase begins after an operator prompt, but retains the same
+    # real WROOM boot identity and source conversion cursor.
+    next_phase = await read(
+        SequencedFakeClient([0]), count=1,
+        previous_sample=0xffffffff, previous_boot=1,
+    )
+    assert next_phase[0]["body"]["imu"]["sample_ms"] == 0
+
+
+async def test_capture_rejects_delayed_pre_wrap_replay_after_wrap():
+    # A delayed older conversion has a numerically larger timestamp than
+    # the already accepted post-wrap value. Only the new value 3 is legal.
+    rows = await read(
+        SequencedFakeClient([0xffffffff, 3]), count=1,
+        previous_sample=2, previous_boot=1,
+    )
+    assert rows[0]["body"]["imu"]["sample_ms"] == 3
+
+
+async def test_capture_never_counts_only_pre_wrap_replays_as_fresh():
+    with pytest.raises(RuntimeError, match="fresh independent"):
+        await read(
+            SequencedFakeClient([0xffffffff]), count=1,
+            previous_sample=2, previous_boot=1,
+        )

@@ -78,7 +78,10 @@ async def capture_phase(
         if boot is not None and current_boot != boot:
             raise RuntimeError("WROOM reboot during physical IMU trial")
         boot = current_boot
-        if seen is None or current > seen:
+        # The WROOM sample clock is uint32: accept a true rollover, but
+        # never treat a delayed pre-wrap conversion as a new sample.
+        forward = (current - seen) & 0xffffffff if seen is not None else None
+        if forward is None or 0 < forward < 0x80000000:
             if receipt is not None and observed <= receipt:
                 raise RuntimeError("Nonmonotonic source receipt")
             samples.append({
