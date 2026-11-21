@@ -89,6 +89,8 @@ def test_legacy_fusion_builder_entrypoint_delegates_to_verified_single_importer(
     canonical = load()
     assert "fusion_one_robot_scaffold.py" in str(legacy._IMPLEMENTATION)
     assert legacy._load()["FIT_REFERENCES"] == canonical.FIT_REFERENCES
+    assert legacy.SOURCE_MESHES == canonical.SOURCE_MESHES
+    assert legacy.ADAPTER_NAMES == canonical.ADAPTER_NAMES
     # Both entrypoints enforce mandatory saved upstream mesh identity.
     with pytest.raises(FileNotFoundError, match="Missing source mesh"):
         legacy.build_manifest(tmp_path)
