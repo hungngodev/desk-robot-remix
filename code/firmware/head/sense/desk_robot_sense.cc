@@ -109,6 +109,7 @@ private:
         // but never flood the shared I2C display every 100 ms.
         uint32_t last_fault_status_refresh_ms = 0;
         bool last_was_idle = false;
+        bool last_face_available = false;
         bool last_idle_face_fault = false;
         bool model_mood_active = false;
         uint32_t model_mood_started_ms = 0;
@@ -163,16 +164,22 @@ private:
             board->face_was_speaking_ = speaking;
             const Observation obs{now_ms};
             const Action action = board->face_behavior_.update(obs);
-            // Xiaozhi owns speaking/listening/status expressions. The reused
-            // Stackchan idle picker may update the existing OLED only when
-            // the device is idle; never write its motion actions to the body.
+            // The upstream OLED keeps status text and emotion in separate
+            // LVGL labels. Preserve Xiaozhi's Speaking/Listening text while
+            // allowing silent cosmetic mood in continuously listening mode.
+            // A normal wake-only build still reserves its listening UI.
             const bool idle = device_state == kDeviceStateIdle;
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            const bool face_available = idle || device_state == kDeviceStateListening;
+#else
+            const bool face_available = idle;
+#endif
             // Consume every pending decision, even while speaking or in a
             // body fault, so stale facial requests never replay after recovery.
             const auto requested_mood = board->body_bridge_ ?
                 board->body_bridge_->TakeCosmeticMoodCue() :
                 desk_robot::CosmeticMood::kNone;
-            if (body_unhealthy || !idle) model_mood_active = false;
+            if (body_unhealthy || !face_available) model_mood_active = false;
             if (board->display_ != nullptr) {
                 // WROOM faults are factual local OLED status even while
                 // Xiaozhi is speaking. Never wait for the speech floor to
@@ -203,7 +210,7 @@ private:
                     // Unknown states defer clear until a known status owner.
                 }
             }
-            if (idle && board->display_ != nullptr) {
+            if (face_available && board->display_ != nullptr) {
                 // Only the Mac's CURRENT context decision may request a
                 // transient mood. The local idle HSM takes over afterward.
                 // These bytes never reach WROOM, motors, Opus or microphones.
@@ -212,7 +219,7 @@ private:
                     // prescribing sadness for every independent WROOM fault.
                     // The factual STOP status above remains visible, and
                     // optional HSM/LLM moods cannot override the safety cue.
-                    if (!last_idle_face_fault || !last_was_idle)
+                    if (!last_idle_face_fault || !last_face_available)
                         board->display_->SetEmotion("neutral");
                     model_mood_active = false;
                 } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
@@ -222,7 +229,7 @@ private:
                 } else if (!model_mood_active ||
                            now_ms - model_mood_started_ms >= 1600U) {
                     if (last_idle_face_fault || model_mood_active ||
-                        !last_was_idle || action.set_mood)
+                        !last_face_available || action.set_mood)
                         board->display_->SetEmotion(
                             action.set_mood ? MoodName(action.mood) : "neutral");
                     model_mood_active = false;
@@ -230,6 +237,7 @@ private:
                 last_idle_face_fault = body_unhealthy;
             }
             last_was_idle = idle;
+            last_face_available = face_available;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
     }

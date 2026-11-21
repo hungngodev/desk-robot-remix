@@ -374,6 +374,26 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('"camera_sensor_pid"', bridge)
 
 
+    def test_continuous_listening_can_render_mood_without_touching_voice(self):
+        """Always listening is not ordinary Idle; keep the OLED expressive."""
+        source = (HEAD / "sense/desk_robot_sense.cc").read_text()
+        face = source.split("static void FaceTask(void* context)", 1)[1].split(
+            "void InitializeDisplay()", 1
+        )[0]
+        assert "#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED" in face
+        assert "face_available = idle || device_state == kDeviceStateListening;" in face
+        assert "const bool face_available = idle;" in face
+        assert "if (face_available && board->display_ != nullptr)" in face
+        assert "if (body_unhealthy || !face_available) model_mood_active = false;" in face
+        # Avoid an every-100ms LVGL write in an unending listening state.
+        assert "last_face_available = face_available;" in face
+        assert "!last_face_available || action.set_mood" in face
+        # Moods are visual only. Xiaozhi's status and safety own the label.
+        assert "Lang::Strings::LISTENING" in face
+        assert "board->display_->SetStatus(\"Body safety stop\");" in face
+        assert "head.command(" not in face
+        assert "speaker.say(" not in face
+
     def test_sense_safety_status_remains_visible_during_speech(self):
         """A factual WROOM fault cannot wait for the idle expression owner."""
         board = (HEAD / "sense/desk_robot_sense.cc").read_text()
@@ -381,7 +401,7 @@ class SenseOverlayTests(unittest.TestCase):
             "void InitializeDisplay()", 1,
         )[0]
         status = face.index('SetStatus("Body safety stop")')
-        idle_mood = face.index("if (idle && board->display_ != nullptr)")
+        idle_mood = face.index("if (face_available && board->display_ != nullptr)")
         self.assertLess(status, idle_mood)
         # A WROOM fault must remain visible even if Xiaozhi rewrites
         # the display while speaking or listening continuously.
@@ -1003,7 +1023,7 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'cosmetic_mood_.offer(' in bridge
     assert 'CosmeticMoodName(requested_mood)' in board
     assert 'now_ms - model_mood_started_ms >= 1600U' in board
-    assert 'body_unhealthy || !idle' in board
+    assert 'body_unhealthy || !face_available' in board
     assert 'board->display_->SetStatus("Body safety stop");' in board
     assert 'Event(EventType::kPersonDetected)' in board
     assert 'body_unhealthy ? "sad" :' not in board
@@ -1024,7 +1044,7 @@ def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
     # Motor safety is factual; a fault must not force scripted sadness.
     assert 'SetEmotion("neutral")' in fault
     assert 'SetEmotion("sad")' not in fault
-    assert '!last_idle_face_fault || !last_was_idle' in fault
+    assert '!last_idle_face_fault || !last_face_available' in fault
     assert 'model_mood_active = false;' in fault
     # Recovery must force a neutral/local HSM face refresh even if its
     # idle picker emitted no new mood. No 100 ms continuous OLED spam.
