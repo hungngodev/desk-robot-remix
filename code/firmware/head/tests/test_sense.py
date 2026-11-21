@@ -318,6 +318,20 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('vTaskDelay(pdMS_TO_TICKS(100));', face)
         self.assertIn('xTaskCreate(BodyPollTask, "sense_body_poll"', source)
 
+    def test_head_never_displays_healthy_body_for_unready_or_unguarded_status(self):
+        """Status may be structurally valid but still lack a safe motion guard."""
+        source = (HEAD / "overlay/robot_bridge.cc").read_text()
+        protocol = (HEAD / "overlay/robot_protocol.h").read_text()
+        poll = source.split("BodyInteraction Bridge::PollInteraction()", 1)[1]
+        poll = poll.split("bool Bridge::Authorize(", 1)[0]
+        self.assertIn('auto required = cJSON_GetObjectItemCaseSensitive(safety, "required")', poll)
+        self.assertIn('auto ready = cJSON_GetObjectItemCaseSensitive(safety, "ready")', poll)
+        self.assertIn('!cJSON_IsBool(required) || !cJSON_IsBool(ready)', poll)
+        self.assertIn('observation.fault = BodySafetyUnhealthy(', poll)
+        self.assertIn('cJSON_IsTrue(required), cJSON_IsTrue(ready), fault->valuestring', poll)
+        self.assertIn('return !required || !ready || fault != "none";', protocol)
+        self.assertNotIn('std::strcmp(fault->valuestring, "not_required") != 0', poll)
+
     def test_urgent_barge_flush_can_play_subsequent_tts(self):
         """Pinned Xiaozhi output worker reopens the codec for the next PCM."""
         overlay.apply(self.root, 'sense')
