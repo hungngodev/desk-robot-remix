@@ -5200,6 +5200,62 @@ def test_oversized_visual_confidence_never_schedules_spontaneous_speech():
     ))
 
 
+async def test_person_face_failed_or_cancelled_head_ack_retries_without_stale_cue(fleet):
+    """Only a confirmed queued face cue consumes the ten second cooldown."""
+    from types import SimpleNamespace
+
+    from desk_robot.pet import PetState
+    from desk_robot.transport import HeadError
+
+    robot = fleet.robots[0]
+
+    class Head:
+        def __init__(self):
+            self.calls = []
+            self.failure = HeadError("head offline")
+
+        async def face_event(self, event):
+            self.calls.append(event)
+            if self.failure is not None:
+                raise self.failure
+
+    head = Head()
+    pet = object.__new__(PetController)
+    pet.settings = SimpleNamespace(
+        mode="hardware", voice_vision_tools_enabled=True,
+    )
+    pet.heads = {robot.id: head}
+    pet.states = {robot.id: PetState(enabled=True, generation=1)}
+    pet._closed = False
+    pet._vision_preemption_epoch = 4
+    pet.multimodal = None
+    pet.max_observation_age = 5.0
+    state = pet.states[robot.id]
+    observed_at = time.monotonic()
+    change = SceneChange("person", "Someone is nearby", .96)
+
+    await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
+    assert head.calls == ["person_detected"]
+    assert state.last_person_face_cue_at == float("-inf")
+
+    head.failure = None
+    await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
+    await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
+    assert head.calls == ["person_detected", "person_detected"]
+    assert state.last_person_face_cue_at > float("-inf")
+
+    state.last_person_face_cue_at = float("-inf")
+    head.failure = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
+    assert state.last_person_face_cue_at == float("-inf")
+
+    head.failure = None
+    await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
+    assert head.calls[-1] == "person_detected"
+    assert len(head.calls) == 4
+
+
 async def test_person_face_cue_needs_fresh_credible_live_source(fleet, tmp_path):
     """No motor authority: a mock head only receives the one cosmetic cue."""
     from types import SimpleNamespace
