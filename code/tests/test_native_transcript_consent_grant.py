@@ -171,6 +171,7 @@ def test_live_asr_revoke_during_durable_write_retracts_ephemeral_receipt(
 ):
     """An old voice/live grant cannot revive transient ASR on an ON/OFF/ON."""
     import time
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.mode = "hardware"
