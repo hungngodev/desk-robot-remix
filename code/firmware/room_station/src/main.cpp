@@ -127,8 +127,12 @@ void bme_step(uint32_t now) {
   }
   bme_valid = finite_temperature(bme.temperature)
       && isfinite(bme.humidity) && bme.humidity >= 0 && bme.humidity <= 100
-      && isfinite(bme.pressure) && bme.pressure > 0
-      && isfinite(bme.gas_resistance) && bme.gas_resistance > 0;
+      // Match the Mac room decoder. An out-of-range BME must not
+      // poison the entire USB frame and hide independent room sensors.
+      && isfinite(bme.pressure) && bme.pressure >= 30000.0f
+      && bme.pressure <= 125000.0f
+      && isfinite(bme.gas_resistance) && bme.gas_resistance >= 1
+      && bme.gas_resistance <= 1000000000U;
   if (bme_valid) bme_sample_ms = now;
 }
 void bme_observation(uint32_t now) {

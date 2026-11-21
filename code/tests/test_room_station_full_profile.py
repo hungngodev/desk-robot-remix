@@ -197,3 +197,21 @@ def test_thermal_scan_publishes_only_complete_staged_frames():
     assert "read_thermal_chunk(" not in report
     assert "thermal_valid && now - thermal_sample_ms <= kThermalStaleMs" in report
     assert "thermal_step(now);" in source
+
+def test_bme688_producer_ranges_match_room_decoder():
+    # A BME outlier should be emitted as valid:false, not as a plausible
+    # value that makes the Mac drop unrelated CO2, radar and thermal data.
+    firmware = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    mac = (ROOT / "code/laptop/src/desk_robot/room_station.py").read_text()
+    sample = firmware.split("void bme_step(uint32_t now) {", 1)[1].split(
+        "void bme_observation(", 1
+    )[0]
+    decoder = mac.split('elif sensor == "bme688":', 1)[1].split(
+        'elif sensor == "ld2410c":', 1
+    )[0]
+    assert "bme.pressure >= 30000.0f" in sample
+    assert "bme.pressure <= 125000.0f" in sample
+    assert "bme.gas_resistance >= 1" in sample
+    assert "bme.gas_resistance <= 1000000000U" in sample
+    assert '_value(data, "pressure_pa", 30000, 125000)' in decoder
+    assert '_value(data, "gas_ohms", 1, 1e9)' in decoder

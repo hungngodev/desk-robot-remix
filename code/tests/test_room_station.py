@@ -659,3 +659,15 @@ def test_room_station_summary_preserves_thermal_with_all_sensors_valid():
     assert "Station thermal raw 23.2..36.8 C (64 unclassified pixels)" in obs.summary
     assert obs.summary.endswith("(64 unclassified pixels)")
 
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("pressure_pa", 29999), ("pressure_pa", 125001),
+    ("gas_ohms", 0), ("gas_ohms", 1000000001),
+])
+def test_bme688_out_of_range_values_reject_frame(field, value):
+    # Consumer refuses outliers; producer separately marks BME invalid so
+    # a single sensor fault cannot suppress otherwise valid station fields.
+    payload = frame()
+    payload["readings"]["bme688"][field] = value
+    with pytest.raises(ValueError, match="Room sensor reading out of range"):
+        accept(payload)
