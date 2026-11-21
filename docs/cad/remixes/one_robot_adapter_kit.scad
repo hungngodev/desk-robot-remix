@@ -21,6 +21,13 @@ oled_pcb_x=27;
 oled_pcb_y=27;
 oled_window_x=22;
 oled_window_y=12;
+// Nominal OLED PCB screen, no measured carrier mounting holes.
+// The previous 35mm face and 3mm inset M2 bores left 1.825mm to
+// the free outer edge. Keep >=2mm both there and beside the display.
+oled_bezel_margin_x=5;
+oled_bezel_margin_y=4;
+oled_bezel_hole_edge=3.5;
+oled_bezel_min_web=2;
 // Exact active candidate envelope only; solder pads, leads and gasket
 // still require a physical coupon before any sealed speaker chamber.
 speaker_l=20;
@@ -77,12 +84,24 @@ module tof_adjustable(){
   }
 }
 module oled_bezel(){
-  x=oled_pcb_x+8; y=oled_pcb_y+8;
+  x=oled_pcb_x+2*oled_bezel_margin_x;
+  y=oled_pcb_y+2*oled_bezel_margin_y;
+  assert(oled_bezel_min_web>=2);
+  assert(oled_bezel_hole_edge-m2_clearance_d/2>=oled_bezel_min_web,
+         "OLED M2 bore breaches bezel outer printable web");
+  assert(x/2-oled_bezel_hole_edge-m2_clearance_d/2
+         -(oled_window_x+fit_xy)/2>=oled_bezel_min_web &&
+         y/2-oled_bezel_hole_edge-m2_clearance_d/2
+         -(oled_window_y+fit_xy)/2>=oled_bezel_min_web,
+         "OLED M2 bore breaches display-window printable web");
   difference(){
     translate([0,0,1.5]) cube([x,y,3],center=true);
     translate([0,0,1.5])
       cube([oled_window_x+fit_xy,oled_window_y+fit_xy,5],center=true);
-    for(xx=[-x/2+3,x/2-3],yy=[-y/2+3,y/2-3])
+    for(xx=[-x/2+oled_bezel_hole_edge,
+            x/2-oled_bezel_hole_edge],
+        yy=[-y/2+oled_bezel_hole_edge,
+            y/2-oled_bezel_hole_edge])
       translate([xx,yy,1.5]) cylinder(h=5,d=m2_clearance_d,center=true);
   }
 }

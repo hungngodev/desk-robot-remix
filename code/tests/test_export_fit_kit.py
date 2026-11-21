@@ -925,3 +925,32 @@ def test_gy530_fit_coupon_rejects_weak_walls_and_missing_floor(tmp_path):
         ], capture_output=True, text=True, timeout=90)
         assert bad.returncode != 0
         assert message in bad.stderr + bad.stdout
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_oled_bezel_keeps_two_mm_web_at_m2_bores_and_display(tmp_path):
+    """Do not trade outer edge thickness for a fragile display-window edge."""
+    source = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
+    valid = tmp_path / "oled_bezel.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(valid),
+        "-D", 'part="oled_bezel"', str(source),
+    ], check=True, capture_output=True, text=True, timeout=90)
+    assert module().closed_mesh_edges(valid) > 0
+    assert module().mesh_bounds_mm(valid)["dimensions_mm"] == [
+        37.0, 35.0, 3.0
+    ]
+    radius = 2.35 / 2
+    assert 3.5 - radius >= 2
+    assert 37 / 2 - 3.5 - radius - (22 + 0.35) / 2 >= 2
+    for override, message in (
+        ("oled_bezel_hole_edge=2", "outer printable web"),
+        ("oled_bezel_margin_x=3", "display-window printable web"),
+    ):
+        bad = subprocess.run([
+            "openscad", "--export-format", "binstl",
+            "-o", str(tmp_path / "bad_oled.stl"),
+            "-D", 'part="oled_bezel"', "-D", override, str(source),
+        ], capture_output=True, text=True, timeout=90)
+        assert bad.returncode != 0
+        assert message in bad.stderr + bad.stdout
