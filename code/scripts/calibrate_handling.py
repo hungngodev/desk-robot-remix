@@ -36,6 +36,7 @@ def analyze(records: list[dict]) -> dict:
     }
     boot_id = firmware = mount = None
     last_sample = last_time = None
+    first_sample = first_time = None
     for record in records:
         if (not isinstance(record, dict)
                 or type(record.get("label")) is not str
@@ -66,6 +67,19 @@ def analyze(records: list[dict]) -> dict:
             elif stamp - last_sample > 0x7fffffff:
                 # Replay of a pre-wrap packet arriving after rollover
                 raise ValueError("No repeated, reversed or stale IMU conversions")
+        # Device uptime and Mac receipt clocks have different origins, but
+        # source acquisition cannot advance by minutes during milliseconds
+        # of host observation. Compare cumulative progress, not individual
+        # pairs, so repeated small clock jumps cannot evade this check.
+        if first_sample is not None:
+            source_elapsed_ms = (stamp - first_sample) & 0xffffffff
+            host_elapsed_ms = (observed - first_time) * 1000.0
+            if source_elapsed_ms > host_elapsed_ms * 1.001 + 3000:
+                raise ValueError(
+                    "WROOM acquisition clock outpaced host receipt time"
+                )
+        else:
+            first_sample, first_time = stamp, observed
         last_time, last_sample = observed, stamp
         for name, old in (("firmware_commit", firmware), ("mount_id", mount)):
             value = record.get(name)

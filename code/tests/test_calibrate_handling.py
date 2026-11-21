@@ -129,3 +129,38 @@ def test_handling_calibration_rejects_backward_sample_without_wrap():
     rows[9]["body"]["imu"]["sample_ms"] = rows[8]["body"]["imu"]["sample_ms"] - 50
     with pytest.raises(ValueError, match="No repeated, reversed or stale IMU conversions"):
         analyze(rows)
+
+
+def test_handling_calibration_rejects_device_uptime_jump_without_host_time():
+    rows = trials()
+    # Consistent per-record seq and fresh age_ms must not hide an impossible
+    # source-clock leap while the Mac has seen only 0.8 seconds pass.
+    for row in rows[8:]:
+        row["body"]["imu"]["sample_ms"] += 30000
+    with pytest.raises(ValueError, match="outpaced host receipt"):
+        analyze(rows)
+
+
+def test_handling_calibration_rejects_accumulated_small_clock_jumps():
+    rows = trials()
+    # An attacker could split a huge leap into individually plausible steps.
+    # The first accepted host receipt anchors one cumulative timing window.
+    for index, row in enumerate(rows):
+        row["body"]["imu"]["sample_ms"] = 1000 + index * 1000
+    with pytest.raises(ValueError, match="outpaced host receipt"):
+        analyze(rows)
+
+
+def test_handling_calibration_allows_real_elapsed_gaps_between_phases():
+    rows = trials()
+    # A deliberate operator setup pause advances BOTH independent clocks.
+    # It must not invalidate otherwise fresh, ordered physical samples.
+    for row in rows[8:]:
+        row["time_monotonic_s"] += 10.0
+        row["body"]["imu"]["sample_ms"] += 10000
+    for row in rows[12:]:
+        row["time_monotonic_s"] += 30.0
+        row["body"]["imu"]["sample_ms"] += 30000
+    report = analyze(rows)
+    assert report["thresholds_physically_qualified"] is False
+    assert report["motor_authorization"] is False
