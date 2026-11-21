@@ -1079,9 +1079,9 @@ class MultimodalOrchestrator:
                         # The stream is still drained continuously, and genuine
                         # physical triggers bypass both optional sampling gates.
                         # The video ring is cleared on disconnect/reconnect.
-                    # Re-prime motion after EACH session, not just the first
-                    # two lifetime metric increments.
-                    bootstrap = len(self.hub.frames[robot_id]) < 2
+                        # Re-prime motion after EACH session, not just the first
+                        # two lifetime metric increments.
+                        bootstrap = len(self.hub.frames[robot_id]) < 2
                         if not recent_sensor_edge and (
                             received - self._last_stream_sample[robot_id] < sample_gap
                             or (not bootstrap and not self.hub.due(robot_id, received))
