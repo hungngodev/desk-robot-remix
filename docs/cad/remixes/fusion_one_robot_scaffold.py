@@ -45,7 +45,7 @@ FIT_REFERENCES = (
 
 # Immutable Git blob identifiers of the licensed ORIGINAL STL inputs.
 # This detects source substitution before Fusion imports a different model.
-# Git blob SHA1 hashes the bytes preceded by b"blob <length>\\0".
+# Git blob SHA1 hashes the bytes preceded by b"blob <length>\0".
 # These revision checks are provenance, NOT installation/fit acceptance.
 SOURCE_MESH_GIT_BLOBS = {
     "docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl": "d7428a9ad9663446d1862061ce1e645f37039c2f",
@@ -79,7 +79,7 @@ def verify_original_source_revisions(root: Path) -> dict[str, str]:
             raise FileNotFoundError(f"Missing original CAD source: {rel}")
         content = path.read_bytes()
         actual = sha1(
-            b"blob " + str(len(content)).encode("ascii") + b"\\0" + content
+            b"blob " + str(len(content)).encode("ascii") + b"\0" + content
         ).hexdigest()
         if actual != expected:
             raise ValueError(f"Original licensed CAD source changed: {rel}")
