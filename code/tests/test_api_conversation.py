@@ -1717,6 +1717,52 @@ async def test_group_sensor_context_survives_camera_opt_out_without_private_asr(
         assert "Private recalled place" not in prompt
 
 
+async def test_group_sensed_event_and_handling_survive_camera_opt_out(settings):
+    """Fleet conversation retains WROOM handling and sensed events under camera privacy."""
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = False
+
+    class MockHub:
+        def interaction_timeline(self, robot_id, now, *, limit=10):
+            return [
+                {
+                    "channel": "sensor",
+                    "kind": "handling_tilt",
+                    "source": "wroom_sensed_event",
+                    "age_ms": 120,
+                    "content": None,
+                },
+                {
+                    "channel": "sensor",
+                    "kind": "camera_face",
+                    "source": "sense_camera_receipt",
+                    "age_ms": 300,
+                    "content": "Secret face",
+                },
+            ]
+
+    class RecordingChat(SimulatedChat):
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            return await super().reply(history)
+
+    chat = RecordingChat()
+    conversation = Conversation(settings, chat, SimulatedSpeaker())
+    conversation.multimodal = SimpleNamespace(hub=MockHub())
+    await conversation.run(["robot-01", "robot-02"], "Check posture", 2)
+
+    assert len(chat.prompts) == 2
+    assert "handling_tilt" in chat.prompts[0]
+    for prompt in chat.prompts:
+        assert "Secret face" not in prompt
+
+
 async def test_raising_optional_live_context_cannot_mask_group_speech_cancel(settings):
     settings.mode = "hardware"
     settings.fleet_text_sharing_enabled = True
