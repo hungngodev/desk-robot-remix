@@ -6,6 +6,7 @@ Source meshes have arbitrary coordinates; this does not align joints,
 generate missing mounts, or certify any printed part or charging circuit.
 """
 from pathlib import Path
+from hashlib import sha1
 import runpy
 import traceback
 
@@ -40,6 +41,50 @@ FIT_REFERENCES = (
     ("Speaker Fit Gauge Only", "fit_stls/speaker_rect_fit_gauge.stl"),
     ("GY530 Sensor Fit Gauge Only", "fit_stls/vl53l0x_gy530_fit_gauge.stl"),
 )
+
+
+# Immutable Git blob identifiers of the licensed ORIGINAL STL inputs.
+# This detects source substitution before Fusion imports a different model.
+# Git blob SHA1 hashes the bytes preceded by b"blob <length>\\0".
+# These revision checks are provenance, NOT installation/fit acceptance.
+SOURCE_MESH_GIT_BLOBS = {
+    "docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl": "d7428a9ad9663446d1862061ce1e645f37039c2f",
+    "docs/cad/originals/smars-stepper/SMARS_28BYJ-48-RearWheel.stl": "e4fcfb7cd884f29a0eb0a10a3bed7e1cdc1fc6fb",
+    "docs/cad/originals/smars/slave_wheel_SL.stl": "b1a431a86029692711c77f15aadac358ff693276",
+    "docs/cad/originals/smars/mechanical_track.stl": "3fa614ef1f0ca1c05ad7e4f6e4cc2c7020d35db4",
+    "docs/cad/originals/forklift/fork_lift_e.stl": "83699aaaaa87efbeb3e2bd897156ff1069aef2e5",
+    "docs/cad/originals/forklift/fork_lift_f.stl": "5b0c7409c889f65a020ee91b9ee28f6b37cf2301",
+    "docs/cad/originals/gripper/servo_case_arm.stl": "121ecb2820b77903ffb2ce83c308d825aac135d7",
+    "docs/cad/originals/gripper/arm_rack.stl": "fa8892f85c133218c597dc04ffabf3a4e91a3a1e",
+    "docs/cad/originals/gripper/pinion_gear.stl": "fc306ad3a8695ae61667ba2769f3b5440839ca2d",
+    "docs/cad/originals/sparky-head/sparky_shell.stl": "b0c95cf6eb8b313859b7af9efca25fe202ef49af",
+    "docs/cad/originals/sparky-head/sparky_collar.stl": "da2a75ae5528542d34232182b5ecf99978c1691f",
+    "docs/cad/originals/sparky-head/sparky_lid.stl": "e3859582ec094a1a256732852187bc71048c6796",
+}
+
+
+def verify_original_source_revisions(root: Path) -> dict[str, str]:
+    """Fail before Fusion import when an original licensed STL was replaced.
+
+    Preserve original author/license and exact geometry. Changing a source
+    requires a deliberate reviewed revision, attribution and fit rerun.
+    """
+    paths = {rel for _, rel in SOURCE_MESHES}
+    if paths != set(SOURCE_MESH_GIT_BLOBS):
+        raise ValueError("Original CAD manifest and pinned sources disagree")
+    verified = {}
+    for rel, expected in SOURCE_MESH_GIT_BLOBS.items():
+        path = root / rel
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing original CAD source: {rel}")
+        content = path.read_bytes()
+        actual = sha1(
+            b"blob " + str(len(content)).encode("ascii") + b"\\0" + content
+        ).hexdigest()
+        if actual != expected:
+            raise ValueError(f"Original licensed CAD source changed: {rel}")
+        verified[rel] = actual
+    return verified
 
 
 def find_repo(script_path: Path) -> Path:
@@ -120,6 +165,7 @@ def run(context):
     ui = app.userInterface
     try:
         repo = find_repo(Path(__file__).resolve())
+        verify_original_source_revisions(repo)
         fit_receipt = verify_optional_fit_references(repo)
         sources = build_manifest(repo)
         app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)

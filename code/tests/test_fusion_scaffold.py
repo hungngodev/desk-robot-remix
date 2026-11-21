@@ -156,3 +156,25 @@ def test_fusion_gui_exposes_protected_pack_source_footprint_block():
             "physical_interior_fit_verified": True,
             "axis_aligned_packaging_possible": True,
         }})
+
+
+def test_original_licensed_fusion_meshes_are_revision_pinned(tmp_path):
+    """The real 12 upstream meshes cannot drift without a reviewed revision."""
+    canonical = load_script()._load()
+    verify = canonical["verify_original_source_revisions"]
+    pinned = canonical["SOURCE_MESH_GIT_BLOBS"]
+    assert len(pinned) == len(canonical["SOURCE_MESHES"]) == 12
+    assert verify(ROOT) == pinned
+    for rel in pinned:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((ROOT / rel).read_bytes())
+    assert verify(tmp_path) == pinned
+    first = tmp_path / canonical["SOURCE_MESHES"][0][1]
+    first.write_bytes(first.read_bytes() + b"tampered mesh")
+    import pytest
+    with pytest.raises(ValueError, match="Original licensed CAD source changed"):
+        verify(tmp_path)
+    first.unlink()
+    with pytest.raises(FileNotFoundError, match="Missing original CAD source"):
+        verify(tmp_path)

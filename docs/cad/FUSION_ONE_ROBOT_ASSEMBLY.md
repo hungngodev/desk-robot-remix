@@ -1,5 +1,15 @@
 # Fusion 360 full one-pet assembly guide
 
+## Source provenance gate
+
+Before Fusion imports its twelve original STL references, the canonical
+scaffold now verifies their exact Git blob revisions against a pinned list
+from the original licensed source assets. Missing or substituted meshes
+fail the import before a new Fusion document is created. This protects
+license attribution and reproducible fit analysis, not actual physical
+fit, shipping rights or final assembly acceptance. Update the revisions
+only after inspecting the upstream license and rechecking affected joints.
+
 ## What is real today
 
 This is the exact mechanical integration plan for the requested **full featured**
