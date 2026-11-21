@@ -118,7 +118,7 @@ def evaluate(records: list[dict]) -> dict:
     ):
         if control.get(field) != human[0][field]:
             raise ValueError(
-                "Robot-only control must match human trial robot and setup"
+                "Robot-only control must use the same robot and setup as human trials"
             )
     duration = _number(control.get("duration_seconds"), "robot-only duration")
     echoes = control.get("self_interruptions")
