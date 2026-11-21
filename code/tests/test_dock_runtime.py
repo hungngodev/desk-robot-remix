@@ -858,3 +858,70 @@ async def test_dock_detector_delay_expires_original_receipt_without_motion(
     assert "stale" in result["reason"].lower()
     assert not result["motor_authorized"] and not result["charging_authorized"]
     assert head.commands == []
+
+
+
+async def test_close_native_detector_retires_idle_pool_before_new_runtime(
+    monkeypatch,
+):
+    """A normal Runtime restart gets a new single native worker, not a leak."""
+    from types import SimpleNamespace
+
+    old = dock_runtime._DETECTOR_POOL
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda jpeg, calibration, *, captured_at: DockPose(
+            0, 0, 400, 0.5, captured_at,
+        ),
+    )
+    await dock_runtime.close_detector_pool()
+    assert dock_runtime._DETECTOR_POOL is not old
+    with pytest.raises(RuntimeError):
+        old.submit(lambda: None)
+    result = await dock_runtime.detect_bounded(
+        b"fake-frame", SimpleNamespace(), captured_at=1.0,
+    )
+    assert result.z_mm == 400
+    await dock_runtime.close_detector_pool()
+
+
+async def test_close_native_detector_refuses_restart_until_process_reset(
+    monkeypatch,
+):
+    """One hung native C worker cannot be replaced by a second unsafe pool."""
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked(jpeg, calibration, *, captured_at):
+        entered.set()
+        release.wait(timeout=5)
+        return DockPose(0, 0, 450, 0.5, captured_at)
+
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked)
+    # Restore the global latched fault after this test; production never
+    # clears it except via restart of the Mac process.
+    monkeypatch.setattr(dock_runtime, "_DETECTOR_RESTART_REQUIRED", False)
+    monkeypatch.setattr(dock_runtime, "_DETECTOR_SHUTTING_DOWN", False)
+    current_pool = dock_runtime._DETECTOR_POOL
+    pending = asyncio.create_task(dock_runtime.detect_bounded(
+        b"frame", SimpleNamespace(), captured_at=1.0,
+    ))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        with pytest.raises(RuntimeError, match="restart Mac process"):
+            await dock_runtime.close_detector_pool()
+        assert dock_runtime._DETECTOR_RESTART_REQUIRED is True
+        assert dock_runtime._DETECTOR_POOL is current_pool
+        with pytest.raises(dock_runtime.DockDetectorBusy, match="restart Mac process"):
+            await dock_runtime.detect_bounded(
+                b"new frame", SimpleNamespace(), captured_at=2.0,
+            )
+    finally:
+        release.set()
+        await asyncio.wait_for(pending, timeout=2.0)
+    assert dock_runtime._DETECTOR_RESTART_REQUIRED is True
+    with pytest.raises(RuntimeError, match="restart Mac process"):
+        await dock_runtime.close_detector_pool()

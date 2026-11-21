@@ -14,6 +14,10 @@ from .dock_vision import DockCameraCalibration, DockPose, assess_dock, detect_ap
 # can be cancelled during shutdown while the C detector is still running.
 _DETECTOR_SLOT = threading.BoundedSemaphore(1)
 _DETECTOR_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desk-apriltag")
+_DETECTOR_SHUTTING_DOWN = False
+_DETECTOR_RESTART_REQUIRED = False
+
+
 
 
 def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
@@ -55,7 +59,37 @@ def _hold(robot_id: str, *, reason: str, source: str) -> dict:
 
 
 class DockDetectorBusy(RuntimeError):
-    """The shared native AprilTag worker is still busy."""
+    """The shared native AprilTag worker is busy or cannot be restarted safely."""
+
+
+async def close_detector_pool() -> None:
+    """Retire the shared native detector only after proving it is idle.
+
+    Python cannot kill an active native C decoder. When Runtime shutdown
+    sees one still running, latch an explicit process-restart requirement.
+    Never replace that worker with a parallel detector in the same process.
+    A genuinely idle worker can be joined and a fresh executor used by a
+    subsequent Mac Runtime instance.
+    """
+    global _DETECTOR_SHUTTING_DOWN, _DETECTOR_RESTART_REQUIRED, _DETECTOR_POOL
+    if _DETECTOR_RESTART_REQUIRED:
+        raise RuntimeError("AprilTag worker shutdown unconfirmed; restart Mac process")
+    _DETECTOR_SHUTTING_DOWN = True
+    if not _DETECTOR_SLOT.acquire(blocking=False):
+        _DETECTOR_RESTART_REQUIRED = True
+        raise RuntimeError("Native AprilTag still running; restart Mac process")
+    try:
+        previous = _DETECTOR_POOL
+        previous.shutdown(wait=False, cancel_futures=False)
+        # Join actual thread, not the cancellable asyncio wrapper. If this
+        # step is cancelled, keep detection closed until cleanup is retried.
+        await asyncio.to_thread(previous.shutdown, wait=True)
+        _DETECTOR_POOL = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="desk-apriltag"
+        )
+        _DETECTOR_SHUTTING_DOWN = False
+    finally:
+        _DETECTOR_SLOT.release()
 
 
 async def detect_bounded(jpeg: bytes, calibration: DockCameraCalibration, *,
@@ -66,6 +100,12 @@ async def detect_bounded(jpeg: bytes, calibration: DockCameraCalibration, *,
     Its concurrent future, not a coroutine, retains the single global slot.
     No camera observation itself ever authorizes motors or charging.
     """
+    if _DETECTOR_RESTART_REQUIRED:
+        raise DockDetectorBusy(
+            "Native AprilTag shutdown unconfirmed; restart Mac process"
+        )
+    if _DETECTOR_SHUTTING_DOWN:
+        raise DockDetectorBusy("Native AprilTag worker is closing")
     if not _DETECTOR_SLOT.acquire(blocking=False):
         raise DockDetectorBusy("Dock marker detector still busy")
     try:
@@ -145,9 +185,9 @@ async def observe_actual_dock(head, robot) -> dict:
         return _hold(robot.id, reason="Invalid dock JPEG", source="head_snapshot_invalid")
     try:
         pose = await detect_bounded(jpeg, calib, captured_at=received_at)
-    except DockDetectorBusy:
+    except DockDetectorBusy as exc:
         return _hold(
-            robot.id, reason="Dock marker detector still busy",
+            robot.id, reason=str(exc),
             source="apriltag_detector_busy",
         )
     except Exception as exc:

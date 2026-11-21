@@ -511,6 +511,12 @@ class Runtime:
         )
         if callable(vision_close):
             await step("YOLO native inference", vision_close(), 2.0)
+        # The process-global AprilTag C worker also outlives canceled
+        # asyncio requests. Do not silently leave a hung detector reusable
+        # by another Runtime instance or any of the five robots.
+        if self.settings.mode == "hardware":
+            from .dock_runtime import close_detector_pool
+            await step("AprilTag native detector", close_detector_pool(), 2.0)
         # Stop the one read-only USB producer after the urgent WROOM STOP and
         # before tearing down per-pet camera and context owners.
         room_stop = getattr(self, "_room_stop", None)
