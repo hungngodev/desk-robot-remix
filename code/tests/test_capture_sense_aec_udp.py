@@ -77,6 +77,14 @@ def test_five_seconds_capture_rejects_foreign_and_never_claims_hardware_proof():
         assert info[key] is False
 
 
+def test_raw_audio_bench_listener_refuses_public_and_wildcard_addresses():
+    for name in ("0.0.0.0", "8.8.8.8", "224.0.0.1", "255.255.255.255"):
+        with pytest.raises(ValueError):
+            capture.lab_ip(name)
+    assert str(capture.lab_ip("192.168.7.10")) == "192.168.7.10"
+    assert str(capture.lab_ip("127.0.0.1")) == "127.0.0.1"
+
+
 def test_udp_gaps_partial_frames_and_dead_feed_are_rejected():
     packet = struct.pack("<hh", 123, -456) * 30
     with pytest.raises(RuntimeError, match="gap"):
