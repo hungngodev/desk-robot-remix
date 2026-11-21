@@ -165,9 +165,12 @@ The exact pinned Xiaozhi `NoAudioCodec::Write` normally calls the ESP-IDF
 An urgent decoder reset and `EnableOutput(false)` cannot reliably interrupt
 a stalled write until that lock is released. The **Sense-only disposable
 overlay** in `install_overlay.py` now reuses the same native I2S writer with
-a 500 ms TX wait ceiling, preserves its actual accepted sample count so the
+a 120 ms TX wait ceiling, preserves its actual accepted sample count so the
 playback AEC reference is not fabricated, and returns a transient write fault
-instead of rebooting the head with `ESP_ERROR_CHECK`. Other Xiaozhi boards
+instead of rebooting the head with `ESP_ERROR_CHECK`. The tighter bound
+reserves time for VAD detection, network dispatch and head decoder flushing;
+it is not evidence that audible STOP meets 500 ms. Physical trials must
+also rule out speech underruns at the selected amplifier and load. Other Xiaozhi boards
 retain the original upstream writer. The overlay test checks the pinned
 upstream anchor and reversibility, but this software bound alone does not
 certify audible interruption: WiFi, AFE/VAD, output DMA, codec locking and
