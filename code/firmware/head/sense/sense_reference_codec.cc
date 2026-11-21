@@ -334,6 +334,8 @@ void SenseReferenceCodec::BenchPcmExpiry(void* context) {
             esp_timer_get_time() - codec->bench_started_us_ < 12'000'000)
             return;
         expired = codec->bench_window_.discard();
+        codec->bench_capture_generation_.fetch_add(
+            1, std::memory_order_acq_rel);
         codec->bench_started_us_ = 0;
     }
     ReleaseBenchPcmCapture(expired);
@@ -341,7 +343,8 @@ void SenseReferenceCodec::BenchPcmExpiry(void* context) {
 
 bool SenseReferenceCodec::BeginBenchPcmCapture() {
     std::lock_guard<std::mutex> lock(bench_mutex_);
-    if (bench_window_.occupied()) return false;
+    if (bench_window_.occupied() || bench_transfer_active_ ||
+        microphone_privacy_muted_.load(std::memory_order_acquire)) return false;
     if (!bench_expiry_timer_) {
         esp_timer_create_args_t args = {};
         args.callback = &SenseReferenceCodec::BenchPcmExpiry;
@@ -367,6 +370,7 @@ bool SenseReferenceCodec::BeginBenchPcmCapture() {
         return false;
     }
     bench_started_us_ = now;
+    bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);
     return true;
 }
 
@@ -383,15 +387,26 @@ SenseReferenceCodec::GetBenchPcmProgress() {
 
 desk_robot::SensePcmWindow::Complete SenseReferenceCodec::TakeBenchPcmCapture() {
     std::lock_guard<std::mutex> lock(bench_mutex_);
-    // Transfer ownership to one authenticated HTTP worker. Timer expiry
-    // cannot wipe the same pointer after this move.
-    return bench_window_.take();
+    // Transfer ownership to one authenticated HTTP worker. No second
+    // capture may allocate PSRAM until this worker releases its old buffer.
+    auto completed = bench_window_.take();
+    if (completed.interleaved) bench_transfer_active_ = true;
+    return completed;
+}
+
+void SenseReferenceCodec::EndBenchPcmTransfer() {
+    std::lock_guard<std::mutex> lock(bench_mutex_);
+    bench_transfer_active_ = false;
 }
 
 void SenseReferenceCodec::AbortBenchPcmCapture() {
     int16_t* data = nullptr;
     {
         std::lock_guard<std::mutex> lock(bench_mutex_);
+        // Revoke ownership before freeing the in-codec allocation.
+        // A moved HTTP buffer stays owned by the worker but its generation
+        // fence is invalidated immediately.
+        bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);
         data = bench_window_.discard();
         bench_started_us_ = 0;
     }

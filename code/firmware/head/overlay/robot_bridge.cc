@@ -35,6 +35,8 @@ struct BenchPcmTransfer {
     httpd_req_t* req;
     desk_robot::SensePcmWindow::Complete pcm;
     uint32_t boot;
+    SenseReferenceCodec* codec;
+    uint64_t generation;
 };
 #endif
 JsonPtr Parse(const std::string& value) {
@@ -641,6 +643,9 @@ void Bridge::BenchPcmTask(void* context) {
     auto* req = transfer->req;
     const auto& pcm = transfer->pcm;
     const auto source = reinterpret_cast<const char*>(pcm.interleaved);
+    const auto still_authorized = [&]() {
+        return transfer->codec->BenchPcmGeneration() == transfer->generation;
+    };
     char first[32], last[32], boot[24], frames[20];
     snprintf(first, sizeof(first), "%lld",
              static_cast<long long>(pcm.first_sample_us));
@@ -660,15 +665,20 @@ void Bridge::BenchPcmTask(void* context) {
     for (std::size_t offset = 0;
          status == ESP_OK && offset < desk_robot::SensePcmWindow::kBytes;
          offset += 4096) {
-        if (esp_timer_get_time() >= deadline_us) break;
+        if (esp_timer_get_time() >= deadline_us || !still_authorized()) {
+            status = ESP_FAIL;  // Physical mute or reset revoked this buffer.
+            break;
+        }
         const auto count = std::min<std::size_t>(
             4096, desk_robot::SensePcmWindow::kBytes - offset);
         status = httpd_resp_send_chunk(req, source + offset, count);
     }
-    if (status == ESP_OK && esp_timer_get_time() < deadline_us)
+    if (status == ESP_OK && esp_timer_get_time() < deadline_us &&
+        still_authorized())
         (void)httpd_resp_send_chunk(req, nullptr, 0);
-    // Wipe even after client disconnect, timeout or partial HTTP output.
+    // Wipe even after physical BOOT, barge-in, client disconnect or timeout.
     SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+    transfer->codec->EndBenchPcmTransfer();
     httpd_req_async_handler_complete(req);
     transfer.reset();
     vTaskDelete(nullptr);
@@ -704,19 +714,22 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     }
     if (strcmp(req->uri, "/api/audio.capture.raw") == 0) {
         if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
-        const auto pcm =
-            static_cast<SenseReferenceCodec*>(audio_codec_)->TakeBenchPcmCapture();
+        auto* codec = static_cast<SenseReferenceCodec*>(audio_codec_);
+        const uint64_t generation = codec->BenchPcmGeneration();
+        const auto pcm = codec->TakeBenchPcmCapture();
         if (!pcm.interleaved || pcm.frames != desk_robot::SensePcmWindow::kFrames)
             return Json(req, 409, Envelope(false, "Bench PCM not complete"));
         httpd_req_t* async_req = nullptr;
         if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
             SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            codec->EndBenchPcmTransfer();
             return Json(req, 503, Envelope(false, "Bench PCM worker unavailable"));
         }
         auto* transfer = new(std::nothrow) BenchPcmTransfer{
-            async_req, pcm, boot_nonce_};
+            async_req, pcm, boot_nonce_, codec, generation};
         if (!transfer) {
             SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            codec->EndBenchPcmTransfer();
             Json(async_req, 503, Envelope(false, "Bench PCM allocation unavailable"));
             httpd_req_async_handler_complete(async_req);
             return ESP_OK;
@@ -724,6 +737,7 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         if (xTaskCreate(BenchPcmTask, "sense_pcm_once", 6144,
                         transfer, 2, nullptr) != pdPASS) {
             SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            codec->EndBenchPcmTransfer();
             delete transfer;
             Json(async_req, 503, Envelope(false, "Bench PCM worker failed"));
             httpd_req_async_handler_complete(async_req);

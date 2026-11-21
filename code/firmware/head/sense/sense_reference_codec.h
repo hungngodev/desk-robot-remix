@@ -72,6 +72,12 @@ public:
         uint32_t frames;
     };
     bool BeginBenchPcmCapture();
+    // A physical BOOT mute or playback cancellation invalidates any
+    // asynchronous raw PCM transfer, even after its buffer was taken.
+    uint64_t BenchPcmGeneration() const noexcept {
+        return bench_capture_generation_.load(std::memory_order_acquire);
+    }
+    void EndBenchPcmTransfer();
     BenchCaptureProgress GetBenchPcmProgress();
     desk_robot::SensePcmWindow::Complete TakeBenchPcmCapture();
     void AbortBenchPcmCapture();
@@ -121,6 +127,8 @@ private:
     std::mutex reference_mutex_;
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
     std::mutex bench_mutex_;
+    std::atomic<uint64_t> bench_capture_generation_{0};
+    bool bench_transfer_active_ = false;  // one RAM transfer at a time
     desk_robot::SensePcmWindow bench_window_{};
     esp_timer_handle_t bench_expiry_timer_ = nullptr;
     int64_t bench_started_us_ = 0;
