@@ -1673,6 +1673,73 @@ DOCK_COST_ROLES = frozenset({
 })
 
 
+# Each cap_power parent represents one complete installed power path, NOT a
+# charger chip by itself. Keep the canonical 49 parent roles and 14 linked
+# decision identities unchanged. These four cost-only children exist ONLY
+# when an operator explicitly selects individually purchased power pieces.
+POWER_PARENT_ROLE = "robot:cap_power"
+POWER_CHILDREN = (
+    "bq24075_charger_candidate",
+    "boost_5v_candidate",
+    "protected_ntc_pack",
+    "polarized_battery_connector",
+)
+POWER_KIT_MODES = frozenset({"complete_kit", "separate_components"})
+
+
+def power_cost_requirements(
+    required: dict, categories: dict, mode: object,
+) -> tuple[dict, dict]:
+    """Expand the one parent quote ONLY for separately purchased subparts."""
+    required, categories = dict(required), dict(categories)
+    if mode == "separate_components":
+        units = required.pop(POWER_PARENT_ROLE, 0)
+        categories.pop(POWER_PARENT_ROLE, None)
+        if units:
+            for ident in POWER_CHILDREN:
+                key = POWER_PARENT_ROLE + ":" + ident
+                required[key] = units
+                categories[key] = "robot"
+    return required, categories
+
+
+def complete_power_kit_contents(contents: object) -> bool:
+    """Require exact carrier identities for every component in one sealed kit.
+
+    This is a purchasing structure check, not proof of NTC wiring, battery
+    protection, charger polarity or any physical release gate.
+    """
+    if type(contents) is not list or len(contents) != len(POWER_CHILDREN):
+        return False
+    found = set()
+    for part in contents:
+        if (type(part) is not dict
+                or type(part.get("id")) is not str
+                or part["id"] not in POWER_CHILDREN
+                or part["id"] in found
+                or type(part.get("quantity_per_kit")) is not int
+                or part["quantity_per_kit"] != 1
+                or any(type(part.get(k)) is not str or not part[k].strip()
+                       for k in ("vendor", "sku", "pcb_revision"))):
+            return False
+        found.add(part["id"])
+    return found == set(POWER_CHILDREN)
+
+
+def invalidate_incomplete_power_quote(cost: dict, message: str) -> dict:
+    """No monetary total or apparent budget headroom from an incomplete kit."""
+    cost["errors"].append(message)
+    cost["calculation_complete_not_physical_approval"] = False
+    for field in (
+        "payable_now_cents", "prototype_cumulative_cents",
+        "remaining_under_cap_cents", "allocated_landed_subtotals_cents",
+    ):
+        cost[field] = None
+    cost["within_prototype_cap"] = (None if cost["scope"] == "fleet"
+                                      else False)
+    return cost
+
+
 def cost_requirements(report: dict, scope: str) -> tuple[dict, dict]:
     """Derive payable part counts from the same canonical quantity owner."""
     if scope == "evaluation":
@@ -1724,8 +1791,41 @@ def quoted_carrier_matches_signed_role(line: dict, selected: dict) -> bool:
 def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
     required, categories = cost_requirements(report, scope)
     values = evidence.get("costs", {}) if isinstance(evidence, dict) else {}
-    return account_landed_cost(values, required, categories,
-                               expected_scope=scope)
+    values = values if isinstance(values, dict) else {}
+    mode = values.get("power_package_mode")
+    if scope != "evaluation":
+        required, categories = power_cost_requirements(
+            required, categories, mode,
+        )
+    cost = account_landed_cost(
+        values, required, categories, expected_scope=scope,
+    )
+    if scope == "evaluation":
+        return cost
+    if mode not in POWER_KIT_MODES:
+        return invalidate_incomplete_power_quote(
+            cost, "one complete power kit or all separately purchased "
+                  "charger, boost, protected pack and connector must be selected",
+        )
+    if mode == "complete_kit":
+        lines = values.get("lines", [])
+        inventory = values.get("inventory", [])
+        if type(lines) is not list or type(inventory) is not list:
+            return invalidate_incomplete_power_quote(
+                cost, "invalid complete power kit evidence",
+            )
+        included = [item for item in [*lines, *inventory]
+                    if type(item) is dict
+                    and item.get("role_key") == POWER_PARENT_ROLE]
+        if not included or any(
+            not complete_power_kit_contents(item.get("kit_components"))
+            for item in included
+        ):
+            return invalidate_incomplete_power_quote(
+                cost, "complete power kit lacks exact charger, boost, "
+                      "protected NTC pack and polarized connector identities",
+            )
+    return cost
 
 
 def attach_verified_checkout_evidence(
@@ -1942,21 +2042,64 @@ def main() -> int:
             print("HOLD: actual landed quotation, budget or received stock "
                   "has not cleared the purchase gates", file=sys.stderr)
             return 2
-        # The approved system receipt for the costed exact carrier BOM must
-        # separately attest that the supplier and SKU match every quote line.
+        # The signed carrier identity must cover the ACTUAL purchased items.
+        # A logical cap_power parent is not four physically purchased parts.
         by_role = (evidence.get("room_pod", {}), evidence.get("parts", {}))
+        power_mode = evidence["costs"].get("power_package_mode")
+        supplemental = evidence.get("supplemental_decisions", {})
+        parent_power = evidence.get("parts", {}).get("cap_power", {})
         for line in evidence["costs"]["lines"]:
             role = line["role_key"]
             kind, ident = role.split(":", 1)
-            selected = by_role[0 if kind == "station" else 1].get(ident, {})
-            # A supplier can be a distributor (for example, DigiKey)
-            # rather than the carrier manufacturer. Match the exact
-            # selected part SKU; verify retailer only when independently
-            # named on the signed part record.
+            if ident.startswith("cap_power:"):
+                component = ident.split(":", 1)[1]
+                if power_mode != "separate_components":
+                    print("HOLD: mixed power kit and component purchase",
+                          file=sys.stderr)
+                    return 2
+                if component == "polarized_battery_connector":
+                    selected = parent_power.get("connector_selected_carrier", {})
+                else:
+                    decision = supplemental.get(component, {})
+                    if decision.get("disposition") != "selected":
+                        print("HOLD: power component is not selected: " + component,
+                              file=sys.stderr)
+                        return 2
+                    selected = decision
+            else:
+                selected = by_role[0 if kind == "station" else 1].get(ident, {})
+            # A supplier can be a distributor (for example DigiKey) rather
+            # than the carrier manufacturer; exact PCB revision still binds.
             if not quoted_carrier_matches_signed_role(line, selected):
                 print("HOLD: quoted SKU, PCB revision or chosen retailer "
                       "differs from signed carrier: " + role, file=sys.stderr)
                 return 2
+            if role == POWER_PARENT_ROLE:
+                if power_mode != "complete_kit":
+                    print("HOLD: parent-plus-child power charges", file=sys.stderr)
+                    return 2
+                # The three linked selected decisions must explicitly name
+                # this same complete parent SKU as their qualified inclusion.
+                for component in POWER_CHILDREN[:3]:
+                    decision = supplemental.get(component, {})
+                    if (decision.get("disposition") != "included_in_parent"
+                            or decision.get("replacement_sku") != line["sku"]):
+                        print("HOLD: power kit lacks signed linked inclusion: "
+                              + component, file=sys.stderr)
+                        return 2
+                # The fourth physical item is the connector; it cannot be
+                # inferred from a generic battery chip/module description.
+                connector = parent_power.get("connector_selected_carrier", {})
+                claimed = next((piece for piece in line["kit_components"]
+                                if piece["id"] == "polarized_battery_connector"),
+                               {})
+                if not all(claimed.get(k) == connector.get(k)
+                           and isinstance(claimed.get(k), str)
+                           and claimed[k].strip()
+                           for k in ("sku", "pcb_revision", "vendor")):
+                    print("HOLD: power kit connector not independently selected",
+                          file=sys.stderr)
+                    return 2
         report = attach_verified_checkout_evidence(
             report, cost, evidence["costs"]
         )
