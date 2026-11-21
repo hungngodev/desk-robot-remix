@@ -21,7 +21,7 @@ def test_real_docked_load_formula_accepts_correct_bq24075_sys_voltage_only():
     base = dict(measured_sys_v=5.5, measured_boost_efficiency=0.85,
                 motors_confirmed_disarmed=True)
     with pytest.raises(ValueError):
-        assess(0.3, 0.2, **base)  # legacy BQ24074 default maximum 4.5 V
+        assess(0.3, 0.2, **base)  # no guessed docked SYS envelope
     report = assess(0.3, 0.2, charger_variant="BQ24075", **base)
     assert report["charger_variant"] == "BQ24075"
     assert report["charger_variant_max_docked_out_v"] == 5.6
@@ -485,6 +485,7 @@ def test_docked_electronics_budget_must_not_inherit_undocked_motor_peak():
 def _qualified_dock_ratings():
     return {
         "measured_sys_v": 4.4, "measured_boost_efficiency": 0.85,
+        "charger_variant": "BQ24074",
         "charger_input_limit_a": 1.5,
         "charger_board_thermal_input_a": 1.5,
         "dock_adapter_continuous_a": 3.0,
@@ -498,15 +499,26 @@ def _qualified_dock_ratings():
 def test_direct_docked_load_rejects_fictional_bq2407x_two_amp_rating(variant):
     """The standalone API cannot evade the BQ2407x's 1.5A silicon limits."""
     ratings = _qualified_dock_ratings()
+    ratings["charger_variant"] = variant
     ratings["charger_input_limit_a"] = 2.0
     with pytest.raises(ValueError, match="input limit cannot exceed 1.5A"):
-        docked(.5, .25, charger_variant=variant, **ratings)
+        docked(.5, .25, **ratings)
     ratings["charger_input_limit_a"] = 1.5
     with pytest.raises(ValueError, match="charge request cannot exceed 1.5A"):
-        docked(.5, 2.0, charger_variant=variant, **ratings)
-    assert docked(.5, .25, charger_variant=variant, **ratings)[
+        docked(.5, 2.0, **ratings)
+    assert docked(.5, .25, **ratings)[
         "candidate_docked_load_on_paper"
     ] in (True, False)
+
+
+def test_direct_dock_api_refuses_missing_or_unknown_charger_identity():
+    ratings = _qualified_dock_ratings()
+    ratings.pop("charger_variant")
+    with pytest.raises(ValueError, match="Explicit BQ24074 or BQ24075"):
+        docked(.5, .25, **ratings)
+    ratings["charger_variant"] = "BQ24073"
+    with pytest.raises(ValueError, match="Explicit BQ24074 or BQ24075"):
+        docked(.5, .25, **ratings)
 
 
 def test_docked_idle_current_plus_real_charge_target_must_both_fit():
@@ -963,6 +975,7 @@ def plausible_hypothetical_one_cell_stack():
     return dict(
         active_peak_5v_a=.6, active_sustained_5v_a=.4,
         dock_idle_5v_a=.2, charge_request_a=.4,
+        charger_variant="BQ24075",
         pack_mm=(50, 30, 10), tray_mm=(68, 35, 14),
         pack_peak_a=10, pack_sustained_a=8, pcm_trip_a=12,
         connector_a=8, wire_crimp_a=8,
@@ -976,6 +989,16 @@ def plausible_hypothetical_one_cell_stack():
         charge_temperature_sensor_connected=True,
         charger_ts_fixed_resistor_removed=True, dock_motors_disarmed=True,
     )
+
+
+def test_full_power_stack_refuses_implicit_or_unknown_fitted_charger():
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.pop("charger_variant")
+    with pytest.raises(ValueError, match="source-reviewed BQ24074 or BQ24075"):
+        one_stack(**cfg)
+    cfg["charger_variant"] = "BQ24073"
+    with pytest.raises(ValueError, match="source-reviewed BQ24074 or BQ24075"):
+        one_stack(**cfg)
 
 
 def test_complete_one_cell_stack_proves_only_math_not_battery_safety():

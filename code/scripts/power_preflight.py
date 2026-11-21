@@ -264,7 +264,7 @@ def assess_docked_load(
     protected_pack_max_charge_a: float | None = None,
     reserve: float = 1.2,
     motors_confirmed_disarmed: bool = False,
-    charger_variant: str = "BQ24074",
+    charger_variant: str | None = None,
 ) -> dict:
     """Conservatively bound simultaneous idle system and 1S charge currents.
 
@@ -280,7 +280,7 @@ def assess_docked_load(
     if any(not _finite_number(x) for x in measured):
         raise ValueError("Actual docked loads and conversion measurements required")
     if charger_variant not in ("BQ24074", "BQ24075"):
-        raise ValueError("Unknown charger variant; source-reviewed IC required")
+        raise ValueError("Explicit BQ24074 or BQ24075 charger variant required")
     max_out_v = 4.5 if charger_variant == "BQ24074" else 5.6
     if (not 0 < measured_idle_5v_a <= 20
             or not 0 < requested_cell_charge_a <= 5
@@ -378,7 +378,7 @@ def screen_one_cell_power_stack(
     charge_temperature_sensor_connected: bool,
     charger_ts_fixed_resistor_removed: bool,
     dock_motors_disarmed: bool,
-    charger_variant: str = "BQ24075",
+    charger_variant: str | None = None,
     boost_efficiency_low_cell: float = 0.85,
     boost_efficiency_docked: float = 0.85,
 ) -> dict:
