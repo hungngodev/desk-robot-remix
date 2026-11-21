@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import secrets
 import threading
 import time
 from dataclasses import dataclass
@@ -20,6 +21,9 @@ from .soil_calibration import SoilCalibration
 STATION = "room-pod-01"
 SENSORS = ("scd40", "bme688", "ld2410c", "soil", "amg8833")
 MAX_FRAME_BYTES = 4096
+# Per-port unpredictable causal marker. A delayed USB JSON frame written
+# before this challenge must never inherit a fresh Mac receive timestamp.
+USB_SYNC_TIMEOUT_S = 3.0
 UINT32 = 0xffffffff
 # Mac receive time limits impossible station uptime advances on one USB epoch.
 # 0.1% clock drift plus 3s scheduling slack; not a physical timing claim.
@@ -297,14 +301,38 @@ class RoomSerialFeed:
         # interleaving bytes on this sole local USB station transport.
         # Device access and user consent remain separately enforced.
         with serial.Serial(self.port, baudrate=115200, timeout=.25,
-                           exclusive=True) as port:
+                           write_timeout=.25, exclusive=True) as port:
             # Reset at real connection opening, not after a callback failure.
             self.last_error = None
+            if not running():
+                return
+            # The Feather emits ordinary samples even before a host attaches.
+            # An old complete JSON frame can be buffered by USB for arbitrary
+            # time and cannot be made current merely by assigning Mac now().
+            # Challenge the firmware after opening this real USB epoch. Only
+            # an exact reply to this fresh nonce authorizes later JSON lines.
+            nonce = secrets.token_hex(8).encode("ascii")
+            request = b"SYNC " + nonce + b"\n"
+            if port.write(request) != len(request):
+                raise RuntimeError("Room station epoch SYNC write incomplete")
+            expected = b"SYNC_ACK " + nonce + b"\n"
+            deadline = time.monotonic() + USB_SYNC_TIMEOUT_S
+            synchronized = False
             decoder = RoomStationDecoder(soil_calibration=self.soil_calibration)
             discard_until_newline = False
             while running():
+                if not synchronized and time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        "Room station post-connect SYNC unacknowledged"
+                    )
                 line = port.readline(MAX_FRAME_BYTES + 1)
                 if not line:
+                    continue
+                if not synchronized:
+                    # Drop ALL pre-ack telemetry, even fully valid JSON.
+                    # A prior connection cannot know this connection nonce.
+                    if line == expected:
+                        synchronized = True
                     continue
                 # readline() may return partial bytes on timeout or the size
                 # limit. Do not accept a parseable suffix as a fresh, distinct

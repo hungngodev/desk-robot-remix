@@ -14,6 +14,23 @@ from desk_robot.room_station import MAX_FRAME_BYTES, RoomSerialFeed, RoomStation
 from desk_robot.soil_calibration import SoilCalibration
 
 
+class SynchronizedFakePort:
+    """Model the physical Feather causal ACK without accepting old USB JSON."""
+
+    def write(self, request):
+        assert request.startswith(b"SYNC ") and request.endswith(b"\n")
+        nonce = request[5:-1]
+        assert len(nonce) == 16 and all(c in b"0123456789abcdef" for c in nonce)
+        self._session_reply = b"SYNC_ACK " + nonce + b"\n"
+        return len(request)
+
+    def _read_session_reply(self):
+        reply = getattr(self, "_session_reply", None)
+        if reply is not None:
+            self._session_reply = None
+        return reply
+
+
 def frame(seq=1, clock=1000):
     return {
         "v": 1, "station": "room-pod-01", "seq": seq, "at_ms": clock,
@@ -382,9 +399,9 @@ def test_room_reader_requests_posix_exclusive_port_ownership(monkeypatch):
 
     opens = []
 
-    class FakePort:
-        def __init__(self, port, *, baudrate, timeout, exclusive):
-            opens.append((port, baudrate, timeout, exclusive))
+    class FakePort(SynchronizedFakePort):
+        def __init__(self, port, *, baudrate, timeout, write_timeout, exclusive):
+            opens.append((port, baudrate, timeout, write_timeout, exclusive))
 
         def __enter__(self):
             return self
@@ -393,12 +410,15 @@ def test_room_reader_requests_posix_exclusive_port_ownership(monkeypatch):
             return False
 
         def readline(self, size):
+            handshake = self._read_session_reply()
+            if handshake is not None:
+                return handshake
             raise AssertionError("Reader should not run after stop")
 
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=FakePort))
     feed = RoomSerialFeed("/dev/cu.test", lambda observation: None)
     feed._read_port(lambda: False)
-    assert opens == [("/dev/cu.test", 115200, .25, True)]
+    assert opens == [("/dev/cu.test", 115200, .25, .25, True)]
     assert feed.received == 0
     assert feed.rejected == 0
 
@@ -422,7 +442,7 @@ def test_unterminated_or_oversized_serial_fragments_never_become_room_frames(mon
     opened = []
     received = []
 
-    class Port:
+    class Port(SynchronizedFakePort):
         def __init__(self, *args, **kwargs):
             self.reads = 0
             opened.append(self)
@@ -671,3 +691,73 @@ def test_bme688_out_of_range_values_reject_frame(field, value):
     payload["readings"]["bme688"][field] = value
     with pytest.raises(ValueError, match="Room sensor reading out of range"):
         accept(payload)
+
+
+
+def test_usb_reconnect_sync_discards_complete_buffered_old_sensor_frame(monkeypatch):
+    """An old valid station JSON must never acquire a new Mac live timestamp."""
+    import sys
+    from types import SimpleNamespace
+
+    old = json.dumps(frame(100, 5000)).encode() + b"\n"
+    new = json.dumps(frame(101, 6000)).encode() + b"\n"
+    observed, opened = [], []
+
+    class ReplayPort(SynchronizedFakePort):
+        def __init__(self, *args, **kwargs):
+            self.reads = 0
+            opened.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            self.reads += 1
+            if self.reads == 1:
+                return old  # Valid complete frame buffered before SYNC
+            if self.reads == 2:
+                return self._read_session_reply()
+            if self.reads == 3:
+                return new   # Emitted only after current-session ACK
+            return b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=ReplayPort))
+    reader = RoomSerialFeed("/dev/cu.test", lambda obs: observed.append(obs.seq))
+    reader._read_port(lambda: not opened or opened[0].reads < 4)
+    assert observed == [101]
+    assert reader.received == 1
+    assert reader.callback_failures == 0
+
+
+def test_room_station_missing_current_epoch_ack_never_delivers_old_json(monkeypatch):
+    """An old or incompatible Feather firmware must not fabricate fresh data."""
+    import sys
+    from types import SimpleNamespace
+
+    import desk_robot.room_station as room_module
+
+    monkeypatch.setattr(room_module, "USB_SYNC_TIMEOUT_S", 0.01)
+    observed = []
+
+    class NoAckPort(SynchronizedFakePort):
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            return json.dumps(frame()).encode() + b"\n"
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=NoAckPort))
+    reader = RoomSerialFeed("/dev/cu.test", observed.append)
+    with pytest.raises(RuntimeError, match="post-connect SYNC unacknowledged"):
+        reader._read_port(lambda: True)
+    assert not observed
+    assert reader.received == 0

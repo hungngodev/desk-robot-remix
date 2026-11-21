@@ -86,6 +86,19 @@ this producer contract but does not prove actual UART packet loss, gas warmup,
 electrical fit, thermal accuracy or a physical station trial. Upstream:
 https://github.com/adafruit/Adafruit_BME680/tree/2.0.5
 
+## USB reconnect freshness handshake
+
+On each serial port open the Mac sends a fresh random `SYNC <16 lowercase hex>\n`
+challenge. The Feather returns the matching `SYNC_ACK <nonce>\n`
+before its next observation frame. The Mac discards ALL earlier buffered
+lines, including otherwise valid complete JSON. Without the correct reply
+within three seconds, the station remains unavailable and its data never
+enters live conversation context. This protects against treating a pre-open
+USB buffer as a freshly acquired room reading. It is **not** cryptographic
+device authentication, nor proof of calibrated environmental sensors.
+The standalone bench collector uses the same handshake. Old station firmware
+must be rebuilt before current Mac USB context can be enabled.
+
 ## Reproducible USB stream evidence capture
 
 After checking the actual Feather PCB and safe sensor voltage domains, run

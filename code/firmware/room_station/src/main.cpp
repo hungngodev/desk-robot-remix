@@ -16,6 +16,7 @@
 #include "soil_sample.h"
 #include "radar_sample_clock.h"
 #include "scd_sample_freshness.h"
+#include "usb_epoch_sync.h"
 
 #ifndef ROOM_SOIL_FITTED
 #define ROOM_SOIL_FITTED 0
@@ -39,6 +40,7 @@ Adafruit_BME680 bme(&Wire);
 Adafruit_AMG88xx amg;
 ld2410 radar;
 desk_robot_room::RadarSampleClock radar_sample_clock;
+desk_robot_room::UsbEpochSync usb_epoch_sync;
 bool scd_started = false;
 bool scd_valid = false;
 bool bme_started = false;
@@ -283,6 +285,17 @@ void setup() {
 #endif
 }
 void loop() {
+  // Bounded read-only causal handshake, never a command to actuate.
+  // The response is written before any subsequently generated JSON report.
+  // Read at most 32 bytes each pass so live radar UART remains serviced.
+  for (uint8_t count = 0; count < 32 && Serial.available() > 0; ++count) {
+    const int value = Serial.read();
+    if (value < 0) break;
+    if (usb_epoch_sync.consume(static_cast<uint8_t>(value))) {
+      Serial.print(F("SYNC_ACK "));
+      Serial.println(usb_epoch_sync.token());
+    }
+  }
   const bool radar_activity = radar.read();
   const uint32_t now = millis();
   // The pinned library reports connected for up to 100 ms after its last

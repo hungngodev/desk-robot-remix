@@ -280,6 +280,10 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/scd_sample_freshness_tests.cpp -o /tmp/desk-room-scd-test
           /tmp/desk-room-scd-test
+      - name: Verify bounded post-connect room USB epoch challenge
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/usb_epoch_sync_tests.cpp -o /tmp/desk-room-usb-sync-test
+          /tmp/desk-room-usb-sync-test
 
   sense-idf:
     concurrency:
