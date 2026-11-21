@@ -1785,3 +1785,12 @@ async def test_raising_optional_live_context_cannot_mask_group_speech_cancel(set
         await conversation.run(["robot-01", "robot-02"], "Continue", 2)
     assert speaker.spoken == [("robot-01", "One real transmitted sentence.")]
     assert conversation.active is None
+
+
+@pytest.mark.parametrize("invalid", [[], {}, ["operator"], {"origin": "operator"}])
+async def test_group_origin_unhashable_rejected_before_activity(settings, invalid):
+    agent = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    with pytest.raises(ValueError, match="Unsupported group conversation origin"):
+        await agent.run(["robot-01", "robot-02"], "Talk about a key", 2, origin=invalid)
+    assert agent.active is None
+    assert agent.group_activity_timeline("robot-01") == []

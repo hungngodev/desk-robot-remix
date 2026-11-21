@@ -571,3 +571,14 @@ def test_delayed_old_topic_start_cannot_overwrite_newer_activity(monkeypatch):
     assert "Delayed older callback" not in ledger.timeline("pet", 23)[0]["content"]
     assert not ledger.finish_topic("pet", first, 24, interrupted=True)
     assert ledger.finish_topic("pet", current, 25, interrupted=False)
+
+
+@pytest.mark.parametrize("invalid", [[], {}, ["operator"], {"origin": "operator"}])
+def test_attention_topic_origin_unhashable_rejected_without_state(invalid):
+    import time
+    ledger = AttentionLedger(["robot-01", "robot-02"])
+    with pytest.raises(ValueError, match="Unsupported conversation origin"):
+        ledger.begin_topic("robot-01", "Discuss a key", time.monotonic(), origin=invalid)
+    assert ledger.timeline("robot-01", time.monotonic()) == []
+    epoch = ledger.begin_topic("robot-01", "Discuss a key", time.monotonic(), origin="operator")
+    assert epoch == 1

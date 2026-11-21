@@ -79,7 +79,7 @@ class AttentionLedger:
     ) -> int:
         """Record a real Mac Conversation.run topic, never a motion command."""
         _clock(at)
-        if origin not in {"operator", "autonomous_social"}:
+        if type(origin) is not str or origin not in {"operator", "autonomous_social"}:
             raise ValueError("Unsupported conversation origin")
         cleaned = _text(topic, 100)
         if not cleaned:

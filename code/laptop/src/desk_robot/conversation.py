@@ -569,7 +569,7 @@ class Conversation:
         *, permission_check: Callable[[], bool] | None = None,
         origin: str = "operator",
     ) -> list[dict]:
-        if origin not in {"operator", "autonomous_social"}:
+        if type(origin) is not str or origin not in {"operator", "autonomous_social"}:
             raise ValueError("Unsupported group conversation origin")
         turns = conversation_turns(robot_ids, utterances)
         if self.active is not None and not self.active.done():
