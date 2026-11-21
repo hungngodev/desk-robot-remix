@@ -1412,6 +1412,34 @@ static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   CHECK(disabled.find("\"extras\":{\"mask\":0") != std::string::npos);
 }
 
+static void battery_readiness_matches_stricter_arm_voltage() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_fuel_monitor(true);
+  desk_robot::AccessoryReadings readings{};
+  readings.gauge.fuel_present = readings.gauge.fuel_valid = true;
+  readings.gauge.fuel_sample_seq = 1;
+  readings.gauge.fuel_at_ms = 100;
+  readings.gauge.cell_mv = 3250;
+  body.set_accessories(readings, 100);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "status", 100).find("\"ready\":false") !=
+        std::string::npos);
+  CHECK(send(body, "status", 100).find("\"fault\":\"battery_low\"") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 100) == "ERR arm battery_low");
+
+  readings.gauge.fuel_sample_seq = 2;
+  readings.gauge.fuel_at_ms = 101;
+  readings.gauge.cell_mv = 3350;
+  body.set_accessories(readings, 101);
+  CHECK(send(body, "status", 101).find("\"ready\":true") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 101) == "OK arm");
+}
+
 static void battery_undervoltage_rejects_arm_and_stops_motion() {
   using desk_robot::BodyControl;
   desk_robot::CliffGuard guard;
@@ -1837,6 +1865,7 @@ int main() {
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
     accessory_reconnect_does_not_invent_petting_events();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
+    battery_readiness_matches_stricter_arm_voltage();
     battery_undervoltage_rejects_arm_and_stops_motion();
     required_fuel_gauge_loss_stops_and_requires_local_rearm();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();

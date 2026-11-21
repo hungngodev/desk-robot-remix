@@ -913,8 +913,11 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool bumper_hit = state_.bumper_raw ||
         ((state_.extra_mask & 1U) != 0U && state_.bumper_active);
     const bool touch_hit = state_.touch_active || state_.touch_raw_active;
-    const bool battery_depleted = state_.accessories.gauge.fuel_valid &&
-        state_.accessories.gauge.cell_mv < 3200U;
+    // Movement already in progress uses the 3200 mV emergency stop, but
+    // a NEW arm requires 3300 mV. Do not tell Mac the robot is ready at
+    // 3250 mV when the very next arm command will be rejected.
+    const bool battery_below_arm_min = state_.accessories.gauge.fuel_valid &&
+        state_.accessories.gauge.cell_mv < 3300U;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !motor_cutoff_unqualified_ &&
         !bumper_fault_latched_ && !battery_fault_latched_ &&
@@ -923,7 +926,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         !motor_watchdog_latched_ && !imu_low_g_latched_ &&
         !imu_sensor_fault_latched_ &&
         !dock_unhealthy && !bumper_hit && !touch_hit &&
-        !battery_depleted &&
+        !battery_below_arm_min &&
         (!imu_motion_required_ || imu_valid);
     // A critical cliff/bus fault takes precedence over a simultaneous
     // cosmetic or optional-input event in the Mac's multimodal context.
@@ -956,7 +959,7 @@ void BodyControl::execute(const char* line, std::size_t length,
             imu_.accel[0] == 0 && imu_.accel[1] == 0 &&
             imu_.accel[2] == 0 ? "imu_zero_accel" :
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
-        battery_depleted ? "battery_low" :
+        battery_below_arm_min ? "battery_low" :
         battery_fault_latched_ ? "battery_low_latched" :
         fuel_monitor_fault_latched_ ? "fuel_monitor_latched" :
         fuel_monitor_required_ && !fuel_monitor_fresh(now_ms) ?
