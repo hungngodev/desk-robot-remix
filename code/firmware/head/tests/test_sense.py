@@ -510,7 +510,13 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn("else if (idle)", face)
         self.assertIn("last_rendered_fault = false;", face)
         self.assertIn("const Action action = board->face_behavior_.update(obs);", face)
-        self.assertGreater(face.index("board->display_->SetEmotion("), idle_mood)
+        # The emergency neutral face is immediate, even while speaking.
+        self.assertLess(face.index('board->display_->SetEmotion("neutral");'), idle_mood)
+        # A model mood is still permitted only through the healthy face owner.
+        self.assertGreater(
+            face.index("board->display_->SetEmotion(CosmeticMoodName(requested_mood))"),
+            idle_mood,
+        )
 
 
     def test_tof_optics_read_only_bridge_validation_and_one_uart_owner(self):
