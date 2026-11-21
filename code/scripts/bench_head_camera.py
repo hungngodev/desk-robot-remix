@@ -187,8 +187,23 @@ async def measure(
     await asyncio.gather(
         receive_stream() if stream else poll_camera(), poll_status()
     )
+    # Keep the actual Sense AEC counters next to camera/WROOM contention
+    # measurements. The optional read is authenticated and does not sample
+    # microphone PCM, block the active camera, or certify audible playback.
+    audio_reference = None
+    audio_reference_error = None
+    read_audio_reference = getattr(head, "audio_reference_status", None)
+    if callable(read_audio_reference):
+        try:
+            audio_reference = await asyncio.wait_for(
+                read_audio_reference(), timeout=1.0
+            )
+        except Exception as exc:
+            audio_reference_error = type(exc).__name__ + ": " + str(exc)[:110]
     elapsed = max(0.001, time.monotonic() - started)
     return {
+        "aec_reference_diagnostics": audio_reference,
+        "aec_reference_probe_error": audio_reference_error,
         "robot_id": robot_id,
         "elapsed_s": round(elapsed, 3),
         "camera_acquisition_mode": (
