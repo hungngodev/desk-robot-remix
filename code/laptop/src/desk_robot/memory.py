@@ -184,6 +184,11 @@ class MemoryStore:
                     "Robot memory database is accessible to other users"
                 )
             db.execute("PRAGMA busy_timeout=3000")
+            # SQLite ordinarily leaves deleted row bytes in free pages.
+            # Restore secure_delete on every connection, including legacy
+            # databases, before correction, retention trimming or forgetting.
+            # This is NOT a claim to erase backups or FTS5 historical pages.
+            db.execute("PRAGMA secure_delete=ON")
             yield db
             db.commit()
         except BaseException:

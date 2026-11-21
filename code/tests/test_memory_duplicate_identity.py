@@ -69,3 +69,22 @@ def test_each_pet_database_restricts_legacy_file_permissions(tmp_path, monkeypat
         store.recent("pet_a")
     # No failure on one private file changes another robot's storage.
     assert store.recent("pet_b") == []
+
+
+def test_private_memory_connections_restore_secure_delete_for_legacy_store(tmp_path):
+    import sqlite3
+
+    store = MemoryStore(tmp_path, ["pet_a"])
+    database = tmp_path / "pet_a.sqlite3"
+    with sqlite3.connect(database) as raw:
+        raw.execute("PRAGMA secure_delete=OFF")
+        assert raw.execute("PRAGMA secure_delete").fetchone()[0] == 0
+    with store._connect("pet_a") as owned:
+        assert owned.execute("PRAGMA secure_delete").fetchone()[0] == 1
+    assert store.remember(
+        "pet_a", "private_note", "A private note to correct",
+        kind="scene", source_robot="pet_a", witnessed=True,
+    )
+    assert store.correct_episode("pet_a", "private_note", "Corrected note")
+    assert store.forget_episode("pet_a", "private_note")
+    assert store.count("pet_a") == 0
