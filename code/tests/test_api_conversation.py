@@ -49,7 +49,7 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
         )
         assert result.status_code == 202
         assert set(coordinator.jobs) != previous_jobs
-        assert coordinator.permits["robot-01"] != previous_permit
+        assert "robot-01" not in coordinator.permits
         assert client.post(
             "/v1/robots/robot-01/pickup", headers=tool, json={"target": "key"}
         ).status_code == 409
