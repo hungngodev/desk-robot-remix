@@ -246,6 +246,10 @@ bool AuxValid(cJSON* json) {
             return false;
     if (!bounded_array(force, "adc", 2, -32768, 32767) ||
         !bounded(get(force, "jaw_seq"), 0, 4294967295.0) ||
+        (get(force, "jaw_valid") && !cJSON_IsBool(get(force, "jaw_valid"))) ||
+        (get(force, "belly_valid") && !cJSON_IsBool(get(force, "belly_valid"))) ||
+        (get(force, "belly_seq") && !bounded(get(force, "belly_seq"), 0, 4294967295.0)) ||
+        (get(force, "belly_age_ms") && !bounded(get(force, "belly_age_ms"), 0, 4294967295.0)) ||
         !cJSON_IsBool(get(force, "valid")) ||
         !cJSON_IsFalse(get(force, "calibrated"))) return false;
     if (!bounded(get(climate, "temp_centi"), -4500, 13000) ||

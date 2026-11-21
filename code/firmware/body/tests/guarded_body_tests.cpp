@@ -655,7 +655,10 @@ static void imu_status_preserves_physical_conversion_and_boot_identity() {
   body.set_imu(reading);
   const auto force_source = send(body, "aux", 80);
   CHECK(force_source.find(
-      "\"jaw_seq\":0,\"boot_id\":123456789,\"jaw_age_ms\":0,\"valid\":false") !=
+      "\"belly_seq\":0,\"belly_age_ms\":0,\"belly_valid\":false") !=
+      std::string::npos);
+  CHECK(force_source.find(
+      "\"jaw_seq\":0,\"boot_id\":123456789,\"jaw_age_ms\":0,\"jaw_valid\":false,\"valid\":false") !=
       std::string::npos);
   CHECK(force_source.size() < desk_robot::kReplyCapacity - 1);
   const auto result = send(body, "status", 80);
@@ -1209,35 +1212,67 @@ static void belly_adc_does_not_refresh_stale_jaw_sample() {
   readings.force.valid_mask = 3U;
   readings.force.adc[0] = 111;
   readings.force.adc[1] = 555;
+  readings.force.belly_sample_seq = 2U;
+  readings.force.belly_at_ms = 100U;
   readings.force.jaw_sample_seq = 4U;
   readings.force.jaw_at_ms = readings.force.at_ms = 100U;
   body.set_accessories(readings, 100U);
-  CHECK(send(body, "aux", 120U).find(
-      "\"jaw_seq\":4,\"boot_id\":123,\"jaw_age_ms\":20,\"valid\":true")
+  const auto initial = send(body, "aux", 120U);
+  CHECK(initial.find(
+      "\"belly_seq\":2,\"belly_age_ms\":20,\"belly_valid\":true")
         != std::string::npos);
-  readings.force.at_ms = 700U;  // only the belly conversion advanced
+  CHECK(initial.find(
+      "\"jaw_seq\":4,\"boot_id\":123,\"jaw_age_ms\":20,\"jaw_valid\":true,\"valid\":true")
+        != std::string::npos);
+  // Belly conversion advances to 700ms while jaw stays at 100ms (stale > 500ms).
+  // Belly must remain independently valid while jaw and composite valid are false.
+  readings.force.belly_sample_seq = 3U;
+  readings.force.belly_at_ms = 700U;
+  readings.force.at_ms = 700U;
   body.set_accessories(readings, 700U);
-  CHECK(send(body, "aux", 700U).find(
-      "\"jaw_seq\":4,\"boot_id\":123,\"jaw_age_ms\":600,\"valid\":false")
+  const auto stale_jaw = send(body, "aux", 700U);
+  CHECK(stale_jaw.find(
+      "\"belly_seq\":3,\"belly_age_ms\":0,\"belly_valid\":true")
         != std::string::npos);
+  CHECK(stale_jaw.find(
+      "\"jaw_seq\":4,\"boot_id\":123,\"jaw_age_ms\":600,\"jaw_valid\":false,\"valid\":false")
+        != std::string::npos);
+  // Jaw advances to 701ms, recovering jaw and composite validity.
   readings.force.jaw_sample_seq = 5U;
   readings.force.jaw_at_ms = 701U;
   body.set_accessories(readings, 701U);
-  CHECK(send(body, "aux", 702U).find(
-      "\"jaw_seq\":5,\"boot_id\":123,\"jaw_age_ms\":1,\"valid\":true")
+  const auto recovered_jaw = send(body, "aux", 702U);
+  CHECK(recovered_jaw.find(
+      "\"belly_seq\":3,\"belly_age_ms\":2,\"belly_valid\":true")
         != std::string::npos);
-  // Electrical clipping remains visible as raw ADC diagnostics but cannot
-  // masquerade as usable force evidence for any Mac consumer.
+  CHECK(recovered_jaw.find(
+      "\"jaw_seq\":5,\"boot_id\":123,\"jaw_age_ms\":1,\"jaw_valid\":true,\"valid\":true")
+        != std::string::npos);
+  // Electrical clipping on jaw invalidates jaw and composite valid, but belly remains valid.
   for (const int endpoint : {-32768, 32767}) {
     readings.force.adc[1] = static_cast<std::int16_t>(endpoint);
     readings.force.jaw_sample_seq += 1U;
     readings.force.jaw_at_ms = readings.force.at_ms = 703U;
     body.set_accessories(readings, 703U);
     const auto clipped = send(body, "aux", 704U);
+    CHECK(clipped.find("\"belly_valid\":true") != std::string::npos);
     CHECK(clipped.find(
-        "\"jaw_age_ms\":1,\"valid\":false,\"calibrated\":false")
+        "\"jaw_age_ms\":1,\"jaw_valid\":false,\"valid\":false,\"calibrated\":false")
           != std::string::npos);
     CHECK(clipped.find(std::string(",") + std::to_string(endpoint) + "]") !=
+          std::string::npos);
+  }
+  // Conversely, clipping on belly invalidates belly and composite valid, while jaw remains valid.
+  for (const int endpoint : {-32768, 32767}) {
+    readings.force.adc[0] = static_cast<std::int16_t>(endpoint);
+    readings.force.adc[1] = 555;
+    readings.force.belly_sample_seq += 1U;
+    readings.force.belly_at_ms = readings.force.at_ms = 705U;
+    body.set_accessories(readings, 705U);
+    const auto clipped_belly = send(body, "aux", 706U);
+    CHECK(clipped_belly.find("\"belly_valid\":false") != std::string::npos);
+    CHECK(clipped_belly.find("\"jaw_valid\":true,\"valid\":false") != std::string::npos);
+    CHECK(clipped_belly.find(std::string("[") + std::to_string(endpoint) + ",") !=
           std::string::npos);
   }
   CHECK(!body.state().armed);
@@ -1325,12 +1360,14 @@ static void physical_gripper_stops_ramping_when_adc_is_not_trustworthy() {
   // A failed conversion during a pending jaw motion must freeze locally,
   // even with no corrective Mac callback arriving on the head UART.
   readings.force.valid = false;
+  readings.force.valid_mask &= ~2U;
   body.set_accessories(readings, 121U);
   body.tick(140U);
   CHECK(body.state().grip == 89 && body.state().grip_target == 89);
   CHECK(body.state().armed && body.state().servos_attached);
   CHECK(send(body, "grip 60", 140U) == "ERR grip force_missing_or_stale");
   readings.force.valid = true;
+  readings.force.valid_mask |= 2U;
   readings.force.jaw_sample_seq = 2U;
   readings.force.at_ms = readings.force.jaw_at_ms = 141U;
   body.set_accessories(readings, 141U);

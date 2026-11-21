@@ -1158,10 +1158,13 @@ class PetController:
             state.last_nose_angle = None
 
         force = data["force"]
-        if robot.squeeze_raw_threshold is not None and force["valid"]:
+        belly_valid = force.get("belly_valid", force["valid"])
+        if robot.squeeze_raw_threshold is not None and belly_valid:
             # ADS1115 channel 0 is the belly FSR. Channel 1 is the jaw
             # contact for guarded grasp; gripping an object cannot claim
             # that a person squeezed this robot's pressure pad.
+            # An invalid or clipped jaw channel 1 must not suppress
+            # independent belly squeeze observation.
             # Both remain nonlinear raw ADC values, never Newtons.
             squeezed = force["adc"][0] >= robot.squeeze_raw_threshold
             if state.last_force_squeeze is False and squeezed:

@@ -179,7 +179,8 @@ class BodyControl {
   }
   bool grip_feedback_fresh(std::uint32_t now_ms) const {
     const auto& f = state_.accessories.force;
-    return f.present && f.valid && (f.valid_mask & 2U) != 0U &&
+    const bool jaw_valid = (f.valid_mask & 2U) != 0U || (f.valid_mask == 0U && f.valid);
+    return f.present && jaw_valid &&
            f.jaw_sample_seq != 0U && now_ms - f.jaw_at_ms < 500U &&
            f.adc[1] != -32768 && f.adc[1] != 32767;
   }

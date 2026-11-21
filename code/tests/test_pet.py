@@ -2398,6 +2398,97 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
         await pet.close()
 
 
+async def test_belly_squeeze_decoupled_from_jaw_clipping_staleness_and_recovery(fleet, tmp_path):
+    from desk_robot.aux import validate_aux
+
+    fleet.mode = "hardware"
+    fleet.robots[0].squeeze_raw_threshold = 8000
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    robot_id = "robot-01"
+    state = pet.states[robot_id]
+    state.enabled = True
+    state.generation = 5
+
+    def report(*, belly_adc=100, jaw_adc=100, belly_valid=True, jaw_valid=True,
+               belly_seq=1, jaw_seq=1, belly_age=20, jaw_age=20):
+        valid = belly_valid and jaw_valid
+        return {
+            "robot_id": robot_id,
+            "pulse": {"present": False, "valid": False, "part_id": 0,
+                      "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
+            "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                       "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {
+                "adc": [belly_adc, jaw_adc],
+                "belly_seq": belly_seq,
+                "belly_age_ms": belly_age,
+                "belly_valid": belly_valid,
+                "jaw_seq": jaw_seq,
+                "jaw_age_ms": jaw_age,
+                "jaw_valid": jaw_valid,
+                "valid": valid,
+                "calibrated": False,
+            },
+            "climate": {"temp_centi": 2150, "rh_centi": 5000, "valid": True},
+            "power": {"cell_mv": 3900, "soc_centi": 8000, "bus_mv": 5100,
+                      "shunt_uv": 5, "fuel_valid": True, "fuel_seq": 1,
+                      "monitor_valid": True, "current_calibrated": False},
+            "proximity": {"raw": 20, "valid": True, "gesture": 0,
+                          "gesture_events": 0, "physically_qualified": False},
+        }
+
+    try:
+        # 1. Baseline: unpressed belly, jaw clipped (jaw_valid=False, valid=False, belly_valid=True)
+        init_frame = report(belly_adc=200, jaw_adc=32767, belly_valid=True, jaw_valid=False)
+        assert validate_aux(init_frame, robot_id) is init_frame
+        await pet._observe_aux(robot_id, 5, init_frame)
+        assert state.last_force_squeeze is False
+        assert not any(m.kind == "squeeze" for m in memory.recent(robot_id))
+
+        # 2. Belly squeeze occurs while jaw is clipped:
+        # belly_valid=True, adc[0]=10000 >= threshold. Pet MUST detect squeeze!
+        squeeze_clipped_jaw = report(
+            belly_adc=10000, jaw_adc=32767, belly_valid=True, jaw_valid=False, belly_seq=2,
+        )
+        assert validate_aux(squeeze_clipped_jaw, robot_id) is squeeze_clipped_jaw
+        await pet._observe_aux(robot_id, 5, squeeze_clipped_jaw)
+        assert state.last_force_squeeze is True
+        squeezes = [m for m in memory.recent(robot_id) if m.kind == "squeeze"]
+        assert len(squeezes) == 1
+
+        # 3. User holds belly squeeze across jaw recovery:
+        # jaw recovers (jaw_adc=500, jaw_valid=True, valid=True).
+        # Held belly squeeze must NOT retrigger or be dropped!
+        squeeze_recovered_jaw = report(
+            belly_adc=10000, jaw_adc=500, belly_valid=True, jaw_valid=True, belly_seq=3, jaw_seq=2,
+        )
+        assert validate_aux(squeeze_recovered_jaw, robot_id) is squeeze_recovered_jaw
+        await pet._observe_aux(robot_id, 5, squeeze_recovered_jaw)
+        assert state.last_force_squeeze is True
+        assert len([m for m in memory.recent(robot_id) if m.kind == "squeeze"]) == 1
+
+        # 4. User releases belly:
+        released = report(
+            belly_adc=200, jaw_adc=500, belly_valid=True, jaw_valid=True, belly_seq=4, jaw_seq=3,
+        )
+        await pet._observe_aux(robot_id, 5, validate_aux(released, robot_id))
+        assert state.last_force_squeeze is False
+
+        # 5. Belly sensor itself goes invalid / stale:
+        belly_stale = report(
+            belly_adc=10000, jaw_adc=500, belly_valid=False, jaw_valid=True,
+            belly_age=600, belly_seq=5, jaw_seq=4,
+        )
+        await pet._observe_aux(robot_id, 5, validate_aux(belly_stale, robot_id))
+        assert state.last_force_squeeze is None
+        assert len([m for m in memory.recent(robot_id) if m.kind == "squeeze"]) == 1
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold(fleet, tmp_path):
     """Optical paw contact is an interaction, not a medical pulse reading."""
     fleet.mode = "hardware"

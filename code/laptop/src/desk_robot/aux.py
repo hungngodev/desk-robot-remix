@@ -58,25 +58,42 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                    for i in range(3))):
         raise ValueError("Invalid AS5600 magnetic angle source")
 
+    jaw_valid = force.get("jaw_valid")
+    belly_valid = force.get("belly_valid")
+    belly_seq = force.get("belly_seq")
+    belly_age = force.get("belly_age_ms")
+    jaw_age = force.get("jaw_age_ms")
+
     if (not _array(force.get("adc"), 2, lambda n: _sint(n, -32768, 32767))
-            # The actual WROOM explicitly marks clipped jaw ADC values
-            # invalid. Keep diagnostic endpoint codes when valid=False, but
-            # never trust valid=True with saturated force source evidence.
-            or (force.get("valid") is True and
-                force["adc"][1] in (-32768, 32767))
-            or not _uint(force.get("jaw_seq"), 0xffffffff)
-            or ("jaw_age_ms" in force and (
-                not _uint(force["jaw_age_ms"], 0xffffffff)
-                # The real WROOM marks a jaw conversion invalid after 500ms.
-                # Never accept contradictory stale-but-valid source claims.
-                or (force.get("valid") is True and
-                    force["jaw_age_ms"] >= 500)))
-            # Optional for old bench captures; the real WROOM now reports
-            # its boot identity so a new ADC counter after reboot is not
-            # mistaken for unsigned wrap within one grasp.
-            or ("boot_id" in force and not _uint(force["boot_id"], 0xffffffff))
             or not _bool(force.get("valid"))
-            or force.get("calibrated") is not False):
+            or force.get("calibrated") is not False
+            or not _uint(force.get("jaw_seq"), 0xffffffff)
+            or ("boot_id" in force and not _uint(force["boot_id"], 0xffffffff))
+            or (jaw_age is not None and not _uint(jaw_age, 0xffffffff))
+            or (jaw_valid is not None and not _bool(jaw_valid))
+            or (belly_seq is not None and not _uint(belly_seq, 0xffffffff))
+            or (belly_age is not None and not _uint(belly_age, 0xffffffff))
+            or (belly_valid is not None and not _bool(belly_valid))
+            # Saturated ADC clipping or staleness invalidates the corresponding channel
+            or (jaw_valid is True and (
+                force["adc"][1] in (-32768, 32767)
+                or force["jaw_seq"] == 0
+                or (jaw_age is not None and jaw_age >= 500)))
+            or (belly_valid is True and (
+                force["adc"][0] in (-32768, 32767)
+                or (belly_seq is not None and belly_seq == 0)
+                or (belly_age is not None and belly_age >= 500)))
+            # Composite validity requires both channels to be fresh and unclipped
+            or (force.get("valid") is True and (
+                force["adc"][0] in (-32768, 32767)
+                or force["adc"][1] in (-32768, 32767)
+                or (jaw_age is not None and jaw_age >= 500)
+                or (belly_age is not None and belly_age >= 500)
+                or jaw_valid is False
+                or belly_valid is False))
+            # Typed per-channel validities must match composite valid
+            or (jaw_valid is not None and belly_valid is not None and (
+                force.get("valid") != (jaw_valid and belly_valid)))):
         raise ValueError("Invalid uncalibrated FSR sample")
 
     if (not _sint(climate.get("temp_centi"), -4500, 13000)

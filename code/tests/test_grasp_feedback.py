@@ -1,7 +1,7 @@
 """Gripper only accepts two physically new ADC conversions to confirm contact."""
 import pytest
 from desk_robot.controller import OperationError
-from desk_robot.grasp_feedback import force_adc, grip_angles, guarded_grasp
+from desk_robot.grasp_feedback import force_adc, force_observation, grip_angles, guarded_grasp
 
 
 class FakeHead:
@@ -86,6 +86,27 @@ async def test_late_jaw_age_during_close_aborts_before_next_step(monkeypatch):
 def test_absent_sensor_never_fabricates_force():
     with pytest.raises(ValueError):
         force_adc({"force": {"valid": False, "adc": [0, 100]}})
+
+
+def test_jaw_force_observation_succeeds_when_jaw_valid_even_if_composite_valid_is_false():
+    reading = {
+        "force": {
+            "adc": [32767, 500],
+            "belly_valid": False,
+            "jaw_valid": True,
+            "valid": False,
+            "calibrated": False,
+            "jaw_seq": 10,
+            "jaw_age_ms": 15,
+        }
+    }
+    adc, seq = force_observation(reading)
+    assert adc == 500
+    assert seq == 10
+
+    reading["force"]["jaw_valid"] = False
+    with pytest.raises(ValueError, match="Missing, invalid or stale"):
+        force_observation(reading)
 
 
 async def test_contact_stops_before_full_closure(monkeypatch):

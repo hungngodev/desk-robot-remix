@@ -167,6 +167,73 @@ def test_expired_jaw_age_is_allowed_only_as_invalid_diagnostic():
     assert result["force"]["valid"] is False
 
 
+def test_decoupled_per_channel_force_validity_and_cross_channel_isolation():
+    # 1. Fresh belly with clipped jaw: valid=False, jaw_valid=False, belly_valid=True
+    data = sample()
+    data["force"].update({
+        "adc": [1024, 32767],
+        "belly_seq": 10,
+        "belly_age_ms": 15,
+        "belly_valid": True,
+        "jaw_seq": 20,
+        "jaw_age_ms": 15,
+        "jaw_valid": False,
+        "valid": False,
+    })
+    result = validate_aux(data, "robot-01")
+    assert result["force"]["belly_valid"] is True
+    assert result["force"]["jaw_valid"] is False
+    assert result["force"]["valid"] is False
+
+    # 2. Fresh jaw with stale belly: valid=False, jaw_valid=True, belly_valid=False
+    data = sample()
+    data["force"].update({
+        "adc": [500, 1000],
+        "belly_seq": 10,
+        "belly_age_ms": 600,
+        "belly_valid": False,
+        "jaw_seq": 21,
+        "jaw_age_ms": 20,
+        "jaw_valid": True,
+        "valid": False,
+    })
+    result = validate_aux(data, "robot-01")
+    assert result["force"]["belly_valid"] is False
+    assert result["force"]["jaw_valid"] is True
+    assert result["force"]["valid"] is False
+
+    # 3. Both valid: valid=True, jaw_valid=True, belly_valid=True
+    data = sample()
+    data["force"].update({
+        "adc": [1024, 1000],
+        "belly_seq": 11,
+        "belly_age_ms": 25,
+        "belly_valid": True,
+        "jaw_seq": 22,
+        "jaw_age_ms": 25,
+        "jaw_valid": True,
+        "valid": True,
+    })
+    result = validate_aux(data, "robot-01")
+    assert result["force"]["valid"] is True
+
+    # 4. Contradiction: valid=True when either channel is marked invalid or out of range
+    for bad_update in [
+        {"belly_valid": False, "jaw_valid": True, "valid": True},
+        {"belly_valid": True, "jaw_valid": False, "valid": True},
+        {"belly_valid": True, "jaw_valid": True, "valid": False},
+        {"belly_valid": True, "belly_age_ms": 500, "jaw_valid": True, "valid": True},
+        {"belly_valid": True, "belly_seq": 0, "jaw_valid": True, "valid": True},
+        {"belly_valid": True, "adc": [32767, 1000], "jaw_valid": True, "valid": True},
+        {"belly_valid": True, "adc": [-32768, 1000], "jaw_valid": True, "valid": True},
+        {"belly_valid": True, "adc": [1000, 32767], "jaw_valid": True, "valid": True},
+    ]:
+        bad = copy.deepcopy(data)
+        bad["force"].update(bad_update)
+        with pytest.raises(ValueError, match="Invalid uncalibrated FSR sample"):
+            validate_aux(bad, "robot-01")
+
+
 async def test_authenticated_head_aux_rejects_wrong_source(settings, tokens):
     requests = []
 

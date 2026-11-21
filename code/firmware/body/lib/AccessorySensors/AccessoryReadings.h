@@ -84,7 +84,9 @@ constexpr bool ads1115_completed_for_channel(std::uint16_t config,
 
 struct ForceRaw {
   bool present = false, valid = false;
-  std::uint8_t valid_mask = 0; // both ADC channels need independent fresh samples
+  std::uint8_t valid_mask = 0; // bit 0: belly (ADC channel 0), bit 1: jaw (ADC channel 1)
+  std::uint32_t belly_sample_seq = 0; // only increments on fresh ADC channel 0 conversion
+  std::uint32_t belly_at_ms = 0; // independent of jaw conversion timestamp
   std::uint32_t jaw_sample_seq = 0; // only increments on fresh ADC channel 1 conversion
   std::uint32_t jaw_at_ms = 0; // independent of belly conversion timestamp
   std::int16_t adc[2]{};

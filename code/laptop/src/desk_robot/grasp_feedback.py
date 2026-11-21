@@ -39,7 +39,8 @@ def grip_angles(start: int, end: int, step: int) -> tuple[int, ...]:
 def force_observation(payload: dict) -> tuple[int, int]:
     """Raw ADC jaw + independent hardware conversion sequence."""
     group = payload.get("force") if isinstance(payload, dict) else None
-    if (not isinstance(group, dict) or group.get("valid") is not True
+    jaw_valid = group.get("jaw_valid", group.get("valid")) if isinstance(group, dict) else None
+    if (not isinstance(group, dict) or jaw_valid is not True
             or group.get("calibrated") is not False
             or not isinstance(group.get("adc"), list) or len(group["adc"]) != 2
             or type(group["adc"][1]) is not int

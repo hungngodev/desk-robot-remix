@@ -1,3 +1,22 @@
+## 21 November 2026: ADS1115 belly and jaw ADC channel validity decoupling
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `a2e3dc1560f0896796c9cae32c021132b918ca12`.
+This source and test batch does not close physical or commercial gates.
+
+* Cross-channel ADC availability decoupling (Review PRRT_kwDOVlmnQ866biI-):
+  - In `code/firmware/body/lib/AccessorySensors/AccessoryReadings.h` and `AccessorySensors.cpp`, added independent per-channel sample sequence (`belly_sample_seq`, `jaw_sample_seq`) and timestamp (`belly_at_ms`, `jaw_at_ms`) tracking for ADS1115 channel 0 (belly) and channel 1 (jaw).
+  - In `code/firmware/body/lib/BodyControl/BodyControl.cpp` and `BodyControl.h`, decoupled freshness evaluation: `belly_fresh` evaluates channel 0 validity, sequence, unclippedness, and age independently of channel 1; `jaw_fresh` evaluates channel 1 validity, sequence, unclippedness, and age independently of channel 0. Firmware `grip` commands enforce strict `jaw_fresh` fail-closed motion gating without depending on belly state.
+  - Exposed typed `belly_seq`, `belly_age_ms`, `belly_valid`, `jaw_seq`, `jaw_age_ms`, `jaw_valid`, and composite `valid` in WROOM AUX `force` JSON telemetry.
+  - In `code/firmware/head/overlay/robot_bridge.cc`, validated optional `belly_valid`, `jaw_valid`, `belly_seq`, `belly_age_ms`.
+  - In `code/laptop/src/desk_robot/aux.py`, added typed validation for `belly_seq`, `belly_age_ms`, `belly_valid`, and `jaw_valid`, enforcing that saturated clipping or staleness invalidates the affected channel and rejecting contradictory states.
+  - In `code/laptop/src/desk_robot/pet.py`, decoupled belly squeeze detection to evaluate `belly_valid` rather than composite `valid`, ensuring fresh belly interactions are captured even when the jaw channel is clipped or stale, and maintaining held squeeze state across jaw recovery without duplicate events.
+  - In `code/laptop/src/desk_robot/grasp_feedback.py`, maintained the strict fail-closed jaw freshness contract by evaluating `jaw_valid` directly.
+  - In `code/firmware/body/tests/guarded_body_tests.cpp`, updated `belly_adc_does_not_refresh_stale_jaw_sample` to verify independent per-channel sequence, age, and validity for valid belly + stale jaw, jaw recovery, jaw clipping, and belly clipping.
+  - In `code/tests/test_aux_telemetry.py`, added `test_decoupled_per_channel_force_validity_and_cross_channel_isolation`.
+  - In `code/tests/test_grasp_feedback.py`, added `test_jaw_force_observation_succeeds_when_jaw_valid_even_if_composite_valid_is_false`.
+  - In `code/tests/test_pet.py`, added `test_belly_squeeze_decoupled_from_jaw_clipping_staleness_and_recovery`.
+
 ## 21 November 2026: Builder-path MPU6050 selection consistency in PLAN.md
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.

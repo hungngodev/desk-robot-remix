@@ -860,13 +860,23 @@ void BodyControl::execute(const char* line, std::size_t length,
           now_ms - a.angle[i].at_ms < 350U) angle_valid |= 1U << i;
     }
     // A completed belly ADC conversion must never refresh an old jaw
-    // sample or certify a current grasp contact.
+    // sample or certify a current grasp contact, and an invalid or clipped
+    // jaw channel must not suppress independent belly squeeze observation.
+    const bool belly_unclipped = a.force.adc[0] != -32768 &&
+                                 a.force.adc[0] != 32767;
+    const bool belly_fresh = ((a.force.valid_mask & 1U) != 0U ||
+                              (a.force.valid_mask == 0U && a.force.valid)) &&
+                             belly_unclipped &&
+                             a.force.belly_sample_seq != 0U &&
+                             now_ms - a.force.belly_at_ms < 500U;
     const bool jaw_unclipped = a.force.adc[1] != -32768 &&
                                a.force.adc[1] != 32767;
-    const bool force_fresh = a.force.valid && jaw_unclipped &&
-                             a.force.jaw_sample_seq != 0U &&
-                             now_ms - a.force.at_ms < 500U &&
-                             now_ms - a.force.jaw_at_ms < 500U;
+    const bool jaw_fresh = ((a.force.valid_mask & 2U) != 0U ||
+                            (a.force.valid_mask == 0U && a.force.valid)) &&
+                           jaw_unclipped &&
+                           a.force.jaw_sample_seq != 0U &&
+                           now_ms - a.force.jaw_at_ms < 500U;
+    const bool force_fresh = belly_fresh && jaw_fresh;
     const bool climate_fresh = a.climate.valid &&
                                now_ms - a.climate.at_ms < 1000U;
     const bool bmp_fresh = a.barometer.present && a.barometer.valid &&
@@ -893,7 +903,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"bpm\":null,\"medical\":false},"
         "\"angles\":{\"raw\":[%u,%u,%u],\"present_mask\":%u,"
         "\"valid_mask\":%u,\"magnet\":[%u,%u,%u]},"
-        "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"boot_id\":%lu,\"jaw_age_ms\":%lu,\"valid\":%s,\"calibrated\":false},"
+        "\"force\":{\"adc\":[%d,%d],\"belly_seq\":%lu,\"belly_age_ms\":%lu,\"belly_valid\":%s,\"jaw_seq\":%lu,\"boot_id\":%lu,\"jaw_age_ms\":%lu,\"jaw_valid\":%s,\"valid\":%s,\"calibrated\":false},"
         "\"climate\":{\"temp_centi\":%d,\"rh_centi\":%d,\"valid\":%s,\"seq\":%lu,\"age_ms\":%lu},"
         "\"bmp280\":{\"present\":%s,\"valid\":%s,\"chip_id\":%u,"
         "\"temp_centi\":%d,\"pressure_pa\":%u,\"seq\":%lu,\"age_ms\":%lu,"
@@ -923,10 +933,15 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned>(a.angle[2].magnet_status),
         static_cast<int>(a.force.adc[0]),
         static_cast<int>(a.force.adc[1]),
+        static_cast<unsigned long>(a.force.belly_sample_seq),
+        static_cast<unsigned long>(a.force.belly_sample_seq != 0U ?
+            now_ms - a.force.belly_at_ms : 0U),
+        belly_fresh ? "true" : "false",
         static_cast<unsigned long>(a.force.jaw_sample_seq),
         static_cast<unsigned long>(boot_epoch_),
         static_cast<unsigned long>(a.force.jaw_sample_seq != 0U ?
             now_ms - a.force.jaw_at_ms : 0U),
+        jaw_fresh ? "true" : "false",
         force_fresh ? "true" : "false",
         a.climate.temp_centi, a.climate.humidity_centi,
         climate_fresh ? "true" : "false",
