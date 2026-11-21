@@ -263,6 +263,9 @@ class HttpHead:
                        or not 0 <= data[key] <= 0xffffffff
                        for key in counters)
                 or type(data.get("reference_integrity_failed")) is not bool
+                or type(data.get("microphone_privacy_muted")) is not bool
+                or type(data.get("microphone_privacy_epoch")) is not int
+                or not 0 <= data["microphone_privacy_epoch"] <= 0xffffffff
                 or data.get("speaker_playback_verified") is not False
                 or data.get("aec_physically_qualified") is not False):
             raise HeadError("Untrusted Sense AEC reference diagnostics")
