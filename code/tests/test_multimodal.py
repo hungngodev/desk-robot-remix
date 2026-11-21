@@ -301,6 +301,28 @@ async def test_proactive_pet_can_wake_on_pushed_frame_without_camera_poll():
         await visual.close()
 
 
+async def test_proactive_wait_refuses_cached_frame_after_camera_consent_revoke():
+    """An earlier selected JPEG is not usable after visual opt out."""
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        observed_at = time.monotonic()
+        visual.hub.offer("robot-01", image(), observed_at, source="proactive")
+        assert await visual.wait_for_proactive_frame(
+            "robot-01", observed_at - 0.1, timeout_s=.05,
+        )
+        visual.settings.voice_vision_tools_enabled = False
+        # The original frame remains cached and the condition is already true,
+        # but consent must still prevent a positive result.
+        assert not await visual.wait_for_proactive_frame(
+            "robot-01", observed_at - 0.1, timeout_s=.05,
+        )
+    finally:
+        await visual.close()
+
+
 async def test_other_pets_keep_streaming_passive_vision_during_human_conversation():
     """One person's speech owns audible inference, not all camera lenses."""
     class LiveHead(Head):
