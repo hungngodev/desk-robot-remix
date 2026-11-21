@@ -414,7 +414,13 @@ class HttpHead:
                 "X-Desk-Camera-Complete-Us",
             )
             values = [response.headers.get(name) for name in names]
-            if self.strict_capture or any(value is not None for value in values):
+            camera_robot = response.headers.get("X-Desk-Camera-Robot-Id")
+            if (self.strict_capture or camera_robot is not None
+                    or any(value is not None for value in values)):
+                # Bind each still capture to its flashed physical head ID
+                # before advancing camera boot or sequence evidence.
+                if camera_robot != self.config.id:
+                    raise HeadError("Camera robot identity mismatch or missing")
                 if not all(value is not None and 1 <= len(value) <= 20
                            and value.isascii() and value.isdecimal()
                            for value in values):

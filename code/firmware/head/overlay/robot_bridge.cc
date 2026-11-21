@@ -495,6 +495,7 @@ void Bridge::CameraTask(void* context) {
             const std::string completed_us = std::to_string(esp_timer_get_time());
             httpd_resp_set_type(req, "image/jpeg");
             httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            httpd_resp_set_hdr(req, "X-Desk-Camera-Robot-Id", CONFIG_DESK_ROBOT_ID);
             httpd_resp_set_hdr(req, "X-Desk-Camera-Boot", nonce.c_str());
             httpd_resp_set_hdr(req, "X-Desk-Camera-Sequence", sequence.c_str());
             httpd_resp_set_hdr(req, "X-Desk-Camera-Complete-Us", completed_us.c_str());

@@ -82,10 +82,13 @@ async def test_camera_completion_sequence_and_boot_id_protect_five_pet_capture(s
         assert request.url.path == "/api/camera.jpg"
         index = min(calls, len(frames) - 1)
         calls += 1
-        return httpx.Response(200, headers=dict(zip(
-            ("X-Desk-Camera-Boot", "X-Desk-Camera-Sequence",
-             "X-Desk-Camera-Complete-Us"), frames[index], strict=True,
-        )), content=b"\xff\xd8frame\xff\xd9")
+        return httpx.Response(200, headers={
+            **dict(zip(
+                ("X-Desk-Camera-Boot", "X-Desk-Camera-Sequence",
+                 "X-Desk-Camera-Complete-Us"), frames[index], strict=True,
+            )),
+            "X-Desk-Camera-Robot-Id": settings.robots[0].id,
+        }, content=b"\xff\xd8frame\xff\xd9")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(settings.robots[0], client, strict_capture=True)
@@ -115,6 +118,7 @@ async def test_old_xiao_camera_boot_cannot_reenter_after_live_reconnect(
         calls += 1
         return httpx.Response(
             200, headers={
+                "X-Desk-Camera-Robot-Id": settings.robots[0].id,
                 "X-Desk-Camera-Boot": str(boot),
                 "X-Desk-Camera-Sequence": str(seq),
                 "X-Desk-Camera-Complete-Us": str(completed),
@@ -144,6 +148,7 @@ async def test_xiao_camera_boot_history_never_evicts_old_frame_identity(
         calls += 1
         return httpx.Response(
             200, headers={
+                "X-Desk-Camera-Robot-Id": settings.robots[0].id,
                 "X-Desk-Camera-Boot": str(boot),
                 "X-Desk-Camera-Sequence": "1",
                 "X-Desk-Camera-Complete-Us": "1000",
@@ -173,6 +178,7 @@ async def test_truncated_camera_jpeg_does_not_consume_source_sequence(settings, 
         return httpx.Response(
             200,
             headers={
+                "X-Desk-Camera-Robot-Id": settings.robots[0].id,
                 "X-Desk-Camera-Boot": "51",
                 "X-Desk-Camera-Sequence": "1",
                 "X-Desk-Camera-Complete-Us": "10000",
@@ -189,6 +195,31 @@ async def test_truncated_camera_jpeg_does_not_consume_source_sequence(settings, 
         # truncated response must not be accepted as a camera observation.
         assert await head.snapshot() == b"\xff\xd8frame\xff\xd9"
         assert calls == 2
+
+
+async def test_snapshot_rejects_missing_or_cross_pet_camera_identity(
+    settings, tokens,
+):
+    """A misrouted physical JPEG is never attributed to a different pet."""
+    for sender in (None, "robot-02"):
+        async def handler(request):
+            headers = {
+                "X-Desk-Camera-Boot": "31",
+                "X-Desk-Camera-Sequence": "1",
+                "X-Desk-Camera-Complete-Us": "1000",
+            }
+            if sender is not None:
+                headers["X-Desk-Camera-Robot-Id"] = sender
+            return httpx.Response(
+                200, headers=headers, content=b"\xff\xd8camera\xff\xd9",
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            head = HttpHead(settings.robots[0], client, strict_capture=True)
+            with pytest.raises(HeadError, match="robot identity"):
+                await head.snapshot()
+            assert head._last_camera is None
+            assert not head._retired_camera_boots
 
 
 async def test_hardware_camera_requires_true_capture_metadata(settings, tokens):
@@ -822,6 +853,7 @@ async def test_actual_xiao_camera_pid_is_bound_to_authenticated_jpeg_boot(settin
         requests.append(request.url.path)
         if request.url.path == "/api/camera.jpg":
             return httpx.Response(200, headers={
+                "X-Desk-Camera-Robot-Id": settings.robots[0].id,
                 "X-Desk-Camera-Boot": "41",
                 "X-Desk-Camera-Sequence": "1",
                 "X-Desk-Camera-Complete-Us": "9000",
@@ -857,6 +889,7 @@ async def test_camera_identity_mismatch_never_qualifies_dock_sensor(
     async def handler(request):
         if request.url.path == "/api/camera.jpg":
             return httpx.Response(200, headers={
+                "X-Desk-Camera-Robot-Id": settings.robots[0].id,
                 "X-Desk-Camera-Boot": "41",
                 "X-Desk-Camera-Sequence": "1",
                 "X-Desk-Camera-Complete-Us": "9000",
