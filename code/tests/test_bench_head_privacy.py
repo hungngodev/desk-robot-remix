@@ -65,7 +65,7 @@ async def run(samples, *, duration=0.7):
     report = await bench.measure(
         Head(samples), "robot-01",
         seconds=duration, poll_period_s=0.05,
-        hold_min_s=0.2, quiet_grace_s=0.05,
+        hold_min_s=0.18, quiet_grace_s=0.04,
         clock=timer, sleeper=timer.sleep,
         on_ready=notices.append,
     )
