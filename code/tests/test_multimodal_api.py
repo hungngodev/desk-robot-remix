@@ -2543,3 +2543,31 @@ def test_status_and_aux_anecdotes_do_not_trigger_extra_live_tool_reads(
             assert answer.status_code == 200
             assert [entry["route"] for entry in answer.json()["tools"]] == expected
             assert answer.json()["motor_authorized"] is False
+
+
+
+@pytest.mark.asyncio
+async def test_native_idle_frame_subscription_observes_revocation_in_under_400ms(
+    settings,
+):
+    """No selected camera frame is needed to end a revoked native stream."""
+    import asyncio
+
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    settings.voice_vision_tools_enabled = True
+    observer = MultimodalOrchestrator(settings, {}, None, asyncio.Lock())
+    frames = observer.native_live_frames(settings.robots[0].id)
+    waiting = asyncio.create_task(anext(frames))
+    try:
+        await asyncio.sleep(0.02)
+        assert not waiting.done()
+        settings.voice_vision_tools_enabled = False
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(waiting, timeout=0.4)
+    finally:
+        if not waiting.done():
+            waiting.cancel()
+            await asyncio.gather(waiting, return_exceptions=True)
+        await frames.aclose()
+        await observer.close()

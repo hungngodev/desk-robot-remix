@@ -1653,6 +1653,11 @@ class NativeOmniSession:
         """
         address = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-stream"
         headers = {"Authorization": f"Bearer {self.token}"}
+        # A clean EOF after Mac revokes consent must be reauthorized now,
+        # before the normal one-second retry delay. Allow one immediate
+        # recheck, then back off if a broken server repeatedly returns
+        # empty 200 streams (otherwise this would spin forever).
+        immediate_recheck_available = True
         while not self.closed:
             try:
                 async with http.get(
@@ -1692,6 +1697,7 @@ class NativeOmniSession:
                     async for chunk in response.content.iter_chunked(65536):
                         if self.closed:
                             return
+                        immediate_recheck_available = True
                         buffer.extend(chunk)
                         if len(buffer) > 1_600_000:
                             raise ValueError("Oversized Mac video event")
@@ -1763,6 +1769,9 @@ class NativeOmniSession:
                 self._camera_stream_connected = False
                 self.latest_jpeg = None
                 self._latest_frame_receipt_us = None
+                if immediate_recheck_available:
+                    immediate_recheck_available = False
+                    continue
             except asyncio.CancelledError:
                 raise
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError,

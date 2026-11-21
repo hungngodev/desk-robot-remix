@@ -8726,3 +8726,53 @@ def test_long_asr_with_prior_distinct_read_does_not_silently_drop_earlier_questi
     )
     assert [route for route, _ in safe] == ["power-status"]
     assert advice_incomplete is False
+
+
+
+async def test_native_clean_camera_eof_rechecks_revocation_without_sleep(native):
+    """Empty idle feed EOF must check for Mac 403 before 1s reconnect sleep."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+
+    class EmptyBody:
+        async def iter_chunked(self, _size):
+            if False:
+                yield b""
+            return
+
+    class Response:
+        def __init__(self, status):
+            self.status = status
+            self.headers = {
+                "X-Desk-Robot-Id": "robot-01",
+                "Content-Type": "application/x-ndjson",
+            }
+            self.content = EmptyBody()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class Mac:
+        calls = 0
+
+        def get(self, address, **kwargs):
+            self.calls += 1
+            assert address.endswith("/v1/pet/robot-01/omni-stream")
+            return Response(200 if self.calls == 1 else 403)
+
+    mac = Mac()
+    await asyncio.wait_for(session._camera_stream(mac), timeout=0.5)
+    assert mac.calls == 2
+    assert session.closed
+    assert session.last_error == "Mac continuous camera permission revoked"
+    assert session.latest_jpeg is None
+    assert session._camera_stream_connected is False

@@ -987,7 +987,11 @@ class MultimodalOrchestrator:
                         lambda version=version: (self._model_frame_versions[robot_id] > version
                                  or self._closed
                                  or not self.settings.voice_vision_tools_enabled)
-                    ), timeout=3)
+                    # Settings is operator-controlled but does not emit an
+                    # asyncio.Condition notification on mutation. Recheck
+                    # consent at most 100ms later even in a completely
+                    # static room with no selected camera frames.
+                    ), timeout=0.1)
                 except TimeoutError:
                     continue
                 if self._closed or not self.settings.voice_vision_tools_enabled:
