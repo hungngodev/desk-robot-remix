@@ -257,6 +257,38 @@ async def test_late_network_camera_frame_needs_matching_source_clock_progress(
 
 
 @pytest.mark.asyncio
+async def test_subsecond_camera_network_backlog_is_not_fresh(monkeypatch):
+    """A 950ms Mac delivery gap with only 250ms camera progress is stale."""
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    jpeg = b"\xff\xd8scene\xff\xd9"
+
+    def respond(_request):
+        return httpx.Response(
+            200,
+            stream=TwoPartCameraStream((_part(1, jpeg), _part(2, jpeg))),
+            headers={"content-type":
+                     "multipart/x-mixed-replace; boundary=deskrobotframe"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        head = HttpHead(
+            RobotConfig(
+                id="robot-01", name="Camera pet",
+                token_env="SENSE_TEST_TOKEN", head_url="http://head.example",
+            ), client,
+        )
+        ticks = iter((100.0, 100.95))
+        monkeypatch.setattr(
+            "desk_robot.transport.time",
+            SimpleNamespace(monotonic=lambda: next(ticks)),
+        )
+        with pytest.raises(HeadError, match="Buffered stale camera frame"):
+            async for _ in head.stream_frames():
+                pass
+        assert head._stream_latest is None
+
+
+@pytest.mark.asyncio
 async def test_sense_bearer_requests_refuse_redirect_even_if_shared_client_follows(
     monkeypatch,
 ):
