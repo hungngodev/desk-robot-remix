@@ -55,6 +55,8 @@ async def measure(head, robot_id: str, *, seconds: float,
             )
             if (not isinstance(sample, dict)
                     or sample.get("robot_id") != robot_id
+                    or type(sample.get("boot")) is not int
+                    or not 0 <= sample["boot"] <= 0xffffffff
                     or any(type(sample.get(key)) is not int
                            or not 0 <= sample[key] <= 0xffffffff
                            for key in COUNTERS)
@@ -63,7 +65,8 @@ async def measure(head, robot_id: str, *, seconds: float,
                     or sample.get("aec_physically_qualified") is not False):
                 raise ValueError("Untrusted robot AEC reference receipt")
             if previous is not None and (
-                any(sample[key] < previous[key] for key in COUNTERS)
+                sample["boot"] != previous["boot"]
+                or any(sample[key] < previous[key] for key in COUNTERS)
                 or (previous["reference_integrity_failed"]
                     and not sample["reference_integrity_failed"])
             ):
@@ -89,6 +92,7 @@ async def measure(head, robot_id: str, *, seconds: float,
     )
     return {
         "robot_id": robot_id,
+        "head_boot": first["boot"] if first is not None else None,
         "elapsed_s": round(time.monotonic() - started, 3),
         "samples": received,
         "probe_errors": invalid_receipts,
