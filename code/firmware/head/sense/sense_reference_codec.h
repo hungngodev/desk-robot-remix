@@ -74,6 +74,9 @@ public:
         bool failed;
         uint32_t frames;
         uint64_t generation;
+        // Activity was observed before the final captured microphone frame,
+        // not on a later HTTP diagnostics poll. Never acoustic playback ACK.
+        bool speaker_activity_in_window;
     };
     bool BeginBenchPcmCapture();
     // A physical BOOT mute or playback cancellation invalidates any
@@ -134,6 +137,8 @@ private:
     std::atomic<uint64_t> bench_capture_generation_{0};
     bool bench_transfer_active_ = false;  // one RAM transfer at a time
     desk_robot::SensePcmWindow bench_window_{};
+    uint32_t bench_speaker_at_start_ = 0;
+    bool bench_speaker_activity_in_window_ = false;
     esp_timer_handle_t bench_expiry_timer_ = nullptr;
     int64_t bench_started_us_ = 0;
     static void BenchPcmExpiry(void* context);
