@@ -492,6 +492,8 @@ void Bridge::CameraTask(void* context) {
         auto jpeg = bridge->camera_->SnapshotJpeg();
         if (!jpeg) {
             bridge->Json(req, 503, Envelope(false, jpeg.error()));
+        } else if (!CompleteJpeg(jpeg->data(), jpeg->size())) {
+            bridge->Json(req, 503, Envelope(false, "incomplete JPEG capture"));
         } else {
             // Completion, not guessed exposure time. The Mac can reject old
             // frames from the same boot without synchronizing ESP32/Mac clocks.
@@ -521,7 +523,6 @@ void Bridge::CameraStreamTask(void* context) {
     auto* req = static_cast<httpd_req_t*>(context);
     auto* bridge = static_cast<Bridge*>(req->user_ctx);
     constexpr char kBoundary[] = "--deskrobotframe\r\n";
-    constexpr std::size_t kMaxJpegBytes = 512 * 1024;
     esp_err_t status = httpd_resp_set_type(
         req, "multipart/x-mixed-replace; boundary=deskrobotframe");
     if (status == ESP_OK)
@@ -531,10 +532,7 @@ void Bridge::CameraStreamTask(void* context) {
     while (status == ESP_OK) {
         {
             auto jpeg = bridge->camera_->SnapshotJpeg();
-            if (!jpeg || jpeg->size() < 4 || jpeg->size() > kMaxJpegBytes ||
-                jpeg->data()[0] != 0xff || jpeg->data()[1] != 0xd8 ||
-                jpeg->data()[jpeg->size() - 2] != 0xff ||
-                jpeg->data()[jpeg->size() - 1] != 0xd9) {
+            if (!jpeg || !CompleteJpeg(jpeg->data(), jpeg->size())) {
                 status = ESP_FAIL; // Never stream a partial camera frame.
             } else {
                 // Per-part provenance is the same trusted monotonic camera
