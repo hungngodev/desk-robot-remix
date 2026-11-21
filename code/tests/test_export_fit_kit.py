@@ -859,7 +859,8 @@ def test_print_screen_rejects_bad_build_volume(printer):
 def test_print_screen_rejects_forged_or_missing_mesh_dimensions():
     screen = module().screen_print_bed_fit
     for dims in (None, [-1, 10, 10], [True, 10, 10],
-                 [float("inf"), 10, 10], [10, 10], [0, 10, 10]):
+                 [float("inf"), 10, 10], [10**1000, 10, 10],
+                 [10, 10], [0, 10, 10]):
         with pytest.raises(ValueError, match="STL build envelope"):
             screen({"parts": [{"location": "fit_stls/a.stl",
                                "bbox_mm": {"dimensions_mm": dims}}]},

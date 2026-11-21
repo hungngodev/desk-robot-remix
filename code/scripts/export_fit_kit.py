@@ -290,8 +290,9 @@ def screen_print_bed_fit(report: dict, bed_xyz_mm: tuple[float, float, float]) -
     """
     if (not isinstance(bed_xyz_mm, (list, tuple))
             or len(bed_xyz_mm) != 3
-            or any(type(v) not in (float, int) or not isfinite(v)
-                   or not 1 <= v <= 5000 for v in bed_xyz_mm)):
+            or any(type(v) not in (float, int)
+                   or not 1 <= v <= 5000 or not isfinite(v)
+                   for v in bed_xyz_mm)):
         raise ValueError("Printer X/Y/Z build dimensions must be finite positive mm")
     if not isinstance(report, dict) or not isinstance(report.get("parts"), list):
         raise ValueError("Printer screen requires a candidate mesh manifest")
@@ -304,8 +305,9 @@ def screen_print_bed_fit(report: dict, bed_xyz_mm: tuple[float, float, float]) -
         bounds = item.get("bbox_mm")
         dims = bounds.get("dimensions_mm") if isinstance(bounds, dict) else None
         if (not isinstance(dims, list) or len(dims) != 3
-                or any(type(v) not in (float, int) or not isfinite(v)
-                       or v <= 0 for v in dims)
+                or any(type(v) not in (float, int)
+                       or not 0 < v <= 1_000_000 or not isfinite(v)
+                       for v in dims)
                 or not isinstance(item.get("location"), str)):
             raise ValueError("Missing or invalid exported STL build envelope")
         sx, sy, sz = dims
