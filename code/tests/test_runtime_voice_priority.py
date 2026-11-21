@@ -1255,3 +1255,102 @@ async def test_older_voice_stop_cannot_start_newer_turn_camera_early():
             return_exceptions=True,
         )
         await visual.close()
+
+
+async def test_late_recovered_vad_stop_cannot_sample_newer_turn():
+    """A slow recovered snapshot must not bypass a later start's STOP barrier."""
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+
+    class Pet:
+        def __init__(self):
+            self.count = 0
+
+        async def interrupt(self, robot_id):
+            index = self.count
+            self.count += 1
+            entered[index].set()
+            await release[index].wait()
+
+    class Conversation:
+        async def stop(self):
+            pass
+
+    class Head:
+        async def snapshot(self):
+            await asyncio.Event().wait()
+
+    settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")],
+        voice_vision_tools_enabled=True, vision_model="local-vlm",
+    )
+    visual = MultimodalOrchestrator(
+        settings, {"robot-01": Head()}, object(), asyncio.Lock(),
+    )
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings, runtime.pet = settings, Pet()
+    runtime.conversation, runtime.multimodal = Conversation(), visual
+    earlier = asyncio.create_task(runtime._on_voice_snapshot(frozenset({"robot-01"})))
+    newer = None
+    try:
+        await asyncio.wait_for(entered[0].wait(), timeout=1)
+        old_generation = visual._turn_epoch["robot-01"]
+        newer = asyncio.create_task(
+            runtime._on_voice_interrupt("robot-01", "speech_start")
+        )
+        await asyncio.wait_for(entered[1].wait(), timeout=1)
+        assert visual._turn_epoch["robot-01"] > old_generation
+        release[0].set()
+        await asyncio.wait_for(earlier, timeout=1)
+        assert visual._capture_tasks.get("robot-01") is None
+        release[1].set()
+        await asyncio.wait_for(newer, timeout=1)
+        assert visual._capture_tasks.get("robot-01") is not None
+    finally:
+        for event in release:
+            event.set()
+        await asyncio.gather(
+            *([earlier] + ([newer] if newer is not None else [])),
+            return_exceptions=True,
+        )
+        await visual.close()
+
+
+async def test_recovered_two_pet_vad_snapshot_starts_both_current_cameras():
+    """A second recovered start invalidates peer epochs within one snapshot."""
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            pass
+
+    class Conversation:
+        async def stop(self):
+            pass
+
+    class Head:
+        async def snapshot(self):
+            await asyncio.Event().wait()
+
+    ids = ["robot-01", "robot-02"]
+    settings = SimpleNamespace(
+        robots=[SimpleNamespace(id=robot_id) for robot_id in ids],
+        voice_vision_tools_enabled=True, vision_model="local-vlm",
+    )
+    visual = MultimodalOrchestrator(
+        settings, {robot_id: Head() for robot_id in ids},
+        object(), asyncio.Lock(),
+    )
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings, runtime.pet = settings, Pet()
+    runtime.conversation, runtime.multimodal = Conversation(), visual
+    try:
+        await runtime._on_voice_snapshot(frozenset(ids))
+        assert set(visual._capture_tasks) == set(ids)
+        assert all(
+            visual._capture_tasks[robot_id] is not None for robot_id in ids
+        )
+    finally:
+        await visual.close()

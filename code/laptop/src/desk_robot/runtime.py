@@ -273,6 +273,7 @@ class Runtime:
             and visual.hub.voice_until[robot_id] == float("inf")
         ]
         preempt_error = None
+        prepared_epochs: dict[str, int] = {}
         if missing_starts:
             attention = getattr(self, "attention", None)
             if attention is not None:
@@ -284,6 +285,15 @@ class Runtime:
             if callable(prepare):
                 for robot_id in sorted(missing_starts):
                     prepare(robot_id, end_expected=True)
+                # Preparing a second active pet invalidates all peers' prior
+                # visual generations. Read tokens only after the whole fleet
+                # snapshot has been prepared, before the slow speaker STOP.
+                read_epoch = getattr(visual, "prepared_turn_epoch", None)
+                if callable(read_epoch):
+                    for robot_id in missing_starts:
+                        token = read_epoch(robot_id)
+                        if type(token) is int:
+                            prepared_epochs[robot_id] = token
             # A recovered VAD snapshot can be the FIRST evidence of a
             # speaking human. Both speech and roaming stop concurrently.
             outcomes = await asyncio.gather(
@@ -303,7 +313,13 @@ class Runtime:
                 return
             for robot_id in sorted(missing_starts):
                 if callable(prepare):
-                    visual.start_speech_frames(robot_id)
+                    token = prepared_epochs.get(robot_id)
+                    if type(token) is int:
+                        visual.start_speech_frames(
+                            robot_id, prepared_epoch=token,
+                        )
+                    else:
+                        visual.start_speech_frames(robot_id)
                 else:
                     visual.voice_started(robot_id)
         # A lost speech_end must stop that head's optional 1 FPS sampler,

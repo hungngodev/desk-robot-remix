@@ -1389,6 +1389,11 @@ class MultimodalOrchestrator:
         # after awaiting an older, slow device speaker STOP.
         return self._turn_epoch[robot_id]
 
+    def prepared_turn_epoch(self, robot_id: str) -> int:
+        """Read the final turn token after a batch of fleet VAD starts."""
+        self.hub._check(robot_id)
+        return self._turn_epoch[robot_id]
+
     def start_speech_frames(
         self, robot_id: str, *, prepared_epoch: int | None = None,
     ) -> None:
