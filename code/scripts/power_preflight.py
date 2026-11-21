@@ -125,6 +125,9 @@ def screen_protected_pack(
                      "minimum_continuous_cell_input_a")
     ):
         raise ValueError("Provide measured-load 1S sizing report first")
+    if (supply["minimum_continuous_cell_input_a"] >
+            supply["minimum_rated_cell_and_boost_input_a"]):
+        raise ValueError("Continuous cell demand cannot exceed peak cell demand")
     dimensions = (pack_length_mm, pack_width_mm, pack_thickness_mm,
                   tray_length_mm, tray_width_mm, tray_height_mm,
                   wire_relief_mm, side_clearance_mm)
