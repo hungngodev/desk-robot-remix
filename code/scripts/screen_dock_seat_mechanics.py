@@ -40,6 +40,7 @@ def dock_constants(source: Path = CAD) -> dict:
         "backstop_height_mm", "base_thickness_mm", "tag_black_side_mm",
         "tag_white_margin_each_mm", "tag_paper_slack_each_mm",
         "tag_bottom_z_mm", "ir_pair_spacing_mm", "ir_probe_bore_d_mm",
+        "ir_min_tag_web_mm",
     )
     values = {}
     for name in names:
@@ -63,6 +64,15 @@ def dock_constants(source: Path = CAD) -> dict:
     )
     if not 0 < paper < width or not 0 < values["ir_pair_spacing_mm"] < width:
         raise ValueError("Dock tag/IR source geometry is inconsistent")
+    # A printed IR-position coupon must not cut the AprilTag paper's
+    # white quiet zone or leave too little material at the outside edge.
+    # Source SCAD enforces both radial web widths independently.
+    half_spacing = values["ir_pair_spacing_mm"] / 2
+    hole_radius = values["ir_probe_bore_d_mm"] / 2
+    web = values["ir_min_tag_web_mm"]
+    if (half_spacing - hole_radius - paper / 2 < web
+            or width / 2 - half_spacing - hole_radius < web):
+        raise ValueError("Dock IR aperture breaches printable tag/edge web")
     # Mirror the printable SCAD's tag pocket assertions. A pocket which
     # cannot exist inside the rail channel or backstop must not receive a
     # positive paper-only seat-switch layout screen.

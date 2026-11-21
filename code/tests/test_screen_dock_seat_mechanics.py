@@ -152,6 +152,26 @@ def test_screen_rejects_tag_pockets_that_openscad_refuses_to_render(
         tool.dock_constants(changed)
 
 
+
+
+@pytest.mark.parametrize("replacement", [
+    "ir_pair_spacing_mm = 70;",
+    "ir_pair_spacing_mm = 120;",
+])
+def test_screen_rejects_ir_pair_coupons_breaching_paper_or_outer_web(
+    tmp_path, replacement,
+):
+    """The paper check cannot approve a source coupon OpenSCAD rejects."""
+    tool = load()
+    source = tool.CAD.read_text(encoding="utf-8")
+    original = "ir_pair_spacing_mm = 98;"
+    assert source.count(original) == 1
+    changed = tmp_path / "bad_ir_coupon.scad"
+    changed.write_text(source.replace(original, replacement), encoding="utf-8")
+    with pytest.raises(ValueError, match="IR aperture breaches printable"):
+        tool.dock_constants(changed)
+
+
 def test_printer_source_and_switch_screen_share_real_pocket_width():
     g = load().dock_constants()
     assert g["backstop_width_mm"] == 126
