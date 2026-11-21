@@ -291,7 +291,7 @@ class Coordinator:
                 # overwrite an unconfirmed physical STOP receipt.
                 self.jobs[jid].state = "cancelled"
                 self.jobs[jid].error = "Operator cancelled before job started"
-        owner_id = self._fleet_motion_owner
+        owner_id = getattr(self, "_fleet_motion_owner", None)
         if stop_acknowledged and owner_id is not None:
             owner = self.jobs.get(owner_id)
             owner_task = self.tasks.get(owner_id)
@@ -489,7 +489,7 @@ class Coordinator:
                         )
                         job.state = "failed"
                 if (stop_acknowledged and not unresponsive
-                        and self._fleet_motion_owner == job.id):
+                        and getattr(self, "_fleet_motion_owner", None) == job.id):
                     self._fleet_motion_owner = None
 
     def manual(self, robot_id: str, command: str) -> Job:
