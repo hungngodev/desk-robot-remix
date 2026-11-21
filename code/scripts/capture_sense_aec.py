@@ -223,6 +223,7 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
             "capture_source": "authenticated_sense_codec_private_pcm_window",
             "robot_id": robot_id,
             "boot": boot,
+            "microphone_privacy_epoch": privacy_epoch,
             "capture_generation": generation,
             "frames": frames,
             "microphone_frames_read_delta": mic_frames_after - initial_mic_frames,
@@ -306,7 +307,8 @@ def preflight_private_destination(directory: Path) -> None:
         raise FileExistsError("Private audio trial files already exist")
 
 
-def save_wavs(directory: Path, raw: bytes, report: dict) -> None:
+def save_wavs(directory: Path, raw: bytes, report: dict, *,
+              verify_before_publish=None) -> None:
     preflight_private_destination(directory)
     mic, ref = split_pcm(raw)
     paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
@@ -324,10 +326,29 @@ def save_wavs(directory: Path, raw: bytes, report: dict) -> None:
         with _create_private(paths[2]) as out:
             written.append(paths[2])
             out.write((json.dumps(report, sort_keys=True, indent=2) + "\n").encode())
+        # A BOOT mute during disk I/O invalidates even a properly validated
+        # HTTP response. Recheck before returning the private WAV paths.
+        # If that final receipt fails, remove the entire newly written set.
+        if verify_before_publish is not None:
+            verify_before_publish()
     except BaseException:
         for path in written:
             path.unlink(missing_ok=True)
         raise
+
+
+def verify_postwrite_privacy(opener, head_url: str, token: str,
+                             report: dict) -> None:
+    """Reject a BOOT privacy change while the Mac was writing private WAVs."""
+    fresh = _json_response(opener, head_address(head_url) + "/api/audio.reference", token)
+    if (fresh.get("robot_id") != report["robot_id"]
+            or _number(fresh.get("boot"), 0, 0xffffffff, "boot ID") != report["boot"]
+            or _number(fresh.get("microphone_privacy_epoch"), 0, 0xffffffff,
+                       "privacy epoch") != report["microphone_privacy_epoch"]
+            or _generation(fresh.get("capture_generation")) != report["capture_generation"]
+            or fresh.get("microphone_privacy_muted") is not False
+            or fresh.get("reference_integrity_failed") is not False):
+        raise RuntimeError("Sense microphone privacy changed before WAV publication")
 
 
 def main() -> int:
@@ -357,7 +378,12 @@ def main() -> int:
     raw, report = capture_head(
         opener, args.head_url, args.robot_id, token,
     )
-    save_wavs(args.output_dir, raw, report)
+    save_wavs(
+        args.output_dir, raw, report,
+        verify_before_publish=lambda: verify_postwrite_privacy(
+            opener, args.head_url, token, report,
+        ),
+    )
     print(json.dumps({
         "frames": report["frames"],
         "files": ["microphone.wav", "speaker_reference.wav", "capture.json"],
