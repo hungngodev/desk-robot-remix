@@ -452,6 +452,9 @@ def test_unterminated_or_oversized_serial_fragments_never_become_room_frames(mon
             return False
         def readline(self, size):
             assert size == MAX_FRAME_BYTES + 1
+            ack = self._read_session_reply()
+            if ack is not None:
+                return ack
             packet = chunks[self.reads]
             self.reads += 1
             return packet
@@ -495,7 +498,7 @@ def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatc
     opened = []
     received = []
 
-    class Port:
+    class Port(SynchronizedFakePort):
         def __init__(self, *args, **kwargs):
             self.reads = 0
             opened.append(self)
@@ -507,6 +510,9 @@ def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatc
             return False
 
         def readline(self, size):
+            ack = self._read_session_reply()
+            if ack is not None:
+                return ack
             chunk = chunks[self.reads]
             self.reads += 1
             return chunk
@@ -530,7 +536,7 @@ def test_cancel_after_usb_read_discards_retired_station_epoch(monkeypatch):
     alive = {"running": True}
     delivered = []
 
-    class Port:
+    class Port(SynchronizedFakePort):
         def __init__(self, *args, **kwargs):
             pass
 
@@ -541,6 +547,9 @@ def test_cancel_after_usb_read_discards_retired_station_epoch(monkeypatch):
             return False
 
         def readline(self, size):
+            ack = self._read_session_reply()
+            if ack is not None:
+                return ack
             alive["running"] = False
             return json.dumps(frame(1, 1000)).encode() + b"\n"
 
@@ -562,7 +571,7 @@ def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatc
     received = []
     feed = RoomSerialFeed("/dev/cu.test", lambda observation: received.append(observation.seq))
 
-    class FakePort:
+    class FakePort(SynchronizedFakePort):
         def __init__(self, *args, **kwargs):
             opened.append(self)
             self.reads = 0
@@ -574,6 +583,9 @@ def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatc
             return False
 
         def readline(self, size):
+            ack = self._read_session_reply()
+            if ack is not None:
+                return ack
             self.reads += 1
             return (json.dumps(packets[self.reads - 1]).encode() + b"\n") if self.reads <= 3 else b""
 
@@ -604,7 +616,7 @@ def test_room_callback_failure_is_not_erased_by_clean_reader_shutdown(monkeypatc
     import sys
     from types import SimpleNamespace
 
-    class Port:
+    class Port(SynchronizedFakePort):
         def __init__(self, *args, **kwargs):
             self.reads = 0
 
@@ -615,6 +627,9 @@ def test_room_callback_failure_is_not_erased_by_clean_reader_shutdown(monkeypatc
             return False
 
         def readline(self, size):
+            ack = self._read_session_reply()
+            if ack is not None:
+                return ack
             self.reads += 1
             if self.reads == 1:
                 return json.dumps(frame()).encode() + b"\n"
