@@ -444,7 +444,10 @@ class HttpHead:
             if self._stream_required or require_live_stream:
                 raise HeadError("Continuous XIAO camera stream is not connected")
             response = await self._request("GET", "/api/camera.jpg")
-            if not (4 <= len(response.content) <= 4_000_000
+            # Both the Sense snapshot producer and MJPEG parser cap JPEG
+            # payloads at 512 KiB. Do not let a legacy HTTP still bypass
+            # that same camera evidence bound.
+            if not (4 <= len(response.content) <= 512 * 1024
                     and response.content.startswith(b"\xff\xd8")
                     and response.content.endswith(b"\xff\xd9")):
                 # A camera HTTP response with only a valid SOI can be
