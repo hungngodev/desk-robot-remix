@@ -32,9 +32,11 @@ from desk_robot_voice_intents import (
     _advice_only_request,
     native_grounded_fact,
     native_readonly_request,
-    native_readonly_requests as native_readonly_requests,
     native_readonly_requests_with_capacity,
     pack_grounded_facts,
+)
+from desk_robot_voice_intents import (
+    native_readonly_requests as native_readonly_requests,
 )
 
 # The host test environment installs the Mac package; the isolated pinned
