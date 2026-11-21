@@ -1354,3 +1354,114 @@ async def test_recovered_two_pet_vad_snapshot_starts_both_current_cameras():
         )
     finally:
         await visual.close()
+
+
+async def test_recovered_snapshot_does_not_release_newer_human_voice():
+    """Stale snapshot end for one pet must not clear a later real VAD start."""
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+
+    class Pet:
+        def __init__(self):
+            self.calls = 0
+
+        async def interrupt(self, robot_id):
+            index = self.calls
+            self.calls += 1
+            entered[index].set()
+            await release[index].wait()
+
+    class Conversation:
+        async def stop(self):
+            pass
+
+    class Head:
+        async def snapshot(self):
+            await asyncio.Event().wait()
+
+    ids = ("robot-01", "robot-02")
+    settings = SimpleNamespace(
+        robots=[SimpleNamespace(id=robot_id) for robot_id in ids],
+        voice_vision_tools_enabled=True, vision_model="local-vlm",
+    )
+    visual = MultimodalOrchestrator(
+        settings, {robot_id: Head() for robot_id in ids},
+        object(), asyncio.Lock(),
+    )
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings, runtime.pet = settings, Pet()
+    runtime.conversation, runtime.multimodal = Conversation(), visual
+    # A prior real start owns robot-01, but the delayed snapshot says only
+    # robot-02 is speaking and will try to release robot-01.
+    visual.hub.notify("robot-01", "human_voice", time.monotonic())
+    older = asyncio.create_task(runtime._on_voice_snapshot(frozenset({"robot-02"})))
+    newer = None
+    try:
+        await asyncio.wait_for(entered[0].wait(), timeout=1)
+        newer = asyncio.create_task(
+            runtime._on_voice_interrupt("robot-01", "speech_start")
+        )
+        await asyncio.wait_for(entered[1].wait(), timeout=1)
+        release[0].set()
+        await asyncio.wait_for(older, timeout=1)
+        assert visual.hub.user_active("robot-01", time.monotonic())
+        assert visual._capture_tasks.get("robot-02") is None
+        release[1].set()
+        await asyncio.wait_for(newer, timeout=1)
+        assert visual.hub.user_active("robot-01", time.monotonic())
+    finally:
+        for event in release:
+            event.set()
+        await asyncio.gather(
+            *([older] + ([newer] if newer is not None else [])),
+            return_exceptions=True,
+        )
+        await visual.close()
+
+
+async def test_recovered_snapshot_does_not_revive_newer_speech_end():
+    """A real end during slow STOP supersedes an old active snapshot."""
+    from desk_robot.multimodal import CameraFrameHub
+
+    ready, release = asyncio.Event(), asyncio.Event()
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            ready.set()
+            await release.wait()
+
+    class Conversation:
+        async def stop(self):
+            pass
+
+    hub = CameraFrameHub(["robot-01"])
+
+    class Visual:
+        def __init__(self):
+            self.hub = hub
+
+        def voice_started(self, robot_id):
+            self.hub.notify(robot_id, "human_voice", time.monotonic())
+
+        def voice_ended(self, robot_id):
+            self.hub.speech_ended(robot_id, time.monotonic())
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")]
+    )
+    runtime.pet = Pet()
+    runtime.conversation, runtime.multimodal = Conversation(), Visual()
+    older = asyncio.create_task(runtime._on_voice_snapshot(frozenset({"robot-01"})))
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=1)
+        await runtime._on_voice_interrupt("robot-01", "speech_end")
+        assert not hub.user_active("robot-01", time.monotonic())
+        release.set()
+        await asyncio.wait_for(older, timeout=1)
+        assert not hub.user_active("robot-01", time.monotonic())
+    finally:
+        release.set()
+        await asyncio.gather(older, return_exceptions=True)

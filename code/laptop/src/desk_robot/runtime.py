@@ -250,6 +250,9 @@ class Runtime:
         visual = getattr(self, "multimodal", None)
         if visual is None:
             return
+        # The authenticated snapshot describes the server state before
+        # asynchronous decoder STOP. Later live VAD edges supersede it.
+        voice_edges_at_snapshot = getattr(self, "_voice_edge_generation", 0)
         # A start may be missing from the replay ring after reconnect.
         # Active VAD from the authenticated server is enough to stop any
         # currently playing unsolicited or group speech before reconciliation.
@@ -310,6 +313,14 @@ class Runtime:
                 # VAD reconciliation still occurs below.
                 preempt_error = failures[0]
             if getattr(self, "_closed", False):
+                return
+            if getattr(self, "_voice_edge_generation", 0) != voice_edges_at_snapshot:
+                # A newer start/end supersedes the entire recovered snapshot.
+                # Do not rearm its camera, release a newer human speech floor,
+                # or resurrect an already ended VAD via stale reconciliation.
+                # A fresh authenticated snapshot can reconcile other peers.
+                if preempt_error is not None:
+                    raise preempt_error
                 return
             for robot_id in sorted(missing_starts):
                 if callable(prepare):
@@ -394,6 +405,9 @@ class Runtime:
             return
         if robot_id not in {robot.id for robot in self.settings.robots}:
             raise KeyError(f"Unknown voice source: {robot_id}")
+        # The listener validated this real VAD edge. Fence any earlier
+        # asynchronously recovering server snapshot before changing leases.
+        self._voice_edge_generation = getattr(self, "_voice_edge_generation", 0) + 1
         attention = getattr(self, "attention", None)
         if attention is not None and kind in ("speech_start", "normal", "group"):
             attention.human_started(robot_id, time.monotonic())
