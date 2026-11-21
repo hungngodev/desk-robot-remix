@@ -80,6 +80,18 @@ def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
     assert "bme.gas_resistance >= 0" not in code
 
 
+def test_optional_radar_absence_never_blocks_shared_station_boot():
+    # Pinned ncmreynolds/ld2410 v0.2.2 begin(Stream, true) waits up to
+    # one second for firmware identification if the optional radar is absent.
+    # Explicit nonblocking boot must preserve fresh UART packet gating.
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    assert "radar.begin(Serial1, false);" in src
+    assert "radar.begin(Serial1);" not in src
+    assert "radar.read();" in src
+    assert "radar.isConnected()" in src
+    assert "radar_sample_clock.has_sample()" in src
+
+
 def test_bme688_gas_conversion_never_blocks_radar_uart_or_fakes_sample_age():
     # The pinned Adafruit_BME680 2.0.5 API supports an asynchronous
     # conversion; this is a source contract until physical Feather trials.
