@@ -118,7 +118,8 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     folder = tmp_path / "docs/cad/remixes"
     folder.mkdir(parents=True)
     for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
-                 "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad"):
+                 "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad",
+                 "mg90s_pocket_fit_gauges.scad"):
         (folder / name).write_text("cube([1,1,1]);\n")
     (folder / "dock").mkdir()
     (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
@@ -137,13 +138,18 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     rendered = tmp_path / "rendered"
     report = source.export_kit(tmp_path, output_dir=rendered)
     assert len(commands) == (
-        len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS) + len(source.RANGER_FITS) + len(source.DOCKS)
-    ) == 16
-    assert len(report["parts"]) == 16
+        len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS)
+        + len(source.RANGER_FITS) + len(source.MG90S_FITS) + len(source.DOCKS)
+    ) == 20
+    assert len(report["parts"]) == 20
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
     assert (rendered / "fit_stls/speaker_rect_fit_gauge.stl").is_file()
     assert (rendered / "fit_stls/speaker_rear_chamber_reference.stl").is_file()
+    assert all(
+        (rendered / f"fit_stls/{name}.stl").is_file()
+        for name in source.MG90S_FITS
+    )
     assert (rendered / "fit_stls/vl53l0x_gy530_fit_gauge.stl").is_file()
     assert (rendered / "dock_stls/dock_passive_fit.stl").is_file()
     assert (rendered / "dock_stls/dock_rail_entry_coupon.stl").is_file()
@@ -260,7 +266,8 @@ def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     folder = tmp_path / "docs/cad/remixes"
     folder.mkdir(parents=True)
     for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
-                 "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad"):
+                 "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad",
+                 "mg90s_pocket_fit_gauges.scad"):
         (folder / name).write_text("cube([1,1,1]);\n")
     (folder / "dock").mkdir()
     (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
@@ -411,13 +418,15 @@ def test_real_openscad_renders_provisional_source_parts(tmp_path):
     assert len(report["parts"]) == (
         len(source.ADAPTERS) + len(source.GAUGES)
         + len(source.SPEAKER_FITS) + len(source.RANGER_FITS)
-        + len(source.DOCKS)
-    ) == 16
+        + len(source.MG90S_FITS) + len(source.DOCKS)
+    ) == 20
     assert (output / "adapter_stls/speaker_grille.stl").is_file()
     assert (output / "dock_stls/dock_passive_fit.stl").is_file()
     assert (output / "dock_stls/dock_rail_entry_coupon.stl").is_file()
     assert (output / "dock_stls/dock_ir_pair_position_coupon.stl").is_file()
     assert (output / "fit_stls/speaker_rear_chamber_reference.stl").is_file()
+    assert all((output / f"fit_stls/{name}.stl").is_file()
+               for name in source.MG90S_FITS)
     for item in report["parts"]:
         assert source.binary_stl_triangles(output / item["location"]) > 0
     assert report["full_printable_assembly_verified"] is False

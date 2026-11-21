@@ -43,6 +43,10 @@ FIT_REFERENCES = (
     ("Speaker Fit Gauge Only", "fit_stls/speaker_rect_fit_gauge.stl"),
     ("Unqualified 1cc Speaker Chamber Reference Only",
      "fit_stls/speaker_rear_chamber_reference.stl"),
+    ("MG90S 0.15mm Case Coupon Only", "fit_stls/mg90s_fit_015.stl"),
+    ("MG90S 0.30mm Case Coupon Only", "fit_stls/mg90s_fit_030.stl"),
+    ("MG90S 0.45mm Case Coupon Only", "fit_stls/mg90s_fit_045.stl"),
+    ("MG90S 0.60mm Case Coupon Only", "fit_stls/mg90s_fit_060.stl"),
     ("GY530 Sensor Fit Gauge Only", "fit_stls/vl53l0x_gy530_fit_gauge.stl"),
 )
 

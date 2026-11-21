@@ -7,3 +7,14 @@ Source: [mg90s_pocket_fit_gauges.scad](mg90s_pocket_fit_gauges.scad). Open with 
 Engineering verification on the nominal settings: OpenSCAD CGAL rendering succeeded and trimesh loaded **112 triangles, four disconnected watertight shells**, total nominal bounds **136.0 by 17.2 by 8.0 mm**. This is **computer geometry verification only**. It does not prove actual material tolerance, horn interference, loaded leverage, gripper jaw geometry, key/candy pickup, linkage collisions or assembled printer fit.
 
 Measure the servo mounting tabs, screw locations, horn hub and case height separately. Verify jaw contact force and 10 mm object lifting in the repo's [first gripper test](../../guides/first-gripper-test.md). No proof of loaded pickup exists without a real prototype. The coupon exists to reduce failed full gripper prints, not to redefine the finished five robot product.
+
+
+For a reproducible, provenance checked print rather than four disconnected
+bodies in a single STL, run `python3 code/scripts/export_fit_kit.py` from
+the repository root with OpenSCAD installed. It now exports four independent,
+connected `fit_stls/mg90s_fit_015.stl`, `mg90s_fit_030.stl`,
+`mg90s_fit_045.stl` and `mg90s_fit_060.stl` coupons, hashes their source
+and validates mesh topology. The historical four-cup layout remains selectable
+with `-D 'part="mg90s_four_cup_layout"'`; it is deliberately not included
+as one disconnected mesh in the main export manifest. Never install these
+temporary clearance samples as actual moving servo brackets.

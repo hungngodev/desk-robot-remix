@@ -2,6 +2,7 @@
 // Does not edit or redistribute the original gripper/forklift STLs.
 // DEFAULT DIMENSIONS ARE NOMINAL ONLY. CALIPER-MEASURE YOUR ACTUAL MG90S.
 $fn=32;
+part = "mg90s_four_cup_layout";
 case_length_mm = 23.0;
 case_width_mm = 12.2;
 wall_mm = 2.5;
@@ -34,7 +35,16 @@ module fit_gauge(clearance_mm) {
                   total_height_mm-floor_mm+0.1]);
     }
 }
-for (i=[0:len(clearances_mm)-1]) {
-    translate([i*(case_length_mm+2*wall_mm+spacing_mm),0,0])
-        fit_gauge(clearances_mm[i]);
-}
+// Export each coupon as an independent single-solid STL to keep the
+// shared print verifier's closed, connected mesh policy. Historical
+// four-cup layout remains available for manually printing the set.
+if (part == "mg90s_four_cup_layout") {
+    for (i=[0:len(clearances_mm)-1]) {
+        translate([i*(case_length_mm+2*wall_mm+spacing_mm),0,0])
+            fit_gauge(clearances_mm[i]);
+    }
+} else if (part == "mg90s_fit_015") fit_gauge(0.15);
+else if (part == "mg90s_fit_030") fit_gauge(0.30);
+else if (part == "mg90s_fit_045") fit_gauge(0.45);
+else if (part == "mg90s_fit_060") fit_gauge(0.60);
+else assert(false, "Unknown MG90S fit coupon");

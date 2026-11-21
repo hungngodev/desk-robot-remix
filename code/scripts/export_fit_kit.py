@@ -30,6 +30,8 @@ GAUGES = (
 SPEAKER_FITS = ("speaker_rect_fit_gauge",
                 "speaker_rear_chamber_reference")
 RANGER_FITS = ("vl53l0x_gy530_fit_gauge",)
+MG90S_FITS = ("mg90s_fit_015", "mg90s_fit_030",
+              "mg90s_fit_045", "mg90s_fit_060")
 DOCKS = ("dock_passive_fit", "dock_rail_entry_coupon",
          "dock_ir_pair_position_coupon")
 
@@ -207,6 +209,7 @@ def export_kit(
         ("adapter_stls", source_dir / "one_robot_adapter_kit.scad", ADAPTERS),
         ("fit_stls", source_dir / "remaining_fit_gauges.scad", GAUGES),
         ("fit_stls", source_dir / "speaker_rect_fit_gauge.scad", SPEAKER_FITS),
+        ("fit_stls", source_dir / "mg90s_pocket_fit_gauges.scad", MG90S_FITS),
         ("fit_stls", source_dir / "vl53l0x_gy530_fit_gauge.scad", RANGER_FITS),
         ("dock_stls", source_dir / "dock/dock_passive_fit.scad", DOCKS),
     )
@@ -247,7 +250,7 @@ def export_kit(
                     "quantity_per_robot": 8 if name == "tof_adjustable" else 1,
                     "installed_quantity_per_robot": 0,
                     "temporary_fit_coupon": name in (
-                        *GAUGES, *SPEAKER_FITS, *RANGER_FITS,
+                        *GAUGES, *SPEAKER_FITS, *RANGER_FITS, *MG90S_FITS,
                         "dock_rail_entry_coupon",
                         "dock_ir_pair_position_coupon",
                     ),
@@ -305,6 +308,7 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         ("adapter_stls", "one_robot_adapter_kit.scad", ADAPTERS),
         ("fit_stls", "remaining_fit_gauges.scad", GAUGES),
         ("fit_stls", "speaker_rect_fit_gauge.scad", SPEAKER_FITS),
+        ("fit_stls", "mg90s_pocket_fit_gauges.scad", MG90S_FITS),
         ("fit_stls", "vl53l0x_gy530_fit_gauge.scad", RANGER_FITS),
         ("dock_stls", "dock/dock_passive_fit.scad", DOCKS),
     ):
@@ -319,7 +323,7 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         # A manifest is not a release BOM. Even a syntactically valid edit
         # must never turn a test coupon into an installed robot component.
         name = Path(location).stem
-        coupon = name in (*GAUGES, *SPEAKER_FITS, *RANGER_FITS,
+        coupon = name in (*GAUGES, *SPEAKER_FITS, *RANGER_FITS, *MG90S_FITS,
                           "dock_rail_entry_coupon",
                           "dock_ir_pair_position_coupon")
         if (item.get("installed_quantity_per_robot") != 0
