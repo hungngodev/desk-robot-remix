@@ -274,11 +274,17 @@ class KokoroHeadSpeaker:
             # response times out or the caller is cancelled. Relinquish
             # that uncertain floor before propagating the original error.
             granted = await self._bridge("/session", grant_request)
-        except BaseException:
-            try:
-                await self._bridge("/session", release_request)
-            except Exception:
-                pass
+        except BaseException as exc:
+            # The bridge rejects these requests before installing a lease.
+            # A 409 may belong to another active speaker with identical IDs;
+            # releasing by device ID would incorrectly stop that session.
+            rejected = (isinstance(exc, httpx.HTTPStatusError)
+                        and exc.response.status_code in {400, 401, 403, 404, 409, 422})
+            if not rejected:
+                try:
+                    await self._bridge("/session", release_request)
+                except Exception:
+                    pass
             raise
         if not matches(granted, True):
             # A damaged or misdirected receipt cannot prove lease authority.

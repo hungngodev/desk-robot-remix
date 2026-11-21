@@ -1542,3 +1542,38 @@ async def test_kokoro_lost_grant_response_compensates_bridge_lease(
     assert [request["enabled"] for request in requests] == [
         True, False, True, False,
     ]
+
+
+@pytest.mark.parametrize("status", [400, 401, 409])
+async def test_kokoro_explicit_rejected_grant_preserves_other_fleet_lease(
+    settings, monkeypatch, status,
+):
+    """An explicitly rejected grant must not release a different session."""
+    import httpx
+
+    monkeypatch.setenv(settings.speech_bridge_token_env, "p" * 32)
+    robot = SimpleNamespace(device_id="head-01")
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+            self.other_lease_active = True
+
+        async def post(self, url, **kwargs):
+            body = kwargs["json"]
+            self.calls.append(body.copy())
+            assert body["enabled"] is True, (
+                "Do not release another session after an explicit bridge rejection"
+            )
+            return httpx.Response(
+                status, request=httpx.Request("POST", url),
+                json={"error": "grant rejected before lease acquisition"},
+            )
+
+    client = Client()
+    speaker = KokoroHeadSpeaker(settings, client)
+    with pytest.raises(httpx.HTTPStatusError):
+        async with speaker.session([robot]):
+            pytest.fail("Rejected grant must never enter speech session")
+    assert client.other_lease_active is True
+    assert client.calls == [{"device_ids": ["head-01"], "enabled": True}]
