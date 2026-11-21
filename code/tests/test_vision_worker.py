@@ -100,3 +100,44 @@ async def test_native_visual_question_huge_confidence_fails_closed_without_crash
     assert await vision.answer("What do you see?", [valid_frame]) == (
         "A key is visible on the desk."
     )
+
+
+@pytest.mark.parametrize("invalid_kind", [[], ["person"], {}, {"kind": "person"}, 1, None])
+async def test_scene_comparator_unhashable_model_kind_is_rejected_without_crash(invalid_kind):
+    import json
+    from io import BytesIO
+
+    from desk_robot.vision import OllamaScene
+    from PIL import Image
+
+    image = BytesIO()
+    Image.new("RGB", (16, 16), (100, 100, 100)).save(image, "JPEG")
+    frame = image.getvalue()
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"message": {"content": json.dumps({
+                "notable": True, "kind": client.kind,
+                "description": "A person entered the scene",
+                "confidence": 0.95,
+            })}}
+
+    class Client:
+        kind = invalid_kind
+
+        async def post(self, *args, **kwargs):
+            return Response()
+
+    client = Client()
+    scene = OllamaScene(client, url="http://localhost:11434", model="local-vlm")
+    # Model JSON data may contain a non-string kind; no observer task should
+    # terminate because Python cannot hash an array or object.
+    assert await scene.compare(frame, frame) is None
+    client.kind = "person"
+    change = await scene.compare(frame, frame)
+    assert change is not None
+    assert change.kind == "person"
+    assert change.confidence == 0.95

@@ -252,7 +252,7 @@ class OllamaScene:
         kind, summary, confidence = (
             value.get("kind"), value.get("description"), value.get("confidence")
         )
-        if kind not in {"person", "hand", "key", "candy", "object", "scene"}:
+        if type(kind) is not str or kind not in {"person", "hand", "key", "candy", "object", "scene"}:
             return None
         if not isinstance(summary, str) or not 5 <= len(summary.strip()) <= 180:
             return None
