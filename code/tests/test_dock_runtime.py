@@ -807,3 +807,23 @@ async def test_stale_mac_receipt_does_not_enter_dock_detector(tmp_path, monkeypa
 def test_invalid_dock_receipt_types_are_not_pose_evidence(bad_receipt):
     with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
         dock_runtime.unpack_dock_frame(bad_receipt)
+
+
+def test_original_dock_receipt_time_is_not_replaced_after_waiting():
+    import time
+    from desk_robot.dock_vision import assess_dock
+
+    received = time.monotonic() - 0.15
+    jpeg, stamp = dock_runtime.unpack_dock_frame(
+        (b"\xff\xd8\xff\xd9", received)
+    )
+    assert jpeg.startswith(b"\xff\xd8")
+    assert stamp == received
+    # A second delayed stage must assess the ORIGINAL receipt, not a
+    # fabricated new pose timestamp after native detector completion.
+    pose = DockPose(0, 0, 450, 0.5, stamp)
+    result = assess_dock(
+        pose, now=received + 0.25, target_distance_mm=120
+    )
+    assert result.phase == "hold"
+    assert "stale" in result.reason.lower()
