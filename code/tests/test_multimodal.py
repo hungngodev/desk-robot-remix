@@ -67,6 +67,46 @@ def config(enabled=True):
 
 
 
+async def test_synthetic_camera_observer_keeps_simulation_without_weakening_hardware_consent():
+    """Simulation uses fake images; real head capture still needs explicit opt-in."""
+    synthetic = config(enabled=False)
+    synthetic.mode = "simulation"
+    head = Head()
+    sim = MultimodalOrchestrator(
+        synthetic, {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        first = await sim.capture("robot-01", source="proactive")
+        assert first.source == "proactive"
+        assert head.captures == 1
+        sim.sensor_event("robot-01", "petting_zone")
+        async with asyncio.timeout(2):
+            while head.captures < 3:
+                await asyncio.sleep(.01)
+        assert any(frame.source == "sensor"
+                   for frame in sim.hub.frames["robot-01"])
+    finally:
+        await sim.close()
+
+    hardware = config(enabled=False)
+    hardware.mode = "hardware"
+    physical = Head()
+    hw = MultimodalOrchestrator(
+        hardware, {"robot-01": physical, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="Camera consent revoked"):
+            await hw.capture("robot-01", source="proactive")
+        hw.sensor_event("robot-01", "petting_zone")
+        await asyncio.sleep(.05)
+        assert physical.captures == 0
+        assert not hw.hub.frames["robot-01"]
+    finally:
+        await hw.close()
+
+
 async def test_invalid_live_frame_receipts_cannot_poison_sampling_cursor():
     """Future, stale, NaN, and duplicate receipts never starve fresh frames."""
     class BadClockHead(Head):
@@ -169,9 +209,14 @@ async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_p
                 await asyncio.sleep(0.02)
         metrics = visual.status("robot-01")["software_timings"]
         assert metrics["stream_frames_received"] >= 7
-        assert 2 <= metrics["stream_frames_selected"] < 7
+        # The sampler must not go blind for 3+ seconds after the first
+        # two frames. An object appearing one second into the continuous
+        # video must reach the cheap motion gate without a new request.
+        assert 3 <= metrics["stream_frames_selected"] < 7
         assert metrics["stream_frames_skipped"] >= 1
         assert len(visual.hub.frames["robot-01"]) >= 2
+        assert any(frame.motion_fraction > .01
+                   for frame in visual.hub.frames["robot-01"])
         assert all(frame.source == "proactive"
                    for frame in visual.hub.frames["robot-01"])
         assert head.captures == 0  # No calls to /api/camera.jpg
