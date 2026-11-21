@@ -217,7 +217,9 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         output_sample_rate_ != static_cast<int>(kSpeakerRate)) {
         return 0;
     }
-    const int volume = output_volume_;
+    // Match the selected Sense-only Xiaozhi I2S gain clamp exactly.
+    // A malformed saved volume must not overflow PCM32 or the echo reference.
+    const int volume = std::clamp(output_volume_, 0, 100);
     uint64_t started_generation = 0;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
