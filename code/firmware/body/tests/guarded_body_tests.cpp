@@ -1193,6 +1193,45 @@ static void belly_adc_does_not_refresh_stale_jaw_sample() {
   CHECK(!body.state().armed);
 }
 
+static void physical_gripper_stops_ramping_when_adc_is_not_trustworthy() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_grip_feedback(true);
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "grip 60", 100) == "ERR grip force_missing_or_stale");
+  desk_robot::AccessoryReadings readings{};
+  readings.force.present = readings.force.valid = true;
+  readings.force.valid_mask = 3U;
+  readings.force.jaw_sample_seq = 1U;
+  readings.force.at_ms = readings.force.jaw_at_ms = 100U;
+  readings.force.adc[1] = 1000;
+  body.set_accessories(readings, 100U);
+  CHECK(send(body, "grip 60", 100) == "OK grip angle=60");
+  body.tick(120);
+  CHECK(body.state().grip == 89 && body.state().grip_target == 60);
+  // A failed conversion during a pending jaw motion must freeze locally,
+  // even with no corrective Mac callback arriving on the head UART.
+  readings.force.valid = false;
+  body.set_accessories(readings, 121U);
+  body.tick(140U);
+  CHECK(body.state().grip == 89 && body.state().grip_target == 89);
+  CHECK(body.state().armed && body.state().servos_attached);
+  CHECK(send(body, "grip 60", 140U) == "ERR grip force_missing_or_stale");
+  readings.force.valid = true;
+  readings.force.jaw_sample_seq = 2U;
+  readings.force.at_ms = readings.force.jaw_at_ms = 141U;
+  body.set_accessories(readings, 141U);
+  CHECK(send(body, "grip 60", 141U) == "OK grip angle=60");
+  for (int endpoint : {-32768, 32767}) {
+    readings.force.adc[1] = static_cast<std::int16_t>(endpoint);
+    ++readings.force.jaw_sample_seq;
+    readings.force.at_ms = readings.force.jaw_at_ms = 142U;
+    body.set_accessories(readings, 142U);
+    body.tick(142U);
+    CHECK(body.state().grip == 89 && body.state().grip_target == 89);
+    CHECK(send(body, "grip 60", 142U) == "ERR grip force_missing_or_stale");
+  }
+}
+
 static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   desk_robot::AccessoryReadings readings{};
@@ -1622,6 +1661,7 @@ int main() {
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     belly_adc_does_not_refresh_stale_jaw_sample();
+    physical_gripper_stops_ramping_when_adc_is_not_trustworthy();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();

@@ -438,6 +438,13 @@ void BodyControl::tick(std::uint32_t now_ms) {
     state_.right = 0;
     drive_duration_ms_ = 0;
   }
+  // If the jaw feedback disappears AFTER a valid command, freeze
+  // the target before the next servo ramp. Leave PWM attached to retain
+  // an already held object rather than dropping it on I2C loss.
+  if (grip_feedback_required_ && state_.grip != state_.grip_target &&
+      !grip_feedback_fresh(now_ms)) {
+    state_.grip_target = state_.grip;
+  }
   const std::uint32_t steps = (now_ms - last_servo_step_ms_) / kServoStepMs;
   if (steps != 0) {
     last_servo_step_ms_ += steps * kServoStepMs;
@@ -1080,6 +1087,10 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "OK drive left=%d right=%d ms=%d",
                     state_.left, state_.right, duration);
     } else if (lift || grip) {
+      if (grip && grip_feedback_required_ && !grip_feedback_fresh(now_ms)) {
+        std::snprintf(reply, capacity, "ERR grip force_missing_or_stale");
+        return;
+      }
       (lift ? state_.lift_target : state_.grip_target) = first;
       std::snprintf(reply, capacity, "OK %s angle=%d", command, first);
     } else {

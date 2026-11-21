@@ -149,6 +149,16 @@ class BodyControl {
   // though actual tilt thresholds are NOT yet calibrated. DC test profile
   // and host policy tests opt in explicitly rather than changing their ABI.
   void require_imu_for_motion(bool required) { imu_motion_required_ = required; }
+  // Physical full build must never advance an MG90S jaw toward a command
+  // target without a recent, unclipped, independently acquired ADS1115
+  // channel 1 value. The historical disconnected DC fixture opts out.
+  void require_grip_feedback(bool required) { grip_feedback_required_ = required; }
+  bool grip_feedback_fresh(std::uint32_t now_ms) const {
+    const auto& f = state_.accessories.force;
+    return f.present && f.valid && (f.valid_mask & 2U) != 0U &&
+           f.jaw_sample_seq != 0U && now_ms - f.jaw_at_ms < 500U &&
+           f.adc[1] != -32768 && f.adc[1] != 32767;
+  }
   bool imu_fresh(std::uint32_t now_ms) const {
     // A fresh sample alone cannot authenticate the board. A previously
     // probed WROOM sensor family must agree with the live driver reading.
@@ -188,6 +198,7 @@ class BodyControl {
   BerryReading imu_{};
   std::uint32_t boot_epoch_ = 0;
   bool imu_motion_required_ = false;
+  bool grip_feedback_required_ = false;
   std::uint32_t last_control_ms_ = 0;
   std::uint32_t drive_started_ms_ = 0;
   std::uint32_t drive_duration_ms_ = 0;
