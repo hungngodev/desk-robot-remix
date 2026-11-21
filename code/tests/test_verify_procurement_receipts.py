@@ -156,9 +156,17 @@ def test_real_prior_leap_day_can_be_verified_against_matching_immutable_record()
 def test_pinned_procurement_json_rejects_ambiguous_duplicate_receipt_fields():
     gate = release.PART_GATES[0]
     item = receipt("part:imu", gate)
-    good = lookup(URL, records=[item])
+    captured = []
+    def capture(source_url):
+        response = lookup(source_url, records=[item])
+        captured.append(response)
+        return response
+
+    # Exercise the real immutable URL conversion before corrupting the
+    # returned JSON. The public evidence_url is not itself the GitHub API.
+    assert release.verified_scoped_record(item, SHA, capture)
+    good = captured[0]
     raw = base64.b64decode(good["content"]).decode()
-    assert release.verified_scoped_record(item, SHA, lambda _: good)
     for changed in (
         raw.replace('"result": "pass"',
                     '"result": "fail", "result": "pass"'),
