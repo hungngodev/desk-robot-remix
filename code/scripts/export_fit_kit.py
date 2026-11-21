@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -348,8 +349,25 @@ def reject_nonfinite_fit_kit_number(token: str) -> None:
 def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict:
     """Reject stale or changed print files; does not certify fit or power."""
     output = output_dir or root / "docs/cad/remixes"
+    manifest = output / "fit_kit_manifest.json"
+    if not manifest.is_file():
+        # Fresh clones deliberately do not ship generated, unqualified STLs.
+        # Tell the builder how to render the SAME candidate and verify it,
+        # rather than surfacing a raw FileNotFoundError with no next step.
+        command = (
+            "python code/scripts/export_fit_kit.py --repo "
+            + shlex.quote(str(root))
+            + " --output " + shlex.quote(str(output))
+        )
+        raise ValueError(
+            f"Candidate fit kit manifest missing: {manifest}. "
+            "Install OpenSCAD and run: " + command + ". "
+            "Then rerun with --verify using the same --repo and --output. "
+            "Exported gauges are provisional and do not prove fitted production "
+            "assembly, power safety or dock charging."
+        )
     report = json.loads(
-        (output / "fit_kit_manifest.json").read_text(encoding="utf-8"),
+        manifest.read_text(encoding="utf-8"),
         object_pairs_hook=strict_fit_kit_manifest_object,
         parse_constant=reject_nonfinite_fit_kit_number,
     )

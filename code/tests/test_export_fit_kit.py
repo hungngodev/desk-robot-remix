@@ -32,6 +32,30 @@ def tetra_stl(*, flip_one_face: bool = False) -> bytes:
     return bytes(data)
 
 
+
+def test_clean_checkout_verify_explains_how_to_generate_candidate_manifest(
+    tmp_path,
+):
+    source = module()
+    # Fresh source checkouts contain SCAD references but not generated STL
+    # manifests. Include spaces to verify that the printed shell command is
+    # safe to copy on a Mac without guessing the output directory.
+    checkout = tmp_path / "checkout with spaces"
+    checkout.mkdir()
+    output = checkout / "rendered candidates"
+    with pytest.raises(ValueError, match="Candidate fit kit manifest missing") as exc:
+        source.verify_fit_kit(checkout, output_dir=output)
+    message = str(exc.value)
+    assert "Install OpenSCAD" in message
+    assert "python code/scripts/export_fit_kit.py" in message
+    assert "--repo '" + str(checkout) + "'" in message
+    assert "--output '" + str(output) + "'" in message
+    assert "--verify" in message
+    assert "provisional" in message
+    assert "power safety or dock charging" in message
+    assert not output.exists()
+
+
 def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
     source = module()
     output = tmp_path / "part.stl"
