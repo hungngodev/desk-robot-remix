@@ -10,6 +10,41 @@ license attribution and reproducible fit analysis, not actual physical
 fit, shipping rights or final assembly acceptance. Update the revisions
 only after inspecting the upstream license and rechecking affected joints.
 
+## Cozmars packaging comparison before Sparky fallback
+
+Evaluate Cozmars V2 before freezing the saved Sparky shell because its creator
+published an editable full robot assembly specifically intended to be adapted to
+different electronics. The upstream model repository is
+`r-cute/rcute-cozmars-model-v2` at commit
+`515f980d4ee91f6a279406085f591b882254aad8`. That revision contains
+`cozmars-v2.f3z` Git blob `4ea3952fdc452081dfc711839e8b500e033a20ee`
+and `cozmars-v2.step` Git blob
+`aabc2da472af675a90ad51e425bd576ba1d31383`. The model repository itself
+contains no LICENSE file. The creator's Cozmars V2 distribution page states
+Creative Commons Attribution NonCommercial ShareAlike and the related server
+repository says commercial use is prohibited.
+
+Treat Cozmars V2 as an external noncommercial packaging reference only for
+this personal prototype until its exact CAD redistribution grant is preserved
+with the model. Do not copy its F3Z or STEP into this repository, do not
+relicense it, and do not make a five robot commercial manufacturing claim from
+this comparison. Its original Raspberry Pi Zero, three 9 g servos, N20 motors,
+1.14 inch display, 10 by 35 by 65 mm battery and 20 by 35 by 3.5 mm speaker
+are not our selected hardware and cannot be used as substitute dimensions.
+
+For the comparison, open the upstream STEP or Fusion assembly separately and
+record only measured interface envelopes that matter to this robot: track and
+body packaging, front claw clearance, head electronics volume, service access,
+wire bend space and center of gravity. Compare those values against the actual
+parts entered in `FUSION_MEASUREMENT_SHEET.md`. Preserve the requested fixed
+retro TV head, inset monochrome face, XIAO Sense camera and microphone, two
+MG90S lift and jaw servos, eight VL53L0X placements and protected power stack.
+If Cozmars geometry cannot accept those measured interfaces without violating
+its license, appearance, safety clearances or drivetrain assumptions, record
+the mismatch and use the already saved Sparky v0.1 head meshes as the fallback
+reference. Sparky therefore remains executable fallback geometry, not the
+unexamined first choice.
+
 ## What is real today
 
 This is the exact mechanical integration plan for the requested **full featured**
