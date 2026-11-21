@@ -29,6 +29,31 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | Key and candy actual width and thickness | | object_w / h |
 | Actual printer minimum wall and hole clearance | | print_wall, clearance_xy |
 
+## Supplier reference envelopes, not measured fit (November 21)
+
+These are verified seller or manufacturer **nominal board dimensions**, not
+measurements of the actual shipped PCB, headers, attached leads or installed
+lens offsets. The blank `Measured mm` cells above intentionally remain
+blank. Use these numbers to prepare reversible CAD fit coupons, then inspect
+the physical revision before releasing printed parts.
+
+1. [ElectroPeak GY-530 VL53L0X carrier SEN-19-006](https://electropeak.com/gy-530-vl53l0x-laser-range-finder) is listed as
+   **10.5 by 13.3 mm**, with a seller advertised minimum ranging distance of
+   **30 mm**. The actual optical center, lens-to-surface standoff, mounting
+   angle and pad-side 3.3 V SDA/SCL pullups are still unmeasured. A nominal
+   13.5 mm optical mounting height cannot be declared a working floor read
+   against a 30 mm published minimum.
+2. [ElectroPeak TCA9548A eight channel board COM-05-067](https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board)
+   is listed as **30 by 21 by 2 mm** before header/wire clearance. It advertises
+   3.3 V and 5 V compatibility, but the actual breakout pullups must be
+   measured on the installed 3.3 V bus. Chip capability alone does not prove
+   this specific assembled board safely isolates voltages.
+3. [Pololu S13V30F5 #4082](https://www.pololu.com/product/4082) is a
+   candidate, not a released converter. Its manufacturer mechanical envelope
+   is **22.9 by 22.9 by 9.7 mm** before wiring and thermal air space. Its
+   low-cell current, mounting and enclosure fit remain separate power
+   qualification gates.
+
 **The 68 mm battery gauge was undersized and is now corrected as a body-only fit coupon.** The LPHD7430085 protected 1S candidate is listed as 86 mm long plus leads. `docs/cad/remixes/remaining_fit_gauges.scad` now uses `power_l = 86` mm and refuses shorter overrides. This does **not** establish clearance for the leads, protection board, NTC connector, charger, boost or strain relief; the complete power assembly is still unqualified. Do not treat that gauge as an acceptable enclosure for the candidate pack. A selected cell, NTC connector, protection board, DC boost and strain relief must be measured and fitted together before changing final printed geometry. The 1 W speaker was rejected as the final model; an 8 ohm 2 W Challenge CS20-02P110-04-1X is now the exact fixed candidate. The source-proved 20 x 16 x 4.7 mm rectangular fit coupon (docs/cad/remixes/speaker_rect_fit_gauge.scad) renders watertight, but does NOT establish speaker seating, the stated 1cc sealed acoustic enclosure, real amplifier thermals or speech double talk.
 
 Do not fabricate any blank measurement to claim print-ready geometry.
