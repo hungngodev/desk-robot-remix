@@ -192,7 +192,7 @@ class OllamaChat:
             "properties": {
                 "tools": {
                     "type": "array",
-                    "maxItems": 2,
+                    "maxItems": 3,
                     "items": {
                         "type": "object",
                         "properties": {

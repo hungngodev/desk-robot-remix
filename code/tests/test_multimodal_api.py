@@ -534,7 +534,7 @@ async def test_existing_ollama_semantic_planner_uses_strict_json_schema(
     assert data["think"] is False
     assert data["options"]["temperature"] == 0
     assert data["format"]["type"] == "object"
-    assert data["format"]["properties"]["tools"]["maxItems"] == 2
+    assert data["format"]["properties"]["tools"]["maxItems"] == 3
     routes = data["format"]["properties"]["tools"]["items"]["properties"]["route"]["enum"]
     assert set(routes) == {
         "look", "status", "power-status", "aux-status", "latest-pickup",
