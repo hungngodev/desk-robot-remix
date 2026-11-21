@@ -87,6 +87,51 @@ def test_actual_pin_reassignment_fails_before_releasing_harness():
         ))
 
 
+@pytest.mark.parametrize("bad_gpio", [6, 12, 42])
+def test_selected_wroom_actuator_pin_cannot_be_flash_boot_or_xiao_only(bad_gpio):
+    plan, body, sense = sources()
+    bad = copy.deepcopy(plan)
+    bad["bus"]["body_gpio"]["lift_servo"] = bad_gpio
+    modified = body.replace(
+        "constexpr int kLiftServo = 18;",
+        f"constexpr int kLiftServo = {bad_gpio};",
+    )
+    assert modified != body
+    # Even a matching firmware + plan edit is not proof that the module has
+    # this output pad or that driving it is safe for the selected boot path.
+    with pytest.raises(ValueError, match="WROOM32"):
+        harness.verify(bad, modified, sense)
+
+
+def test_wroom_input_only_pad_cannot_be_reassigned_to_servo_output():
+    plan, body, sense = sources()
+    bad = copy.deepcopy(plan)
+    # Exchange the input touch sensor and servo to avoid triggering the
+    # duplicate-pin guard first. The firmware and plan now agree exactly.
+    bad["bus"]["body_gpio"]["lift_servo"] = 34
+    bad["bus"]["body_gpio"]["head_touch"] = 18
+    modified = body.replace(
+        "constexpr int kLiftServo = 18;", "constexpr int kLiftServo = 34;"
+    ).replace(
+        "constexpr int kTouchOutput = 34;", "constexpr int kTouchOutput = 18;"
+    )
+    assert modified != body
+    with pytest.raises(ValueError, match="WROOM32 output GPIO"):
+        harness.verify(bad, modified, sense)
+
+
+def test_wroom_sensor_input_cannot_use_unbonded_xiao_gpio():
+    plan, body, sense = sources()
+    bad = copy.deepcopy(plan)
+    bad["bus"]["body_gpio"]["head_touch"] = 42
+    modified = body.replace(
+        "constexpr int kTouchOutput = 34;", "constexpr int kTouchOutput = 42;"
+    )
+    assert modified != body
+    with pytest.raises(ValueError, match="WROOM32 GPIO"):
+        harness.verify(bad, modified, sense)
+
+
 def test_unqualified_bus_edits_cannot_silently_change_critical_floor():
     plan, body, sense = sources()
     bad = copy.deepcopy(plan)

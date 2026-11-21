@@ -31,6 +31,22 @@ HEAD_SINGLE = {
     "head_uart_tx": "ROBOT_UART_TX", "head_uart_rx": "ROBOT_UART_RX",
 }
 
+# The classic ESP32 WROOM32 is not an ESP32-S3. GPIO6..11 are internal flash
+# connections; 20, 24, 28..31, 37 and 38 are not usable WROOM32 module pads.
+# GPIO34, 35, 36 and 39 are input-only. Outputs in this selected design must
+# additionally avoid boot strapping pins and the UART0 programming console.
+_WROOM32_GPIO_PADS = frozenset({
+    0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19,
+    21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39,
+})
+_WROOM32_SAFE_OUTPUT_PADS = frozenset({
+    13, 14, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33,
+})
+_BODY_OUTPUT_ROLES = frozenset({
+    "left_stepper", "right_stepper", "lift_servo", "grip_servo",
+    "head_uart_tx", "sda", "scl",
+})
+
 
 def _pin(pattern: str, source: str, label: str) -> int:
     hits = re.findall(pattern, source)
@@ -49,6 +65,17 @@ def verify(plan: dict, body: str, head: str) -> None:
             raise ValueError(f"Invalid {owner} GPIO")
         if len(pins) != len(set(pins)):
             raise ValueError(f"Double-booked {owner} GPIO")
+    body_pins = bus["body_gpio"]
+    for role, value in body_pins.items():
+        pins = value if isinstance(value, list) else [value]
+        if any(pin not in _WROOM32_GPIO_PADS for pin in pins):
+            raise ValueError(f"WROOM32 GPIO not bonded or reserved for flash: {role}")
+        if role in _BODY_OUTPUT_ROLES and any(
+            pin not in _WROOM32_SAFE_OUTPUT_PADS for pin in pins
+        ):
+            raise ValueError(
+                f"WROOM32 output GPIO input-only or boot reserved: {role}"
+            )
     for label, symbol in BODY_SINGLE.items():
         actual = _pin(rf"constexpr int {symbol} = (\d+);", body, symbol)
         if actual != bus["body_gpio"][label]:
