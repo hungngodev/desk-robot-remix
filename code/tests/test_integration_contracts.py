@@ -652,7 +652,15 @@ def test_round2_xiaozhi_jpeg_and_bounded_uart_reuse_existing_owners():
     # replies only to bounded requests, never streams 100 Hz IMU or ToF logs
     # into Xiaozhi's audio thread, and makes no unsolicited motor decisions.
     assert "for (int bytes = 0; bytes < 64 && stream.available() > 0;" in body
-    assert "process_input(head_uart, head_receiver, false);" in body
+    # The bounded head input still feeds the canonical WROOM controller,
+    # but long status replies are enqueued instead of blocking the cliff and
+    # heartbeat loop for an entire 115200-baud JSON transmission.
+    assert "process_input(head_uart, head_receiver, head_replies, false);" in body
+    assert "process_input(Serial, usb_receiver, usb_replies, true);" in body
+    assert "replies.enqueue_line(reply);" in body
+    assert "head_replies.drain(head_uart);" in body
+    assert "usb_replies.drain(Serial);" in body
+    assert "stream.print(reply)" not in body
     assert "uart_driver_install(kUart, 2048," in bridge
     assert 'Transact("status", false)' in bridge
     assert "Serial2.printf" not in body
