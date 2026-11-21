@@ -2,11 +2,21 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace desk_robot {
+// Validate bytes BEFORE publishing a source identity or JPEG success receipt.
+// These are the same bounded native JPEG framing requirements on both routes.
+inline bool CompleteJpeg(const std::uint8_t* data, std::size_t size) {
+    return data != nullptr && size >= 4 && size <= 512 * 1024 &&
+           data[0] == 0xff && data[1] == 0xd8 &&
+           data[size - 2] == 0xff && data[size - 1] == 0xd9;
+}
+
 struct Command {
     std::string verb;
     std::vector<int> args;
