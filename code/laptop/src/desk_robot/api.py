@@ -154,14 +154,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             return None
         return visual, epochs[robot_id]
 
-    def remember_tool_context(owner, robot_id: str, kind: str, summary: str):
+    def remember_tool_context(owner, robot_id: str, kind: str, summary: str) -> bool:
         if owner is None:
-            return
+            return False
         visual, generation = owner
-        if visual._turn_epoch.get(robot_id) == generation:
-            visual.hub.remember_tool(
-                robot_id, kind, summary, time.monotonic()
-            )
+        if visual._turn_epoch.get(robot_id) != generation:
+            return False
+        visual.hub.remember_tool(robot_id, kind, summary, time.monotonic())
+        return True
 
     def native_pet_speech_policy(robot_id: str) -> dict:
         """One Mac operator policy owner; missing pet state fails closed.

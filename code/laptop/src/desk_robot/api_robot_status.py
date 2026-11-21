@@ -5,6 +5,8 @@ receipt handoff. Robot telemetry is read only, never motion authority.
 """
 from __future__ import annotations
 
+import math
+
 from fastapi import Depends, FastAPI, Request
 
 from .config import Settings
@@ -34,6 +36,29 @@ def _fresh_aux_acquisition(
     return 0 < delta < 0x80000000
 
 
+def _aux_boot_epoch(data: dict) -> int | None:
+    """Bind conversational ambient samples to one explicit WROOM boot."""
+    force, proximity = data.get("force"), data.get("proximity")
+    if not isinstance(force, dict) or not isinstance(proximity, dict):
+        return None
+    first, second = force.get("boot_id"), proximity.get("boot_id")
+    if (type(first) is int and 1 <= first <= 0xffffffff
+            and type(second) is int and first == second):
+        return first
+    return None
+
+
+def _json_safe_telemetry(value: object) -> object:
+    """Keep invalid legacy diagnostics readable, never promote them to facts."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _json_safe_telemetry(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_telemetry(v) for v in value]
+    return value
+
+
 def register_robot_status_routes(
     app: FastAPI, settings: Settings, *, authorize, coordinator,
     requested_tool_context, remember_tool_context,
@@ -41,7 +66,13 @@ def register_robot_status_routes(
     # Only accepted human-tool receipts advance this in-process cursor.
     # Dashboard polling still exposes historical raw diagnostics without
     # consuming a newly acquired sample's conversational provenance.
-    last_aux_context_seq: dict[tuple[str, str], int] = {}
+    last_aux_context_seq: dict[tuple[str, str], tuple[int, int]] = {}
+    active_aux_boot: dict[str, int] = {}
+    retired_aux_boots: dict[str, set[int]] = {}
+
+    def previous_seq(key: tuple[str, str], boot: int) -> int | None:
+        cursor = last_aux_context_seq.get(key)
+        return cursor[1] if cursor is not None and cursor[0] == boot else None
 
     @app.get("/v1/robots", dependencies=[Depends(authorize)])
     async def robots():
@@ -88,19 +119,22 @@ def register_robot_status_routes(
         # Only an authenticated, explicit head tool request may add a short
         # physical sensor receipt to the shared multimodal brain timeline.
         # Dashboard polling and failed/invalid measurements never inject it.
-        if owner is not None:
+        boot = _aux_boot_epoch(data)
+        if (owner is not None and boot is not None
+                and boot not in retired_aux_boots.get(robot_id, set())):
             cues = []
+            pending_seq: dict[tuple[str, str], tuple[int, int]] = {}
             climate = data.get("climate")
             climate_key = (robot_id, "climate")
             if (_fresh_aux_acquisition(
-                    climate, previous_seq=last_aux_context_seq.get(climate_key),
+                    climate, previous_seq=previous_seq(climate_key, boot),
                     max_age_ms=1000,
                 )
                 and type(climate.get("temp_centi")) is int
                 and -4500 <= climate["temp_centi"] <= 13000
                 and type(climate.get("rh_centi")) is int
                 and 0 <= climate["rh_centi"] <= 10000):
-                last_aux_context_seq[climate_key] = climate["seq"]
+                pending_seq[climate_key] = (boot, climate["seq"])
                 cues.append(
                     f"SHT41 local temp_centi={climate['temp_centi']}, "
                     f"humidity_centi={climate['rh_centi']}, "
@@ -109,7 +143,7 @@ def register_robot_status_routes(
             bmp = data.get("bmp280")
             bmp_key = (robot_id, "bmp280")
             if (_fresh_aux_acquisition(
-                    bmp, previous_seq=last_aux_context_seq.get(bmp_key),
+                    bmp, previous_seq=previous_seq(bmp_key, boot),
                     max_age_ms=2000,
                 )
                 and bmp.get("present") is True
@@ -119,15 +153,23 @@ def register_robot_status_routes(
                 and -4000 <= bmp["temp_centi"] <= 8500
                 and type(bmp.get("pressure_pa")) is int
                 and 30000 <= bmp["pressure_pa"] <= 120000):
-                last_aux_context_seq[bmp_key] = bmp["seq"]
+                pending_seq[bmp_key] = (boot, bmp["seq"])
                 cues.append(
                     f"BMP280 local pressure_pa={bmp['pressure_pa']}, "
                     f"seq={bmp['seq']}, age_ms={bmp['age_ms']}"
                 )
             if cues:
-                remember_tool_context(
+                admitted = remember_tool_context(
                     owner, robot_id, "sensor_telemetry",
                     "; ".join(cues)[:180] + "; raw local probe, not calibrated",
                 )
-        return data
+                # Accept all source cursors only after the current human turn
+                # admitted this combined receipt. No await separates commit.
+                if admitted is True:
+                    prior_boot = active_aux_boot.get(robot_id)
+                    if prior_boot is not None and prior_boot != boot:
+                        retired_aux_boots.setdefault(robot_id, set()).add(prior_boot)
+                    active_aux_boot[robot_id] = boot
+                    last_aux_context_seq.update(pending_seq)
+        return _json_safe_telemetry(data)
 

@@ -3,6 +3,7 @@
 The route fake supplies an already authenticated human turn. It deliberately
 does not use a physical WROOM or claim mounted sensor calibration.
 """
+import asyncio
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -27,13 +28,19 @@ def _bmp(*, seq=71, age_ms=240):
     }
 
 
-def _route(initial):
-    data = {"robot_id": "robot-01", **deepcopy(initial)}
+def _route(initial, *, before_reply=None):
+    data = {
+        "robot_id": "robot-01",
+        "force": {"boot_id": 123}, "proximity": {"boot_id": 123},
+        **deepcopy(initial),
+    }
     heard = []
-    authorized_owner = object()
+    current_turn = SimpleNamespace(epoch=1)
     head = SimpleNamespace()
 
     async def aux_status():
+        if before_reply is not None:
+            await before_reply()
         return deepcopy(data)
 
     head.aux_status = aux_status
@@ -46,17 +53,21 @@ def _route(initial):
         robots=[SimpleNamespace(id="robot-01", name="Pet", motion_enabled=False)],
     )
     app = FastAPI()
+    def remember(owner, rid, kind, summary):
+        if owner[1] != current_turn.epoch:
+            return False
+        heard.append((owner, rid, kind, summary))
+        return True
+
     register_robot_status_routes(
         app, settings, authorize=lambda: None, coordinator=lambda: fleet,
         requested_tool_context=lambda request, robot_id: (
-            authorized_owner if request.headers.get("x-test-turn") == "active"
-            else None
+            (current_turn, current_turn.epoch)
+            if request.headers.get("x-test-turn") == "active" else None
         ),
-        remember_tool_context=lambda owner, rid, kind, summary: heard.append(
-            (owner, rid, kind, summary)
-        ),
+        remember_tool_context=remember,
     )
-    return app, data, heard, authorized_owner
+    return app, data, heard, (current_turn, 1)
 
 
 @pytest.mark.parametrize("sensor,missing", [
@@ -150,6 +161,8 @@ def test_ambient_provenance_is_source_scoped_and_aggregates_one_receipt():
     ("climate", "temp_centi", 23.4), ("climate", "rh_centi", 10001),
     ("bmp280", "seq", False), ("bmp280", "age_ms", -1),
     ("bmp280", "pressure_pa", float("nan")),
+    ("bmp280", "pressure_pa", float("inf")),
+    ("bmp280", "pressure_pa", float("-inf")),
     ("bmp280", "chip_id", 0),
 ])
 def test_ambient_malformed_legacy_value_is_not_promoted(sensor, field, bad):
@@ -157,8 +170,87 @@ def test_ambient_malformed_legacy_value_is_not_promoted(sensor, field, bad):
     payload[field] = bad
     app, _data, heard, _owner = _route({sensor: payload})
     with TestClient(app) as client:
-        assert client.get(
+        response = client.get(
             "/v1/robots/robot-01/aux",
             headers={"x-test-turn": "active"},
+        )
+    assert response.status_code == 200
+    if isinstance(bad, float):
+        assert response.json()[sensor][field] is None
+    assert heard == []
+
+
+@pytest.mark.parametrize("sensor", ["climate", "bmp280"])
+def test_new_wroom_boot_resets_sensor_cursor_without_replaying_retired_boot(sensor):
+    sample = _climate(seq=120) if sensor == "climate" else _bmp(seq=120)
+    app, data, heard, _owner = _route({sensor: sample})
+    with TestClient(app) as client:
+        def request():
+            return client.get(
+                "/v1/robots/robot-01/aux", headers={"x-test-turn": "active"},
+            )
+
+        assert request().status_code == 200
+        assert len(heard) == 1
+        data["force"]["boot_id"] = data["proximity"]["boot_id"] = 124
+        data[sensor]["seq"] = 1
+        assert request().status_code == 200
+        assert len(heard) == 2
+        assert "seq=1" in heard[-1][3]
+
+        # A delayed old boot cannot reclaim a retired source epoch.
+        data["force"]["boot_id"] = data["proximity"]["boot_id"] = 123
+        data[sensor]["seq"] = 121
+        assert request().status_code == 200
+        assert len(heard) == 2
+
+        data["force"]["boot_id"] = data["proximity"]["boot_id"] = 124
+        data[sensor]["seq"] = 1
+        assert request().status_code == 200
+        assert len(heard) == 2
+        data[sensor]["seq"] = 2
+        assert request().status_code == 200
+        assert len(heard) == 3
+
+
+@pytest.mark.parametrize("boot", [None, 0, True, "123"])
+def test_missing_or_untyped_boot_epoch_keeps_ambient_diagnostic_only(boot):
+    app, data, heard, _owner = _route({"climate": _climate()})
+    if boot is None:
+        del data["force"]["boot_id"]
+    else:
+        data["force"]["boot_id"] = boot
+    with TestClient(app) as client:
+        assert client.get(
+            "/v1/robots/robot-01/aux", headers={"x-test-turn": "active"},
         ).status_code == 200
     assert heard == []
+
+
+def test_canceled_turn_does_not_consume_sensor_acquisition():
+    canceled = False
+    owner = None
+
+    async def interrupt_before_aux_returns():
+        nonlocal canceled
+        if not canceled:
+            await asyncio.sleep(0)
+            owner[0].epoch += 1
+            canceled = True
+
+    app, _data, heard, owner = _route(
+        {"climate": _climate(seq=51)}, before_reply=interrupt_before_aux_returns,
+    )
+    with TestClient(app) as client:
+        def request():
+            return client.get(
+                "/v1/robots/robot-01/aux", headers={"x-test-turn": "active"},
+            )
+
+        assert request().status_code == 200
+        assert heard == []
+        assert request().status_code == 200
+        assert len(heard) == 1
+        assert "seq=51" in heard[0][3]
+        assert request().status_code == 200
+        assert len(heard) == 1
