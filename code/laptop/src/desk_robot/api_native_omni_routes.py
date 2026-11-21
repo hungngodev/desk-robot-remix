@@ -314,6 +314,9 @@ def register_native_omni_routes(
         coordinator().robot(robot_id)
         if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Physical live camera requires explicit opt in")
+        # Bind this HTTP subscription to the grant at admission. The async
+        # iterator may resume after a rapid opt out and regrant.
+        camera_grant = settings.camera_consent_generation
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None or not callable(getattr(visual, "native_live_frames", None)):
             raise HTTPException(503, "Continuous visual observer unavailable")
@@ -327,7 +330,8 @@ def register_native_omni_routes(
                 # vision consent, then wait here on the client socket.
                 # Recheck after that await and before any JPEG is emitted.
                 if (settings.mode != "hardware"
-                        or not settings.voice_vision_tools_enabled):
+                        or not settings.voice_vision_tools_enabled
+                        or settings.camera_consent_generation != camera_grant):
                     return
                 now = time.monotonic()
                 age_ms = round((now - frame.received_at) * 1000)
@@ -364,6 +368,7 @@ def register_native_omni_routes(
         coordinator().robot(robot_id)
         if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Physical live camera requires explicit opt in")
+        camera_grant = settings.camera_consent_generation
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None:
             raise OperationError("No hardware camera adapter")
@@ -374,7 +379,8 @@ def register_native_omni_routes(
             await reuse(robot_id) if callable(reuse)
             else await visual.capture(robot_id, source="speech")
         )
-        if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
+        if (settings.mode != "hardware" or not settings.voice_vision_tools_enabled
+                or settings.camera_consent_generation != camera_grant):
             raise HTTPException(403, "Camera consent revoked during capture")
         age_ms = round(1000 * (time.monotonic() - evidence.received_at))
         if not 0 <= age_ms <= 1000:
