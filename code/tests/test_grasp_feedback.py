@@ -32,7 +32,7 @@ class Settings:
     grip_force_delta_raw = 120
     grip_force_limit_raw = 500
     grip_force_sign = 1
-    grip_step_deg = 5
+    grip_step_deg = 4
 
 
 async def healthy():
@@ -40,8 +40,10 @@ async def healthy():
 
 
 def test_servo_increments_respect_both_linkage_orientations():
-    assert grip_angles(60, 73, 5) == (60, 65, 70, 73)
-    assert grip_angles(102, 87, 5) == (102, 97, 92, 87)
+    assert grip_angles(60, 73, 4) == (60, 64, 68, 72, 73)
+    assert grip_angles(102, 87, 4) == (102, 98, 94, 90, 87)
+    with pytest.raises(ValueError, match="Measured servo limits required"):
+        grip_angles(60, 73, 5)
     with pytest.raises(ValueError):
         grip_angles(60, 60, 4)
     with pytest.raises(ValueError):
@@ -77,7 +79,7 @@ async def test_late_jaw_age_during_close_aborts_before_next_step(monkeypatch):
     head = ExpiredJaw([100, 101, 240])
     with pytest.raises(OperationError, match="Lost fresh force sensor"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 def test_absent_sensor_never_fabricates_force():
@@ -92,7 +94,7 @@ async def test_contact_stops_before_full_closure(monkeypatch):
     head = FakeHead([100, 101, 130, 240, 245])
     result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert result["contact_delta_raw"] >= 120
-    assert head.commands == ["grip 65", "grip 70", "grip 75"]
+    assert head.commands == ["grip 64", "grip 68", "grip 72"]
     assert result["physical_acceptance_pass"] is False
 
 
@@ -103,7 +105,7 @@ async def test_stale_feedback_fails_before_next_servo_pulse(monkeypatch):
     head = FakeHead([100, 100, None])
     with pytest.raises(OperationError, match="Lost fresh"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
@@ -113,7 +115,7 @@ async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
     head = FakeHead([(100, 1), (100, 2), (240, 3), (240, 3)])
     with pytest.raises(OperationError, match="No new jaw sample"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 65", "grip 70", "grip 60"]
+    assert head.commands == ["grip 64", "grip 68", "grip 60"]
 
 
 async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):
@@ -123,7 +125,7 @@ async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):
     head = FakeHead([100, 100, 800])
     with pytest.raises(OperationError, match="ceiling"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
     head = FakeHead([100, 250])
     with pytest.raises(OperationError, match="baseline"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
@@ -140,7 +142,7 @@ async def test_inverse_fsr_contact_does_not_continue_closing(monkeypatch, sign, 
     head = FakeHead([1000, 1000, opposite])
     with pytest.raises(OperationError, match="contradicts calibrated FSR polarity"):
         await guarded_grasp(head, Calibrated(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 async def test_local_disarm_never_bypassed_to_release_jaw(monkeypatch):
@@ -164,7 +166,7 @@ async def test_local_disarm_never_bypassed_to_release_jaw(monkeypatch):
     with pytest.raises(OperationError, match="force ceiling exceeded"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=intermittent_health)
     assert calls >= 3
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 64"]
 
 
 async def test_uncertain_transport_failure_after_jaw_move_attempts_safe_relief(monkeypatch):
@@ -176,14 +178,14 @@ async def test_uncertain_transport_failure_after_jaw_move_attempts_safe_relief(m
     original = head.aux_status
 
     async def failing_adc():
-        if "grip 65" in head.commands:
+        if "grip 64" in head.commands:
             raise OSError("ADC bus timed out after jaw movement")
         return await original()
 
     head.aux_status = failing_adc
     with pytest.raises(OSError, match="ADC bus timed out"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 async def test_uncertain_transport_failure_does_not_override_local_disarm(monkeypatch):
@@ -195,7 +197,7 @@ async def test_uncertain_transport_failure_does_not_override_local_disarm(monkey
     original = head.aux_status
 
     async def failing_adc():
-        if "grip 65" in head.commands:
+        if "grip 64" in head.commands:
             raise OSError("ADC bus timed out")
         return await original()
 
@@ -210,7 +212,7 @@ async def test_uncertain_transport_failure_does_not_override_local_disarm(monkey
     # Do not manufacture an ADC timeout or send an unauthorized relief pulse.
     with pytest.raises(OperationError, match="WROOM disarmed"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=status)
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 64"]
 
 
 async def test_cancelled_close_attempts_relief_only_with_live_safety(monkeypatch):
@@ -229,7 +231,7 @@ async def test_cancelled_close_attempts_relief_only_with_live_safety(monkeypatch
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", cancel_after_close)
     with pytest.raises(asyncio.CancelledError):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 async def test_cancelled_close_does_not_bypass_body_disarm(monkeypatch):
@@ -253,7 +255,7 @@ async def test_cancelled_close_does_not_bypass_body_disarm(monkeypatch):
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", cancel_after_close)
     with pytest.raises(asyncio.CancelledError):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=disarmed_after_first_close)
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 64"]
 
 
 async def test_real_task_cancellation_during_unacknowledged_jaw_command(monkeypatch):
@@ -270,7 +272,7 @@ async def test_real_task_cancellation_during_unacknowledged_jaw_command(monkeypa
 
     async def interrupted_command(command):
         head.commands.append(command)
-        if command == "grip 65":
+        if command == "grip 64":
             command_sent.set()
             await never_acknowledged.wait()
 
@@ -281,7 +283,7 @@ async def test_real_task_cancellation_during_unacknowledged_jaw_command(monkeypa
         task.cancel()  # Real task cancellation, not manually raising the exception.
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert head.commands == ["grip 65", "grip 60"]
+        assert head.commands == ["grip 64", "grip 60"]
     finally:
         if not task.done():
             task.cancel()
@@ -322,7 +324,7 @@ async def test_stalled_force_feedback_is_bounded_and_jaw_relaxes_only_if_safe(
             guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy), timeout=0.5,
         )
     assert head.commands == (
-        [] if phase == "before_first" else ["grip 65", "grip 60"]
+        [] if phase == "before_first" else ["grip 64", "grip 60"]
     )
 
 
@@ -361,7 +363,7 @@ async def test_stalled_force_feedback_never_bypasses_local_wroom_disarm(monkeypa
             guarded_grasp(head, Settings(), robot_id="robot-01", health=disarmed), timeout=0.5,
         )
     assert checks == 3
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 64"]
 
 
 
@@ -383,7 +385,7 @@ async def test_hung_gripper_command_still_attempts_bounded_safe_relief(monkeypat
 
     async def stalled_close(command):
         head.commands.append(command)
-        if command == "grip 65":
+        if command == "grip 64":
             entered.set()
             await asyncio.Event().wait()
 
@@ -393,7 +395,7 @@ async def test_hung_gripper_command_still_attempts_bounded_safe_relief(monkeypat
             guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy), timeout=0.5,
         )
     assert entered.is_set()
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 async def test_hung_safety_recheck_blocks_extra_grip_and_relief(monkeypatch):
@@ -423,7 +425,7 @@ async def test_hung_safety_recheck_blocks_extra_grip_and_relief(monkeypatch):
             guarded_grasp(head, Settings(), robot_id="robot-01", health=health), timeout=0.5,
         )
     assert checks == 3  # Before close, after close, attempted safe relief.
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 64"]
 
 
 async def test_jaw_hardware_sequence_wraps_without_falsely_rejecting_fresh_force(monkeypatch):
@@ -438,7 +440,7 @@ async def test_jaw_hardware_sequence_wraps_without_falsely_rejecting_fresh_force
     ])
     result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert result["contact_delta_raw"] >= Settings.grip_force_delta_raw
-    assert head.commands == ["grip 65", "grip 70", "grip 75"]
+    assert head.commands == ["grip 64", "grip 68", "grip 72"]
     assert result["physical_acceptance_pass"] is False
 
 
@@ -466,7 +468,7 @@ async def test_jaw_after_movement_rejects_backwards_frame_and_relaxes(monkeypatc
     head = FakeHead([(100, 100), (101, 101), (240, 100)])
     with pytest.raises(OperationError, match="No new jaw sample"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 async def test_gripper_rejects_foreign_robot_force_before_any_pulse(monkeypatch):
@@ -512,7 +514,7 @@ async def test_gripper_foreign_robot_force_mid_close_triggers_guarded_relief(
         await guarded_grasp(
             head, Settings(), robot_id="robot-01", health=healthy,
         )
-    assert head.commands == ["grip 65", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 async def test_gripper_cannot_wait_forever_for_uncooperative_force_adapter(
@@ -597,7 +599,7 @@ async def test_gripper_disarm_response_after_jaw_close_never_reopens_unsafely(
             head, Settings(), robot_id="robot-01", health=health_response,
         )
     assert calls >= 3
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 64"]
 
 
 class BootEpochHead(FakeHead):
@@ -638,4 +640,4 @@ async def test_reboot_after_jaw_close_never_commands_second_pulse_or_relief(monk
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     # The previous command could have actuated. A boot change invalidates
     # the old task, including any attempted relief on a different boot.
-    assert head.commands == ["grip 65"]
+    assert head.commands == ["grip 64"]

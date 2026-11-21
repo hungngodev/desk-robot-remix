@@ -23,7 +23,7 @@ _HEALTH_READ_TIMEOUT_S = 2.5
 def grip_angles(start: int, end: int, step: int) -> tuple[int, ...]:
     if (type(start) is not int or type(end) is not int or type(step) is not int
             or not 60 <= start <= 120 or not 60 <= end <= 120
-            or start == end or not 1 <= step <= 10):
+            or start == end or not 1 <= step <= 4):
         raise ValueError("Measured servo limits required")
     direction = 1 if end > start else -1
     return tuple([start, *range(start + direction * step, end, direction * step), end])

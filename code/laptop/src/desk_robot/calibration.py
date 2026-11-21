@@ -25,7 +25,9 @@ class Calibration(BaseModel):
     grip_force_delta_raw: int | None = Field(default=None, ge=50, le=20000)
     grip_force_limit_raw: int | None = Field(default=None, ge=100, le=30000)
     grip_force_sign: int = Field(default=1)
-    grip_step_deg: int = Field(default=4, ge=1, le=10)
+    # WROOM permits at most four servo degrees per completed jaw conversion.
+    # Do not let the Mac assume a larger physical angle than firmware moved.
+    grip_step_deg: int = Field(default=4, ge=1, le=4)
     lift_down: int = Field(default=60, ge=60, le=120)
     lift_up: int = Field(default=110, ge=60, le=120)
     alignment_tolerance_mm: float = Field(default=8, gt=0, le=30)
