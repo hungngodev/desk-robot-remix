@@ -175,7 +175,6 @@ class HttpHead:
         self.client = client
         self.lock = asyncio.Lock()
         self.capture_lock = asyncio.Lock()
-        self._bench_audio_lock = asyncio.Lock()  # explicit operator only
         self.strict_capture = strict_capture
         self._last_camera: tuple[int, int, int] | None = None
         self._retired_camera_boots: set[int] = set()
@@ -193,13 +192,12 @@ class HttpHead:
         self._stream_required = True
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        timeout = kwargs.pop("timeout", httpx.Timeout(3, connect=1))
         try:
             response = await self.client.request(
                 method,
                 self.config.head_url.rstrip("/") + path,
                 headers={"Authorization": f"Bearer {secret(self.config.token_env)}"},
-                timeout=timeout,
+                timeout=httpx.Timeout(3, connect=1),
                 **kwargs,
             )
             response.raise_for_status()
@@ -265,84 +263,6 @@ class HttpHead:
             raise HeadError("Untrusted Sense AEC reference diagnostics")
         return data
 
-
-    async def bench_pcm_capture(self, *, timeout_s: float = 10.0) -> tuple[bytes, dict]:
-        """Explicit private Sense calibration, not an extra realtime mic owner."""
-        if (type(timeout_s) not in (int, float)
-                or not 5.0 <= timeout_s <= 11.0):
-            raise ValueError("Bench PCM capture requires bounded 5..11s deadline")
-        async with self._bench_audio_lock:
-            try:
-                async with asyncio.timeout(timeout_s):
-                    start = _response_object(await self._request(
-                        "POST", "/api/audio.capture.start", content=b"",
-                    ))
-                    if (start.get("ok") is not True
-                            or start.get("robot_id") != self.config.id
-                            or start.get("reply") != "Private bench PCM capture started"):
-                        raise HeadError("Sense PCM capture authorization failed")
-                    boot: int | None = None
-                    while True:
-                        status = _response_object(await self._request(
-                            "GET", "/api/audio.capture.status",
-                        ))
-                        new_boot = status.get("boot")
-                        active = status.get("active")
-                        ready = status.get("ready")
-                        failed = status.get("failed")
-                        frames = status.get("frames")
-                        if (status.get("robot_id") != self.config.id
-                                or type(new_boot) is not int
-                                or not 0 <= new_boot <= 0xffffffff
-                                or type(frames) is not int
-                                or not 0 <= frames <= 64000
-                                or any(type(x) is not bool
-                                       for x in (active, ready, failed))
-                                or sum((active, ready, failed)) != 1
-                                or status.get("physical_aec_qualified") is not False
-                                or (ready and frames != 64000)
-                                or (boot is not None and new_boot != boot)):
-                            raise HeadError("Untrusted Sense PCM status or reboot")
-                        boot = new_boot
-                        if failed:
-                            raise HeadError("Sense PCM lost reference continuity")
-                        if ready:
-                            break
-                        await asyncio.sleep(0.15)
-                    response = await self._request(
-                        "GET", "/api/audio.capture.raw",
-                        timeout=httpx.Timeout(8, connect=1),
-                    )
-            except TimeoutError as exc:
-                raise HeadError("Sense PCM capture timed out; do not reuse") from exc
-            def header_int(key: str) -> int:
-                value = response.headers.get(key)
-                if (value is None or not 1 <= len(value) <= 20
-                        or not value.isascii() or not value.isdecimal()):
-                    raise HeadError("Sense PCM completion metadata absent")
-                return int(value)
-            first = header_int("x-desk-audio-first-us")
-            last = header_int("x-desk-audio-last-us")
-            if (response.headers.get("x-desk-audio-robot-id") != self.config.id
-                    or response.headers.get("content-type", "").split(";", 1)[0]
-                       != "application/octet-stream"
-                    or header_int("x-desk-audio-boot") != boot
-                    or header_int("x-desk-audio-frames") != 64000
-                    or not 0 < first < last
-                    or not 3_400_000 <= last - first <= 4_700_000
-                    or len(response.content) != 256000):
-                raise HeadError("Sense PCM payload identity or timing invalid")
-            return response.content, {
-                "robot_id": self.config.id,
-                "boot": boot,
-                "frames": 64000,
-                "sample_rate_hz": 16000,
-                "channels": ["microphone", "digital_playback_reference"],
-                "first_sample_us": first,
-                "last_sample_us": last,
-                "physical_aec_qualified": False,
-                "actual_speaker_playback_verified": False,
-            }
 
     async def aux_status(self) -> dict:
         """Authenticate and validate all optional sensor provenance, never arm."""
