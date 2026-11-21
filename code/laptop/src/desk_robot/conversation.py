@@ -266,15 +266,23 @@ class KokoroHeadSpeaker:
         grant_request = {"device_ids": ids, "enabled": True}
         if passive:
             grant_request["passive"] = True
-        granted = await self._bridge("/session", grant_request)
-        if not matches(granted, True):
-            # A damaged/misdirected response does not prove which heads have
-            # their microphones muted. Ask the same bridge to relinquish any
-            # possible partial lease; never send audio into an unknown floor.
+        release_request = {"device_ids": ids, "enabled": False}
+        if passive:
+            release_request["passive"] = True
+        try:
+            # The bridge may have applied a lease even when its grant
+            # response times out or the caller is cancelled. Relinquish
+            # that uncertain floor before propagating the original error.
+            granted = await self._bridge("/session", grant_request)
+        except BaseException:
             try:
-                release_request = {"device_ids": ids, "enabled": False}
-                if passive:
-                    release_request["passive"] = True
+                await self._bridge("/session", release_request)
+            except Exception:
+                pass
+            raise
+        if not matches(granted, True):
+            # A damaged or misdirected receipt cannot prove lease authority.
+            try:
                 await self._bridge("/session", release_request)
             except Exception:
                 pass
@@ -282,9 +290,6 @@ class KokoroHeadSpeaker:
         try:
             yield
         finally:
-            release_request = {"device_ids": ids, "enabled": False}
-            if passive:
-                release_request["passive"] = True
             released = await self._bridge("/session", release_request)
             if not matches(released, False):
                 raise RuntimeError("Xiaozhi speaker session release unconfirmed")
