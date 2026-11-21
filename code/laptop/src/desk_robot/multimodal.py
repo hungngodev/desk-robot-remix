@@ -1074,18 +1074,17 @@ class MultimodalOrchestrator:
                                 self.hub.event_history[robot_id]
                             )
                         )
-                        # Prime two selected frames for actual motion scoring,
-                        # then let the existing hub set the idle/active/VAD rate.
-                        # The stream is still drained continuously, and genuine
-                        # physical triggers bypass both optional sampling gates.
-                        # The video ring is cleared on disconnect/reconnect.
-                        # Re-prime motion after EACH session, not just the first
-                        # two lifetime metric increments.
-                        bootstrap = len(self.hub.frames[robot_id]) < 2
-                        if not recent_sensor_edge and (
-                            received - self._last_stream_sample[robot_id] < sample_gap
-                            or (not bootstrap and not self.hub.due(robot_id, received))
-                        ):
+                        # The cheap video gate must keep observing at its
+                        # bounded sample rate even when no earlier scene
+                        # change has been detected. Applying the hub's
+                        # 0.3 FPS *inference* cadence here blinds it to a
+                        # briefly present object that appears after bootstrap.
+                        # Expensive model comparisons remain separately
+                        # guarded by PetController.VisualChangeGate and its
+                        # salience, freshness and speech priority rules.
+                        if (not recent_sensor_edge
+                                and received - self._last_stream_sample[robot_id]
+                                < sample_gap):
                             metrics["stream_frames_skipped"] += 1
                             continue
                         self._last_stream_sample[robot_id] = received
@@ -1162,7 +1161,8 @@ class MultimodalOrchestrator:
             return  # any live human voice owns the fleet's camera priority
         # Local WROOM sensor and fault evidence is independent of camera consent.
         # Never turn a touch or cliff edge into a legacy snapshot opt-in.
-        if not self.settings.voice_vision_tools_enabled:
+        if (self.settings.mode == "hardware"
+                and not self.settings.voice_vision_tools_enabled):
             return
         self._cancel_proactive_snapshot(robot_id)
         # The selected Sense hardware runs one *continuous* authenticated
@@ -1464,7 +1464,8 @@ class MultimodalOrchestrator:
         self.hub._check(robot_id)
         if self._closed:
             raise RuntimeError("Multimodal orchestrator closed")
-        if not self.settings.voice_vision_tools_enabled:
+        if (self.settings.mode == "hardware"
+                and not self.settings.voice_vision_tools_enabled):
             raise RuntimeError("Camera consent revoked for capture")
         if not 0 <= reuse_if_recent_s <= 1.0:
             raise ValueError("Invalid shared live camera age")
@@ -1479,7 +1480,8 @@ class MultimodalOrchestrator:
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
-            if not self.settings.voice_vision_tools_enabled:
+            if (self.settings.mode == "hardware"
+                    and not self.settings.voice_vision_tools_enabled):
                 raise RuntimeError("Camera consent revoked for capture")
             if (source == "proactive"
                     and (pending := self._look_tasks.get(robot_id)) is not None
@@ -1523,7 +1525,8 @@ class MultimodalOrchestrator:
                 # Its API request is not owned by _capture_tasks, so cancelling
                 # that sampler on reconnect or a newer VAD is insufficient:
                 # old HTTP/decode work must never repopulate the emptied hub.
-                if not self.settings.voice_vision_tools_enabled:
+                if (self.settings.mode == "hardware"
+                        and not self.settings.voice_vision_tools_enabled):
                     # An opt-out during JPEG I/O or Pillow preparation is final:
                     # never publish an old sensor-triggered image to the Mac hub.
                     self.hub.discard_video(robot_id)
