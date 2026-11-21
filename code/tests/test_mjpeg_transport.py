@@ -34,6 +34,20 @@ def test_single_oversized_network_batch_fails_before_any_frame_publication():
     ]
 
 
+def test_many_tiny_jpeg_parts_cannot_monopolize_camera_parser():
+    """A byte limit cannot bound the number of minimum-size MJPEG parts."""
+    jpeg = b"\xff\xd8\xff\xd9"
+    batch = b"".join(_part(i, jpeg) for i in range(1, 34))
+    assert len(batch) < 64 * 1024
+    reader = _MjpegFrames(expected_robot_id="robot-01")
+    with pytest.raises(ValueError, match="Oversized MJPEG frame count"):
+        reader.feed(batch)
+
+    assert [identity[1] for _, identity in _MjpegFrames().feed(
+        b"".join(_part(i, jpeg) for i in range(1, 8))
+    )] == list(range(1, 8))
+
+
 def test_large_network_read_keeps_incremental_mjpeg_buffer_bounded():
     class TrackedBuffer(bytearray):
         peak = 0

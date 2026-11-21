@@ -90,8 +90,13 @@ class _MjpegFrames:
         # holding the shared stream lock. A healthy 4 FPS source fits.
         if len(chunk) > 4 * 1024 * 1024:
             raise ValueError("Oversized MJPEG network batch")
+        total_parts = 0
         for offset in range(0, len(chunk), 64 * 1024):
-            yield from self._feed_bounded_chunk(chunk[offset:offset + 64 * 1024])
+            for frame in self._feed_bounded_chunk(chunk[offset:offset + 64 * 1024]):
+                total_parts += 1
+                if total_parts > 32:
+                    raise ValueError("Oversized MJPEG frame count")
+                yield frame
 
     def _feed_bounded_chunk(self, chunk: bytes) -> list[tuple[bytes, tuple[int, int, int]]]:
         self.buffer.extend(chunk)
@@ -153,6 +158,10 @@ class _MjpegFrames:
                     or not frame.endswith(b"\xff\xd9")
                     or self.buffer[finish:finish + 2] != b"\r\n"):
                 raise ValueError("MJPEG frame incomplete")
+            # Tiny but valid parts must not expand one bounded socket read
+            # into unbounded parser work on the shared audio/vision loop.
+            if len(frames) >= 32:
+                raise ValueError("Oversized MJPEG frame count")
             frames.append((frame, (boot, sequence, completed)))
             del self.buffer[:finish + 2]
         if len(self.buffer) > 512 * 1024 + 1024:
