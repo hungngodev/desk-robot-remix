@@ -468,6 +468,9 @@ def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatc
         b"[[[\n",
         json.dumps(frame(1, 1000)).encode() + b"\n",
         json.dumps(frame(2, 2000)).encode() + b"\n",
+        # Keep the reader active through delivery of the final valid frame.
+        # Stopping immediately after readline correctly drops that frame.
+        b"",
     ]
     opened = []
     received = []
@@ -497,6 +500,36 @@ def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatc
     assert feed.rejected == 2
     assert feed.callback_failures == 0
     assert recursive_frames == ["[[[\n"]  # The RecursionError branch ran.
+
+
+def test_cancel_after_usb_read_discards_retired_station_epoch(monkeypatch):
+    # A stop that races the last USB read must not publish its observation.
+    import sys
+    from types import SimpleNamespace
+
+    alive = {"running": True}
+    delivered = []
+
+    class Port:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            alive["running"] = False
+            return json.dumps(frame(1, 1000)).encode() + b"\n"
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda obs: delivered.append(obs.seq))
+    feed._read_port(lambda: alive["running"])
+    assert delivered == []
+    assert feed.received == 0
+    assert feed.callback_failures == 0
 
 
 def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatch):
