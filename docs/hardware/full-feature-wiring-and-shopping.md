@@ -117,15 +117,21 @@ The dock has **five individual keyed cradles**, one for each pet, with camera-vi
 
 ## Shared desktop accessory station, not five copies
 
-| Station sensor/game | Quantity for five pets | Plan |
+| Shared station role | Selected quantity for one shared station | Plan |
 | --- | ---: | --- |
-| SCD40 real CO2 | 1 | ventilated stationary desk |
-| BME688 VOC gas and ambient | 1 | ventilated stationary desk |
-| LD2410C mmWave presence module | 1 | fixed room pod UART |
-| MAX30102 heartbeat pad | 1 | consented tabletop contact accessory |
-| Capacitive soil probe | 1 | external plant accessory |
-| NFC game tags and magnets | 10 | shared interactive toys |
-| AMG8833 thermal array | 1 | optional separate thermal station; not needed for core camera vision |
+| SCD40 real CO2 | 1 | ventilated stationary desk; purchasing still HOLD |
+| BME688 VOC gas and ambient | 1 | ventilated stationary desk; purchasing still HOLD |
+| LD2410C mmWave presence module | 1 | fixed room pod UART; purchasing still HOLD |
+| Capacitive soil probe | 1 | external plant accessory; purchasing still HOLD |
+| NFC game tags and magnets | 0 | OPTIONAL NOT SELECTED, DO NOT BUY; ten future game props are only a concept |
+| AMG8833 thermal array | 0 | OPTIONAL NOT SELECTED, DO NOT BUY; future separate thermal station concept |
+
+This legacy wiring reference is not a third shopping list. The only selected
+MAX30102 pads are the five robot-mounted paw pads (one per pet), with stock
+still unverified; there is no sixth station heartbeat pad. Exact selected
+roles and conditional quantities come from `full-feature-plan.json` and its
+two generated shopping lists. Optional NFC toy props and AMG8833 thermal
+hardware have selected quantity zero and are not a default checkout.
 
 The room accessory station may reuse the existing Feather nRF52840 over USB if its UART/I2C and firmware are verified; otherwise one generic ESP32C3. It publishes timestamped scoped context to the Mac and controls **no motors**. Human presence or heartbeat is **never** presented as identification, medical diagnosis or consent to monitor.
 

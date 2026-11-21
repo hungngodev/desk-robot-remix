@@ -42,6 +42,31 @@ def fixture():
     }
 
 
+
+def test_static_station_wiring_table_cannot_add_sixth_paw_pad_or_optional_props():
+    """Old descriptive tables must agree with the generated shopping roles."""
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    paw = next(p for p in plan["parts"] if p["id"] == "max30102")
+    assert paw["group"] == "pet"
+    assert paw["per_robot"] * plan["target_robots"] == 5
+    station = {p["id"]: p for p in plan["room_pod"]["modules"]}
+    assert "max30102" not in station
+    assert station["nfc_game_props"]["purchase_status"] == "conditional_optional"
+    assert station["amg8833"]["purchase_status"] == "conditional_optional"
+
+    wiring = (mod.PLAN.parent / "full-feature-wiring-and-shopping.md").read_text(
+        encoding="utf-8"
+    )
+    section = wiring.split("## Shared desktop accessory station, not five copies", 1)[1]
+    section = section.split("## What is selected versus still unverified", 1)[0]
+    assert "| MAX30102 heartbeat pad |" not in section
+    for name in ("NFC game tags and magnets", "AMG8833 thermal array"):
+        assert f"| {name} | 0 | OPTIONAL NOT SELECTED, DO NOT BUY" in section
+    assert "no sixth station heartbeat pad" in section
+
+
 def test_full_fleet_quantities_never_grant_purchase():
     r = mod.generate(fixture())
     assert (r["fleet_robots"], r["docks"], r["room_stations"]) == (5, 5, 1)
