@@ -203,7 +203,7 @@ async def call(conn, route, payload=None):
         or result.get("model_can_arm_motors") is not False
         or result.get("untrusted_model_selection") is not True
         or not isinstance(result.get("tools"), list)
-        or len(result["tools"]) > 2
+        or len(result["tools"]) > 3
         or any(
             not isinstance(tool, dict)
             or not isinstance(tool.get("route"), str)
@@ -214,6 +214,12 @@ async def call(conn, route, payload=None):
             or not isinstance(tool.get("payload"), dict)
             for tool in result["tools"]
         )
+        # Even an otherwise allowlisted plan must not execute a duplicate
+        # route twice and crowd out a distinct explicitly requested fact.
+        or len(result["tools"]) != len({
+            tool["route"] for tool in result["tools"]
+            if isinstance(tool, dict) and isinstance(tool.get("route"), str)
+        })
     ):
         return {"error": "Invalid read-only Mac intent plan", "retried": False}
     if route == "look" and (

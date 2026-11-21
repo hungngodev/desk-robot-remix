@@ -1246,3 +1246,53 @@ async def test_xiaozhi_tool_cancel_during_waiter_cleanup_never_speaks_stale_resu
         "retried": False,
     }
     assert "STALE_TURN" not in str(result)
+
+
+
+@pytest.mark.parametrize("planned,accepted", [
+    (["power-status", "aux-status", "status"], True),
+    (["power-status", "aux-status", "status", "latest-pickup"], False),
+    (["power-status", "aux-status", "power-status"], False),
+    (["power-status", "aux-status", "move"], False),
+    (["power-status", "aux-status", "../stop"], False),
+])
+async def test_authenticated_shared_xiaozhi_plan_accepts_three_distinct_readonly_routes(
+    bridge_tools, monkeypatch, planned, accepted,
+):
+    """Real first Xiaozhi HTTP bridge cannot discard a valid third Mac tool."""
+    original = httpx.AsyncClient
+    requested = []
+
+    def handle(request):
+        requested.append(request)
+        assert request.url.path == "/v1/pet/robot-01/plan-readonly"
+        assert request.method == "POST"
+        assert request.headers["authorization"] == "Bearer " + "s" * 40
+        assert request.headers["x-desk-robot-tool-receipt"] == "1"
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "source": "existing_mac_ollama_readonly_route_selection",
+            "untrusted_model_selection": True,
+            "model_can_arm_motors": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+            "tools": [{"route": name, "payload": {}} for name in planned],
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handle), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "plan-readonly",
+        {"transcript": "Check charge, raw sensors, and WROOM safety status"},
+    )
+    assert len(requested) == 1
+    if accepted:
+        assert [item["route"] for item in result["tools"]] == planned
+        assert result["motor_authorized"] is False
+        assert result["charging_authorized"] is False
+    else:
+        assert result == {
+            "error": "Invalid read-only Mac intent plan", "retried": False,
+        }
