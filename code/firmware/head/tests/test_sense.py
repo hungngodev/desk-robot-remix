@@ -394,6 +394,22 @@ class SenseOverlayTests(unittest.TestCase):
         assert "head.command(" not in face
         assert "speaker.say(" not in face
 
+    def test_new_body_fault_neutralizes_emotion_even_while_speaking(self):
+        """A status fault cannot leave a happy emoji through a long song."""
+        source = (HEAD / "sense/desk_robot_sense.cc").read_text()
+        face = source.split("static void FaceTask(void* context)", 1)[1].split(
+            "void InitializeDisplay()", 1
+        )[0]
+        neutral = face.index("if (body_unhealthy && !last_idle_face_fault)")
+        available = face.index("if (face_available && board->display_ != nullptr)")
+        assert neutral < available
+        assert 'board->display_->SetEmotion("neutral");' in face[neutral:available]
+        # This cursor advances irrespective of speaking/listening state.
+        assert face.index("last_idle_face_fault = body_unhealthy;") > available
+        assert face.count("last_idle_face_fault = body_unhealthy;") == 1
+        assert "last_fault_status_refresh_ms = now_ms;" in face
+        assert "board->display_->SetStatus(\"Body safety stop\");" in face
+
     def test_sense_safety_status_remains_visible_during_speech(self):
         """A factual WROOM fault cannot wait for the idle expression owner."""
         board = (HEAD / "sense/desk_robot_sense.cc").read_text()
@@ -1044,7 +1060,7 @@ def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
     # Motor safety is factual; a fault must not force scripted sadness.
     assert 'SetEmotion("neutral")' in fault
     assert 'SetEmotion("sad")' not in fault
-    assert '!last_idle_face_fault || !last_face_available' in fault
+    assert 'last_idle_face_fault && !last_face_available' in fault
     assert 'model_mood_active = false;' in fault
     # Recovery must force a neutral/local HSM face refresh even if its
     # idle picker emitted no new mood. No 100 ms continuous OLED spam.

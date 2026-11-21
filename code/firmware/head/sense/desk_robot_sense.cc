@@ -181,6 +181,12 @@ private:
                 desk_robot::CosmeticMood::kNone;
             if (body_unhealthy || !face_available) model_mood_active = false;
             if (board->display_ != nullptr) {
+                // A new physical WROOM fault cannot leave yesterday's happy
+                // emotion visible until speech finishes. Only alter the
+                // separate LVGL emotion label once on the fault transition;
+                // Xiaozhi keeps ownership of speaker and listening status.
+                if (body_unhealthy && !last_idle_face_fault)
+                    board->display_->SetEmotion("neutral");
                 // WROOM faults are factual local OLED status even while
                 // Xiaozhi is speaking. Never wait for the speech floor to
                 // become idle to show a newly observed safety fault.
@@ -219,7 +225,7 @@ private:
                     // prescribing sadness for every independent WROOM fault.
                     // The factual STOP status above remains visible, and
                     // optional HSM/LLM moods cannot override the safety cue.
-                    if (!last_idle_face_fault || !last_face_available)
+                    if (last_idle_face_fault && !last_face_available)
                         board->display_->SetEmotion("neutral");
                     model_mood_active = false;
                 } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
@@ -234,8 +240,10 @@ private:
                             action.set_mood ? MoodName(action.mood) : "neutral");
                     model_mood_active = false;
                 }
-                last_idle_face_fault = body_unhealthy;
             }
+            // Update fault history even while the voice floor owns the OLED.
+            // Otherwise speaking can trigger a 100 ms neutral redraw flood.
+            last_idle_face_fault = body_unhealthy;
             last_was_idle = idle;
             last_face_available = face_available;
             vTaskDelay(pdMS_TO_TICKS(100));
