@@ -21,6 +21,7 @@ def test_bench_percentiles_are_bounded_and_do_not_claim_a_latency_with_no_sample
 
 async def test_stream_motion_instrumentation_reports_light_and_cover_without_media():
     import io
+
     from PIL import Image
 
     def jpeg(dark, light, *, cover=False):
