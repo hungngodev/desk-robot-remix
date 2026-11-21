@@ -144,3 +144,25 @@ def test_default_full_dc_wheels_stay_disabled_until_external_cutoff_qualified():
     assert "[env:esp32dev]" in ini
     assert "DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED=0" not in ini.split(
         "[env:esp32dev]", 1)[1]
+
+
+def test_full_guarded_builds_enable_direct_nc_collision_contacts():
+    ini = (BODY / "platformio.ini").read_text(encoding="utf-8")
+    firmware = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    body = (BODY / "lib/BodyControl/BodyControl.cpp").read_text(encoding="utf-8")
+    guarded = (BODY / "tests/guarded_body_tests.cpp").read_text(encoding="utf-8")
+    wiring = (HARDWARE / "wiring.md").read_text(encoding="utf-8")
+
+    def section(name):
+        marker = "[env:" + name + "]"
+        assert ini.count(marker) == 1
+        return ini.split(marker, 1)[1].split("\n[env:", 1)[0]
+
+    for name in ("esp32_full", "esp32_dc_full"):
+        assert "-DDESK_ROBOT_ENABLE_BUMPER=1" in section(name)
+    assert "DESK_ROBOT_ENABLE_BUMPER=1" not in section("esp32dev")
+    assert "control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);" in firmware
+    assert "if (guarded_motion_profile()) bumper_fault_latched_ = true;" in body
+    assert "raw_bumper_trip_preempts_debounce_and_preserves_payload" in guarded
+    assert "two normally closed bumpers wired in series" in wiring
+    assert "External 3.3 V pullup is mandatory" in wiring

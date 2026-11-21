@@ -374,7 +374,7 @@ InvenSense MPU6050 RM-MPU-6000A and Adafruit AT42QT1010 breakout:
 | RANGE mux 0x70 channels 5 through 7 | Three actual read-only left, right and rear VL53L0X | Existing firmware source acquires these in esp32_full; no local reverse/turn movement permission |
 | ACCESSORY mux 0x71 channels 0 through 7 | CAP/paw, gesture/nose, force, SHT41/BMP280, power gauges, MCP dock/PN532, wheel angles | See complete channel list above and source checked generated harness; chip IDs, breakout VCC and I2C pullups remain unqualified |
 | GPIO34 | Required active HIGH AT42QT1010 head pad | 3.3 V power and output, through-case physical false-touch trials |
-| GPIO35, build flag DESK_ROBOT_ENABLE_BUMPER | Optional normally-closed mechanical bumper, raw local trip | External 3.3 V pullup; normally closed contacts hold GPIO35 LOW, opening a switch or unplugging a lead produces the active HIGH trip. Verify this fail-closed polarity physically before enabling |
+| GPIO35, build flag DESK_ROBOT_ENABLE_BUMPER | Required in both full body profiles: two normally closed bumpers wired in series, direct raw local trip | External 3.3 V pullup is mandatory on this input-only pin; closed contacts hold GPIO35 LOW, opening either switch or unplugging a lead produces the active HIGH trip. A floating or unpowered input cannot prove continuity. Verify real switch release, disconnection and collision stopping with motors disconnected before physical release |
 | MCP23017 GPIOB0, build flag DESK_ROBOT_ENABLE_REED | Slow read-only magnetic costume accessory reed closure | Source polls BANK=0 GPIOB 0x13, active LOW, 3.3 V pullup, actual dwell and magnet interference need measurement |
 | MCP23017 GPIOB1, build flag DESK_ROBOT_ENABLE_PIR | Slow read-only PIR motion output | Source polls same expander byte, active HIGH; measured 3.3 V output, pulse dwell and external bias needed; not person recognition |
 | WROOM GPIO36 and GPIO39 reserved | Two independent demodulated left/right terminal beacon inputs | **Source NEC/RMT decoder implemented, but NO physical receiver qualification or movement authority.** External bias, ESP32 RTC/ADC glitch erratum, actual interrupts/RMT version and optical baffles must be checked |
@@ -399,7 +399,7 @@ With a qualified and physically disconnected motor supply, run the existing
 the WROOM USB serial interface. The inspection now exposes MPU6050 (family4)
 raw six-axis data and the `optional_inputs` enabled bit mask, bumper/reed/PIR
 levels and rising counters. It reports false physical qualification even when
-values are fresh. GPIO35/36/39 remain disabled in default firmware until each
+values are fresh. GPIO35 is enabled in both full guarded body profiles, but GPIO36/39 remain dock IR receiver inputs until each
 has measured voltage levels, hardware pull resistors and a real enclosure mount.
 An active bumper also blocks the tool's *eligibility diagnostic* for a local
 rearm; only actual physical calibration and the separate direct USB command can
