@@ -224,13 +224,23 @@ class HttpHead:
 
     async def command(self, command: str) -> dict:
         expected = expected_ack(command)
-        async with self.lock:
-            response = await self._request("POST", "/api/command", json={"command": command})
-            data = _response_object(response)
-            reply = data.get("reply", "")
-            if data.get("ok") is not True or data.get("robot_id") != self.config.id or reply != expected:
-                raise HeadError("Unmatched or failed command ACK; movement not retried")
-            return data
+        if command == "halt":
+            # Urgent WROOM disarm must not queue behind a stalled telemetry
+            # read. WROOM owns the independent physical STOP latch; a reply
+            # is only a command receipt, never proof that wheels have stopped.
+            response = await self._request(
+                "POST", "/api/command", json={"command": command}
+            )
+        else:
+            async with self.lock:
+                response = await self._request(
+                    "POST", "/api/command", json={"command": command}
+                )
+        data = _response_object(response)
+        reply = data.get("reply", "")
+        if data.get("ok") is not True or data.get("robot_id") != self.config.id or reply != expected:
+            raise HeadError("Unmatched or failed command ACK; movement not retried")
+        return data
 
     async def face_event(self, event: str) -> None:
         """Send an explicitly bounded cosmetic face cue to THIS robot's head.

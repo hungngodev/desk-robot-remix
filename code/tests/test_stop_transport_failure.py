@@ -1,6 +1,7 @@
 """Regression for urgent STOP transport failure with uncooperative jobs."""
 
 import asyncio
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -149,6 +150,53 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
             "WROOM physical STOP unconfirmed; rely on local watchdog",
         )
 
+
+
+    async def test_urgent_halt_bypasses_stalled_status_request(self):
+        """A stalled status GET must not consume the terminal HALT budget."""
+        import httpx
+
+        from desk_robot.transport import HttpHead
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        halt_sent = asyncio.Event()
+
+        async def handler(request):
+            if request.method == "GET" and request.url.path == "/api/status":
+                entered.set()
+                await release.wait()
+                return httpx.Response(200, json={"robot_id": "robot-01"})
+            if request.method == "POST" and request.url.path == "/api/command":
+                self.assertEqual(
+                    request.headers["Authorization"], "Bearer fixture-token"
+                )
+                self.assertEqual(json.loads(request.content), {"command": "halt"})
+                halt_sent.set()
+                return httpx.Response(
+                    200, json={"ok": True, "robot_id": "robot-01", "reply": "OK halt"}
+                )
+            raise AssertionError(f"Unexpected request {request.method} {request.url}")
+
+        config = SimpleNamespace(
+            id="robot-01", head_url="http://robot.invalid", token_env="HEAD_TOKEN"
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            head = HttpHead(config, client)
+            with patch("desk_robot.transport.secret", return_value="fixture-token"):
+                stalled_get = asyncio.create_task(head.status())
+                try:
+                    await asyncio.wait_for(entered.wait(), timeout=1.0)
+                    self.assertTrue(head.lock.locked())
+                    receipt = await asyncio.wait_for(
+                        head.command("halt"), timeout=0.5
+                    )
+                    self.assertTrue(halt_sent.is_set())
+                    self.assertEqual(receipt["reply"], "OK halt")
+                    self.assertFalse(stalled_get.done())
+                finally:
+                    release.set()
+                    await asyncio.wait_for(stalled_get, timeout=1.0)
 
 
 if __name__ == "__main__":
