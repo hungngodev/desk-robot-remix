@@ -885,8 +885,11 @@ void BodyControl::execute(const char* line, std::size_t length,
             imu_.model == BerryModel::Mpu6050 &&
             imu_.accel[0] == 0 && imu_.accel[1] == 0 &&
             imu_.accel[2] == 0 ? "imu_zero_accel" :
-        imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
+        // A safety fault latched during motion remains the operator's
+        // recovery reason even when the raw sample subsequently goes stale.
+        // A normal head ARM cannot clear it; only local USB rearm can.
         imu_sensor_fault_latched_ ? "imu_sensor_fault_latched" :
+        imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
         !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
         reply, capacity,

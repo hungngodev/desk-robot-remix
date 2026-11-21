@@ -784,15 +784,22 @@ static void required_imu_is_a_local_freshness_interlock() {
   CHECK(!body.state().armed);
   CHECK(body.state().left == 0 && body.state().right == 0);
   CHECK(body.state().servos_attached);  // no deliberate drop of held object
-  // Even a later ID mismatch cannot be treated as fresh motor clearance.
+  // The watchdog did not fire, but the live IMU safety fault is latched.
+  // Status must explain why a remote command cannot resume movement.
+  CHECK(send(body, "status", 251).find(
+      "\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
+  // Identity changes and a fresh but invalid raw sample cannot clear the
+  // latch or replace the required local USB recovery with an ordinary ARM.
   body.set_imu_identity(4, 0x68, 0);
-  CHECK(send(body, "arm", 252) == "ERR arm imu_missing_or_stale");
+  CHECK(send(body, "arm", 252) == "ERR arm imu_sensor_fault_latched");
   body.set_imu_identity(1, 0xd4, 0x49);
-  CHECK(send(body, "arm", 252) == "ERR arm imu_missing_or_stale");
+  CHECK(send(body, "arm", 252) == "ERR arm imu_sensor_fault_latched");
   reading.valid = false;
   reading.at_ms = 252;
   body.set_imu(reading);
-  CHECK(send(body, "arm", 252) == "ERR arm imu_missing_or_stale");
+  CHECK(send(body, "arm", 252) == "ERR arm imu_sensor_fault_latched");
+  CHECK(send(body, "status", 252).find(
+      "\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
   reading.valid = true;
   body.set_imu(reading);
   CHECK(send(body, "arm", 252) == "ERR arm imu_sensor_fault_latched");
