@@ -685,8 +685,10 @@ class Coordinator:
             )
             # Camera receipt time is NOT equivalent to image exposure time.
             # Local WROOM cliff stop remains mandatory for every short pulse.
+            # Real docking reuses a strictly fresh MJPEG frame.
+            capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
             jpeg = await _bounded_head_reply(
-                head.snapshot(), seconds=2.0,
+                capture_dock(), seconds=2.0,
                 timeout_message="Camera snapshot timeout",
             )
             received_at = time.monotonic()
