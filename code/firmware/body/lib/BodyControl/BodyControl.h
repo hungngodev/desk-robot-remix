@@ -223,6 +223,8 @@ class BodyControl {
   std::uint32_t dc_fault_last_seq_ = 0, dc_fault_last_at_ms_ = 0;
   bool dc_fault_last_active_ = false;
   bool bumper_fault_latched_ = false; // collision requires local USB recovery
+  bool battery_fault_latched_ = false; // guarded motion needs USB recovery
+  std::uint32_t battery_fault_seq_ = 0, battery_fault_at_ms_ = 0;
   bool motor_watchdog_latched_ = false;  // only local USB may clear
   bool imu_low_g_latched_ = false;  // native MPU event needs local USB rearm
   bool imu_sensor_fault_latched_ = false; // lost live IMU during motion: USB only

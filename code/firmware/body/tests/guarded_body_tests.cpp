@@ -1392,20 +1392,51 @@ static void battery_undervoltage_rejects_arm_and_stops_motion() {
   CHECK(send(body, "arm", 0) == "OK arm");
 
   desk_robot::AccessoryReadings readings{};
-  readings.gauge.fuel_valid = true;
+  readings.gauge.fuel_present = readings.gauge.fuel_valid = true;
+  readings.gauge.fuel_sample_seq = 1;
+  readings.gauge.fuel_at_ms = 1;
   readings.gauge.cell_mv = 0; // Collapsed 0 mV reading must fail closed
   body.set_accessories(readings, 1);
   CHECK(!body.state().armed);
-  CHECK(send(body, "arm", 1) == "ERR arm battery_low");
+  CHECK(send(body, "arm", 1) == "ERR arm battery_low_latched");
 
+  readings.gauge.fuel_sample_seq = 2;
+  readings.gauge.fuel_at_ms = 2;
   readings.gauge.cell_mv = 3190;
   body.set_accessories(readings, 2);
   CHECK(!body.state().armed);
-  CHECK(send(body, "arm", 2) == "ERR arm battery_low");
+  CHECK(send(body, "arm", 2) == "ERR arm battery_low_latched");
 
+  // Changing the voltage but reusing the last low sample is NOT evidence
+  // of recovery. Neither a remote permit nor a local command may bypass it.
   readings.gauge.cell_mv = 3350;
   body.set_accessories(readings, 3);
-  CHECK(send(body, "arm", 3) == "OK arm");
+  CHECK(send(body, "arm", 3) == "ERR arm battery_low_latched");
+  CHECK(send(body, "rearm", 3, true) ==
+        "ERR rearm battery_unsafe_or_stale");
+  CHECK(send(body, "status", 3).find("\"fault\":\"battery_low_latched\"") !=
+        std::string::npos);
+  readings.gauge.fuel_valid = false;
+  body.set_accessories(readings, 4);
+  CHECK(send(body, "rearm", 4, true) ==
+        "ERR rearm battery_unsafe_or_stale");
+
+  // A new independently completed healthy gauge conversion plus deliberate
+  // local recovery is required. It cannot resume the old motion command.
+  readings.gauge.fuel_valid = true;
+  readings.gauge.fuel_sample_seq = 3;
+  readings.gauge.fuel_at_ms = 5;
+  body.set_accessories(readings, 5);
+  CHECK(send(body, "arm", 5) == "ERR arm battery_low_latched");
+  CHECK(send(body, "rearm", 5) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 505, true) ==
+        "ERR rearm battery_unsafe_or_stale");
+  readings.gauge.fuel_sample_seq = 4;
+  readings.gauge.fuel_at_ms = 506;
+  body.set_accessories(readings, 506);
+  fresh(guard, 506);
+  CHECK(send(body, "rearm", 506, true) == "OK rearm");
+  CHECK(send(body, "arm", 506) == "OK arm");
   CHECK(body.state().armed);
 }
 

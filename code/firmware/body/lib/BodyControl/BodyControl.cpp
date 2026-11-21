@@ -340,6 +340,20 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   }
   if (readings.gauge.fuel_valid &&
       readings.gauge.cell_mv < 3200U) {
+    if (guarded_motion_profile()) {
+      const auto& fuel = readings.gauge;
+      const auto seq_delta = fuel.fuel_sample_seq - battery_fault_seq_;
+      const auto time_delta = fuel.fuel_at_ms - battery_fault_at_ms_;
+      if (!battery_fault_latched_ ||
+          (seq_delta != 0U && seq_delta < 0x80000000U &&
+           time_delta != 0U && time_delta < 0x80000000U)) {
+        battery_fault_seq_ = fuel.fuel_sample_seq;
+        battery_fault_at_ms_ = fuel.fuel_at_ms;
+      }
+      // A later missing/invalid/healthy gauge result cannot let an old
+      // head request restart motion. Local recovery needs a newer valid read.
+      battery_fault_latched_ = true;
+    }
     stop_motion();
     state_.armed = false;
   }
@@ -416,7 +430,7 @@ void BodyControl::tick(std::uint32_t now_ms) {
     // remains a separate physical release gate.
     return;
   }
-  if (bumper_fault_latched_) {
+  if (bumper_fault_latched_ || battery_fault_latched_) {
     stop_motion();
     state_.armed = false;
     return;
@@ -879,7 +893,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool battery_depleted = state_.accessories.gauge.fuel_valid &&
         state_.accessories.gauge.cell_mv < 3200U;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
-        !bumper_fault_latched_ &&
+        !bumper_fault_latched_ && !battery_fault_latched_ &&
         !motor_watchdog_latched_ && !imu_low_g_latched_ &&
         !imu_sensor_fault_latched_ &&
         !dock_unhealthy && !bumper_hit && !touch_hit &&
@@ -916,6 +930,7 @@ void BodyControl::execute(const char* line, std::size_t length,
             imu_.accel[2] == 0 ? "imu_zero_accel" :
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
         battery_depleted ? "battery_low" :
+        battery_fault_latched_ ? "battery_low_latched" :
         !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
         reply, capacity,
@@ -1030,6 +1045,19 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR rearm imu_missing_or_stale");
       return;
     }
+    if (battery_fault_latched_) {
+      const auto& fuel = state_.accessories.gauge;
+      const auto seq_delta = fuel.fuel_sample_seq - battery_fault_seq_;
+      const auto time_delta = fuel.fuel_at_ms - battery_fault_at_ms_;
+      if (!fuel.fuel_present || !fuel.fuel_valid ||
+          fuel.fuel_sample_seq == 0U || now_ms - fuel.fuel_at_ms >= 500U ||
+          fuel.cell_mv < 3300U || seq_delta == 0U ||
+          seq_delta >= 0x80000000U || time_delta == 0U ||
+          time_delta >= 0x80000000U) {
+        std::snprintf(reply, capacity, "ERR rearm battery_unsafe_or_stale");
+        return;
+      }
+    }
     if (!guarded_motion_profile() || guard_ == nullptr ||
         !guard_->try_rearm(now_ms)) {
       std::snprintf(reply, capacity, "ERR rearm safety_interlock");
@@ -1037,11 +1065,16 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
     bumper_fault_latched_ = false; // only USB, after released raw contact
+    battery_fault_latched_ = false; // after newer measured safe fuel sample
     motor_watchdog_latched_ = false; // no old drive resumed
     imu_low_g_latched_ = false; // after a truly fresh, clear MPU status
     imu_sensor_fault_latched_ = false; // after fresh sensor and USB recovery
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (battery_fault_latched_) {
+      std::snprintf(reply, capacity, "ERR arm battery_low_latched");
+      return;
+    }
     if (bumper_fault_latched_) {
       std::snprintf(reply, capacity, "ERR arm bumper_latched");
       return;
