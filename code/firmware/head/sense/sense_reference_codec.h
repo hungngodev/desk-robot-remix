@@ -37,6 +37,8 @@ public:
         uint32_t overwrite_reads;
         uint32_t discarded_stale_writes;
         uint32_t short_output_writes;
+        uint32_t microphone_frames_read;
+        uint32_t speaker_frames_accepted;
         bool integrity_failed;
     };
     ReferenceDiagnostics GetReferenceDiagnostics();
@@ -83,6 +85,10 @@ private:
     uint32_t stale_publish_discards_ = 0;
     // I2S timeout/short output cannot be counted as fully delivered speech.
     uint32_t short_output_writes_ = 0;
+    // Driver read/write progress, not proof of microphone acoustic quality
+    // or speaker playback. Persist across cancellation for a live bench.
+    uint32_t microphone_frames_read_ = 0;
+    uint32_t speaker_frames_accepted_ = 0;
     // Silence-only reference on startup/reset is expected briefly. Count
     // missing windows and warn only on prolonged consecutive underflow.
     uint32_t missing_reference_reads_ = 0;
