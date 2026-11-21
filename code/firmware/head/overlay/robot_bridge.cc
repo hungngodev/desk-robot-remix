@@ -496,7 +496,9 @@ esp_err_t Bridge::Json(httpd_req_t* req, int status, const std::string& body) {
     const char* status_text = "500 Internal Server Error";
     switch (status) {
         case 200: status_text = "200 OK"; break;
+        case 202: status_text = "202 Accepted"; break;
         case 400: status_text = "400 Bad Request"; break;
+        case 409: status_text = "409 Conflict"; break;
         case 401: status_text = "401 Unauthorized"; break;
         case 413: status_text = "413 Content Too Large"; break;
         case 415: status_text = "415 Unsupported Media Type"; break;
