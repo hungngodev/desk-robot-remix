@@ -7,6 +7,7 @@ import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Callable
 
 from .dock_vision import DockCameraCalibration, DockPose, assess_dock, detect_apriltag
 
@@ -168,12 +169,23 @@ async def verify_selected_dock_frame(head, observation) -> None:
         await verify(observation)
 
 
-async def observe_actual_dock(head, robot) -> dict:
+async def observe_actual_dock(
+    head, robot, *, consent_valid: Callable[[], bool] | None = None,
+) -> dict:
     """Real head JPEG in, real marker pose out. No movement is possible here.
 
     Time is captured at Mac JPEG receipt, not falsely claimed camera exposure.
-    No drive, servo, arm or charge tools are imported or called.
+    No drive, servo, arm or charge tools are imported or called. An optional
+    API-grant callback prevents further visual processing after revocation.
     """
+    def consent_denied() -> bool:
+        return consent_valid is not None and not consent_valid()
+
+    if consent_denied():
+        return _hold(
+            robot.id, reason="Camera consent revoked",
+            source="camera_consent_revoked",
+        )
     try:
         calib, target = load_real_dock_calibration(robot.dock_calibration)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -186,6 +198,9 @@ async def observe_actual_dock(head, robot) -> dict:
             robot.id, reason="Dock calibration needs actual camera sensor PID",
             source="not_calibrated",
         )
+    if consent_denied():
+        return _hold(robot.id, reason="Camera consent revoked",
+                     source="camera_consent_revoked")
     try:
         # The native AprilTag slot must not be occupied by an alternate
         # head snapshot that suppresses coroutine cancellation indefinitely.
@@ -199,6 +214,9 @@ async def observe_actual_dock(head, robot) -> dict:
         )
     except (OSError, ConnectionError, TimeoutError, RuntimeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
+    if consent_denied():
+        return _hold(robot.id, reason="Camera consent revoked",
+                     source="camera_consent_revoked")
     try:
         jpeg, received_at = unpack_dock_frame(observation)
     except ValueError:
@@ -231,6 +249,9 @@ async def observe_actual_dock(head, robot) -> dict:
             reason=f"Dock camera live identity unavailable: {type(exc).__name__}",
             source="camera_identity_unavailable",
         )
+    if consent_denied():
+        return _hold(robot.id, reason="Camera consent revoked",
+                     source="camera_consent_revoked")
     if observed_pid != calib.camera_sensor_pid:
         return _hold(
             robot.id, reason="Dock camera sensor PID differs from calibration",
@@ -242,6 +263,9 @@ async def observe_actual_dock(head, robot) -> dict:
             robot.id, reason="Dock camera receipt expired during identity check",
             source="head_snapshot_invalid",
         )
+    if consent_denied():
+        return _hold(robot.id, reason="Camera consent revoked",
+                     source="camera_consent_revoked")
     try:
         pose = await detect_bounded(jpeg, calib, captured_at=received_at)
     except DockDetectorBusy as exc:
@@ -258,6 +282,9 @@ async def observe_actual_dock(head, robot) -> dict:
             reason=f"Dock marker detection unavailable: {type(exc).__name__}",
             source="apriltag_detection_failed",
         )
+    if consent_denied():
+        return _hold(robot.id, reason="Camera consent revoked",
+                     source="camera_consent_revoked")
     # The native detector can finish after a same-PID stream reconnect.
     try:
         await verify_selected_dock_frame(head, observation)
@@ -266,6 +293,9 @@ async def observe_actual_dock(head, robot) -> dict:
             robot.id, reason=f"Dock frame source changed: {type(exc).__name__}",
             source="head_snapshot_invalid",
         )
+    if consent_denied():
+        return _hold(robot.id, reason="Camera consent revoked",
+                     source="camera_consent_revoked")
     # A corrupted native adapter result must not escape as a plausible dock
     # phase or crash the observer after the detector worker has completed.
     if pose is not None and not isinstance(pose, DockPose):
@@ -295,6 +325,9 @@ async def observe_actual_dock(head, robot) -> dict:
     assessment = assess_dock(
         assessed_pose, now=time.monotonic(), target_distance_mm=target
     )
+    if consent_denied():
+        return _hold(robot.id, reason="Camera consent revoked",
+                     source="camera_consent_revoked")
     return {
         "robot_id": robot.id, "phase": assessment.phase,
         "reason": assessment.reason,

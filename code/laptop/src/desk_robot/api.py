@@ -204,7 +204,17 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Camera consent required for dock observation")
         camera_grant = settings.camera_consent_generation
-        result = await observe_actual_dock(coordinator().heads[robot_id], robot)
+
+        def original_camera_grant_valid() -> bool:
+            return (
+                settings.voice_vision_tools_enabled
+                and settings.camera_consent_generation == camera_grant
+            )
+
+        result = await observe_actual_dock(
+            coordinator().heads[robot_id], robot,
+            consent_valid=original_camera_grant_valid,
+        )
         if not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Camera consent revoked during dock observation")
         if settings.camera_consent_generation != camera_grant:

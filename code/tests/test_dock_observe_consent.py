@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from desk_robot import dock_runtime
 from desk_robot.api import create_app
 from fastapi.testclient import TestClient
 
@@ -22,7 +23,8 @@ def test_dock_observe_never_publishes_old_grant_pose(
         "motor_authorized": False, "charging_authorized": False,
     }
 
-    async def observe(head, robot):
+    async def observe(head, robot, *, consent_valid=None):
+        assert consent_valid is not None and consent_valid()
         calls.append(robot.id)
         if grant_change in {"revoke", "regrant"}:
             settings.voice_vision_tools_enabled = False
@@ -53,3 +55,45 @@ def test_dock_observe_never_publishes_old_grant_pose(
     else:
         assert "pose" not in response.text
         assert "x_mm" not in response.text
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+async def test_revoked_snapshot_does_not_reach_identity_or_detector(
+    settings, monkeypatch, regrant,
+):
+    """Do not process a JPEG captured during a different permission grant."""
+    settings.voice_vision_tools_enabled = True
+    old_grant = settings.camera_consent_generation
+    observed = []
+
+    def grant_valid():
+        return (settings.voice_vision_tools_enabled
+                and settings.camera_consent_generation == old_grant)
+
+    class Head:
+        async def snapshot(self):
+            settings.voice_vision_tools_enabled = False
+            if regrant:
+                settings.voice_vision_tools_enabled = True
+            return b"\\xff\\xd8\\xff\\xd9"
+
+        async def camera_identity(self):
+            observed.append("identity")
+            return "OV5640"
+
+    monkeypatch.setattr(
+        dock_runtime, "load_real_dock_calibration",
+        lambda path: (SimpleNamespace(camera_sensor_pid="OV5640"), 200),
+    )
+    monkeypatch.setattr(
+        dock_runtime, "detect_bounded",
+        lambda *args, **kwargs: observed.append("detector"),
+    )
+    result = await dock_runtime.observe_actual_dock(
+        Head(), SimpleNamespace(id="robot-01", dock_calibration=None),
+        consent_valid=grant_valid,
+    )
+    assert result["phase"] == "hold"
+    assert result["source"] == "camera_consent_revoked"
+    assert result["pose"] is None
+    assert observed == []
