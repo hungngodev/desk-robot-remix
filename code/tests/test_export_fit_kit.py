@@ -653,3 +653,30 @@ def test_flat_tray_diagonal_bound_distinguishes_rotation_from_impossibility(tmp_
     assert possible_on_axes["axis_aligned_packaging_possible"] is True
     assert possible_on_axes["flat_tray_any_yaw_impossible"] is False
     assert possible_on_axes["physical_interior_fit_verified"] is False
+
+def test_protected_pack_audit_tracks_active_fit_coupon_dimensions():
+    """The buying audit must not keep the retired 68 mm battery tray claim."""
+    scad = (
+        ROOT / "docs/cad/remixes/remaining_fit_gauges.scad"
+    ).read_text(encoding="utf-8")
+    audit = (
+        ROOT / "docs/hardware/2026-11-17-protected-pack-and-connector-audit.md"
+    ).read_text(encoding="utf-8")
+
+    def scalar(name):
+        prefix = name + " = "
+        line = next(
+            line for line in scad.splitlines()
+            if line.strip().startswith(prefix)
+        )
+        return float(line.split("=", 1)[1].split(";", 1)[0].strip())
+
+    dims = tuple(scalar(name) for name in ("power_l", "power_w", "power_h"))
+    assert dims == (86.0, 35.0, 14.0)
+    assert "86 x 35 x 14 mm" in audit
+    assert "Current 86 x 35 x 14 nominal pack cavity" in audit
+    assert "Current 68 x 35 x 14 nominal tray" not in audit
+    assert "length 86 mm before wire relief exceeds 68 mm" not in audit
+    assert "70 mm leads, bend radius" in audit
+    assert "107.6 x 40.6 mm" in audit
+

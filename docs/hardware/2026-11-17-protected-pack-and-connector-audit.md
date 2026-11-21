@@ -10,16 +10,19 @@ The source-of-truth load calculation remains
 [`code/scripts/power_preflight.py`](../../code/scripts/power_preflight.py).
 The new [vendor harness screener](../../code/scripts/screen_vendor_battery_harness.py)
 reuses its conservative input demand and separately rejects undersized
-connectors or wires. The standard envelope in
+connectors or wires. The current provisional pack cavity in
 [`remaining_fit_gauges.scad`](../cad/remixes/remaining_fit_gauges.scad)
-is 68 x 35 x 14 mm and is **not a validated final chassis**.
+is **86 x 35 x 14 mm**. The rendered coupon is larger because it adds
+fit allowance, walls and external mounting tabs; the source packaging screen
+currently reports about **107.6 x 40.6 mm** in XY for the whole tray. Those
+numbers are CAD geometry only and are **not a validated final chassis**.
 
 ## Five specific product configurations, not a generic 2000mAh order
 
-| Exact vendor variant | Protected pack dimensions | Discharge claim | Connector and wire limit | Current 68 x 35 x 14 nominal tray |
+| Exact vendor variant | Protected pack dimensions | Discharge claim | Connector and wire limit | Current 86 x 35 x 14 nominal pack cavity |
 | --- | --- | --- | --- | --- |
 | [LiPol LP103650](https://www.lipobattery.us/3-7v-lipo-battery-lp103650-2000mah-7-4wh-with-pcm-and-wires-and-ntc-and-2510-3p/) | 51 x 36 x 10 mm | 2 A max | 2510 3P current rating not established | **NO**: 36 mm width plus clearance is wider than 35 mm |
-| [LiPol LPHD7430085](https://lipo-battery.com/high-rate-discharge-lipo-battery-lphd7430085-5a-3-7v-2000mah-7-4wh/) | 86 x 30 x 7.4 mm | 5 A max | Molex 43645 0300 and 70mm attached leads require exact terminal rating | **NO**: length 86 mm before wire relief exceeds 68 mm |
+| [LiPol LPHD7430085](https://lipo-battery.com/high-rate-discharge-lipo-battery-lphd7430085-5a-3-7v-2000mah-7-4wh/) | 86 x 30 x 7.4 mm | 5 A max | Molex 43645 0300 and 70mm attached leads require exact terminal rating | **NO**: the bare protected body fits the nominal cavity dimensions on paper, but the connector, 70 mm leads, bend radius, isolation and removal path are unmeasured, and the complete tray already conflicts with the original SMARS outer footprint |
 | [BatterySpace PR CU R512, 22AWG open leads](https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx) | 68 x 50 x 7 mm | 4 A max | Supplier states 4 A for **22 AWG open leads**, no safe connector/harness selection yet | **NO**: 50 mm width and unqualified lead termination |
 | [BatterySpace PR CU R512, Molex 26AWG](https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx) | 68 x 50 x 7 mm | 4 A cell claim | **2.2 A connector and leads** published | **NO**: both 50 mm width and connector rating may fail |
 | [BatterySpace PR CU R512, JST SHR 30AWG](https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx) | 68 x 50 x 7 mm | 4 A cell claim | **0.86 A connector and leads** published | **NO**: both 50 mm width and insufficient cable |
@@ -37,8 +40,11 @@ cell rating does **not** override 2.2 A or 0.86 A harness ratings.
 
 The source catalog now contains TEN exact manufacturer configurations including
 these five additional vendor models. At the same deliberately illustrative
-2.55A peak cell demand and 1.53A sustained cell demand, the full 68 x 35 x
-14mm envelope **still accepts none**.
+2.55A peak cell demand and 1.53A sustained cell demand, the current 86 x 35 x
+14 mm nominal cavity **still accepts none as an orderable complete assembly**.
+LPHD7430085 is no longer rejected for its bare body length alone; its harness,
+service clearance, electrical qualification and whole-tray chassis conflict
+remain blocking.
 
 | Exact model and manufacturer | Published protection and current | Assembled body envelope | Sourcing decision |
 | --- | --- | --- | --- |
