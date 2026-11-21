@@ -48,6 +48,7 @@ jobs:
             tests/test_runtime_voice_priority.py \
             tests/test_brain_context.py \
             tests/test_brain_core_memory.py \
+            tests/test_core_memory_mutation_race.py \
             tests/test_brain_memory_retrieval.py \
             tests/test_memory_duplicate_identity.py \
             tests/test_api_conversation.py \

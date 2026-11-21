@@ -40,6 +40,7 @@ def test_host_verification_uses_independent_bounded_job_lanes():
             assert "tests/test_stop_transport_failure.py::StopTransportFailureTests::test_cooperative_job_cancellation_preserves_failed_physical_stop" in tests
             assert "tests/test_stop_transport_failure.py::StopTransportFailureTests::test_terminal_stop_halts_body_but_short_pulse_preserves_arm" in tests
             assert "tests/test_memory_duplicate_identity.py" in tests
+            assert "tests/test_core_memory_mutation_race.py" in tests
             assert "tests/test_vision_worker.py::test_scene_comparator_unhashable_model_kind_is_rejected_without_crash" in tests
             assert "tests/test_multimodal.py::test_unhashable_multimodal_cues_are_rejected_without_mutation" in tests
         checkout = next(
