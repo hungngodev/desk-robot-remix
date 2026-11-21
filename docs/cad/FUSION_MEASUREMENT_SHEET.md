@@ -24,7 +24,7 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | Sensor lens to floor nominal measured standoff | | tof_floor_height |
 | Dock track guide clear width | | dock_clear_width |
 | Two independent terminal IR emitter carriers, their lateral separation, lens height, aim and optical overlap | | dock_ir_spacing / ir_left_z / ir_right_z / ir_yaw |
-| Exact two independent seat switch bodies, mount pitch / hole diameter, free and operating positions, normally closed polarity, overtravel and wire clearance | | dock_seat_body / dock_seat_mount_pitch / dock_seat_hole_d / dock_seat_fp / dock_seat_op / dock_seat_overtravel / dock_seat_wire_clearance |
+| Exact two independent seat switch bodies, mount pitch / hole diameter, free and operating positions, normally closed polarity, overtravel and wire clearance | | dock_seat_left / dock_seat_right / dock_seat_body / dock_seat_mount_pitch / dock_seat_hole_d / dock_seat_fp / dock_seat_op / dock_seat_overtravel / dock_seat_wire_clearance |
 | AprilTag printed black square size and camera height | | tag_square_mm, tag_center_height |
 | Key and candy actual width and thickness | | object_w / h |
 | Actual printer minimum wall and hole clearance | | print_wall, clearance_xy |
