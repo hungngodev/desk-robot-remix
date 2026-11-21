@@ -9,7 +9,7 @@ and rear wheel originals are also saved; combined mechanical fit is unverified.
 **Appearance revision:** user chose a rounder existing head. Saved
 [Sparky v0.1.0](originals/sparky-head/README.md) is the current fit-check candidate;
 EVA is historical. [Four concept views](concepts/2026-11-03-rounded/README.md)
-use real shell/chassis meshes but illustrative tracks/mechanism/mounts and no bank.
+use real shell/chassis meshes but illustrative tracks/mechanism/mounts and no qualified battery envelope.
 
 | Source | Author | Needed files | License |
 | --- | --- | --- | --- |
@@ -22,14 +22,23 @@ use real shell/chassis meshes but illustrative tracks/mechanism/mounts and no ba
 | [Original forklift 3027255](https://www.thingiverse.com/thing:3027255/files) | tristomietitoredeituit | [Saved E/F pieces, PDF and hashes](originals/forklift/README.md) | CC BY-NC-SA 4.0 |
 
 Do not mix screwless/screwed axle and wheel variants. Follow original assembly
-counts. Stepper chassis/lift/rounded head/WROOM/bank/sensor mounting still needs measured fit checks.
+counts. Stepper chassis/lift/rounded head/WROOM/protected 1S pack/sensor mounting still needs measured fit checks.
 
 Future permitted jobs: removable rounded-head bracket clearing camera/microphone/
 speaker/button; small internal module spacers or camera-aperture corrections;
-WROOM/bank spacers, small sensor brackets, an SSD1306 bezel and thin replaceable
-jaw tips. Keep the camera pose fixed relative to the jaws. The old separate
-battery/buck system is not in the bank-based plan. Confirm physical bank size,
-head/arm stability and ToF standoff before final mounting. Preserve the existing chassis and linkage.
+WROOM/protected 1S pack spacers, small sensor brackets, an SSD1306 bezel and thin replaceable
+jaw tips. Keep the camera pose fixed relative to the jaws. **Current power envelope:** the old USB power-bank design is historical and
+is not the selected first-robot supply. Use the [protected 1S power circuit
+contract](../hardware/2026-11-17-one-pet-protected-power-circuit.md) as the
+source for a protected cell with a real NTC, BQ24075 power-path charger,
+regulated 5V actuator/audio and independent 3.3V sensor rails. The CAD must
+fit the exact approved pack, protector, polarized connector, fuse, switch,
+wire bend radii, buck/boost stages and physical service path. Check actual
+tray dimensions, center of gravity, head/arm stability and ToF standoff
+before final mounting. The battery, converter, charger, dock contacts and
+power harness are NOT qualified for purchase, powered assembly or charging:
+this schematic contract requires physical measurements and fault trials.
+Do not substitute a power bank or infer battery fit from a source STL. Preserve the existing chassis and linkage.
 
 Each export must record source/license, dimensions, changes and hash. Derived
 SMARS geometry retains its noncommercial/share-alike terms. Software MIT terms

@@ -41,3 +41,18 @@ def test_optional_research_row_cannot_qualify_or_defer_required_dock():
     )
     assert "advanced games/docking/navigation" in _stages(fake)[12]
     assert "advanced games/docking/navigation" not in rows[12]
+
+
+def test_cad_register_rejects_obsolete_power_bank_assembly_instructions():
+    cad = (ROOT / "docs/cad/README.md").read_text(encoding="utf-8")
+    circuit = (ROOT / "docs/hardware/"
+               "2026-11-17-one-pet-protected-power-circuit.md").read_text(
+                   encoding="utf-8",
+               )
+    assert "protected 1S power circuit" in cad
+    assert "BQ24075" in cad and "regulated 5V" in cad
+    assert "3.3V sensor" in cad and "NOT qualified for purchase" in cad
+    assert "protected single-cell pack" in circuit
+    assert "BQ24075" in circuit and "NOT A FABRICATED OR TESTED PCB" in circuit
+    for obsolete in ("bank-based plan", "physical bank size", "WROOM/bank"):
+        assert obsolete not in cad
