@@ -266,6 +266,14 @@ PHYSICAL_GATE_METRICS = {
 }
 
 
+NONNEGATIVE_PHYSICAL_GATES = frozenset({
+    "loaded_drive_and_stopping",
+    "hardware_motor_driver_fails_low_after_cpu_stall",
+    "full_power_load_and_faults",
+    "battery_pack_ntc_to_charger_ts_thermal_fault_trial",
+})
+
+
 def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
     """Reject text-only or out-of-limit critical physical gate signoffs.
 
@@ -306,6 +314,12 @@ def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
         if not all(math.isfinite(number) for number in bounds):
             return False
     except (OverflowError, ValueError):
+        return False
+    # A fitted distance, elapsed cutoff time or absolute peak current cannot
+    # be negative even if the claimed acceptance range was also fabricated
+    # with negative endpoints. Signed pack shunt current and Celsius case
+    # temperature deliberately remain eligible for negative observations.
+    if gate in NONNEGATIVE_PHYSICAL_GATES and any(n < 0 for n in bounds):
         return False
     return bounds[1] <= bounds[0] <= bounds[2]
 
