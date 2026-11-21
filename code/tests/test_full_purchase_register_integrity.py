@@ -137,7 +137,12 @@ def test_every_supplemental_purchase_row_has_one_parent_and_quantity():
     assert len(pet) == 42 and len(room) == 7
     for name, (per, count, parent, disposition) in EXTRA.items():
         cells = rows[name]
-        assert (int(cells[2]), int(cells[3])) == (per, count), name
+        if name == "Room thermal 8x8 array":
+            assert cells[2:4] == ["1 if later selected", "1 visible option"]
+            assert cells[5] == "0"
+            assert "CONDITIONAL OPTIONAL, NOT SELECTED" in cells[6]
+        else:
+            assert (int(cells[2]), int(cells[3])) == (per, count), name
         assert 0 <= int(cells[5]) <= count, name
         detail = linked[LINKED_IDS[name]]
         assert detail["parent_role"] == parent, (
