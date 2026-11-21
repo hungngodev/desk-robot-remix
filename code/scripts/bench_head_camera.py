@@ -81,6 +81,9 @@ async def measure(
     stream_intervals: list[float] = []
     sense_capture_intervals: list[float] = []
     status_times: list[float] = []
+    concurrent_audio_samples: list[tuple[float, dict]] = []
+    concurrent_audio_errors: list[str] = []
+    read_audio_reference = getattr(head, "audio_reference_status", None)
     camera_sizes: list[int] = []
     camera_errors: list[str] = []
     status_errors: list[str] = []
@@ -245,9 +248,58 @@ async def measure(
             due = max(due + status_period_s, time.monotonic())
             await asyncio.sleep(max(0, min(deadline, due) - time.monotonic()))
 
-    await asyncio.gather(
-        receive_stream() if stream else poll_camera(), poll_status()
-    )
+    async def poll_concurrent_audio():
+        """Observe real codec counters while video runs, never PCM or playback."""
+        due = started
+        while time.monotonic() < deadline:
+            begin = time.monotonic()
+            try:
+                sample = await asyncio.wait_for(
+                    read_audio_reference(),
+                    timeout=min(0.8, max(0.05, deadline - begin)),
+                )
+                if (type(sample) is not dict
+                        or sample.get("robot_id") != robot_id
+                        or type(sample.get("boot")) is not int
+                        or not 0 <= sample["boot"] <= 0xffffffff
+                        or sample.get("microphone_privacy_muted") is not False
+                        or sample.get("reference_integrity_failed") is not False
+                        or sample.get("speaker_playback_verified") is not False
+                        or sample.get("aec_physically_qualified") is not False
+                        or any(
+                            type(sample.get(key)) is not int
+                            or not 0 <= sample[key] <= 0xffffffff
+                            for key in (
+                                "microphone_frames_read",
+                                "speaker_frames_accepted",
+                                "reference_underflow_reads",
+                            )
+                        )):
+                    raise ValueError("Invalid concurrent Sense AEC receipt")
+                if concurrent_audio_samples:
+                    previous = concurrent_audio_samples[-1][1]
+                    if (sample["boot"] != previous["boot"]
+                            or any(sample[key] < previous[key] for key in (
+                                "microphone_frames_read",
+                                "speaker_frames_accepted",
+                                "reference_underflow_reads",
+                            ))):
+                        raise ValueError("Concurrent Sense AEC reboot or counter regression")
+                concurrent_audio_samples.append((time.monotonic(), sample))
+            except Exception as exc:
+                if len(concurrent_audio_errors) < 20:
+                    concurrent_audio_errors.append(
+                        type(exc).__name__ + ": " + str(exc)[:110]
+                    )
+            due = max(due + status_period_s, time.monotonic())
+            await asyncio.sleep(max(0, min(deadline, due) - time.monotonic()))
+
+    active_tasks = [
+        receive_stream() if stream else poll_camera(), poll_status(),
+    ]
+    if stream and callable(read_audio_reference):
+        active_tasks.append(poll_concurrent_audio())
+    await asyncio.gather(*active_tasks)
     # End the camera/status measurement interval BEFORE the optional AEC
     # GET. A slow diagnostic response cannot dilute measured camera FPS.
     elapsed = max(0.001, time.monotonic() - started)
@@ -256,7 +308,6 @@ async def measure(
     # microphone PCM, block the active camera, or certify audible playback.
     audio_reference = None
     audio_reference_error = None
-    read_audio_reference = getattr(head, "audio_reference_status", None)
     if callable(read_audio_reference):
         try:
             audio_reference = await asyncio.wait_for(
@@ -264,7 +315,33 @@ async def measure(
             )
         except Exception as exc:
             audio_reference_error = type(exc).__name__ + ": " + str(exc)[:110]
+    concurrent_audio_delta = None
+    if len(concurrent_audio_samples) >= 2:
+        first = concurrent_audio_samples[0][1]
+        last = concurrent_audio_samples[-1][1]
+        concurrent_audio_delta = {
+            key: last[key] - first[key]
+            for key in (
+                "microphone_frames_read", "speaker_frames_accepted",
+                "reference_underflow_reads",
+            )
+        }
     return {
+        "concurrent_audio_samples": len(concurrent_audio_samples),
+        "concurrent_audio_errors": concurrent_audio_errors[:20],
+        "concurrent_audio_counter_delta": concurrent_audio_delta,
+        "concurrent_audio_mac_span_ms": (
+            round(1000 * (
+                concurrent_audio_samples[-1][0] - concurrent_audio_samples[0][0]
+            ), 1) if len(concurrent_audio_samples) >= 2 else None
+        ),
+        "concurrent_audio_driver_activity_observed": (
+            stream and concurrent_audio_delta is not None
+            and not concurrent_audio_errors
+            and concurrent_audio_delta["microphone_frames_read"] > 0
+            and concurrent_audio_delta["speaker_frames_accepted"] > 0
+            and concurrent_audio_delta["reference_underflow_reads"] == 0
+        ),
         "aec_reference_diagnostics": audio_reference,
         "aec_reference_probe_error": audio_reference_error,
         "robot_id": robot_id,
