@@ -687,7 +687,7 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
         "Room gas/environment sensor": "bme688",
         "Room presence radar": "ld2410c",
         "Room thermal 8x8 array": "amg8833",
-        "Optional capacitive soil probe": "soil_probe",
+        "Required shared-station capacitive soil probe": "soil_probe",
         "Optional NFC toy stickers": "nfc_game_props",
     }
     register = (mod.PLAN.parent / "2026-11-16-five-pet-purchase-register.md").read_text()
@@ -722,7 +722,7 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
         "Room gas/environment sensor": (1, 1),
         "Room presence radar": (1, 1),
         "Room thermal 8x8 array": (1, 1),
-        "Optional capacitive soil probe": (1, 1),
+        "Required shared-station capacitive soil probe": (1, 1),
         "Optional NFC toy stickers": (10, 10),
     }
     assert set(expected) == set(role)
@@ -917,7 +917,7 @@ def test_all_fourteen_addon_quantities_match_one_fleet():
         "Room gas/environment sensor": (1, 1),
         "Room presence radar": (1, 1),
         "Room thermal 8x8 array": (1, 1),
-        "Optional capacitive soil probe": (1, 1),
+        "Required shared-station capacitive soil probe": (1, 1),
         "Optional NFC toy stickers": (10, 10),
     }
     observed = {}
