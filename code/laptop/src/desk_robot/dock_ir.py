@@ -24,11 +24,17 @@ def dock_beacon_code(dock_id: int) -> int:
 _KNOWN_DOCK_CODES = frozenset(dock_beacon_code(i) for i in range(1, 6))
 
 def validate_ir(data: dict, robot_id: str, *,
-                expected_dock_id: int | None = None) -> dict:
+                expected_dock_id: int | None = None,
+                elapsed_ms: float = 0.0) -> dict:
     if expected_dock_id is not None:
         expected_code = dock_beacon_code(expected_dock_id)
     else:
         expected_code = None
+    # The WROOM age is measured when its report is assembled, not when the
+    # Mac receives it. Include all subsequent transport/decision latency.
+    # Invalid elapsed time never creates a fresher beacon.
+    if type(elapsed_ms) not in (int, float) or not 0 <= elapsed_ms <= 1e9:
+        raise ValueError("Invalid NEC elapsed request age")
     if not isinstance(data, dict) or data.get("robot_id") != robot_id:
         raise ValueError("Wrong or missing NEC receiver robot identity")
     for key in ("left_valid", "right_valid", "match"):
@@ -43,7 +49,8 @@ def validate_ir(data: dict, robot_id: str, *,
             raise ValueError(f"NEC must not claim physical authority: {key}")
     for side in ("left", "right"):
         if data[f"{side}_valid"] and (
-            data[f"{side}_seq"] == 0 or data[f"{side}_age_ms"] > 200
+            data[f"{side}_seq"] == 0
+            or data[f"{side}_age_ms"] + elapsed_ms > 200
         ):
             raise ValueError(f"Fresh NEC {side} needs a real hardware frame")
     if data["match"]:

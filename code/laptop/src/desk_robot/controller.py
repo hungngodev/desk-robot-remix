@@ -842,6 +842,7 @@ class Coordinator:
                 getter = getattr(head, "ir_status", None)
                 if not callable(getter):
                     raise OperationError("Assigned dock IR receiver unavailable")
+                ir_request_at = time.monotonic()
                 reading = await _bounded_head_reply(
                     getter(), seconds=1.0,
                     timeout_message="Assigned dock IR status timeout",
@@ -849,6 +850,7 @@ class Coordinator:
                 try:
                     beacon = validate_ir(
                         reading, job.robot_id, expected_dock_id=expected_dock,
+                        elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
                     )
                 except ValueError as exc:
                     raise OperationError(f"Assigned dock IR rejected: {exc}") from exc
@@ -921,6 +923,22 @@ class Coordinator:
             except Exception as exc:
                 raise OperationError("Dock JPEG source changed before drive") from exc
             self._require_camera_motion_grant(camera_grant)
+            if expected_dock is not None:
+                # WROOM health and the selected camera boot are awaited after
+                # the beacon read. A valid IR reply can expire during either
+                # wait; never authorize a pulse from that expired sample.
+                try:
+                    validate_ir(
+                        reading, job.robot_id, expected_dock_id=expected_dock,
+                        elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
+                    )
+                except ValueError:
+                    return {
+                        "phase": "hold",
+                        "reason": "Assigned dock IR expired before guarded drive",
+                        "charging_authorized": False,
+                        "physical_acceptance_pass": False,
+                    }
             await head.command(command)
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)

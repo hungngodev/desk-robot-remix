@@ -64,6 +64,31 @@ def test_mismatched_reception_cannot_report_a_beacon_identity():
         validate_ir(reading, "robot-01")
 
 
+@pytest.mark.parametrize(("left_age", "right_age", "elapsed", "valid"), [
+    (180, 25, 20, True),
+    (180, 25, 21, False),
+    (25, 185, 16, False),
+    (25, 185, 15, True),
+    (0, 0, 201, False),
+])
+def test_ir_decision_age_includes_transport_and_both_receiver_ages(
+    left_age, right_age, elapsed, valid,
+):
+    reading = evidence()
+    reading.update(left_age_ms=left_age, right_age_ms=right_age)
+    if valid:
+        assert validate_ir(reading, "robot-01", elapsed_ms=elapsed) == reading
+    else:
+        with pytest.raises(ValueError, match="Fresh NEC"):
+            validate_ir(reading, "robot-01", elapsed_ms=elapsed)
+
+
+@pytest.mark.parametrize("elapsed", [True, -1, float("nan"), float("inf"), "25"])
+def test_ir_transport_elapsed_age_must_be_finite_nonnegative_number(elapsed):
+    with pytest.raises(ValueError, match="Invalid NEC elapsed"):
+        validate_ir(evidence(), "robot-01", elapsed_ms=elapsed)
+
+
 async def test_http_head_uses_existing_auth_and_get_only(monkeypatch):
     monkeypatch.setenv("TEST_ROBOT_NECS", "R" * 48)
     events = []

@@ -14,6 +14,8 @@ from desk_robot.simulator import SimulationVision
 @pytest.mark.parametrize("changed,pose_x", [
     ("disarmed", 80), ("side_blocked", 80), ("front_blocked", 0),
     ("healthy", 0),
+    ("slow_ir_left", 0), ("slow_ir_right", 0),
+    ("slow_body", 0),
 ])
 async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
     settings, monkeypatch, changed, pose_x,
@@ -31,6 +33,8 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
 
         async def status(self):
             self.reads += 1
+            if self.changed == "slow_body" and self.reads >= 2:
+                await asyncio.sleep(0.16)
             disarmed = self.changed == "disarmed"
             side = [600, 600, 600]
             if self.changed == "side_blocked":
@@ -58,11 +62,14 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
         async def ir_status(self):
             started.set()
             await release.wait()
+            if self.changed in ("slow_ir_left", "slow_ir_right"):
+                await asyncio.sleep(0.16)
             return {
                 "robot_id": "robot-01",
                 "left_valid": True, "right_valid": True, "match": True,
                 "left_seq": 8, "right_seq": 9,
-                "left_age_ms": 0, "right_age_ms": 0,
+                "left_age_ms": 85 if self.changed in ("slow_ir_left", "slow_body") else 0,
+                "right_age_ms": 85 if self.changed == "slow_ir_right" else 0,
                 "code": dock_beacon_code(1),
                 "motor_authorized": False, "charging_authorized": False,
                 "physical_qualified": False,
@@ -92,7 +99,7 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
         await asyncio.wait_for(started.wait(), 1.5)
         head.changed = None if changed == "healthy" else changed
         release.set()
-        if changed in ("disarmed", "side_blocked"):
+        if changed in ("disarmed", "side_blocked", "slow_ir_left", "slow_ir_right"):
             with pytest.raises(OperationError):
                 await asyncio.wait_for(task, 2)
             assert head.commands == []
@@ -100,11 +107,12 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
             result = await asyncio.wait_for(task, 2)
             assert result["phase"] == "hold"
             assert result["charging_authorized"] is False
-            if changed == "front_blocked":
+            if changed in ("front_blocked", "slow_body"):
                 assert head.commands == []
             else:
                 assert head.commands == ["drive 20 20 100", "stop"]
-        assert head.reads >= 2
+        # Slow IR is rejected before a second body-health round trip.
+        assert head.reads >= (1 if changed.startswith("slow_ir") else 2)
     finally:
         release.set()
         if not task.done():
