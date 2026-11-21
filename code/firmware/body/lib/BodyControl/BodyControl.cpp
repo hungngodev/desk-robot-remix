@@ -122,12 +122,16 @@ void BodyControl::set_cap(bool valid, std::uint8_t zones) {
   cap_initialized_ = true;
 }
 
+void BodyControl::sample_bumper_input(bool active) {
+  state_.bumper_raw = active;
+  if (active) touch_trip(); // stop wheels, preserve payload holding PWM
+}
+
 void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
                                          bool reed, bool pir) {
   enabled_mask &= 0x07U;
   state_.extra_mask = enabled_mask;
-  state_.bumper_raw = (enabled_mask & 1U) && bumper;
-  if (state_.bumper_raw) touch_trip(); // immediate local motor disarm
+  sample_bumper_input((enabled_mask & 1U) != 0U && bumper);
   const bool levels[3] = {bool((enabled_mask & 1U) && bumper),
                           bool((enabled_mask & 2U) && reed),
                           bool((enabled_mask & 4U) && pir)};
@@ -816,8 +820,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         guard_->evaluate(now_ms);
     const bool driver_unhealthy = dc_fault_latched_ || dc_driver_fault_bad(now_ms);
     const bool dock_unhealthy = dock_power_lockout_ || dock_telemetry_bad(now_ms);
-    const bool bumper_hit = (state_.extra_mask & 1U) != 0U &&
-        (state_.bumper_raw || state_.bumper_active);
+    const bool bumper_hit = state_.bumper_raw ||
+        ((state_.extra_mask & 1U) != 0U && state_.bumper_active);
     const bool touch_hit = state_.touch_active || state_.touch_raw_active;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !motor_watchdog_latched_ && !imu_low_g_latched_ &&
@@ -950,8 +954,8 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR rearm dock_gpio_missing_or_stale");
       return;
     }
-    if ((state_.extra_mask & 1U) &&
-        (state_.bumper_raw || state_.bumper_active)) {
+    if (state_.bumper_raw ||
+        ((state_.extra_mask & 1U) && state_.bumper_active)) {
       std::snprintf(reply, capacity, "ERR rearm bumper_active");
       return;
     }
@@ -993,7 +997,8 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR arm dock_gpio_missing_or_stale");
       return;
     }
-    if (state_.extra_mask & 1U && (state_.bumper_raw || state_.bumper_active)) {
+    if (state_.bumper_raw ||
+        ((state_.extra_mask & 1U) && state_.bumper_active)) {
       std::snprintf(reply, capacity, "ERR arm bumper_active");
       return;
     }
