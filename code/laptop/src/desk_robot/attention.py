@@ -98,6 +98,8 @@ class AttentionLedger:
         self, robot_id: str, generation: int, at: float, *, interrupted: bool
     ) -> bool:
         _clock(at)
+        if type(interrupted) is not bool:
+            raise ValueError("Topic interruption status must be boolean")
         state = self._state(robot_id)
         if (type(generation) is not int
                 or state.generation != generation

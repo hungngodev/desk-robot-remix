@@ -508,3 +508,16 @@ def test_boolean_topic_generation_cannot_finish_first_live_conversation(monkeypa
     assert "Ongoing conversation topic" in ledger.timeline("pet", 13)[0]["content"]
     assert ledger.finish_topic("pet", generation, 14, interrupted=False)
     assert ledger._state("pet").topic_state == "completed"
+
+
+@pytest.mark.parametrize("invalid", [None, 0, 1, "false", "true", []])
+def test_nonboolean_interruption_cannot_relabel_live_conversation(monkeypatch, invalid):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 100.0)
+    ledger = AttentionLedger(["pet"])
+    generation = ledger.begin_topic("pet", "Continue the current story", 10)
+    with pytest.raises(ValueError, match="boolean"):
+        ledger.finish_topic("pet", generation, 12, interrupted=invalid)
+    assert ledger._state("pet").topic_state == "active"
+    assert ledger._state("pet").topic_updated_at == 10
+    assert ledger.finish_topic("pet", generation, 14, interrupted=False)
+    assert ledger._state("pet").topic_state == "completed"
