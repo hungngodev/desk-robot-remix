@@ -594,12 +594,13 @@ async def test_persistent_stream_adapts_static_sampling_after_two_baselines():
             self.release = asyncio.Event()
 
         async def stream_frames(self):
-            base = time.monotonic() - 4
             frame = image()
-            for index in range(17):
+            for _ in range(17):
                 self.emitted += 1
-                yield frame, base + index * 0.25
-                await asyncio.sleep(0)
+                # This represents a live camera, not a four-second backlog.
+                # Production must reject pre-aged frames during JPEG decode.
+                yield frame, time.monotonic()
+                await asyncio.sleep(0.25)
             self.drained.set()
             await self.release.wait()
 
@@ -610,7 +611,7 @@ async def test_persistent_stream_adapts_static_sampling_after_two_baselines():
     )
     visual.start_streams()
     try:
-        await asyncio.wait_for(head.drained.wait(), timeout=3)
+        await asyncio.wait_for(head.drained.wait(), timeout=8)
         stats = visual.status("robot-01")["software_timings"]
         assert head.emitted == stats["stream_frames_received"] == 17
         # Two warmup samples at 0 and 0.5 seconds; one more at 4 seconds.
@@ -632,11 +633,12 @@ async def test_reconnect_restarts_two_frame_motion_bootstrap():
 
         async def stream_frames(self):
             self.attempts += 1
-            base = time.monotonic() - 1
             still = image()
-            for index in range(4):
-                yield still, base + index * .25
-                await asyncio.sleep(0)
+            for _ in range(4):
+                # A reconnect starts with current capture receipts. An old
+                # camera backlog must never serve as the new visual baseline.
+                yield still, time.monotonic()
+                await asyncio.sleep(0.25)
             if self.attempts > 1:
                 self.ready.set()
                 await self.release.wait()
@@ -648,7 +650,7 @@ async def test_reconnect_restarts_two_frame_motion_bootstrap():
     )
     visual.start_streams()
     try:
-        await asyncio.wait_for(head.ready.wait(), timeout=5)
+        await asyncio.wait_for(head.ready.wait(), timeout=8)
         assert head.attempts >= 2
         assert len(visual.hub.frames["robot-01"]) == 2
         assert visual.status("robot-01")["software_timings"][
