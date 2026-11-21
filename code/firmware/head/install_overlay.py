@@ -503,7 +503,135 @@ void Application::HandleStartListeningEvent() {""",
 
 void Application::HandleStartListeningEvent() {""",
         )
+        # Physical BOOT privacy is an APPLICATION audio-send fence as well as
+        # a codec PDM fence. Never send already-queued Opus after opt out.
+        text = replace_once(
+            text,
+            """        if (bits & MAIN_EVENT_SEND_AUDIO) {
+            while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                if (protocol_ && !protocol_->SendAudio(std::move(packet))) {""",
+            """        if (bits & MAIN_EVENT_SEND_AUDIO) {
+            while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+                if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) {
+                    while (audio_service_.PopPacketFromSendQueue()) {}
+                    break;
+                }
+#endif
+                if (protocol_ && !protocol_->SendAudio(std::move(packet))) {""",
+        )
+        text = replace_once(
+            text,
+            """void Application::HandleToggleChatEvent() {
+    auto state = GetDeviceState();""",
+            """void Application::HandleToggleChatEvent() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) return;
+#endif
+    auto state = GetDeviceState();""",
+        )
+        text = replace_once(
+            text,
+            """void Application::HandleStartListeningEvent() {
+    auto state = GetDeviceState();""",
+            """void Application::HandleStartListeningEvent() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) return;
+#endif
+    auto state = GetDeviceState();""",
+        )
+        text = replace_once(
+            text,
+            """void Application::HandleStopListeningEvent() {
+    auto state = GetDeviceState();""",
+            """void Application::HandleStopListeningEvent() {
+    auto state = GetDeviceState();
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) {
+        // Physical BOOT has already gated PDM. Drop encoded packets that
+        // were in the original Xiaozhi queue before the button event.
+        while (audio_service_.PopPacketFromSendQueue()) {}
+        if (state == kDeviceStateSpeaking) {
+            AbortSpeaking(kAbortReasonNone);
+            audio_service_.ResetDecoder();
+            Board::GetInstance().GetAudioCodec()->EnableOutput(false);
+        }
+        if (protocol_ && protocol_->IsAudioChannelOpened())
+            protocol_->CloseAudioChannel();
+        if (GetDeviceState() == kDeviceStateConnecting ||
+            GetDeviceState() == kDeviceStateListening ||
+            GetDeviceState() == kDeviceStateSpeaking)
+            SetDeviceState(kDeviceStateIdle);
+        return;
+    }
+#endif""",
+        )
+        text = replace_once(
+            text,
+            """void Application::StartListeningAudio() {
+    // Runs in the main loop, either directly from HandleStateChangedEvent or""",
+            """void Application::StartListeningAudio() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    if (sense_microphone_privacy_muted_.load(std::memory_order_acquire)) return;
+#endif
+    // Runs in the main loop, either directly from HandleStateChangedEvent or""",
+        )
+        # After a blocked audio channel open, BOOT may have set Idle or
+        # explicitly muted even when the old state still appears Connecting.
+        text = replace_once(
+            text,
+            """if (GetDeviceState() != kDeviceStateConnecting) {
+        protocol_->CloseAudioChannel();
+        return;
+    }
+#endif
+    SetListeningMode(mode);""",
+            """if (GetDeviceState() != kDeviceStateConnecting ||
+        sense_microphone_privacy_muted_.load(std::memory_order_acquire)) {
+        protocol_->CloseAudioChannel();
+        return;
+    }
+#endif
+    SetListeningMode(mode);""",
+        )
         files[path] = text.encode()
+        # Only the disposable Sense clone changes upstream Application
+        # declarations, so every other Xiaozhi board retains original code.
+        header_path = "main/application.h"
+        header = (target / header_path).read_text()
+        header = replace_once(
+            header,
+            """#include <functional>
+#include <cstdint>""",
+            """#include <functional>
+#include <atomic>
+#include <cstdint>""",
+        )
+        header = replace_once(
+            header,
+            """    void ToggleChatState();
+
+    /**""",
+            """    void ToggleChatState();
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    void SetSenseMicrophonePrivacyMuted(bool muted) {
+        sense_microphone_privacy_muted_.store(muted, std::memory_order_release);
+    }
+#endif
+
+    /**""",
+        )
+        header = replace_once(
+            header,
+            """    AudioService audio_service_;
+    NotifyPlayer notify_player_;""",
+            """    AudioService audio_service_;
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+    std::atomic<bool> sense_microphone_privacy_muted_{false};
+#endif
+    NotifyPlayer notify_player_;""",
+        )
+        files[header_path] = header.encode()
         return files
     files = cores3_files(target)
     if board == "cores3":
