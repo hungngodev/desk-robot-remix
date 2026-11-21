@@ -261,7 +261,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         codec_source = replace_once(
             codec_source,
             '#include "no_audio_codec.h"',
-            '#include "no_audio_codec.h"\\n#include "sdkconfig.h"'.replace('\\n', '\n'),
+            '#include "no_audio_codec.h"\\n#include <algorithm>\\n#include "sdkconfig.h"'.replace('\\n', '\n'),
         )
         codec_source = replace_once(
             codec_source,
@@ -297,6 +297,19 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         &bytes_written, portMAX_DELAY));
 #endif
     return static_cast<int>(bytes_written / sizeof(int32_t));''',
+        )
+        # Only the selected Sense amplifier may accept bounded volume.
+        # NVS and upstream SetOutputVolume do not cap values above 100;
+        # the unbounded squared gain can overflow its int32 PCM factor.
+        codec_source = replace_once(
+            codec_source,
+            '    int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;',
+            '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    const int safe_volume = std::clamp(output_volume_, 0, 100);
+    int32_t volume_factor = pow(double(safe_volume) / 100.0, 2) * 65536;
+#else
+    int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
+#endif''',
         )
         # Sense PDM is the SAME existing Xiaozhi microphone reader, not a
         # new capture task. A disconnected or wedged I2S DMA channel must
