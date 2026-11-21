@@ -2228,6 +2228,13 @@ class PetController:
                     raw = ordered(
                         robot_id, now, limit=remaining if live_media_allowed else 16
                     )
+                    # Runtime only admits new station samples with opt-in,
+                    # but an older buffered one must also disappear on revoke.
+                    if not self.settings.room_station_context_enabled:
+                        raw = [
+                            item for item in raw
+                            if item.get("channel") != "room_station"
+                        ]
                     if live_media_allowed:
                         timeline = [
                             item for item in raw
@@ -2264,8 +2271,15 @@ class PetController:
             and self.settings.voice_vision_tools_enabled
             and bool(timeline)
         )
+        room_context_used = (
+            self.settings.mode == "hardware"
+            and any(item.get("channel") == "room_station" for item in timeline)
+        )
         context = compose_brain_context(memory, core_memory, timeline)
-        return recent_memory, context, private_memory_allowed, live_context_used
+        return (
+            recent_memory, context, private_memory_allowed,
+            live_context_used, room_context_used,
+        )
 
     async def _speak_social(
         self, robot_id: str, change: SceneChange, generation: int,
@@ -2573,9 +2587,8 @@ class PetController:
             gathered = await self._load_proactive_context(robot_id, change)
             if gathered is None:
                 return
-            recent_memory, context, private_memory_allowed, live_context_used = (
-                gathered
-            )
+            (recent_memory, context, private_memory_allowed,
+             live_context_used, room_context_used) = gathered
             # A social turn is NOT five independent agents speaking at once.
             # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
             # each pet's own persona, two bounded turns and per-pet memory.
@@ -2603,6 +2616,8 @@ class PetController:
                          or self.settings.voice_memory_tools_enabled)
                     and (not live_context_used
                          or self.settings.voice_vision_tools_enabled)
+                    and (not room_context_used
+                         or self.settings.room_station_context_enabled)
                     and (not camera_derived
                          or self.settings.mode != "hardware"
                          or self.settings.voice_vision_tools_enabled)
@@ -2685,6 +2700,11 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "live_context_consent_revoked"
                 return
+            if (room_context_used
+                    and not self.settings.room_station_context_enabled):
+                state.suppressed += 1
+                state.last_initiative_suppression = "room_context_consent_revoked"
+                return
             def audio_still_permitted() -> bool:
                 # Kokoro synthesis can outlive the authenticated VAD monitor.
                 # A lost listener cannot certify that a human has not barged.
@@ -2696,6 +2716,8 @@ class PetController:
                          or self.settings.voice_memory_tools_enabled)
                     and (not live_context_used
                          or self.settings.voice_vision_tools_enabled)
+                    and (not room_context_used
+                         or self.settings.room_station_context_enabled)
                     and (not camera_derived or self.settings.mode != "hardware"
                          or self.settings.voice_vision_tools_enabled)
                     and not self._human_active_in_fleet(time.monotonic())
