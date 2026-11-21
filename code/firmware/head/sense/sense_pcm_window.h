@@ -1,0 +1,109 @@
+#pragma once
+
+// A single consent-gated stereo PCM16 calibration window. The real Sense
+// Xiaozhi codec supplies simultaneous microphone and AEC reference frames.
+// Memory ownership stays with the codec/HTTP caller, not this view class.
+// No second mic reader, persistence, speech, or motor authority.
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+
+namespace desk_robot {
+
+class SensePcmWindow {
+ public:
+  static constexpr std::uint32_t kSampleRate = 16000;
+  static constexpr std::uint32_t kChannels = 2;
+  static constexpr std::uint32_t kFrames = 4 * kSampleRate;
+  static constexpr std::size_t kBytes =
+      std::size_t{kFrames} * kChannels * sizeof(std::int16_t);
+
+  struct Complete {
+    std::int16_t* interleaved = nullptr;
+    std::uint32_t frames = 0;
+    std::int64_t first_sample_us = 0;
+    std::int64_t last_sample_us = 0;
+  };
+
+  bool begin(std::int16_t* storage, std::int64_t request_us) noexcept {
+    if (storage == nullptr || request_us <= 0 || storage_ != nullptr)
+      return false;
+    storage_ = storage;
+    requested_us_ = request_us;
+    received_ = 0;
+    first_sample_us_ = 0;
+    last_sample_us_ = 0;
+    failed_ = false;
+    ready_ = false;
+    return true;
+  }
+
+  void offer(const std::int16_t* mic, const std::int16_t* reference,
+             std::uint32_t frames, std::int64_t end_us,
+             bool reference_valid) noexcept {
+    if (storage_ == nullptr || ready_ || failed_) return;
+    if (!mic || !reference || frames == 0 || frames > 2048 ||
+        !reference_valid || end_us <= requested_us_ ||
+        end_us - requested_us_ > 6'000'000 ||
+        (last_sample_us_ != 0 &&
+         (end_us <= last_sample_us_ || end_us - last_sample_us_ > 250'000)) ||
+        (last_sample_us_ == 0 && end_us - requested_us_ > 500'000)) {
+      failed_ = true;
+      return;
+    }
+    if (first_sample_us_ == 0) {
+      first_sample_us_ = end_us -
+          (std::int64_t{frames} * 1'000'000 / kSampleRate);
+    }
+    const std::uint32_t accepted =
+        std::min(frames, kFrames - received_);
+    for (std::uint32_t i = 0; i < accepted; ++i) {
+      storage_[2 * (received_ + i)] = mic[i];
+      storage_[2 * (received_ + i) + 1] = reference[i];
+    }
+    received_ += accepted;
+    last_sample_us_ = end_us;
+    if (received_ == kFrames) ready_ = true;
+  }
+
+  bool ready() const noexcept { return ready_ && !failed_; }
+  bool failed() const noexcept { return failed_; }
+  bool occupied() const noexcept { return storage_ != nullptr; }
+  std::uint32_t frames_received() const noexcept { return received_; }
+
+  Complete take() noexcept {
+    if (!ready()) return {};
+    Complete out{storage_, received_, first_sample_us_, last_sample_us_};
+    reset();
+    return out;
+  }
+
+  // Returns the caller's allocation for mandatory secure wipe and release.
+  std::int16_t* discard() noexcept {
+    auto* pointer = storage_;
+    reset();
+    return pointer;
+  }
+
+ private:
+  void reset() noexcept {
+    storage_ = nullptr;
+    requested_us_ = 0;
+    received_ = 0;
+    first_sample_us_ = 0;
+    last_sample_us_ = 0;
+    ready_ = false;
+    failed_ = false;
+  }
+
+  std::int16_t* storage_ = nullptr;
+  std::uint32_t received_ = 0;
+  std::int64_t requested_us_ = 0;
+  std::int64_t first_sample_us_ = 0;
+  std::int64_t last_sample_us_ = 0;
+  bool ready_ = false;
+  bool failed_ = false;
+};
+
+}  // namespace desk_robot
