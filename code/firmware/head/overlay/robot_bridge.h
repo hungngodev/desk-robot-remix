@@ -4,6 +4,7 @@
 #include <mutex>
 #include <string>
 #include "esp_http_server.h"
+#include "sdkconfig.h"  // Bench PCM handler is compile gated per private Sense build.
 #include "camera.h"
 #include "robot_protocol.h"
 #include "real_touch_edges.h"
@@ -53,6 +54,9 @@ private:
     static void BodyReadTask(void* context);
     static void CameraTask(void* context);
     static void CameraStreamTask(void* context);
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+    static void BenchPcmTask(void* context);
+#endif
     Reply Transact(const std::string& command, bool operator_control);
     bool Authorize(httpd_req_t* req);
     esp_err_t Handle(httpd_req_t* req);
