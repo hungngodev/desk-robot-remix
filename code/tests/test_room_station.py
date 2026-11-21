@@ -782,6 +782,7 @@ def test_usb_reader_rechallenges_after_a_stalled_post_ack_frame(monkeypatch):
     """A late complete JSON line is NOT a current room observation."""
     import sys
     from types import SimpleNamespace
+
     import desk_robot.room_station as module
 
     clock = {"now": 100.0}
@@ -827,6 +828,7 @@ def test_usb_reader_never_accepts_second_frame_without_its_own_ack(monkeypatch):
     """Missing a per-report ACK must not turn queued JSON into live context."""
     import sys
     from types import SimpleNamespace
+
     import desk_robot.room_station as module
 
     clock = {"now": 100.0}

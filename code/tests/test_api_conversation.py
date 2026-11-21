@@ -41,7 +41,7 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
         assert client.post("/v1/robots/robot-01/enable", headers=operator).status_code == 200
         coordinator = app.state.runtime.coordinator
         previous_jobs = set(coordinator.jobs)
-        previous_permit = coordinator.permits["robot-01"]
+        assert "robot-01" in coordinator.permits
         # Xiaozhi cannot mint a permit but can consume the operator's single
         # recent grant for a bounded key or candy pickup, with WROOM guards.
         result = client.post(
