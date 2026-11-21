@@ -127,7 +127,9 @@ async def test_stale_feedback_fails_before_next_servo_pulse(monkeypatch):
     head = FakeHead([100, 100, None])
     with pytest.raises(OperationError, match="Lost fresh"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 64", "grip 60"]
+    # The downgraded AUX frame has no WROOM boot identity. A relief command
+    # could act on a rebooted controller, so even reopening is forbidden.
+    assert head.commands == ["grip 64"]
 
 
 async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
