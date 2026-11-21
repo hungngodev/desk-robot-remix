@@ -3,6 +3,8 @@
 These are source contract checks, not physically applied 5V/3.3V tests.
 """
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -100,7 +102,8 @@ def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
     # reject the zero sentinel; the upper bound rejects absurd stale data.
     assert "bme.gas_resistance >= 1" in start
     assert "bme.gas_resistance <= 1000000000U" in start
-    assert "if (bme_valid) bme_sample_ms = now;" in start
+    assert "bme_completed.publish(bme.temperature, bme.humidity, bme.pressure," in start
+    assert "bme.gas_resistance, now);" in start
 
 
 def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
@@ -136,8 +139,8 @@ def test_bme688_gas_conversion_never_blocks_radar_uart_or_fakes_sample_age():
     report = code.split("void bme_observation(", 1)[1].split("void radar_observation", 1)[0]
     assert "bme.beginReading()" not in report
     assert "bme.endReading()" not in report
-    assert "const bool fresh = bme_valid && now - bme_sample_ms <= kBmeStaleMs;" in report
-    assert 'Serial.print(bme_sample_ms);' in report
+    assert "const bool fresh = bme_completed.fresh(now, kBmeStaleMs);" in report
+    assert 'Serial.print(bme_completed.sample_ms);' in report
     assert "constexpr uint32_t kBmeStaleMs = 3000;" in code
 
 
@@ -219,3 +222,40 @@ def test_bme688_producer_ranges_match_room_decoder():
     assert "bme.gas_resistance <= 1000000000U" in sample
     assert '_value(data, "pressure_pa", 30000, 125000)' in decoder
     assert '_value(data, "gas_ohms", 1, 1e9)' in decoder
+
+def test_bme_pending_conversion_reports_only_last_completed_tuple():
+    source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    helper = (ROOT / "code/firmware/room_station/src/bme_completed_sample.h").read_text()
+    scan = source.split("void bme_step(uint32_t now) {", 1)[1].split(
+        "void bme_observation(uint32_t now) {", 1
+    )[0]
+    report = source.split("void bme_observation(uint32_t now) {", 1)[1].split(
+        "void radar_observation(", 1
+    )[0]
+    assert '#include "bme_completed_sample.h"' in source
+    assert "bme.gas_resistance = 0;" in scan
+    assert "if (!bme_pending) bme_completed.invalidate();" in scan
+    assert "bme_completed.publish(" in scan
+    assert "bme_completed.invalidate();" in scan
+    assert "bme_completed.fresh(now, kBmeStaleMs)" in report
+    assert "now_ms - sample_ms <= max_age_ms" in helper
+    for raw in ("bme.temperature", "bme.humidity", "bme.pressure", "bme.gas_resistance"):
+        assert raw not in report
+    for field in ("temperature_c", "humidity_pct", "pressure_pa", "gas_ohms", "sample_ms"):
+        assert "bme_completed." + field in report
+
+
+def test_bme_completed_native_conversion_cache_with_sanitizers(tmp_path):
+    # Executed C++ behavior, not just text matching a possible implementation.
+    compiler = shutil.which("c++")
+    assert compiler is not None, "C++17 compiler is required for station tests"
+    src = ROOT / "code/firmware/room_station/tests/bme_completed_sample_tests.cpp"
+    includes = ROOT / "code/firmware/room_station/src"
+    executable = tmp_path / "bme_completed_sample_tests"
+    subprocess.run([
+        compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+        "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+        f"-I{includes}", str(src), "-o", str(executable),
+    ], check=True, capture_output=True, text=True, timeout=30)
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)

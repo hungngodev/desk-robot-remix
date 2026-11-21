@@ -16,6 +16,7 @@
 #include "soil_sample.h"
 #include "radar_sample_clock.h"
 #include "scd_sample_freshness.h"
+#include "bme_completed_sample.h"
 #include "usb_epoch_sync.h"
 
 #ifndef ROOM_SOIL_FITTED
@@ -44,8 +45,9 @@ desk_robot_room::UsbEpochSync usb_epoch_sync;
 bool scd_started = false;
 bool scd_valid = false;
 bool bme_started = false;
-bool bme_pending = false, bme_valid = false;
-uint32_t bme_last_start_ms = 0, bme_sample_ms = 0;
+bool bme_pending = false;
+uint32_t bme_last_start_ms = 0;
+desk_robot_room::BmeCompletedSample bme_completed;
 bool amg_started = false;
 uint16_t co2_ppm = 0;
 float scd_temp = 0, scd_humidity = 0;
@@ -117,17 +119,17 @@ void bme_step(uint32_t now) {
     // empty conversions cannot refresh a previous valid gas sample.
     bme.gas_resistance = 0;
     bme_pending = bme.beginReading() != 0U;
-    if (!bme_pending) bme_valid = false;
+    if (!bme_pending) bme_completed.invalidate();
     return;
   }
   const int remaining = bme.remainingReadingMillis();
   if (remaining > Adafruit_BME680::reading_complete) return;
   bme_pending = false;
   if (remaining != Adafruit_BME680::reading_complete || !bme.endReading()) {
-    bme_valid = false;
+    bme_completed.invalidate();
     return;
   }
-  bme_valid = finite_temperature(bme.temperature)
+  const bool complete = finite_temperature(bme.temperature)
       && isfinite(bme.humidity) && bme.humidity >= 0 && bme.humidity <= 100
       // Match the Mac room decoder. An out-of-range BME must not
       // poison the entire USB frame and hide independent room sensors.
@@ -135,19 +137,26 @@ void bme_step(uint32_t now) {
       && bme.pressure <= 125000.0f
       && isfinite(bme.gas_resistance) && bme.gas_resistance >= 1
       && bme.gas_resistance <= 1000000000U;
-  if (bme_valid) bme_sample_ms = now;
+  if (complete) {
+    // Publish every field together with the actual completed-conversion time.
+    // Upstream scratch may be reset while the next conversion is pending.
+    bme_completed.publish(bme.temperature, bme.humidity, bme.pressure,
+                          bme.gas_resistance, now);
+  } else {
+    bme_completed.invalidate();
+  }
 }
 void bme_observation(uint32_t now) {
   // Serial reporting never starts or waits for a gas conversion.
   // Preserve the actual last completed sample time, not the report time.
-  const bool fresh = bme_valid && now - bme_sample_ms <= kBmeStaleMs;
+  const bool fresh = bme_completed.fresh(now, kBmeStaleMs);
   Serial.print(F("\"bme688\":{\"valid\":")); jsbool(fresh);
   if (fresh) {
-    Serial.print(F(",\"sample_ms\":")); Serial.print(bme_sample_ms);
-    Serial.print(F(",\"temp_c\":")); number(bme.temperature);
-    Serial.print(F(",\"humidity_pct\":")); number(bme.humidity);
-    Serial.print(F(",\"pressure_pa\":")); number(bme.pressure, 0);
-    Serial.print(F(",\"gas_ohms\":")); number(bme.gas_resistance, 0);
+    Serial.print(F(",\"sample_ms\":")); Serial.print(bme_completed.sample_ms);
+    Serial.print(F(",\"temp_c\":")); number(bme_completed.temperature_c);
+    Serial.print(F(",\"humidity_pct\":")); number(bme_completed.humidity_pct);
+    Serial.print(F(",\"pressure_pa\":")); number(bme_completed.pressure_pa, 0);
+    Serial.print(F(",\"gas_ohms\":")); Serial.print(bme_completed.gas_ohms);
     // Gas resistance is raw resistance, never calibrated VOC or AQI.
   }
   Serial.print('}');
