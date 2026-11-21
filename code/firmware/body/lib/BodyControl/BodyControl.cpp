@@ -1057,7 +1057,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     // correctly makes that same frame unsafe for motor permission. Retain
     // chip identity and age guards so a stale or swapped board cannot
     // manufacture a current low-g observation in the shared Mac brain.
-    const bool imu_raw_fresh = imu_.valid && now_ms - imu_.at_ms <= 200U &&
+    // Do not present a duplicate or out-of-order conversion as fresh raw
+    // MPU evidence while the independent motion gate rejects its provenance.
+    const bool imu_raw_fresh = imu_.valid && !imu_provenance_bad_ &&
+        now_ms - imu_.at_ms <= 200U &&
         state_.imu_family >= 1U && state_.imu_family <= 4U &&
         imu_.model == static_cast<BerryModel>(state_.imu_family) &&
         BerryImu::identify(state_.imu_gyro_id, state_.imu_aux_id) == imu_.model;

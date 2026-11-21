@@ -953,12 +953,20 @@ static void imu_replay_and_rollover_are_local_motion_safety_evidence() {
   CHECK(!body.state().armed && body.state().left == 0);
   CHECK(body.state().servos_attached); // never drop an already held object
   CHECK(!body.imu_fresh(101));
+  const auto replay_status = send(body, "status", 101);
+  CHECK(replay_status.find(
+      "\"temp_valid\":false,\"low_g_valid\":false,\"low_g_irq\":false") !=
+      std::string::npos);  // a rejected replay is not live physical MPU data
   CHECK(send(body, "arm", 101) == "ERR arm imu_sensor_fault_latched");
   CHECK(send(body, "rearm", 101, true) == "ERR rearm imu_missing_or_stale");
   reading.at_ms = 102; // genuine newer conversion
   body.set_imu(reading);
   fresh(guard, 102);
   CHECK(body.imu_fresh(102));
+  const auto genuine_status = send(body, "status", 102);
+  CHECK(genuine_status.find(
+      "\"temp_valid\":true,\"low_g_valid\":true,\"low_g_irq\":false") !=
+      std::string::npos);  // fresh source restores raw evidence, not wheel ARM
   CHECK(send(body, "arm", 102) == "ERR arm imu_sensor_fault_latched");
   CHECK(send(body, "rearm", 102, true) == "OK rearm");
   CHECK(send(body, "arm", 102) == "OK arm");
