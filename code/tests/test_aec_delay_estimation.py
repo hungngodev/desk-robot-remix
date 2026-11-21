@@ -41,6 +41,25 @@ def test_silence_uncorrelated_or_nonfinite_cannot_fake_calibration():
             estimate_delay(signal, np.ones(1000))
 
 
+def test_periodic_tone_or_two_similarly_loud_echoes_is_not_unique_delay():
+    # A pure tone can have near-perfect correlation at many different delays.
+    # The estimator must not turn the first such peak into an AEC setting.
+    samples = 8000
+    time = np.arange(samples)
+    tone = 0.18 * np.sin(2 * np.pi * 1000 * time / 16000)
+    microphone = np.concatenate((np.zeros(1120), tone))[:samples]
+    with pytest.raises(ValueError, match="Ambiguous acoustic delay"):
+        estimate_delay(tone, microphone)
+
+    # Two strong real reflections are ambiguous even for broadband audio.
+    rng = np.random.default_rng(483)
+    speaker = rng.normal(0, 0.18, samples)
+    early = np.concatenate((np.zeros(1120), speaker))[:samples]
+    late = np.concatenate((np.zeros(1280), speaker))[:samples]
+    with pytest.raises(ValueError, match="Ambiguous acoustic delay"):
+        estimate_delay(speaker, early + late)
+
+
 def test_sample_rate_and_window_are_strict():
     signal = np.ones(1000)
     with pytest.raises(ValueError):
