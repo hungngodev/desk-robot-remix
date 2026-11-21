@@ -722,7 +722,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"bpm\":null,\"medical\":false},"
         "\"angles\":{\"raw\":[%u,%u,%u],\"present_mask\":%u,"
         "\"valid_mask\":%u,\"magnet\":[%u,%u,%u]},"
-        "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"valid\":%s,\"calibrated\":false},"
+        "\"force\":{\"adc\":[%d,%d],\"jaw_seq\":%lu,\"boot_id\":%lu,\"valid\":%s,\"calibrated\":false},"
         "\"climate\":{\"temp_centi\":%d,\"rh_centi\":%d,\"valid\":%s,\"seq\":%lu,\"age_ms\":%lu},"
         "\"bmp280\":{\"present\":%s,\"valid\":%s,\"chip_id\":%u,"
         "\"temp_centi\":%d,\"pressure_pa\":%u,\"seq\":%lu,\"age_ms\":%lu,"
@@ -753,6 +753,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<int>(a.force.adc[0]),
         static_cast<int>(a.force.adc[1]),
         static_cast<unsigned long>(a.force.jaw_sample_seq),
+        static_cast<unsigned long>(boot_epoch_),
         force_fresh ? "true" : "false",
         a.climate.temp_centi, a.climate.humidity_centi,
         climate_fresh ? "true" : "false",
