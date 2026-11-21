@@ -86,6 +86,7 @@ def register_readonly_planner_routes(
         camera_context_used = any(
             is_camera_derived_timeline_item(item) for item in timeline
         )
+        camera_consent_generation = settings.camera_consent_generation
         room_context_used = any(
             item.get("channel") == "room_station" for item in timeline
         )
@@ -131,6 +132,9 @@ def register_readonly_planner_routes(
         # Do not return executable selections from an obsolete private prompt.
         if camera_context_used and not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Live observation consent revoked during planning")
+        if (camera_context_used
+                and settings.camera_consent_generation != camera_consent_generation):
+            raise HTTPException(409, "Live observation grant changed during planning")
         if private_context_used and not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Private memory consent revoked during planning")
         if room_context_used and not settings.room_station_context_enabled:

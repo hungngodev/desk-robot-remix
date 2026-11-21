@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 
 class RobotConfig(BaseModel):
@@ -64,6 +64,9 @@ class RobotConfig(BaseModel):
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    # Global live camera grant covers every configured pet. Private Pydantic
+    # storage never becomes a serializable configuration or model instruction.
+    _camera_consent_generation: int = PrivateAttr(default=0)
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
     coordinator_token_env: str = "DESK_ROBOT_API_TOKEN"
@@ -149,6 +152,21 @@ class Settings(BaseModel):
         ):
             raise ValueError("Qualified dock approach requires assigned beacon ID")
         return self
+
+    def __setattr__(self, name: str, value: object) -> None:
+        was_granted = (
+            name == "voice_vision_tools_enabled"
+            and getattr(self, "voice_vision_tools_enabled", False) is True
+        )
+        super().__setattr__(name, value)
+        if was_granted and not self.voice_vision_tools_enabled:
+            # Even an immediate re-enable is a NEW grant; old VLM evidence
+            # and in-flight plans must never regain the prior authorization.
+            self._camera_consent_generation += 1
+
+    @property
+    def camera_consent_generation(self) -> int:
+        return self._camera_consent_generation
 
     def robot(self, robot_id: str) -> RobotConfig:
         for robot in self.robots:

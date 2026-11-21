@@ -282,7 +282,9 @@ def test_native_context_and_ollama_planner_exclude_revoked_visual_tool_text(
         assert "do not drive" in model.prompts[-1]
 
 
-@pytest.mark.parametrize("revocation", ["live", "memory", "derived_live"])
+@pytest.mark.parametrize("revocation", [
+    "live", "memory", "derived_live", "derived_reenabled",
+])
 def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
     settings, tokens, revocation,
 ):
@@ -303,7 +305,7 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
             robot, "memory_recall", "A private historical personal preference",
             time.monotonic(),
         )
-    elif revocation == "derived_live":
+    elif revocation in ("derived_live", "derived_reenabled"):
         hub.remember_tool(
             robot, "visual_look", "PRIVATE_RED_KEY_DERIVED_FROM_CAMERA",
             time.monotonic(),
@@ -323,9 +325,11 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
                 assert "private historical" in str(history)
                 settings.voice_memory_tools_enabled = False
             else:
-                if revocation == "derived_live":
+                if revocation in ("derived_live", "derived_reenabled"):
                     assert "PRIVATE_RED_KEY_DERIVED_FROM_CAMERA" in str(history)
                 settings.voice_vision_tools_enabled = False
+                if revocation == "derived_reenabled":
+                    settings.voice_vision_tools_enabled = True
             return json.dumps({"tools": [{"route": "status"}]})
 
     async def noop():
@@ -344,8 +348,14 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
             json={"transcript": "What is your safety status?"},
         )
     assert model.calls == 1
-    assert response.status_code == 403
-    assert "revoked during planning" in response.json()["detail"]
+    if revocation == "derived_reenabled":
+        assert settings.voice_vision_tools_enabled is True
+        assert settings.camera_consent_generation == 1
+        assert response.status_code == 409
+        assert "grant changed during planning" in response.json()["detail"]
+    else:
+        assert response.status_code == 403
+        assert "revoked during planning" in response.json()["detail"]
 
 
 def test_mac_semantic_planner_rejects_late_plan_after_new_human_vad(
