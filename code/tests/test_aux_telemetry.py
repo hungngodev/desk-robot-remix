@@ -51,14 +51,64 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
     current = sample()
     current["force"]["boot_id"] = 0x12345678
     current["force"]["jaw_age_ms"] = 25
-    current["proximity"]["boot_id"] = 0x87654321
+    current["proximity"]["boot_id"] = 0x12345678
     assert validate_aux(current, "robot-01")["force"]["boot_id"] == 0x12345678
     assert validate_aux(current, "robot-01")["force"]["jaw_age_ms"] == 25
-    assert validate_aux(current, "robot-01")["proximity"]["boot_id"] == 0x87654321
+    assert validate_aux(current, "robot-01")["proximity"]["boot_id"] == 0x12345678
     assert result["power"]["current_calibrated"] is False
     assert result["proximity"]["gesture"] == 1
     assert result["proximity"]["gesture_events"] == 3
     assert result["proximity"]["physically_qualified"] is False
+
+
+@pytest.mark.parametrize("force_boot, proximity_boot", [
+    (101, 202), (202, 101), (0, 202), (202, 0), (0, 0),
+])
+def test_wroom_aux_rejects_inconsistent_epoch_across_sensor_groups(
+    force_boot, proximity_boot,
+):
+    data = sample()
+    data["force"]["boot_id"] = force_boot
+    data["proximity"]["boot_id"] = proximity_boot
+    with pytest.raises(ValueError, match="WROOM auxiliary boot provenance"):
+        validate_aux(data, "robot-01")
+
+
+async def test_mixed_boot_replay_does_not_advance_pet_aux_state():
+    from types import SimpleNamespace
+
+    from desk_robot.pet import PetController
+
+    # A retired old proximity response cannot disguise itself as a new
+    # whole-WROOM boot or reset counters already accepted under boot 202.
+    data = sample()
+    data["force"]["boot_id"] = 303
+    data["proximity"]["boot_id"] = 101
+    state = SimpleNamespace(
+        enabled=True, generation=77, aux_reads=12, last_aux_boot_id=202,
+        retired_aux_boot_ids={101}, last_gesture_events=7, last_paw_seq=4,
+    )
+    pet = SimpleNamespace(
+        settings=SimpleNamespace(mode="hardware"),
+        states={"robot-01": state}, _closed=False,
+    )
+    with pytest.raises(ValueError, match="WROOM auxiliary boot provenance"):
+        await PetController._observe_aux(pet, "robot-01", 77, data)
+    assert (state.aux_reads, state.last_aux_boot_id,
+            state.retired_aux_boot_ids, state.last_gesture_events,
+            state.last_paw_seq) == (12, 202, {101}, 7, 4)
+
+
+async def test_authenticated_head_rejects_mixed_wroom_boot_id(settings, tokens):
+    data = sample()
+    data["force"]["boot_id"] = 101
+    data["proximity"]["boot_id"] = 202
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=data)
+    )) as client:
+        head = HttpHead(settings.robots[0], client)
+        with pytest.raises(HeadError):
+            await head.aux_status()
 
 
 @pytest.mark.parametrize(

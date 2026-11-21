@@ -131,6 +131,17 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or ("boot_id" in proximity and not _uint(proximity["boot_id"], 0xffffffff))
             or proximity.get("physically_qualified") is not False):
         raise ValueError("Invalid APDS9960 source")
+    # A single WROOM response serializes both sensor groups under the same
+    # boot epoch. Legacy bench captures can omit IDs, but two explicit IDs
+    # must never disagree or be the zero/uninitialized epoch. Otherwise an
+    # out-of-order reply can rebase all optional counters on the wrong boot.
+    force_boot = force.get("boot_id")
+    proximity_boot = proximity.get("boot_id")
+    if (force_boot is not None and proximity_boot is not None
+            and (force_boot == 0 or proximity_boot == 0
+                 or force_boot != proximity_boot)):
+        raise ValueError("Inconsistent WROOM auxiliary boot provenance")
+
     bmp = data.get("bmp280")
     if bmp is not None:
         if (not isinstance(bmp, dict)
