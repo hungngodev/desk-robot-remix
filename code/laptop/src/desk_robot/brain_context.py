@@ -209,11 +209,13 @@ def compose_brain_context(
             status, topic = item.get("status"), item.get("topic")
             epoch, sent = item.get("activity_epoch"), item.get("sent_segments")
             origin = item.get("source")
-            if (origin in {"mac_operator_group_conversation",
+            if (type(origin) is str
+                    and origin in {"mac_operator_group_conversation",
                            "mac_autonomous_social_group_conversation"}
                     and item.get("playback_verified") is False
                     and item.get("motor_authorized") is False
                     and item.get("physical_action_verified") is False
+                    and type(status) is str
                     and status in {"waiting", "speaking", "completed",
                                    "interrupted", "failed"}
                     and type(epoch) is int and epoch > 0
@@ -305,7 +307,8 @@ def compose_brain_context(
                     "(not calibrated, not actuator permission): "
                     + _clean(result, limit=115)
                 )
-        elif channel == "tool" and kind in {"robot_status", "pickup_status"}:
+        elif (channel == "tool" and type(kind) is str
+              and kind in {"robot_status", "pickup_status"}):
             result = item.get("content")
             if isinstance(result, str) and result.strip():
                 label = (

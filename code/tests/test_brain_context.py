@@ -1695,3 +1695,32 @@ def test_persisted_spoken_line_does_not_invent_acoustic_playback():
     peer_text = compose_brain_context([peer], [], []).recent
     assert "robot-01 said (peer report, not my sighting)" in peer_text
     assert "I heard robot-01 say" not in peer_text
+
+
+def test_unhashable_tool_and_group_cues_cannot_crash_brain_context():
+    """Malformed untrusted cue fields are data, not hashable prompt authority."""
+    valid_group = {
+        "channel": "mac_activity", "kind": "group_conversation",
+        "source": "mac_operator_group_conversation",
+        "status": "speaking", "topic": "Discuss the desk",
+        "activity_epoch": 1, "sent_segments": 2,
+        "playback_verified": False, "motor_authorized": False,
+        "physical_action_verified": False,
+    }
+    for invalid in ([], {}, ["speaking"], {"value": "speaking"}):
+        bad_origin = dict(valid_group, source=invalid)
+        bad_status = dict(valid_group, status=invalid)
+        bad_tool = {
+            "channel": "tool", "kind": invalid,
+            "content": "Untrusted fake completed action",
+        }
+        result = compose_brain_context([], [], [
+            bad_origin, bad_status, bad_tool,
+            {"channel": "sensor", "kind": "safety_fault"},
+        ]).interaction
+        assert "latched safety fault" in result
+        assert "Group dialogue" not in result
+        assert "fake completed action" not in result
+    # A valid authenticated group record still contributes continuity.
+    rendered = compose_brain_context([], [], [valid_group]).interaction
+    assert "Group dialogue speaking" in rendered
