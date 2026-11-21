@@ -215,3 +215,14 @@ def test_contact_carrier_source_revision_or_dimensions_cannot_drift(tmp_path):
     )
     with pytest.raises(ValueError, match="Invalid unpowered contact"):
         source.contact_constants(fake)
+
+
+def test_unpowered_contact_coupon_datum_parser_reads_current_source():
+    """The source CSV style SCAD numbers must parse, not silently use a fallback."""
+    source = load()
+    constants = source.contact_constants()
+    assert constants["carrier_length_mm"] == 54
+    assert constants["carrier_depth_mm"] == 25
+    assert constants["carrier_height_mm"] == 9
+    assert len(constants["source_sha256"]) == 64
+    assert constants["electrical_contact_selected"] is False
