@@ -64,9 +64,17 @@ bool StatusValid(cJSON* json) {
     auto ranges = get(json, "ranges");
     auto touch = get(json, "touch");
     auto imu = get(json, "imu");
+    auto side_ranges = get(json, "side_ranges");
     if (!cJSON_IsObject(motor) || !cJSON_IsObject(servo) ||
         !cJSON_IsObject(safety) || !cJSON_IsObject(ranges) ||
-        !cJSON_IsObject(touch) || !cJSON_IsObject(imu)) return false;
+        !cJSON_IsObject(touch) || !cJSON_IsObject(imu) ||
+        !cJSON_IsObject(side_ranges)) return false;
+    // Two independent status sections MUST agree on their source boot.
+    auto imu_boot = get(imu, "boot_id");
+    auto side_boot = get(side_ranges, "boot_id");
+    if (!integer(imu_boot, 0, 4294967295.0) ||
+        !integer(side_boot, 0, 4294967295.0) ||
+        imu_boot->valuedouble != side_boot->valuedouble) return false;
     for (const char* name : {"m0", "m1"})
         if (!integer(get(motor, name), -40, 40)) return false;
     for (const char* name : {"lift", "grip", "lift_target", "grip_target"})
@@ -400,6 +408,16 @@ BodyInteraction Bridge::PollInteraction() {
         return observation;
     }
     const auto current = static_cast<std::uint32_t>(count->valuedouble);
+    // Transact validated the WROOM boot in both source sections. The
+    // first sampled nonzero post-reboot counter must not fabricate contact.
+    auto imu = cJSON_GetObjectItemCaseSensitive(json.get(), "imu");
+    auto boot = cJSON_GetObjectItemCaseSensitive(imu, "boot_id");
+    if (!cJSON_IsNumber(boot) || !std::isfinite(boot->valuedouble) ||
+        boot->valuedouble < 0 || boot->valuedouble > 4294967295.0 ||
+        !head_touch_edges_.AcceptBoot(
+            static_cast<std::uint32_t>(boot->valuedouble)))
+        return observation;
+    const auto body_boot_id = static_cast<std::uint32_t>(boot->valuedouble);
     observation.touch_events = head_touch_edges_.Observe(current);
 
     // CAP1188 is optional and never replaces the dedicated WROOM touch stop.
@@ -418,6 +436,8 @@ BodyInteraction Bridge::PollInteraction() {
         std::isfinite(cap_events->valuedouble) &&
         std::floor(cap_events->valuedouble) == cap_events->valuedouble &&
         cap_events->valuedouble >= 0 && cap_events->valuedouble <= 4294967295.0) {
+        // The optional CAP1188 count shares the same WROOM boot identity.
+        if (!body_cap_edges_.AcceptBoot(body_boot_id)) return observation;
         observation.cap_touch_events = body_cap_edges_.Observe(
             static_cast<std::uint32_t>(cap_events->valuedouble));
     } else {
