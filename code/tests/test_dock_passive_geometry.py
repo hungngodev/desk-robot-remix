@@ -159,3 +159,56 @@ def test_real_track_measurement_override_preserves_rail_clearance(tmp_path):
         assert xs == list(expected)
     # Measured 112 mm tracks + 2 mm each side gives 116 mm straight opening.
     assert 129 - 13 == 116
+
+
+def test_passive_dock_beacon_pair_coupon_preserves_tag_quiet_zone(tmp_path):
+    """Real STL triangles prove two open, symmetric unpowered trial holes."""
+    import shutil
+    import struct
+    import subprocess
+    import pytest
+
+    openscad = shutil.which("openscad")
+    if openscad is None:
+        pytest.skip("OpenSCAD not installed")
+    output = tmp_path / "ir_pair.stl"
+    subprocess.run([
+        openscad, "--export-format", "binstl", "-o", str(output),
+        "-D", 'part="dock_ir_pair_position_coupon"', str(SOURCE),
+    ], check=True, capture_output=True, text=True, timeout=120)
+    data = output.read_bytes()
+    n = struct.unpack_from("<I", data, 80)[0]
+    assert n > 0 and len(data) == 84 + 50*n
+    faces = [
+        tuple(struct.unpack_from("<fff", data, 84+50*i+12+12*j)
+              for j in range(3)) for i in range(n)
+    ]
+    vertices = [p for face in faces for p in face]
+    assert tuple(min(p[k] for p in vertices) for k in range(3)) == (0, 0, 0)
+    assert tuple(max(p[k] for p in vertices) for k in range(3)) == (
+        126, 16, 3
+    )
+    # The full CSG top surface should not bridge over either opening.
+    def top_face_covers(x, y, triangle):
+        a, b, c = triangle
+        if not all(abs(p[2]-3) < .001 for p in triangle):
+            return False
+        denominator = ((b[1]-c[1])*(a[0]-c[0])
+                       + (c[0]-b[0])*(a[1]-c[1]))
+        if abs(denominator) < 1e-8:
+            return False
+        u = ((b[1]-c[1])*(x-c[0]) + (c[0]-b[0])*(y-c[1]))/denominator
+        v = ((c[1]-a[1])*(x-c[0]) + (a[0]-c[0])*(y-c[1]))/denominator
+        return min(u, v, 1-u-v) > 1e-6
+    for x in (14, 112):
+        assert not any(top_face_covers(x, 8, face) for face in faces)
+    # A too-close transmitter spacing would carve into the tag white margin.
+    invalid = subprocess.run([
+        openscad, "--export-format", "binstl", "-o",
+        str(tmp_path / "bad.stl"), "-D",
+        'part="dock_ir_pair_position_coupon"', "-D",
+        "ir_pair_spacing_mm=65", str(SOURCE),
+    ], capture_output=True, text=True, timeout=120)
+    assert "IR aperture overlaps AprilTag quiet paper margin" in (
+        invalid.stderr + invalid.stdout
+    )

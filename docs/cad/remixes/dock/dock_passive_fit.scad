@@ -28,6 +28,13 @@ outside_width_mm = channel_mm + 2 * inner_wall_x;
 backstop_front_y_mm = base_length_mm - backstop_thickness_mm;
 // The reversible coupon includes the 37 mm flare and straight guide.
 entry_coupon_length_mm = 48;
+// Unpowered IR pair LOCATION TEST: not an emitter holder or final beam aim.
+// Both transmitter carrier, lens diameter and mounting angles are unmeasured.
+ir_pair_spacing_mm = 98; // provisional symmetric markers at x14/112
+ir_probe_bore_d_mm = 5.5; // nominal 5 mm component clearance TEST only
+ir_coupon_height_mm = 16;
+ir_coupon_thickness_mm = 3;
+ir_min_tag_web_mm = 3;
 assert(track_outer_width_mm > 40 && track_outer_width_mm < 200);
 assert(side_clearance_each_mm >= 0.5 && side_clearance_each_mm < 8);
 assert(base_length_mm > guide_run_mm + backstop_thickness_mm);
@@ -97,6 +104,35 @@ module dock_rail_entry_coupon() {
     }
 }
 
+module dock_ir_pair_position_coupon() {
+    // Flat 1:1 reversible layout jig. Two independent beacon beam centers
+    // sit outside the printed AprilTag's required white quiet border.
+    // No LEDs, drivers, current-limiting resistor, charging, terminal travel,
+    // receiver mounting, or optical baffles are qualified by this print.
+    assert(ir_pair_spacing_mm > 0 && ir_pair_spacing_mm < outside_width_mm);
+    assert(ir_probe_bore_d_mm > 1 && ir_probe_bore_d_mm < 15);
+    assert(ir_coupon_thickness_mm >= 2 && ir_coupon_height_mm >= 10);
+    assert(ir_min_tag_web_mm >= 3);
+    assert(ir_pair_spacing_mm / 2 - ir_probe_bore_d_mm / 2 >=
+           tag_pocket_side_mm / 2 + ir_min_tag_web_mm,
+           "IR aperture overlaps AprilTag quiet paper margin");
+    assert(outside_width_mm / 2 - ir_pair_spacing_mm / 2 -
+           ir_probe_bore_d_mm / 2 >= ir_min_tag_web_mm,
+           "IR aperture breaches outer dock edge");
+    assert(ir_coupon_height_mm / 2 - ir_probe_bore_d_mm / 2 >= ir_min_tag_web_mm,
+           "IR aperture breaches coupon long edge");
+    difference() {
+        cube([outside_width_mm, ir_coupon_height_mm,
+              ir_coupon_thickness_mm]);
+        for (x = [outside_width_mm/2-ir_pair_spacing_mm/2,
+                  outside_width_mm/2+ir_pair_spacing_mm/2])
+            translate([x, ir_coupon_height_mm/2, -0.1])
+                cylinder(h=ir_coupon_thickness_mm+0.2,
+                         d=ir_probe_bore_d_mm);
+    }
+}
+
 if (part == "dock_passive_fit") dock_passive_fit();
 else if (part == "dock_rail_entry_coupon") dock_rail_entry_coupon();
+else if (part == "dock_ir_pair_position_coupon") dock_ir_pair_position_coupon();
 else assert(false, "Unknown passive dock fit part");

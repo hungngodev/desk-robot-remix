@@ -29,7 +29,8 @@ GAUGES = (
 )
 SPEAKER_FITS = ("speaker_rect_fit_gauge",)
 RANGER_FITS = ("vl53l0x_gy530_fit_gauge",)
-DOCKS = ("dock_passive_fit", "dock_rail_entry_coupon")
+DOCKS = ("dock_passive_fit", "dock_rail_entry_coupon",
+         "dock_ir_pair_position_coupon")
 
 
 def binary_stl_triangles(path: Path) -> int:
@@ -235,6 +236,7 @@ def export_kit(
                     "temporary_fit_coupon": name in (
                         *GAUGES, *SPEAKER_FITS, *RANGER_FITS,
                         "dock_rail_entry_coupon",
+                        "dock_ir_pair_position_coupon",
                     ),
                 })
         for entry in rendered:
@@ -302,7 +304,8 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         # must never turn a test coupon into an installed robot component.
         name = Path(location).stem
         coupon = name in (*GAUGES, *SPEAKER_FITS, *RANGER_FITS,
-                          "dock_rail_entry_coupon")
+                          "dock_rail_entry_coupon",
+                          "dock_ir_pair_position_coupon")
         if (item.get("installed_quantity_per_robot") != 0
                 or type(item.get("installed_quantity_per_robot")) is not int
                 or item.get("temporary_fit_coupon") is not coupon):

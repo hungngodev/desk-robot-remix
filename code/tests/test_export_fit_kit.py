@@ -138,14 +138,15 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     report = source.export_kit(tmp_path, output_dir=rendered)
     assert len(commands) == (
         len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS) + len(source.RANGER_FITS) + len(source.DOCKS)
-    ) == 14
-    assert len(report["parts"]) == 14
+    ) == 15
+    assert len(report["parts"]) == 15
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
     assert (rendered / "fit_stls/speaker_rect_fit_gauge.stl").is_file()
     assert (rendered / "fit_stls/vl53l0x_gy530_fit_gauge.stl").is_file()
     assert (rendered / "dock_stls/dock_passive_fit.stl").is_file()
     assert (rendered / "dock_stls/dock_rail_entry_coupon.stl").is_file()
+    assert (rendered / "dock_stls/dock_ir_pair_position_coupon.stl").is_file()
     assert (rendered / "fit_kit_manifest.json").is_file()
     assert report["parts"][1]["quantity_per_robot"] == 8
     assert all(item["installed_quantity_per_robot"] == 0
@@ -388,10 +389,11 @@ def test_real_openscad_renders_provisional_source_parts(tmp_path):
         len(source.ADAPTERS) + len(source.GAUGES)
         + len(source.SPEAKER_FITS) + len(source.RANGER_FITS)
         + len(source.DOCKS)
-    ) == 14
+    ) == 15
     assert (output / "adapter_stls/speaker_grille.stl").is_file()
     assert (output / "dock_stls/dock_passive_fit.stl").is_file()
     assert (output / "dock_stls/dock_rail_entry_coupon.stl").is_file()
+    assert (output / "dock_stls/dock_ir_pair_position_coupon.stl").is_file()
     for item in report["parts"]:
         assert source.binary_stl_triangles(output / item["location"]) > 0
     assert report["full_printable_assembly_verified"] is False

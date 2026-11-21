@@ -35,6 +35,8 @@ ADAPTER_NAMES = (
 FIT_REFERENCES = (
     ("Passive Dock Fit Only", "dock_stls/dock_passive_fit.stl"),
     ("Dock Entry Coupon Only", "dock_stls/dock_rail_entry_coupon.stl"),
+    ("Unpowered IR Pair Spacing Coupon Only",
+     "dock_stls/dock_ir_pair_position_coupon.stl"),
     ("Battery Tray Gauge Only", "fit_stls/battery_boost_tray.stl"),
     ("Contact Pocket Gauge Only", "fit_stls/dock_contact_recess_gauge.stl"),
     ("Jaw Reference Coupon Only", "fit_stls/jaw_calibration_coupon.stl"),

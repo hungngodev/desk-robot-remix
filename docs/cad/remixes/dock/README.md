@@ -45,3 +45,27 @@ it a parametric dock.
 
 See: ../FUSION_ONE_ROBOT_ASSEMBLY.md and
 ../FUSION_MEASUREMENT_SHEET.md.
+
+
+## Reversible two beam alignment coupon
+
+The independent NEC transmitter electronics use two physically aimed 38 kHz
+channels but their actual emitter carriers, current limiting, vertical aim
+and beam overlap are not mechanically qualified. To check a **trial**
+left/right separation without modifying or powering the full cradle, export:
+
+```sh
+openscad --export-format binstl -o dock_ir_pair_position_coupon.stl \\
+  -D 'part="dock_ir_pair_position_coupon"' dock_passive_fit.scad
+```
+
+The nominal flat plate uses the same 126 mm dock width and has two
+5.5 mm inspection bores at x=14 and x=112 mm, deliberately outside the
+71.2 mm AprilTag paper pocket and its white quiet margin. The 98 mm
+spacing is a starting reference, NOT measured IR bearing accuracy or
+selected emitter housing. Measure the real LED/transmitter carrier,
+receiver pair, beam angular response, line of sight to the approaching
+pet and screw fit before adapting the final backstop. This coupon has
+no emitter electronics, mounting authority, charging contacts or power.
+Its exported source and watertight mesh are checked by the regular
+`export_fit_kit.py` route.
