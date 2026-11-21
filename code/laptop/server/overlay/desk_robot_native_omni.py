@@ -1492,6 +1492,14 @@ class NativeOmniSession:
                             self._readonly_requests.add(key)
                         except asyncio.QueueFull:
                             self.native_readonly_tools_dropped += 1
+                            # The operator's spoken intent selected this
+                            # read-only route, but capacity prevented its
+                            # execution. Report an incomplete answer instead
+                            # of silently speaking the routes that did fit.
+                            self._readonly_capacity_exceeded = (
+                                epoch, request_turn,
+                            )
+                            self._readonly_requests.add(key)
                     continue
                 # A successful authenticated Mac call is still a completed
                 # HTTP tool invocation even when a minimal response yields no

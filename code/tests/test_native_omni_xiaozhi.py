@@ -8499,3 +8499,66 @@ async def test_native_readonly_queue_overflow_speaks_limitation_not_partial_answ
         session.closed = True
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_native_semantic_planner_overflow_marks_entire_answer_incomplete(
+    native, monkeypatch,
+):
+    """A full queue cannot silently lose one or both model-selected reads."""
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    for route in ("status", "aux-status", "power-status"):
+        session._readonly_queue.put_nowait((route, {}, 0, 0))
+
+    async def call(current, route, payload):
+        assert current is conn
+        assert route == "plan-readonly"
+        return {
+            "robot_id": "robot-01",
+            "source": "existing_mac_ollama_readonly_route_selection",
+            "untrusted_model_selection": True,
+            "model_can_arm_motors": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+            "tools": [
+                {"route": "look", "payload": {"question": "Look at my desk"}},
+                {"route": "voice-context", "payload": {}},
+            ],
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, value in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, value)
+
+    facts = await session._run_readonly_batch([
+        ("plan-readonly", {"transcript": "Look and recall"}, 0, 0),
+    ])
+    assert facts == []
+    assert session._readonly_capacity_exceeded == (0, 0)
+    assert session.native_readonly_tools_dropped == 2
+    assert session.native_readonly_tools_completed == 0
+    assert session._readonly_queue.qsize() == 3
+    assert {
+        ("look", "__semantic_planner__"),
+        ("voice-context", "__semantic_planner__"),
+    }.issubset(session._readonly_requests)
+    session._clear_obsolete_tool_turn()
+    assert session._readonly_capacity_exceeded is None
