@@ -248,7 +248,7 @@ class HttpHead:
         data = _response_object(await self._request("GET", "/api/audio.reference"))
         counters = (
             "reference_underflow_reads", "reference_overwrite_reads",
-            "discarded_stale_writes",
+            "discarded_stale_writes", "short_output_writes",
         )
         if data.get("robot_id") != self.config.id or any(
             type(data.get(key)) is not int or not 0 <= data[key] <= 0xffffffff
