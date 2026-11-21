@@ -166,6 +166,7 @@ def test_passive_dock_beacon_pair_coupon_preserves_tag_quiet_zone(tmp_path):
     import shutil
     import struct
     import subprocess
+
     import pytest
 
     openscad = shutil.which("openscad")
