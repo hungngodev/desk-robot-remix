@@ -81,7 +81,7 @@ def test_room_bench_transport_failure_does_not_promote_any_physical_gate():
 @pytest.mark.parametrize("port,seconds", [
     ("ttyUSB0", 60), ("/dev/cu.test", 0), ("/dev/cu.test", True),
     ("/dev/cu.test", float("nan")), ("/dev/cu.test", float("inf")),
-    ("/dev/cu.test", 3601),
+    ("/dev/cu.test", 3601), ("/dev/cu.test", 10 ** 500),
 ])
 def test_room_bench_requires_explicit_local_port_and_bounded_capture(port, seconds):
     with pytest.raises(ValueError):
