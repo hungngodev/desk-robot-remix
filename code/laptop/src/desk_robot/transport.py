@@ -398,7 +398,7 @@ class HttpHead:
                     self._stream_latest = None
                     self._stream_condition.notify_all()
 
-    async def snapshot_for_dock(self) -> bytes:
+    async def snapshot_for_dock(self) -> tuple[bytes, float]:
         """Only a very recent authenticated MJPEG receipt may guide docking.
 
         Never initiate a separate still capture when the live stream is down.
@@ -407,16 +407,20 @@ class HttpHead:
         if not self._stream_connected:
             raise HeadError("Dock observation needs connected live camera stream")
         return await self.snapshot(
-            max_stream_age_seconds=0.20, require_live_stream=True
+            max_stream_age_seconds=0.20, require_live_stream=True,
+            include_stream_receipt=True,
         )
 
     async def snapshot(
         self, *, max_stream_age_seconds: float = 1.0,
         require_live_stream: bool = False,
-    ) -> bytes:
+        include_stream_receipt: bool = False,
+    ) -> bytes | tuple[bytes, float]:
         if (type(max_stream_age_seconds) not in (int, float)
                 or not 0 < max_stream_age_seconds <= 1.0
-                or type(require_live_stream) is not bool):
+                or type(require_live_stream) is not bool
+                or type(include_stream_receipt) is not bool
+                or (include_stream_receipt and not require_live_stream)):
             raise ValueError("Invalid camera stream receipt age limit")
 
         # Separate camera serialization: concurrent Mac pet/pickup callers must
@@ -438,6 +442,10 @@ class HttpHead:
                             if not self._stream_connected:
                                 raise HeadError("Camera stream lost during snapshot")
                             self._snapshot_version = self._stream_version
+                            if include_stream_receipt:
+                                # Keep JPEG bytes and original Mac receipt
+                                # timestamp coupled under the camera lock.
+                                return self._stream_latest, self._stream_received_at
                             return self._stream_latest
                 except TimeoutError as exc:
                     raise HeadError("No fresh camera frame on live stream") from exc
