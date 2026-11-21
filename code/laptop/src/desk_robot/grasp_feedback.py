@@ -101,6 +101,10 @@ async def guarded_grasp(
             raise ValueError("Foreign or missing jaw sensor robot identity")
         observation = force_observation(sample)
         group = sample["force"]
+        # Read-only legacy adapters may infer validity from composite force.valid,
+        # but physical jaw motion needs the actual fresh jaw ADC channel verdict.
+        if group.get("jaw_valid") is not True:
+            raise ValueError("Missing independent jaw ADC channel validity")
         # Physical servo movement must not trust a legacy/partial AUX
         # adapter with no acquisition clock or reboot fence. Keep the
         # optional metadata allowance in force_observation for read-only
@@ -111,7 +115,11 @@ async def guarded_grasp(
             raise ValueError("Missing or expired jaw ADC acquisition age")
         observed_boot = group.get("boot_id")
         if (type(observed_boot) is not int
-                or not 0 <= observed_boot <= 0xffffffff):
+                or not 1 <= observed_boot <= 0xffffffff):
+            # A zero or malformed boot after movement cannot authorize even
+            # a relief pulse against a possibly reset controller.
+            if force_boot_seen:
+                force_boot_changed = True
             raise ValueError("Missing or invalid WROOM boot identity for jaw evidence")
         if force_boot_seen and observed_boot != force_boot_id:
             # Across a CPU reboot the jaw sequence may look like uint32 wrap.

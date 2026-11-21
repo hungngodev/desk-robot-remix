@@ -21,7 +21,7 @@ class FakeHead:
             self.seq += 1
         return {"robot_id": "robot-01", "force": {"valid": True, "calibrated": False,
                           "jaw_seq": self.seq, "adc": [0, value],
-                          "jaw_age_ms": 0, "boot_id": 5103}}
+                          "jaw_valid": True, "jaw_age_ms": 0, "boot_id": 5103}}
 
     async def command(self, command):
         self.commands.append(command)
@@ -791,3 +791,84 @@ async def test_delayed_jaw_sample_does_not_override_local_disarm(monkeypatch):
             head, Settings(), robot_id="robot-01", health=disarm_on_retry,
         )
     assert head.commands == ["grip 64"]
+
+
+@pytest.mark.parametrize("downgrade", ["missing", "false", "string"])
+@pytest.mark.parametrize("when", ["before_first", "after_first_close"])
+async def test_grasp_requires_independent_jaw_valid_at_motion_boundary(
+    monkeypatch, downgrade, when,
+):
+    """Composite force.valid cannot stand in for a channel-valid ADC verdict."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class DowngradedJaw(FakeHead):
+        async def aux_status(self):
+            frame = await super().aux_status()
+            if when == "before_first" or self.seq >= 3:
+                if downgrade == "missing":
+                    frame["force"].pop("jaw_valid")
+                else:
+                    frame["force"]["jaw_valid"] = (
+                        False if downgrade == "false" else "true"
+                    )
+            return frame
+
+    head = DowngradedJaw([100, 101, 240])
+    expected = ("Fresh force feedback required"
+                if when == "before_first" else "Lost fresh force sensor")
+    with pytest.raises(OperationError, match=expected):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    # A failed acquired sample cannot permit a second closing command.
+    # Only an independently confirmed still-armed WROOM can allow relief.
+    assert head.commands == (
+        [] if when == "before_first" else ["grip 64", "grip 60"]
+    )
+
+
+async def test_invalid_jaw_valid_after_close_cannot_relieve_disarmed_body(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class LostJaw(FakeHead):
+        async def aux_status(self):
+            frame = await super().aux_status()
+            if self.seq >= 3:
+                frame["force"].pop("jaw_valid")
+            return frame
+
+    head = LostJaw([100, 101, 240])
+
+    checks = 0
+
+    async def health():
+        nonlocal checks
+        checks += 1
+        return {"armed": checks < 3, "robot_id": "robot-01"}
+
+    with pytest.raises(OperationError, match="Lost fresh force sensor"):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=health)
+    assert head.commands == ["grip 64"]
+
+
+@pytest.mark.parametrize("when", ["before_first", "after_first_close"])
+async def test_zero_boot_epoch_never_authorizes_jaw_command_or_relief(
+    monkeypatch, when,
+):
+    """An uninitialized WROOM identity cannot authorize servo movement."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    boots = [0, 0, 0] if when == "before_first" else [5103, 5103, 0]
+    head = BootEpochHead([100, 101, 240], boots=boots)
+    expected = ("Fresh force feedback required"
+                if when == "before_first" else "Lost fresh force sensor")
+    with pytest.raises(OperationError, match=expected):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    # No cross-boot relief even if a stale health adapter still says armed.
+    assert head.commands == ([] if when == "before_first" else ["grip 64"])
