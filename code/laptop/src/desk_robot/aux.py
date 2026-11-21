@@ -60,8 +60,12 @@ def validate_aux(data: dict, robot_id: str) -> dict:
 
     if (not _array(force.get("adc"), 2, lambda n: _sint(n, -32768, 32767))
             or not _uint(force.get("jaw_seq"), 0xffffffff)
-            or ("jaw_age_ms" in force and
-                not _uint(force["jaw_age_ms"], 0xffffffff))
+            or ("jaw_age_ms" in force and (
+                not _uint(force["jaw_age_ms"], 0xffffffff)
+                # The real WROOM marks a jaw conversion invalid after 500ms.
+                # Never accept contradictory stale-but-valid source claims.
+                or (force.get("valid") is True and
+                    force["jaw_age_ms"] >= 500)))
             # Optional for old bench captures; the real WROOM now reports
             # its boot identity so a new ADC counter after reboot is not
             # mistaken for unsigned wrap within one grasp.

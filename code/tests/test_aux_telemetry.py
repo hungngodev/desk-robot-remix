@@ -50,7 +50,9 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
     assert result["force"]["calibrated"] is False
     current = sample()
     current["force"]["boot_id"] = 0x12345678
+    current["force"]["jaw_age_ms"] = 25
     assert validate_aux(current, "robot-01")["force"]["boot_id"] == 0x12345678
+    assert validate_aux(current, "robot-01")["force"]["jaw_age_ms"] == 25
     assert result["power"]["current_calibrated"] is False
     assert result["proximity"]["gesture"] == 1
     assert result["proximity"]["gesture_events"] == 3
@@ -69,6 +71,9 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
         ("force", "jaw_seq", -1), ("force", "jaw_seq", True),
         ("force", "boot_id", -1), ("force", "boot_id", True),
         ("force", "boot_id", 4294967296),
+        ("force", "jaw_age_ms", -1), ("force", "jaw_age_ms", True),
+        ("force", "jaw_age_ms", 4294967296),
+        ("force", "jaw_age_ms", 500),
         ("force", "calibrated", True), ("climate", "rh_centi", 11000),
         ("climate", "temp_centi", float("nan")),
         ("climate", "seq", True), ("climate", "age_ms", -1),
@@ -86,6 +91,14 @@ def test_aux_rejects_forged_invalid_or_calibrated_sensors(group, field, value):
     payload[group][field] = value
     with pytest.raises(ValueError):
         validate_aux(payload, "robot-01")
+
+
+def test_expired_jaw_age_is_allowed_only_as_invalid_diagnostic():
+    data = sample()
+    data["force"].update({"jaw_age_ms": 501, "valid": False})
+    result = validate_aux(data, "robot-01")
+    assert result["force"]["jaw_age_ms"] == 501
+    assert result["force"]["valid"] is False
 
 
 async def test_authenticated_head_aux_rejects_wrong_source(settings, tokens):
