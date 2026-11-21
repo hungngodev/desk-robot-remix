@@ -155,11 +155,15 @@ private:
                 // Refresh once on returning to idle because Xiaozhi may
                 // replace the status while speaking. No mandatory speech.
                 if (body_unhealthy &&
-                    (!last_rendered_fault || (idle && !last_was_idle)))
+                    (!last_rendered_fault || (idle && !last_was_idle))) {
                     board->display_->SetStatus("Body safety stop");
-                else if (last_rendered_fault && !body_unhealthy)
+                    last_rendered_fault = true;
+                } else if (last_rendered_fault && !body_unhealthy && idle) {
+                    // Do not erase Xiaozhi's active speaking/listening status.
+                    // Retain ownership until idle, then clear only our warning.
                     board->display_->SetStatus("");
-                last_rendered_fault = body_unhealthy;
+                    last_rendered_fault = false;
+                }
             }
             if (idle && board->display_ != nullptr) {
                 // Only the contextual HSM mood remains idle-exclusive.
