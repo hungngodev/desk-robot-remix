@@ -985,10 +985,12 @@ class MultimodalOrchestrator:
                 )
             except TimeoutError:
                 return False
-            return not self._closed and any(
-                frame.source == "proactive" and frame.received_at > latest
-                for frame in self.hub.frames[robot_id]
-            )
+            # A cached frame is not permission to observe after opt out.
+            return (not self._closed and self.settings.voice_vision_tools_enabled
+                    and any(
+                        frame.source == "proactive" and frame.received_at > latest
+                        for frame in self.hub.frames[robot_id]
+                    ))
 
     def start_streams(self) -> None:
         """Own the one persistent visual feed whenever camera consent is on.
