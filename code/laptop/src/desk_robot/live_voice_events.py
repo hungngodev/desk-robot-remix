@@ -122,6 +122,8 @@ class VoiceEventListener:
         if pending:
             # Child tasks are cancelled but never presumed physically flushed.
             raise TimeoutError("Fleet interruption incomplete; head unresponsive")
+        if any(task in done and task.cancelled() for task in tasks):
+            raise TimeoutError("Fleet interruption cancelled without ACK")
         if errors:
             raise errors[0]
 

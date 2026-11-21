@@ -1220,3 +1220,20 @@ async def test_cancelled_shared_audio_abort_does_not_cancel_voice_monitor():
         # successful shared decoder STOP or permanent monitor shutdown.
         with pytest.raises(TimeoutError, match="cancelled without ACK"):
             await listener._preempt_all("stream_unavailable")
+
+
+async def test_cancelled_per_pet_audio_abort_raises_timeout_error():
+    """A cancelled child per-pet abort callback is not a confirmed decoder flush."""
+    import asyncio
+
+    async def cancelled_abort(robot_id, reason):
+        raise asyncio.CancelledError()
+
+    async with httpx.AsyncClient() as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=cancelled_abort,
+        )
+        with pytest.raises(TimeoutError, match="Fleet interruption cancelled without ACK"):
+            await listener._preempt_all("stream_unavailable")
+
