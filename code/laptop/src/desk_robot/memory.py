@@ -98,8 +98,13 @@ class MemoryStore:
             raise ValueError("Memory root must not be a symlink")
         try:
             os.chmod(self.root, 0o700)
-        except OSError:
-            pass  # Network/Windows filesystems may not support POSIX permissions.
+        except OSError as exc:
+            # A readable shared directory defeats per-pet SQLite isolation.
+            # Do not initialize durable private memories if the filesystem
+            # refuses the local permission boundary.
+            raise PermissionError("Cannot protect private robot memory root") from exc
+        if self.root.stat().st_mode & 0o077:
+            raise PermissionError("Robot memory root is accessible to other users")
         for robot in sorted(self.robot_ids):
             with self._connect(robot) as db:
                 db.execute(
