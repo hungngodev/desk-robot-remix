@@ -512,6 +512,41 @@ def test_capture_main_installs_no_redirect_handler():
     source = SOURCE.read_text()
     assert "urllib.request.ProxyHandler({}), NoRedirect()" in source
 
+def test_private_aec_capture_rejects_directory_symlink_swap_during_wav_write(
+    tmp_path, monkeypatch,
+):
+    """An attacker cannot redirect raw microphone PCM after preflight.
+
+    The file descriptor anchors all writes and cleanup to the original
+    private directory, even when its pathname is replaced with a symlink.
+    """
+    private = tmp_path / "private"
+    outside = tmp_path / "public"
+    retired = tmp_path / "retired"
+    private.mkdir(mode=0o700)
+    outside.mkdir(mode=0o755)
+    original_create = capture._create_private
+    swapped = False
+
+    def replace_private_path(path, *, directory_fd=None):
+        nonlocal swapped
+        if not swapped:
+            assert directory_fd is not None
+            private.rename(retired)
+            private.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        return original_create(path, directory_fd=directory_fd)
+
+    monkeypatch.setattr(capture, "_create_private", replace_private_path)
+    with pytest.raises(ValueError, match="directory changed during write"):
+        capture.save_wavs(
+            private, b"\\x00" * capture.BYTES, {"robot_id": "robot-01"},
+        )
+    assert swapped
+    assert list(outside.iterdir()) == []
+    assert list(retired.iterdir()) == []
+
+
 def test_destination_preflight_rejects_existing_audio_and_public_directory(tmp_path):
     private = tmp_path / "private"
     capture.preflight_private_destination(private)
