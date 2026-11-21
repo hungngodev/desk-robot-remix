@@ -600,6 +600,10 @@ async def test_hardware_group_conversation_does_not_persist_peer_speech_without_
     assert all(item.kind == "own_utterance" for item in first + second)
     assert all(item.source_robot == "robot-01" for item in first)
     assert all(item.source_robot == "robot-02" for item in second)
+    assert all(
+        "Untrusted digitally relayed peer speech" not in str(history)
+        for history in agent.histories.values()
+    )
 
     settings.fleet_text_sharing_enabled = True
     await agent.run(ids, "Now sharing is permitted", 2)
@@ -610,6 +614,10 @@ async def test_hardware_group_conversation_does_not_persist_peer_speech_without_
     assert sum(item.kind == "peer_utterance" for item in second) == 1
     assert all(not item.witnessed for item in first + second
                if item.kind == "peer_utterance")
+    assert any(
+        "Untrusted digitally relayed peer speech" in str(history)
+        for history in agent.histories.values()
+    )
 
 
 
