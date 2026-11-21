@@ -1820,6 +1820,7 @@ class PetController:
                             self._consider_speech(
                                 robot_id, change, generation,
                                 camera_derived=True,
+                                received_at=received,
                             )
             except asyncio.CancelledError:
                 raise
@@ -2012,7 +2013,7 @@ class PetController:
 
     def _consider_speech(
         self, robot_id: str, change: SceneChange, generation: int, *,
-        camera_derived: bool = False,
+        camera_derived: bool = False, received_at: float | None = None,
     ) -> None:
         state = self.states[robot_id]
         now = time.monotonic()
@@ -2083,7 +2084,11 @@ class PetController:
         )
         self._speech_task = asyncio.create_task(
             self._speak(robot_id, change, generation,
-                        offered_at=now, social_peer_id=peer_id,
+                        # Camera evidence keeps its original Mac receipt
+                        # clock through all model and speaker admission.
+                        offered_at=(received_at if camera_derived
+                                    and received_at is not None else now),
+                        social_peer_id=peer_id,
                         social_peer_generation=peer_generation,
                         camera_derived=camera_derived)
         )
@@ -2898,6 +2903,11 @@ class PetController:
                          or self.settings.voice_vision_tools_enabled)
                     and not self._human_active_in_fleet(time.monotonic())
                     and not newer_human_turn()
+                    # An old camera guess must never restart speech when TTS
+                    # or the head's playback queue takes longer than its TTL.
+                    and (not camera_derived
+                         or time.monotonic() - offered_at
+                            <= self.max_observation_age)
                 )
 
             transmitted = await self.conversation.say_proactive(

@@ -3601,6 +3601,67 @@ async def test_spontaneous_model_response_expires_before_old_event_is_spoken(
         await pet.close()
 
 
+async def test_camera_original_receipt_expires_inside_speaker_queue(
+    fleet, tmp_path,
+):
+    """A nearly expired camera event cannot become speech after head latency."""
+    class DelayedSpeaker(SimulatedSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def say(self, robot, text, *, permission_check=None):
+            self.entered.set()
+            await self.release.wait()
+            if permission_check is not None and not permission_check():
+                raise RuntimeError("Camera evidence expired before audible send")
+            self.spoken.append((robot.id, text))
+
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    speaker = DelayedSpeaker()
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+        max_observation_age=1.2,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 84
+    received_at = time.monotonic() - 0.5
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A new brass key appeared", 0.98),
+            84, camera_derived=True, received_at=received_at,
+        )
+        await asyncio.wait_for(speaker.entered.wait(), timeout=0.5)
+        # A 9s-old observation plus a 3s synthesis/queue delay against a
+        # 10s TTL, scaled to keep this regression quick.
+        await asyncio.sleep(0.75)
+        speaker.release.set()
+        await wait_for(lambda: pet._speech_task is None, timeout=2)
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        assert pet._group_last_spoken == float("-inf")
+        assert state.last_error is not None
+        assert "Camera evidence expired" in state.last_error
+    finally:
+        speaker.release.set()
+        state.enabled = False
+        await pet.close()
+
+
+def test_camera_observer_passes_original_receipt_into_speech_scheduler():
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "laptop/src/desk_robot/pet.py"
+    ).read_text()
+    assert "camera_derived=True,\n                                received_at=received," in src
+    assert "and received_at is not None else now" in src
+    assert "or time.monotonic() - offered_at" in src
+
+
 async def test_proactive_model_rejects_long_uninvited_monologue_without_tts(
     fleet, tmp_path,
 ):
