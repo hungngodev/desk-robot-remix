@@ -196,6 +196,13 @@ def register_voice_context_route(
         # after that independent opt-out.
         if not settings.voice_vision_tools_enabled:
             sensor_cues, tool_cues, timeline = [], [], []
+        # Room USB context has independent consent; a cached sample read
+        # before SQLite yielded must disappear if the operator opted out.
+        if not settings.room_station_context_enabled:
+            timeline = [
+                item for item in timeline
+                if item.get("channel") != "room_station"
+            ]
         # A SQLite worker may complete after a NEW authenticated voice turn.
         # Discard the entire private response, not merely its Mac timeline
         # receipt; the superseded caller has no authority to reuse these facts.
