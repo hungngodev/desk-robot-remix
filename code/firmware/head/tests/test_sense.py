@@ -35,7 +35,8 @@ class SenseOverlayTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         names = ['main/Kconfig.projbuild', 'main/CMakeLists.txt', 'main/mcp_server.cc',
-                 'main/application.cc', 'main/audio/audio_service.cc',
+                 'main/application.cc', 'main/application.h',
+                 'main/audio/audio_service.cc',
                  'main/audio/codecs/no_audio_codec.cc']
         names += [f'main/boards/common/{name}' for name in (
             'camera.h', 'esp_video.h', 'esp_video.cc', 'esp32_camera.h', 'esp32_camera.cc')]
@@ -55,6 +56,19 @@ class SenseOverlayTests(unittest.TestCase):
     def tearDown(self):
         self.git.stop()
         self.temp.cleanup()
+
+    def test_sense_application_header_overlay_has_real_fixture_and_reversible_privacy_gate(self):
+        """The real pinned header is needed for source patch and exact restore."""
+        path = "main/application.h"
+        self.assertIn(path, self.original)
+        original = self.original[path]
+        self.assertEqual((self.root / path).read_bytes(), original)
+        overlay.apply(self.root, "sense")
+        changed = (self.root / path).read_text()
+        self.assertIn("SetSenseMicrophonePrivacyMuted", changed)
+        self.assertIn("sense_microphone_privacy_muted_", changed)
+        overlay.remove(self.root)
+        self.assertEqual((self.root / path).read_bytes(), original)
 
     def test_sense_camera_pdm_pin_budget_and_eight_mb_layout(self):
         overlay.apply(self.root, 'sense')
