@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "CliffGuard.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -305,6 +306,73 @@ void status_honesty() {
   CHECK(after.find("\"attached\":true") != std::string::npos);
 }
 
+void guarded_head_timeout_cannot_rearm_from_reconnected_uart() {
+  desk_robot::CliffConfig calibration{};
+  calibration.calibrated = true;
+  calibration.freshness_ms = 100;
+  calibration.front_obstacle_mm = 30;
+  calibration.front_max_mm = 1000;
+  for (auto& floor : calibration.floor) {
+    floor.min_mm = 40;
+    floor.max_mm = 60;
+  }
+  for (const auto profile : {
+           desk_robot::BodyProfile::StepperGuarded,
+           desk_robot::BodyProfile::DcGuarded,
+       }) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(calibration));
+    auto refresh = [&](std::uint32_t now) {
+      for (std::uint8_t i = 0; i < 5; ++i)
+        guard.sample(i, i < 4 ? 50 : 200, true, now);
+    };
+    refresh(0);
+    BodyControl body(profile, &guard);
+    auto usb = [&](const std::string& line, std::uint32_t now) {
+      char reply[desk_robot::kReplyCapacity]{};
+      body.execute(line.data(), line.size(), now, reply, sizeof(reply), true);
+      return std::string(reply);
+    };
+    CHECK(usb("rearm", 0) == "OK rearm");
+    CHECK(send(body, "arm", 0) == "OK arm");
+    CHECK(send(body, "drive 20 20 250", 0) ==
+          "OK drive left=20 right=20 ms=250");
+    for (std::uint32_t now = 50; now <= 500; now += 50) {
+      refresh(now); // The cliff guard does not expire first.
+      body.tick(now);
+      if (now == 200)
+        CHECK(body.state().armed && body.state().left == 20);
+    }
+    CHECK(!body.state().armed);
+    CHECK(body.state().left == 0 && body.state().right == 0);
+    const auto status = send(body, "status", 500);
+    CHECK(status.find("\"fault\":\"command_timeout_latched\"") !=
+          std::string::npos);
+    CHECK(status.find("\"ready\":false") != std::string::npos);
+
+    // Head bytes are real framed commands; they cannot borrow local USB
+    // rearm authority merely because the bus and floor are now healthy.
+    LineReceiver remote;
+    refresh(501);
+    const auto replies = frame(
+        body, remote, "arm\ndrive 20 20 100\n", 501);
+    CHECK(replies.size() == 2);
+    CHECK(replies[0] == "ERR arm command_timeout_latched");
+    CHECK(replies[1] == "ERR drive disarmed");
+    CHECK(send(body, "arm", 501) == "ERR arm command_timeout_latched");
+    CHECK(send(body, "rearm", 501) == "ERR rearm local_only");
+
+    refresh(502);
+    CHECK(usb("rearm", 502) == "OK rearm");
+    CHECK(!body.state().armed);
+    CHECK(body.state().left == 0 && body.state().right == 0);
+    CHECK(send(body, "arm", 502) == "OK arm");
+    CHECK(body.state().left == 0);
+    CHECK(send(body, "drive 20 20 100", 502) ==
+          "OK drive left=20 right=20 ms=100");
+  }
+}
+
 void deterministic_stream_stress() {
   BodyControl body;
   LineReceiver receiver;
@@ -341,6 +409,8 @@ int main(int argc, char** argv) {
       {"malformed_atomicity", malformed_atomicity},
       {"overlong_frame_recovery", overlong_frame_recovery}, {"framing", framing},
       {"independent_receivers", independent_receivers}, {"status_honesty", status_honesty},
+      {"guarded_head_timeout_cannot_rearm_from_reconnected_uart",
+       guarded_head_timeout_cannot_rearm_from_reconnected_uart},
       {"deterministic_stream_stress", deterministic_stream_stress}};
   int ran = 0;
   for (const auto& test : tests) {

@@ -262,7 +262,8 @@ class BodyControl {
   bool fuel_monitor_fault_latched_ = false; // required physical gauge missing/stale
   std::uint32_t fuel_monitor_fault_seq_ = 0, fuel_monitor_fault_at_ms_ = 0;
   std::uint32_t battery_fault_seq_ = 0, battery_fault_at_ms_ = 0;
-  bool motor_watchdog_latched_ = false;  // only local USB may clear
+  bool motor_watchdog_latched_ = false;  // physical CPU stall, USB only
+  bool command_timeout_latched_ = false; // silent head link, USB only
   bool imu_low_g_latched_ = false;  // native MPU event needs local USB rearm
   bool imu_sensor_fault_latched_ = false; // lost live IMU during motion: USB only
   bool dc_driver_fault_bad(std::uint32_t now_ms) const;

@@ -525,7 +525,7 @@ void BodyControl::tick(std::uint32_t now_ms) {
     state_.armed = false;
     return;
   }
-  if (motor_watchdog_latched_) {
+  if (motor_watchdog_latched_ || command_timeout_latched_) {
     stop_motion();
     state_.armed = false;
     return;
@@ -539,10 +539,13 @@ void BodyControl::tick(std::uint32_t now_ms) {
   if (!state_.armed) return;
   // Unsigned elapsed arithmetic remains correct when millis() wraps.
   if (now_ms - last_control_ms_ >= kWatchdogMs) {
+    // The head link expired. In a physically guarded build, a reconnecting
+    // head must not silently restore drive permission with an old ARM.
+    // A fresh USB recovery is required, even when ranges remain healthy.
+    if (guarded_motion_profile()) command_timeout_latched_ = true;
     stop_motion();
     state_.armed = false;
-    // Keep the last servo PWM on communication loss: detaching could drop a
-    // held object. Only explicit disarm/hardware fault detaches the servos.
+    // Preserve holding PWM so a held object is not deliberately dropped.
     return;
   }
   if (drive_duration_ms_ != 0 && now_ms - drive_started_ms_ >= drive_duration_ms_) {
@@ -1017,7 +1020,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         !bumper_fault_latched_ && !battery_fault_latched_ &&
         !fuel_monitor_fault_latched_ &&
         (!fuel_monitor_required_ || fuel_monitor_fresh(now_ms)) &&
-        !motor_watchdog_latched_ && !imu_low_g_latched_ &&
+        !motor_watchdog_latched_ && !command_timeout_latched_ &&
+        !imu_low_g_latched_ &&
         !imu_sensor_fault_latched_ &&
         !dock_unhealthy && !bumper_hit && !touch_hit &&
         !battery_below_arm_min &&
@@ -1028,6 +1032,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         dc_fault_latched_ ? "dc_driver_fault_latched" :
         dc_driver_fault_bad(now_ms) ? "dc_driver_fault_unavailable" :
         motor_watchdog_latched_ ? "motor_watchdog_latched" :
+        command_timeout_latched_ ? "command_timeout_latched" :
         motor_cutoff_unqualified_ ? "motor_cutoff_unqualified" :
         guarded_motion_profile() && !cliff_ready ?
             guard_ == nullptr ? "missing_guard" :
@@ -1209,6 +1214,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     battery_fault_latched_ = false; // after newer measured safe fuel sample
     fuel_monitor_fault_latched_ = false; // after fresh independently acquired data
     motor_watchdog_latched_ = false; // no old drive resumed
+    command_timeout_latched_ = false; // local USB recovery only
     imu_low_g_latched_ = false; // after a truly fresh, clear MPU status
     imu_sensor_fault_latched_ = false; // after fresh sensor and USB recovery
     std::snprintf(reply, capacity, "OK rearm");
@@ -1243,6 +1249,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     if (motor_watchdog_latched_) {
       std::snprintf(reply, capacity, "ERR arm motor_watchdog_latched");
+      return;
+    }
+    if (command_timeout_latched_) {
+      std::snprintf(reply, capacity, "ERR arm command_timeout_latched");
       return;
     }
     if (dc_fault_latched_ || dc_driver_fault_bad(now_ms)) {
