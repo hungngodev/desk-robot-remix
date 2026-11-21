@@ -157,10 +157,18 @@ class Runtime:
         with self._room_dispatch_lock:
             if self._closed:
                 return
+            # Serial callbacks and operator consent updates run on different
+            # threads. Both values must belong to the SAME permission epoch.
+            # Otherwise an old ON sample could be tagged with a new grant.
+            grant_before = getattr(
+                self.settings, "room_station_consent_generation", None
+            )
+            granted = self.settings.room_station_context_enabled
+            grant_after = getattr(
+                self.settings, "room_station_consent_generation", None
+            )
             self._room_dispatch_pending = (
-                observation,
-                getattr(self.settings, "room_station_consent_generation", None),
-                self.settings.room_station_context_enabled,
+                observation, grant_after, granted and grant_before == grant_after,
             )
             if self._room_dispatch_enqueued:
                 return

@@ -136,3 +136,36 @@ def test_pending_room_report_is_not_regranted_after_consent_cycle(settings):
     loop.callbacks.pop()()
     assert [observation.seq for observation in delivered] == [2, 4]
     assert runtime._room_dispatch_pending is None
+
+
+def test_room_grant_changes_mid_usb_queue_snapshot_are_rejected():
+    """Consent cannot flip while a serial thread samples its grant identity."""
+    runtime, delivered = make_runtime()
+    loop = QueuedLoop()
+
+    class Settings:
+        generation = 0
+        switched = False
+
+        @property
+        def room_station_consent_generation(self):
+            return self.generation
+
+        @property
+        def room_station_context_enabled(self):
+            if not self.switched:
+                # Deterministically simulate ON -> OFF -> ON after the
+                # first generation read and before the permission read.
+                self.switched = True
+                self.generation += 1
+            return True
+
+    runtime.settings = Settings()
+    runtime._queue_room_observation(loop, room(1))
+    loop.callbacks.pop()()
+    assert delivered == []
+
+    # A subsequent sample captured entirely under the new grant is valid.
+    runtime._queue_room_observation(loop, room(2))
+    loop.callbacks.pop()()
+    assert [observation.seq for observation in delivered] == [2]
