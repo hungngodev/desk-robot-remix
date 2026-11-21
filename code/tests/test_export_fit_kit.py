@@ -426,3 +426,22 @@ def test_nonenergized_contact_gauge_refuses_overlap_with_m3_bores(tmp_path):
         )
         # An OpenSCAD error may leave a file; never treat it as a print
         # candidate if the parameter assertion was raised.
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+@pytest.mark.parametrize(("override", "expected"), [
+    ("contact_pocket_depth_mm=8", "insufficient insulated floor"),
+    ("contact_carrier_w=7", "breaches side wall"),
+])
+def test_contact_gauge_refuses_unsafe_floor_or_side_web(tmp_path, override, expected):
+    source = ROOT / "docs/cad/remixes/remaining_fit_gauges.scad"
+    output = tmp_path / "unsafe_contact.stl"
+    command = [
+        "openscad", "--export-format", "binstl",
+        "-D", 'part="dock_contact_recess_gauge"',
+        "-D", override, "-o", str(output), str(source),
+    ]
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=90,
+    )
+    assert expected in result.stderr + result.stdout
