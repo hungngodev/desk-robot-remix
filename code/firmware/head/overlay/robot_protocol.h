@@ -44,6 +44,15 @@ private:
     std::atomic<unsigned> pending_{0};
 };
 
+// The WROOM status "none" is healthy only with an active AND ready local
+// motion guard. A bench or legacy profile reporting "not_required" is not a
+// safety-qualified robot and must not release the head's neutral fault face.
+// This informs OLED state only; WROOM remains the sole motor safety owner.
+inline bool BodySafetyUnhealthy(bool required, bool ready,
+                                std::string_view fault) {
+    return !required || !ready || fault != "none";
+}
+
 // A pure cosmetic one-shot, not a sensor HSM, speech or motor authority.
 // This mailbox carries the Mac's already validated decision to the local
 // OLED owner and expires if the face task stalls or Xiaozhi owns the screen.
