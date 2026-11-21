@@ -153,6 +153,13 @@ class BodyControl {
   // target without a recent, unclipped, independently acquired ADS1115
   // channel 1 value. The historical disconnected DC fixture opts out.
   void require_grip_feedback(bool required) { grip_feedback_required_ = required; }
+  // Only the full battery-powered build opts into this mandatory safety input.
+  void require_fuel_monitor(bool required) { fuel_monitor_required_ = required; }
+  bool fuel_monitor_fresh(std::uint32_t now_ms) const {
+    const auto& f = state_.accessories.gauge;
+    return f.fuel_present && f.fuel_valid && f.fuel_sample_seq != 0U &&
+           now_ms - f.fuel_at_ms < 500U;
+  }
   bool grip_feedback_fresh(std::uint32_t now_ms) const {
     const auto& f = state_.accessories.force;
     return f.present && f.valid && (f.valid_mask & 2U) != 0U &&
@@ -199,6 +206,7 @@ class BodyControl {
   std::uint32_t boot_epoch_ = 0;
   bool imu_motion_required_ = false;
   bool grip_feedback_required_ = false;
+  bool fuel_monitor_required_ = false;
   std::uint32_t last_control_ms_ = 0;
   std::uint32_t drive_started_ms_ = 0;
   std::uint32_t drive_duration_ms_ = 0;
@@ -224,6 +232,8 @@ class BodyControl {
   bool dc_fault_last_active_ = false;
   bool bumper_fault_latched_ = false; // collision requires local USB recovery
   bool battery_fault_latched_ = false; // guarded motion needs USB recovery
+  bool fuel_monitor_fault_latched_ = false; // required physical gauge missing/stale
+  std::uint32_t fuel_monitor_fault_seq_ = 0, fuel_monitor_fault_at_ms_ = 0;
   std::uint32_t battery_fault_seq_ = 0, battery_fault_at_ms_ = 0;
   bool motor_watchdog_latched_ = false;  // only local USB may clear
   bool imu_low_g_latched_ = false;  // native MPU event needs local USB rearm

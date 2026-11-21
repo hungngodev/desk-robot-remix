@@ -1441,6 +1441,68 @@ static void battery_undervoltage_rejects_arm_and_stops_motion() {
 }
 
 
+static void required_fuel_gauge_loss_stops_and_requires_local_rearm() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_fuel_monitor(true);
+  CHECK(send(body, "arm", 100) == "ERR arm fuel_monitor_missing_or_stale");
+  CHECK(send(body, "rearm", 100, true) ==
+        "ERR rearm fuel_monitor_missing_or_stale");
+
+  desk_robot::AccessoryReadings readings{};
+  body.set_accessories(readings, 101);
+  CHECK(send(body, "status", 101).find("\"fault\":\"fuel_monitor_latched\"") !=
+        std::string::npos);
+  readings.gauge.fuel_present = readings.gauge.fuel_valid = true;
+  readings.gauge.cell_mv = 3700;
+  readings.gauge.fuel_sample_seq = 1;
+  readings.gauge.fuel_at_ms = 102;
+  body.set_accessories(readings, 102);
+  CHECK(send(body, "arm", 102) == "ERR arm fuel_monitor_latched");
+  CHECK(send(body, "rearm", 102) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 102, true) == "OK rearm");
+  CHECK(send(body, "arm", 102) == "OK arm");
+  CHECK(send(body, "drive 30 30 200", 102).find("OK drive") == 0);
+  CHECK(send(body, "grip 110", 102) == "OK grip angle=110");
+  body.tick(103);
+  const int held = body.state().grip;
+
+  readings.gauge.fuel_valid = false;
+  body.set_accessories(readings, 104);
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0);
+  CHECK(body.state().servos_attached && body.state().grip == held);
+  readings.gauge.fuel_valid = true; // same old sample is NOT a recovery
+  body.set_accessories(readings, 105);
+  CHECK(send(body, "arm", 105) == "ERR arm fuel_monitor_latched");
+  CHECK(send(body, "rearm", 105, true) ==
+        "ERR rearm fuel_monitor_no_new_sample");
+
+  readings.gauge.fuel_sample_seq = 2;
+  readings.gauge.fuel_at_ms = 106;
+  body.set_accessories(readings, 106);
+  CHECK(send(body, "rearm", 106, true) == "OK rearm");
+  CHECK(send(body, "arm", 106) == "OK arm");
+  for (std::uint32_t at = 146; at <= 626; at += 40) {
+    fresh(guard, at);
+    body.tick(at);
+  }
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "status", 626).find("\"fault\":\"fuel_monitor_latched\"") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 626) == "ERR arm fuel_monitor_latched");
+  CHECK(send(body, "rearm", 626, true) ==
+        "ERR rearm fuel_monitor_missing_or_stale");
+  readings.gauge.fuel_sample_seq = 3;
+  readings.gauge.fuel_at_ms = 627;
+  body.set_accessories(readings, 627);
+  fresh(guard, 627);
+  CHECK(send(body, "rearm", 627, true) == "OK rearm");
+  CHECK(send(body, "arm", 627) == "OK arm");
+}
+
 static void guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract() {
   // This is a policy/command contract test, not a load or PWM hardware test.
   using desk_robot::BodyControl;
@@ -1740,6 +1802,7 @@ int main() {
     accessory_reconnect_does_not_invent_petting_events();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     battery_undervoltage_rejects_arm_and_stops_motion();
+    required_fuel_gauge_loss_stops_and_requires_local_rearm();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     independent_pack_sensor_freshness_never_crosses_devices();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();

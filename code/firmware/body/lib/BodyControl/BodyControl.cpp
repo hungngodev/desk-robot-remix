@@ -242,6 +242,15 @@ bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
 void BodyControl::set_accessories(const AccessoryReadings& readings,
                                   std::uint32_t now_ms) {
   state_.accessories = readings;
+  if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
+    if (!fuel_monitor_fault_latched_) {
+      fuel_monitor_fault_seq_ = readings.gauge.fuel_sample_seq;
+      fuel_monitor_fault_at_ms_ = readings.gauge.fuel_at_ms;
+    }
+    fuel_monitor_fault_latched_ = true;
+    stop_motion();
+    state_.armed = false; // retain jaw holding PWM on pack telemetry loss
+  }
   if (dc_fault_required_) {
     const auto& fault = readings.optional_inputs;
     const bool current = fault.present && fault.valid &&
@@ -430,7 +439,15 @@ void BodyControl::tick(std::uint32_t now_ms) {
     // remains a separate physical release gate.
     return;
   }
-  if (bumper_fault_latched_ || battery_fault_latched_) {
+  if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
+    if (!fuel_monitor_fault_latched_) {
+      fuel_monitor_fault_seq_ = state_.accessories.gauge.fuel_sample_seq;
+      fuel_monitor_fault_at_ms_ = state_.accessories.gauge.fuel_at_ms;
+    }
+    fuel_monitor_fault_latched_ = true;
+  }
+  if (bumper_fault_latched_ || battery_fault_latched_ ||
+      fuel_monitor_fault_latched_) {
     stop_motion();
     state_.armed = false;
     return;
@@ -894,6 +911,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         state_.accessories.gauge.cell_mv < 3200U;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !bumper_fault_latched_ && !battery_fault_latched_ &&
+        !fuel_monitor_fault_latched_ &&
+        (!fuel_monitor_required_ || fuel_monitor_fresh(now_ms)) &&
         !motor_watchdog_latched_ && !imu_low_g_latched_ &&
         !imu_sensor_fault_latched_ &&
         !dock_unhealthy && !bumper_hit && !touch_hit &&
@@ -931,6 +950,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
         battery_depleted ? "battery_low" :
         battery_fault_latched_ ? "battery_low_latched" :
+        fuel_monitor_fault_latched_ ? "fuel_monitor_latched" :
+        fuel_monitor_required_ && !fuel_monitor_fresh(now_ms) ?
+            "fuel_monitor_missing_or_stale" :
         !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
         reply, capacity,
@@ -1045,6 +1067,20 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR rearm imu_missing_or_stale");
       return;
     }
+    if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
+      std::snprintf(reply, capacity, "ERR rearm fuel_monitor_missing_or_stale");
+      return;
+    }
+    if (fuel_monitor_fault_latched_) {
+      const auto& fuel = state_.accessories.gauge;
+      const auto seq_delta = fuel.fuel_sample_seq - fuel_monitor_fault_seq_;
+      const auto time_delta = fuel.fuel_at_ms - fuel_monitor_fault_at_ms_;
+      if (seq_delta == 0U || seq_delta >= 0x80000000U ||
+          time_delta == 0U || time_delta >= 0x80000000U) {
+        std::snprintf(reply, capacity, "ERR rearm fuel_monitor_no_new_sample");
+        return;
+      }
+    }
     if (battery_fault_latched_) {
       const auto& fuel = state_.accessories.gauge;
       const auto seq_delta = fuel.fuel_sample_seq - battery_fault_seq_;
@@ -1066,11 +1102,20 @@ void BodyControl::execute(const char* line, std::size_t length,
     dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
     bumper_fault_latched_ = false; // only USB, after released raw contact
     battery_fault_latched_ = false; // after newer measured safe fuel sample
+    fuel_monitor_fault_latched_ = false; // after fresh independently acquired data
     motor_watchdog_latched_ = false; // no old drive resumed
     imu_low_g_latched_ = false; // after a truly fresh, clear MPU status
     imu_sensor_fault_latched_ = false; // after fresh sensor and USB recovery
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (fuel_monitor_fault_latched_) {
+      std::snprintf(reply, capacity, "ERR arm fuel_monitor_latched");
+      return;
+    }
+    if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
+      std::snprintf(reply, capacity, "ERR arm fuel_monitor_missing_or_stale");
+      return;
+    }
     if (battery_fault_latched_) {
       std::snprintf(reply, capacity, "ERR arm battery_low_latched");
       return;

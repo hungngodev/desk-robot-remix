@@ -460,6 +460,14 @@ void setup() {
   Serial.println("INFO max30102_fifo_red_first_compiled_unqualified");
 #endif
   const bool accessory_mux = accessories.begin(Wire);
+#if defined(DESK_ROBOT_REQUIRE_FUEL_MONITOR) && DESK_ROBOT_REQUIRE_FUEL_MONITOR
+  // Full battery robot cannot move when its fuel gauge is missing/stale.
+  // A valid digital voltage read does not certify the pack or charger.
+  control.require_fuel_monitor(true);
+  Serial.println(accessories.readings().gauge.fuel_present ?
+      "INFO required_max17048_found_unqualified_until_first_read" :
+      "ERR required_max17048_missing_motor_locked");
+#endif
   // These drivers probe the SAME 0x71 multiplexer after TofBus's own
   // initial check. A transient 0x71 startup NACK must not let a later
   // discovered CAP1188 at 0x29 coexist with an active VL53L0X lane.
