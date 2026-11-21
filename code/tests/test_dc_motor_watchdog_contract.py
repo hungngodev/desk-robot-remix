@@ -142,8 +142,8 @@ def test_default_full_dc_wheels_stay_disabled_until_external_cutoff_qualified():
     assert "dc.inhibit_unqualified_motor_cutoff();" in test_source
     # Bench only: preserve the historical DC fixture for disconnected tests.
     assert "[env:esp32dev]" in ini
-    assert "DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED=0" not in ini.split(
-        "[env:esp32dev]", 1)[1]
+    bench_section = ini.split("[env:esp32dev]", 1)[1].split("\n[env:", 1)[0]
+    assert "DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED=0" not in bench_section
 
 
 def test_full_guarded_builds_enable_direct_nc_collision_contacts():
