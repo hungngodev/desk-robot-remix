@@ -139,7 +139,12 @@ void BerryImu::poll(std::uint32_t now_ms) {
   if (reading_.model == BerryModel::Mpu6050) {
     std::uint8_t frame[14]{};
     if (!read_bytes(gyro_address_, 0x3b, frame, 14)) {
+      // An unreadable conversion cannot carry a previous IRQ/status forward
+      // as evidence for this failed sample. Keep the historical event count
+      // and edge state, so an interrupted read cannot duplicate an old IRQ.
       reading_.valid = false;
+      reading_.low_g_status_valid = false;
+      reading_.low_g_irq = false;
       return;
     }
     decode_mpu6050(frame, reading_);

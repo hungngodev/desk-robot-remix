@@ -71,6 +71,27 @@ int main() {
     mpu.poll(450);
     CHECK(mpu.reading().low_g_event_seq == 3U);
 
+    // An unreadable 14-byte conversion must invalidate the current low-g
+    // status as well as the sample. A recovery with the same latched IRQ
+    // must not replay it as a newly observed event.
+    mpu_wire.reject_read_reg = 0x3b;
+    mpu.poll(500);
+    CHECK(!mpu.reading().valid);
+    CHECK(!mpu.reading().low_g_status_valid);
+    CHECK(!mpu.reading().low_g_irq);
+    CHECK(mpu.reading().low_g_event_seq == 3U);
+    mpu_wire.reject_read_reg = -1;
+    mpu_wire.registers[0x3a] = 0x80;
+    mpu.poll(550);
+    CHECK(mpu.reading().valid && mpu.reading().low_g_status_valid);
+    CHECK(mpu.reading().low_g_irq);
+    CHECK(mpu.reading().low_g_event_seq == 3U);
+    mpu.poll(600); // successful clear of the retained IRQ
+    CHECK(mpu.reading().valid && !mpu.reading().low_g_irq);
+    mpu_wire.registers[0x3a] = 0x80;
+    mpu.poll(650);
+    CHECK(mpu.reading().low_g_event_seq == 4U);
+
     TwoWire bad_readback;
     bad_readback.reject_read_reg = 0x1d;
     BerryImu unverified_ff;
