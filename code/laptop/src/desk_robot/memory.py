@@ -23,6 +23,16 @@ _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 _EVENT_ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 _EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
 
+# Every retained deletion ID is an exact cross-restart replay prohibition.
+# Unlike bounded episode rows, tombstones CANNOT be silently evicted.
+# At this generous per-pet budget (~274 unique deletions/day for a year),
+# seal only NEW memory writes durably. Explicit forget remains available.
+_MAX_DELETED_EPISODE_IDS = 100_000
+
+
+class MemoryWriteSealed(RuntimeError):
+    """Private episode writes are disabled after the deletion fence fills."""
+
 
 _CORE_SLOT = re.compile(r"[a-z][a-z0-9_]{1,39}\Z")
 _WORDS = re.compile(r"(?u)[^\W_]{2,}")
@@ -126,6 +136,29 @@ class MemoryStore:
                     """CREATE TABLE IF NOT EXISTS deleted_episode_ids (
                          event_id TEXT PRIMARY KEY
                        )"""
+                )
+                # Saturation cannot evict a tombstone: that would allow
+                # delayed canceled audio or camera callbacks to resurrect an
+                # explicitly deleted memory. Persist one per-pet write seal.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS deletion_fence_guard (
+                         singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                         writes_sealed INTEGER NOT NULL
+                             CHECK(writes_sealed IN (0,1))
+                       )"""
+                )
+                db.execute(
+                    "INSERT OR IGNORE INTO deletion_fence_guard "
+                    "(singleton,writes_sealed) VALUES (1,0)"
+                )
+                # Legacy databases may already contain more deletions than
+                # the current budget. Their next episode write must NOT get
+                # an accidental new lease just because this schema is new.
+                db.execute(
+                    """UPDATE deletion_fence_guard SET writes_sealed=1
+                       WHERE singleton=1 AND
+                         (SELECT COUNT(*) FROM deleted_episode_ids) >= ?""",
+                    (_MAX_DELETED_EPISODE_IDS,),
                 )
                 # Operator-curated core identity/preferences are distinct
                 # from automatic sensor episodes. Like Letta core memory,
@@ -260,6 +293,15 @@ class MemoryStore:
             # Begin before checking the tombstone: the competing operator
             # DELETE and a delayed remembered event must have ONE order.
             db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "SELECT writes_sealed FROM deletion_fence_guard WHERE singleton=1"
+            ).fetchone() != (0,):
+                # A bounded tombstone table cannot faithfully represent an
+                # unbounded event-ID set. Reject every new episode write
+                # instead of forgetting an old operator deletion.
+                raise MemoryWriteSealed(
+                    "Private episode writes sealed after deletion fence budget"
+                )
             if db.execute(
                 "SELECT 1 FROM deleted_episode_ids WHERE event_id=?",
                 (event_id,),
@@ -456,10 +498,25 @@ class MemoryStore:
             db.execute("BEGIN IMMEDIATE")
             # Even a deletion arriving before a slow SQLite writer creates a
             # durable fence. Never copy a peer's deletion to this pet's DB.
-            db.execute(
-                "INSERT OR IGNORE INTO deleted_episode_ids(event_id) VALUES (?)",
-                (event_id,),
-            )
+            sealed = db.execute(
+                "SELECT writes_sealed FROM deletion_fence_guard WHERE singleton=1"
+            ).fetchone() != (0,)
+            if not sealed:
+                db.execute(
+                    "INSERT OR IGNORE INTO deleted_episode_ids(event_id) VALUES (?)",
+                    (event_id,),
+                )
+                if db.execute(
+                    "SELECT COUNT(*) FROM deleted_episode_ids"
+                ).fetchone()[0] >= _MAX_DELETED_EPISODE_IDS:
+                    # Permanently bound this robot's deletion registry.
+                    # No later remember() may insert anything, including
+                    # an ID deleted after saturation. Both operations hold
+                    # the same BEGIN IMMEDIATE writer lease.
+                    db.execute(
+                        "UPDATE deletion_fence_guard SET writes_sealed=1 "
+                        "WHERE singleton=1"
+                    )
             return db.execute(
                 "DELETE FROM memories WHERE event_id=?", (event_id,)
             ).rowcount == 1

@@ -1,0 +1,110 @@
+"""Bounded persistent deletion fences must never resurrect private facts."""
+
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+
+import desk_robot.memory as memory_module
+from desk_robot.memory import MemoryStore, MemoryWriteSealed
+
+
+def remember(store, pet, event):
+    return store.remember(
+        pet, event, f"Original observation {event}",
+        kind="touch_tap", source_robot=pet, witnessed=True,
+    )
+
+
+def read_fence(root, pet):
+    with sqlite3.connect(root / f"{pet}.sqlite3") as db:
+        return (
+            db.execute("SELECT COUNT(*) FROM deleted_episode_ids").fetchone()[0],
+            db.execute(
+                "SELECT writes_sealed FROM deletion_fence_guard WHERE singleton=1"
+            ).fetchone()[0],
+        )
+
+
+def test_deleted_episode_fence_is_bounded_and_seals_new_writes_across_restarts(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 3)
+    root = tmp_path / "private"
+    store = MemoryStore(root, ["robot-01", "robot-02"])
+    assert remember(store, "robot-01", "first")
+    assert remember(store, "robot-02", "peer")
+    assert store.forget_episode("robot-01", "first")
+    assert store.forget_episode("robot-01", "unknown-2") is False
+    assert read_fence(root, "robot-01") == (2, 0)
+
+    # Third unique deletion reaches the cap. There is NO unsafe eviction.
+    assert store.forget_episode("robot-01", "unknown-3") is False
+    assert read_fence(root, "robot-01") == (3, 1)
+    for i in range(50):
+        store.forget_episode("robot-01", f"other-{i}")
+    assert read_fence(root, "robot-01") == (3, 1)
+    assert store.count("robot-01") == 0
+    for event in ("first", "unknown-2", "unknown-3", "other-49", "new"):
+        with pytest.raises(MemoryWriteSealed, match="writes sealed"):
+            remember(store, "robot-01", event)
+
+    # A new process must not reset the irreversible replay prohibition.
+    reopened = MemoryStore(root, ["robot-01", "robot-02"])
+    assert read_fence(root, "robot-01") == (3, 1)
+    with pytest.raises(MemoryWriteSealed):
+        remember(reopened, "robot-01", "other-40")
+    assert reopened.count("robot-01") == 0
+    # No cross-pet tombstone or seal; unrelated private identity still writes.
+    assert read_fence(root, "robot-02") == (0, 0)
+    assert remember(reopened, "robot-02", "peer-new")
+    assert reopened.count("robot-02") == 2
+
+
+def test_saturated_fence_still_allows_operator_deletion_of_existing_memory(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 2)
+    root = tmp_path / "private"
+    store = MemoryStore(root, ["robot-01"])
+    assert remember(store, "robot-01", "keep")
+    store.forget_episode("robot-01", "not-yet-1")
+    store.forget_episode("robot-01", "not-yet-2")
+    assert read_fence(root, "robot-01") == (2, 1)
+    assert store.forget_episode("robot-01", "keep") is True
+    assert store.get_episode("robot-01", "keep") is None
+    assert read_fence(root, "robot-01") == (2, 1)
+    with pytest.raises(MemoryWriteSealed):
+        remember(store, "robot-01", "keep")
+
+
+def test_legacy_tombstone_database_is_sealed_on_upgrade(tmp_path, monkeypatch):
+    root = tmp_path / "private"
+    initial = MemoryStore(root, ["robot-01"])
+    for i in range(5):
+        initial.forget_episode("robot-01", f"preexisting-{i}")
+    assert read_fence(root, "robot-01") == (5, 0)
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 3)
+    upgraded = MemoryStore(root, ["robot-01"])
+    assert read_fence(root, "robot-01") == (5, 1)
+    with pytest.raises(MemoryWriteSealed):
+        remember(upgraded, "robot-01", "new-after-upgrade")
+    upgraded.forget_episode("robot-01", "more")
+    assert read_fence(root, "robot-01") == (5, 1)
+
+
+def test_forget_and_delayed_writer_are_serialized_at_saturation(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 1)
+    root = tmp_path / "private"
+    store = MemoryStore(root, ["robot-01"])
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        # A late callback cannot get past a committed delete fence.
+        delete = pool.submit(store.forget_episode, "robot-01", "delayed")
+        delete.result(timeout=5)
+        attempted = pool.submit(remember, store, "robot-01", "delayed")
+        with pytest.raises(MemoryWriteSealed):
+            attempted.result(timeout=5)
+    assert read_fence(root, "robot-01") == (1, 1)
+    assert store.count("robot-01") == 0
