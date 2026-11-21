@@ -642,7 +642,9 @@ static void mpu_native_low_g_irq_vetoes_local_wheels() {
   body.tick(101);
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0 && body.state().servos_attached);
-  CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
+  // Native MPU FF_INT is a sticky local fault, not just a stale sample.
+  // It must outrank generic IMU freshness until deliberate USB recovery.
+  CHECK(send(body, "arm", 101) == "ERR arm imu_low_g_latched");
   const auto low_g_status = send(body, "status", 101);
   CHECK(low_g_status.find("\"fault\":\"imu_low_g_latched\"") != std::string::npos);
   CHECK(low_g_status.find("\"valid\":false") != std::string::npos);
