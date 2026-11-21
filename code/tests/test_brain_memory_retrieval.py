@@ -457,9 +457,13 @@ def test_live_situation_is_available_without_persistent_memory_consent(
                 "/v1/pet/robot-01/interaction-context", headers=tool
             )
             assert cam_off.status_code == 200
+            # Camera opt-out also revokes a completed visual_look receipt.
+            # Independently consented WROOM touch must remain available.
             assert [cue["channel"] for cue in cam_off.json()[
                 "current_interaction_timeline"
-            ]] == ["sensor", "tool"]
+            ]] == ["sensor"]
+            assert "A hand may be nearby" not in cam_off.text
+            assert "touch_tap" in cam_off.json()["model_context"]
         finally:
             runtime.multimodal = None
 
