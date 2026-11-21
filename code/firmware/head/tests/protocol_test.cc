@@ -4,6 +4,17 @@
 #include "real_touch_edges.h"
 using namespace desk_robot;
 int main() {
+    std::uint8_t jpeg[] = {0xff, 0xd8, 0x11, 0x22, 0xff, 0xd9};
+    assert(CompleteJpeg(jpeg, sizeof(jpeg)));
+    assert(!CompleteJpeg(nullptr, sizeof(jpeg)));
+    assert(!CompleteJpeg(jpeg, 3));
+    assert(!CompleteJpeg(jpeg, 512 * 1024 + 1));
+    jpeg[0] = 0x11;
+    assert(!CompleteJpeg(jpeg, sizeof(jpeg)));
+    jpeg[0] = 0xff;
+    jpeg[5] = 0x00;
+    assert(!CompleteJpeg(jpeg, sizeof(jpeg)));
+
     RealTouchEdges head;
     assert(head.Observe(10) == 0); // first read is baseline
     assert(head.Observe(11) == 1);
