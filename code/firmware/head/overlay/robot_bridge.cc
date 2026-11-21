@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string_view>
 #include <vector>
 
@@ -29,6 +30,13 @@ constexpr size_t kMaxReply = 1920;  // WROOM 1800-byte JSON and worst-case 1726-
 constexpr size_t kMaxBody = 160;
 const char* kTag = "DeskRobotHead";
 using JsonPtr = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+struct BenchPcmTransfer {
+    httpd_req_t* req;
+    desk_robot::SensePcmWindow::Complete pcm;
+    uint32_t boot;
+};
+#endif
 JsonPtr Parse(const std::string& value) {
     return JsonPtr(cJSON_ParseWithLengthOpts(value.c_str(), value.size() + 1, nullptr, true), cJSON_Delete);
 }
@@ -314,7 +322,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 13;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -328,7 +336,13 @@ void Bridge::Start() {
              {"/api/camera.jpg", HTTP_GET},
              {"/api/camera.mjpg", HTTP_GET},
              {"/api/camera.identity", HTTP_GET},
-             {"/api/audio.reference", HTTP_GET}}) {
+             {"/api/audio.reference", HTTP_GET}
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+             ,{"/api/audio.capture.start", HTTP_POST},
+             {"/api/audio.capture.status", HTTP_GET},
+             {"/api/audio.capture.raw", HTTP_GET}
+#endif
+             }) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
         uri.method = entry.second;
@@ -610,8 +624,106 @@ void Bridge::CameraStreamTask(void* context) {
     vTaskDelete(nullptr);
 }
 
+
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+void Bridge::BenchPcmTask(void* context) {
+    // Asynchronous HTTP response so 256 KiB raw PCM can never block status,
+    // emergency STOP or watchdog requests on the head HTTP dispatcher.
+    std::unique_ptr<BenchPcmTransfer> transfer(
+        static_cast<BenchPcmTransfer*>(context));
+    auto* req = transfer->req;
+    const auto& pcm = transfer->pcm;
+    const auto source = reinterpret_cast<const char*>(pcm.interleaved);
+    char first[32], last[32], boot[24], frames[20];
+    snprintf(first, sizeof(first), "%lld",
+             static_cast<long long>(pcm.first_sample_us));
+    snprintf(last, sizeof(last), "%lld",
+             static_cast<long long>(pcm.last_sample_us));
+    snprintf(boot, sizeof(boot), "%u", static_cast<unsigned>(transfer->boot));
+    snprintf(frames, sizeof(frames), "%u", static_cast<unsigned>(pcm.frames));
+    esp_err_t status = httpd_resp_set_type(req, "application/octet-stream");
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Robot-Id", CONFIG_DESK_ROBOT_ID);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Boot", boot);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Frames", frames);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-First-Us", first);
+    if (status == ESP_OK) status = httpd_resp_set_hdr(req, "X-Desk-Audio-Last-Us", last);
+    const int64_t deadline_us = esp_timer_get_time() + 5'000'000;
+    for (std::size_t offset = 0;
+         status == ESP_OK && offset < desk_robot::SensePcmWindow::kBytes;
+         offset += 4096) {
+        if (esp_timer_get_time() >= deadline_us) break;
+        const auto count = std::min<std::size_t>(
+            4096, desk_robot::SensePcmWindow::kBytes - offset);
+        status = httpd_resp_send_chunk(req, source + offset, count);
+    }
+    if (status == ESP_OK && esp_timer_get_time() < deadline_us)
+        (void)httpd_resp_send_chunk(req, nullptr, 0);
+    // Wipe even after client disconnect, timeout or partial HTTP output.
+    SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+    httpd_req_async_handler_complete(req);
+    transfer.reset();
+    vTaskDelete(nullptr);
+}
+#endif
+
 esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
+
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+    if (strcmp(req->uri, "/api/audio.capture.start") == 0) {
+        if (req->content_len != 0)
+            return Json(req, 400, Envelope(false, "Bench capture request must be empty"));
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
+        if (!static_cast<SenseReferenceCodec*>(audio_codec_)->BeginBenchPcmCapture())
+            return Json(req, 409, Envelope(false, "Bench PCM unavailable or already active"));
+        return Json(req, 202, Envelope(true, "Private bench PCM capture started"));
+    }
+    if (strcmp(req->uri, "/api/audio.capture.status") == 0) {
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
+        const auto progress =
+            static_cast<SenseReferenceCodec*>(audio_codec_)->GetBenchPcmProgress();
+        JsonPtr data(cJSON_CreateObject(), cJSON_Delete);
+        if (!data) return Json(req, 503, Envelope(false, "Bench status unavailable"));
+        cJSON_AddStringToObject(data.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddNumberToObject(data.get(), "boot", boot_nonce_);
+        cJSON_AddBoolToObject(data.get(), "active", progress.active);
+        cJSON_AddBoolToObject(data.get(), "ready", progress.ready);
+        cJSON_AddBoolToObject(data.get(), "failed", progress.failed);
+        cJSON_AddNumberToObject(data.get(), "frames", progress.frames);
+        cJSON_AddBoolToObject(data.get(), "physical_aec_qualified", false);
+        return Json(req, 200, Encode(data.get()));
+    }
+    if (strcmp(req->uri, "/api/audio.capture.raw") == 0) {
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
+        const auto pcm =
+            static_cast<SenseReferenceCodec*>(audio_codec_)->TakeBenchPcmCapture();
+        if (!pcm.interleaved || pcm.frames != desk_robot::SensePcmWindow::kFrames)
+            return Json(req, 409, Envelope(false, "Bench PCM not complete"));
+        httpd_req_t* async_req = nullptr;
+        if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+            SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            return Json(req, 503, Envelope(false, "Bench PCM worker unavailable"));
+        }
+        auto* transfer = new(std::nothrow) BenchPcmTransfer{
+            async_req, pcm, boot_nonce_};
+        if (!transfer) {
+            SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            Json(async_req, 503, Envelope(false, "Bench PCM allocation unavailable"));
+            httpd_req_async_handler_complete(async_req);
+            return ESP_OK;
+        }
+        if (xTaskCreate(BenchPcmTask, "sense_pcm_once", 6144,
+                        transfer, 2, nullptr) != pdPASS) {
+            SenseReferenceCodec::ReleaseBenchPcmCapture(pcm.interleaved);
+            delete transfer;
+            Json(async_req, 503, Envelope(false, "Bench PCM worker failed"));
+            httpd_req_async_handler_complete(async_req);
+        }
+        return ESP_OK;
+    }
+#endif
     if (strcmp(req->uri, "/api/audio.reference") == 0) {
 #if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)
         if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense audio unavailable"));
