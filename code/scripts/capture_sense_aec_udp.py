@@ -26,6 +26,17 @@ from pathlib import Path
 RATE = 16_000
 MAX_DATAGRAM = 8192
 MAX_OTHER_SOURCE = 32
+LAB_NETWORKS = tuple(ipaddress.ip_network(cidr) for cidr in (
+    "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+))
+
+
+def lab_ip(value: str) -> ipaddress.IPv4Address:
+    """Never bind a raw-mic UDP listener to a wildcard or public address."""
+    address = ipaddress.IPv4Address(value)
+    if not any(address in network for network in LAB_NETWORKS):
+        raise ValueError("Use a specific loopback or RFC1918 private IPv4")
+    return address
 
 
 def split_interleaved(raw: bytes) -> tuple[bytes, bytes]:
@@ -48,7 +59,7 @@ def receive_capture(sock: socket.socket, *, expected_source_ip: str,
                     duration_s: int = 5, max_gap_ms: int = 150,
                     clock=time.monotonic) -> tuple[bytes, dict]:
     """Receive one bounded interleaved buffer without ever logging PCM."""
-    ipaddress.IPv4Address(expected_source_ip)
+    lab_ip(expected_source_ip)
     if (type(duration_s) is not int or not 5 <= duration_s <= 10
             or type(max_gap_ms) is not int or not 40 <= max_gap_ms <= 500):
         raise ValueError("Bench duration or packet gap outside safe bounds")
@@ -150,10 +161,14 @@ def main() -> int:
     args = parser.parse_args()
     if not args.i_consent_to_private_raw_audio:
         parser.error("Raw microphone capture requires explicit operator consent")
-    if (not 1024 <= args.port <= 65535
-            or not ipaddress.IPv4Address(args.bind_ip).is_private
-            or not ipaddress.IPv4Address(args.expected_source_ip).is_private):
-        parser.error("Only explicit private lab IPv4 addresses and unprivileged UDP ports")
+    if not 1024 <= args.port <= 65535:
+        parser.error("Unprivileged UDP port required")
+    try:
+        lab_ip(args.bind_ip)
+        lab_ip(args.expected_source_ip)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.bind((args.bind_ip, args.port))
         sock.settimeout(1.0)
