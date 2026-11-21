@@ -446,3 +446,55 @@ def test_xiaozhi_live_context_drops_cached_room_on_station_consent_revoke(settin
         )
         assert payload["motor_authorized"] is False
         assert payload["model_context_untrusted_not_instructions"] is True
+
+
+def test_readonly_voice_planner_drops_room_context_after_opt_out(settings):
+    """Slow model planning cannot turn revoked USB room data into a reply."""
+    import time
+
+    from desk_robot.api_readonly_planner import register_readonly_planner_routes
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomObservation
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.room_station_context_enabled = True
+    hub = CameraFrameHub(["robot-01"])
+    hub.remember_room(RoomObservation(
+        seq=1, at_ms=100, received_at=time.monotonic(), readings={},
+        summary="ROOM PRIVATE: historical USB room measurement",
+    ))
+
+    class Planner:
+        calls = []
+
+        async def readonly_tool_plan(self, history):
+            self.calls.append(str(history))
+            settings.room_station_context_enabled = False
+            return '{"tools":[]}'
+
+    planner = Planner()
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=SimpleNamespace(hub=hub),
+        conversation=SimpleNamespace(chat=planner),
+    )
+    register_readonly_planner_routes(app, settings, authorize=lambda: None)
+    with TestClient(app) as client:
+        first = client.post(
+            "/v1/pet/robot-01/plan-readonly",
+            json={"transcript": "What can you tell me about the room?"},
+        )
+        assert first.status_code == 403
+        assert "room station consent revoked" in first.json()["detail"].lower()
+        assert "ROOM PRIVATE" in planner.calls[0]
+
+        second = client.post(
+            "/v1/pet/robot-01/plan-readonly",
+            json={"transcript": "What can you tell me about the room?"},
+        )
+        assert second.status_code == 200
+        assert "ROOM PRIVATE" not in planner.calls[1]
+        assert second.json()["motor_authorized"] is False
