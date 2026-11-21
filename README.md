@@ -10,6 +10,8 @@ python -m pytest code/tests/test_procurement_release.py
 
 # Desk Robot Remix
 
+**First complete pet builder route:** [One robot, dock and shared station assembly and acceptance guide](docs/guides/one-complete-robot.md). This entry point links the canonical two shopping lists, printable reference geometry, wiring, firmware, calibration and physical HOLD gates. It is not a finished printable or powered hardware release.
+
 - [**Docs**](docs/README.md) is the living handbook. Start here for the plan,
   parts, model files, build guides, sources and bench records.
 - [**Code**](code/README.md) contains the firmware, Mac software, tools and
