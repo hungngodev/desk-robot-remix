@@ -67,6 +67,17 @@ private:
         }
     }
 
+    static const char* CosmeticMoodName(desk_robot::CosmeticMood mood) {
+        using desk_robot::CosmeticMood;
+        switch (mood) {
+            case CosmeticMood::kNeutral: return "neutral";
+            case CosmeticMood::kHappy: return "happy";
+            case CosmeticMood::kThinking: return "thinking";
+            case CosmeticMood::kSurprised: return "surprised";
+            default: return "neutral";
+        }
+    }
+
     static void BodyPollTask(void* context) {
         auto* board = static_cast<DeskRobotSenseBoard*>(context);
         while (true) {
@@ -100,6 +111,8 @@ private:
         using namespace stackchan::behavior;
         bool last_rendered_fault = false;
         bool last_was_idle = false;
+        bool model_mood_active = false;
+        uint32_t model_mood_started_ms = 0;
         while (true) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
             const uint32_t valid_at =
@@ -158,6 +171,12 @@ private:
             // Stackchan idle picker may update the existing OLED only when
             // the device is idle; never write its motion actions to the body.
             const bool idle = device_state == kDeviceStateIdle;
+            // Consume every pending decision, even while speaking or in a
+            // body fault, so stale facial requests never replay after recovery.
+            const auto requested_mood = board->body_bridge_ ?
+                board->body_bridge_->TakeCosmeticMoodCue() :
+                desk_robot::CosmeticMood::kNone;
+            if (body_unhealthy || !idle) model_mood_active = false;
             if (board->display_ != nullptr) {
                 // WROOM faults are factual local OLED status even while
                 // Xiaozhi is speaking. Never wait for the speech floor to
@@ -185,14 +204,20 @@ private:
                 }
             }
             if (idle && board->display_ != nullptr) {
-                // Only the contextual HSM mood remains idle-exclusive.
-                // Reuse pinned Stackchan expression selection without
-                // mapping a fault, touch, or sighting to a fixed emotion.
-                if (!last_was_idle) {
-                    board->display_->SetEmotion(
-                        action.set_mood ? MoodName(action.mood) : "neutral");
-                } else if (action.set_mood) {
-                    board->display_->SetEmotion(MoodName(action.mood));
+                // Only the Mac's CURRENT context decision may request a
+                // transient mood. The local idle HSM takes over afterward.
+                // These bytes never reach WROOM, motors, Opus or microphones.
+                if (!body_unhealthy &&
+                    requested_mood != desk_robot::CosmeticMood::kNone) {
+                    board->display_->SetEmotion(CosmeticMoodName(requested_mood));
+                    model_mood_active = true;
+                    model_mood_started_ms = now_ms;
+                } else if (!model_mood_active ||
+                           now_ms - model_mood_started_ms >= 1600U) {
+                    if (model_mood_active || !last_was_idle || action.set_mood)
+                        board->display_->SetEmotion(
+                            action.set_mood ? MoodName(action.mood) : "neutral");
+                    model_mood_active = false;
                 }
             }
             last_was_idle = idle;

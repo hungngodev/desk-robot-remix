@@ -44,6 +44,50 @@ private:
     std::atomic<unsigned> pending_{0};
 };
 
+// A pure cosmetic one-shot, not a sensor HSM, speech or motor authority.
+// This mailbox carries the Mac's already validated decision to the local
+// OLED owner and expires if the face task stalls or Xiaozhi owns the screen.
+enum class CosmeticMood : std::uint8_t {
+    kNone = 0, kNeutral, kHappy, kThinking, kSurprised,
+};
+
+inline CosmeticMood ParseCosmeticMood(std::string_view event) {
+    if (event == "mood:neutral") return CosmeticMood::kNeutral;
+    if (event == "mood:happy") return CosmeticMood::kHappy;
+    if (event == "mood:thinking") return CosmeticMood::kThinking;
+    if (event == "mood:surprised") return CosmeticMood::kSurprised;
+    return CosmeticMood::kNone;
+}
+
+class CosmeticMoodCue {
+public:
+    void offer(CosmeticMood mood, std::uint32_t now_ms) {
+        if (mood == CosmeticMood::kNone) return;
+        // One 32-bit atomic receipt holds the mood and a 100 ms clock tick.
+        // The modulo clock is safe across ESP32 uptime wrap.
+        const std::uint32_t tick = (now_ms / 100U) & 0x00ffffffU;
+        pending_.store((tick << 8U) | static_cast<std::uint32_t>(mood),
+                       std::memory_order_release);
+    }
+    CosmeticMood take(std::uint32_t now_ms) {
+        const std::uint32_t receipt = pending_.exchange(
+            0U, std::memory_order_acq_rel);
+        if (receipt == 0U) return CosmeticMood::kNone;
+        const auto age_ticks = ((now_ms / 100U) -
+            (receipt >> 8U)) & 0x00ffffffU;
+        if (age_ticks > 10U) return CosmeticMood::kNone;
+        switch (receipt & 0xffU) {
+            case 1: return CosmeticMood::kNeutral;
+            case 2: return CosmeticMood::kHappy;
+            case 3: return CosmeticMood::kThinking;
+            case 4: return CosmeticMood::kSurprised;
+            default: return CosmeticMood::kNone;
+        }
+    }
+private:
+    std::atomic<std::uint32_t> pending_{0U};
+};
+
 struct Command {
     std::string verb;
     std::vector<int> args;

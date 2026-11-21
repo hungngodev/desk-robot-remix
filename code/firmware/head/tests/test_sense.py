@@ -883,6 +883,11 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'bool TakePersonCue();' in header
     assert 'body_bridge_->TakePersonCue()' in board
     assert 'Event(EventType::kPersonDetected)' in board
+    assert 'CosmeticMood Bridge::TakeCosmeticMoodCue()' in bridge
+    assert 'cosmetic_mood_.offer(' in bridge
+    assert 'CosmeticMoodName(requested_mood)' in board
+    assert 'now_ms - model_mood_started_ms >= 1600U' in board
+    assert 'body_unhealthy || !idle' in board
     assert 'board->display_->SetStatus("Body safety stop");' in board
     assert 'Event(EventType::kPersonDetected)' in board
     assert 'body_unhealthy ? "sad" :' not in board

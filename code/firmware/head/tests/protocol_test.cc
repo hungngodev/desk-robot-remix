@@ -30,6 +30,23 @@ int main() {
     assert(cap.Observe(0) == 0); // wrap never fabricates a contact
     assert(cap.Observe(3) == 3);
 
+    // Cosmetic cues are latest only, time bounded, and never motor commands.
+    CosmeticMoodCue mood;
+    assert(ParseCosmeticMood("mood:thinking") == CosmeticMood::kThinking);
+    assert(ParseCosmeticMood("mood:surprised") == CosmeticMood::kSurprised);
+    assert(ParseCosmeticMood("mood:move") == CosmeticMood::kNone);
+    assert(ParseCosmeticMood("arm") == CosmeticMood::kNone);
+    mood.offer(CosmeticMood::kHappy, 1000);
+    mood.offer(CosmeticMood::kThinking, 1010);
+    assert(mood.take(1100) == CosmeticMood::kThinking);
+    assert(mood.take(1101) == CosmeticMood::kNone);
+    mood.offer(CosmeticMood::kSurprised, 1000);
+    assert(mood.take(2200) == CosmeticMood::kNone); // stale > 1s
+    mood.offer(CosmeticMood::kNeutral, 0xffffff00U);
+    assert(mood.take(0xffffff64U) == CosmeticMood::kNeutral); // uptime wrap
+    mood.offer(CosmeticMood::kHappy, 200);
+    assert(mood.take(200) == CosmeticMood::kHappy);
+
     // Urgent requests must win over telemetry without fabricating ACKs.
     UrgentStopGate gate;
     assert(!gate.preempts(false));
