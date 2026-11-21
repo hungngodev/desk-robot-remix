@@ -250,7 +250,9 @@ class HttpHead:
             "reference_underflow_reads", "reference_overwrite_reads",
             "discarded_stale_writes", "short_output_writes",
         )
-        if data.get("robot_id") != self.config.id or any(
+        if (data.get("robot_id") != self.config.id
+                or type(data.get("boot")) is not int
+                or not 0 <= data["boot"] <= 0xffffffff or any(
             type(data.get(key)) is not int or not 0 <= data[key] <= 0xffffffff
             for key in counters
         ) or type(data.get("reference_integrity_failed")) is not bool or (
