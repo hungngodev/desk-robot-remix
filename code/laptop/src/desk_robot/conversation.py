@@ -695,10 +695,21 @@ class Conversation:
                             self.settings.mode != "hardware"
                             or self.settings.voice_vision_tools_enabled
                         )
-                        raw = self.multimodal.hub.interaction_timeline(
-                            robot_id, time.monotonic(),
-                            limit=remaining if live_media_allowed else 16,
+                        read_timeline = getattr(
+                            getattr(self.multimodal, "hub", None),
+                            "interaction_timeline", None,
                         )
+                        # Optional context failure may not mask a newer
+                        # human interruption or strand the speaker lease.
+                        try:
+                            raw = (
+                                read_timeline(
+                                    robot_id, time.monotonic(),
+                                    limit=remaining if live_media_allowed else 16,
+                                ) if callable(read_timeline) else []
+                            )
+                        except Exception:
+                            raw = []
                         if live_media_allowed:
                             timeline = raw
                         else:

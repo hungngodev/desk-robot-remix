@@ -1379,7 +1379,9 @@ async def test_group_activity_does_not_require_camera_consent(settings):
     conversation.coordinator_jobs = jobs
     await conversation.run(ids[:2], "Keep singing", utterances=2)
     assert "Mac operator-submitted exploration job is running" in prompts[1]
-    assert "Physical sensor edge: handling_tilt" not in prompts[1]
+    # WROOM sensor events remain contextual despite camera opt-out.
+    assert "Physical sensor edge: handling_tilt" in prompts[1]
+    assert "XIAO frame received" not in prompts[1]
     assert "Keep singing" in prompts[1]
 
     # No cross-pet activity disclosure after sharing consent is revoked.

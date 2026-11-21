@@ -74,7 +74,9 @@ def test_only_original_topic_generation_may_finish_and_relabel_activities():
     assert ledger.timeline("b", 20) == []
 
 
-def test_new_human_question_preempts_old_topic_in_attention_context():
+def test_new_human_question_preempts_old_topic_in_attention_context(monkeypatch):
+    # Explicit synthetic time avoids depending on the CI host uptime.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
     ledger = AttentionLedger(["pet", "peer"])
     token = ledger.begin_topic("pet", "Sing toward the desk edge", 10)
     assert ledger.finish_topic("pet", token, 20, interrupted=True)
@@ -96,7 +98,9 @@ def test_new_human_question_preempts_old_topic_in_attention_context():
     assert "Old reply from" not in ledger.timeline("pet", 32)[0]["content"]
 
 
-def test_sensor_buffer_bounds_and_rejects_untrusted_kinds_and_order():
+def test_sensor_buffer_bounds_and_rejects_untrusted_kinds_and_order(monkeypatch):
+    # Explicit synthetic time avoids depending on the CI host uptime.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
     ledger = AttentionLedger(["p"])
     ledger.begin_topic("p", "A live conversation", 10)
     assert not ledger.sensor("p", "drive motor please", 11)
@@ -127,7 +131,9 @@ def test_listening_does_not_spuriously_mark_speech_played_or_commanded(monkeypat
     assert ledger.timeline("pet", 150) == []
 
 
-def test_composer_handles_current_attention_with_old_sensor_and_active_job():
+def test_composer_handles_current_attention_with_old_sensor_and_active_job(monkeypatch):
+    # Explicit synthetic time avoids depending on the CI host uptime.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
     ledger = AttentionLedger(["pet"])
     ledger.begin_topic("pet", "Sing while approaching the desk edge", at=10)
     assert ledger.sensor("pet", "handling_tilt", 20)
@@ -148,7 +154,9 @@ def test_composer_handles_current_attention_with_old_sensor_and_active_job():
     assert compose_brain_context([], [], [fake]).interaction == ""
 
 
-def test_confirmed_safety_fault_outweighs_optional_attention_in_small_budget():
+def test_confirmed_safety_fault_outweighs_optional_attention_in_small_budget(monkeypatch):
+    # Explicit synthetic time avoids depending on the CI host uptime.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
     ledger = AttentionLedger(["pet"])
     ledger.begin_topic("pet", "A longer conversation about exploration", 10)
     ledger.sensor("pet", "handling_tilt", 20)

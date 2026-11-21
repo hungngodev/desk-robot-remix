@@ -1715,3 +1715,27 @@ async def test_group_sensor_context_survives_camera_opt_out_without_private_asr(
         assert "Private conversation behind the door" not in prompt
         assert "Private camera guess" not in prompt
         assert "Private recalled place" not in prompt
+
+
+async def test_raising_optional_live_context_cannot_mask_group_speech_cancel(settings):
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = False
+
+    class InterruptibleStream:
+        async def stream_reply(self, history):
+            yield "One real transmitted sentence."
+            settings.fleet_text_sharing_enabled = False
+            yield "An obsolete second sentence."
+
+    class BrokenHub:
+        def interaction_timeline(self, *args, **kwargs):
+            raise RuntimeError("Optional RAM timeline unavailable")
+
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, InterruptibleStream(), speaker)
+    conversation.multimodal = SimpleNamespace(hub=BrokenHub())
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(["robot-01", "robot-02"], "Continue", 2)
+    assert speaker.spoken == [("robot-01", "One real transmitted sentence.")]
+    assert conversation.active is None
