@@ -109,10 +109,23 @@ code after boot, without another PDM driver or competing Opus connection.
 It defaults to **off**. For a private production build the operator must
 explicitly supply `--continuous-audio` to
 `firmware/head/private_config.py --board sense` along with the existing
-private credentials, selected robot and Mac server address. The on-device
-BOOT button can close the streaming channel even while the robot speaks;
-operator intervention disables automatic reactivation for that boot.
-A power cycle starts another explicitly configured continuous audio session.
+private credentials, selected robot and Mac server address. The physical BOOT button is also an immediate codec-level microphone privacy
+control, including while the robot is speaking or its network channel is
+still connecting. The first press gates the actual PDM read before it may reach
+Opus, invalidates old in-flight microphone reads and destroys any optional
+private AEC capture window; it then requests the original Xiaozhi channel
+stop. The second deliberate press unmutes and may reopen the same Xiaozhi
+session. Neither press allows automatic microphone reactivation later in this
+boot, including a WiFi reconnect. Power cycling permits the original explicit
+build-level setting to start another session.
+
+This is a **source-based privacy fence**, not a measured upper bound on packets
+already encoded or sent before the physical press. On the assembled head,
+press BOOT during idle listening, active speech, pending slow WiFi connection,
+AEC capture and reconnection. Verify microphone packet cutoff, that a late
+network open cannot restart listening, and that explicit manual unmute is
+required; record the measured intervals and do not claim instant network
+revocation or physical audio silence from host tests alone.
 This is a software privacy control, **not an electrically qualified microphone
 mute switch**. Confirm the OLED listening state, AEC, silence-stream continuity
 and actual headset interruption with instruments before production.
