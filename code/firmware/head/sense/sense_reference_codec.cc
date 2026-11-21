@@ -183,11 +183,22 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
     const int accepted = NoAudioCodec::Write(data, samples);
     bool log_stale = false;
     uint32_t stale_discards = 0;
-    if (accepted > 0) {
+    bool log_short = false;
+    uint32_t short_writes = 0;
+    {
         std::lock_guard<std::mutex> lock(reference_mutex_);
-        if (started_generation == reference_generation_) {
+        // The pinned AudioCodec::OutputData discards Write's return value.
+        // Never let a timed-out/partial Sense TX masquerade as complete
+        // speech or a qualified echo reference, even on a clean generation.
+        if (accepted != samples) {
+            if (short_output_writes_ != UINT32_MAX) ++short_output_writes_;
+            short_writes = short_output_writes_;
+            reference_integrity_failed_ = true;
+            log_short = short_writes == 1 || (short_writes % 32U) == 0U;
+        }
+        if (accepted > 0 && started_generation == reference_generation_) {
             PublishAcceptedLocked(data, accepted, volume, esp_timer_get_time());
-        } else {
+        } else if (accepted > 0) {
             // The physical TX DMA may have accepted some old audio. It must
             // NOT be relabeled as current-generation echo reference.
             if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;
@@ -199,6 +210,10 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
     if (log_stale) {
         ESP_LOGW("SenseAEC", "discarded stale playback reference after cancellation: %u writes; physical TX silence unverified",
                  static_cast<unsigned>(stale_discards));
+    }
+    if (log_short) {
+        ESP_LOGW("SenseAEC", "incomplete speaker I2S write: %d/%d frames; %u short writes; A2 integrity FAILED",
+                 accepted, samples, static_cast<unsigned>(short_writes));
     }
     return accepted;
 }
@@ -227,7 +242,7 @@ SenseReferenceCodec::GetReferenceDiagnostics() {
     std::lock_guard<std::mutex> lock(reference_mutex_);
     return ReferenceDiagnostics{
         missing_reference_reads_, reference_overwrite_reads_,
-        stale_publish_discards_, reference_integrity_failed_};
+        stale_publish_discards_, short_output_writes_, reference_integrity_failed_};
 }
 
 void SenseReferenceCodec::EnableOutput(bool enable) {
