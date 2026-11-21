@@ -36,6 +36,8 @@ def force_observation(payload: dict) -> tuple[int, int]:
             or not isinstance(group.get("adc"), list) or len(group["adc"]) != 2
             or type(group["adc"][1]) is not int
             or not -32768 <= group["adc"][1] <= 32767
+            # A clipped ADC cannot establish the jaw's actual force.
+            or group["adc"][1] in (-32768, 32767)  # saturated ADS1115
             or type(group.get("jaw_seq")) is not int
             or not 1 <= group["jaw_seq"] <= 0xffffffff):
         raise ValueError("Missing, invalid or stale ADS1115 gripper sample")

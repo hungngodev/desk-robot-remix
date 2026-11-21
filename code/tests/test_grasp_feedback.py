@@ -48,6 +48,13 @@ def test_servo_increments_respect_both_linkage_orientations():
         grip_angles(60, 135, 4)
 
 
+@pytest.mark.parametrize("clipped", [-32768, 32767])
+def test_clipped_gripper_adc_cannot_authorize_contact(clipped):
+    with pytest.raises(ValueError, match="Missing, invalid or stale"):
+        force_adc({"force": {"valid": True, "calibrated": False,
+                             "jaw_seq": 1, "adc": [0, clipped]}})
+
+
 def test_absent_sensor_never_fabricates_force():
     with pytest.raises(ValueError):
         force_adc({"force": {"valid": False, "adc": [0, 100]}})
