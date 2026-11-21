@@ -2932,6 +2932,155 @@ async def test_optional_bumper_magnet_pir_are_real_masked_fleet_events(fleet, tm
         state.enabled = False
         await pet.close()
 
+
+async def test_optional_counters_reject_stale_replays_and_handle_uint32_wrap_and_reboot(fleet, tmp_path):
+    cancellations = []
+    async def stop(robot_id):
+        cancellations.append(robot_id)
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(),
+                        on_local_fault=stop, speech_cooldown=120)
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 5
+    def status(mask, bumps, reed, pir, boot_id=None):
+        payload = {"extras": {
+            "mask": mask, "bumper": bool(bumps), "bumps": bumps,
+            "reed": bool(reed), "reed_count": reed,
+            "pir": bool(pir), "pir_count": pir,
+        }}
+        if boot_id is not None:
+            payload["imu"] = {"boot_id": boot_id}
+            payload["side_ranges"] = {"boot_id": boot_id}
+        return payload
+
+    try:
+        # 1. 11, 12, 11, 12 replay rejection
+        await pet._observe_optional("robot-01", 5, status(7, 11, 20, 30))
+        assert not any(m.kind == "bumper" for m in memory.recent("robot-01"))
+        assert cancellations == []
+
+        await pet._observe_optional("robot-01", 5, status(7, 12, 20, 30))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == 1
+        assert cancellations == ["robot-01"]
+
+        # Delayed old frame with bumps=11 must not rewind baseline to 11
+        await pet._observe_optional("robot-01", 5, status(7, 11, 20, 30))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == 1
+        assert cancellations == ["robot-01"]
+
+        # Repeated 12 must NOT fire a second bumper event
+        await pet._observe_optional("robot-01", 5, status(7, 12, 20, 30))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == 1
+        assert cancellations == ["robot-01"]
+
+        # New legitimate bump 13 fires cleanly
+        await pet._observe_optional("robot-01", 5, status(7, 13, 20, 30))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == 2
+        assert cancellations == ["robot-01", "robot-01"]
+
+        # 2. Independent counters
+        await pet._observe_optional("robot-01", 5, status(7, 13, 21, 30))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "magnet"]) == 1
+        assert len([m for m in memory.recent("robot-01") if m.kind == "pir"]) == 0
+
+        await pet._observe_optional("robot-01", 5, status(7, 13, 21, 31))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "pir"]) == 1
+
+        # 3. Uint32 wrap: 0xfffffffe -> 0xffffffff -> 0
+        # Reconfigure mask or establish large baseline
+        await pet._observe_optional("robot-01", 5, status(1, 0xfffffffe, 0, 0))  # mask change rebaselines
+        bumps_before = len([m for m in memory.recent("robot-01") if m.kind == "bumper"])
+
+        await pet._observe_optional("robot-01", 5, status(1, 0xffffffff, 0, 0))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_before + 1
+
+        # 0xffffffff -> 0 is valid 32-bit forward wrap (delta=1)
+        await pet._observe_optional("robot-01", 5, status(1, 0, 0, 0))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_before + 2
+
+        # Stale backward sample 0xffffffff must not rewind baseline
+        await pet._observe_optional("robot-01", 5, status(1, 0xffffffff, 0, 0))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_before + 2
+
+        # Repeated 0 does not fire
+        await pet._observe_optional("robot-01", 5, status(1, 0, 0, 0))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_before + 2
+
+        # 4. WROOM boot epoch tracking & reboot
+        await pet._observe_optional("robot-01", 5, status(1, 10, 0, 0, boot_id=100))
+        bumps_count = len([m for m in memory.recent("robot-01") if m.kind == "bumper"])
+
+        await pet._observe_optional("robot-01", 5, status(1, 11, 0, 0, boot_id=100))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_count + 1
+
+        # Reboot to boot_id 101 with bumps reset to 0: establishes new baseline, no false event
+        await pet._observe_optional("robot-01", 5, status(1, 0, 0, 0, boot_id=101))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_count + 1
+
+        # Legitimate bump in boot 101
+        await pet._observe_optional("robot-01", 5, status(1, 1, 0, 0, boot_id=101))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_count + 2
+
+        # Stale frame from retired boot 100 rejected completely
+        await pet._observe_optional("robot-01", 5, status(1, 12, 0, 0, boot_id=100))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_count + 2
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_cap1188_rejects_stale_replays_and_handles_uint32_wrap(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 4
+    def cap_payload(cap, good, events):
+        return {"extras": {
+            "mask": 0, "bumper": False, "bumps": 0, "reed": False, "reed_count": 0,
+            "pir": False, "pir_count": 0,
+            "cap": cap, "cap_ok": good, "cap_events": events,
+        }}
+    try:
+        # Baseline 11
+        await pet._observe_optional("robot-01", 4, cap_payload(1, True, 11))
+        assert not any(m.kind == "petting_zone" for m in memory.recent("robot-01"))
+
+        # Event at 12 (pad 1 touched)
+        await pet._observe_optional("robot-01", 4, cap_payload(1, True, 12))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "petting_zone"]) == 1
+
+        # Stale backwards count 11: rejected, baseline and mask preserved
+        await pet._observe_optional("robot-01", 4, cap_payload(1, True, 11))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "petting_zone"]) == 1
+
+        # Duplicate count 12: rejected, no new event
+        await pet._observe_optional("robot-01", 4, cap_payload(1, True, 12))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "petting_zone"]) == 1
+
+        # Next touch 13 (pad 2 touched)
+        await pet._observe_optional("robot-01", 4, cap_payload(2, True, 13))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "petting_zone"]) == 2
+
+        # Uint32 wrap: 0xffffffff -> 0
+        await pet._observe_optional("robot-01", 4, cap_payload(0, False, 0))  # cap_ok=False clears baseline
+        await pet._observe_optional("robot-01", 4, cap_payload(1, True, 0xffffffff))  # baseline
+        assert len([m for m in memory.recent("robot-01") if m.kind == "petting_zone"]) == 2
+
+        # Rollover to 0
+        await pet._observe_optional("robot-01", 4, cap_payload(1, True, 0))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "petting_zone"]) == 3
+
+        # Stale backwards count 0xffffffff: rejected
+        await pet._observe_optional("robot-01", 4, cap_payload(1, True, 0xffffffff))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "petting_zone"]) == 3
+    finally:
+        state.enabled = False
+        await pet.close()
+
 async def test_real_voice_interrupt_suppresses_proactive_banter_for_cooldown(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     speaker = SimulatedSpeaker()

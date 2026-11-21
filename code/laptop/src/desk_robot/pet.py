@@ -129,6 +129,8 @@ class PetState:
     safety_fault_events: int = 0
     last_extra_mask: int | None = None
     last_extra_events: dict[str, int] | None = None
+    last_extra_boot_id: int | None = None
+    retired_extra_boot_ids: set[int] = field(default_factory=set, repr=False)
     last_cap_events: int | None = None
     last_cap_mask: int | None = None
     side_events: SideRangeEvents = field(default_factory=SideRangeEvents, repr=False)
@@ -331,6 +333,8 @@ class PetController:
         state.handling_events = 0
         state.last_extra_events = None
         state.last_extra_mask = None
+        state.last_extra_boot_id = None
+        state.retired_extra_boot_ids.clear()
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
         state.aux_reads = 0
         state.last_battery_low = None
@@ -1366,15 +1370,29 @@ class PetController:
                 or type(count) is not int or not 0 <= count <= 0xffffffff):
             return
         state = self.states[robot_id]
+        if not good:
+            state.last_cap_events = None
+            state.last_cap_mask = None
+            return
         old = state.last_cap_events
         prior_mask = state.last_cap_mask
-        state.last_cap_events = count if good else None
-        state.last_cap_mask = mask if good else None
-        if (not good or old is None or count < old or count - old > 8
-                or not state.enabled or state.generation != generation):
+        if old is None:
+            state.last_cap_events = count
+            state.last_cap_mask = mask
             return
-        delta = count - old
-        if delta == 0:
+        advance = _sensor_counter_advance(count, old)
+        if advance == 0:
+            if count == old:
+                state.last_cap_mask = mask
+            return  # duplicate or backwards/stale frame: do NOT rewind baseline
+        if advance > 8:
+            state.last_cap_events = count
+            state.last_cap_mask = mask
+            return
+        delta = advance
+        state.last_cap_events = count
+        state.last_cap_mask = mask
+        if not state.enabled or state.generation != generation:
             return
         # One independently counted hardware rise and exactly one newly
         # active CAP electrode identify a particular touch zone. When multiple
@@ -1410,24 +1428,61 @@ class PetController:
             return
         if any(type(extra.get(key)) is not bool for key in ("bumper", "reed", "pir")):
             return
-        await self._observe_cap(robot_id, generation, extra)
         state = self.states[robot_id]
+
+        reported_boot_ids = [
+            section["boot_id"]
+            for name in ("imu", "side_ranges")
+            if isinstance((section := body.get(name)), dict)
+            and "boot_id" in section
+        ]
+        if reported_boot_ids:
+            if (any(type(value) is not int or not 1 <= value <= 0xffffffff
+                    for value in reported_boot_ids)
+                    or len(set(reported_boot_ids)) != 1):
+                return  # contradictory or invalid WROOM source identity
+            boot_id = reported_boot_ids[0]
+            if boot_id in state.retired_extra_boot_ids:
+                return
+            if state.last_extra_boot_id not in (None, boot_id):
+                state.retired_extra_boot_ids.add(state.last_extra_boot_id)
+                state.last_extra_events = None
+                state.last_extra_mask = None
+                state.last_cap_events = None
+                state.last_cap_mask = None
+            state.last_extra_boot_id = boot_id
+        elif state.last_extra_boot_id is not None:
+            return  # never downgrade to identity-free packets mid-session
+
+        await self._observe_cap(robot_id, generation, extra)
+
         values = {key: extra[key] for key in keys}
         previous = state.last_extra_events
         previous_mask = state.last_extra_mask
-        state.last_extra_mask, state.last_extra_events = mask, values
-        if (previous is None or previous_mask != mask or not state.enabled
-                or state.generation != generation):
+
+        if previous is None or previous_mask != mask:
+            state.last_extra_mask = mask
+            state.last_extra_events = dict(values)
             return
+
         for key, bit, kind, description in (
             ("bumps", 1, "bumper", "My optional bumper registered a contact and stopped my tracks"),
             ("reed_count", 2, "magnet", "My optional reed switch detected a magnetic accessory closure"),
             ("pir_count", 4, "pir", "My optional PIR detected changing infrared motion, not an identified person"),
         ):
             if not mask & bit:
+                state.last_extra_events[key] = values[key]
                 continue
-            delta = values[key] - previous[key]
-            if delta <= 0 or delta > 20:
+            current = values[key]
+            prior = previous.get(key)
+            advance = _sensor_counter_advance(current, prior)
+            if advance == 0:
+                continue  # duplicate or backwards/stale sample: do NOT rewind baseline
+            if advance > 20:
+                state.last_extra_events[key] = current
+                continue
+            state.last_extra_events[key] = current
+            if not state.enabled or state.generation != generation:
                 continue
             if key == "bumps":
                 if self.on_local_fault is not None:
@@ -1441,7 +1496,7 @@ class PetController:
             change = SceneChange(kind, description, 1.0)
             self._notify_sensor(robot_id, kind)
             await self._store_observation(robot_id, change)
-            if key != "bumps" and state.enabled and state.generation == generation:
+            if key != "bumps":
                 self._consider_speech(robot_id, change, generation)
 
     async def _observe_side_ranges(

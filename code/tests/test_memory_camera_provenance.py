@@ -3,7 +3,6 @@
 import time
 
 import pytest
-
 from desk_robot.memory import CameraProvenance, MemoryStore
 
 

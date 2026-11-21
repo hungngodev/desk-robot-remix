@@ -1,3 +1,16 @@
+## 21 November 2026: Monotonic optional sensor acquisition and uint32 wrap handling
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `1a3ec5b11c08bbb192363f06193d312e02d5041d`.
+This source and test batch does not close physical or commercial gates.
+
+* WROOM optional sensor counter monotonicity, replay rejection & uint32 wrap (Review PRRT_kwDOVlmnQ866bfmn):
+  - In `code/laptop/src/desk_robot/pet.py`, updated `_observe_optional` and `_observe_cap` to preserve monotonic counter baselines across delayed or out-of-order packets.
+  - Replaces premature baseline overwrites with `_sensor_counter_advance()`, ensuring backwards or duplicate samples never rewind the active baseline or trigger duplicate fault, magnet, PIR, or CAP petting pad events.
+  - Modulo 32-bit forward wrap (`0xffffffff -> 0`) is now treated as a legitimate forward edge, preventing dropped transitions upon uint32 counter rollover.
+  - Added WROOM boot epoch tracking (`last_extra_boot_id`, `retired_extra_boot_ids`), establishing a clean baseline without false events across reboots and rejecting stale packets from retired boot epochs.
+  - In `code/tests/test_pet.py`, added unit regressions `test_optional_counters_reject_stale_replays_and_handle_uint32_wrap_and_reboot` and `test_cap1188_rejects_stale_replays_and_handles_uint32_wrap` validating `11,12,11,12` replay rejection, uint32 wrap across `0xfffffffe -> 0xffffffff -> 0`, reboot rebaseline, retired boot rejection, and independent multi-counter advances.
+
 ## 21 November 2026: Voice context camera consent fencing and derived tool stripping
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
