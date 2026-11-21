@@ -9,6 +9,7 @@
 #include "esp32_camera.h"
 #include "robot_bridge.h"
 #include "stackchan_behavior.hpp"
+#include "face_eye_display.hpp"
 #include "led/single_led.h"
 #include "sdkconfig.h"
 #include "assets/lang_config.h"
@@ -34,6 +35,8 @@ class DeskRobotSenseBoard : public WifiBoard {
 private:
     i2c_master_bus_handle_t display_i2c_bus_ = nullptr;
     Display* display_ = nullptr;
+    desk_robot::LocalEyeDisplay* local_eye_display_ = nullptr;
+    desk_robot::FaceEyeAnimator eye_animator_{};
     Esp32Camera* camera_ = nullptr;
     Button boot_button_;
     // Pinned Stackchan-agent HSM controls OLED mood only, NEVER tracks/claw.
@@ -283,6 +286,15 @@ private:
                     model_mood_active = false;
                 }
             }
+            // Blink/gaze is a local, nonactuating LVGL overlay confined to
+            // Xiaozhi's emotion icon slot. Safety, voice, and current Mac
+            // cosmetic cues always suppress it; stale HSM motion is discarded.
+            if (board->local_eye_display_ != nullptr) {
+                const auto eyes = board->eye_animator_.Step(
+                    now_ms, action.motion,
+                    face_available && !body_unhealthy && !model_mood_active);
+                board->local_eye_display_->ShowEyes(eyes);
+            }
             // Update fault history even while the voice floor owns the OLED.
             // Otherwise speaking can trigger a 100 ms neutral redraw flood.
             last_idle_face_fault = body_unhealthy;
@@ -323,8 +335,10 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
         ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, false));
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
-        display_ = new OledDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                   DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        local_eye_display_ = new desk_robot::LocalEyeDisplay(
+            panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        display_ = local_eye_display_;
     }
 
     void InitializeCamera() {
@@ -367,6 +381,10 @@ private:
 
 public:
     DeskRobotSenseBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+        // Weighted HSM idle candidates remain spontaneous; keep optional
+        // gaze picks in a human-scale 6 to 15 second range.
+        face_behavior_.pick_min_ms = 6000;
+        face_behavior_.pick_max_ms = 15000;
         // Keep the unused SD device deselected before driving its shared SPI pins.
         // No card may be inserted while GPIO7/8 are used for amplifier clocks/data.
         ESP_ERROR_CHECK(gpio_set_direction(SD_CARD_CS_GPIO, GPIO_MODE_OUTPUT));

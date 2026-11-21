@@ -1515,3 +1515,71 @@ def test_private_pcm_transfer_revoked_by_boot_mute_and_reference_reset():
     starter = starter.split("SenseReferenceCodec::BenchCaptureProgress", 1)[0]
     assert "bench_transfer_active_" in starter
     assert "microphone_privacy_muted_.load(" in starter
+
+
+def test_sense_hsm_gaze_and_blink_reach_local_locked_oled_without_motor_motion():
+    """Native policy regression plus real FaceTask and pinned LVGL ownership checks."""
+    source = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
+    face = source.split("static void FaceTask(void* context)", 1)[1].split(
+        "void InitializeDisplay()", 1
+    )[0]
+    assert "const Action action = board->face_behavior_.update(obs);" in face
+    assert "board->eye_animator_.Step(" in face
+    assert "now_ms, action.motion," in face
+    assert "face_available && !body_unhealthy && !model_mood_active" in face
+    assert "board->local_eye_display_->ShowEyes(eyes);" in face
+    assert face.index("board->local_eye_display_->ShowEyes(eyes);") > face.index(
+        "board->display_->SetEmotion(CosmeticMoodName(requested_mood))"
+    )
+    assert "new desk_robot::LocalEyeDisplay(" in source
+    assert "display_ = local_eye_display_;" in source
+    assert "face_behavior_.pick_min_ms = 6000;" in source
+    assert "face_behavior_.pick_max_ms = 15000;" in source
+    assert "void SetupUI() override" in renderer
+    assert "OledDisplay::SetupUI();" in renderer
+    assert "DisplayLockGuard lock(this);" in renderer
+    assert "lv_obj_set_pos(pupil_[i], 4 + frame.x, 5 + frame.y);" in renderer
+    assert 'lv_obj_set_pos(eye_layer_, 0, 16);' in renderer
+    assert 'lv_obj_set_size(eye_layer_, 32, 48);' in renderer
+    assert not any(word in renderer for word in (
+        "command_drive", "MotorDriver", "servo", "uart_write_bytes"
+    ))
+    compiler = shutil.which("g++") or shutil.which("c++")
+    if compiler is None:
+        raise unittest.SkipTest("Native C++ compiler unavailable")
+    native = r"""
+#include "face_eye_animator.hpp"
+#include <cassert>
+using namespace desk_robot;
+using stackchan::behavior::Motion;
+int main() {
+    FaceEyeAnimator eyes;
+    auto left = eyes.Step(1000, Motion::kLookLeft, true);
+    assert(left.visible && left.x == -3 && !left.closed);
+    assert(!eyes.Step(2200, Motion::kNone, true).visible);
+    auto blink = eyes.Step(6000, Motion::kNone, true);
+    assert(blink.visible && !blink.closed);
+    assert(eyes.Step(6150, Motion::kNone, true).closed);
+    assert(!eyes.Step(6400, Motion::kNone, true).visible);
+    assert(!eyes.Step(6450, Motion::kLookRight, false).visible);
+    assert(!eyes.Step(6500, Motion::kNone, true).visible);
+    assert(eyes.Step(6700, Motion::kLookRight, true).x == 3);
+    assert(eyes.Step(6800, Motion::kLookUp, true).y == -3);
+    assert(eyes.Step(6900, Motion::kNod, true).y == 3);
+    assert(eyes.Step(7450, Motion::kNone, true).y == -2);
+    assert(!eyes.Step(8101, Motion::kNone, true).visible);
+    FaceEyeAnimator rollover;
+    assert(rollover.Step(0xfffffff0U, Motion::kLookLeft, true).visible);
+    assert(rollover.Step(0x40U, Motion::kNone, true).visible);
+}
+"""
+    with tempfile.TemporaryDirectory() as temp:
+        cpp = Path(temp) / "eyes.cpp"
+        binary = Path(temp) / "eyes"
+        cpp.write_text(native)
+        subprocess.run([
+            compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+            "-I", str(HEAD / "overlay"), str(cpp), "-o", str(binary),
+        ], check=True, capture_output=True, text=True)
+        subprocess.run([str(binary)], check=True, capture_output=True, text=True)
